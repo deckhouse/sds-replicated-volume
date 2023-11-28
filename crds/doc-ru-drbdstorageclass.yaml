@@ -1,0 +1,30 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            drbd storage class
+          properties:
+            spec:
+              properties:
+                linstorstoragepool:
+                  description: |
+                    Связанный drbd storage pool
+                placementcount:
+                  description: |
+                    Количество реплик ресурсов
+                reclaimpolicy:
+                  description: |
+                    Действие при удалениии ресурса
+                volumebindingmode:
+                  description: |
+                    Режим подключения тома
+                allowvolumeexpand:
+                  description: |
+                    Разрешено ли расширять тома
+                drbdoptions:
+                  properties:
+                    autoquorum:
+                      description: |
+                        Автоматически подтверждать кворум ресурсов

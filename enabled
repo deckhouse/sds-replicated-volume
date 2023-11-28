@@ -1,0 +1,23 @@
+#!/bin/bash
+
+source /deckhouse/shell_lib.sh
+
+function __main__() {
+  enabled::disable_module_if_cluster_is_not_bootstraped
+  enabled::disable_module_in_kubernetes_versions_less_than 1.23.0
+  if values::array_has global.enabledModules "linstor" ; then
+    echo "false" > $MODULE_ENABLED_RESULT
+  else
+    echo "true" > $MODULE_ENABLED_RESULT
+  fi
+
+  if [ "$(kubectl get moduleconfig linstor -o jsonpath={.spec.settings.dataNodes)" ]; then
+    $linstor_settings=$(kubectl get moduleconfig linstor -o jsonpath={.spec.settings.dataNodes})
+    $sds_drbd_settings=$(kubectl get moduleconfig sds-drbd -o jsonpath={.spec.settings.dataNodes})
+    if [ "$linstor_settings" != "$sds_drbd_settings" ]; then
+      kubectl patch moduleconfig sds-drbd --type=json -p "$(kubectl get moduleconfig linstor -o json | jq '[{op: "replace", path: "/spec/settings", value:  .spec.settings.dataNodes}]')"
+    fi
+  fi
+}
+
+enabled::run $@

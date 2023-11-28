@@ -1,0 +1,62 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: drbdstorageclasses.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: storage
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    plural: drbdstorageclasses
+    singular: drbdstorageclass
+    kind: DRBDStorageClass
+    shortNames:
+      - dsc
+  preserveUnknownFields: false
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: "drbd storage class"
+          properties:
+            spec:
+              # x-kubernetes-validations:
+              #   - rule: '(self.dataSafety == "Standard" || self.dataSafety == "Standard") && size(self.volumeTopology.values) >= 3'
+              #     message: 'volumeTopology must have three or more elements for Standard dataSafety of dataAvailabilityOnMaintenance'
+              #   - rule: '(self.dataSafety == "Standard" && self.dataAvailabilityOnMaintenance == "Standard") || (self.dataSafety == "None")'
+              #     message: 'dataSafety Standard and dataAvailabilityOnMaintenance None cannot be set simultaneously'
+              type: object
+              properties:
+                storagePool:
+                  type: string
+                reclaimPolicy:
+                  type: string
+                  enum: [ 'Delete', 'Retain' ]
+                replication:
+                  type: string
+                  enum: [ 'None', 'Availability', 'ConsistencyAndAvailability' ]
+                  default: 'ConsistencyAndAvailability'
+                volumeAccess:
+                  type: string
+                  enum: [ 'Local', 'EventuallyLocal', 'PreferablyLocal', "Any" ]
+                  default: 'PreferablyLocal'
+                zones:
+                  type: array
+                  items:
+                    type: string
+              required:
+                - storagePool
+                - reclaimPolicy
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [ 'Failed', 'Created' ]
+                reason:
+                  type: string
