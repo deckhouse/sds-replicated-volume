@@ -1,0 +1,36 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            LVM volume group
+          properties:
+            spec:
+              properties:
+                type:
+                  description: |
+                    Используемая LVM volume group
+                actualvgonthenode:
+                  description: |
+                    Имя LVM volume group на узле
+                thinpool:
+                  description: |
+                    Используемый thin pool
+                  properties:
+                    name:
+                      description: |
+                        Имя thin pool
+                    size:
+                      description: |
+                        Размер thin pool
+            status:
+              properties:
+                nodes:
+                  description: |
+                    Список нод
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Имена нод

@@ -1,0 +1,27 @@
+spec:
+  versions:
+    - name: v1alpha1
+      schema:
+        openAPIV3Schema:
+          description: |
+            drbd storage pool
+          properties:
+            spec:
+              properties:
+                lvmvolumegroups:
+                  items:
+                    properties:
+                      name:
+                        description: |
+                          Название LVM группы
+                      thinpoolname:
+                        description: |
+                          Название thin pool
+            status:
+              properties:
+                phase:
+                  description: |
+                    Текущее состояние
+                reason:
+                  description: |
+                    Причина, вызвавшая последнее действие
