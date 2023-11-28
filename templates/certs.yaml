@@ -1,0 +1,56 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linstor-controller-https-cert
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+type: kubernetes.io/tls
+data:
+  {{- with .Values.sdsDrbd.internal.httpsControllerCert }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linstor-client-https-cert
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+type: kubernetes.io/tls
+data:
+  {{- with .Values.sdsDrbd.internal.httpsClientCert }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linstor-controller-ssl-cert
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+type: kubernetes.io/tls
+data:
+  {{- with .Values.sdsDrbd.internal.sslControllerCert }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: linstor-node-ssl-cert
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+type: kubernetes.io/tls
+data:
+  {{- with .Values.sdsDrbd.internal.sslNodeCert }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
+  {{- end }}

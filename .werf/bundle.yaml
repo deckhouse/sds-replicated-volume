@@ -1,0 +1,29 @@
+# Bundle image, stored in your.registry.io/modules/<module-name>:<semver>
+---
+image: bundle
+from: registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
+fromCacheVersion: "2023-11-27.1"
+import:
+# Rendering .werf/images-digests.yaml is required!
+- image: images-digests
+  add: /images_digests.json
+  to: /images_digests.json
+  after: setup
+# Rendering .werf/python-deps.yaml is required!
+- image: python-dependencies
+  add: /lib/python/dist
+  to: /lib/python/dist
+  after: setup
+git:
+- add: /
+  to: /
+  includePaths:
+  - .helmignore
+  - charts
+  - crds
+  - enabled
+  - hooks
+  - monitoring
+  - openapi
+  - templates
+  - Chart.yaml

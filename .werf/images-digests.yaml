@@ -1,0 +1,40 @@
+{{- /* Find all images digests and save use them to compose a structure for the module values. */ -}}
+{{- $ImagesIDList := list }}
+{{- $Images := tpl (.Files.Get ".werf/images.yaml") . }}
+
+
+{{- range $ImageManifest := regexSplit "\n?---[ \t]*\n" $Images -1 }}
+  {{- $ImageManifest := $ImageManifest | fromYaml }}
+  {{- if $ImageManifest.image }}
+    {{- $ImagesIDList = append $ImagesIDList $ImageManifest.image }}
+  {{- end }}
+{{- end }}
+
+# Images Digest: a files with all image digests to be able to use them in helm templates of a module
+---
+image: images-digests
+from: registry.deckhouse.io/base_images/alpine:3.16.3
+dependencies:
+{{- range $ImageID := $ImagesIDList }}
+  {{- $ImageNameCamel  := $ImageID | splitList "/" | last  | camelcase | untitle }}
+  - image: {{ $ImageID }}
+    before: setup
+    imports:
+    - type: ImageDigest
+      targetEnv: MODULE_IMAGE_DIGEST_{{ $ImageNameCamel }}
+{{- end }}
+shell:
+  beforeInstall:
+  - apk add --no-cache jq
+  setup:
+    - |
+      env | grep MODULE_IMAGE_DIGEST | jq -Rn '
+        reduce inputs as $i (
+          {};
+          . * (
+            $i | ltrimstr("MODULE_IMAGE_DIGEST_") | sub("=";"_") |
+            split("_") as [$imageName, $digest] |
+            {($imageName): $digest}
+          )
+        )
+      ' > /images_digests.json
