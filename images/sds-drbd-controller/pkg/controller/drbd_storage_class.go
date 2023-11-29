@@ -502,6 +502,7 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 			APIVersion: StorageClassAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
+			Labels:          map[string]string{"storage.deckhouse.io/managed-by": "sds-drbd"},
 			Name:            drbdsc.Name,
 			Namespace:       drbdsc.Namespace,
 			OwnerReferences: nil,
