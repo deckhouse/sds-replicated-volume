@@ -1,4 +1,4 @@
-- name: kubernetes.drbd.pool
+- name: kubernetes.drbd.storage_class
   rules:
     - alert: DRBDPoolIsNotManagedThroughDRBDStorageClass
       expr: sum(kube_storageclass_info{provisioner='linstor.csi.linbit.com'} * on(storageclass) group_left() kube_storageclass_labels{label_storage_deckhouse_io_managed_by!='sds-drbd'}) > 0
