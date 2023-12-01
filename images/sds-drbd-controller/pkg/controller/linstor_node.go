@@ -101,7 +101,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	// log.Debug("reconcileLinstorNodes: Get config from secret: " + secretNamespace + "/" + secretName)
 	configSecret, err := GetKubernetesSecretByName(ctx, cl, secretName, secretNamespace)
 	if err != nil {
-		log.Error(err, "Failed get secret:"+secretName+"/"+secretNamespace)
+		log.Error(err, "Failed get secret:"+secretNamespace+"/"+secretName)
 		return err
 	}
 
