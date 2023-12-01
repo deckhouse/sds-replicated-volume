@@ -25,6 +25,7 @@ import (
 const (
 	ScanInterval           = 10
 	ConfigSecretName       = "d8-sds-drbd-controller-config"
+	LinstorLeaseName       = "linstor"
 	NodeName               = "NODE_NAME"
 	MetricsPortEnv         = "METRICS_PORT"
 	ControllerNamespaceEnv = "CONTROLLER_NAMESPACE"
@@ -34,6 +35,7 @@ const (
 type Options struct {
 	ScanInterval        int
 	ConfigSecretName    string
+	LinstorLeaseName    string
 	MetricsPort         string
 	ControllerNamespace string
 }
@@ -41,6 +43,7 @@ type Options struct {
 func NewConfig() (*Options, error) {
 	var opts Options
 	opts.ScanInterval = ScanInterval
+	opts.LinstorLeaseName = LinstorLeaseName
 	opts.ConfigSecretName = ConfigSecretName
 
 	opts.MetricsPort = os.Getenv(MetricsPortEnv)
