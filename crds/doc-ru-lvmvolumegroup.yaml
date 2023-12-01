@@ -11,6 +11,9 @@ spec:
                 type:
                   description: |
                     Используемая LVM volume group
+                blockDeviceNames:
+                  description: |
+                    Список блочных устройств
                 actualvgonthenode:
                   description: |
                     Имя LVM volume group на узле
