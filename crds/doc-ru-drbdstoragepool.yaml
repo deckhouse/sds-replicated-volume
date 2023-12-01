@@ -16,7 +16,7 @@ spec:
                           Название LVM группы
                       thinpoolname:
                         description: |
-                          Название thin pool
+                          Название LVM thin pool группы
             status:
               properties:
                 phase:
