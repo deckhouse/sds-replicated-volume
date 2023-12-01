@@ -21,14 +21,18 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "drbd storage pool"
+          description: "DRBD storage pool"
           properties:
+            required:
+              - spec
             spec:
               type: object
               properties:
                 type:
                   type: string
-                  enum: [ 'LVM','LVMThin' ]
+                  enum:
+                    - LVM
+                    - LVMThin
                 lvmvolumegroups:
                   type: array
                   items:
@@ -43,6 +47,9 @@ spec:
               properties:
                 phase:
                   type: string
-                  enum: [ 'Updating','Failed', 'Completed' ]
+                  enum:
+                    - Updating
+                    - Failed
+                    - Completed
                 reason:
                   type: string

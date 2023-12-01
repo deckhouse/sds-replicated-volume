@@ -22,41 +22,52 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "drbd storage class"
+          description: "DRBD storage class"
           properties:
+            required:
+              - spec
             spec:
-              # x-kubernetes-validations:
-              #   - rule: '(self.dataSafety == "Standard" || self.dataSafety == "Standard") && size(self.volumeTopology.values) >= 3'
-              #     message: 'volumeTopology must have three or more elements for Standard dataSafety of dataAvailabilityOnMaintenance'
-              #   - rule: '(self.dataSafety == "Standard" && self.dataAvailabilityOnMaintenance == "Standard") || (self.dataSafety == "None")'
-              #     message: 'dataSafety Standard and dataAvailabilityOnMaintenance None cannot be set simultaneously'
+              x-kubernetes-validations:
+                - rule: '(has(self.replication) && self.replication == "None") || ((!has(self.replication) || self.replication == "Availability" || self.replication == "ConsistencyAndAvailability") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))'
+                  message: 'When "replication" is not set or is set to "Availability" or "ConsistencyAndAvailability" (default value), "zones" must be either not specified, or must contain exactly one or three zones.'
               type: object
+              required:
+                - storagePool
+                - reclaimPolicy
               properties:
                 storagePool:
                   type: string
                 reclaimPolicy:
                   type: string
-                  enum: [ 'Delete', 'Retain' ]
+                  enum:
+                    - Delete
+                    - Retain
                 replication:
                   type: string
-                  enum: [ 'None', 'Availability', 'ConsistencyAndAvailability' ]
+                  enum:
+                    - None
+                    - Availability
+                    - ConsistencyAndAvailability
                   default: 'ConsistencyAndAvailability'
                 volumeAccess:
                   type: string
-                  enum: [ 'Local', 'EventuallyLocal', 'PreferablyLocal', "Any" ]
+                  enum:
+                    - Local
+                    - EventuallyLocal
+                    - PreferablyLocal
+                    - Any
                   default: 'PreferablyLocal'
                 zones:
                   type: array
                   items:
                     type: string
-              required:
-                - storagePool
-                - reclaimPolicy
             status:
               type: object
               properties:
                 phase:
                   type: string
-                  enum: [ 'Failed', 'Created' ]
+                  enum:
+                    - Failed
+                    - Created
                 reason:
                   type: string

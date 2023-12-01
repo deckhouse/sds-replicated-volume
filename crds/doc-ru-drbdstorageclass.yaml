@@ -4,27 +4,26 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            drbd storage class
+            DRBD storage class
           properties:
             spec:
               properties:
-                linstorstoragepool:
+                storagePool:
                   description: |
-                    Связанный drbd storage pool
+                    Связанный DRBD storage pool
                 placementcount:
                   description: |
                     Количество реплик ресурсов
-                reclaimpolicy:
+                reclaimPolicy:
                   description: |
                     Действие при удалениии ресурса
-                volumebindingmode:
+                replication:
                   description: |
-                    Режим подключения тома
-                allowvolumeexpand:
+                    Настройки репликации томов
+                volumeAccess:
                   description: |
-                    Разрешено ли расширять тома
-                drbdoptions:
-                  properties:
-                    autoquorum:
-                      description: |
-                        Автоматически подтверждать кворум ресурсов
+                    Разрешен ли удаленный доступ к томам
+                zones:
+                  description: |
+                    Разрешенные для использования зоны в кластере
+
