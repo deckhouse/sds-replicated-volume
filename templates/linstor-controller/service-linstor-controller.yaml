@@ -8,6 +8,7 @@ metadata:
 spec:
   selector:
     app: linstor-controller
+    storage.deckhouse.io/linstor-leader: "true"
   ports:
     - name: metrics
       port: 3370
