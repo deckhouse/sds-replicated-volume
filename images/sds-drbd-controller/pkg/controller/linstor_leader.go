@@ -18,13 +18,17 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -53,20 +57,17 @@ func NewLinstorLeader(
 
 			if request.Name == linstorLeaseName {
 				log.Info("Start reconcile of linstor-controller pods.")
-				// drbdNodeSelector := map[string]string{DRBDNodeSelectorKey: ""}
 				err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 				if err != nil {
 					log.Error(err, "Failed reconcile linstor-controller pods")
 					return reconcile.Result{
 						RequeueAfter: time.Duration(interval) * time.Second,
-					}, err
+					}, nil
 				}
 				log.Info("Finish reconcile of linstor-controller pods.")
 			}
 
-			return reconcile.Result{
-				RequeueAfter: time.Duration(interval) * time.Second,
-			}, nil
+			return reconcile.Result{Requeue: false}, nil
 
 		}),
 	})
@@ -75,7 +76,69 @@ func NewLinstorLeader(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &coordinationv1.Lease{}), &handler.EnqueueRequestForObject{})
+	err = c.Watch(
+		source.Kind(mgr.GetCache(), &coordinationv1.Lease{}),
+		handler.Funcs{
+			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+				if request.Name == linstorLeaseName {
+					log.Info("Start of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
+					err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
+						q.AddAfter(request, time.Duration(interval)*time.Second)
+					}
+
+					log.Info("END of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
+				}
+
+			},
+			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+
+				if e.ObjectNew.GetName() == linstorLeaseName {
+					newLease, ok := e.ObjectNew.(*coordinationv1.Lease)
+					if !ok {
+						log.Error(err, "error get  ObjectNew Lease with name: "+e.ObjectNew.GetName())
+					}
+
+					oldLease, ok := e.ObjectOld.(*coordinationv1.Lease)
+					if !ok {
+						log.Error(err, "error get  ObjectOld Lease with name: "+e.ObjectOld.GetName())
+					}
+
+					var oldIdentity, newIdentity string
+
+					if oldLease.Spec.HolderIdentity != nil {
+						oldIdentity = *oldLease.Spec.HolderIdentity
+					} else {
+						oldIdentity = "nil"
+					}
+
+					if newLease.Spec.HolderIdentity != nil {
+						newIdentity = *newLease.Spec.HolderIdentity
+					} else {
+						newIdentity = "nil"
+					}
+
+					if newIdentity != oldIdentity {
+						log.Info("START from UPDATE event of leases.coordination.k8s.io with name: " + e.ObjectNew.GetName())
+						log.Info("HolderIdentity changed from " + oldIdentity + " to " + newIdentity)
+						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
+						err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
+							q.AddAfter(request, time.Duration(interval)*time.Second)
+						}
+						log.Info("END from UPDATE event of leases.coordination.k8s.io with name: " + e.ObjectNew.GetName())
+					}
+				}
+			},
+			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {},
+		})
+
+	if err != nil {
+		return nil, err
+	}
 
 	return c, err
 

@@ -111,17 +111,14 @@ func NewDRBDStorageClass(
 	c, err := controller.New(DRBDStorageClassControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 
-			log.Info("START from reconciler reconcile of DRBDStorageClass with name: " + request.Name)
+			log.Info("START reconcile of DRBDStorageClass with name: " + request.Name)
 
 			shouldRequeue, err := ReconcileDRBDStorageClassEvent(ctx, cl, request, log)
 			if shouldRequeue {
-				log.Error(err, fmt.Sprintf("error in ReconcileEvent. Add to retry after %d seconds.", interval))
-				return reconcile.Result{
-					RequeueAfter: time.Duration(interval) * time.Second,
-				}, err
+				log.Error(err, fmt.Sprintf("error in ReconcileDRBDStorageClassEvent. Add to retry after %d seconds.", interval))
+			} else {
+				log.Info("END reconcile of DRBD storage pool with name: " + request.Name)
 			}
-
-			log.Info("END from reconciler reconcile of DRBD storage pool with name: " + request.Name)
 
 			return reconcile.Result{Requeue: false}, nil
 		}),

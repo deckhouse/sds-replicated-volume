@@ -22,9 +22,9 @@ spec:
         openAPIV3Schema:
           type: object
           description: "DRBD storage pool"
+          required:
+            - spec
           properties:
-            required:
-              - spec
             spec:
               type: object
               properties:
