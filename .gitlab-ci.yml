@@ -107,10 +107,26 @@ before_script:
 
 
 # PROD registry
-.prod_vars:
+.prod_vars_ce:
   variables:
     REGISTRY: ${EXTERNAL_MODULES_REGISTRY}
-    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH}
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_CE}
+    REGISTRY_LOGIN: ${EXTERNAL_MODULES_REGISTRY_LOGIN}
+    REGISTRY_PASSWORD: ${EXTERNAL_MODULES_REGISTRY_PASSWORD}
+    ENV: PROD
+
+.prod_vars_ee:
+  variables:
+    REGISTRY: ${EXTERNAL_MODULES_REGISTRY}
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_EE}
+    REGISTRY_LOGIN: ${EXTERNAL_MODULES_REGISTRY_LOGIN}
+    REGISTRY_PASSWORD: ${EXTERNAL_MODULES_REGISTRY_PASSWORD}
+    ENV: PROD
+
+.prod_vars_fe:
+  variables:
+    REGISTRY: ${EXTERNAL_MODULES_REGISTRY}
+    REGISTRY_PATH: ${EXTERNAL_MODULES_REGISTRY_PATH_FE}
     REGISTRY_LOGIN: ${EXTERNAL_MODULES_REGISTRY_LOGIN}
     REGISTRY_PASSWORD: ${EXTERNAL_MODULES_REGISTRY_PASSWORD}
     ENV: PROD
@@ -138,9 +154,19 @@ before_script:
     - main
   when: always
 
-.prod:
+.prod_ce:
   extends:
-    - .prod_vars
+    - .prod_vars_ce
+    - .prod_rules
+
+.prod_ee:
+  extends:
+    - .prod_vars_ee
+    - .prod_rules
+
+.prod_fe:
+  extends:
+    - .prod_vars_fe
     - .prod_rules
 
 .dev:
@@ -148,10 +174,24 @@ before_script:
     - .dev_vars
     - .dev_rules
 
-build_prod:
+build_prod_ce:
   stage: build
   extends:
-    - .prod
+    - .prod_ce
+    - .build_script
+  when: manual
+
+build_prod_ee:
+  stage: build
+  extends:
+    - .prod_ee
+    - .build_script
+  when: manual
+
+build_prod_fe:
+  stage: build
+  extends:
+    - .prod_fe
     - .build_script
   when: manual
 
@@ -161,9 +201,9 @@ build_dev:
     - .dev
     - .build_script
 
-deploy_to_dev_channel:
+deploy_dev:
   stage: deploy_dev
-  dependencies:
+  needs:
     - build_dev
   extends:
     - .dev
@@ -176,12 +216,46 @@ deploy_to_dev_channel:
           - dev
           - dev-general
 
-deploy_to_prod_channels:
+deploy_ce:
   stage: deploy_prod
-  dependencies:
-    - build_prod
+  needs:
+    - build_prod_ce
   extends:
-    - .prod
+    - .prod_ce
+    - .deploy_script
+  when:
+    manual
+  parallel:
+    matrix:
+      - RELEASE_CHANNEL:
+          - alpha
+          - beta
+          - early-access
+          - stable
+
+deploy_ee:
+  stage: deploy_prod
+  needs:
+    - build_prod_ee
+  extends:
+    - .prod_ee
+    - .deploy_script
+  when:
+    manual
+  parallel:
+    matrix:
+      - RELEASE_CHANNEL:
+          - alpha
+          - beta
+          - early-access
+          - stable
+
+deploy_fe:
+  stage: deploy_prod
+  needs:
+    - build_prod_fe
+  extends:
+    - .prod_fe
     - .deploy_script
   when:
     manual
