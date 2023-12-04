@@ -23,9 +23,9 @@ spec:
         openAPIV3Schema:
           type: object
           description: "DRBD storage class"
+          required:
+            - spec
           properties:
-            required:
-              - spec
             spec:
               x-kubernetes-validations:
                 - rule: '(has(self.replication) && self.replication == "None") || ((!has(self.replication) || self.replication == "Availability" || self.replication == "ConsistencyAndAvailability") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))'

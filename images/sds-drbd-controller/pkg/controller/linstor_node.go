@@ -69,12 +69,10 @@ func NewLinstorNode(
 				drbdNodeSelector := map[string]string{DRBDNodeSelectorKey: ""}
 				err := reconcileLinstorNodes(ctx, cl, lc, log, request.Namespace, request.Name, drbdNodeSelector)
 				if err != nil {
-					log.Error(err, "Failed reconcile LINSTOR nodes")
-					return reconcile.Result{
-						RequeueAfter: time.Duration(interval) * time.Second,
-					}, err
+					log.Error(nil, "Failed reconcile of LINSTOR nodes")
+				} else {
+					log.Info("END reconcile of LINSTOR nodes.")
 				}
-				log.Info("Finish reconcile of LINSTOR nodes.")
 			}
 
 			return reconcile.Result{
@@ -117,7 +115,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	}
 
 	// log.Debug("reconcileLinstorNodes: Get LINSTOR nodes")
-	linstorNodes, err := lc.Nodes.GetAll(timeoutCtx, &lclient.ListOpts{})
+	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
 	if err != nil {
 		log.Error(err, "Failed get LINSTOR nodes")
 		return err
@@ -125,13 +123,13 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 
 	if len(selectedKubernetesNodes.Items) != 0 {
 		// log.Debug("reconcileLinstorNodes: Start AddOrConfigureDRBDNodes")
-		err = AddOrConfigureDRBDNodes(ctx, cl, lc, log, selectedKubernetesNodes, linstorNodes, drbdNodeSelector)
+		err = AddOrConfigureDRBDNodes(ctx, cl, lc, log, selectedKubernetesNodes, linstorSatelliteNodes, drbdNodeSelector)
 		if err != nil {
 			log.Error(err, "Failed add DRBD nodes:")
 			return err
 		}
 	} else {
-		// log.Warn("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector))
+		log.Info("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector)) //TODO: log.Warn
 	}
 
 	// Remove logic
@@ -143,17 +141,28 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
 
 	// log.Debug("reconcileLinstorNodes: Start removeDRBDNodes")
-	err = removeDRBDNodes(ctx, cl, lc, log, drbdNodesToRemove, linstorNodes, drbdNodeSelector)
+	err = removeDRBDNodes(ctx, cl, lc, log, drbdNodesToRemove, linstorSatelliteNodes, drbdNodeSelector)
+	if err != nil {
+		log.Error(err, "Failed remove DRBD nodes:")
+		return err
+	}
+
+	// log.Debug("reconcileLinstorNodes: Start removeLinstorControllerNodes")
+	err = removeLinstorControllerNodes(ctx, lc, log, linstorControllerNodes)
+	if err != nil {
+		log.Error(err, "Failed remove LINSTOR controller nodes:")
+		return err
+	}
 
 	return nil
 }
 
-func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorNodes []lclient.Node, drbdNodeSelector map[string]string) error {
+func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdNodeSelector map[string]string) error {
 	// log.Debug("removeDRBDNodes: Start")
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
 		// log.Debug("removeDRBDNodes: Process Kubernetes node: " + drbdNodeToRemove.Name)
 
-		for _, linstorNode := range linstorNodes {
+		for _, linstorNode := range linstorSatelliteNodes {
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
 				log.Info("Remove LINSTOR node: " + drbdNodeToRemove.Name)
@@ -378,4 +387,35 @@ func ContainsNode(nodeList v1.NodeList, node v1.Node) bool {
 	}
 	return false
 
+}
+
+func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, []lclient.Node, error) {
+	linstorNodes, err := lc.Nodes.GetAll(ctx, &lclient.ListOpts{})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	linstorControllerNodes := []lclient.Node{}
+	linstorSatelliteNodes := []lclient.Node{}
+
+	for _, linstorNode := range linstorNodes {
+		if linstorNode.Type == LinstorControllerType {
+			linstorControllerNodes = append(linstorControllerNodes, linstorNode)
+		} else if linstorNode.Type == LinstorSatelliteType {
+			linstorSatelliteNodes = append(linstorSatelliteNodes, linstorNode)
+		}
+	}
+
+	return linstorSatelliteNodes, linstorControllerNodes, nil
+}
+
+func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log logr.Logger, linstorControllerNodes []lclient.Node) error {
+	for _, linstorControllerNode := range linstorControllerNodes {
+		log.Info("removeLinstorControllerNodes: Remove LINSTOR controller node: " + linstorControllerNode.Name)
+		err := lc.Nodes.Delete(ctx, linstorControllerNode.Name)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
