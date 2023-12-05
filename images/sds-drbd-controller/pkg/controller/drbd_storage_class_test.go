@@ -112,6 +112,9 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 					OwnerReferences: nil,
 					Finalizers:      nil,
 					ManagedFields:   nil,
+					Labels: map[string]string{
+						"storage.deckhouse.io/managed-by": "sds-drbd",
+					},
 				},
 				Parameters:           storageClassParameters,
 				ReclaimPolicy:        &reclaimPolicy,
