@@ -232,6 +232,7 @@ deploy_ce:
           - beta
           - early-access
           - stable
+          - rock-solid
 
 deploy_ee:
   stage: deploy_prod
@@ -249,6 +250,7 @@ deploy_ee:
           - beta
           - early-access
           - stable
+          - rock-solid
 
 deploy_fe:
   stage: deploy_prod
@@ -266,3 +268,4 @@ deploy_fe:
           - beta
           - early-access
           - stable
+          - rock-solid
