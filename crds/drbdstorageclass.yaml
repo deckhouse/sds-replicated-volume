@@ -30,6 +30,8 @@ spec:
               x-kubernetes-validations:
                 - rule: '(has(self.replication) && self.replication == "None") || ((!has(self.replication) || self.replication == "Availability" || self.replication == "ConsistencyAndAvailability") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))'
                   message: 'When "replication" is not set or is set to "Availability" or "ConsistencyAndAvailability" (default value), "zones" must be either not specified, or must contain exactly one or three zones.'
+                - rule: self == oldSelf
+                  message: Value is immutable.
               type: object
               required:
                 - storagePool
