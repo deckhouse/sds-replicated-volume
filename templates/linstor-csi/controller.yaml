@@ -431,7 +431,7 @@ spec:
 {{- else }}
         nodeAffinity: {}
 {{- end }}
-{{- with (index (fromYaml (include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app.kubernetes.io/component" "csi-controller" "app.kubernetes.io/instance" "linstor")))) "affinity") }}
+{{- with (index (fromYaml (include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "linstor-csi-controller")))) "affinity") }}
         {{ toYaml . | nindent 8 }}
 {{- else }}
         podAntiAffinity: {}

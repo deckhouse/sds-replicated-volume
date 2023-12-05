@@ -85,7 +85,7 @@ spec:
 {{- else }}
         nodeAffinity: {}
 {{- end }}
-{{- with (index (fromYaml (include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app.kubernetes.io/instance" "linstor" "app.kubernetes.io/managed-by" "piraeus-operator" "app.kubernetes.io/name" "piraeus-controller")))) "affinity") }}
+{{- with (index (fromYaml (include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "linstor-controller")))) "affinity") }}
         {{ toYaml . | nindent 8 }}
 {{- else }}
         podAntiAffinity: {}
