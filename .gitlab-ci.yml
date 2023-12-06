@@ -103,6 +103,20 @@ before_script:
         spec:
           enabled: true
           version: 1
+        ---
+        apiVersion: deckhouse.io/v1alpha1
+        kind: ModuleUpdatePolicy
+        metadata:
+          name: ${MODULE_NAME}
+        spec:
+          moduleReleaseSelector:
+            labelSelector:
+              matchLabels:
+                module: ${MODULE_NAME}
+                source: ${MODULE_NAME}
+          releaseChannel: ${RELEASE_CHANNEL}
+          update:
+            mode: Auto      
       EOF
 
 
