@@ -31,7 +31,7 @@ spec:
   replication: ConsistencyAndAvailability
   storagePool: storagePoolName
   volumeAccess: Local
-  retentionPolicy: Delete
+  reclaimPolicy: Delete
   zones:
   - zone-a
   - zone-b
@@ -49,5 +49,5 @@ spec:
   replication: None
   storagePool: storagePoolName
   volumeAccess: Any
-  retentionPolicy: Delete
+  reclaimPolicy: Delete
 ```
