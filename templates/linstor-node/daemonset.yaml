@@ -59,18 +59,17 @@ spec:
       app: linstor-node
   template:
     metadata:
-      labels:
-        app: linstor-node
       name: linstor-node
       namespace: d8-{{ .Chart.Name }}
+      {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-node")) | nindent 6 }}
     spec:
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_root" . | nindent 6 }}
-{{- if dig "dataNodes" "nodeSelector" false .Values.sdsDrbd }}
       nodeSelector:
         storage.deckhouse.io/sds-drbd-node: ""
-{{- end }}
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
       affinity: {}
       initContainers:
         - command:
@@ -199,8 +198,6 @@ spec:
             name: drbd-reactor-config
       dnsPolicy: ClusterFirstWithHostNet
       hostNetwork: true
-      imagePullSecrets:
-        - name: {{ .Chart.Name }}-module-registry
       restartPolicy: Always
       schedulerName: default-scheduler
       serviceAccount: linstor-node
