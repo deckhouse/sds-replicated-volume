@@ -49,6 +49,13 @@ before_script:
       docker image push ${REPO}:${RELEASE_VERSION}
       docker image rmi ${REPO}:${RELEASE_VERSION} || true;
 
+      # Register module ========================================================
+      # registry.example.com/modules/sds-drbd
+      docker pull spotify/scratch
+      docker image tag spotify/scratch:latest ${REGISTRY}/${REGISTRY_PATH}:${MODULE_NAME}
+      docker image push ${REGISTRY}/${REGISTRY_PATH}:${MODULE_NAME}
+      docker image rmi ${REGISTRY}/${REGISTRY_PATH}:${MODULE_NAME} || true
+      
       cat << EOF
         Build version: ${RELEASE_VERSION}
         ---
