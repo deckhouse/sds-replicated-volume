@@ -97,6 +97,7 @@ before_script:
 # Vars =================================================================================================================
 
 variables:
+  MODULE_NAME: sds-drbd
   MODULES_MODULE_NAME: sds-drbd
 
 # DEV registry
