@@ -63,7 +63,7 @@ default:
         apiVersion: deckhouse.io/v1alpha1
         kind: ModulePullOverride
         metadata:
-          name: ${MODULE_NAME}
+          name: ${MODULES_MODULE_NAME}
         spec:
           imageTag: ${MODULES_MODULE_TAG}
           source: deckhouse
@@ -72,7 +72,7 @@ default:
         apiVersion: deckhouse.io/v1alpha1
         kind: ModuleConfig
         metadata:
-          name: ${MODULE_NAME}
+          name: ${MODULES_MODULE_NAME}
         spec:
           enabled: true
           version: 1
@@ -97,7 +97,6 @@ before_script:
 # Vars =================================================================================================================
 
 variables:
-  MODULE_NAME: sds-drbd
   MODULES_MODULE_NAME: sds-drbd
 
 # DEV registry
