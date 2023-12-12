@@ -8,6 +8,9 @@ spec:
           properties:
             spec:
               properties:
+                isDefault:
+                  description: |
+                    Должен ли создаваемый Storage class являться классом по умолчанию
                 storagePool:
                   description: |
                     Связанный DRBD storage pool
