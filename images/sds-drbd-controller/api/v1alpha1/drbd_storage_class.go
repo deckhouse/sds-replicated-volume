@@ -37,6 +37,7 @@ type DRBDStorageClassList struct {
 }
 
 type DRBDStorageClassSpec struct {
+	IsDefault     bool     `json:"isDefault"`
 	StoragePool   string   `json:"storagePool"`
 	ReclaimPolicy string   `json:"reclaimPolicy"`
 	Replication   string   `json:"replication"`

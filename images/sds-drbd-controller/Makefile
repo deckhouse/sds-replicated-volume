@@ -1,4 +1,5 @@
 SHELL := /bin/bash
+TEST-ARGS=-race -timeout 30s -count 1
 base_golang_20_bullseye := golang:1.20-bullseye
 repo_local := localhost:5000
 repo_fox := registry.flant.com/deckhouse/storage
@@ -15,6 +16,9 @@ image_tag := $(USER)
 
 run: ## run go
 	go run -race ./cmd/main.go
+
+test:
+	go test $(TEST-ARGS) ./...
 
 # local_build_and_push:
 # 	docker build --build-arg="BASE_GOLANG_19_BULLSEYE=$(base_golang_19_bullseye)" . -t $(repo_local)/$(image_name):$(image_tag)

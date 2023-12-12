@@ -482,7 +482,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			"first": {},
 		}
 
-		validation, mes := controller.ValidateDRBDStorageClass(&drbdsc, zones)
+		validation, mes := controller.ValidateDRBDStorageClass(ctx, cl, &drbdsc, zones)
 		Expect(validation).Should(BeFalse())
 		Expect(mes).To(Equal("Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected non-existent zones: second; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; "))
 	})
@@ -497,7 +497,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			"third":  {},
 		}
 
-		validation, _ := controller.ValidateDRBDStorageClass(&drbdsc, zones)
+		validation, _ := controller.ValidateDRBDStorageClass(ctx, cl, &drbdsc, zones)
 		Expect(validation).Should(BeTrue())
 	})
 
@@ -604,7 +604,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		err = controller.ReconcileDRBDStorageClass(ctx, cl, log, &drbdsc)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
 		Expect(drbdsc.Status.Phase).To(Equal(controller.Failed))
 		Expect(drbdsc.Status.Reason).To(Equal(failedMessage))
 
