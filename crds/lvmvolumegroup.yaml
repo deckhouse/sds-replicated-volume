@@ -114,3 +114,30 @@ spec:
                               type: string
                             blockDevice:
                               type: string
+      additionalPrinterColumns:
+        - jsonPath: .status.health
+          name: health
+          type: string
+          description: Volume Group health.
+        - jsonPath: .status.nodes..name
+          name: node
+          type: string
+          description: The node the VG is on.
+        - jsonPath: .status.vgSize
+          name: size
+          type: string
+          description: Total VG size.
+        - jsonPath: .status.allocatedSize
+          name: allocated size
+          type: string
+          description: Actual VG size.
+        - jsonPath: .spec.actualVGNameOnTheNode
+          name: VG
+          type: string
+          description: Actual VG name.
+          priority: 1
+        - jsonPath: .spec.type
+          name: type
+          type: string
+          description: Volume Group type.
+          priority: 1
