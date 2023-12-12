@@ -30,22 +30,38 @@ spec:
               x-kubernetes-validations:
                 - rule: '(has(self.replication) && self.replication == "None") || ((!has(self.replication) || self.replication == "Availability" || self.replication == "ConsistencyAndAvailability") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))'
                   message: 'When "replication" is not set or is set to "Availability" or "ConsistencyAndAvailability" (default value), "zones" must be either not specified, or must contain exactly one or three zones.'
-                - rule: self == oldSelf
-                  message: Value is immutable.
+                - message: zones field cannot be deleted or added
+                  rule: (has(self.zones) && has(oldSelf.zones)) || (!has(self.zones) && !has(oldSelf.zones))
+                - message: replication filed cannot be deleted or added
+                  rule: (has(self.replication) && has(oldSelf.replication)) || (!has(self.replication) && !has(oldSelf.replication))
+                - message: volumeAccess filed cannot be deleted or added
+                  rule: (has(self.volumeAccess) && has(oldSelf.volumeAccess)) || (!has(self.volumeAccess) && !has(oldSelf.volumeAccess))
               type: object
               required:
                 - storagePool
                 - reclaimPolicy
               properties:
+                isDefault:
+                  type: boolean
+                  default: false
                 storagePool:
                   type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                 reclaimPolicy:
                   type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                   enum:
                     - Delete
                     - Retain
                 replication:
                   type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                   enum:
                     - None
                     - Availability
@@ -53,6 +69,9 @@ spec:
                   default: 'ConsistencyAndAvailability'
                 volumeAccess:
                   type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                   enum:
                     - Local
                     - EventuallyLocal
@@ -61,6 +80,9 @@ spec:
                   default: 'PreferablyLocal'
                 zones:
                   type: array
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                   items:
                     type: string
             status:
