@@ -116,6 +116,7 @@ func NewDRBDStorageClass(
 			shouldRequeue, err := ReconcileDRBDStorageClassEvent(ctx, cl, request, log)
 			if shouldRequeue {
 				log.Error(err, fmt.Sprintf("error in ReconcileDRBDStorageClassEvent. Add to retry after %d seconds.", interval))
+				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
 			} else {
 				log.Info("END reconcile of DRBD storage pool with name: " + request.Name)
 			}
@@ -146,7 +147,17 @@ func NewDRBDStorageClass(
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 
-				if e.ObjectNew.GetDeletionTimestamp() != nil {
+				newDRBDSC, ok := e.ObjectNew.(*v1alpha1.DRBDStorageClass)
+				if !ok {
+					log.Error(err, "error get ObjectNew DRBDStorageClass")
+				}
+
+				oldDRBDSC, ok := e.ObjectOld.(*v1alpha1.DRBDStorageClass)
+				if !ok {
+					log.Error(err, "error get ObjectOld DRBDStorageClass")
+				}
+
+				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newDRBDSC.Spec, oldDRBDSC.Spec) {
 					log.Info("START from UPDATE reconcile of DRBDStorageClass with name: " + e.ObjectNew.GetName())
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					shouldRequeue, err := ReconcileDRBDStorageClassEvent(ctx, cl, request, log)
@@ -194,7 +205,7 @@ func ReconcileDRBDStorageClassEvent(ctx context.Context, cl client.Client, reque
 		// #TODO: warn
 		switch drbdsc.Status.Phase {
 		case Failed:
-			log.Info("StorageClass with name: " + drbdsc.Name + " was not deleted because the DRBDStorageClass is in a Failed state.")
+			log.Info("StorageClass with name: " + drbdsc.Name + " was not deleted because the DRBDStorageClass is in a Failed state. Deliting only finalizer.")
 		case Created:
 			_, err = GetStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name)
 			if err != nil {
@@ -241,8 +252,9 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 		return err
 	}
 
-	valid, msg := ValidateDRBDStorageClass(drbdsc, zones)
+	valid, msg := ValidateDRBDStorageClass(ctx, cl, drbdsc, zones)
 	if !valid {
+		err := fmt.Errorf("[ReconcileDRBDStorageClass] DRBDStorageClass validation failed for resource named: %s", drbdsc.Name)
 		log.Info(fmt.Sprintf("[ReconcileDRBDStorageClass] DRBDStorageClass validation failed for resource named: %s", drbdsc.Name))
 		drbdsc.Status.Phase = Failed
 		drbdsc.Status.Reason = fmt.Sprintf("%v", msg)
@@ -251,7 +263,7 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 			return fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
 		}
 
-		return nil
+		return err
 	}
 	log.Info("DRBDStorageClass with name: " + drbdsc.Name + " is valid")
 
@@ -304,6 +316,14 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 		return fmt.Errorf("error LabelNodes: %s", err.Error())
 	}
 
+	if drbdsc.Spec.IsDefault {
+		err := makeStorageClassDefault(ctx, cl, drbdsc)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to make storage class default, name: %s", drbdsc.Name))
+			return fmt.Errorf("error makeStorageClassDefault: %s", err.Error())
+		}
+	}
+
 	return nil
 }
 
@@ -324,13 +344,39 @@ func GetClusterZones(ctx context.Context, cl client.Client) (map[string]struct{}
 	return nodeZones, nil
 }
 
-func ValidateDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass, zones map[string]struct{}) (bool, string) {
+func ValidateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass, zones map[string]struct{}) (bool, string) {
 	var (
 		failedMsgBuilder strings.Builder
 		validationPassed = true
 	)
 
 	failedMsgBuilder.WriteString("Validation of DRBDStorageClass failed: ")
+
+	if drbdsc.Spec.IsDefault {
+		storageClass, err := GetStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name)
+		if err != nil && !errors.IsNotFound(err) {
+			validationPassed = false
+			failedMsgBuilder.WriteString(fmt.Sprintf("Unable to get StorageClass wit name: %s. Error: %s; ", drbdsc.Name, err.Error()))
+		} else {
+			isDefault := "false"
+			exists := false
+			if storageClass != nil {
+				isDefault, exists = storageClass.Annotations["storageclass.kubernetes.io/is-default-class"]
+			}
+			if !exists || isDefault != "true" {
+				defaultDRBDSCNames, err := findDefaultDRBDStorageClasses(ctx, cl, drbdsc.Name)
+				if err != nil {
+					validationPassed = false
+					failedMsgBuilder.WriteString(fmt.Sprintf("Unable to find default StoragePool. Error: %s; ", err.Error()))
+				} else {
+					if len(defaultDRBDSCNames) > 0 {
+						validationPassed = false
+						failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default DRBDStorageClasses: %s; ", strings.Join(defaultDRBDSCNames, ",")))
+					}
+				}
+			}
+		}
+	}
 
 	if drbdsc.Spec.StoragePool == "" {
 		validationPassed = false
@@ -578,6 +624,54 @@ func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStor
 			if err != nil {
 				return err
 			}
+		}
+	}
+
+	return nil
+}
+
+func findDefaultDRBDStorageClasses(ctx context.Context, cl client.Client, currentDRBDSCName string) ([]string, error) {
+	drbdscList := &v1alpha1.DRBDStorageClassList{}
+	err := cl.List(ctx, drbdscList)
+	if err != nil {
+		return nil, err
+	}
+
+	var defaultDRBDSCNames []string
+
+	for _, drbdsc := range drbdscList.Items {
+		if drbdsc.Name != currentDRBDSCName && drbdsc.Spec.IsDefault {
+			defaultDRBDSCNames = append(defaultDRBDSCNames, drbdsc.Name)
+		}
+	}
+
+	return defaultDRBDSCNames, nil
+}
+
+func makeStorageClassDefault(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass) error {
+	storageClassList := &storagev1.StorageClassList{}
+	err := cl.List(ctx, storageClassList)
+	if err != nil {
+		return err
+	}
+
+	for _, sc := range storageClassList.Items {
+		_, isDefault := sc.Annotations["storageclass.kubernetes.io/is-default-class"]
+
+		if sc.Name == drbdsc.Name && !isDefault {
+			if sc.Annotations == nil {
+				sc.Annotations = make(map[string]string)
+			}
+			sc.Annotations["storageclass.kubernetes.io/is-default-class"] = "true"
+		} else if sc.Name != drbdsc.Name && isDefault {
+			delete(sc.Annotations, "storageclass.kubernetes.io/is-default-class")
+		} else {
+			continue
+		}
+
+		err := cl.Update(ctx, &sc)
+		if err != nil {
+			return err
 		}
 	}
 
