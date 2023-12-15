@@ -3,46 +3,6 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
----
-apiVersion: batch/v1
-kind: Job
-metadata:
-  name: metadata-initial-backup
-  namespace: d8-{{ .Chart.Name }}
-spec:
-  template:
-    metadata:
-      namespace: d8-{{ .Chart.Name }}
-      {{- include "helm_lib_module_labels" (list . (dict "app" "metadata-backup" )) | nindent 6 }}
-    spec:
-      restartPolicy: OnFailure
-      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
-      {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
-      {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
-      {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
-      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "metadata-backup")) | nindent 6 }}
-      imagePullSecrets:
-      - name: {{ .Chart.Name }}-module-registry
-      serviceAccount: metadata-backup
-      serviceAccountName: metadata-backup
-      containers:
-      - name: metadata-backup
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
-        image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
-        imagePullPolicy: IfNotPresent
-        command:
-          - /backup.sh
-          - --initialBackup
-        volumeMounts:
-          - name: tmp
-            mountPath: /tmp
-        resources:
-          requests:
-            {{- include "helm_lib_module_ephemeral_storage_logs_with_extra" 10 | nindent 12 }}
-            {{- include "metadata_backup_resources" . | nindent 12 }}
-      volumes:
-      - name: tmp
-        emptyDir: {}
 {{- if dig "backup" "enabled" true .Values.sdsDrbd }}
 ---
 apiVersion: batch/v1
@@ -76,9 +36,9 @@ spec:
             image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
             imagePullPolicy: IfNotPresent
             command:
-              - /backup.sh
-              - --scheduledBackup
-              - retentionCount {{ dig "backup" "retentionCount" "3" .Values.sdsDrbd }}
+              - /backup.py
+              - --retentionCount
+              - {{ dig "backup" "retentionCount" "3" .Values.sdsDrbd | quote }}
             volumeMounts:
               - name: tmp
                 mountPath: /tmp
