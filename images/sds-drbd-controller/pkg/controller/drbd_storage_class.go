@@ -101,7 +101,6 @@ const (
 )
 
 func NewDRBDStorageClass(
-	ctx context.Context,
 	mgr manager.Manager,
 	interval int,
 ) (controller.Controller, error) {
