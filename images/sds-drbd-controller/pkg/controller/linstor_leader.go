@@ -42,7 +42,6 @@ const (
 )
 
 func NewLinstorLeader(
-	ctx context.Context,
 	mgr manager.Manager,
 	linstorLeaseName string,
 	interval int,
@@ -52,8 +51,6 @@ func NewLinstorLeader(
 
 	c, err := controller.New(LinstorLeaderControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
-			// fmt.Println("START EVENT ", request)
 
 			if request.Name == linstorLeaseName {
 				log.Info("Start reconcile of linstor-controller pods.")

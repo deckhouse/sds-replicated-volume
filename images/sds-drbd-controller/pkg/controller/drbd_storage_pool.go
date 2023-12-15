@@ -47,7 +47,6 @@ const (
 )
 
 func NewDRBDStoragePool(
-	ctx context.Context,
 	mgr manager.Manager,
 	lc *lapi.Client,
 	interval int,
@@ -309,7 +308,6 @@ func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, namespace
 		lvmVolumeGroupName = g.Name
 
 		if lvmVolumeGroupsNames[lvmVolumeGroupName] {
-			//UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("LvmVolumeGroup name is not unique, %v", lvmVolumeGroupsNames[lvmVolumeGroupName]))
 			invalidLvmVolumeGroups[lvmVolumeGroupName] = "LvmVolumeGroup name is not unique"
 			continue
 		}

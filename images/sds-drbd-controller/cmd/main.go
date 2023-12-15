@@ -114,19 +114,19 @@ func main() {
 	}
 	log.Info("controller NewLinstorNode start")
 
-	if _, err := controller.NewDRBDStorageClass(ctx, mgr, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewDRBDStorageClass(mgr, cfgParams.ScanInterval); err != nil {
 		log.Error(err, "failed create controller NewDRBDStorageClass")
 		os.Exit(1)
 	}
 	log.Info("controller NewDRBDStorageClass start")
 
-	if _, err := controller.NewDRBDStoragePool(ctx, mgr, lc, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewDRBDStoragePool(mgr, lc, cfgParams.ScanInterval); err != nil {
 		log.Error(err, "failed create controller NewDRBDStoragePool", err)
 		os.Exit(1)
 	}
 	log.Info("controller NewDRBDStoragePool start")
 
-	if _, err := controller.NewLinstorLeader(ctx, mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval); err != nil {
 		log.Error(err, "failed create controller NewLinstorLeader", err)
 		os.Exit(1)
 	}
