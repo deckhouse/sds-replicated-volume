@@ -56,7 +56,7 @@ func NewConfig() (*Options, error) {
 
 		namespace, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 		if err != nil {
-			log.Fatalf("Failed to get namespace from filesystem: %v", err)
+			log.Printf("Failed to get namespace from filesystem: %v", err)
 			log.Printf("Using hardcoded namespace: %s", HardcodedControllerNS)
 			opts.ControllerNamespace = HardcodedControllerNS
 		} else {
