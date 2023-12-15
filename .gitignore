@@ -34,5 +34,5 @@ __pycache__/
 .pytest_cache/
 
 # dev
-dev/Dockerfile-dev
+images/sds-drbd-controller/dev/Dockerfile-dev
 images/sds-drbd-controller/Makefile
