@@ -32,7 +32,17 @@ def main():
                 f"linstor-scheduler-admission.{common.NAMESPACE}.svc"]),
             values_path_prefix=f"{common.MODULE_NAME}.internal.webhookCert"
             ),
+        TlsSecret(
+            cn="webhooks",
+            name="webhooks-https-certs",
+            sansGenerator=default_sans([
+                "webhooks",
+                f"webhooks.{common.NAMESPACE}",
+                f"webhooks.{common.NAMESPACE}.svc"]),
+            values_path_prefix=f"{common.MODULE_NAME}.internal.customWebhookCert"
+            ),
         cn="linstor-scheduler-admission",
+        common_ca=True,
         namespace=common.NAMESPACE)
 
     hook.run()
