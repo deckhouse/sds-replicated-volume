@@ -30,7 +30,7 @@ spec:
       action: keep
   selector:
     matchLabels:
-      app.kubernetes.io/instance: linstor
+      app: linstor-node
   namespaceSelector:
     matchNames:
     - d8-{{ .Chart.Name }}
