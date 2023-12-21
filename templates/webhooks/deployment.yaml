@@ -1,0 +1,39 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 2 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: webhooks
+  template:
+    metadata:
+      labels:
+        app: webhooks
+    spec:
+      containers:
+        - name: webhooks
+          command:
+            - /webhooks
+          imagePullSecrets:
+            - name: {{ .Chart.Name }}-module-registry
+          image: {{ include "helm_lib_module_image" (list . "webhooks") }}
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: certs
+              mountPath: "/etc/certs"
+              readOnly: true
+          ports:
+            - name: http
+              containerPort: 8443
+              protocol: TCP
+      serviceAccount: webhooks
+      serviceAccountName: webhooks
+      volumes:
+        - name: certs
+          secret:
+            secretName: webhooks-https-certs
