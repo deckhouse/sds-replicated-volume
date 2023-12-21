@@ -53,3 +53,14 @@ spec:
                     - Completed
                 reason:
                   type: string
+      additionalPrinterColumns:
+        - jsonPath: .status.phase
+          name: Phase
+          type: string
+        - jsonPath: .spec.type
+          name: Type
+          type: string
+        - jsonPath: .status.reason
+          name: Reason
+          type: string
+          priority: 1
