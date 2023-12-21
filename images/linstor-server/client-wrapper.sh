@@ -15,7 +15,7 @@
 # limitations under the License.
 
 # only allowed subcommands of linstor client
-valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "v" "resource-definition" "rd")
+valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "v" "resource-definition" "rd" "error-reports" "err")
 valid_subcommands_ver=("controller" "c")
 valid_subcommands_lv=("resource" "r")
 allowed=false
@@ -23,6 +23,10 @@ allowed=false
 # check for allowed linstor ... l and linstor ... list commands
 if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w $1) ]]; then
   if [[ $2 == "l" || $2 == "list" ]]; then
+    allowed=true
+  fi
+
+  if [[ $2 == "s" || $2 == "show" ]]; then
     allowed=true
   fi
 
