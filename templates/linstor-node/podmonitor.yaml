@@ -31,7 +31,6 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/instance: linstor
-      app.kubernetes.io/managed-by: Helm
   namespaceSelector:
     matchNames:
     - d8-{{ .Chart.Name }}
