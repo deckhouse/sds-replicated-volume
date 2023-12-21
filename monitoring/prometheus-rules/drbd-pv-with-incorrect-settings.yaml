@@ -1,0 +1,20 @@
+- name: kubernetes.pv.settings_check
+  rules:
+    - alert: DRBDPVWithIncorrectSettings
+      expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_linstor_settings_mismatch="true", label_storage_deckhouse_io_linstor_settings_mismatch_ignore!="true"}) > 0
+      for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_drbd_device_health: "DRBDPVWithIncorrectSettings,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_drbd_device_health: "DRBDPVWithIncorrectSettings,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: DRBD PVs has incorrect settings
+        description: |
+          There are persistent volumes in the cluster that were created before migration to DRBDStorageClass. 
+          You must recreate it (recommended way), or add storage.deckhouse.io/linstor-settings-mismatch-ignore!=true label to ignore it for PV.
+          
+          You can view all of such PV with command          
+          `kubectl get pv -l storage.deckhouse.io/linstor-settings-mismatch=true,storage.deckhouse.io/linstor-settings-mismatch-ignore!=true`
