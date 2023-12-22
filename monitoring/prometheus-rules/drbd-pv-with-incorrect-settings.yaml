@@ -18,3 +18,6 @@
           
           You can view all of such PV with command          
           `kubectl get pv -l storage.deckhouse.io/linstor-settings-mismatch=true,storage.deckhouse.io/linstor-settings-mismatch-ignore!=true`
+          
+          Also, you can add label for all incorrect PVs
+          `kubectl label pv -l storage.deckhouse.io/linstor-settings-mismatch=true storage.deckhouse.io/linstor-settings-mismatch-ignore=true`
