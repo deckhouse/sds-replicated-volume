@@ -1,3 +1,32 @@
+{{- define "webhooks_resources" }}
+cpu: 10m
+memory: 50Mi
+{{- end }}
+  
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" "workload-resource-policy.deckhouse.io" "master")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: webhooks
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+      - containerName: webhooks
+        minAllowed:
+          {{- include "webhooks_resources" . | nindent 8 }}
+        maxAllowed:
+          cpu: 20m
+          memory: 100Mi
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -6,31 +35,40 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 2 }}
 spec:
-  replicas: 1
+  {{- include "helm_lib_deployment_on_master_strategy_and_replicas_for_ha" . | nindent 2 }}
   selector:
     matchLabels:
       app: webhooks
   template:
     metadata:
-      labels:
-        app: webhooks
+      {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 6 }}
     spec:
+      {{- include "helm_lib_priority_class" (tuple . "system-cluster-critical") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node" "with-uninitialized" "with-cloud-provider-uninitialized") | nindent 6 }}
+      {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "webhooks")) | nindent 6 }}
       containers:
-        - name: webhooks
-          command:
-            - /webhooks
-          imagePullSecrets:
-            - name: {{ .Chart.Name }}-module-registry
-          image: {{ include "helm_lib_module_image" (list . "webhooks") }}
-          imagePullPolicy: IfNotPresent
-          volumeMounts:
-            - name: certs
-              mountPath: "/etc/certs"
-              readOnly: true
-          ports:
-            - name: http
-              containerPort: 8443
-              protocol: TCP
+      - name: webhooks
+        command:
+          - /webhooks
+        imagePullSecrets:
+          - name: {{ .Chart.Name }}-module-registry
+        image: {{ include "helm_lib_module_image" (list . "webhooks") }}
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+          - name: certs
+            mountPath: "/etc/certs"
+            readOnly: true
+        ports:
+          - name: http
+            containerPort: 8443
+            protocol: TCP
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "webhooks_resources" . | nindent 12 }}
+{{- end }}
       serviceAccount: webhooks
       serviceAccountName: webhooks
       volumes:
