@@ -117,7 +117,7 @@ func NewAlertController(
 			var RGName string
 
 			for _, pv := range pvs {
-				if pv.Spec.CSI.Driver == PVCSIDriver {
+				if len(pv.Spec.CSI.Driver) != 0 && pv.Spec.CSI.Driver == PVCSIDriver {
 					kubeParams = scToParams[pv.Spec.StorageClassName]
 
 					RGName = rdsObj[pv.Name].RGname
