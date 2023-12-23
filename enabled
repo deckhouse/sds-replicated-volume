@@ -6,6 +6,11 @@ function __main__() {
   enabled::disable_module_if_cluster_is_not_bootstraped
   enabled::disable_module_in_kubernetes_versions_less_than 1.23.0
 
+  if values::array_has global.enabledModules "linstor" ; then
+    echo "false" > "$MODULE_ENABLED_RESULT"
+    exit 0
+  fi
+
   if [ "$(kubectl get moduleconfig linstor -o jsonpath={.spec.settings.dataNodes})" ]; then
     linstor_settings=$(kubectl get moduleconfig linstor -o jsonpath={.spec.settings.dataNodes})
     sds_drbd_settings=$(kubectl get moduleconfig sds-drbd -o jsonpath={.spec.settings.dataNodes})
