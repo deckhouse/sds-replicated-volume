@@ -1,4 +1,4 @@
-From ba2341cf56ef5b3029242e22bbf9c751b361a882 Mon Sep 17 00:00:00 2001
+From d4068bbef0f428da00998e9484734a2c83b4b096 Mon Sep 17 00:00:00 2001
 From: Andrei Kvapil <kvapss@gmail.com>
 Date: Tue, 3 Oct 2023 13:32:21 +0200
 Subject: [PATCH] Automatically fix symlinks for devices
@@ -12,13 +12,13 @@ fixes: https://github.com/LINBIT/linstor-server/issues/326
 
 Signed-off-by: Andrei Kvapil <kvapss@gmail.com>
 ---
- .../linstor/layer/dmsetup/DmSetupUtils.java   | 125 +++++++++++++++++-
+ .../linstor/layer/dmsetup/DmSetupUtils.java   | 127 +++++++++++++++++-
  .../linbit/linstor/layer/drbd/DrbdLayer.java  |  13 ++
  .../linstor/layer/storage/utils/Commands.java |  14 ++
- 3 files changed, 151 insertions(+), 1 deletion(-)
+ 3 files changed, 153 insertions(+), 1 deletion(-)
 
 diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
-index ba753577d..9d017b1b3 100644
+index ba753577d..42d93e662 100644
 --- a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
 +++ b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
 @@ -17,7 +17,16 @@ import com.linbit.utils.StringUtils;
@@ -47,7 +47,7 @@ index ba753577d..9d017b1b3 100644
          Pattern.MULTILINE
      );
  
-@@ -187,6 +196,120 @@ public class DmSetupUtils
+@@ -187,6 +196,122 @@ public class DmSetupUtils
          return ret;
      }
  
@@ -91,38 +91,40 @@ index ba753577d..9d017b1b3 100644
 +                    continue;
 +                }
 +
-+                // ------- create dir ------
-+                Path dirpath = Paths.get("../dm-" + minor);
++                System.out.println("Symbolic link \"" + path + "\" does not exist. Proceeding to create it.");
 +
-+                 if (!Files.exists(dirpath)) {
++                // ------- create dir ------
++                Path dirPath = Paths.get(path).getParent();
++
++                if (!Files.exists(dirpath)) {
 +                    Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxr-xr-x");
 +                    FileAttribute<Set<PosixFilePermission>> fileAttributes = PosixFilePermissions.asFileAttribute(permissions);
 +                    Files.createDirectory(dirpath, fileAttributes);
-+                    System.out.println("Directory created");
-+
++                    System.out.println("Directory \"" + dirpath + "\" successfully created with permissions 'rwxr-xr-x'.");
 +                } else {
-+                    System.out.println("Directory already exists");
++                    System.out.println("Directory \"" + dirpath + "\" already exists.");
 +                }
 +                // ------- create dir ---------
 +                // ------- create symlink -----
 +
-+                File f = new File("../dm-" + minor);
++                File originFile = new File("../dm-" + minor);
 +
-+                if (f.exists()) {
-+                    System.out.println("file exist, create symlink");
++                if (originFile.exists()) {
++                    System.out.println("Origin file  \"" + originFile + "\" found. Proceeding to create a symlink.");
++		                Path newLink = FileSystems.getDefault().getPath(path);
 +
-+		            Path newLink = FileSystems.getDefault().getPath(path);
-+
-+		            try {
-+			                Files.createSymbolicLink(newLink, dirpath);
-+				        } catch (IOException e) {
-+					        System.err.println(e);
-+				        } catch (UncheckedIOException e) {
-+					        System.err.println(e);
-+			        }
-+                 } else
-+                {
-+                    System.out.println("File not found");
++                    try {
++                        Files.createSymbolicLink(newLink, originFile.toPath());
++                        System.out.println("Symlink \"" + newLink + "\" created, pointing to \"" + originFile.toPath() + "\"");
++                    }
++                    catch (IOException e) {
++                        System.err.println(e);
++                    }
++                    catch (UncheckedIOException e) {
++                        System.err.println(e);
++                    }
++                } else {
++                    System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
 +                }
 +
 +                // ------- create symlink -----
