@@ -51,8 +51,6 @@ spec:
       - name: webhooks
         command:
           - /webhooks
-        imagePullSecrets:
-          - name: {{ .Chart.Name }}-module-registry
         image: {{ include "helm_lib_module_image" (list . "webhooks") }}
         imagePullPolicy: IfNotPresent
         volumeMounts:
@@ -69,6 +67,8 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "webhooks_resources" . | nindent 12 }}
 {{- end }}
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
       serviceAccount: webhooks
       serviceAccountName: webhooks
       volumes:
