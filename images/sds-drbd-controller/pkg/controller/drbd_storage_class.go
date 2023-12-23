@@ -117,7 +117,7 @@ func NewDRBDStorageClass(
 				log.Error(err, fmt.Sprintf("error in ReconcileDRBDStorageClassEvent. Add to retry after %d seconds.", interval))
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
 			} else {
-				log.Info("END reconcile of DRBD storage pool with name: " + request.Name)
+				log.Info("END reconcile of DRBDStorageClass with name: " + request.Name)
 			}
 
 			return reconcile.Result{Requeue: false}, nil
