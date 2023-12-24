@@ -535,7 +535,11 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 
 	if len(drbdsc.Spec.Zones) != 0 {
 		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)
-		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
+		if len(drbdsc.Spec.Zones) == 1 {
+			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = "kubernetes.io/hostname"
+		} else {
+			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
+		}
 	}
 
 	newStorageClass := &storagev1.StorageClass{
