@@ -630,6 +630,24 @@ func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStor
 		}
 	}
 
+	allNodes := v1.NodeList{}
+	err := cl.List(ctx, &allNodes)
+	if err != nil {
+		return err
+	}
+	for _, node := range allNodes.Items {
+		_, exist := allSelectedNodes[node.Name]
+		if !exist {
+			if labels.Set(node.Labels).Has(fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)) {
+				delete(node.Labels, fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name))
+				err := cl.Update(ctx, &node)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
