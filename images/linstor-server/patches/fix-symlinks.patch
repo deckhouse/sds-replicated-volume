@@ -1,4 +1,4 @@
-From 580a056777e2836568baf40165ee0fea17e7fd57 Mon Sep 17 00:00:00 2001
+From fac3e367a541f966f7198673509a4c39880750df Mon Sep 17 00:00:00 2001
 From: Andrei Kvapil <kvapss@gmail.com>
 Date: Tue, 3 Oct 2023 13:32:21 +0200
 Subject: [PATCH] Automatically fix symlinks for devices
@@ -18,7 +18,7 @@ Signed-off-by: Andrei Kvapil <kvapss@gmail.com>
  3 files changed, 153 insertions(+), 1 deletion(-)
 
 diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
-index ba753577d..24a701bc4 100644
+index ba753577d..057aaabca 100644
 --- a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
 +++ b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
 @@ -17,7 +17,16 @@ import com.linbit.utils.StringUtils;
@@ -107,36 +107,36 @@ index ba753577d..24a701bc4 100644
 +                // ------- create dir ---------
 +                // ------- create symlink -----
 +
-+                File originFile = new File("../dm-" + minor);
++                // File originFile = new File("../dm-" + minor);
 +
-+                if (originFile.exists()) {
-+                    System.out.println("Origin file  \"" + originFile + "\" found. Proceeding to create a symlink.");
-+		                Path newLink = FileSystems.getDefault().getPath(path);
++                // if (originFile.exists()) {
++                //     System.out.println("Origin file  \"" + originFile + "\" found. Proceeding to create a symlink.");
++		            //     Path newLink = FileSystems.getDefault().getPath(path);
 +
-+                    try {
-+                        Files.createSymbolicLink(newLink, originFile.toPath());
-+                        System.out.println("Symlink \"" + newLink + "\" created, pointing to \"" + originFile.toPath() + "\"");
-+                    }
-+                    catch (IOException e) {
-+                        System.err.println(e);
-+                    }
-+                    catch (UncheckedIOException e) {
-+                        System.err.println(e);
-+                    }
-+                } else {
-+                    System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
-+                }
++                //     try {
++                //         Files.createSymbolicLink(newLink, originFile.toPath());
++                //         System.out.println("Symlink \"" + newLink + "\" created, pointing to \"" + originFile.toPath() + "\"");
++                //     }
++                //     catch (IOException e) {
++                //         System.err.println(e);
++                //     }
++                //     catch (UncheckedIOException e) {
++                //         System.err.println(e);
++                //     }
++                // } else {
++                //     System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
++                // }
 +
 +                // ------- create symlink -----
 +
 +
-+
-+                // OutputData symlinkOutput = extCmd.exec("ln", "-s", "../dm-" + minor, path);
-+                // ExtCmdUtils.checkExitCode(
-+                //     symlinkOutput,
-+                //     StorageException::new,
-+                //     "Failed to create device symlink"
-+                // );
++                System.out.println("Create symlink with command: \"ln -s ../dm-" + minor + " " + path);
++                OutputData symlinkOutput = extCmd.exec("ln", "-s", "../dm-" + minor, path);
++                ExtCmdUtils.checkExitCode(
++                    symlinkOutput,
++                    StorageException::new,
++                    "Failed to create device symlink"
++                );
 +            }
 +        }
 +        catch (IOException ioExc)
