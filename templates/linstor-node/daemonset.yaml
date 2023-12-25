@@ -81,9 +81,9 @@ spec:
           name: wait-drbd-ver-9-2
           resources:
             requests:
-            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "drbd_wait_resources" . | nindent 12 }}
+              {{- include "drbd_wait_resources" . | nindent 14 }}
 {{- end }}
       containers:
       - args:
