@@ -132,12 +132,12 @@ func main() {
 	}
 	log.Info("controller NewLinstorLeader start")
 
-	if _, err := controller.NewAlertController(mgr, lc, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval); err != nil {
 		log.Error(err, "failed create controller NewDRBDStoragePool", err)
 		os.Exit(1)
 	}
 
-	log.Info("controller NewAlertController start")
+	log.Info("controller NewLinstorResourcesWatcher start")
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "unable to set up health check")
