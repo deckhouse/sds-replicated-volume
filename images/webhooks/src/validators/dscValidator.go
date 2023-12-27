@@ -80,6 +80,9 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 				arReview.Response.Result = &metav1.Status{
 					Message: fmt.Sprintf("Default DRBDStorageClass already set: %s", listedDscClassName),
 				}
+				klog.Infof("Default DRBDStorageClass already set: %s (%s)", listedDscClassName, string(raw))
+			} else {
+				klog.Infof("Incoming request approved (%s)", string(raw))
 			}
 		}
 
