@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 	"net/http"
 )
 
@@ -30,13 +31,16 @@ func SCValidate(w http.ResponseWriter, r *http.Request) {
 	if jsonData["provisioner"] == "linstor.csi.linbit.com" {
 		if arReview.Request.UserInfo.Username == "system:serviceaccount:d8-sds-drbd:sds-drbd-controller" {
 			arReview.Response.Allowed = true
+			klog.Infof("Incoming request approved (%s)", string(raw))
 		} else if arReview.Request.Operation == "DELETE" {
 			arReview.Response.Allowed = true
+			klog.Infof("Incoming request approved (%s)", string(raw))
 		} else {
 			arReview.Response.Allowed = false
 			arReview.Response.Result = &metav1.Status{
 				Message: "Manual operations with this StorageClass is prohibited. Please use DRBDStorageClass instead.",
 			}
+			klog.Infof("Incoming request denied: Manual operations with this StorageClass is prohibited. Please use DRBDStorageClass instead (%s)", string(raw))
 		}
 	} else {
 		arReview.Response.Allowed = true
