@@ -64,7 +64,7 @@ func NewDRBDStoragePool(
 				log.Error(err, fmt.Sprintf("error in ReconcileDRBDStoragePoolEvent. Add to retry after %d seconds.", interval))
 				return reconcile.Result{
 					RequeueAfter: time.Duration(interval) * time.Second,
-				}, err
+				}, nil
 			}
 
 			log.Info("END from reconciler reconcile of DRBD storage pool with name: " + request.Name)
@@ -150,7 +150,7 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, drbdsp.Namespace, drbdsp.Spec.Type, drbdsp.Spec.LvmVolumeGroups)
 	if !ok {
 		drbdsp.Status.Phase = "Failed"
-		drbdsp.Status.Reason = fmt.Sprintf("%v", msg)
+		drbdsp.Status.Reason = fmt.Sprintf("%s", msg)
 		err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
 		if err != nil {
 			return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
