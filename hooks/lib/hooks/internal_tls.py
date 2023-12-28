@@ -62,7 +62,7 @@ class TlsSecret:
 
 class GenerateCertificateHook(Hook):
     """
-    Сonfig for the hook that generates certificates.
+    Config for the hook that generates certificates.
     """
     SNAPSHOT_SECRETS_NAME = "secrets"
     SNAPSHOT_SECRETS_CHECK_NAME = "secretsCheck"
