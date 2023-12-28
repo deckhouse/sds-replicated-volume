@@ -4,29 +4,69 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            DRBD storage class
+            DRBDStorageClass — это пользовательский ресурс Kubernetes, который определяет конфигурацию Kubernetes StorageСlass.
           properties:
             spec:
+              description: |
+                Определяет конфигурацию StorageClass в Kubernetes.                
               properties:
                 isDefault:
                   description: |
-                    Должен ли создаваемый Storage class являться классом по умолчанию
+                    Должен ли создаваемый StorageClass являться классом по умолчанию.
                 storagePool:
                   description: |
-                    Связанный DRBD storage pool
-                placementcount:
-                  description: |
-                    Количество реплик ресурсов
+                    Имя выбранного DRBDStoragePool-ресурса.
                 reclaimPolicy:
                   description: |
-                    Действие при удалениии ресурса
+                    Reclaim policy текущего StorageClass. Может быть: 
+                    - Delete (если Persistent Volume Claim будет удален, вместе с ним удалится Persistent Volume)
+                    - Retain (если Persistent Volume Claim будет удален, Persistent Volume останется нетронутым)
+
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
                 replication:
                   description: |
-                    Настройки репликации томов
+                    Режим репликации StorageClass. Может быть:
+                    - None (в этом режиме параметры StorageClass 'placementCount' и 'AutoEvictMinReplicaCount' будут равны '1')
+                    - Availability (в этом режиме параметры StorageClass 'placementCount' и 'AutoEvictMinReplicaCount' будут равны '2')
+                    - ConsistencyAndAvailability (в этом режиме параметры StorageClass 'placementCount' и 'AutoEvictMinReplicaCount' будут равны '3')
+                    
+                    > Обратите внимание, что режимом репликации по умолчанию является 'ConsistencyAndAvailability'.
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
                 volumeAccess:
                   description: |
-                    Разрешен ли удаленный доступ к томам
+                    Режим доступа к данным. Может быть:
+                    - Local (в этом режиме параметр StorageClass 'allowRemoteVolumeAccess' равен 'false',
+                    а Volume Binding mode — 'WaitForFirstConsumer')
+                    - EventuallyLocal (в этом режиме параметр StorageClass 'allowRemoteVolumeAccess' 
+                    равен '- fromSame:\n  - topology.kubernetes.io/zone', 'auto-diskful' — '30' минутам, 
+                    'auto-diskful-allow-cleanup' — 'true',
+                    а Volume Binding mode — 'WaitForFirstConsumer')
+                    - PreferablyLocal (в этом режиме параметр StorageClass 'allowRemoteVolumeAccess' 
+                    равен '- fromSame:\n  - topology.kubernetes.io/zone',
+                    а Volume Binding mode — 'WaitForFirstConsumer')
+                    - Any (в этом режиме параметр StorageClass 'allowRemoteVolumeAccess' 
+                    равен '- fromSame:\n  - topology.kubernetes.io/zone',
+                    а Volume Binding mode — 'Immediate')
+                    
+                    > Обратите внимание, что режимом доступа по умолчанию является 'PreferablyLocal'.
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
                 zones:
                   description: |
-                    Разрешенные для использования зоны в кластере
-
+                    Список зон, в которых Volume'ы StorageClass будут реплицированы. Контроллер повесит лейбл с 
+                    именем StorageClass на узлах, которые будут непосредственно использованы StorageClass.
+                    
+                    > Обратите внимание, что для режимов репликации 'Availability' и 'ConsistencyAndAvailability' вам
+                    необходимо выбрать 1 или 3 зоны.
+                    > Важно: это поле является неизменяемым и не может быть изменено после первоначального создания ресурса.
+            status:
+              description: |
+                Отображает информацию о текущем состоянии StorageClass.
+              properties:
+                phase:
+                  description: |
+                    Общее текущее состояние StorageClass. Может быть: 
+                    - Failed (если контроллер получил некорректную конфигурацию ресурса или возникли ошибки в процессе выполнения операции)
+                    - Created (если StorageClass создан успешно)
+                reason:
+                  description: |
+                    Дополнительная информация о текущем состоянии StorageClass.

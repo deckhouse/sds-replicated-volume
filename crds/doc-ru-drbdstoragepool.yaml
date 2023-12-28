@@ -4,24 +4,40 @@ spec:
       schema:
         openAPIV3Schema:
           description: |
-            drbd storage pool
+            DRBDStoragePool — это пользовательский ресурс Kubernetes, который определяет конфигурацию Storage-pool'ов в LINSTOR. 
           properties:
             spec:
+              description: |
+                Определяет конфигурацию Storage-pool'ов в LINSTOR.
               properties:
+                type:
+                  description: |
+                    Определяет тип Volume'ов. Может быть: 
+                    - LVM (для Thick)
+                    - LVMThin (для Thin)
                 lvmvolumegroups:
                   items:
                     properties:
                       name:
                         description: |
-                          Название LVM группы
+                          Список имен LVMVolumeGroup-ресурсов, Volume Group'ы/Thin-pool'ы которых будут использованы для
+                          создания Storage-pool'ов в LINSTOR.
+                          
+                          > Обратите внимание, что каждый LVMVolumeGroup-ресурс обязан иметь тот же тип (Thin/Thick),
+                          что указан в поле 'Spec.Type' текущего ресурса.
                       thinpoolname:
                         description: |
-                          Название LVM thin pool группы
+                          Имя выбранного Thin-pool.
             status:
+              description: |
+                Отображает актуальную информацию о текущем состоянии Storage-pool в LINSTOR.
               properties:
                 phase:
                   description: |
-                    Текущее состояние
+                    Текущее состояние DRBDStoragePool-ресурса. Может быть:
+                    - Completed (если контроллер получил корректную конфигурацию ресурса и конфигурация Storage-pool'ов в LINSTOR обновлена)
+                    - Updating (если контроллер получил корректную конфигурацию ресурса и конфигурация Storage-pool'ов в LINSTOR обновляется)
+                    - Failed (если контроллер получил некорректную конфигурацию ресурса или во время операции возникла ошибка)
                 reason:
                   description: |
-                    Причина, вызвавшая последнее действие
+                    Дополнительная информация о текущем состоянии ресурса.

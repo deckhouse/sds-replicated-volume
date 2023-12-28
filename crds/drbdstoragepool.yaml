@@ -21,38 +21,64 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
-          description: "DRBD storage pool"
+          description: |
+            DRBDStoragePool is a Kubernetes Custom Resource that defines a configuration for Linstor Storage-pools. 
           required:
             - spec
           properties:
             spec:
               type: object
+              description: |
+                Defines desired rules for Linstor's Storage-pools.
               properties:
                 type:
                   type: string
+                  description: |
+                    Defines the volumes type. Might be:
+                    - LVM (for Thick)
+                    - LVMThin (for Thin)
                   enum:
                     - LVM
                     - LVMThin
                 lvmvolumegroups:
                   type: array
+                  description: |
+                    An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
+                    the required space.
+                    
+                    > Note that every LVMVolumeGroup resource has to have the same type Thin/Thick 
+                    as it is in current resource's 'Spec.Type' field.
                   items:
                     type: object
                     properties:
                       name:
                         type: string
+                        description: |
+                          Selected LVMVolumeGroup resource's name.
                       thinpoolname:
                         type: string
+                        description: |
+                          Selected Thin-pool name.
             status:
               type: object
+              description: |
+                Displays current information about the state of the LINSTOR storage pool.
               properties:
                 phase:
                   type: string
+                  description: |
+                    The actual DRBDStoragePool resource's state. Might be: 
+                    - Completed (if the controller received correct resource configuration and Linstor Storage-pools configuration is up-to-date)
+                    - Updating (if the controller received correct resource configuration and Linstor Storage-pools configuration needs to be updated)
+                    - Failed (if the controller received incorrect resource configuration or an error occurs during the operation)
                   enum:
                     - Updating
                     - Failed
                     - Completed
                 reason:
                   type: string
+                  description: |
+                    The additional information about the resource's current state.
       additionalPrinterColumns:
         - jsonPath: .status.phase
           name: Phase
