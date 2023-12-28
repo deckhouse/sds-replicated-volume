@@ -117,7 +117,7 @@ func NewDRBDStorageClass(
 				log.Error(err, fmt.Sprintf("error in ReconcileDRBDStorageClassEvent. Add to retry after %d seconds.", interval))
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
 			} else {
-				log.Info("END reconcile of DRBD storage pool with name: " + request.Name)
+				log.Info("END reconcile of DRBDStorageClass with name: " + request.Name)
 			}
 
 			return reconcile.Result{Requeue: false}, nil
@@ -535,7 +535,11 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 
 	if len(drbdsc.Spec.Zones) != 0 {
 		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)
-		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
+		if len(drbdsc.Spec.Zones) == 1 {
+			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = "kubernetes.io/hostname"
+		} else {
+			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
+		}
 	}
 
 	newStorageClass := &storagev1.StorageClass{
@@ -622,6 +626,24 @@ func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStor
 			err := cl.Update(ctx, &node)
 			if err != nil {
 				return err
+			}
+		}
+	}
+
+	allNodes := v1.NodeList{}
+	err := cl.List(ctx, &allNodes)
+	if err != nil {
+		return err
+	}
+	for _, node := range allNodes.Items {
+		_, exist := allSelectedNodes[node.Name]
+		if !exist {
+			if labels.Set(node.Labels).Has(fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)) {
+				delete(node.Labels, fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name))
+				err := cl.Update(ctx, &node)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}
