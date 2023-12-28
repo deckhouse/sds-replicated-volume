@@ -216,6 +216,10 @@ RUN chmod 755 /liveness.sh
 COPY client-wrapper.sh /usr/local/bin/linstor
 RUN chmod 755 /usr/local/bin/linstor
 
+# Script for cleaner sidecar
+COPY cleaner.py /cleaner.py
+RUN chmod 755 /cleaner.py
+
 RUN mv /usr/bin/linstor /usr/bin/originallinstor
 
 CMD ["startSatellite"]

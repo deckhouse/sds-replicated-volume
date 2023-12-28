@@ -86,6 +86,25 @@ spec:
               {{- include "drbd_wait_resources" . | nindent 14 }}
 {{- end }}
       containers:
+      - command:
+          - python3
+          - /cleaner.py
+        image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
+        imagePullPolicy: IfNotPresent
+        name: linstor-resources-cleaner
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+{{- end }}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /etc/linstor/client
+            name: linstor-client
+          - mountPath: /var/lib/linstor.d
+            name: linstord
       - args:
           - startSatellite
         env:
@@ -114,6 +133,8 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
+          - mountPath: /var/lib/linstor.d
+            name: linstord
           - mountPath: /etc/linstor
             name: linstor-conf
           - mountPath: /dev/
@@ -204,6 +225,8 @@ spec:
       serviceAccountName: linstor-node
       terminationGracePeriodSeconds: 30
       volumes:
+        - emptyDir: {}
+          name: linstord
         - configMap:
             defaultMode: 420
             name: linstor-node-config
