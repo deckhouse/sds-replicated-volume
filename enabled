@@ -17,9 +17,13 @@ function __main__() {
     sds_drbd_settings=$(kubectl get moduleconfig sds-drbd -o jsonpath={.spec.settings.dataNodes})
     if [ "$linstor_settings" != "$sds_drbd_settings" ]; then
       if [ -z "$(kubectl get moduleconfig sds-drbd -o jsonpath={.spec.version})" ]; then
-        kubectl patch moduleconfig sds-drbd --type=json -p "$(kubectl get moduleconfig linstor -o json | jq '[{op: "add", path: "/spec/version", value: 1}]')"
+        kubectl patch moduleconfig sds-drbd --type=json -p '[{op: "add", path: "/spec/version", value: 1}]'
       fi
-      kubectl patch moduleconfig sds-drbd --type=json -p "$(kubectl get moduleconfig linstor -o json | jq '[{op: "replace", path: "/spec/settings", value: .spec.settings}]')"
+      if [ -z "$(kubectl get moduleconfig sds-drbd -o jsonpath={.spec.settings})" ]; then
+        kubectl patch moduleconfig sds-drbd --type=json -p "$(kubectl get moduleconfig linstor -o json | jq '[{op: "add", path: "/spec/settings", value: .spec.settings}]')"
+      else
+        kubectl patch moduleconfig sds-drbd --type=json -p "$(kubectl get moduleconfig linstor -o json | jq '[{op: "replace", path: "/spec/settings/dataNodes", value: .spec.settings.dataNodes}]')"
+      fi
     fi
   fi
 
