@@ -19,7 +19,8 @@ spec:
       template:
         metadata:
           namespace: d8-{{ .Chart.Name }}
-          {{- include "helm_lib_module_labels" (list . (dict "app" "metadata-backup" )) | nindent 10 }}
+          labels:
+            app: metadata-backup
         spec:
           restartPolicy: OnFailure
           {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 10 }}
