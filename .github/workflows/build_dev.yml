@@ -24,6 +24,6 @@ jobs:
         shell: bash
         name: Show vars
 
-      # - uses: actions/checkout@v4
-      # - uses: deckhouse/modules-actions/setup@v1
-      # - uses: deckhouse/modules-actions/build@v1
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - uses: deckhouse/modules-actions/build@v1
