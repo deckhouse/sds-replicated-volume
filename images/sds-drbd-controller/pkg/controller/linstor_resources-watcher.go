@@ -20,11 +20,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/go-logr/logr"
-	"k8s.io/utils/strings/slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/go-logr/logr"
+	"k8s.io/utils/strings/slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	core "k8s.io/api/core/v1"
@@ -436,12 +437,19 @@ func getMissMatchedParams(sc v1.StorageClass, rg lapi.ResourceGroup) []string {
 	for _, param := range scParamsMatchRGSelectFilter {
 		switch param {
 		case replicasOnSameSCKey:
-			replicasOnSame := getRGReplicasValue(rg.SelectFilter.ReplicasOnSame[0])
+			replicasOnSame := ""
+			if len(rg.SelectFilter.ReplicasOnSame) != 0 {
+				replicasOnSame = getRGReplicasValue(rg.SelectFilter.ReplicasOnSame[0])
+			}
 			if scParams[param] != replicasOnSame {
 				missMatched = append(missMatched, param)
 			}
+
 		case replicasOnDifferentSCKey:
-			replicasOnDifferent := getRGReplicasValue(rg.SelectFilter.ReplicasOnDifferent[0])
+			replicasOnDifferent := ""
+			if len(rg.SelectFilter.ReplicasOnDifferent) != 0 {
+				replicasOnDifferent = getRGReplicasValue(rg.SelectFilter.ReplicasOnDifferent[0])
+			}
 			if scParams[param] != replicasOnDifferent {
 				missMatched = append(missMatched, param)
 			}
