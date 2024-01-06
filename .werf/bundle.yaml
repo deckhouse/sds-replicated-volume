@@ -21,6 +21,7 @@ git:
   - .helmignore
   - charts
   - crds
+  - docs
   - enabled
   - hooks
   - monitoring
