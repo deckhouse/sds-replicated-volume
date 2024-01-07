@@ -305,7 +305,7 @@ If you get any output (there are "Remote failed to finish a request within ..." 
 No, the `SDS-DRBD` module does not automatically create or delete the `DRBDStoragePool` and `DRBDStorageClass`. Only the user can create them. The controller merely reflects the current state of the respective operation in the Status field.
 
 ## There are "zones" in the spec field of the DRBDStorageClass resource. What are these?
-Zones are a custom abstraction to define which nodes to create volumes on. A node’s membership in a particular zone is displayed in the node's labels under the `topology.kubernetes.io/zone` key.
+Zones are a custom abstraction used to define on which nodes data volumes and their replicas will be created. A node’s membership in a particular zone is displayed in the node's `Labels` under the `topology.kubernetes.io/zone` key.
 
 ## I deleted the DRBDStoragePool resource, but the corresponding Storage Pool in Linstor is still there. Is that the expected behavior?
 Yes. Currently, the `SDS-DRBD` module does not handle operations when deleting the `DRBDStoragePool` resource.
