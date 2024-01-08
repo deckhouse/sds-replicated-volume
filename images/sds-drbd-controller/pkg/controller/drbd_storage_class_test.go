@@ -58,6 +58,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 				ReclaimPolicy: controller.ReclaimPolicyRetain,
 				Replication:   controller.ReplicationConsistencyAndAvailability,
 				VolumeAccess:  controller.VolumeAccessLocal,
+				Topology:      controller.TopologyTransZonal,
 				Zones:         validZones,
 			},
 		}
@@ -72,6 +73,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 				ReclaimPolicy: "",
 				Replication:   controller.ReplicationConsistencyAndAvailability,
 				VolumeAccess:  controller.VolumeAccessLocal,
+				Topology:      controller.TopologyTransZonal,
 				Zones:         invalidValues,
 			},
 		}
@@ -449,31 +451,6 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		Expect(requeue).To(BeFalse())
 	})
 
-	It("ValidateZonesForExistence_returns_true_empty_wrong_zones", func() {
-		selectedZones := []string{"first", "second"}
-		zones := map[string]struct{}{
-			"first":  {},
-			"second": {},
-		}
-
-		valid, wrongZones := controller.ValidateZonesForExistence(selectedZones, zones)
-		Expect(valid).To(BeTrue())
-		Expect(len(wrongZones)).To(Equal(0))
-	})
-
-	It("ValidateZonesForExistence_returns_false_and_wrong_zones", func() {
-		selectedZones := []string{"first", "second"}
-		zones := map[string]struct{}{
-			"first": {},
-		}
-
-		expectedWrongZones := []string{"second"}
-
-		valid, wrongZones := controller.ValidateZonesForExistence(selectedZones, zones)
-		Expect(valid).To(BeFalse())
-		Expect(wrongZones).To(Equal(expectedWrongZones))
-	})
-
 	It("ValidateDRBDStorageClass_Incorrect_spec_Returns_false_and_messages", func() {
 		testName := generateTestName()
 		drbdsc := invalidDrbdscTemplate
@@ -484,7 +461,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 
 		validation, mes := controller.ValidateDRBDStorageClass(ctx, cl, &drbdsc, zones)
 		Expect(validation).Should(BeFalse())
-		Expect(mes).To(Equal("Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected non-existent zones: second; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; "))
+		Expect(mes).To(Equal("Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "))
 	})
 
 	It("ValidateDRBDStorageClass_Correct_spec_Returns_true", func() {
@@ -592,7 +569,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		testName := generateTestName()
 		drbdsc := invalidDrbdscTemplate
 		drbdsc.Name = testName
-		failedMessage := "Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; "
+		failedMessage := "Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "
 		err := cl.Create(ctx, &drbdsc)
 		if err == nil {
 			defer func() {
