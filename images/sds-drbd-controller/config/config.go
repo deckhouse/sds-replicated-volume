@@ -24,7 +24,7 @@ import (
 // ScanInterval Scan block device interval seconds
 const (
 	ScanInterval                      = 10
-	LinstorResourcesReconcileInterval = 60
+	LinstorResourcesReconcileInterval = 120
 	ConfigSecretName                  = "d8-sds-drbd-controller-config"
 	LinstorLeaseName                  = "linstor"
 	NodeName                          = "NODE_NAME"

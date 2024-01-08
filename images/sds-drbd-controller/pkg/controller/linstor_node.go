@@ -163,6 +163,8 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
 
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
+		log.Info(fmt.Sprintf("Processing the node '%s' that does not match the user-defined selector.", drbdNodeToRemove.Name))
+		log.Info(fmt.Sprintf("Checking if node '%s' is a LINSTOR node.", drbdNodeToRemove.Name))
 
 		for _, linstorNode := range linstorSatelliteNodes {
 			if drbdNodeToRemove.Name == linstorNode.Name {
@@ -172,7 +174,7 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drb
 				break
 			}
 		}
-
+		log.Info(fmt.Sprintf("Reconciling labels for node '%s'", drbdNodeToRemove.Name))
 		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector, false)
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
@@ -373,30 +375,31 @@ func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log l
 func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logr.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
 	labelsToAdd := make(map[string]string)
 	labelsToRemove := make(map[string]string)
+	storageClassesLabelsForNode := make(map[string]string)
 
 	if isDRBDNode {
 		if !labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
-			log.Info("Kubernetes node: " + kubernetesNode.Name + "  have not drbd label. Set it")
+			log.Info(fmt.Sprintf("Kubernetes node '%s' has not drbd label. Set it.", kubernetesNode.Name))
 			labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
+		}
+
+		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(ctx, cl, kubernetesNode, drbdStorageClasses)
+		for labelKey, labelValue := range storageClassesLabelsForNode {
+			if _, existsInKubernetesNodeLabels := kubernetesNode.Labels[labelKey]; !existsInKubernetesNodeLabels {
+				labelsToAdd[labelKey] = labelValue
+			}
 		}
 	} else {
 		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
-			log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing label.", kubernetesNode.Name))
-
-			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
-			// labelsToRemove = labels.Merge(labelsToRemove, drbdNodeSelector)
+			log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing DRBD label.", kubernetesNode.Name))
+			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
 		}
 	}
 
-	if kubernetesNode.Labels != nil {
-		storageClassesLabelsForNode := GetStorageClassesLabelsForNode(ctx, cl, kubernetesNode, drbdStorageClasses)
-		labelsToAdd = labels.Merge(labelsToAdd, storageClassesLabelsForNode)
-
-		for labelKey := range kubernetesNode.Labels {
-			if strings.HasPrefix(labelKey, StorageClassLabelKeyPrefix) {
-				if _, ok := storageClassesLabelsForNode[labelKey]; !ok {
-					labelsToRemove = labels.Merge(labelsToRemove, map[string]string{labelKey: ""})
-				}
+	for labelKey := range kubernetesNode.Labels {
+		if strings.HasPrefix(labelKey, StorageClassLabelKeyPrefix) {
+			if _, existsInStorageClassesLabels := storageClassesLabelsForNode[labelKey]; !existsInStorageClassesLabels {
+				labelsToRemove[labelKey] = ""
 			}
 		}
 	}
@@ -414,7 +417,7 @@ func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log lo
 	}
 	kubernetesNode.Labels = labels.Merge(kubernetesNode.Labels, labelsToAdd)
 
-	log.Info(fmt.Sprintf("Reconciling labels for node '%s': adding %d labels, removing %d labels", kubernetesNode.Name, len(labelsToAdd), len(labelsToRemove)))
+	log.Info(fmt.Sprintf("Reconciling labels for node '%s': adding %d labels (%v), removing %d labels(%v)", kubernetesNode.Name, len(labelsToAdd), labelsToAdd, len(labelsToRemove), labelsToRemove))
 	err := cl.Update(ctx, &kubernetesNode)
 	if err != nil {
 		return err

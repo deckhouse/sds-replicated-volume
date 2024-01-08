@@ -189,7 +189,8 @@ var _ = Describe(controller.DRBDStoragePoolControllerName, func() {
 		reconciledGoodDRBDStoragePool, err := controller.GetDRBDStoragePool(ctx, cl, testNameSpace, GoodDRBDStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reconciledGoodDRBDStoragePool.Status.Phase).To(Equal("Failed"))
-		Expect(reconciledGoodDRBDStoragePool.Status.Reason).To(Equal(`Error getting LINSTOR Storage Pool gooddrbdoperatorstoragepool on node first_node on vg actualVG-1-on-FirstNode: Get "http://localhost:3370/v1/nodes/first_node/storage-pools/gooddrbdoperatorstoragepool": dial tcp [::1]:3370: connect: connection refused`))
+		pattern := `Error getting LINSTOR Storage Pool gooddrbdoperatorstoragepool on node first_node on vg actualVG-1-on-FirstNode: Get "http://(localhost|\[::1\]|127\.0\.0\.1):3370/v1/nodes/first_node/storage-pools/gooddrbdoperatorstoragepool": dial tcp (\[::1\]|127\.0\.0\.1):3370: connect: connection refused`
+		Expect(reconciledGoodDRBDStoragePool.Status.Reason).To(MatchRegexp(pattern))
 
 		// Negative test with bad LVMVolumeGroups.
 
