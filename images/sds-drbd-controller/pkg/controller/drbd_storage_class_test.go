@@ -612,6 +612,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNameSpace, testName)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Expect(storageClass).To(BeNil())
 
 		err = controller.ReconcileDRBDStorageClass(ctx, cl, log, &drbdsc)
 		Expect(err).NotTo(HaveOccurred())
