@@ -50,8 +50,8 @@ const (
 	StorageClassKind               = "StorageClass"
 	StorageClassAPIVersion         = "storage.k8s.io/v1"
 
-	ZoneLabel         = "topology.kubernetes.io/zone"
-	ClassStorageLabel = "class.storage.deckhouse.io"
+	ZoneLabel                  = "topology.kubernetes.io/zone"
+	StorageClassLabelKeyPrefix = "class.storage.deckhouse.io"
 
 	VolumeAccessLocal           = "Local"
 	VolumeAccessEventuallyLocal = "EventuallyLocal"
@@ -313,7 +313,8 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 		return fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
 	}
 
-	err = LabelNodes(ctx, cl, drbdsc)
+	storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, drbdsc.Name)
+	err = LabelNodes(ctx, cl, storageClassLabelKey, drbdsc.Spec.Zones)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to label nodes for resource, name: %s", drbdsc.Name))
 		return fmt.Errorf("error LabelNodes: %s", err.Error())
@@ -533,7 +534,7 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 
 	switch drbdsc.Spec.Topology {
 	case TopologyTransZonal:
-		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)
+		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, drbdsc.Name)
 		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
 	case TopologyZonal:
 		storageClassParameters[StorageClassParamReplicasOnSameKey] = ZoneLabel
@@ -604,11 +605,11 @@ func RemoveString(slice []string, s string) (result []string) {
 	return
 }
 
-func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass) error {
+func LabelNodes(ctx context.Context, cl client.Client, storageClassLabelKey string, zones []string) error {
 	var nodeSelector map[string]string
 	allSelectedNodes := map[string]v1.Node{}
 
-	for _, value := range drbdsc.Spec.Zones {
+	for _, value := range zones {
 		nodeSelector = map[string]string{ZoneLabel: value}
 		selectedNodes := v1.NodeList{}
 		err := cl.List(ctx, &selectedNodes, client.MatchingLabels(nodeSelector))
@@ -621,8 +622,8 @@ func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStor
 	}
 
 	for _, node := range allSelectedNodes {
-		if !labels.Set(node.Labels).Has(fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)) {
-			node.Labels[fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)] = ""
+		if !labels.Set(node.Labels).Has(storageClassLabelKey) {
+			node.Labels[storageClassLabelKey] = ""
 			err := cl.Update(ctx, &node)
 			if err != nil {
 				return err
@@ -638,8 +639,8 @@ func LabelNodes(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStor
 	for _, node := range allNodes.Items {
 		_, exist := allSelectedNodes[node.Name]
 		if !exist {
-			if labels.Set(node.Labels).Has(fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)) {
-				delete(node.Labels, fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name))
+			if labels.Set(node.Labels).Has(storageClassLabelKey) {
+				delete(node.Labels, storageClassLabelKey)
 				err := cl.Update(ctx, &node)
 				if err != nil {
 					return err

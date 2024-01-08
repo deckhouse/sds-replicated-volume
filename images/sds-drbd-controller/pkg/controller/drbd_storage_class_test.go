@@ -769,7 +769,8 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			}()
 		}
 
-		err = controller.LabelNodes(ctx, cl, &drbdsc)
+		storageClassLabelKey := fmt.Sprintf("%s/%s", controller.StorageClassLabelKeyPrefix, drbdsc.Name)
+		err = controller.LabelNodes(ctx, cl, storageClassLabelKey, drbdsc.Spec.Zones)
 		Expect(err).NotTo(HaveOccurred())
 
 		updatedNode := &v1.Node{}
