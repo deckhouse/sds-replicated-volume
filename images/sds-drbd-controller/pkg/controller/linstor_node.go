@@ -173,13 +173,7 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drb
 			}
 		}
 
-		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToRemove.Labels)) {
-			log.Info("Kubernetes node: " + drbdNodeToRemove.Name + "  has a DRBD label but is no longer a DRBD node. Initiating removal logic.")
-			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
-			// #TODO: How get current replica count and modify it?
-		}
-
-		err := reconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector)
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector, false)
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
 		}
@@ -206,7 +200,7 @@ func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.
 			}
 		}
 
-		err := reconcileKubernetesNodeLabels(ctx, cl, log, selectedKubernetesNode, drbdStorageClasses, drbdNodeSelector)
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, selectedKubernetesNode, drbdStorageClasses, drbdNodeSelector, true)
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", selectedKubernetesNode.Name, err)
 		}
@@ -376,13 +370,22 @@ func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log l
 	return nil
 }
 
-func reconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logr.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
+func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logr.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
 	labelsToAdd := make(map[string]string)
 	labelsToRemove := make(map[string]string)
 
-	if !labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
-		log.Info("Kubernetes node: " + kubernetesNode.Name + "  have not drbd label. Set it")
-		labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
+	if isDRBDNode {
+		if !labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
+			log.Info("Kubernetes node: " + kubernetesNode.Name + "  have not drbd label. Set it")
+			labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
+		}
+	} else {
+		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
+			log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing label.", kubernetesNode.Name))
+
+			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+			// labelsToRemove = labels.Merge(labelsToRemove, drbdNodeSelector)
+		}
 	}
 
 	if kubernetesNode.Labels != nil {
