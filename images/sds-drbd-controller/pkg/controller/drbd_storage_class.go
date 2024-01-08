@@ -431,22 +431,6 @@ func ValidateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1a
 	return validationPassed, failedMsgBuilder.String()
 }
 
-func ValidateZonesForExistence(selectedZones []string, clusterZones map[string]struct{}) (bool, []string) {
-	wrongZones := make([]string, 0, len(selectedZones))
-
-	for _, zone := range selectedZones {
-		if _, exist := clusterZones[zone]; !exist {
-			wrongZones = append(wrongZones, zone)
-		}
-	}
-
-	if len(wrongZones) == 0 {
-		return true, wrongZones
-	}
-
-	return false, wrongZones
-}
-
 func UpdateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass) error {
 	err := cl.Update(ctx, drbdsc)
 	if err != nil {
