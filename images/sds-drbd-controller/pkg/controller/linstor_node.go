@@ -392,14 +392,16 @@ func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log lo
 		storageClassesLabelsForNode := GetStorageClassesLabelsForNode(ctx, cl, kubernetesNode, drbdStorageClasses)
 		labelsToAdd = labels.Merge(labelsToAdd, storageClassesLabelsForNode)
 
-		for k := range kubernetesNode.Labels {
-			if strings.HasPrefix(k, StorageClassLabelKeyPrefix) {
-				labelsToRemove = labels.Merge(labelsToRemove, map[string]string{k: ""})
+		for labelKey := range kubernetesNode.Labels {
+			if strings.HasPrefix(labelKey, StorageClassLabelKeyPrefix) {
+				if _, ok := storageClassesLabelsForNode[labelKey]; !ok {
+					labelsToRemove = labels.Merge(labelsToRemove, map[string]string{labelKey: ""})
+				}
 			}
 		}
 	}
 
-	if labelsToAdd == nil && labelsToRemove == nil {
+	if len(labelsToAdd) == 0 && len(labelsToRemove) == 0 {
 		return nil
 	}
 
@@ -412,6 +414,7 @@ func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log lo
 	}
 	kubernetesNode.Labels = labels.Merge(kubernetesNode.Labels, labelsToAdd)
 
+	log.Info(fmt.Sprintf("Reconciling labels for node '%s': adding %d labels, removing %d labels", kubernetesNode.Name, len(labelsToAdd), len(labelsToRemove)))
 	err := cl.Update(ctx, &kubernetesNode)
 	if err != nil {
 		return err
