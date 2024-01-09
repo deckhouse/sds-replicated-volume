@@ -312,13 +312,6 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 		return fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
 	}
 
-	// storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, drbdsc.Name)
-	// err = LabelNodes(ctx, cl, storageClassLabelKey, drbdsc.Spec.Zones)
-	// if err != nil {
-	// 	log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to label nodes for resource, name: %s", drbdsc.Name))
-	// 	return fmt.Errorf("error LabelNodes: %s", err.Error())
-	// }
-
 	if drbdsc.Spec.IsDefault {
 		err := makeStorageClassDefault(ctx, cl, drbdsc)
 		if err != nil {
@@ -603,53 +596,6 @@ func RemoveString(slice []string, s string) (result []string) {
 	}
 	return
 }
-
-// func LabelNodes(ctx context.Context, cl client.Client, storageClassLabelKey string, zones []string) error {
-// 	var nodeSelector map[string]string
-// 	allSelectedNodes := map[string]v1.Node{}
-
-// 	for _, value := range zones {
-// 		nodeSelector = map[string]string{ZoneLabel: value}
-// 		selectedNodes := v1.NodeList{}
-// 		err := cl.List(ctx, &selectedNodes, client.MatchingLabels(nodeSelector))
-// 		if err != nil {
-// 			return err
-// 		}
-// 		for _, node := range selectedNodes.Items {
-// 			allSelectedNodes[node.Name] = node
-// 		}
-// 	}
-
-// 	for _, node := range allSelectedNodes {
-// 		if !labels.Set(node.Labels).Has(storageClassLabelKey) {
-// 			node.Labels[storageClassLabelKey] = ""
-// 			err := cl.Update(ctx, &node)
-// 			if err != nil {
-// 				return err
-// 			}
-// 		}
-// 	}
-
-// 	allNodes := v1.NodeList{}
-// 	err := cl.List(ctx, &allNodes)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	for _, node := range allNodes.Items {
-// 		_, exist := allSelectedNodes[node.Name]
-// 		if !exist {
-// 			if labels.Set(node.Labels).Has(storageClassLabelKey) {
-// 				delete(node.Labels, storageClassLabelKey)
-// 				err := cl.Update(ctx, &node)
-// 				if err != nil {
-// 					return err
-// 				}
-// 			}
-// 		}
-// 	}
-
-// 	return nil
-// }
 
 func findDefaultDRBDStorageClasses(ctx context.Context, cl client.Client, currentDRBDSCName string) ([]string, error) {
 	drbdscList := &v1alpha1.DRBDStorageClassList{}
