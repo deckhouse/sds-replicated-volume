@@ -68,7 +68,7 @@ spec:
       initContainers:
         - name: wait-for-linstor
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
-          image: {{ include "helm_lib_module_image" (list . "linstorAffinityController") }}
+          image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
           imagePullPolicy: "IfNotPresent"
           command:
             - /linstor-wait-until
