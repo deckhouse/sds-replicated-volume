@@ -100,6 +100,7 @@ func NewDRBDStoragePool(
 				newDRBDSP := e.ObjectNew.(*v1alpha1.DRBDStoragePool)
 				if reflect.DeepEqual(oldDRBDSP.Spec, newDRBDSP.Spec) {
 					log.Info("StoragePool spec not changed. Nothing to do") // TODO: change to debug
+					log.Info("END from UPDATE reconcile of DRBD storage pool with name: " + e.ObjectNew.GetName())
 					return
 				}
 
@@ -239,8 +240,8 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 			isSuccessful = false
 		}
 
-		if existedStoragePool.Props["StorDriver/LvmVg"] != lvmVgForLinstor {
-			errMessage := fmt.Sprintf("Storage Pool %s on node %s already exists with vg \"%s\". New vg is \"%s\". VG change is forbidden; ", drbdsp.Name, nodeName, existedStoragePool.Props["StorDriver/LvmVg"], lvmVgForLinstor)
+		if existedStoragePool.Props[StorPoolNamePropKey] != lvmVgForLinstor {
+			errMessage := fmt.Sprintf("Storage Pool %s on node %s already exists with vg \"%s\". New vg is \"%s\". VG change is forbidden; ", drbdsp.Name, nodeName, existedStoragePool.Props[StorPoolNamePropKey], lvmVgForLinstor)
 			log.Error(nil, errMessage)
 			failedMsgBuilder.WriteString(errMessage)
 			isSuccessful = false
