@@ -346,7 +346,7 @@ spec:
               secretKeyRef:
                 key: tls.key
                 name: linstor-client-https-cert
-        image: {{ include "helm_lib_module_image" (list . "linstorCsi") }}
+        image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
         imagePullPolicy: IfNotPresent
         name: linstor-wait-node-online
         resources:
@@ -673,7 +673,7 @@ spec:
                 secretKeyRef:
                   key: tls.key
                   name: linstor-client-https-cert
-          image: {{ include "helm_lib_module_image" (list . "linstorCsi") }}
+          image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
           imagePullPolicy: IfNotPresent
           name: linstor-wait-api-online
           resources:
