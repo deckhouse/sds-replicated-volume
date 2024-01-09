@@ -174,7 +174,7 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 
 		if !ok {
 			log.Error(nil, fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map: %+v", drbdspLvmVolumeGroup.Name, lvmVolumeGroups))
-			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map. See logs of %s for details", drbdspLvmVolumeGroup.Name, DRBDStoragePoolControllerName))
+			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map. See logs of %s for details; ", drbdspLvmVolumeGroup.Name, DRBDStoragePoolControllerName))
 			isSuccessful = false
 			continue
 		}
@@ -223,7 +223,7 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 				log.Info(fmt.Sprintf("Storage Pool %s created on node %s on vg %s", drbdsp.Name, nodeName, lvmVgForLinstor))
 				continue
 			} else {
-				errMessage := fmt.Sprintf("Error getting LINSTOR Storage Pool %s on node %s on vg %s: %s", drbdsp.Name, nodeName, lvmVgForLinstor, err.Error())
+				errMessage := fmt.Sprintf("Error getting LINSTOR Storage Pool %s on node %s on vg %s: %s; ", drbdsp.Name, nodeName, lvmVgForLinstor, err.Error())
 				log.Error(nil, errMessage)
 				failedMsgBuilder.WriteString(errMessage)
 				isSuccessful = false
@@ -233,14 +233,14 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 		log.Info(fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists. Check it", drbdsp.Name, nodeName, lvmVgForLinstor))
 
 		if existedStoragePool.ProviderKind != newStoragePool.ProviderKind {
-			errMessage := fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists but with different type %s. New type is %s. Type change is forbidden", drbdsp.Name, nodeName, lvmVgForLinstor, existedStoragePool.ProviderKind, newStoragePool.ProviderKind)
+			errMessage := fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists but with different type %s. New type is %s. Type change is forbidden; ", drbdsp.Name, nodeName, lvmVgForLinstor, existedStoragePool.ProviderKind, newStoragePool.ProviderKind)
 			log.Error(nil, errMessage)
 			failedMsgBuilder.WriteString(errMessage)
 			isSuccessful = false
 		}
 
 		if existedStoragePool.Props["StorDriver/LvmVg"] != lvmVgForLinstor {
-			errMessage := fmt.Sprintf("Storage Pool %s on node %s already exists with vg \"%s\". New vg is \"%s\". VG change is forbidden", drbdsp.Name, nodeName, existedStoragePool.Props["StorDriver/LvmVg"], lvmVgForLinstor)
+			errMessage := fmt.Sprintf("Storage Pool %s on node %s already exists with vg \"%s\". New vg is \"%s\". VG change is forbidden; ", drbdsp.Name, nodeName, existedStoragePool.Props["StorDriver/LvmVg"], lvmVgForLinstor)
 			log.Error(nil, errMessage)
 			failedMsgBuilder.WriteString(errMessage)
 			isSuccessful = false
