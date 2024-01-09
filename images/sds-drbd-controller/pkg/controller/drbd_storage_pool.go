@@ -150,7 +150,7 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, drbdsp.Namespace, drbdsp.Spec.Type, drbdsp.Spec.LvmVolumeGroups)
 	if !ok {
 		drbdsp.Status.Phase = "Failed"
-		drbdsp.Status.Reason = fmt.Sprintf("%s", msg)
+		drbdsp.Status.Reason = msg
 		err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
 		if err != nil {
 			return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())

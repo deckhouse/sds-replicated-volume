@@ -45,6 +45,7 @@ spec:
               required:
                 - storagePool
                 - reclaimPolicy
+                - topology
               properties:
                 isDefault:
                   type: boolean
@@ -114,6 +115,24 @@ spec:
                     - PreferablyLocal
                     - Any
                   default: 'PreferablyLocal'
+                topology:
+                  type: string
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
+                  description: |
+                    The topology settings for the volumes in the created Storage class. Might be:
+                    - TransZonal - replicas of the volumes will be created in different zones (one replica per zone). 
+                    To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
+                    - Zonal - all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+                    - Ignored - the topology information will not be used to place replicas of the volumes.
+                    The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
+
+                    > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+                  enum:
+                    - TransZonal
+                    - Zonal
+                    - Ignored
                 zones:
                   type: array
                   x-kubernetes-validations:

@@ -38,6 +38,7 @@ type DRBDStorageClassSpec struct {
 	ReclaimPolicy string   `json:"reclaimPolicy"`
 	Replication   string   `json:"replication"`
 	VolumeAccess  string   `json:"volumeAccess"`
+	Topology      string   `json:"topology"`
 	Zones         []string `json:"zones"`
 }
 

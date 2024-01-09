@@ -65,6 +65,10 @@ const (
 	ReplicationAvailability               = "Availability"
 	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 
+	TopologyTransZonal = "TransZonal"
+	TopologyZonal      = "Zonal"
+	TopologyIgnored    = "Ignored"
+
 	// DRBDControllerPlacementCount = "linstor.csi.linbit.com/placementCount"
 	// DRBDOperatorStoragePool        = "linstor.csi.linbit.com/storagePool"
 	// AutoQuorum                     = "property.linstor.csi.linbit.com/DrbdOptions/auto-quorum"
@@ -192,58 +196,58 @@ func ReconcileDRBDStorageClassEvent(ctx context.Context, cl client.Client, reque
 	err := cl.Get(ctx, request.NamespacedName, drbdsc)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("DRBDStorageClass with name: " + request.Name + " not found. Object was probably deleted. Removing it from queue.") // #TODO: warn
+			log.Info("[ReconcileDRBDStorageClassEvent] DRBDStorageClass with name: " + request.Name + " not found. Object was probably deleted. Removing it from queue.") // #TODO: warn
 			return false, nil
 		}
 
-		return true, fmt.Errorf("error getting DRBDStorageClass: %s", err.Error())
+		return true, fmt.Errorf("[ReconcileDRBDStorageClassEvent] error getting DRBDStorageClass: %s", err.Error())
 	}
 
 	if drbdsc.ObjectMeta.DeletionTimestamp != nil {
-		log.Info("DRBDStorageClass with name: " + drbdsc.Name + " is marked for deletion. Removing it.")
+		log.Info("[ReconcileDRBDStorageClassEvent] DRBDStorageClass with name: " + drbdsc.Name + " is marked for deletion. Removing it.")
 		// #TODO: warn
 		switch drbdsc.Status.Phase {
 		case Failed:
-			log.Info("StorageClass with name: " + drbdsc.Name + " was not deleted because the DRBDStorageClass is in a Failed state. Deliting only finalizer.")
+			log.Info("[ReconcileDRBDStorageClassEvent] StorageClass with name: " + drbdsc.Name + " was not deleted because the DRBDStorageClass is in a Failed state. Deliting only finalizer.")
 		case Created:
 			_, err = GetStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name)
 			if err != nil {
 				if !errors.IsNotFound(err) {
-					return true, fmt.Errorf("error getting StorageClass: %s", err.Error())
+					return true, fmt.Errorf("[ReconcileDRBDStorageClassEvent] error getting StorageClass: %s", err.Error())
 				}
 
-				log.Info("StorageClass with name: " + drbdsc.Name + " not found. No need to delete it.")
+				log.Info("[ReconcileDRBDStorageClassEvent] StorageClass with name: " + drbdsc.Name + " not found. No need to delete it.")
 				break
 			}
 
-			log.Info("StorageClass with name: " + drbdsc.Name + " found. Deleting it.")
+			log.Info("[ReconcileDRBDStorageClassEvent] StorageClass with name: " + drbdsc.Name + " found. Deleting it.")
 			if err := DeleteStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name); err != nil {
-				return true, fmt.Errorf("error DeleteStorageClass: %s", err.Error())
+				return true, fmt.Errorf("[ReconcileDRBDStorageClassEvent] error DeleteStorageClass: %s", err.Error())
 			}
-			log.Info("StorageClass with name: " + drbdsc.Name + " deleted.")
+			log.Info("[ReconcileDRBDStorageClassEvent] StorageClass with name: " + drbdsc.Name + " deleted.")
 		}
 
-		log.Info("Removing finalizer from DRBDStorageClass with name: " + drbdsc.Name)
+		log.Info("[ReconcileDRBDStorageClassEvent] Removing finalizer from DRBDStorageClass with name: " + drbdsc.Name)
 
 		drbdsc.ObjectMeta.Finalizers = RemoveString(drbdsc.ObjectMeta.Finalizers, DRBDStorageClassFinalizerName)
 		if err = UpdateDRBDStorageClass(ctx, cl, drbdsc); err != nil {
-			return true, fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
+			return true, fmt.Errorf("[ReconcileDRBDStorageClassEvent] error UpdateDRBDStorageClass: %s", err.Error())
 		}
 
-		log.Info("Finalizer removed from DRBDStorageClass with name: " + drbdsc.Name)
+		log.Info("[ReconcileDRBDStorageClassEvent] Finalizer removed from DRBDStorageClass with name: " + drbdsc.Name)
 
 		return false, nil
 	}
 
 	if err = ReconcileDRBDStorageClass(ctx, cl, log, drbdsc); err != nil {
-		return true, fmt.Errorf("error ReconcileDRBDStorageClass: %s", err.Error())
+		return true, fmt.Errorf("[ReconcileDRBDStorageClassEvent] error ReconcileDRBDStorageClass: %s", err.Error())
 	}
 
 	return false, nil
 }
 
 func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.Logger, drbdsc *v1alpha1.DRBDStorageClass) error { // TODO: add shouldRequeue as returned value
-	log.Info("Validating DRBDStorageClass with name: " + drbdsc.Name)
+	log.Info("[ReconcileDRBDStorageClass] Validating DRBDStorageClass with name: " + drbdsc.Name)
 
 	zones, err := GetClusterZones(ctx, cl)
 	if err != nil {
@@ -253,49 +257,49 @@ func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.L
 
 	valid, msg := ValidateDRBDStorageClass(ctx, cl, drbdsc, zones)
 	if !valid {
-		err := fmt.Errorf("[ReconcileDRBDStorageClass] DRBDStorageClass validation failed for resource named: %s", drbdsc.Name)
-		log.Info(fmt.Sprintf("[ReconcileDRBDStorageClass] DRBDStorageClass validation failed for resource named: %s", drbdsc.Name))
+		err := fmt.Errorf("[ReconcileDRBDStorageClass] Validation of DRBDStorageClass failed for the resource named: %s", drbdsc.Name)
+		log.Info(fmt.Sprintf("[ReconcileDRBDStorageClass] Validation of DRBDStorageClass failed for the resource named: %s, for the following reason: %s", drbdsc.Name, msg))
 		drbdsc.Status.Phase = Failed
-		drbdsc.Status.Reason = fmt.Sprintf("%v", msg)
+		drbdsc.Status.Reason = msg
 		if err := UpdateDRBDStorageClass(ctx, cl, drbdsc); err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to update DRBD resource, name: %s", drbdsc.Name))
-			return fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
+			return fmt.Errorf("[ReconcileDRBDStorageClass] error UpdateDRBDStorageClass: %s", err.Error())
 		}
 
 		return err
 	}
-	log.Info("DRBDStorageClass with name: " + drbdsc.Name + " is valid")
+	log.Info("[ReconcileDRBDStorageClass] DRBDStorageClass with name: " + drbdsc.Name + " is valid")
 
-	log.Info("Try to get StorageClass with name: " + drbdsc.Name)
+	log.Info("[ReconcileDRBDStorageClass] Try to get StorageClass with name: " + drbdsc.Name)
 	storageClass, err := GetStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to get storage class for DRBDStorageClass resource, name: %s", drbdsc.Name))
-			return fmt.Errorf("error getting StorageClass: %s", err.Error())
+			return fmt.Errorf("[ReconcileDRBDStorageClass] error getting StorageClass: %s", err.Error())
 		}
 
-		log.Info("StorageClass with name: " + drbdsc.Name + " not found. Create it.")
+		log.Info("[ReconcileDRBDStorageClass] StorageClass with name: " + drbdsc.Name + " not found. Create it.")
 		if err = CreateStorageClass(ctx, cl, drbdsc); err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to create storage class for DRBDStorageClass resource, name: %s", drbdsc.Name))
-			return fmt.Errorf("error CreateStorageClass: %s", err.Error())
+			return fmt.Errorf("[ReconcileDRBDStorageClass] error CreateStorageClass: %s", err.Error())
 		}
-		log.Info("StorageClass with name: " + drbdsc.Name + " created.")
+		log.Info("[ReconcileDRBDStorageClass] StorageClass with name: " + drbdsc.Name + " created.")
 	} else {
-		log.Info("StorageClass with name: " + drbdsc.Name + " found. Compare it with DRBDStorageClass.")
+		log.Info("[ReconcileDRBDStorageClass] StorageClass with name: " + drbdsc.Name + " found. Compare it with DRBDStorageClass.")
 		equal, msg := CompareDRBDStorageClassAndStorageClass(drbdsc, storageClass)
 		if !equal {
-			log.Info("DRBDStorageClass and StorageClass are not equal.")
+			log.Info("[ReconcileDRBDStorageClass] DRBDStorageClass and StorageClass are not equal.")
 			drbdsc.Status.Phase = Failed
 			drbdsc.Status.Reason = msg
 
 			if err := UpdateDRBDStorageClass(ctx, cl, drbdsc); err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClass] unable to update DRBD resource, name: %s", drbdsc.Name))
-				return fmt.Errorf("error UpdateDRBDStorageClass: %s", err.Error())
+				return fmt.Errorf("[ReconcileDRBDStorageClass] error UpdateDRBDStorageClass: %s", err.Error())
 			}
 			return nil
 		}
 
-		log.Info("DRBDStorageClass and StorageClass are equal.")
+		log.Info("[ReconcileDRBDStorageClass] DRBDStorageClass and StorageClass are equal.")
 	}
 
 	drbdsc.Status.Phase = Created
@@ -387,50 +391,44 @@ func ValidateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1a
 		failedMsgBuilder.WriteString("ReclaimPolicy is empty; ")
 	}
 
-	if len(zones) > 0 {
+	switch drbdsc.Spec.Topology {
+	case TopologyTransZonal:
 		if len(drbdsc.Spec.Zones) == 0 {
 			validationPassed = false
-			failedMsgBuilder.WriteString("Zones are empty; ")
+			failedMsgBuilder.WriteString("Topology is set to 'TransZonal', but zones are not specified; ")
 		} else {
-			valid, wrongZones := ValidateZonesForExistence(drbdsc.Spec.Zones, zones)
-			if !valid {
+			switch drbdsc.Spec.Replication {
+			case ReplicationAvailability, ReplicationConsistencyAndAvailability:
+				if len(drbdsc.Spec.Zones) != 3 {
+					validationPassed = false
+					failedMsgBuilder.WriteString(fmt.Sprintf("Selected unacceptable amount of zones for replication type: %s; correct number of zones should be 3; ", drbdsc.Spec.Replication))
+				}
+			case ReplicationNone:
+			default:
 				validationPassed = false
-				failedMsgBuilder.WriteString(fmt.Sprintf("Selected non-existent zones: %s; ", strings.Join(wrongZones, ",")))
+				failedMsgBuilder.WriteString(fmt.Sprintf("Selected unsupported replication type: %s; ", drbdsc.Spec.Replication))
 			}
 		}
-	}
-
-	if len(drbdsc.Spec.Zones) > 0 {
-		switch drbdsc.Spec.Replication {
-		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
-			if len(drbdsc.Spec.Zones) != 1 && len(drbdsc.Spec.Zones) != 3 {
-				validationPassed = false
-				failedMsgBuilder.WriteString(fmt.Sprintf("Selected unacceptable amount of zones for replication type: %s; ", drbdsc.Spec.Replication))
-			}
-		case ReplicationNone:
-		default:
+	case TopologyZonal:
+		if len(drbdsc.Spec.Zones) != 0 {
 			validationPassed = false
-			failedMsgBuilder.WriteString(fmt.Sprintf("Selected unsupported replication type: %s; ", drbdsc.Spec.Replication))
+			failedMsgBuilder.WriteString("Topology is set to 'Zonal', but zones are specified; ")
 		}
+	case TopologyIgnored:
+		if len(zones) > 0 {
+			validationPassed = false
+			failedMsgBuilder.WriteString("Setting 'topology' to 'Ignored' is prohibited when zones are present in the cluster; ")
+		}
+		if len(drbdsc.Spec.Zones) != 0 {
+			validationPassed = false
+			failedMsgBuilder.WriteString("Topology is set to 'Ignored', but zones are specified; ")
+		}
+	default:
+		validationPassed = false
+		failedMsgBuilder.WriteString(fmt.Sprintf("Selected unsupported topology: %s; ", drbdsc.Spec.Topology))
 	}
 
 	return validationPassed, failedMsgBuilder.String()
-}
-
-func ValidateZonesForExistence(selectedZones []string, clusterZones map[string]struct{}) (bool, []string) {
-	wrongZones := make([]string, 0, len(selectedZones))
-
-	for _, zone := range selectedZones {
-		if _, exist := clusterZones[zone]; !exist {
-			wrongZones = append(wrongZones, zone)
-		}
-	}
-
-	if len(wrongZones) == 0 {
-		return true, wrongZones
-	}
-
-	return false, wrongZones
 }
 
 func UpdateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass) error {
@@ -533,13 +531,15 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 		volumeBindingMode = "Immediate"
 	}
 
-	if len(drbdsc.Spec.Zones) != 0 {
+	switch drbdsc.Spec.Topology {
+	case TopologyTransZonal:
 		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", ClassStorageLabel, drbdsc.Name)
-		if len(drbdsc.Spec.Zones) == 1 {
-			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = "kubernetes.io/hostname"
-		} else {
-			storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
-		}
+		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = ZoneLabel
+	case TopologyZonal:
+		storageClassParameters[StorageClassParamReplicasOnSameKey] = ZoneLabel
+		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = "kubernetes.io/hostname"
+	case TopologyIgnored:
+		storageClassParameters[StorageClassParamReplicasOnDifferentKey] = "kubernetes.io/hostname"
 	}
 
 	newStorageClass := &storagev1.StorageClass{
