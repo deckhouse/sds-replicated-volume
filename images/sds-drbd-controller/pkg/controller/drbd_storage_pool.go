@@ -23,6 +23,7 @@ import (
 	"reflect"
 	"sds-drbd-controller/api/v1alpha1"
 	"sort"
+	"strings"
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
@@ -40,10 +41,11 @@ import (
 )
 
 const (
-	DRBDStoragePoolControllerName = "drbd--storage-pool-controller"
+	DRBDStoragePoolControllerName = "drbd-storage-pool-controller"
 	TypeLVMThin                   = "LVMThin"
 	TypeLVM                       = "LVM"
 	LVMVGTypeLocal                = "Local"
+	StorPoolNamePropKey           = "StorDriver/StorPoolName"
 )
 
 func NewDRBDStoragePool(
@@ -157,18 +159,24 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 		}
 		return nil
 	}
+	var (
+		lvmVgForLinstor  string
+		lvmType          lapi.ProviderKind
+		failedMsgBuilder strings.Builder
+		isSuccessful     = true
+	)
 
-	var lvmVgForLinstor string
-	var lvmType lapi.ProviderKind
+	failedMsgBuilder.WriteString("Error occurred while creating Storage Pools: ")
 
 	for _, drbdspLvmVolumeGroup := range drbdsp.Spec.LvmVolumeGroups {
 		lvmVolumeGroup, ok := lvmVolumeGroups[drbdspLvmVolumeGroup.Name]
 		nodeName := lvmVolumeGroup.Status.Nodes[0].Name
 
 		if !ok {
-			drbdsp.Status.Phase = "Failed"
-			drbdsp.Status.Reason = fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map. See logs of %s for details", drbdspLvmVolumeGroup.Name, DRBDStoragePoolControllerName)
-			return fmt.Errorf("error getting LvmVolumeGroup %s from lvmVolumeGroups map (%v), returned by the GetAndValidateVolumeGroups function", drbdspLvmVolumeGroup.Name, lvmVolumeGroups)
+			log.Error(nil, fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map: %+v", drbdspLvmVolumeGroup.Name, lvmVolumeGroups))
+			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map. See logs of %s for details", drbdspLvmVolumeGroup.Name, DRBDStoragePoolControllerName))
+			isSuccessful = false
+			continue
 		}
 
 		switch drbdsp.Spec.Type {
@@ -185,7 +193,7 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 			NodeName:        nodeName,
 			ProviderKind:    lvmType,
 			Props: map[string]string{
-				"StorDriver/LvmVg": lvmVgForLinstor, // TODO: change to const
+				StorPoolNamePropKey: lvmVgForLinstor, // TODO: change to const
 			},
 		}
 
@@ -216,42 +224,37 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 				continue
 			} else {
 				errMessage := fmt.Sprintf("Error getting LINSTOR Storage Pool %s on node %s on vg %s: %s", drbdsp.Name, nodeName, lvmVgForLinstor, err.Error())
-				drbdsp.Status.Phase = "Failed"
-				drbdsp.Status.Reason = errMessage
-				err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
-				if err != nil {
-					log.Error(nil, errMessage)
-					return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
-				}
-				return fmt.Errorf(errMessage)
+				log.Error(nil, errMessage)
+				failedMsgBuilder.WriteString(errMessage)
+				isSuccessful = false
+				continue
 			}
 		}
+		log.Info(fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists. Check it", drbdsp.Name, nodeName, lvmVgForLinstor))
 
 		if existedStoragePool.ProviderKind != newStoragePool.ProviderKind {
 			errMessage := fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists but with different type %s. New type is %s. Type change is forbidden", drbdsp.Name, nodeName, lvmVgForLinstor, existedStoragePool.ProviderKind, newStoragePool.ProviderKind)
-			drbdsp.Status.Phase = "Failed"
-			drbdsp.Status.Reason = errMessage
-			err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
-			if err != nil {
-				log.Error(nil, errMessage)
-				return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
-			}
-			return fmt.Errorf(errMessage)
+			log.Error(nil, errMessage)
+			failedMsgBuilder.WriteString(errMessage)
+			isSuccessful = false
 		}
 
 		if existedStoragePool.Props["StorDriver/LvmVg"] != lvmVgForLinstor {
 			errMessage := fmt.Sprintf("Storage Pool %s on node %s already exists with vg \"%s\". New vg is \"%s\". VG change is forbidden", drbdsp.Name, nodeName, existedStoragePool.Props["StorDriver/LvmVg"], lvmVgForLinstor)
-			drbdsp.Status.Phase = "Failed"
-			drbdsp.Status.Reason = errMessage
-			err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
-			if err != nil {
-				log.Error(nil, errMessage)
-				return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
-			}
-			return fmt.Errorf(errMessage)
+			log.Error(nil, errMessage)
+			failedMsgBuilder.WriteString(errMessage)
+			isSuccessful = false
 		}
+	}
 
-		log.Info(fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists. Nothing to do", drbdsp.Name, nodeName, lvmVgForLinstor))
+	if !isSuccessful {
+		drbdsp.Status.Phase = "Failed"
+		drbdsp.Status.Reason = failedMsgBuilder.String()
+		err := UpdateDRBDStoragePool(ctx, cl, drbdsp)
+		if err != nil {
+			return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
+		}
+		return fmt.Errorf("error occurred while creating Storage Pools")
 	}
 
 	drbdsp.Status.Phase = "Completed"
@@ -260,7 +263,6 @@ func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Cl
 	if err != nil {
 		return fmt.Errorf("error UpdateDRBDStoragePool: %s", err.Error())
 	}
-
 	return nil
 }
 
