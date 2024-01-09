@@ -121,7 +121,7 @@ def main(interval: int, debug: bool):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--interval", type=int, help="Interval in seconds", default=20, required=False)
+    parser.add_argument("--interval", type=int, help="Interval in seconds", default=60, required=False)
     parser.add_argument("--debug", action="store_true", help="Enable debug logging", required=False)
     args = parser.parse_args()
 

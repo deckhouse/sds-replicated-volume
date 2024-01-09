@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"reflect"
 	"sds-drbd-controller/api/v1alpha1"
+	sdsapi "sds-drbd-controller/api/v1alpha1"
 	"sds-drbd-controller/pkg/controller"
 	"strings"
 
@@ -752,6 +753,9 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		testName := generateTestName()
 		drbdsc := validSpecDrbdscTemplate
 		drbdsc.Name = testName
+		err := cl.Create(ctx, &drbdsc)
+		Expect(err).NotTo(HaveOccurred())
+
 		node := &v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "node-1",
@@ -760,7 +764,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			},
 		}
 
-		err := cl.Create(ctx, node)
+		err = cl.Create(ctx, node)
 		if err == nil {
 			defer func() {
 				if err = cl.Delete(ctx, node); err != nil && !errors.IsNotFound(err) {
@@ -769,7 +773,16 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			}()
 		}
 
-		err = controller.LabelNodes(ctx, cl, &drbdsc)
+		// storageClassLabelKey := fmt.Sprintf("%s/%s", controller.StorageClassLabelKeyPrefix, drbdsc.Name)
+		// err = controller.LabelNodes(ctx, cl, storageClassLabelKey, drbdsc.Spec.Zones)
+		// Expect(err).NotTo(HaveOccurred())
+		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
+
+		drbdStorageClasses := sdsapi.DRBDStorageClassList{}
+		err = cl.List(ctx, &drbdStorageClasses)
+		Expect(err).NotTo(HaveOccurred())
+
+		err = controller.ReconcileKubernetesNodeLabels(ctx, cl, log, *node, drbdStorageClasses, drbdNodeSelector, true)
 		Expect(err).NotTo(HaveOccurred())
 
 		updatedNode := &v1.Node{}
@@ -777,7 +790,6 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 			Name:      "node-1",
 			Namespace: testNameSpace,
 		}, updatedNode)
-
 		Expect(err).NotTo(HaveOccurred())
 
 		_, exist := updatedNode.Labels[fmt.Sprintf("class.storage.deckhouse.io/%s", drbdsc.Name)]

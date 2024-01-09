@@ -49,6 +49,10 @@ const (
 	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-drbd-node"
 )
 
+var (
+	drbdNodeSelector = map[string]string{DRBDNodeSelectorKey: ""}
+)
+
 func NewLinstorNode(
 	ctx context.Context,
 	mgr manager.Manager,
@@ -64,7 +68,6 @@ func NewLinstorNode(
 
 			if request.Name == configSecretName {
 				log.Info("Start reconcile of LINSTOR nodes.")
-				drbdNodeSelector := map[string]string{DRBDNodeSelectorKey: ""}
 				err := reconcileLinstorNodes(ctx, cl, lc, log, request.Namespace, request.Name, drbdNodeSelector)
 				if err != nil {
 					log.Error(nil, "Failed reconcile of LINSTOR nodes")
@@ -117,8 +120,15 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 		return err
 	}
 
+	drbdStorageClasses := sdsapi.DRBDStorageClassList{}
+	err = cl.List(ctx, &drbdStorageClasses)
+	if err != nil {
+		log.Error(err, "Failed get DRBD storage classes")
+		return err
+	}
+
 	if len(selectedKubernetesNodes.Items) != 0 {
-		err = AddOrConfigureDRBDNodes(ctx, cl, lc, log, selectedKubernetesNodes, linstorSatelliteNodes, drbdNodeSelector)
+		err = AddOrConfigureDRBDNodes(ctx, cl, lc, log, selectedKubernetesNodes, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
 		if err != nil {
 			log.Error(err, "Failed add DRBD nodes:")
 			return err
@@ -135,7 +145,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	}
 	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
 
-	err = removeDRBDNodes(log, drbdNodesToRemove, linstorSatelliteNodes, drbdNodeSelector)
+	err = removeDRBDNodes(ctx, cl, log, drbdNodesToRemove, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
 	if err != nil {
 		log.Error(err, "Failed remove DRBD nodes:")
 		return err
@@ -150,30 +160,31 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	return nil
 }
 
-func removeDRBDNodes(log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdNodeSelector map[string]string) error {
+func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
 
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
+		log.Info(fmt.Sprintf("Processing the node '%s' that does not match the user-defined selector.", drbdNodeToRemove.Name))
+		log.Info(fmt.Sprintf("Checking if node '%s' is a LINSTOR node.", drbdNodeToRemove.Name))
 
 		for _, linstorNode := range linstorSatelliteNodes {
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
-				log.Info("Remove LINSTOR node: " + drbdNodeToRemove.Name)
+				log.Info(fmt.Sprintf("Detected a LINSTOR node '%s' that no longer matches the user-defined selector and needs to be removed. Initiating the deletion process.", drbdNodeToRemove.Name))
 				log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
 				break
 			}
 		}
-
-		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToRemove.Labels)) {
-			log.Info("Kubernetes node: " + drbdNodeToRemove.Name + "  have drbd label. Unset it")
-			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
-			// #TODO: How get current replica count and modify it?
+		log.Info(fmt.Sprintf("Reconciling labels for node '%s'", drbdNodeToRemove.Name))
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector, false)
+		if err != nil {
+			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
 		}
 
 	}
 	return nil
 }
 
-func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdNodeSelector map[string]string) error {
+func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
 
 	for _, selectedKubernetesNode := range selectedKubernetesNodes.Items {
 
@@ -191,21 +202,9 @@ func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.
 			}
 		}
 
-		if !labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(selectedKubernetesNode.Labels)) {
-
-			originalNode := selectedKubernetesNode.DeepCopy()
-			newNode := selectedKubernetesNode.DeepCopy()
-			if newNode.Labels == nil {
-				newNode.Labels = make(map[string]string, len(drbdNodeSelector))
-			}
-			for labelKey, labelValue := range drbdNodeSelector {
-				newNode.Labels[labelKey] = labelValue
-			}
-
-			err := cl.Patch(ctx, newNode, client.MergeFrom(originalNode))
-			if err != nil {
-				return fmt.Errorf("unable set drbd labels to node %s: %w", selectedKubernetesNode.Name, err)
-			}
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, selectedKubernetesNode, drbdStorageClasses, drbdNodeSelector, true)
+		if err != nil {
+			return fmt.Errorf("unable to reconcile labels for node %s: %w", selectedKubernetesNode.Name, err)
 		}
 
 		if !findMatch {
@@ -371,4 +370,75 @@ func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log l
 		}
 	}
 	return nil
+}
+
+func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logr.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
+	labelsToAdd := make(map[string]string)
+	labelsToRemove := make(map[string]string)
+	storageClassesLabelsForNode := make(map[string]string)
+
+	if isDRBDNode {
+		if !labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
+			log.Info(fmt.Sprintf("Kubernetes node '%s' has not drbd label. Set it.", kubernetesNode.Name))
+			labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
+		}
+
+		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(kubernetesNode, drbdStorageClasses)
+		for labelKey, labelValue := range storageClassesLabelsForNode {
+			if _, existsInKubernetesNodeLabels := kubernetesNode.Labels[labelKey]; !existsInKubernetesNodeLabels {
+				labelsToAdd[labelKey] = labelValue
+			}
+		}
+	} else {
+		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
+			log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing DRBD label.", kubernetesNode.Name))
+			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
+		}
+	}
+
+	for labelKey := range kubernetesNode.Labels {
+		if strings.HasPrefix(labelKey, StorageClassLabelKeyPrefix) {
+			if _, existsInStorageClassesLabels := storageClassesLabelsForNode[labelKey]; !existsInStorageClassesLabels {
+				labelsToRemove[labelKey] = ""
+			}
+		}
+	}
+
+	if len(labelsToAdd) == 0 && len(labelsToRemove) == 0 {
+		return nil
+	}
+
+	if kubernetesNode.Labels == nil {
+		kubernetesNode.Labels = make(map[string]string, len(labelsToAdd))
+	}
+
+	for k := range labelsToRemove {
+		delete(kubernetesNode.Labels, k)
+	}
+	kubernetesNode.Labels = labels.Merge(kubernetesNode.Labels, labelsToAdd)
+
+	log.Info(fmt.Sprintf("Reconciling labels for node '%s': adding %d labels (%v), removing %d labels(%v)", kubernetesNode.Name, len(labelsToAdd), labelsToAdd, len(labelsToRemove), labelsToRemove))
+	err := cl.Update(ctx, &kubernetesNode)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList) map[string]string {
+	storageClassesLabels := make(map[string]string)
+
+	for _, drbdStorageClass := range drbdStorageClasses.Items {
+		if drbdStorageClass.Spec.Zones == nil {
+			continue
+		}
+		for _, zone := range drbdStorageClass.Spec.Zones {
+			if zone == kubernetesNode.Labels[ZoneLabel] {
+				storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, drbdStorageClass.Name)
+				storageClassesLabels = labels.Merge(storageClassesLabels, map[string]string{storageClassLabelKey: ""})
+				break
+			}
+		}
+	}
+	return storageClassesLabels
 }

@@ -19,6 +19,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	sdsapi "sds-drbd-controller/api/v1alpha1"
 	"sds-drbd-controller/pkg/controller"
 
 	linstor "github.com/LINBIT/golinstor/client"
@@ -201,8 +202,10 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 
 		log := logr.Logger{}
 		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
+		drbdStorageClasses := sdsapi.DRBDStorageClassList{}
+		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.AddOrConfigureDRBDNodes(ctx, cl, mockLc, log, selectedKubeNodes, []linstor.Node{}, drbdNodeSelector)
+		err = controller.AddOrConfigureDRBDNodes(ctx, cl, mockLc, log, selectedKubeNodes, []linstor.Node{}, drbdStorageClasses, drbdNodeSelector)
 		Expect(err).NotTo(HaveOccurred())
 	})
 
