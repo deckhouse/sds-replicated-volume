@@ -383,7 +383,7 @@ func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log lo
 			labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
 		}
 
-		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(ctx, cl, kubernetesNode, drbdStorageClasses)
+		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(kubernetesNode, drbdStorageClasses)
 		for labelKey, labelValue := range storageClassesLabelsForNode {
 			if _, existsInKubernetesNodeLabels := kubernetesNode.Labels[labelKey]; !existsInKubernetesNodeLabels {
 				labelsToAdd[labelKey] = labelValue
@@ -425,7 +425,7 @@ func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log lo
 	return nil
 }
 
-func GetStorageClassesLabelsForNode(ctx context.Context, cl client.Client, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList) map[string]string {
+func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList) map[string]string {
 	storageClassesLabels := make(map[string]string)
 
 	for _, drbdStorageClass := range drbdStorageClasses.Items {
