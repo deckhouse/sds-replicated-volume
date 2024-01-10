@@ -51,42 +51,42 @@ spec:
     updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
-      - containerName: csi-attacher
-        minAllowed:
+    - containerName: csi-attacher
+      minAllowed:
         {{- include "csi_attacher_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
-      - containerName: csi-provisioner
-        minAllowed:
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
+    - containerName: csi-provisioner
+      minAllowed:
         {{- include "csi_provisioner_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
-      - containerName: csi-resizer
-        minAllowed:
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
+    - containerName: csi-resizer
+      minAllowed:
         {{- include "csi_resizer_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
-      - containerName: rnd-csi-plugin
-        minAllowed:
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
+    - containerName: rnd-csi-plugin
+      minAllowed:
         {{- include "rnd_csi_plugin_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 70m
-          memory: 100Mi
-      - containerName: csi-snapshotter
-        minAllowed:
+      maxAllowed:
+        cpu: 70m
+        memory: 100Mi
+    - containerName: csi-snapshotter
+      minAllowed:
         {{- include "csi_snapshotter_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
-      - containerName: csi-livenessprobe
-        minAllowed:
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
+    - containerName: csi-livenessprobe
+      minAllowed:
         {{- include "csi_livenessprobe_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
 ---
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
@@ -103,24 +103,24 @@ spec:
     updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
-      - containerName: rnd-csi-plugin
-        minAllowed:
+    - containerName: rnd-csi-plugin
+      minAllowed:
         {{- include "rnd_csi_plugin_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 70m
-          memory: 100Mi
-      - containerName:  csi-livenessprobe
-        minAllowed:
+      maxAllowed:
+        cpu: 70m
+        memory: 100Mi
+    - containerName:  csi-livenessprobe
+      minAllowed:
         {{- include "csi_livenessprobe_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
-      - containerName: csi-node-driver-registrar
-        minAllowed:
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
+    - containerName: csi-node-driver-registrar
+      minAllowed:
         {{- include "csi_node_driver_registrar_resources" . | nindent 8 }}
-        maxAllowed:
-          cpu: 20m
-          memory: 50Mi
+      maxAllowed:
+        cpu: 20m
+        memory: 50Mi
 {{- end }}
 ---
 apiVersion: policy/v1
@@ -162,155 +162,120 @@ spec:
 {{- end }}
       affinity: {}
       containers:
-        - args:
-            - --v=5
-            - --csi-address=$(CSI_ENDPOINT)
-            - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
-          env:
-            - name: CSI_ENDPOINT
-              value: /csi/csi.sock
-            - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/rnd.csi.storage.deckhouse.io/csi.sock
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: spec.nodeName
-            - name: LS_CONTROLLERS
-              value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
-            - name: LS_ROOT_CA
-              valueFrom:
-                secretKeyRef:
-                  key: ca.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_CERTIFICATE
-              valueFrom:
-                secretKeyRef:
-                  key: tls.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: tls.key
-                  name: linstor-client-https-cert
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiNodeDriverRegistrar" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          lifecycle:
-            preStop:
-              exec:
-                command:
-                  - /bin/sh
-                  - -c
-                  - rm -rf /registration/rnd.csi.storage.deckhouse.io /registration/rnd.csi.storage.deckhouse.io-reg.sock
-          name: csi-node-driver-registrar
-          resources:
-            requests:
+      - args:
+          - --v=5
+          - --csi-address=$(CSI_ENDPOINT)
+          - --kubelet-registration-path=$(DRIVER_REG_SOCK_PATH)
+        env:
+          - name: CSI_ENDPOINT
+            value: /csi/csi.sock
+          - name: DRIVER_REG_SOCK_PATH
+            value: /var/lib/kubelet/plugins/rnd.csi.storage.deckhouse.io/csi.sock
+          - name: KUBE_NODE_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: spec.nodeName
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiNodeDriverRegistrar" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        lifecycle:
+          preStop:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - rm -rf /registration/rnd.csi.storage.deckhouse.io /registration/rnd.csi.storage.deckhouse.io-reg.sock
+        name: csi-node-driver-registrar
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_attacher_resources" . | nindent 12 }}
 {{- end }}
-          securityContext:
-            allowPrivilegeEscalation: true
-            capabilities:
-              add:
-                - SYS_ADMIN
-            privileged: true
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /csi/
-              name: plugin-dir
-            - mountPath: /registration/
-              name: registration-dir
-        - args:
-            - --csi-address=$(CSI_ENDPOINT)
-          env:
-            - name: CSI_ENDPOINT
-              value: /csi/csi.sock
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiLivenessprobe" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-livenessprobe
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /csi/
-              name: plugin-dir
-          resources:
-            requests:
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+              - SYS_ADMIN
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /csi/
+            name: plugin-dir
+          - mountPath: /registration/
+            name: registration-dir
+      - args:
+          - --csi-address=$(CSI_ENDPOINT)
+        env:
+          - name: CSI_ENDPOINT
+            value: /csi/csi.sock
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiLivenessprobe" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-livenessprobe
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /csi/
+            name: plugin-dir
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_livenessprobe_resources" . | nindent 12 }}
 {{- end }}
-        - args:
-            - --csi-endpoint=unix://$(CSI_ENDPOINT)
-            - --node=$(KUBE_NODE_NAME)
-            - --rnd-endpoint=$(LS_CONTROLLERS)
-            - --log-level=info
-          env:
-            - name: CSI_ENDPOINT
-              value: /csi/csi.sock
-            - name: DRIVER_REG_SOCK_PATH
-              value: /var/lib/kubelet/plugins/rnd.csi.storage.deckhouse.io/csi.sock
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: spec.nodeName
-            - name: LS_CONTROLLERS
-              value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
-            - name: LS_ROOT_CA
-              valueFrom:
-                secretKeyRef:
-                  key: ca.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_CERTIFICATE
-              valueFrom:
-                secretKeyRef:
-                  key: tls.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: tls.key
-                  name: linstor-client-https-cert
-          image: {{ include "helm_lib_module_image" (list . "rndCsi") }}
-          imagePullPolicy: IfNotPresent
-          livenessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /healthz
-              port: 9808
-              scheme: HTTP
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          name: rnd-csi-plugin
-          ports:
-            - containerPort: 9808
-              name: healthz
-              protocol: TCP
-          resources:
-            requests:
+      - args:
+          - --csi-endpoint=unix://$(CSI_ENDPOINT)
+          - --node=$(KUBE_NODE_NAME)
+          - --log-level=info
+        env:
+          - name: CSI_ENDPOINT
+            value: /csi/csi.sock
+          - name: DRIVER_REG_SOCK_PATH
+            value: /var/lib/kubelet/plugins/rnd.csi.storage.deckhouse.io/csi.sock
+          - name: KUBE_NODE_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: spec.nodeName
+        image: {{ include "helm_lib_module_image" (list . "rndCsi") }}
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 9808
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: rnd-csi-plugin
+        ports:
+          - containerPort: 9808
+            name: healthz
+            protocol: TCP
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "rnd_csi_plugin_resources" . | nindent 12 }}
 {{- end }}
-          securityContext:
-            capabilities:
-              add:
-                - SYS_ADMIN
-            privileged: true
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /csi/
-              name: plugin-dir
-            - mountPath: /var/lib/kubelet
-              mountPropagation: Bidirectional
-              name: publish-dir
-            - mountPath: /dev
-              name: device-dir
+        securityContext:
+          capabilities:
+            add:
+              - SYS_ADMIN
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /csi/
+            name: plugin-dir
+          - mountPath: /var/lib/kubelet
+            mountPropagation: Bidirectional
+            name: publish-dir
+          - mountPath: /dev
+            name: device-dir
       dnsPolicy: ClusterFirstWithHostNet
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
@@ -379,10 +344,10 @@ spec:
             nodeSelectorTerms:
               - matchExpressions:
 {{- range $k, $v := index (fromYaml .) "nodeSelector" }}
-                  - key: {{ $k }}
-                    operator: In
-                    values:
-                      - {{ $v | quote }}
+                - key: {{ $k }}
+                  operator: In
+                  values:
+                    - {{ $v | quote }}
 {{- end }}
 {{- else }}
         nodeAffinity: {}
@@ -393,216 +358,199 @@ spec:
         podAntiAffinity: {}
 {{- end }}
       containers:
-        - args:
-            - --v=5
-            - --csi-address=$(ADDRESS)
-            - --timeout=1m
-            - --leader-election=true
-            - --leader-election-namespace=$(NAMESPACE)
-            - --worker-threads=1
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.namespace
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalAttacher" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-attacher
-          resources:
-            requests:
+      - args:
+          - --v=5
+          - --csi-address=$(ADDRESS)
+          - --timeout=1m
+          - --leader-election=true
+          - --leader-election-namespace=$(NAMESPACE)
+          - --worker-threads=1
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+          - name: NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalAttacher" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-attacher
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_attacher_resources" . | nindent 12 }}
 {{- end }}
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
-        - args:
-            - --csi-address=$(ADDRESS)
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiLivenessprobe" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-livenessprobe
-          resources:
-            requests:
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
+      - args:
+          - --csi-address=$(ADDRESS)
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiLivenessprobe" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-livenessprobe
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_livenessprobe_resources" . | nindent 12 }}
 {{- end }}
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
-        - args:
-            - --csi-address=$(ADDRESS)
-            - --timeout=1m
-            - --default-fstype=ext4
-            - --feature-gates=Topology=true
-            - --leader-election=true
-            - --leader-election-namespace=$(NAMESPACE)
-            - --enable-capacity
-            - --extra-create-metadata
-            - --capacity-ownerref-level=2
-            - --worker-threads=1
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.namespace
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.name
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalProvisioner" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-provisioner
-          resources:
-            requests:
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
+      - args:
+          - --csi-address=$(ADDRESS)
+          - --timeout=1m
+          - --default-fstype=ext4
+          - --feature-gates=Topology=true
+          - --leader-election=true
+          - --leader-election-namespace=$(NAMESPACE)
+          - --enable-capacity
+          - --extra-create-metadata
+          - --capacity-ownerref-level=2
+          - --worker-threads=1
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+          - name: NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.name
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalProvisioner" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-provisioner
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "csi_provisioner_resources" . | nindent 12 }}
 {{- end }}
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
-        - args:
-            - --timeout=1m
-            - --csi-address=$(ADDRESS)
-            - --leader-election=true
-            - --leader-election-namespace=$(NAMESPACE)
-            - --worker-threads=1
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.namespace
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalSnapshotter" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-snapshotter
-          resources:
-            requests:
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
+      - args:
+          - --timeout=1m
+          - --csi-address=$(ADDRESS)
+          - --leader-election=true
+          - --leader-election-namespace=$(NAMESPACE)
+          - --worker-threads=1
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+          - name: NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalSnapshotter" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-snapshotter
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_snapshotter_resources" . | nindent 12 }}
 {{- end }}
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
-        - args:
-            - --v=5
-            - --csi-address=$(ADDRESS)
-            - --timeout=1m
-            - --handle-volume-inuse-error=false
-            - --leader-election=true
-            - --leader-election-namespace=$(NAMESPACE)
-            - --workers=1
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-            - name: NAMESPACE
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: metadata.namespace
-          image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalResizer" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
-          imagePullPolicy: IfNotPresent
-          name: csi-resizer
-          resources:
-            requests:
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
+      - args:
+          - --v=5
+          - --csi-address=$(ADDRESS)
+          - --timeout=1m
+          - --handle-volume-inuse-error=false
+          - --leader-election=true
+          - --leader-election-namespace=$(NAMESPACE)
+          - --workers=1
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+          - name: NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+        image: {{ include "helm_lib_module_common_image" (list . (list "csiExternalResizer" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
+        imagePullPolicy: IfNotPresent
+        name: csi-resizer
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_resizer_resources" . | nindent 12 }}
 {{- end }}
-          securityContext: {}
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
-        - args:
-            - --csi-endpoint=unix://$(ADDRESS)
-            - --node=$(KUBE_NODE_NAME)
-            - --log-level=info
-          env:
-            - name: ADDRESS
-              value: /var/lib/csi/sockets/pluginproxy/./csi.sock
-            - name: KUBE_NODE_NAME
-              valueFrom:
-                fieldRef:
-                  apiVersion: v1
-                  fieldPath: spec.nodeName
-            - name: LS_CONTROLLERS
-              value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
-            - name: LS_ROOT_CA
-              valueFrom:
-                secretKeyRef:
-                  key: ca.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_CERTIFICATE
-              valueFrom:
-                secretKeyRef:
-                  key: tls.crt
-                  name: linstor-client-https-cert
-            - name: LS_USER_KEY
-              valueFrom:
-                secretKeyRef:
-                  key: tls.key
-                  name: linstor-client-https-cert
-          image: {{ include "helm_lib_module_image" (list . "rndCsi") }}
-          imagePullPolicy: IfNotPresent
-          livenessProbe:
-            failureThreshold: 3
-            httpGet:
-              path: /healthz
-              port: 9808
-              scheme: HTTP
-            periodSeconds: 10
-            successThreshold: 1
-            timeoutSeconds: 1
-          name: rnd-csi-plugin
-          ports:
-            - containerPort: 9808
-              name: healthz
-              protocol: TCP
-          resources:
-            requests:
+        securityContext: {}
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
+      - args:
+          - --csi-endpoint=unix://$(ADDRESS)
+          - --node=$(KUBE_NODE_NAME)
+          - --log-level=info
+        env:
+          - name: ADDRESS
+            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+          - name: KUBE_NODE_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: spec.nodeName
+        image: {{ include "helm_lib_module_image" (list . "rndCsi") }}
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /healthz
+            port: 9808
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: rnd-csi-plugin
+        ports:
+          - containerPort: 9808
+            name: healthz
+            protocol: TCP
+        resources:
+          requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "rnd_csi_plugin_resources" . | nindent 12 }}
 {{- end }}
-          securityContext:
-            capabilities:
-              add:
-                - SYS_ADMIN
-            privileged: true
-          terminationMessagePath: /dev/termination-log
-          terminationMessagePolicy: File
-          volumeMounts:
-            - mountPath: /var/lib/csi/sockets/pluginproxy/
-              name: socket-dir
+        securityContext:
+          capabilities:
+            add:
+              - SYS_ADMIN
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+          - mountPath: /var/lib/csi/sockets/pluginproxy/
+            name: socket-dir
       dnsPolicy: ClusterFirst
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
