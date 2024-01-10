@@ -22,6 +22,8 @@ spec:
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
+    # {{ $.Values.sdsDrbd.internal.nodesHash }}
+
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
