@@ -225,11 +225,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_livenessprobe_resources" . | nindent 12 }}
 {{- end }}
-      - args:
-          - --csi-endpoint=unix://$(CSI_ENDPOINT)
-          - --node=$(KUBE_NODE_NAME)
-          - --log-level=info
-        env:
+      - env:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
           - name: DRIVER_REG_SOCK_PATH
@@ -507,11 +503,7 @@ spec:
         volumeMounts:
           - mountPath: /var/lib/csi/sockets/pluginproxy/
             name: socket-dir
-      - args:
-          - --csi-endpoint=unix://$(ADDRESS)
-          - --node=$(KUBE_NODE_NAME)
-          - --log-level=info
-        env:
+      - env:
           - name: ADDRESS
             value: /var/lib/csi/sockets/pluginproxy/./csi.sock
           - name: KUBE_NODE_NAME
