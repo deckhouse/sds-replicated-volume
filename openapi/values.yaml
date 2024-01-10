@@ -11,14 +11,14 @@ properties:
     - sslControllerCert
     - sslNodeCert
     - drbdVersion
-    - nodesHash
+    - dataNodesChecksum
     properties:
       drbdVersion:
         type: string
         default: "9.2.5"
-      nodesHash:
+      dataNodesChecksum:
         type: string
-        default: "8411fa3e4d61e760f3ad8251aa2b1421fcba04b9362763920c98268e0ef06a7d"
+        default: "default_data_nodes_checksum"
       masterPassphrase:
         type: string
       httpsClientCert:
