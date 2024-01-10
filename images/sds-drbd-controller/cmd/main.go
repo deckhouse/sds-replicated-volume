@@ -71,7 +71,7 @@ func main() {
 	// Create default config Kubernetes client
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "error read kubernetes configuration")
+		log.Error(err, "error by reading a kubernetes configuration")
 	}
 	log.Info("read Kubernetes config")
 
@@ -103,49 +103,53 @@ func main() {
 
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
-		log.Error(err, "failed create manager")
+		log.Error(err, "failed to create a manager")
 		os.Exit(1)
 	}
-
-	log.Info("create kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
+	log.Info("created kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
 
 	controllerruntime.SetLogger(log.GetLogger())
 	lc, err := lapi.NewClient(lapi.Log(log))
 	if err != nil {
-		log.Error(err, "failed create linstor client")
+		log.Error(err, "failed to create a linstor client")
 		os.Exit(1)
 	}
 
 	if _, err := controller.NewLinstorNode(ctx, mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed create controller NewLinstorNode", err)
+		log.Error(err, "failed to create the NewLinstorNode controller")
 		os.Exit(1)
 	}
-	log.Info("controller NewLinstorNode start")
+	log.Info("the NewLinstorNode controller starts")
 
 	if _, err := controller.NewDRBDStorageClass(mgr, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed create controller NewDRBDStorageClass")
+		log.Error(err, "failed to create the NewDRBDStorageClass controller")
 		os.Exit(1)
 	}
-	log.Info("controller NewDRBDStorageClass start")
+	log.Info("the NewDRBDStorageClass controller starts")
 
 	if _, err := controller.NewDRBDStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed create controller NewDRBDStoragePool", err)
+		log.Error(err, "failed to create the NewDRBDStoragePool controller")
 		os.Exit(1)
 	}
-	log.Info("controller NewDRBDStoragePool start")
+	log.Info("the NewDRBDStoragePool controller starts")
 
 	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
-		log.Error(err, "failed create controller NewLinstorLeader", err)
+		log.Error(err, "failed to create the NewLinstorLeader controller")
 		os.Exit(1)
 	}
-	log.Info("controller NewLinstorLeader start")
+	log.Info("the NewLinstorLeader controller starts")
 
 	if _, err := controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log); err != nil {
-		log.Error(err, "failed create controller NewDRBDStoragePool", err)
+		log.Error(err, "failed to create the NewDRBDStoragePool controller")
 		os.Exit(1)
 	}
+	log.Info("the NewLinstorResourcesWatcher controller starts")
 
-	log.Info("controller NewLinstorResourcesWatcher start")
+	if _, err = controller.NewDRBDStorageClassWatcher(mgr, cfgParams.DRBDStorageClassWatchInterval); err != nil {
+		log.Error(err, "failed to create the NewDRBDStorageClassWatcher controller")
+		os.Exit(1)
+	}
+	log.Info("the NewDRBDStorageClassWatcher controller starts")
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "unable to set up health check")
@@ -158,7 +162,7 @@ func main() {
 
 	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "error start manager")
+		log.Error(err, "error by starting the manager")
 		os.Exit(1)
 	}
 

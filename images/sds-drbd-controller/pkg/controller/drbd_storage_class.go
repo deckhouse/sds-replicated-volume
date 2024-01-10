@@ -492,15 +492,15 @@ func GenerateStorageClassFromDRBDStorageClass(drbdsc *v1alpha1.DRBDStorageClass)
 	}
 
 	switch drbdsc.Spec.Replication {
-	case "None":
+	case ReplicationNone:
 		storageClassParameters[StorageClassPlacementCountKey] = "1"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "1"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-	case "Availability":
+	case ReplicationAvailability:
 		storageClassParameters[StorageClassPlacementCountKey] = "2"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "2"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-	case "ConsistencyAndAvailability":
+	case ReplicationConsistencyAndAvailability:
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo

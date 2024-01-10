@@ -143,7 +143,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 		log.Error(err, "Failed get all nodes from Kubernetes")
 		return err
 	}
-	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
+	drbdNodesToRemove := DiffNodeLists(*allKubernetesNodes, selectedKubernetesNodes)
 
 	err = removeDRBDNodes(ctx, cl, log, drbdNodesToRemove, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
 	if err != nil {
@@ -304,9 +304,9 @@ func GetKubernetesNodesBySelector(ctx context.Context, cl client.Client, nodeSel
 	return selectedK8sNodes, err
 }
 
-func GetAllKubernetesNodes(ctx context.Context, cl client.Client) (v1.NodeList, error) {
-	allKubernetesNodes := v1.NodeList{}
-	err := cl.List(ctx, &allKubernetesNodes)
+func GetAllKubernetesNodes(ctx context.Context, cl client.Client) (*v1.NodeList, error) {
+	allKubernetesNodes := &v1.NodeList{}
+	err := cl.List(ctx, allKubernetesNodes)
 	return allKubernetesNodes, err
 }
 
