@@ -22,7 +22,8 @@ spec:
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    # {{ $.Values.sdsDrbd.internal.nodesHash }}
+    # data nodes checksum to force bashible execution on nodes list change
+    # {{ $.Values.sdsDrbd.internal.dataNodesChecksum }}
 
     kubeconfig="/etc/kubernetes/kubelet.conf"
 

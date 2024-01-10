@@ -53,7 +53,7 @@ config = {
 def main(ctx: hook.Context):
     uid_list = sorted(_['filterResult']['uid'] for _ in ctx.snapshots.get(NODE_SNAPSHOT_NAME, []))
     hash = hashlib.sha256(bytes(str(uid_list), 'UTF-8')).hexdigest()
-    module_values.set_value(f"{common.MODULE_NAME}.internal.nodesHash", ctx.values, hash)
+    module_values.set_value(f"{common.MODULE_NAME}.internal.dataNodesChecksum", ctx.values, hash)
 
 if __name__ == "__main__":
     if isinstance(config, dict):
