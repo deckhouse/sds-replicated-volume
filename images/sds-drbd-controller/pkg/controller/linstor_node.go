@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"golang.org/x/sync/errgroup"
 	"net"
 	sdsapi "sds-drbd-controller/api/v1alpha1"
 	"strings"
@@ -47,6 +49,7 @@ const (
 	LinstorEncryptionType     = "SSL" // "Plain"
 	reachableTimeout          = 10 * time.Second
 	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-drbd-node"
+	DisklessStoragePool       = "DfltDisklessStorPool"
 )
 
 var (
@@ -145,7 +148,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	}
 	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
 
-	err = removeDRBDNodes(ctx, cl, log, drbdNodesToRemove, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
+	err = removeDRBDNodes(ctx, cl, lc, log, drbdNodesToRemove, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
 	if err != nil {
 		log.Error(err, "Failed remove DRBD nodes:")
 		return err
@@ -160,28 +163,153 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	return nil
 }
 
-func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
-
+func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
+	// log.Debug("removeDRBDNodes: Start")
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
-		log.Info(fmt.Sprintf("Processing the node '%s' that does not match the user-defined selector.", drbdNodeToRemove.Name))
-		log.Info(fmt.Sprintf("Checking if node '%s' is a LINSTOR node.", drbdNodeToRemove.Name))
+		// log.Debug("removeDRBDNodes: Process Kubernetes node: " + drbdNodeToRemove.Name)
 
 		for _, linstorNode := range linstorSatelliteNodes {
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
-				log.Info(fmt.Sprintf("Detected a LINSTOR node '%s' that no longer matches the user-defined selector and needs to be removed. Initiating the deletion process.", drbdNodeToRemove.Name))
+				log.Info("Remove LINSTOR node: " + drbdNodeToRemove.Name)
 				log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+
+				nodeName := drbdNodeToRemove.Name
+				overrideProps := lclient.GenericPropsModify{OverrideProps: map[string]string{"AutoplaceTarget": "false"}}
+				err := lc.Nodes.Modify(ctx, nodeName, lclient.NodeModify{NodeType: "static", GenericPropsModify: overrideProps})
+				if err != nil {
+					log.Error(err, "Warning! Couldnot set node autoplace prop to false")
+				}
+
+				// Get all resource from linstor controller
+				resources := make([]lclient.Resource, 0, 50)
+				resourcesGroups, err := lc.ResourceDefinitions.GetAll(ctx, lclient.RDGetAllRequest{})
+				if err != nil {
+					log.Error(err, "Warning! Couldnot recieve resource definitions list from linstor controller")
+				}
+				for _, rg := range resourcesGroups {
+					rs, err := lc.Resources.GetAll(ctx, rg.Name)
+					if err != nil {
+						log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
+						continue
+					}
+					resources = append(resources, rs...)
+				}
+
+				// filter res by node and diskfull
+				for _, res := range resources {
+					if res.NodeName == nodeName && res.Props["StorPoolName"] != DisklessStoragePool {
+						resDefinition, err := lc.ResourceDefinitions.Get(ctx, res.Name)
+						if err != nil {
+							log.Error(err, "could not get resource definition from controller", res.Name)
+							continue
+						}
+
+						resGroup, err := lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
+						if err != nil {
+							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
+							continue
+						}
+
+						desiredRelicaCount := resGroup.SelectFilter.PlaceCount + 1
+						isTiebrakerNeeded := desiredRelicaCount == 2
+						// Only one that I can invent
+						if isTiebrakerNeeded {
+							desiredRelicaCount++
+						}
+
+						resVolumes, err := lc.ResourceDefinitions.GetVolumeDefinitions(ctx, res.Name)
+						if err != nil {
+							log.Error(err, "could not get resource volumes from controller", res.Name)
+							continue
+						}
+						resVolumesSizeKb := uint64(0)
+						for _, resVol := range resVolumes {
+							resVolumesSizeKb += resVol.SizeKib
+						}
+
+						// Get nodes from resource group and calc difference with available nodes
+						allNodes, err := lc.Nodes.GetAll(ctx)
+						if err != nil {
+							log.Error(err, "could not nodes from controller")
+							continue
+						}
+
+						// Get available nodes with enough disk space
+						availableNodes := getAvailableNodes(allNodes, resGroup.SelectFilter.NodeNameList)
+						availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
+						// TODO: add another filter to dron nodes from linstorNodes
+						if int32(len(availableNodes)) < desiredRelicaCount {
+							log.Error(errors.New("not enough available nodes"), "check nodes count")
+							continue
+						}
+
+						// TODO: How get current replica count and modify it?
+						g := new(errgroup.Group)
+						for i := int32(0); i < desiredRelicaCount; i++ {
+							g.Go(func() error {
+								resCreate := lclient.ResourceCreate{
+									Resource: lclient.Resource{
+										Name:     res.Name,
+										NodeName: availableNodes[i],
+									},
+								}
+								return lc.Resources.Create(ctx, resCreate)
+							})
+							// TODO: in some cases add
+							//g.Go(func() error {
+							//	return lc.Resources.Diskless(ctx, res.Name, availableNodes[i], DisklessStoragePool)
+							//})
+						}
+						if err := g.Wait(); err == nil {
+							log.Info("successful add resources")
+						} else {
+							log.Error(err, "error while creating resources on nodes")
+						}
+
+						// TODO: add retries?
+
+						// Check replicas count after add new ones
+						resGroup, err = lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
+						if err != nil {
+							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
+							continue
+						}
+						if desiredRelicaCount != resGroup.SelectFilter.PlaceCount {
+							log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
+							continue
+						}
+					}
+				}
+
+				err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+				if err != nil {
+					log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
+				}
 				break
 			}
 		}
-		log.Info(fmt.Sprintf("Reconciling labels for node '%s'", drbdNodeToRemove.Name))
-		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector, false)
-		if err != nil {
-			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
+
+		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToRemove.Labels)) {
+			log.Info("Kubernetes node: " + drbdNodeToRemove.Name + "  have drbd label. Unset it")
+			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+
+			// TODO: now it should be uncomment?
+			originalNode := drbdNodeToRemove.DeepCopy()
+			newNode := drbdNodeToRemove.DeepCopy()
+			for labelKey := range drbdNodeSelector {
+				delete(newNode.Labels, labelKey)
+			}
+
+			err := cl.Patch(ctx, newNode, client.MergeFrom(originalNode))
+			if err != nil {
+				log.Error(err, "Unable unset drbd labels from node %s. "+drbdNodeToRemove.Name)
+			}
 		}
 
 	}
 	return nil
+
 }
 
 func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
@@ -441,4 +569,37 @@ func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses s
 		}
 	}
 	return storageClassesLabels
+}
+
+func getAvailableNodes(allNodes []lclient.Node, storageNode []string) []string {
+	result := make([]string, 0, len(allNodes))
+	for _, node := range allNodes {
+		founded := false
+		for _, sn := range storageNode {
+			if node.Name == sn {
+				founded = true
+				break
+			}
+		}
+		if !founded {
+			result = append(result, node.Name)
+		}
+	}
+	return result
+}
+
+func filterNodesWithCapacity(ctx context.Context, lc *lclient.Client, nodes []string, size uint64) []string {
+	result := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		storagePools, err := lc.Nodes.GetStoragePools(ctx, node)
+		if err != nil {
+			for _, sp := range storagePools {
+				if size <= uint64(sp.FreeCapacity) {
+					result = append(result, node)
+					break
+				}
+			}
+		}
+	}
+	return result
 }
