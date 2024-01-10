@@ -95,6 +95,10 @@ spec:
       - name: linstor-controller
         args:
           - startController
+          - --log-level
+          - {{ .Values.sdsDrbd.logLevel }}
+          - --log-level-linstor
+          - {{ .Values.sdsDrbd.logLevel }}
         env:
           - name: JAVA_OPTS
             value: -Djdk.tls.acknowledgeCloseNotify=true

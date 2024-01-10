@@ -20,11 +20,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sds-drbd-controller/pkg/logger"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/go-logr/logr"
 	"k8s.io/utils/strings/slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
@@ -65,9 +65,9 @@ func NewLinstorResourcesWatcher(
 	mgr manager.Manager,
 	lc *lapi.Client,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 	ctx := context.Background()
 
 	c, err := controller.New(linstorResourcesWatcherCtrlName, mgr, controller.Options{
@@ -128,7 +128,7 @@ func NewLinstorResourcesWatcher(
 
 func ReconcileParams(
 	ctx context.Context,
-	log logr.Logger,
+	log logger.Logger,
 	cl client.Client,
 	scs map[string]v1.StorageClass,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
@@ -182,7 +182,7 @@ func ReconcileParams(
 
 func ReconcileTieBreaker(
 	ctx context.Context,
-	log logr.Logger,
+	log logger.Logger,
 	lc *lapi.Client,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
@@ -266,7 +266,7 @@ func createTieBreaker(ctx context.Context, lc *lapi.Client, resourceName, nodeNa
 }
 
 func getNodeForTieBreaker(
-	log logr.Logger,
+	log logger.Logger,
 	nodes []lapi.Node,
 	resources []lapi.Resource,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,

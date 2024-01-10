@@ -108,6 +108,10 @@ spec:
             name: linstord
       - args:
           - startSatellite
+          - --log-level
+          - {{ .Values.sdsDrbd.logLevel }}
+          - --log-level-linstor
+          - {{ .Values.sdsDrbd.logLevel }}
         env:
           - name: SPAAS_URL
             value: https://spaas.d8-{{ .Chart.Name }}.svc:2020

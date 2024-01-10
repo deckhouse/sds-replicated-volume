@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"reflect"
 	"sds-drbd-controller/api/v1alpha1"
+	"sds-drbd-controller/pkg/logger"
 	"sort"
 	"strings"
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
-	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -52,9 +52,9 @@ func NewDRBDStoragePool(
 	mgr manager.Manager,
 	lc *lapi.Client,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 
 	c, err := controller.New(DRBDStoragePoolControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -131,7 +131,7 @@ func NewDRBDStoragePool(
 	return c, err
 }
 
-func ReconcileDRBDStoragePoolEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logr.Logger, lc *lapi.Client) (bool, error) {
+func ReconcileDRBDStoragePoolEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logger.Logger, lc *lapi.Client) (bool, error) {
 	drbdsp := &v1alpha1.DRBDStoragePool{}
 	err := cl.Get(ctx, request.NamespacedName, drbdsp)
 	if err != nil {
@@ -148,7 +148,7 @@ func ReconcileDRBDStoragePoolEvent(ctx context.Context, cl client.Client, reques
 	return false, nil
 }
 
-func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logr.Logger, drbdsp *v1alpha1.DRBDStoragePool) error { // TODO: add shouldRequeue as returned value
+func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, drbdsp *v1alpha1.DRBDStoragePool) error { // TODO: add shouldRequeue as returned value
 
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, drbdsp.Namespace, drbdsp.Spec.Type, drbdsp.Spec.LvmVolumeGroups)
 	if !ok {
