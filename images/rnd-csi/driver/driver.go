@@ -74,28 +74,18 @@ type Driver struct {
 // NewDriver returns a CSI plugin that contains the necessary gRPC
 // interfaces to interact with Kubernetes over unix domain sockets for
 // managaing  disks
-func NewDriver(ep, driverName, address string) (*Driver, error) {
+func NewDriver(ep, driverName, address string, nodeName *string, log *logrus.Entry) (*Driver, error) {
 
 	if driverName == "" {
 		driverName = DefaultDriverName
 	}
 
-	if version == "" {
-		version = "dev"
-	}
-
-	log := logrus.New().WithFields(logrus.Fields{
-		"version": version,
-	})
-
 	return &Driver{
-		name: driverName,
-
-		endpoint: ep,
-		address:  address,
-
-		log: log,
-
+		name:              driverName,
+		hostID:            *nodeName,
+		endpoint:          ep,
+		address:           address,
+		log:               log,
 		waitActionTimeout: defaultWaitActionTimeout,
 	}, nil
 }

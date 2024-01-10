@@ -19,36 +19,45 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
-	"log"
+	"github.com/sirupsen/logrus"
+	"k8s.io/klog/v2"
 	"os"
 	"os/signal"
+	"rnd-csi/config"
 	"rnd-csi/driver"
 	"syscall"
 )
 
 func main() {
 
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cfgParams, err := config.NewConfig()
+	if err != nil {
+		klog.Fatal("unable to create NewConfig")
+	}
+
+	log := logrus.New().WithFields(logrus.Fields{
+		//"version": cfgParams.Version,
+	})
+
+	log.Log(logrus.Level(cfgParams.LogLevel))
+
+	log.Info("version = ", cfgParams.Version)
+
 	var (
 		endpoint   = flag.String("endpoint", "unix:///var/lib/kubelet/plugins/"+driver.DefaultDriverName+"/csi.sock", "CSI endpoint")
 		driverName = flag.String("driver-name", driver.DefaultDriverName, "Name for the driver")
 		address    = flag.String("address", driver.DefaultAddress, "Address to serve on")
-		version    = flag.Bool("version", false, "Print the version and exit.")
 	)
 
 	flag.Parse()
 
-	if *version {
-		fmt.Printf("%s - %s (%s)\n", driver.GetVersion(), driver.GetCommit(), driver.GetTreeState())
-		os.Exit(0)
-	}
-
-	drv, err := driver.NewDriver(*endpoint, *driverName, *address)
+	drv, err := driver.NewDriver(*endpoint, *driverName, *address, &cfgParams.NodeName, log)
 	if err != nil {
-		log.Fatalln(err)
+		log.Error(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	c := make(chan os.Signal, 1)
@@ -59,7 +68,7 @@ func main() {
 	}()
 
 	if err := drv.Run(ctx); err != nil {
-		log.Fatalln(err)
+		log.Error(err, "[dev.Run]")
 	}
 
 }

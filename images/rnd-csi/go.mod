@@ -8,9 +8,11 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	golang.org/x/sync v0.6.0
 	google.golang.org/grpc v1.60.1
+	k8s.io/klog/v2 v2.110.1
 )
 
 require (
+	github.com/go-logr/logr v1.3.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/sys v0.16.0 // indirect
 	golang.org/x/text v0.14.0 // indirect

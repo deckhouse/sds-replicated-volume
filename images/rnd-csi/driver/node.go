@@ -57,6 +57,13 @@ func (d *Driver) NodeGetCapabilities(ctx context.Context, request *csi.NodeGetCa
 }
 
 func (d *Driver) NodeGetInfo(ctx context.Context, request *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeGetInfo")
+	d.log.Info("hostID = ", d.hostID)
+
+	return &csi.NodeGetInfoResponse{
+		NodeId:             d.hostID,
+		MaxVolumesPerNode:  0,
+		AccessibleTopology: nil,
+	}, nil
+
 }
