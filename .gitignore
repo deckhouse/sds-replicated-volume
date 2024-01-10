@@ -36,3 +36,5 @@ __pycache__/
 # dev
 images/sds-drbd-controller/dev/Dockerfile-dev
 images/sds-drbd-controller/Makefile
+images/rnd-csi/dev/Dockerfile-dev
+images/rnd-csi/Makefile
