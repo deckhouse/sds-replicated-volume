@@ -2,13 +2,14 @@
 title: "Модуль SDS-DRBD: FAQ"
 description: Диагностика проблем LINSTOR. Когда следует использовать LVM, а когда LVMThin? Производительность и надежность LINSTOR, сравнение с Ceph. Как добавить существующий LVM или LVMThin-пул в LINSTOR? Как настроить Prometheus на использование хранилища LINSTOR? Вопросы по работе контроллера.
 ---
-{% alert level="warning" %}
+
+{{< alert level="warning" >}}
 Работоспособность модуля гарантируется только в следующих случаях:
-- при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](../../supported_versions.html#linux);
+- при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux);
 - при использовании сети 10Gbps.
 
 Работоспособность модуля в других условиях возможна, но не гарантируется.
-{% endalert %}
+{{< /alert >}}
 
 ## Когда следует использовать LVM, а когда LVMThin?
 
@@ -331,11 +332,11 @@ dmesg | grep 'Remote failed to finish a request within'
 
 ## Миграция на DRBDStorageClass
 
-StorageClasses в данном модуле управляются через ресурс DRBDStorageClass. Вручную StorageClasses создаваться не должны.
+StorageClass'ы в данном модуле управляются через ресурс DRBDStorageClass. Вручную StorageClass'ы создаваться не должны.
 
+При миграции с модуля Linstor необходимо удалить старые StorageClass'ы и создать новые через ресурс DRBDStorageClass в соответствии с таблицей.
 
-При миграции с модуля Linstor необходимо создать ресурсы DRBDStorageClass в соответствии с таблицей.
-Обратите внимание, что в старых storage class нужно смотреть опцию из секции parameter, а в новом классе нужно использовать опцию самого DRBDStorageClass  
+Обратите внимание, что в старых StorageClass нужно смотреть опцию из секции parameter самого StorageClass, а указывать соответствующую опцию при создании нового необходимо в DRBDStorageClass.
 
 | параметр StorageClass                     | DRBDStorageClass      | Параметр по умолчанию | Примечания                                                     |
 |-------------------------------------------|-----------------------|-|----------------------------------------------------------------|
@@ -351,35 +352,3 @@ StorageClasses в данном модуле управляются через р
 - zones - перечисление зон, которые нужно использовать для размещения ресурсов (прямое указание названия зон в облаке). Обратите внимание, что удаленный доступ Pod к тому с данными возможен только в пределах одной зоны!
 - volumeAccess может принимать значения "Local" (доступ строго в пределах Node), "EventuallyLocal" (реплика данных будет синхронизироваться на Node с запущенным Pod спустя некоторое время после запуска), "PreferablyLocal" (удаленный доступ Pod к тому с данными разрешен, volumeBindingMode: WaitForFirstConsumer), "Any" (удаленный доступ Pod к тому с данными разрешен, volumeBindingMode: Immediate)
 - При необходимости использовать volumeBindingMode: Immediate нужно выставлять параметр DRBDStorageClass volumeAccess равным Any
-
-Пример DRBDStorageClass только с использованием локальных томов и высокой степенью резервирования
-
-```
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
-metadata:
-  name: haclass
-spec:
-  replication: ConsistencyAndAvailability
-  storagePool: storagePoolName
-  volumeAccess: Local
-  reclaimPolicy: Delete
-  zones:
-  - zone-a
-  - zone-b
-  - zone-c
-```
-
-Пример DRBDStorageClass с возможностью использования удаленных реплик и без резервирования (например, для тестовых окружений)
-
-```
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
-metadata:
-  name: testclass
-spec:
-  replication: None
-  storagePool: storagePoolName
-  volumeAccess: Any
-  reclaimPolicy: Delete
-```

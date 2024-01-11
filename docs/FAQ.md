@@ -2,13 +2,14 @@
 title: "The SDS-DRBD module: FAQ"
 description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? LINSTOR performance and reliability notes, comparison to Ceph. How to add existing LINSTOR LVM or LVMThin pool. How to configure Prometheus to use LINSTOR for storing data. Controller's work-flow questions.
 ---
-{% alert level="warning" %}
+
+{{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
+- if stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux) are used;
 - if a 10 Gbps network is used.
 
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+{{< /alert >}}
 
 ## What is difference between LVM and LVMThin?
 

@@ -2,13 +2,14 @@
 title: "The SDS-DRDB module: configuration examples"
 description: The SDS-DRDB controller usage and work-flow examples.
 ---
-{% alert level="warning" %}
+
+{{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
+- if stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux) are used;
 - if a 10 Gbps network is used.
 
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+{{< /alert >}}
 
 Once the module is enabled, the cluster is automatically configured to use LINSTOR. You only need to configure the storage.
 

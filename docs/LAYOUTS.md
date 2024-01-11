@@ -1,7 +1,6 @@
 ---
-title: "The SDS-DRBD module: configuration"
-force_searchable: true
-description: The SDS-DRBD Deckhouse module's configuration.
+title: "Module SDS-DRDB: usage cases"
+linkTitle: "Usage cases"
 ---
 
 {{< alert level="warning" >}}
@@ -11,3 +10,4 @@ The module is guaranteed to work only in the following cases:
 
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
+

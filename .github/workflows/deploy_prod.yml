@@ -6,7 +6,7 @@ env:
   CI_COMMIT_REF_NAME: ${{ github.ref_name }}
   MODULES_MODULE_NAME: ${{ vars.MODULE_NAME }}
   RELEASE_CHANNEL: ${{ github.event.inputs.version }}
-  MODULES_REGISTRY_LOGIN: ${{ secrets.PROD_MODULES_REGISTRY_LOGIN }}
+  MODULES_REGISTRY_LOGIN: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
 

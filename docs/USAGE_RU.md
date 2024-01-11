@@ -1,36 +1,64 @@
 ---
 title: "Модуль SDS-DRDB: примеры конфигурации"
-description: Использование и примеры работы sds-drbd-controller.
+description: "Использование и примеры работы sds-drbd-controller."
 ---
-{% alert level="warning" %}
+
+{{< alert level="warning" >}}
 Работоспособность модуля гарантируется только в следующих случаях:
-- при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](../../supported_versions.html#linux);
+- при использовании стоковых ядер, поставляемых вместе с [поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux);
 - при использовании сети 10Gbps.
 
 Работоспособность модуля в других условиях возможна, но не гарантируется.
-{% endalert %}
+{{< /alert >}}
 
 После включения модуля кластер автоматически настраивается на использование LINSTOR и остается только сконфигурировать хранилище.
 
 ## Конфигурация хранилища LINSTOR
 
-Конфигурация хранилища `LINSTOR` в `Deckhouse` осуществляется `sds-drbd-controller'ом` посредством создания [пользовательских ресурсов](ссылка на ресурсы): `DRBDStoragePool` и `DRBDStorageClass`.
+Конфигурация хранилища `LINSTOR` в `Deckhouse` осуществляется `sds-drbd-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `DRBDStoragePool` и `DRBDStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [SDS-Node-Configurator](../../sds-node-configurator/stable/).
 
-- Для создания `Storage Pool` в `LINSTOR` пользователь вручную [создает](#создание-drbdstoragepool-ресурса) `DRBDStoragePool`-ресурс и заполняет поле `Spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](ссылка на ресурс).
+### Настройка LVM
 
-- Для создания `StorageClass` в `Kubernetes` пользователь вручную [создает](#создание-ресурса-drbdstorageclass) `DRBDStorageClass` и заполняет поле `Spec`, указывая необходимые параметры, а также используемые `DRBDStoragePool`-ресурсы.
+Примеры конфигурации можно найти в документации модуля [SDS-Node-Configurator](../../sds-node-configurator/stable/usage.html)
 
-## Описание работы sds-drbd-controller
+### Работа с ресурсами `DRBDStoragePool`
 
-Контроллер работает с двумя типами ресурсов:
+#### Создание ресурса `DRBDStoragePool`
 
-### Работа с ресурсами [DRBDStoragePool]()
+- Для создания `Storage Pool` на определеных узлах в `LINSTOR` пользователь вручную создает ресурс [DRBDStoragePool](./cr.html#drbdstoragepool) и заполняет поле `Spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup). 
 
-#### Создание `DRBDStoragePool`-ресурса
-`DRBDStoragePool`-ресурс позволяет создать `Storage Pool` необходимой конфигурации в `LINSTOR` на основе используемых ресурсов [LVMVolumeGroup](ссылка на ресурс).
-Для этого пользователю необходимо вручную создать ресурс и заполнить поле `Spec` (то есть желаемое состояние `Storage Pool` в `LINSTOR`). 
+- Пример ресурса для thick LVM:
 
-> Внимание! Все ресурсы `LVMVolumeGroup`, указанные в `Spec` ресурса `DRBDStoragePool`, должны быть на разных узлах. (Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле.) 
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStoragePool
+metadata:
+  name: data
+spec:
+  type: LVM
+  lvmvolumegroups:
+    - name: lvg-1
+    - name: lvg-2
+```
+
+- Пример ресурса для thin LVM:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStoragePool
+metadata:
+  name: thin-data
+spec:
+  type: LVMThin
+  lvmvolumegroups:
+    - name: lvg-3
+      thinpoolname: thin-pool
+    - name: lvg-4
+      thinpoolname: thin-pool
+```
+
+
+> Внимание! Все ресурсы `LVMVolumeGroup`, указанные в `Spec` ресурса `DRBDStoragePool`, должны быть на разных узлах. (Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле.)
 
 Результатом обработки пользовательского ресурса `DRBDStoragePool` станет создание необходимого `Storage Pool` в `LINSTOR`.
 
@@ -44,7 +72,8 @@ description: Использование и примеры работы sds-drbd-
 > 
 > В случае возникновения ошибки при создании `Storage Pool` в `LINSTOR` контроллер удалит за собой невалидный `Storage Pool` в `LINSTOR`.
 
-#### Обновление `DRBDStoragePool`-ресурса
+#### Обновление ресурса `DRBDStoragePool`
+
 Пользователь имеет возможность обновить существующую конфигурацию `Storage Pool` в `LINSTOR`. Для этого пользователю необходимо внести желаемые изменения в поле `Spec` соответствующего ресурса.
 
 После внесения изменений в ресурс `sds-drbd-controller` провалидирует новую конфигурацию и в случае валидных данных выполнит необходимые операции по обновлению `Storage Pool` в `LINSTOR`. Результаты данной операции также будут отображены в поле `Status` ресурса `DRBDStoragePool`.
@@ -53,16 +82,52 @@ description: Использование и примеры работы sds-drbd-
 > 
 > Контроллер не реагирует на внесенные пользователем изменения в поле `Status` ресурса.
 
-#### Удаление `DRBDStoragePool`-ресурса
+#### Удаление ресурса `DRBDStoragePool`
 В настоящий момент `sds-drbd-controller` никак не обрабатывает удаление ресурсов `DRBDStoragePool`.
 
 > Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в `LINSTOR`. Если пользователь воссоздаст удаленный ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `Status.Phase` созданного ресурса будет отображено значение `Created`.
 
-### Работа с ресурсами [DRBDStorageClass]()
+### Работа с ресурсами `DRBDStorageClass`
 
 #### Создание ресурса `DRBDStorageClass`
-`DRBDStorageClass`-ресурс позволяет создать необходимый `StorageClass` в `Kubernetes` для выбранного `Storage Pool` в `LINSTOR`.
-Для этого пользователю необходимо вручную создать ресурс и заполнить поле `Spec` (то есть желаемое состояние `StorageClass` в `Kubernetes`).
+
+- Для создания `StorageClass` в `Kubernetes` пользователь вручную создает ресурс [DRBDStorageClass](./cr.html#drbdstorageclass) и заполняет поле `Spec`, указывая необходимые параметры.
+
+- Пример ресурса для создания `StorageClass` c использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStorageClass
+metadata:
+  name: haclass
+spec:
+  storagePool: storagePoolName
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  topology: TransZonal
+  zones:
+  - zone-a
+  - zone-b
+  - zone-c
+```
+
+Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
+
+- Пример ресурса для создания `StorageClass` c разрешенными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStorageClass
+metadata:
+  name: testclass
+spec:
+  replication: None
+  storagePool: storagePoolName
+  reclaimPolicy: Delete
+  topology: Ignored
+```
+
+- Больше примеров с различными сценариями использования и схемами [можно найти здесь](./layouts.html)
 
 > Перед процессом непосредственно создания `StorageClass` запустится процесс валидации предоставленной конфигурации. 
 > В случае обнаружения ошибок `StorageClass` создан не будет, а в поле `Status` ресурса `DRBDStorageClass` отобразится информация об ошибке.
