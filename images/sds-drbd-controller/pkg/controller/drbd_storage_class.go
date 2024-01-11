@@ -21,12 +21,12 @@ import (
 	"fmt"
 	"reflect"
 	"sds-drbd-controller/api/v1alpha1"
+	"sds-drbd-controller/pkg/logger"
 	"strings"
 	"time"
 
 	"k8s.io/utils/strings/slices"
 
-	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -106,9 +106,9 @@ const (
 func NewDRBDStorageClass(
 	mgr manager.Manager,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 
 	c, err := controller.New(DRBDStorageClassControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -190,7 +190,7 @@ func NewDRBDStorageClass(
 	return c, err
 }
 
-func ReconcileDRBDStorageClassEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logr.Logger) (bool, error) {
+func ReconcileDRBDStorageClassEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logger.Logger) (bool, error) {
 	drbdsc := &v1alpha1.DRBDStorageClass{}
 	err := cl.Get(ctx, request.NamespacedName, drbdsc)
 	if err != nil {
@@ -245,7 +245,7 @@ func ReconcileDRBDStorageClassEvent(ctx context.Context, cl client.Client, reque
 	return false, nil
 }
 
-func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logr.Logger, drbdsc *v1alpha1.DRBDStorageClass) error { // TODO: add shouldRequeue as returned value
+func ReconcileDRBDStorageClass(ctx context.Context, cl client.Client, log logger.Logger, drbdsc *v1alpha1.DRBDStorageClass) error { // TODO: add shouldRequeue as returned value
 	log.Info("[ReconcileDRBDStorageClass] Validating DRBDStorageClass with name: " + drbdsc.Name)
 
 	zones, err := GetClusterZones(ctx, cl)

@@ -20,18 +20,16 @@ import (
 	"context"
 	"sds-drbd-controller/api/v1alpha1"
 	"sds-drbd-controller/pkg/controller"
+	"sds-drbd-controller/pkg/logger"
 	"strings"
 
 	lapi "github.com/LINBIT/golinstor/client"
-	llog "github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"go.uber.org/zap/zapcore"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -42,10 +40,10 @@ var _ = Describe(controller.DRBDStoragePoolControllerName, func() {
 	)
 
 	var (
-		ctx   = context.Background()
-		cl    = newFakeClient()
-		log   = zap.New(zap.Level(zapcore.Level(-1)), zap.UseDevMode(true))
-		lc, _ = lapi.NewClient(lapi.Log(llog.StandardLogger()))
+		ctx    = context.Background()
+		cl     = newFakeClient()
+		log, _ = logger.NewLogger("2")
+		lc, _  = lapi.NewClient(lapi.Log(log))
 
 		testDRBDSP = &v1alpha1.DRBDStoragePool{
 			ObjectMeta: metav1.ObjectMeta{
@@ -182,7 +180,7 @@ var _ = Describe(controller.DRBDStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		goodDRBDStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodDRBDStoragePool.ObjectMeta.Namespace, Name: goodDRBDStoragePool.ObjectMeta.Name}}
-		shouldRequeue, err := controller.ReconcileDRBDStoragePoolEvent(ctx, cl, goodDRBDStoragePoolrequest, log, lc)
+		shouldRequeue, err := controller.ReconcileDRBDStoragePoolEvent(ctx, cl, goodDRBDStoragePoolrequest, *log, lc)
 		Expect(err).To(HaveOccurred()) // TODO: add mock for linstor client and change to Expect(err).NotTo(HaveOccurred()) and Expect(shouldRequeue).To(BeFalse())
 		Expect(shouldRequeue).To(BeTrue())
 
@@ -205,7 +203,7 @@ var _ = Describe(controller.DRBDStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		badDRBDStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badDRBDStoragePool.ObjectMeta.Namespace, Name: badDRBDStoragePool.ObjectMeta.Name}}
-		shouldRequeue, err = controller.ReconcileDRBDStoragePoolEvent(ctx, cl, badDRBDStoragePoolrequest, log, lc)
+		shouldRequeue, err = controller.ReconcileDRBDStoragePoolEvent(ctx, cl, badDRBDStoragePoolrequest, *log, lc)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(shouldRequeue).To(BeFalse())
 

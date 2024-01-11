@@ -19,6 +19,7 @@ package config
 import (
 	"log"
 	"os"
+	"sds-drbd-controller/pkg/logger"
 )
 
 // ScanInterval Scan block device interval seconds
@@ -31,6 +32,7 @@ const (
 	MetricsPortEnv                    = "METRICS_PORT"
 	ControllerNamespaceEnv            = "CONTROLLER_NAMESPACE"
 	HardcodedControllerNS             = "d8-sds-drbd-controller"
+	LogLevel                          = "LOG_LEVEL"
 )
 
 type Options struct {
@@ -40,6 +42,7 @@ type Options struct {
 	LinstorLeaseName                  string
 	MetricsPort                       string
 	ControllerNamespace               string
+	Loglevel                          logger.Verbosity
 }
 
 func NewConfig() (*Options, error) {
@@ -48,6 +51,13 @@ func NewConfig() (*Options, error) {
 	opts.LinstorResourcesReconcileInterval = LinstorResourcesReconcileInterval
 	opts.LinstorLeaseName = LinstorLeaseName
 	opts.ConfigSecretName = ConfigSecretName
+
+	loglevel := os.Getenv(LogLevel)
+	if loglevel == "" {
+		opts.Loglevel = logger.DebugLevel
+	} else {
+		opts.Loglevel = logger.Verbosity(loglevel)
+	}
 
 	opts.MetricsPort = os.Getenv(MetricsPortEnv)
 	if opts.MetricsPort == "" {

@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"net"
 	sdsapi "sds-drbd-controller/api/v1alpha1"
+	"sds-drbd-controller/pkg/logger"
 	"strings"
 	"time"
 
 	lclient "github.com/LINBIT/golinstor/client"
-	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -59,9 +59,9 @@ func NewLinstorNode(
 	lc *lclient.Client,
 	configSecretName string,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 
 	c, err := controller.New(LinstorNodeControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -93,7 +93,7 @@ func NewLinstorNode(
 
 }
 
-func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, secretNamespace string, secretName string, drbdNodeSelector map[string]string) error {
+func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logger.Logger, secretNamespace string, secretName string, drbdNodeSelector map[string]string) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, reachableTimeout)
 	defer cancel()
 
@@ -160,7 +160,7 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	return nil
 }
 
-func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
+func removeDRBDNodes(ctx context.Context, cl client.Client, log logger.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
 
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
 		log.Info(fmt.Sprintf("Processing the node '%s' that does not match the user-defined selector.", drbdNodeToRemove.Name))
@@ -184,7 +184,7 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, log logr.Logger, drb
 	return nil
 }
 
-func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
+func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logger.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
 
 	for _, selectedKubernetesNode := range selectedKubernetesNodes.Items {
 
@@ -361,7 +361,7 @@ func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, [
 	return linstorSatelliteNodes, linstorControllerNodes, nil
 }
 
-func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log logr.Logger, linstorControllerNodes []lclient.Node) error {
+func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log logger.Logger, linstorControllerNodes []lclient.Node) error {
 	for _, linstorControllerNode := range linstorControllerNodes {
 		log.Info("removeLinstorControllerNodes: Remove LINSTOR controller node: " + linstorControllerNode.Name)
 		err := lc.Nodes.Delete(ctx, linstorControllerNode.Name)
@@ -372,7 +372,7 @@ func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log l
 	return nil
 }
 
-func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logr.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
+func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logger.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
 	labelsToAdd := make(map[string]string)
 	labelsToRemove := make(map[string]string)
 	storageClassesLabelsForNode := make(map[string]string)

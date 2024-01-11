@@ -21,9 +21,9 @@ import (
 	"fmt"
 	sdsapi "sds-drbd-controller/api/v1alpha1"
 	"sds-drbd-controller/pkg/controller"
+	"sds-drbd-controller/pkg/logger"
 
 	linstor "github.com/LINBIT/golinstor/client"
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -200,7 +200,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		mockLc, err := NewLinstorClientWithMockNodes()
 		Expect(err).NotTo(HaveOccurred())
 
-		log := logr.Logger{}
+		log := logger.Logger{}
 		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
 		drbdStorageClasses := sdsapi.DRBDStorageClassList{}
 		Expect(err).NotTo(HaveOccurred())

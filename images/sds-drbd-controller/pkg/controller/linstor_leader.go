@@ -19,9 +19,9 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sds-drbd-controller/pkg/logger"
 	"time"
 
-	"github.com/go-logr/logr"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -45,9 +45,9 @@ func NewLinstorLeader(
 	mgr manager.Manager,
 	linstorLeaseName string,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 
 	c, err := controller.New(LinstorLeaderControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
@@ -141,7 +141,7 @@ func NewLinstorLeader(
 
 }
 
-func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log logr.Logger, linstorNamespace, linstorLeaseName string) error {
+func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log logger.Logger, linstorNamespace, linstorLeaseName string) error {
 	linstorLease := &coordinationv1.Lease{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      linstorLeaseName,

@@ -23,11 +23,11 @@ import (
 	"sds-drbd-controller/api/v1alpha1"
 	sdsapi "sds-drbd-controller/api/v1alpha1"
 	"sds-drbd-controller/pkg/controller"
+	"sds-drbd-controller/pkg/logger"
 	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +35,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
@@ -47,7 +46,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 	var (
 		ctx = context.Background()
 		cl  = newFakeClient()
-		log = zap.New(zap.Level(zapcore.Level(-1)), zap.UseDevMode(true))
+		log = logger.Logger{}
 
 		validZones              = []string{"first", "second", "third"}
 		validSpecDrbdscTemplate = v1alpha1.DRBDStorageClass{

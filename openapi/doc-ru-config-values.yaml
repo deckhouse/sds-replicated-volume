@@ -1,5 +1,7 @@
 type: object
 properties:
+  logLevel:
+    description: Уровень логирования для приложений модуля
   dataNodes:
     description: Настройки для узлов Linstor с данными
     properties:

@@ -1,5 +1,15 @@
 type: object
 properties:
+  logLevel:
+    type: string
+    enum:
+      - ERROR
+      - WARN
+      - INFO
+      - DEBUG
+      - TRACE
+    description: Module log level
+    default: INFO
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data

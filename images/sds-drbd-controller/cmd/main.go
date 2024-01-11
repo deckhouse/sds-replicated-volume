@@ -25,11 +25,10 @@ import (
 	"sds-drbd-controller/config"
 	"sds-drbd-controller/pkg/controller"
 	kubutils "sds-drbd-controller/pkg/kubeutils"
-
-	llog "github.com/sirupsen/logrus"
+	"sds-drbd-controller/pkg/logger"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 
 	lapi "github.com/LINBIT/golinstor/client"
-	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -37,7 +36,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
@@ -52,16 +50,22 @@ var (
 )
 
 func main() {
-	log := zap.New(zap.Level(zapcore.Level(-1)), zap.UseDevMode(true))
-	ctx := context.Background()
 
-	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	ctx := context.Background()
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
-		log.Error(err, "error read configuration")
+		fmt.Println("unable to create NewConfig " + err.Error())
 	}
+
+	log, err := logger.NewLogger(cfgParams.Loglevel)
+	if err != nil {
+		fmt.Println(fmt.Sprintf("unable to create NewLogger, err: %v", err))
+		os.Exit(1)
+	}
+
+	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	// Create default config Kubernetes client
 	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
@@ -90,8 +94,7 @@ func main() {
 	managerOpts := manager.Options{
 		Scheme: scheme,
 		// MetricsBindAddress: cfgParams.MetricsPort,
-		Logger: log,
-		Cache:  cacheOpt,
+		Cache: cacheOpt,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
@@ -102,37 +105,38 @@ func main() {
 
 	log.Info("create kubernetes manager in namespace: " + cfgParams.ControllerNamespace)
 
-	lc, err := lapi.NewClient(lapi.Log(llog.StandardLogger())) // TODO: fix this
+	controllerruntime.SetLogger(log.GetLogger())
+	lc, err := lapi.NewClient(lapi.Log(log))
 	if err != nil {
 		log.Error(err, "failed create linstor client")
 		os.Exit(1)
 	}
 
-	if _, err := controller.NewLinstorNode(ctx, mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewLinstorNode(ctx, mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed create controller NewLinstorNode", err)
 		os.Exit(1)
 	}
 	log.Info("controller NewLinstorNode start")
 
-	if _, err := controller.NewDRBDStorageClass(mgr, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewDRBDStorageClass(mgr, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed create controller NewDRBDStorageClass")
 		os.Exit(1)
 	}
 	log.Info("controller NewDRBDStorageClass start")
 
-	if _, err := controller.NewDRBDStoragePool(mgr, lc, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewDRBDStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed create controller NewDRBDStoragePool", err)
 		os.Exit(1)
 	}
 	log.Info("controller NewDRBDStoragePool start")
 
-	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval); err != nil {
+	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed create controller NewLinstorLeader", err)
 		os.Exit(1)
 	}
 	log.Info("controller NewLinstorLeader start")
 
-	if _, err := controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval); err != nil {
+	if _, err := controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log); err != nil {
 		log.Error(err, "failed create controller NewDRBDStoragePool", err)
 		os.Exit(1)
 	}
