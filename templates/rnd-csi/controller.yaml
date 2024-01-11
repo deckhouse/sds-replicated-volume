@@ -225,7 +225,9 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "csi_livenessprobe_resources" . | nindent 12 }}
 {{- end }}
-      - env:
+      - args:
+        - --endpoint=unix://$(CSI_ENDPOINT)
+        env:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
           - name: DRIVER_REG_SOCK_PATH
@@ -363,7 +365,7 @@ spec:
           - --worker-threads=1
         env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
           - name: NAMESPACE
             valueFrom:
               fieldRef:
@@ -382,13 +384,13 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
       - args:
           - --csi-address=$(ADDRESS)
         env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
         image: {{ include "helm_lib_module_common_image" (list . (list "csiLivenessprobe" $kubeVersion.Major $kubeVersion.Minor | join "" )) }}
         imagePullPolicy: IfNotPresent
         name: csi-livenessprobe
@@ -402,7 +404,7 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
       - args:
           - --csi-address=$(ADDRESS)
@@ -417,7 +419,7 @@ spec:
           - --worker-threads=1
         env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
           - name: NAMESPACE
             valueFrom:
               fieldRef:
@@ -441,7 +443,7 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
       - args:
           - --timeout=1m
@@ -451,7 +453,7 @@ spec:
           - --worker-threads=1
         env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
           - name: NAMESPACE
             valueFrom:
               fieldRef:
@@ -470,7 +472,7 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
       - args:
           - --v=5
@@ -482,7 +484,7 @@ spec:
           - --workers=1
         env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
           - name: NAMESPACE
             valueFrom:
               fieldRef:
@@ -501,11 +503,13 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
-      - env:
+      - args:
+        - --endpoint=unix://$(ADDRESS)
+        env:
           - name: ADDRESS
-            value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+            value: /csi/csi.sock
           - name: KUBE_NODE_NAME
             valueFrom:
               fieldRef:
@@ -541,7 +545,7 @@ spec:
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
-          - mountPath: /var/lib/csi/sockets/pluginproxy/
+          - mountPath: /csi/
             name: socket-dir
       dnsPolicy: ClusterFirst
       imagePullSecrets:
