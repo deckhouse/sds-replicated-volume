@@ -172,11 +172,11 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
 				log.Info("Remove LINSTOR node: " + drbdNodeToRemove.Name)
-				log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
 
 				nodeName := drbdNodeToRemove.Name
+
 				overrideProps := lclient.GenericPropsModify{OverrideProps: map[string]string{"AutoplaceTarget": "false"}}
-				err := lc.Nodes.Modify(ctx, nodeName, lclient.NodeModify{NodeType: "static", GenericPropsModify: overrideProps})
+				err := lc.Nodes.Modify(ctx, nodeName, lclient.NodeModify{GenericPropsModify: overrideProps})
 				if err != nil {
 					log.Error(err, "Warning! Couldnot set node autoplace prop to false")
 				}
@@ -191,24 +191,25 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 					rs, err := lc.Resources.GetAll(ctx, rg.Name)
 					if err != nil {
 						log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
-						continue
+						break
 					}
 					resources = append(resources, rs...)
 				}
 
+				nodeToBeDeleted := false
 				// filter res by node and diskfull
 				for _, res := range resources {
 					if res.NodeName == nodeName && res.Props["StorPoolName"] != DisklessStoragePool {
 						resDefinition, err := lc.ResourceDefinitions.Get(ctx, res.Name)
 						if err != nil {
 							log.Error(err, "could not get resource definition from controller", res.Name)
-							continue
+							break
 						}
 
 						resGroup, err := lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
 						if err != nil {
 							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
-							continue
+							break
 						}
 
 						desiredRelicaCount := resGroup.SelectFilter.PlaceCount + 1
@@ -221,7 +222,7 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						resVolumes, err := lc.ResourceDefinitions.GetVolumeDefinitions(ctx, res.Name)
 						if err != nil {
 							log.Error(err, "could not get resource volumes from controller", res.Name)
-							continue
+							break
 						}
 						resVolumesSizeKb := uint64(0)
 						for _, resVol := range resVolumes {
@@ -232,16 +233,31 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						allNodes, err := lc.Nodes.GetAll(ctx)
 						if err != nil {
 							log.Error(err, "could not nodes from controller")
-							continue
+							break
 						}
 
 						// Get available nodes with enough disk space
-						availableNodes := getAvailableNodes(allNodes, resGroup.SelectFilter.NodeNameList)
-						availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
+						//log.Info("What about all nodes?", "nodes", allNodes)
+						//log.Info("Resource group", "res_group", resGroup)
+						//log.Info("Resource", "res", resources)
+						//log.Info("Resource definition", "res_def", resDefinition)
+
+						nodesWithRes, err := getNodesByResourceName(ctx, lc, res.Name)
+						if err != nil {
+							log.Error(err, "could not get nodes from ctrl by resource name: "+res.Name)
+							break
+						}
+						log.Info("Node by res name", "nodes", nodesWithRes)
+
+						availableNodes := getAvailableNodes(allNodes, nodesWithRes)
+						log.Info("Node by res name after 1st filer", "nodes", availableNodes)
+						availableNodes = filterNodesWithCapacity(ctx, lc, log, availableNodes, resVolumesSizeKb)
+						log.Info("Node by res name after 2nd filer", "nodes", availableNodes)
 						// TODO: add another filter to dron nodes from linstorNodes
 						if int32(len(availableNodes)) < desiredRelicaCount {
+							log.Info("debug info:", "available node", len(availableNodes), "desired node", desiredRelicaCount)
 							log.Error(errors.New("not enough available nodes"), "check nodes count")
-							continue
+							break
 						}
 
 						// TODO: How get current replica count and modify it?
@@ -273,39 +289,43 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						resGroup, err = lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
 						if err != nil {
 							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
-							continue
+							break
 						}
 						if desiredRelicaCount != resGroup.SelectFilter.PlaceCount {
 							log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
-							continue
+							nodeToBeDeleted = false
+						} else {
+							nodeToBeDeleted = true
 						}
 					}
 				}
 
-				err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
-				if err != nil {
-					log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
+				if nodeToBeDeleted {
+					err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+					if err != nil {
+						log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
+					}
+					break
 				}
-				break
 			}
 		}
 
-		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToRemove.Labels)) {
-			log.Info("Kubernetes node: " + drbdNodeToRemove.Name + "  have drbd label. Unset it")
-			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
-
-			// TODO: now it should be uncomment?
-			originalNode := drbdNodeToRemove.DeepCopy()
-			newNode := drbdNodeToRemove.DeepCopy()
-			for labelKey := range drbdNodeSelector {
-				delete(newNode.Labels, labelKey)
-			}
-
-			err := cl.Patch(ctx, newNode, client.MergeFrom(originalNode))
-			if err != nil {
-				log.Error(err, "Unable unset drbd labels from node %s. "+drbdNodeToRemove.Name)
-			}
-		}
+		//if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToRemove.Labels)) {
+		//	log.Info("Kubernetes node: " + drbdNodeToRemove.Name + "  have drbd label. Unset it")
+		//	log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+		//
+		//	// TODO: now it should be uncomment?
+		//	originalNode := drbdNodeToRemove.DeepCopy()
+		//	newNode := drbdNodeToRemove.DeepCopy()
+		//	for labelKey := range drbdNodeSelector {
+		//		delete(newNode.Labels, labelKey)
+		//	}
+		//
+		//	err := cl.Patch(ctx, newNode, client.MergeFrom(originalNode))
+		//	if err != nil {
+		//		log.Error(err, "Unable unset drbd labels from node %s. "+drbdNodeToRemove.Name)
+		//	}
+		//}
 
 	}
 	return nil
@@ -588,13 +608,31 @@ func getAvailableNodes(allNodes []lclient.Node, storageNode []string) []string {
 	return result
 }
 
+func getNodesByResourceName(ctx context.Context, lc *lclient.Client, resName string) ([]string, error) {
+	nodes := make([]string, 0, 10)
+	resources, err := lc.Resources.GetAll(ctx, resName)
+	if err != nil {
+		return nodes, err
+	}
+	for _, res := range resources {
+		// Maybe excess condition
+		if res.Name == resName {
+			nodes = append(nodes, res.NodeName)
+		}
+	}
+	return nodes, nil
+}
+
 func filterNodesWithCapacity(ctx context.Context, lc *lclient.Client, nodes []string, size uint64) []string {
 	result := make([]string, 0, len(nodes))
 	for _, node := range nodes {
 		storagePools, err := lc.Nodes.GetStoragePools(ctx, node)
 		if err != nil {
+			return []string{}
+		} else {
 			for _, sp := range storagePools {
-				if size <= uint64(sp.FreeCapacity) {
+				// Here check for "DfltDisklessStorPool" is important
+				if sp.StoragePoolName != DisklessStoragePool && size <= uint64(sp.FreeCapacity) {
 					result = append(result, node)
 					break
 				}
