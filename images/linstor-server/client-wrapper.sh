@@ -18,40 +18,52 @@
 valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "v" "resource-definition" "rd" "error-reports" "err")
 valid_subcommands_ver=("controller" "c")
 valid_subcommands_lv=("resource" "r")
+valid_keys=("-m" "--output-version=v1")
 allowed=false
 
+originalKeys=("$@")
+checkKeys=true
+
+while [[ $checkKeys == true ]]; do
+  if [[ $(echo "${valid_keys[@]}" | fgrep -w -- $1) ]]; then
+    shift
+  else
+    checkKeys=false
+  fi
+done
+
 # check for allowed linstor ... l and linstor ... list commands
-if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w $1) ]]; then
-  if [[ $2 == "l" || $2 == "list" ]]; then
+if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
+  if [[ "$2" == "l" || "$2" == "list" ]]; then
     allowed=true
   fi
 
-  if [[ $2 == "s" || $2 == "show" ]]; then
+  if [[ "$2" == "s" || "$2" == "show" ]]; then
     allowed=true
   fi
 
-  if [[ $2 == "set-property" ]] && [[ $4 == "AutoplaceTarget" ]]; then
+  if [[ "$2" == "set-property" ]] && [[ '$4' == "AutoplaceTarget" ]]; then
     allowed=true
   fi
 fi
 
 
 # check for allowed linstor ... v and linstor ... version commands
-if [[ $(echo "${valid_subcommands_ver[@]}" | fgrep -w $1) ]]; then
-  if [[ $2 == "v" || $2 == "version" ]]; then
+if [[ $(echo "${valid_subcommands_ver[@]}" | fgrep -w -- $1) ]]; then
+  if [[ "$2" == "v" || "$2" == "version" ]]; then
     allowed=true
   fi
 fi
 
 # check for allowed linstor ... lv commands
-if [[ $(echo "${valid_subcommands_lv[@]}" | fgrep -w $1) ]]; then
-  if [[ $2 == "lv" ]]; then
+if [[ $(echo "${valid_subcommands_lv[@]}" | fgrep -w -- $1) ]]; then
+  if [[ "$2" == "lv" ]]; then
     allowed=true
   fi
 fi
 
 if [[ $allowed == true ]]; then
-  /usr/bin/originallinstor "$@"
+  /usr/bin/originallinstor "${originalKeys[@]}"
 else
   echo "You're not allowed to change state of linstor cluster manually. Please contact tech support"
   exit 1
