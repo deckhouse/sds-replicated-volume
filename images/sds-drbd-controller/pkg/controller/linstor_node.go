@@ -196,8 +196,9 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 					resources = append(resources, rs...)
 				}
 
-				nodeToBeDeleted := false
-				// filter res by node and diskfull
+				// If only one resource is not expanded we couldnot remove node
+				nodeToBeDeleted := make([]bool, 0, 10)
+
 				for _, res := range resources {
 					if res.NodeName == nodeName && res.Props["StorPoolName"] != DisklessStoragePool {
 						resDefinition, err := lc.ResourceDefinitions.Get(ctx, res.Name)
@@ -213,11 +214,23 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						}
 
 						desiredRelicaCount := resGroup.SelectFilter.PlaceCount + 1
-						isTiebrakerNeeded := desiredRelicaCount == 2
-						// Only one that I can invent
-						if isTiebrakerNeeded {
-							desiredRelicaCount++
+
+						// Get current resource replicas from api and only Diskfull ones
+						currentResources := resourceFilter(resources, func(resource lclient.Resource) bool {
+							if resource.Name == res.Name {
+								if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
+									return true
+								}
+							}
+							return false
+						})
+
+						if int32(len(currentResources)) >= desiredRelicaCount {
+							log.Info("No need to add resources", "name", res.Name, "desired", desiredRelicaCount, "current", len(currentResources))
+							break
 						}
+
+						needToAddResourcesCount := desiredRelicaCount - int32(len(currentResources))
 
 						resVolumes, err := lc.ResourceDefinitions.GetVolumeDefinitions(ctx, res.Name)
 						if err != nil {
@@ -237,11 +250,6 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						}
 
 						// Get available nodes with enough disk space
-						//log.Info("What about all nodes?", "nodes", allNodes)
-						//log.Info("Resource group", "res_group", resGroup)
-						//log.Info("Resource", "res", resources)
-						//log.Info("Resource definition", "res_def", resDefinition)
-
 						nodesWithRes, err := getNodesByResourceName(ctx, lc, res.Name)
 						if err != nil {
 							log.Error(err, "could not get nodes from ctrl by resource name: "+res.Name)
@@ -249,20 +257,18 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						}
 						log.Info("Node by res name", "nodes", nodesWithRes)
 
+						// filter available nodes
 						availableNodes := getAvailableNodes(allNodes, nodesWithRes)
-						log.Info("Node by res name after 1st filer", "nodes", availableNodes)
-						availableNodes = filterNodesWithCapacity(ctx, lc, log, availableNodes, resVolumesSizeKb)
-						log.Info("Node by res name after 2nd filer", "nodes", availableNodes)
-						// TODO: add another filter to dron nodes from linstorNodes
-						if int32(len(availableNodes)) < desiredRelicaCount {
-							log.Info("debug info:", "available node", len(availableNodes), "desired node", desiredRelicaCount)
+						availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
+
+						if int32(len(availableNodes)) < needToAddResourcesCount {
+							log.Info("debug info:", "available node", len(availableNodes), "need to add", needToAddResourcesCount)
 							log.Error(errors.New("not enough available nodes"), "check nodes count")
 							break
 						}
 
-						// TODO: How get current replica count and modify it?
 						g := new(errgroup.Group)
-						for i := int32(0); i < desiredRelicaCount; i++ {
+						for i := int32(0); i < needToAddResourcesCount; i++ {
 							g.Go(func() error {
 								resCreate := lclient.ResourceCreate{
 									Resource: lclient.Resource{
@@ -272,10 +278,6 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 								}
 								return lc.Resources.Create(ctx, resCreate)
 							})
-							// TODO: in some cases add
-							//g.Go(func() error {
-							//	return lc.Resources.Diskless(ctx, res.Name, availableNodes[i], DisklessStoragePool)
-							//})
 						}
 						if err := g.Wait(); err == nil {
 							log.Info("successful add resources")
@@ -293,14 +295,14 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 						}
 						if desiredRelicaCount != resGroup.SelectFilter.PlaceCount {
 							log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
-							nodeToBeDeleted = false
+							nodeToBeDeleted = append(nodeToBeDeleted, false)
 						} else {
-							nodeToBeDeleted = true
+							nodeToBeDeleted = append(nodeToBeDeleted, true)
 						}
 					}
 				}
 
-				if nodeToBeDeleted {
+				if allSuccess(nodeToBeDeleted) {
 					err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
 					if err != nil {
 						log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
@@ -591,11 +593,12 @@ func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses s
 	return storageClassesLabels
 }
 
-func getAvailableNodes(allNodes []lclient.Node, storageNode []string) []string {
+// Filter the nodes without that already conatains resource
+func getAvailableNodes(allNodes []lclient.Node, nodesToExclude []string) []string {
 	result := make([]string, 0, len(allNodes))
 	for _, node := range allNodes {
 		founded := false
-		for _, sn := range storageNode {
+		for _, sn := range nodesToExclude {
 			if node.Name == sn {
 				founded = true
 				break
@@ -623,6 +626,7 @@ func getNodesByResourceName(ctx context.Context, lc *lclient.Client, resName str
 	return nodes, nil
 }
 
+// Filter nodes with storage pool with enough capacity
 func filterNodesWithCapacity(ctx context.Context, lc *lclient.Client, nodes []string, size uint64) []string {
 	result := make([]string, 0, len(nodes))
 	for _, node := range nodes {
@@ -640,4 +644,26 @@ func filterNodesWithCapacity(ctx context.Context, lc *lclient.Client, nodes []st
 		}
 	}
 	return result
+}
+
+func allSuccess(results []bool) bool {
+	if len(results) == 0 {
+		return false
+	}
+	for _, res := range results {
+		if !res {
+			return false
+		}
+	}
+	return true
+}
+
+func resourceFilter(resources []lclient.Resource, f func(resource lclient.Resource) bool) []lclient.Resource {
+	filtered := make([]lclient.Resource, 0, len(resources))
+	for _, r := range resources {
+		if f(r) {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered
 }
