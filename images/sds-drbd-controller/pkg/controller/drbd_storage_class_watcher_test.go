@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	client2 "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
@@ -23,6 +24,157 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 		log       = zap.New(zap.Level(zapcore.Level(-1)), zap.UseDevMode(true))
 		namespace = "test_namespace"
 	)
+
+	t.Run("ReconcileDRBDStorageClassPools_returns_correctly", func(t *testing.T) {
+		const (
+			firstName  = "first"
+			secondName = "second"
+			badName    = "bad"
+			firstSp    = "sp1"
+			secondSp   = "sp2"
+			thirdSp    = "sp3"
+		)
+
+		dscs := map[string]v1alpha1.DRBDStorageClass{
+			firstName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      firstName,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: firstSp,
+				},
+			},
+			secondName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secondName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: secondSp,
+				},
+			},
+			badName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      badName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: "unknown",
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      badName,
+				Namespace: namespace,
+			},
+		}
+
+		err := cl.Create(ctx, sc)
+		if err != nil {
+			t.Error(err)
+		} else {
+			defer func() {
+				err = cl.Delete(ctx, sc)
+				if err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+
+		sps := map[string][]client2.StoragePool{
+			firstSp:  {},
+			secondSp: {},
+			thirdSp:  {},
+		}
+
+		expected := map[string]v1alpha1.DRBDStorageClass{
+			firstName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      firstName,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: firstSp,
+				},
+			},
+			secondName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secondName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: secondSp,
+				},
+			},
+		}
+
+		actual := ReconcileDRBDStorageClassPools(ctx, cl, log, dscs, sps)
+		assert.Equal(t, expected, actual)
+
+		badSc := &storagev1.StorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      badName,
+		}, badSc)
+		if assert.NoError(t, err) {
+			_, exist := badSc.Labels[NonOperationalByStoragePool]
+			assert.True(t, exist)
+		}
+	})
+
+	t.Run("SortNodesByStoragePool_returns_correctly", func(t *testing.T) {
+		const (
+			node1  = "node1"
+			node2  = "node2"
+			node3  = "node3"
+			spName = "test-sp"
+		)
+
+		sps := map[string][]client2.StoragePool{
+			spName: {
+				{
+					NodeName:        node1,
+					StoragePoolName: spName,
+				},
+				{
+					NodeName:        node2,
+					StoragePoolName: spName,
+				},
+			},
+		}
+
+		nodeList := &v1.NodeList{
+			Items: []v1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node1,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node2,
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: node3,
+					},
+				},
+			},
+		}
+		expected := map[string][]v1.Node{
+			spName: {nodeList.Items[0], nodeList.Items[1]},
+		}
+
+		actual := SortNodesByStoragePool(nodeList, sps)
+		assert.Equal(t, expected, actual)
+	})
 
 	t.Run("GetAllDRBDStorageClasses_returns_DRBDStorageClasses", func(t *testing.T) {
 		const (
@@ -74,111 +226,6 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 		}
 	})
 
-	t.Run("GetAllDRBDStoragePools_returns_DRBDStoragePools", func(t *testing.T) {
-		const (
-			firstName  = "first"
-			secondName = "second"
-		)
-
-		dsps := []v1alpha1.DRBDStoragePool{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      firstName,
-					Namespace: namespace,
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      secondName,
-					Namespace: namespace,
-				},
-			},
-		}
-
-		var err error
-		for _, dsp := range dsps {
-			err = cl.Create(ctx, &dsp)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, dsc := range dsps {
-					err = cl.Delete(ctx, &dsc)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		actual, err := GetAllDRBDStoragePools(ctx, cl)
-		if assert.NoError(t, err) {
-			assert.Equal(t, 2, len(actual))
-			_, exist := actual[firstName]
-			assert.True(t, exist)
-			_, exist = actual[secondName]
-			assert.True(t, exist)
-		}
-	})
-
-	t.Run("GetAllLVMVolumeGroups_returns_LVMVolumeGroups", func(t *testing.T) {
-		const (
-			firstName  = "first"
-			secondName = "second"
-		)
-
-		lvgs := []v1alpha1.LvmVolumeGroup{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      firstName,
-					Namespace: namespace,
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      secondName,
-					Namespace: namespace,
-				},
-			},
-		}
-
-		var err error
-		for _, lvg := range lvgs {
-			err = cl.Create(ctx, &lvg)
-			if err != nil {
-				t.Error(err)
-			}
-		}
-
-		if err == nil {
-			defer func() {
-				for _, dsc := range lvgs {
-					err = cl.Delete(ctx, &dsc)
-					if err != nil {
-						t.Error(err)
-					}
-				}
-			}()
-		}
-
-		actual, err := GetAllLVMVolumeGroups(ctx, cl)
-		if assert.NoError(t, err) {
-			assert.Equal(t, 2, len(actual.Items))
-			mp := make(map[string]struct{}, len(actual.Items))
-			for _, lvg := range actual.Items {
-				mp[lvg.Name] = struct{}{}
-			}
-
-			_, exist := mp[firstName]
-			assert.True(t, exist)
-			_, exist = mp[secondName]
-			assert.True(t, exist)
-		}
-	})
-
 	t.Run("GetDRBDStoragePoolsZones_returns_zones", func(t *testing.T) {
 		const (
 			labelNode1  = "label-node1"
@@ -186,8 +233,6 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			lvgName1    = "lvg-name1"
-			lvgName2    = "lvg-name2"
 			dspName     = "dsp-test"
 		)
 		nodeList := v1.NodeList{
@@ -216,54 +261,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		lvgList := v1alpha1.LvmVolumeGroupList{
-			Items: []v1alpha1.LvmVolumeGroup{
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: lvgName1,
-					},
-					Status: v1alpha1.LvmVolumeGroupStatus{
-						Nodes: []v1alpha1.LvmVolumeGroupNode{
-							{
-								Name: labelNode1,
-							},
-							{
-								Name: labelNode2,
-							},
-						},
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: lvgName2,
-					},
-					Status: v1alpha1.LvmVolumeGroupStatus{
-						Nodes: []v1alpha1.LvmVolumeGroupNode{
-							{
-								Name: noLabelNode,
-							},
-						},
-					},
-				},
-			},
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
 		}
 
-		dsps := map[string]v1alpha1.DRBDStoragePool{
-			dspName: {
-				ObjectMeta: metav1.ObjectMeta{
-					Name: dspName,
-				},
-				Spec: v1alpha1.DRBDStoragePoolSpec{
-					LvmVolumeGroups: []v1alpha1.DRBDStoragePoolLVMVolumeGroups{
-						{
-							Name: lvgName1,
-						},
-					},
-				},
-			},
-		}
-
-		actual := GetDRBDStoragePoolsZones(&nodeList, &lvgList, dsps)
+		actual := GetDRBDStoragePoolsZones(spNodes)
 		assert.True(t, slices.Contains(actual[dspName], zone1))
 		assert.True(t, slices.Contains(actual[dspName], zone2))
 	})
@@ -273,9 +275,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			labelNode1  = "label-node1"
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
-			zone2       = "test-zone2"
-			zone3       = "test-zone3"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -296,6 +297,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -305,6 +310,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -328,7 +334,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -346,7 +352,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			labelNode2  = "label-node2"
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -378,6 +385,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -387,6 +398,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -410,7 +422,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -430,7 +442,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -462,6 +475,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -472,6 +489,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -495,7 +513,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -511,7 +529,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 		const (
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -529,6 +548,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -538,6 +561,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -561,7 +585,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -581,7 +605,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -613,6 +638,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -623,6 +652,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -646,7 +676,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -663,7 +693,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -686,6 +717,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -695,6 +730,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -718,7 +754,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -736,7 +772,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode2 = "no-label-node2"
 			noLabelNode  = "no-label-node3"
 			zone1        = "test-zone1"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -757,6 +794,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -766,6 +807,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -789,7 +831,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -829,7 +871,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -849,7 +895,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -870,6 +917,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -880,6 +931,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -903,7 +955,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -943,7 +995,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -960,7 +1016,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			labelNode1  = "label-node1"
 			labelNode2  = "label-node2"
 			noLabelNode = "no-label-node"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -978,6 +1035,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -987,6 +1048,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1010,7 +1072,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1041,7 +1103,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1060,7 +1126,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1089,6 +1156,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1098,6 +1169,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1121,7 +1193,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1139,7 +1211,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			labelNode2 = "label-node2"
 			labelNode3 = "label-node3"
 			zone1      = "test-zone1"
-			dscName    = "dsp-test"
+			dscName    = "dsc-test"
+			dspName    = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1171,6 +1244,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1180,6 +1257,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1203,7 +1281,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1223,7 +1301,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1      = "test-zone1"
 			zone2      = "test-zone2"
 			zone3      = "test-zone3"
-			dscName    = "dsp-test"
+			dscName    = "dsc-test"
+			dspName    = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1255,6 +1334,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1265,6 +1348,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1288,7 +1372,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1308,7 +1392,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1      = "test-zone1"
 			zone2      = "test-zone2"
 			zone3      = "test-zone3"
-			dscName    = "dsp-test"
+			dscName    = "dsc-test"
+			dspName    = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1340,6 +1425,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1350,6 +1439,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1373,7 +1463,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1389,7 +1479,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 		const (
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1407,6 +1498,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1416,6 +1511,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1439,7 +1535,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1456,7 +1552,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1479,6 +1576,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1488,6 +1589,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1511,7 +1613,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1531,7 +1633,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1560,6 +1663,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1569,6 +1676,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1592,7 +1700,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1632,7 +1740,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1653,7 +1765,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsp-test"
+			dscName     = "dsc-test"
+			dspName     = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1682,6 +1795,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1692,6 +1809,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1715,7 +1833,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1755,7 +1873,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1772,7 +1894,8 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsp-test"
+			dscName      = "dsc-test"
+			dspName      = "dsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1790,6 +1913,10 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
+		spNodes := map[string][]v1.Node{
+			dspName: nodeList.Items,
+		}
+
 		dscs := map[string]v1alpha1.DRBDStorageClass{
 			dscName: {
 				ObjectMeta: metav1.ObjectMeta{
@@ -1799,6 +1926,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 				Spec: v1alpha1.DRBDStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
+					StoragePool: dspName,
 				},
 			},
 		}
@@ -1822,7 +1950,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, nodeList)
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -1853,7 +1981,11 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, updatedNodeList)
+		spNodes = map[string][]v1.Node{
+			dspName: updatedNodeList.Items,
+		}
+
+		ReconcileDRBDStorageClassReplication(ctx, cl, log, dscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
