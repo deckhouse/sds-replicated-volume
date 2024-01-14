@@ -39,6 +39,9 @@ rules:
       - get
       - watch
       - list
+      - delete
+      - update
+      - create
 
 ---
 kind: ClusterRole
