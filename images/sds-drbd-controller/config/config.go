@@ -31,7 +31,8 @@ const (
 	NodeName                          = "NODE_NAME"
 	MetricsPortEnv                    = "METRICS_PORT"
 	ControllerNamespaceEnv            = "CONTROLLER_NAMESPACE"
-	HardcodedControllerNS             = "d8-sds-drbd-controller"
+	HardcodedControllerNS             = "d8-sds-drbd"
+	ControllerName                    = "sds-drbd-controller"
 	LogLevel                          = "LOG_LEVEL"
 )
 
