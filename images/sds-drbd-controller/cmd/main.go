@@ -26,6 +26,7 @@ import (
 	"sds-drbd-controller/pkg/controller"
 	kubutils "sds-drbd-controller/pkg/kubeutils"
 	"sds-drbd-controller/pkg/logger"
+
 	controllerruntime "sigs.k8s.io/controller-runtime"
 
 	lapi "github.com/LINBIT/golinstor/client"
@@ -94,7 +95,10 @@ func main() {
 	managerOpts := manager.Options{
 		Scheme: scheme,
 		// MetricsBindAddress: cfgParams.MetricsPort,
-		Cache: cacheOpt,
+		Cache:                   cacheOpt,
+		LeaderElection:          true,
+		LeaderElectionNamespace: cfgParams.ControllerNamespace,
+		LeaderElectionID:        config.ControllerName,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
