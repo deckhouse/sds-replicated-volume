@@ -12,7 +12,7 @@ The module is guaranteed to work only in the following cases:
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-This module manages replicated block storage based on `LINSTOR` and the `DRBD` kernel module and allows to create a `Storage Pool` in `Linstor` and a `Storage Class` in `Kubernetes` by creating [Kubernetes custom resources](./CR.md).
+This module manages replicated block storage based on `LINSTOR` and the `DRBD` kernel module and allows to create a `Storage Pool` in `Linstor` and a `Storage Class` in `Kubernetes` by creating [Kubernetes custom resources](cr.html).
 `LINSTOR` is an orchestrator that acts as an abstraction layer. It:
 - automates volume creation using well-known and proven technologies such as `LVM` and `ZFS`;
 - configures volume replication using `DRBD`.
@@ -21,6 +21,6 @@ The SDS-DRBD module makes it easy to use LINSTOR-based storage in your cluster. 
 
 Two modes are supported: LVM and LVMThin.
 
-Each mode has its advantages and disadvantages. Read [FAQ](./FAQ.md#what-is-difference-between-lvm-and-lvmthin) to learn more and compare them.
+Each mode has its advantages and disadvantages. Read [FAQ](faq.html#what-is-difference-between-lvm-and-lvmthin) to learn more and compare them.
 
-Note that the module's [Kubernetes custom resources](./CR.md) are Cluster-scoped.
+Note that the module's [Kubernetes custom resources](cr.html) are Cluster-scoped.
