@@ -78,7 +78,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		testNodeAddress = "test_address"
 	)
 	var (
-		selectedKubeNodes v1.NodeList
+		selectedKubeNodes *v1.NodeList
 	)
 
 	It("GetKubernetesNodesBySelector", func() {
@@ -124,7 +124,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		const (
 			existName = "exist"
 		)
-		nodes := v1.NodeList{Items: []v1.Node{
+		nodes := &v1.NodeList{Items: []v1.Node{
 			{ObjectMeta: metav1.ObjectMeta{
 				Name: existName,
 			}},
@@ -148,7 +148,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 	})
 
 	It("DiffNodeLists", func() {
-		nodeList1 := v1.NodeList{}
+		nodeList1 := &v1.NodeList{}
 		nodeList1.Items = []v1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
@@ -167,7 +167,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 			},
 		}
 
-		nodeList2 := v1.NodeList{}
+		nodeList2 := &v1.NodeList{}
 		nodeList2.Items = []v1.Node{
 			{
 				ObjectMeta: metav1.ObjectMeta{
