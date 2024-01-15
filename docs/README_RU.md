@@ -12,7 +12,7 @@ moduleStatus: experimental
 Работоспособность модуля в других условиях возможна, но не гарантируется.
 {{< /alert >}}
 
-Модуль управляет в кластере реплицируемым блочным хранилищем на базе `DRBD`. На текущий момент в качестве control-plane используется `LINSTOR`. Модуль позволяет создавать `Storage Pool` в `LINSTOR` и `StorageClass` в `Kubernetes` через создание [пользовательских ресурсов Kubernetes](./cr.html). 
+Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. На текущий момент в качестве control-plane используется `LINSTOR`. Модуль позволяет создавать `Storage Pool` в `LINSTOR` и `StorageClass` в `Kubernetes` через создание [пользовательских ресурсов Kubernetes](./cr.html). 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [SDS-Node-Configurator](../../sds-node-configurator/).
 > **Внимание!** Перед включением модуля `SDS-DRDB` необходимо включить модуль `SDS-Node-Configurator`.
 
