@@ -4,16 +4,15 @@ import (
 	"context"
 	client2 "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
-	"go.uber.org/zap/zapcore"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/strings/slices"
 	"sds-drbd-controller/api/v1alpha1"
+	"sds-drbd-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"testing"
 )
 
@@ -21,7 +20,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 	var (
 		cl        = newFakeClient()
 		ctx       = context.Background()
-		log       = zap.New(zap.Level(zapcore.Level(-1)), zap.UseDevMode(true))
+		log       = logger.Logger{}
 		namespace = "test_namespace"
 	)
 

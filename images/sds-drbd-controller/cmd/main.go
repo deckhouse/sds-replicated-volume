@@ -145,7 +145,7 @@ func main() {
 	}
 	log.Info("the NewLinstorResourcesWatcher controller starts")
 
-	if _, err = controller.NewDRBDStorageClassWatcher(mgr, lc, cfgParams.DRBDStorageClassWatchInterval); err != nil {
+	if _, err = controller.NewDRBDStorageClassWatcher(mgr, lc, cfgParams.DRBDStorageClassWatchInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewDRBDStorageClassWatcher controller")
 		os.Exit(1)
 	}

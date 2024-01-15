@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	lapi "github.com/LINBIT/golinstor/client"
-	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
 	"sds-drbd-controller/api/v1alpha1"
+	"sds-drbd-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -28,9 +28,9 @@ func NewDRBDStorageClassWatcher(
 	mgr manager.Manager,
 	lc *lapi.Client,
 	interval int,
+	log logger.Logger,
 ) (controller.Controller, error) {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger()
 	ctx := context.Background()
 
 	c, err := controller.New(DrbdStorageClassWatcherCtrlName, mgr, controller.Options{
@@ -98,7 +98,7 @@ func SortNodesByStoragePool(nodeList *v1.NodeList, sps map[string][]lapi.Storage
 func ReconcileDRBDStorageClassPools(
 	ctx context.Context,
 	cl client.Client,
-	log logr.Logger,
+	log logger.Logger,
 	dscs map[string]v1alpha1.DRBDStorageClass,
 	sps map[string][]lapi.StoragePool,
 ) map[string]v1alpha1.DRBDStorageClass {
@@ -120,13 +120,14 @@ func ReconcileDRBDStorageClassPools(
 func ReconcileDRBDStorageClassReplication(
 	ctx context.Context,
 	cl client.Client,
-	log logr.Logger,
+	log logger.Logger,
 	dscs map[string]v1alpha1.DRBDStorageClass,
 	spNodes map[string][]v1.Node,
 ) {
 	log.Info("[ReconcileDRBDStorageClassReplication] starts reconcile")
 
 	for _, dsc := range dscs {
+		log.Debug(fmt.Sprintf("[ReconcileDRBDStorageClassReplication] DRBDStorageClass %s replication type %s", dsc.Name, dsc.Spec.Replication))
 		switch dsc.Spec.Replication {
 		case ReplicationNone:
 		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
@@ -137,6 +138,7 @@ func ReconcileDRBDStorageClassReplication(
 					zoneNodesCount[zone]++
 				}
 			}
+			log.Debug(fmt.Sprintf("[ReconcileDRBDStorageClassReplication] DRBDStorageClass %s topology type %s", dsc.Name, dsc.Spec.Topology))
 			switch dsc.Spec.Topology {
 			// As we need to place 3 storage replicas in a some random zone, we check if at least one zone has enough nodes for quorum.
 			case TopologyZonal:
@@ -197,7 +199,7 @@ func ReconcileDRBDStorageClassReplication(
 func ReconcileDRBDStorageClassZones(
 	ctx context.Context,
 	cl client.Client,
-	log logr.Logger,
+	log logger.Logger,
 	dscs map[string]v1alpha1.DRBDStorageClass,
 	dspZones map[string][]string,
 ) map[string]v1alpha1.DRBDStorageClass {
@@ -231,7 +233,7 @@ func ReconcileDRBDStorageClassZones(
 	return healthyDSCs
 }
 
-func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logr.Logger, dsc v1alpha1.DRBDStorageClass, label string) {
+func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, dsc v1alpha1.DRBDStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
@@ -263,7 +265,7 @@ func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client,
 	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully set a NonOperational label on the Kubernetes Storage Class %s", dsc.Name))
 }
 
-func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logr.Logger, dsc v1alpha1.DRBDStorageClass, label string) {
+func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, dsc v1alpha1.DRBDStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
