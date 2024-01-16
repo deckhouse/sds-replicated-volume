@@ -18,6 +18,7 @@
 valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "v" "resource-definition" "rd" "error-reports" "err")
 valid_subcommands_ver=("controller" "c")
 valid_subcommands_lv=("resource" "r")
+valid_subcommands_advise=("advise" "adv")
 valid_keys=("-m" "--output-version=v1")
 allowed=false
 
@@ -58,6 +59,13 @@ fi
 # check for allowed linstor ... lv commands
 if [[ $(echo "${valid_subcommands_lv[@]}" | fgrep -w -- $1) ]]; then
   if [[ "$2" == "lv" ]]; then
+    allowed=true
+  fi
+fi
+
+# check for allowed linstor advise commands
+if [[ $(echo "${valid_subcommands_advise[@]}" | fgrep -w -- $1) ]]; then
+  if [[ "$2" == "r" || "$2" == "resource" || "$2" == "m" || "$2" == "maintenance" ]]; then
     allowed=true
   fi
 fi
