@@ -76,6 +76,7 @@ spec:
 
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
       desired_version="{{ $.Values.sdsDrbd.internal.drbdVersion }}"
+      force_rebuild_version="{{ $.Values.sdsDrbd.internal.drbdVersionForceRebuild }}"
 
       # We expect the loaded DRBD module to be version 9.
       # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
@@ -87,7 +88,9 @@ spec:
         rmmod drbd || true
       fi
 
-      if [ "${current_version}" == "${desired_version}" ]; then
+      if { echo "${current_version}"; echo "${force_rebuild_version}"; } | sort --version-sort --check; then
+        echo "DRBD needs to be rebuilt"
+      else
         if grep -q -E '^drbd$' /etc/modules; then
           sed -i '/^drbd$/d' /etc/modules
         fi
@@ -98,8 +101,13 @@ spec:
       fi
     fi
 
+    bb-apt-install make gcc bind9-host patch mokutil
+    check_sb_state="$(mokutil --sb-state)"
+    if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
+      echo "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsDrbd.internal.drbdVersion }} or higher."
+      exit 0
+    fi
     bb-rp-install "drbd:{{ .Values.global.modulesImages.digests.registrypackages.drbd }}"
-    bb-apt-install make gcc bind9-host patch
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
@@ -150,9 +158,10 @@ spec:
     if [ -e "/proc/drbd" ]; then
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
       desired_version="{{ $.Values.sdsDrbd.internal.drbdVersion }}"
+      force_rebuild_version="{{ $.Values.sdsDrbd.internal.drbdVersionForceRebuild }}"
 
-      if [ "${current_version}" != "${desired_version}" ]; then
-        bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired "$desired_version"), setting reboot flag"
+      if { echo "${current_version}"; echo "${force_rebuild_version}"; } | sort --version-sort --check; then
+        bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired minimum "$desired_version"), setting reboot flag"
         bb-flag-set reboot
       fi
     fi
