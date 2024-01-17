@@ -40,6 +40,9 @@ spec:
                   enum:
                     - LVM
                     - LVMThin
+                  x-kubernetes-validations:
+                    - rule: self == oldSelf
+                      message: Value is immutable.
                 lvmvolumegroups:
                   type: array
                   description: |

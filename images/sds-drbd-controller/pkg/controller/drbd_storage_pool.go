@@ -104,18 +104,6 @@ func NewDRBDStoragePool(
 					return
 				}
 
-				if oldDRBDSP.Spec.Type != newDRBDSP.Spec.Type {
-					errMessage := fmt.Sprintf("StoragePool spec changed. Type change is forbidden. Old type: %s, new type: %s", oldDRBDSP.Spec.Type, newDRBDSP.Spec.Type)
-					log.Error(nil, errMessage)
-					newDRBDSP.Status.Phase = "Failed"
-					newDRBDSP.Status.Reason = errMessage
-					err := UpdateDRBDStoragePool(ctx, cl, newDRBDSP)
-					if err != nil {
-						log.Error(err, "error UpdateDRBDStoragePool")
-					}
-					return
-				}
-
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				shouldRequeue, err := ReconcileDRBDStoragePoolEvent(ctx, cl, request, log, lc)
 				if shouldRequeue {
