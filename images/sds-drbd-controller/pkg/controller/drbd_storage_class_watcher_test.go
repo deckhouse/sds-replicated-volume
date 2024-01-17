@@ -24,7 +24,7 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 		namespace = "test_namespace"
 	)
 
-	t.Run("ReconcileDRBDStorageClassPools_returns_correctly", func(t *testing.T) {
+	t.Run("ReconcileDRBDStorageClassPools_returns_correctly_and_sets_label", func(t *testing.T) {
 		const (
 			firstName  = "first"
 			secondName = "second"
@@ -125,6 +125,160 @@ func TestDRBDStorageClassWatcher(t *testing.T) {
 			_, exist := badSc.Labels[NonOperationalByStoragePool]
 			assert.True(t, exist)
 		}
+	})
+
+	t.Run("ReconcileDRBDStorageClassPools_returns_correctly_and_removes_label", func(t *testing.T) {
+		const (
+			firstName  = "first"
+			secondName = "second"
+			badName    = "bad"
+			firstSp    = "sp1"
+			secondSp   = "sp2"
+			thirdSp    = "sp3"
+		)
+
+		dscs := map[string]v1alpha1.DRBDStorageClass{
+			firstName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      firstName,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: firstSp,
+				},
+			},
+			secondName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secondName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: secondSp,
+				},
+			},
+			badName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      badName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: thirdSp,
+				},
+			},
+		}
+
+		sc := &storagev1.StorageClass{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      badName,
+				Namespace: namespace,
+			},
+		}
+
+		err := cl.Create(ctx, sc)
+		if err != nil {
+			t.Error(err)
+		} else {
+			defer func() {
+				err = cl.Delete(ctx, sc)
+				if err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+
+		sps := map[string][]client2.StoragePool{
+			firstSp:  {},
+			secondSp: {},
+		}
+
+		expected := map[string]v1alpha1.DRBDStorageClass{
+			firstName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      firstName,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: firstSp,
+				},
+			},
+			secondName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secondName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: secondSp,
+				},
+			},
+		}
+
+		actual := ReconcileDRBDStorageClassPools(ctx, cl, log, dscs, sps)
+		assert.Equal(t, expected, actual)
+
+		badSc := &storagev1.StorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      badName,
+		}, badSc)
+		if assert.NoError(t, err) {
+			_, exist := badSc.Labels[NonOperationalByStoragePool]
+			assert.True(t, exist)
+		}
+
+		newSps := map[string][]client2.StoragePool{
+			firstSp:  {},
+			secondSp: {},
+			thirdSp:  {},
+		}
+
+		newExpected := map[string]v1alpha1.DRBDStorageClass{
+			firstName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      firstName,
+					Namespace: namespace,
+				},
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: firstSp,
+				},
+			},
+			secondName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      secondName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: secondSp,
+				},
+			},
+			badName: {
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      badName,
+					Namespace: namespace,
+				},
+
+				Spec: v1alpha1.DRBDStorageClassSpec{
+					StoragePool: thirdSp,
+				},
+			},
+		}
+
+		newActual := ReconcileDRBDStorageClassPools(ctx, cl, log, dscs, newSps)
+		assert.Equal(t, newExpected, newActual)
+
+		updatedBadSc := &storagev1.StorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Namespace: namespace,
+			Name:      badName,
+		}, updatedBadSc)
+		if assert.NoError(t, err) {
+			_, exist := updatedBadSc.Labels[NonOperationalByStoragePool]
+			assert.False(t, exist)
+		}
+
 	})
 
 	t.Run("SortNodesByStoragePool_returns_correctly", func(t *testing.T) {

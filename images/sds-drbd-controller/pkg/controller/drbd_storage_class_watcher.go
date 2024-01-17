@@ -106,6 +106,8 @@ func ReconcileDRBDStorageClassPools(
 	for _, dsc := range dscs {
 		if _, exist := sps[dsc.Spec.StoragePool]; exist {
 			healthy[dsc.Name] = dsc
+
+			removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByStoragePool)
 		} else {
 			err := errors.New(fmt.Sprintf("storage pool %s does not exist", dsc.Spec.StoragePool))
 			log.Error(err, fmt.Sprintf("[ReconcileDRBDStorageClassPools] storage pool validation failed for the DRBDStorageClass %s", dsc.Name))
