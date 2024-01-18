@@ -22,6 +22,19 @@ valid_subcommands_advise=("advise" "adv")
 valid_keys=("-m" "--output-version=v1")
 allowed=false
 
+if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
+  echo "This wrapper is designed to minimize manual intervention in the module's operation. We are continuously improving the built-in capabilities to avoid the need for console commands. Please try to use them as much as possible. The allowed commands at the moment are:"
+  echo "- storage-pool list/show"
+  echo "- node list/show"
+  echo "- resource list/show/lv"
+  echo "- volume list/show"
+  echo "- resource-definition list/show"
+  echo "- error-reports list/show"
+  echo "- controller version"
+  echo "- advise resource/maintainance"
+  exit 0
+fi
+
 originalKeys=("$@")
 checkKeys=true
 
