@@ -14,7 +14,8 @@
         summary: DRBD PVs has incorrect settings
         description: |
           There are persistent volumes in the cluster that were created before migration to DRBDStorageClass. 
-          You must recreate it (recommended way), or add storage.deckhouse.io/linstor-settings-mismatch-ignore!=true label to ignore it for PV.
+          You can recreate it, or add the label storage.deckhouse.io/linstor-settings-mismatch-ignore!=true to ignore it for the PV.
+          Please note that in the future, when transitioning from LINSTOR to a new controller, the settings for all such PVs will be automatically modified to match the current StorageClass settings.
           
           You can view all of such PV with command          
           `kubectl get pv -l storage.deckhouse.io/linstor-settings-mismatch=true,storage.deckhouse.io/linstor-settings-mismatch-ignore!=true`
