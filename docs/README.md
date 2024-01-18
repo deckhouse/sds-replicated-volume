@@ -26,5 +26,3 @@ After you enable the `SDS-DRBD` module in the Deckhouse configuration, your clus
 
 Two modes are supported: LVM and LVMThin.
 Each mode has its advantages and disadvantages. Read [FAQ](./faq.html#what-is-difference-between-lvm-and-lvmthin) to learn more and compare them.
-
-Note that the module's [Kubernetes custom resources](cr.html) are Cluster-scoped.
