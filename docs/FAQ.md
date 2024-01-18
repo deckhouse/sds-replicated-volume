@@ -15,59 +15,17 @@ As for any other configurations, the module may work, but its smooth operation i
 
 In a nutshell::
 
-- LVM is simpler and has performance comparable to that of native drives;
-- LVMThin allows snapshots and overprovisioning, but it is twice as slow.
-
-## LINSTOR performance and reliability; comparing it to Ceph
-
-{% alert %}
-Recommended reading: ["Comparing Ceph, LINSTOR, Mayastor, and Vitastor storage performance in Kubernetes"](https://www.reddit.com/r/kubernetes/comments/v3tzze/comparing_ceph_linstor_mayastor_and_vitastor/).
-{% endalert %}
-
-We approach this issue from a practical point of view. In practice, a difference of a few tens of percent never matters. What matters is a difference of a factor of two or more.
-
-Comparison criteria:
-
-- Sequential read and write are irrelevant, because on any technology they are always up against the network (10 Gbps vs. 1 Gbps). From a practical standpoint, this metric can be completely ignored;
-- Random read and write (1 Gbps vs. 10 Gbps):
-    - DRBD + LVM is 5 times better than Ceph RBD (latency is 5 times less while IOPS is 5 times higher);
-    - DRBD + LVM is 2 times better than DRBD + LVMThin.
-- If one of the replicas is local, the read speed will be about the same as the speed of the storage device;
-- If there are no replicas on local storage, the write speed will be roughly limited to half the network bandwidth for two replicas, or ⅓ network bandwidth for three replicas;
-- With a large number of clients (more than 10, at iodepth 64), Ceph lag tends to increase (up to 10 times); it consumes significantly more CPU resources.
-
-In practice, there are only three significant factors and it does not matter which parameters you change:
-
-- **Read locality** — if all reads are local, they run at the speed (throughput, IOPS, latency) of the local disk (the difference is nearly unnoticeable);
-- **1 network hop when writing** — in DRBD, the replication is performed by the *client*, and in Ceph, by the *server*. Thus, Ceph's latency for writes is always at least twice that of DRBD;
-- **Code complexity** — latency of calculations on the datapath (CPU instructions are run for each I/O operation). Here, DRBD + LVM is simpler than DRBD + LVMThin, and much simpler than Ceph RBD.
-
-## Which implementation to use in which situation?
-
-By default, the module uses two replicas (the third `diskless` replica is created automatically; it is used for quorum). This approach ensures protection against split-brain and sufficient storage reliability. However, keep in mind the following peculiarities:
-
-- When one of the replicas (replica A) is unavailable, data is written to a single replica (replica B) only. THis means that:
-    - If at this moment the second replica (replica B) becomes unavailable, writing and reading will fail;
-    - If at the same time the second replica (replica B) is irretrievably lost, the data will be partially lost (since there is only the outdated replica A);
-    - If the old replica (replica A) is also irretrievably lost, the data will be lost completely.
-- If the second replica is turned off, both replicas must be available to turn it back on (without operator intervention). This is necessary to correctly handle the split-brain situation;
-- Enabling a third replica addresses both problems (at least two copies of data are available at any given time), but increases the overhead (network, disk).
-
-It is strongly recommended to have one local replica. This doubles the possible write bandwidth (with two replicas) and significantly increases the read speed. But even if there is no local replica, things will still work fine, except that reads will be done over the network and there will be double network utilization on writes.
-
-Depending on the task, you may choose one of the following:
-
-- DRBD + LVM — faster (x2) and more reliable (LVM is simpler);
-- DRBD + LVMThin — support for snapshots and overprovisioning.
+- LVM is simpler and has performance comparable to that of native disk drives;
+- LVMThin allows for snapshots and overprovisioning; however, it is twice as slow.
 
 ## How do I get info about the space used?
 
-There are two ways:
+There are two options:
 
 - Using the Grafana dashboard: navigate to **Dashboards --> Storage --> LINSTOR/DRBD**  
-  In the upper right corner, you'll see the space used in the cluster.
+  In the upper right corner, you'll see the amount of space used in the cluster.
 
-  > **Attention!** *Raw* space usage in the cluster is displayed.
+  > **Caution!** *Raw* space usage in the cluster is displayed.
   > Suppose you create a volume with two replicas. In this case, these values must be divided by two to see how many such volumes can be in your cluster.
 
 - Using the LINSTOR command line:
@@ -76,40 +34,21 @@ There are two ways:
   kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor storage-pool list
   ```
 
-  > **Attention!** *Raw* space usage for each node in the cluster is displayed.
+  > **Caution!** *Raw* space usage for each node in the cluster is displayed.
   > Suppose you create a volume with two replicas. In this case, those two replicas must fully fit on two nodes in your cluster.
 
 ## How do I set the default StorageClass?
 
-Set the corresponding [DRBDStorageClass](link to a resource) CR field `spec.IsDefault` to `true`.
+Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass](link to a resource) custom resource.
 
-## How do I add an existing LVM or LVMThin-pool?
+## How do I add the existing LVM or LVMThin pool?
 
-Create a new CR [DRBDStoragePool](resource). In the resource `spec.Lvmvolumegroups.Name`, select the corresponding [LVMVolumeGroup](link to a resource) with the `LVMThin-pool` name in `spec.Lvmvolumegroups.Thinpoolname` if nessesary.
-
-## How do I configure Prometheus to use LINSTOR to store data?
-
-Steps to configure Prometheus to use LINSTOR for storing data are as follows:
-
-- [Configure](configuration.html#linstor-storage-configuration) the storage-pools and StorageClass;
-- Specify the [longtermStorageClass](../300-prometheus/configuration.html#parameters-longtermstorageclass) and [storageClass](../300-prometheus/configuration.html#parameters-storageclass) parameters in the [prometheus](../300-prometheus/) module config.
-
-  Example:
-
-  ```yaml
-  apiVersion: deckhouse.io/v1alpha1
-  kind: ModuleConfig
-  metadata:
-    name: prometheus
-  spec:
-    version: 2
-    enabled: true
-    settings:
-      longtermStorageClass: linstor-data-r2
-      storageClass: linstor-data-r2
-  ```
-
-- Wait for the Prometheus Pods to restart.
+1. Manually add the `storage.deckhouse.io/enabled=true` tag to the Volume Group:
+```
+vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
+```
+2. This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
+3. You can specify this resource in the [DRBDStoragePool](link to the resource) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
 ## How do I evict resources from a node?
 
@@ -141,9 +80,9 @@ Steps to configure Prometheus to use LINSTOR for storing data are as follows:
   kubectl -n d8-sds-drbd get pods | grep -v Running
   ```
 
-### How do I evict Resources from a Node without deleting It from LINSTOR and Kubernetes
+### How do I evict resources from a node without deleting it from LINSTOR and Kubernetes
 
-Run the `evict.sh` script in interactive `--delete-resources-only` mode:
+Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
 
 ```shell
 ./evict.sh --delete-resources-only
@@ -155,7 +94,7 @@ To run the `evict.sh` script in non-interactive mode, add the `--non-interactive
 ./evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
-> **Note!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the LINSTOR scheduler from creating resources on this node.
+> **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the LINSTOR scheduler from creating resources on this node.
 
 Run the following command to allow resources and pods to be scheduled on the node again:
 
@@ -171,42 +110,6 @@ Run the following command to check the *AutoplaceTarget* property for all nodes 
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
 linstor node list -s AutoplaceTarget
 ```
-
-### Evict Resources from a Node and remove it from LINSTOR and Kubernetes
-
-Run the `evict.sh` script in interactive mode with the `--delete-node` flag and enter the node to be deleted:
-
-```shell
-./evict.sh --delete-node
-```
-
-To run the `evict.sh` script in non-interactive mode, add the `--non-interactive` flag when invoking it, followed by the name of the node to delete. In this mode, the script will run automatically without waiting for the user confirmation. Example:
-
-```shell
-./evict.sh --non-interactive --delete-node --node-name "worker-1"
-```
-
-  > **Caution!** The script will delete the node from both Kubernetes and LINSTOR.
-
-In this `--delete-node` mode, resources are not physically removed from the node. To clean up the node, log in to it and do the following:
-
-  > **Caution!** These actions will destroy all your data on the node.
-
-* Retrieve and remove all the volume groups on the node that were used for the LINSTOR LVM storage pools:
-
-  ```shell
-  vgs -o+tags | awk 'NR==1;$NF~/linstor-/'
-  vgremove -y <vg names from previous command>
-  ```
-
-* Retrieve and remove all the logical volumes on the node that were used for the LINSTOR LVM_THIN storage pools:
-
-  ```shell
-  lvs -o+tags | awk 'NR==1;$NF~/linstor-/'
-  lvremove -y /dev/<vg name from previous command>/<lv name from previous command>
-  ```
-
-* To continue cleaning, follow [the instructions](../040-node-manager/faq.html#how-to-clean-up-a-node-for-adding-to-the-cluster) (starting from step two).
 
 ## Troubleshooting
 
@@ -226,7 +129,7 @@ Check the status of the `linstor-node` Pods:
 kubectl get pod -n d8-sds-drbd -l app=linstor-node
 ```
 
-If you see that some of them get stuck in `Init` state, check the DRBD version and the bashible logs on the node:
+If you see that some of them got stuck in `Init` state, check the DRBD version aw well as the bashible logs on the node:
 
 ```shell
 cat /proc/drbd
@@ -235,98 +138,82 @@ journalctl -fu bashible
 
 The most likely reasons why loading the kernel module fails:
 
-- There may be an in-tree kernel version of the DRBDv8 module pre-loaded. However, LINSTOR requires DRBDv9.
-  Check the pre-loaded module version: `cat /proc/drbd`. If the file is missing, then the module is not loaded and this is not your case.
+- You have the in-tree version of the DRBDv8 module preloaded, whereas LINSTOR requires DRBDv9.
+  Check the preloaded module version: `cat /proc/drbd`. If the file is missing, then the module is not preloaded and this is not your case.
 
 - You have Secure Boot enabled.
   Since the DRBD module we provide is compiled dynamically for your kernel (similar to dkms), it is not digitally signed.
   We do not currently support running the DRBD module with a Secure Boot enabled.
 
-### Pod cannot start with the `FailedMount` error
+### The Pod cannot start due to the `FailedMount` error
 
-#### **Pod is stuck in the `ContainerCreating` phase**
+#### **The Pod is stuck at the `ContainerCreating` phase**
 
-If the Pod is stuck in the `ContainerCreating` phase, and the following errors are displayed when the `kubectl describe pod` command is invoked:
+If the Pod is stuck at the `ContainerCreating` phase, and the following errors are displayed when the `kubectl describe pod` command is invoked:
 
 ```text
 rpc error: code = Internal desc = NodePublishVolume failed for pvc-b3e51b8a-9733-4d9a-bf34-84e0fee3168d: checking
 for exclusive open failed: wrong medium type, check device health
 ```
 
-... it means that device is still mounted to some other node.
+... it means that the device is still mounted on one ot the nodes.
 
-To check it, use the following command:
+Use the command below to see if this is the case:
 
 ```shell
+alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
 linstor resource list -r pvc-b3e51b8a-9733-4d9a-bf34-84e0fee3168d
 ```
 
-The `InUse` flag indicates which node the device is being used on.
+The `InUse` flag will point to the node on which the device is being used. You will need to manually unmount the disk on that node.
 
-#### **Pod cannot start due to missing CSI driver**
+#### **Errors of the `Input/output error` type**
 
-Here is an example of the error when running `kubectl describe pod`:
+These errors usually occur during the file system (mkfs) creation.
 
-```text
-kubernetes.io/csi: attachment for pvc-be5f1991-e0f8-49e1-80c5-ad1174d10023 failed: CSINode b-node0 does not
-contain driver linstor.csi.linbit.com
-```
-
-Check the status of the `linstor-csi-node` Pods:
-
-```shell
-kubectl get pod -n d8-sds-drbd -l app.kubernetes.io/component=csi-node
-```
-
-Most likely, they are stuck in the `Init` state, waiting for the node to change its status to `Online` in LINSTOR. Run the following command to see the node list:
-
-```shell
-linstor node list
-```
-
-If you see any nodes in the `EVICTED` state, then they have been unavailable for 2 hours. Run the following command to join them to the cluster:
-
-```shell
-linstor node rst <name>
-```
-
-#### **`Input/output`` errors**
-
-Such errors usually occur while the file system (mkfs) is being created.
-
-Check `dmesg` on the node where your Pod is running:
+Check `dmesg` on the node where the pod is being run:
 
 ```shell
 dmesg | grep 'Remote failed to finish a request within'
 ```
 
-If you get any output (there are "Remote failed to finish a request within ..." lines in the `dmesg` output), it is likely that your disk subsystem is too slow for DRBD to function properly.
+If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
-## Does the SDS-DRBD module automatically create its custom resources based on the existing Storage Pools in Linstor or Storage Classes in Kubernetes?
-No, the `SDS-DRBD` module does not automatically create or delete the `DRBDStoragePool` and `DRBDStorageClass`. Only the user can create them. The controller merely reflects the current state of the respective operation in the Status field.
+## I have deleted the DRBDStoragePool resource, yet its associated Storage Pool in the LINSTOR backend is still there. Is it supposed to be like this?
+Yes, this is the expected behavior. Currently, the `SDS-DRBD` module does not process operations when deleting the `DRBDStoragePool` resource.
 
-## There are "zones" in the spec field of the DRBDStorageClass resource. What are these?
-Zones are a custom abstraction used to define on which nodes data volumes and their replicas will be created. A node’s membership in a particular zone is displayed in the node's `Labels` under the `topology.kubernetes.io/zone` key.
+## I am unable to update the fields in the DRBDStorageClass resource spec. Is this the expected behavior?  
+Yes, this is the expected behavior. Only the `isDefault` field is editable in the `spec`. All the other fields in the resource `spec` are made immutable.
 
-## I deleted the DRBDStoragePool resource, but the corresponding Storage Pool in Linstor is still there. Is that the expected behavior?
-Yes. Currently, the `SDS-DRBD` module does not handle operations when deleting the `DRBDStoragePool` resource.
+## When you delete a DRBDStorageClass resource, its child StorageClass in Kubernetes is not deleted. What can I do in this case?
+The child StorageClass is only deleted if the status of the DRBDStorageClass resource is `Created`. Otherwise, you will need to either restore the DRBDStorageClass resource to a working state or delete the StorageClass yourself.
 
-## I cannot update the spec field of the DRBDStorageClass resource. Is this expected behavior?
-Yes, this is expected behavior. The `isDefault` field is the only one that can be modified. All other `spec` fields are immutable.
-
-## I cannot delete the DRBDStorageClass resource along with the associated Storage Class in Kubernetes. What should I do?
-Please check the `Status.Phase` field of the resource you are trying to delete. The `SDS-DRBD` controller will perform the necessary deletion operations only if the this field has the `Created` state.
-
-> The `Status.Reason`` field reflects the reasons for the different status, if any.
-
-## Do I need to manually clear the invalid Storage Pools in Linstor in case the creation via the DRDBStoragePool resource fails?
-No, our module takes care of this. We are aware that `Linstor` can create invalid `Storage Pools`. Therefore, in case of a failed creation, the controller will automatically remove the incorrectly created `Storage Pool` in `Linstor`.
-
-> If the resource fails to be validated by the controller, no creation of the Storage Pool will occur.
-
-## I noticed that when creating a Storage Pool / Storage Class in the corresponding resource, an error was displayed, but then everything was fine, and the desired entity was created. Is this expected behavior?
-Yes, this is expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
+## I noticed that when creating a Storage Pool / Storage Class in the corresponding resource, an error was displayed, but then everything was fine, and the desired entity was created. Is this the expected behavior?
+Yes, this is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
-Information about the reasons for the failure should be displayed in the `Status.Reason` field of the `DRBDStoragePool` and `DRBDStorageClass` resources. 
-If the information provided is not enough to identify the problem, refer to the controller logs.
+Information about the reasons for the failure is saved to the `Status.Reason` field of the `DRBDStoragePool` and `DRBDStorageClass` resources. 
+If the information provided is not enough to identify the problem, refer to the sds-drbd-controller logs.
+
+## Migrating to DRBDStorageClass
+
+In this module, StorageClasses are managed via the DRBDStorageClass resource. StorageClasses are not supposed to be created manually.
+
+When migrating off the Linstor module, you must delete the old StorageClasses and create new ones via the DRBDStorageClass resource according to the table below.
+
+Note that for the old StorageClass, you have to use the option from the parameter section of the StorageClass itself, whereas when creating a new one, you have to specify the corresponding option in the DRBDStorageClass.
+
+| StorageClass parameter                     | DRBDStorageClass      | Default parameter | Notes                                                     |
+|-------------------------------------------|-----------------------|-|----------------------------------------------------------------|
+| linstor.csi.linbit.com/placementCount: "1" | replication: "None"   | | A single volume replica with data will be created                  |
+| linstor.csi.linbit.com/placementCount: "2" | replication: "Availability" | | Two volume replicas with data will be created                  |
+| linstor.csi.linbit.com/placementCount: "3" | replication: "ConsistencyAndAvailability" | Yes | Three volume replicas with data will be created                   |
+| linstor.csi.linbit.com/storagePool: "name" | storagePool: "name"   | | Name of the storage pool to use for storage               |
+| linstor.csi.linbit.com/allowRemoteVolumeAccess: "false" | volumeAccess: "Local" | | Pods are not allowed to access data volumes remotely (only local access to the disk within the Node is allowed) |
+
+On top of these, the following parameters are available:
+
+- reclaimPolicy (Delete, Retain) - corresponds to the reclaimPolicy parameter of the old StorageClass
+- zones - list of zones to be used for hosting resources ( the actual names of the zones in the cloud). Please note that remote access to a volume with data is only possible within a single zone!
+- volumeAccess can be "Local" (access is strictly within the node), "EventuallyLocal" (the data replica will be synchronized on the node with the running pod a while after the start), "PreferablyLocal" (remote access to the volume with data is allowed, volumeBindingMode: WaitForFirstConsumer), "Any" (remote access to the volume with data is allowed, volumeBindingMode: Immediate).
+- If you need to use `volumeBindingMode: Immediate`, set the volumeAccess parameter of the DRBDStorageClass to `Any`.
