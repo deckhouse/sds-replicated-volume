@@ -182,19 +182,11 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 				}
 
 				// Get all resource from linstor controller
-				resources := make([]lclient.Resource, 0, 50)
-				resourcesGroups, err := lc.ResourceDefinitions.GetAll(ctx, lclient.RDGetAllRequest{})
+				resources, err := GetAllResources(ctx, lc)
 				if err != nil {
-					log.Error(err, "Warning! Couldnot recieve resource definitions list from linstor controller")
+					log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
 				}
-				for _, rg := range resourcesGroups {
-					rs, err := lc.Resources.GetAll(ctx, rg.Name)
-					if err != nil {
-						log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
-						break
-					}
-					resources = append(resources, rs...)
-				}
+				log.Info("available", "resources", resources)
 
 				// If only one resource is not expanded we couldnot remove node
 				nodeToBeDeleted := make([]bool, 0, 10)
@@ -255,25 +247,28 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 							log.Error(err, "could not get nodes from ctrl by resource name: "+res.Name)
 							break
 						}
-						log.Info("Node by res name", "nodes", nodesWithRes)
+						log.Info("Node by res name", "name", res.Name, "nodes", nodesWithRes)
 
 						// filter available nodes
 						availableNodes := getAvailableNodes(allNodes, nodesWithRes)
 						availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
+						log.Info("available", "nodes", availableNodes)
 
 						if int32(len(availableNodes)) < needToAddResourcesCount {
-							log.Info("debug info:", "available node", len(availableNodes), "need to add", needToAddResourcesCount)
 							log.Error(errors.New("not enough available nodes"), "check nodes count")
 							break
 						}
 
+						log.Info("debug info:", "available node", len(availableNodes), "need to add", needToAddResourcesCount)
+
 						g := new(errgroup.Group)
 						for i := int32(0); i < needToAddResourcesCount; i++ {
+							localIndex := i
 							g.Go(func() error {
 								resCreate := lclient.ResourceCreate{
 									Resource: lclient.Resource{
 										Name:     res.Name,
-										NodeName: availableNodes[i],
+										NodeName: availableNodes[localIndex],
 									},
 								}
 								return lc.Resources.Create(ctx, resCreate)
@@ -287,13 +282,22 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 
 						// TODO: add retries?
 
+						// TODO: new to rewrite without PlaceCount
 						// Check replicas count after add new ones
-						resGroup, err = lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
+						newResources, err := GetAllResources(ctx, lc)
 						if err != nil {
 							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
 							break
 						}
-						if desiredRelicaCount != resGroup.SelectFilter.PlaceCount {
+						currentResources = resourceFilter(newResources, func(resource lclient.Resource) bool {
+							if resource.Name == res.Name {
+								if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
+									return true
+								}
+							}
+							return false
+						})
+						if desiredRelicaCount != int32(len(currentResources)) {
 							log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
 							nodeToBeDeleted = append(nodeToBeDeleted, false)
 						} else {
@@ -303,7 +307,8 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 				}
 
 				if allSuccess(nodeToBeDeleted) {
-					err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+					// err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+					log.Info("node will be deleted", "name", drbdNodeToRemove.Name)
 					if err != nil {
 						log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
 					}
@@ -591,6 +596,22 @@ func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses s
 		}
 	}
 	return storageClassesLabels
+}
+
+func GetAllResources(ctx context.Context, lc *lclient.Client) ([]lclient.Resource, error) {
+	resources := make([]lclient.Resource, 0, 50)
+	resourcesGroups, err := lc.ResourceDefinitions.GetAll(ctx, lclient.RDGetAllRequest{})
+	if err != nil {
+		return []lclient.Resource{}, err
+	}
+	for _, rg := range resourcesGroups {
+		rs, err := lc.Resources.GetAll(ctx, rg.Name)
+		if err != nil {
+			return []lclient.Resource{}, err
+		}
+		resources = append(resources, rs...)
+	}
+	return resources, nil
 }
 
 // Filter the nodes without that already conatains resource
