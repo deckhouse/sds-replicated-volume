@@ -25,6 +25,19 @@ spec:
     # data nodes checksum to force bashible execution on nodes list change
     # {{ $.Values.sdsDrbd.internal.dataNodesChecksum }}
 
+    # Unpack package from module image and run install script
+    # bb-rp-from-module-image-install package:digest registry_auth scheme registry_address registry_path
+    # TODO: Get rid of this in favour of standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+    bb-rp-from-module-image-install() {
+      local MODULE_PACKAGE=$1
+      local REGISTRY_AUTH=$2
+      local SCHEME=$3
+      local REGISTRY_ADDRESS=$4
+      local REGISTRY_PATH=$5
+    
+      bb-rp-install $MODULE_PACKAGE
+    }
+
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
     kernel_version_in_use="$(uname -r)"
@@ -69,6 +82,11 @@ spec:
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
     SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
+    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsDrbd.registry.dockercfg }} | base64 -d | jq -r .auths[].auth | base64 -d)"
+    MODULE_SCHEME="{{ .Values.sdsDrbd.registryScheme }}"
+    MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsDrbd.registry.base }} | cut -f 1 -d '/')
+    MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsDrbd.registry.base }} | cut -f 2- -d '/')"/sds-drbd"
+
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
 
@@ -85,7 +103,12 @@ spec:
         rmmod drbd || true
       fi
 
-      if [ "${current_version}" == "${desired_version}" ]; then
+      # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+      bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsDrbd.semver }}" $MODULE_REGISTRY_AUTH $MODULE_SCHEME $MODULE_REGISTRY_ADDRESS $MODULE_REGISTRY_PATH
+
+      if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
+        bb-log-info "DRBD needs to be rebuilt"
+      else
         if grep -q -E '^drbd$' /etc/modules; then
           sed -i '/^drbd$/d' /etc/modules
         fi
@@ -96,8 +119,15 @@ spec:
       fi
     fi
 
-    bb-rp-install "drbd:{{ .Values.global.modulesImages.digests.registrypackages.drbd }}"
-    apt-get -y install make gcc bind-utils patch
+    apt-get -y install make gcc bind-utils patch mokutil
+    check_sb_state="$(mokutil --sb-state || echo "Not supported")"
+    if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
+      bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsDrbd.internal.drbdVersion }} or higher."
+      exit 0
+    fi
+
+    # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+    bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsDrbd.drbd }}" $MODULE_REGISTRY_AUTH $MODULE_SCHEME $MODULE_REGISTRY_ADDRESS $MODULE_REGISTRY_PATH
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
@@ -149,8 +179,8 @@ spec:
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
       desired_version="{{ $.Values.sdsDrbd.internal.drbdVersion }}"
 
-      if [ "${current_version}" != "${desired_version}" ]; then
-        bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired "$desired_version"), setting reboot flag"
+      if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
+        bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired minimum "$desired_version"), setting reboot flag"
         bb-flag-set reboot
       fi
     fi
