@@ -49,7 +49,7 @@ spec:
 > **Caution!** Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
 
 
-## Cross-zonal StorageClass with high data redundancy and gradual creation of local replicas
+## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
 - An example of a `DRBDStorageClass` resource:
 
@@ -78,14 +78,14 @@ spec:
 - Volume replica layout:
 ![Scheme](./images/trans-zonal.png)
 
-- Recommendations on how to use a cross-zonal StorageClass:
+- Recommendations on how to use a trans-zonal StorageClass:
 
   - A StatefulSet that consists of multiple pods, where the unavailability of one pod along with all its data may result in performance degradation and/or loss of important data. Critical services are an example of the perfect use case for such a StatefulSet. In these services, each pod stores its unique state locally, and there is no replication of this state between different pods.
 
   - For such a StatefulSet, it is recommended to use podAntiAffinity rules with the `preferredDuringSchedulingIgnoredDuringExecution` type and `topologyKey: topology.kubernetes.io/zone` type. In this case, if the cluster is stable and resources are sufficient in each zone, pods will be distributed to different zones — one per zone. If one of the zones is down, the pods will automatically migrate to a running zone where other pods of the same StatefulSet already exist. This helps prevent performance degradation and/or data loss. However, the disadvantage of such podAntiAffinity is that if only one node with a local replica fails in some zone, then the pod will most likely migrate to a node in another zone with an existing local replica rather than to a node without a local replica in the same zone and commence populating a local replica 30 minutes later.
 
-  - This StorageClass is only recommended if there is a high bandwidth (10 Gbps) and low ping (less than 25 ms) network connection between zones, and if there is no need to minimize network traffic between zones. Setting the `topology` parameter to `TransZonal` activates cross-zonal replication, which results in a significant increase in traffic between zones as compared to the `Zonal` value for the same parameter.
+  - This StorageClass is only recommended if there is a high bandwidth (10 Gbps) and low ping (less than 25 ms) network connection between zones, and if there is no need to minimize network traffic between zones. Setting the `topology` parameter to `TransZonal` activates trans-zonal replication, which results in a significant increase in traffic between zones as compared to the `Zonal` value for the same parameter.
 
   - This StorageClass is recommended if high write rates are not considered a priority. The synchronous replication protocol used in DRBD treats a read operation as completed only after receiving confirmation from all replicas of a successful write to the local disk. With three replicas distributed across different zones, the write latency will be higher than with a zonal StorageClass. The exception to this is when the network parameters within a zone and between the zones are similar.
 
-> **Caution!** Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of cross-zonal StorageClass: a pod cannot be moved to a zone that is not specified in the spec.zones of the cross-zonal StorageClass configuration.
+> **Caution!** Regardless of the StorageClass settings, you cannot migrate pods to zones without data replicas. This imposes a restriction on the use of trans-zonal StorageClass: a pod cannot be moved to a zone that is not specified in the spec.zones of the trans-zonal StorageClass configuration.
