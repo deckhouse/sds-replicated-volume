@@ -1,5 +1,5 @@
 ---
-title: "The SDS-DRBD module: FAQ"
+title: "The sds-drbd module: FAQ"
 description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? LINSTOR performance and reliability notes, comparison to Ceph. How to add existing LINSTOR LVM or LVMThin pool. How to configure Prometheus to use LINSTOR for storing data. Controller's work-flow questions.
 ---
 
@@ -183,7 +183,7 @@ dmesg | grep 'Remote failed to finish a request within'
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
 ## I have deleted the DRBDStoragePool resource, yet its associated Storage Pool in the LINSTOR backend is still there. Is it supposed to be like this?
-Yes, this is the expected behavior. Currently, the `SDS-DRBD` module does not process operations when deleting the `DRBDStoragePool` resource.
+Yes, this is the expected behavior. Currently, the `sds-drbd` module does not process operations when deleting the `DRBDStoragePool` resource.
 
 ## I am unable to update the fields in the DRBDStorageClass resource spec. Is this the expected behavior?  
 Yes, this is the expected behavior. Only the `isDefault` field is editable in the `spec`. All the other fields in the resource `spec` are made immutable.

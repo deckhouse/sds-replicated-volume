@@ -1,6 +1,6 @@
 ---
-title: "The SDS-DRBD module: Custom Resources"
-description: "The SDS-DRBD module Custom Resources: DRBDStoragePool and DRBDStorageClass."
+title: "The sds-drbd module: Custom Resources"
+description: "The sds-drbd module Custom Resources: DRBDStoragePool and DRBDStorageClass."
 ---
 
 {{< alert level="warning" >}}

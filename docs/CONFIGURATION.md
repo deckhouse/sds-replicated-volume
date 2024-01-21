@@ -1,7 +1,7 @@
 ---
-title: "The SDS-DRBD module: configuration"
+title: "The sds-drbd module: configuration"
 force_searchable: true
-description: The SDS-DRBD Deckhouse module's configuration.
+description: The sds-drbd Deckhouse module's configuration.
 ---
 
 {{< alert level="warning" >}}

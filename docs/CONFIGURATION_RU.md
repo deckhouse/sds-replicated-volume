@@ -1,7 +1,7 @@
 ---
-title: "Модуль SDS-DRBD: настройки"
+title: "Модуль sds-drbd: настройки"
 force_searchable: true
-description: Параметры настройки модуля SDS-DRBD Deckhouse.
+description: Параметры настройки модуля sds-drbd Deckhouse.
 ---
 
 {{< alert level="warning" >}}

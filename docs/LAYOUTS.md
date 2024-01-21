@@ -1,5 +1,5 @@
 ---
-title: "Module SDS-DRDB: use cases"
+title: "Module sds-drbd: use cases"
 linkTitle: "Usage cases"
 ---
 

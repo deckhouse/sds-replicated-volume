@@ -1,6 +1,6 @@
 ---
-title: "The SDS-DRDB module: configuration examples"
-description: The SDS-DRDB controller usage and work-flow examples.
+title: "The sds-drbd module: configuration examples"
+description: The sds-drbd controller usage and work-flow examples.
 ---
 
 {{< alert level="warning" >}}
@@ -11,7 +11,7 @@ The module is guaranteed to work only in the following cases:
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-Once the `SDS-DRBD` module is enabled in the Deckhouse configuration, your cluster will be automatically configured to use the `LINSTOR` backend. All that remains is to create the storage pools and StorageClass according to the instructions below.
+Once the `sds-drbd` module is enabled in the Deckhouse configuration, your cluster will be automatically configured to use the `LINSTOR` backend. All that remains is to create the storage pools and StorageClass according to the instructions below.
 
 ## Configuring the LINSTOR backend
 
@@ -162,4 +162,4 @@ In a hyperconverged infrastructure, you may want your pods to run on the same no
 The module provides a custom scheduler for such tasks. It takes into account where exactly the data is stored and tries to schedule pods first on those nodes where the data is available locally.
 Any pod that uses sds-drbd volumes will be automatically configured to use this scheduler.
 
-Data locality is determined by the `volumeAccess` parameter when the `DRDBStorageClass` resource is being created.
+Data locality is determined by the `volumeAccess` parameter when the `DRBDStorageClass` resource is being created.
