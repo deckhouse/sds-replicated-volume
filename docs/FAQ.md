@@ -119,7 +119,7 @@ linstor node list -s AutoplaceTarget
 Problems can occur at different levels of component operation.
 This simple cheat sheet will help you quickly navigate through the diagnosis of various problems with the LINSTOR-created volumes:
 
-![LINSTOR cheatsheet](../../images/041-linstor/linstor-debug-cheatsheet.svg)
+![LINSTOR cheatsheet](./images/linstor-debug-cheatsheet.svg)
 <!--- Source: https://docs.google.com/drawings/d/19hn3nRj6jx4N_haJE0OydbGKgd-m8AUSr0IqfHfT6YA/edit --->
 
 Some common problems are described below.
