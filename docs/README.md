@@ -13,8 +13,8 @@ As for any other configurations, the module may work, but its smooth operation i
 {{< /alert >}}
 
 This module manages replicated block storage based on `DRBD`. Currently, `LINSTOR` is used as a control-plane. The module allows you to create a `Storage Pool` in `LINSTOR` as well as a `StorageClass` in `Kubernetes` by creating [Kubernetes custom resources](./cr.html). 
-To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [SDS-Node-Configurator](../../sds-node-configurator/) module.
-> **Caution!** Before enabling the `sds-drbd` module, you must enable the `SDS-Node-Configurator` module.
+To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/) module.
+> **Caution!** Before enabling the `sds-drbd` module, you must enable the `sds-node-configurator` module.
 > 
 > **Caution!** The user is not allowed to configure the `LINSTOR` backend directly.
 >

@@ -15,13 +15,13 @@ Once the `sds-drbd` module is enabled in the Deckhouse configuration, your clust
 
 ## Configuring the LINSTOR backend
 
-In `Deckhouse`, the `sds-drbd-controller` handles the configuration of `LINSTOR` storage. For this, `DRBDStoragePool` and `DRBDStorageClass` [custom resources](./cr.html) are created. The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [SDS-Node-Configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
+In `Deckhouse`, the `sds-drbd-controller` handles the configuration of `LINSTOR` storage. For this, `DRBDStoragePool` and `DRBDStorageClass` [custom resources](./cr.html) are created. The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
 
 > **Caution!** The user may not configure the `LINSTOR` backend directly.
 
 ### Setting up LVM
 
-Configuration examples can be found in the [SDS-Node-Configurator](../../sds-node-configurator/stable/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](./../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
+Configuration examples can be found in the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](./../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
 
 ### Using `DRBDStoragePool` resources
 

@@ -15,13 +15,13 @@ description: "Использование и примеры работы sds-drbd
 
 ## Конфигурация бэкенда LINSTOR
 
-Конфигурация `LINSTOR` в `Deckhouse` осуществляется `sds-drbd-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `DRBDStoragePool` и `DRBDStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [SDS-Node-Configurator](../../sds-node-configurator/stable/).
+Конфигурация `LINSTOR` в `Deckhouse` осуществляется `sds-drbd-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `DRBDStoragePool` и `DRBDStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
 
 > **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
 
 ### Настройка LVM
 
-Примеры конфигурации можно найти в документации модуля [SDS-Node-Configurator](../../sds-node-configurator/stable/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
+Примеры конфигурации можно найти в документации модуля [sds-node-configurator](../../sds-node-configurator/stable/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
 
 ### Работа с ресурсами `DRBDStoragePool`
 
