@@ -1,6 +1,6 @@
 ---
-title: "Модуль SDS-DRBD: CRs"
-description: "Модуль SDS-DRBD CRs: DRBDStoragePool и DRBDStorageClass."
+title: "Модуль SDS-DRBD: Custom Resources"
+description: "Модуль SDS-DRBD Custom Resources: DRBDStoragePool и DRBDStorageClass."
 ---
 
 {{< alert level="warning" >}}
