@@ -16,7 +16,7 @@ As for any other configurations, the module may work, but its smooth operation i
 In a nutshell::
 
 - LVM is simpler and has performance comparable to that of native disk drives;
-- LVMThin allows for snapshots and overprovisioning; however, it is twice as slow.
+- LVMThin allows for snapshots and overprovisioning; however, it is significantly slower.
 
 ## How do I get info about the space used?
 
