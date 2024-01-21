@@ -41,13 +41,16 @@ There are two options:
 
 Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass](./cr.html#drbdstorageclass) custom resource.
 
-## How do I add the existing LVM or LVMThin pool?
+## How do I add the existing LVM Volume Group or LVMThin pool?
 
 1. Manually add the `storage.deckhouse.io/enabled=true` tag to the Volume Group:
-```
+
+```shell
 vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
 ```
+
 2. This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
+
 3. You can specify this resource in the [DRBDStoragePool](./cr.html#drbdstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
 ## How do I evict resources from a node?
