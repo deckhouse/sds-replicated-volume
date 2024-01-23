@@ -1,94 +1,165 @@
 ---
-title: "The SDS-DRDB module: configuration examples"
-description: The SDS-DRDB controller usage and work-flow examples.
+title: "The sds-drbd module: configuration examples"
+description: The sds-drbd controller usage and work-flow examples.
 ---
-{% alert level="warning" %}
+
+{{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:
-- if stock kernels shipped with the [supported distributions](../../supported_versions.html#linux) are used;
+- if stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux) are used;
 - if a 10 Gbps network is used.
 
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
-{% endalert %}
+{{< /alert >}}
 
-Once the module is enabled, the cluster is automatically configured to use LINSTOR. You only need to configure the storage.
+Once the `sds-drbd` module is enabled in the Deckhouse configuration, your cluster will be automatically configured to use the `LINSTOR` backend. All that remains is to create the storage pools and StorageClass according to the instructions below.
 
-## Configuring LINSTOR storage
-In `Deckhouse`, the `sds-drbd-controller` handles the configuration of `LINSTOR` storage. For this, `DRBDStoragePool` and `DRBDStorageClass` [custom resources](link to resources) are created.
+## Configuring the LINSTOR backend
 
-- To create a `Storage Pool` in `Linstor`, the user has to manually [create](#creating-drbdstoragepool-resource) the `DRBDStoragePool` resource and populate the `Spec` field by entering the pool type as well as the [LVMVolumeGroup](link to resource) resources used.
+In `Deckhouse`, the `sds-drbd-controller` handles the configuration of `LINSTOR` storage. For this, `DRBDStoragePool` and `DRBDStorageClass` [custom resources](./cr.html) are created. The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
 
-- To create a `Storage Class` in `Kubernetes`, the user has to manually [create](#creating-drbdstorageclass-resource) the `DRBDStorageClass` and populate its `Spec` field with all the necessary parameters as well as the `DRBDStoragePool` resources used.
+> **Caution!** The user may not configure the `LINSTOR` backend directly.
 
-## How the `sds-drbd-controller` works
+### Setting up LVM
 
-The controller's operations can be divided into 2 types:
+Configuration examples can be found in the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](./../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
 
-1. ### [DRBDStoragePool](resource) resources
+### Using `DRBDStoragePool` resources
+
 #### Creating a `DRBDStoragePool` resource
 
-The DRBDStoragePool resource allows you to create a Storage Pool in LINSTOR based on the [LVMVolumeGroup](link to the resource) resources you use.
-For this, the user has to manually create the resource and populate the `Spec` field (that is, to describe the desired state of the `Storage Pool` in `Linstor`).
+- To create a `Storage Pool` on specific nodes in `LINSTOR`, the user has to create a [DRBDStoragePool](./cr.html#drbdstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources used.
 
-> **Caution!** All LVMVolumeGroup resources in the Spec of the DRBDStoragePool resource must reside on different nodes. (You may not refer to multiple LVMVolumeGroup resources located on the same node).
+- An example of a resource for classic LVM volumes (Thick):
 
-The `sds-drbd-controller` will then process the `DRBDStoragePool` resource defined bby the user and create the corresponding `Storage Pool` in `Linstor`.
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStoragePool
+metadata:
+  name: data
+spec:
+  type: LVM
+  lvmvolumegroups:
+    - name: lvg-1
+    - name: lvg-2
+```
 
-> The name of the created `Storage Pool` will match the name of the created `DRBDStoragePool` resource.
+- An example of a resource for classic Thin LVM volumes:
 
-Information about the controller's progress and results is available in the Status field of the created DRBDStoragePool resource.
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStoragePool
+metadata:
+  name: thin-data
+spec:
+  type: LVMThin
+  lvmvolumegroups:
+    - name: lvg-3
+      thinpoolname: thin-pool
+    - name: lvg-4
+      thinpoolname: thin-pool
+```
 
-> Before working with LINSTOR, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error. This will prevent Storage Pools with errors from being created in LINSTOR.
+> **Caution!** All `LVMVolumeGroup` resources in the `spec` of the `DRBDStoragePool` resource must reside on different nodes. (You may not refer to multiple `LVMVolumeGroup` resources located on the same node).
+
+The `sds-drbd-controller` will then process the `DRBDStoragePool` resource defined by the user and create the corresponding `Storage Pool` in the `Linstor` backend.
+
+> The name of the `Storage Pool` being created will match the name of the created `DRBDStoragePool` resource.
 >
-> If an error occurs when creating a Storage Pool in LINSTOR, the controller will delete the invalid Storage Pool in LINSTOR.
+> The `Storage Pool` will be created on the nodes defined in the LVMVolumeGroup resources.
+
+Information about the controller's progress and results is available in the `status` field of the created `DRBDStoragePool` resource.
+
+> Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
+>
+> Invalid `Storage Pools` will not be created in `LINSTOR`.
 
 #### Updating the `DRBDStoragePool` resource
 
-You can update the existing configuration of a `Storage Pool` in `Linstor`. To do so, make the desired changes to the `Spec` field of the corresponding resource.
+You can add new `LVMVolumeGroups` to the `spec.lvmVolumeGroups` list (effectively adding new nodes to the Storage Pool).
 
-The `sds-drbd-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in `Linstor`. The results of this operation will also be reflected in the `Status` field of the `DRBDStoragePool` resource.
+The `sds-drbd-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the `Linstor` backend. The results of this operation will also be reflected in the `status` field of the `DRBDStoragePool` resource.
 
-> Note that the `Spec.Type` field of the `DRBDStoragePool` resource is **immutable**.
+> Note that the `spec.type` field of the `DRBDStoragePool` resource is **immutable**.
 >
-> The controller does not respond to changes made by the user in the `Spec.Status` resource field.
+> The controller does not respond to changes made by the user in the `status` field of the resource.
 
 #### Deleting the `DRBDStoragePool` resource
 
 Currently, the `sds-drbd-controller` does not handle the deletion of `DRBDStoragePool` resources in any way.
 
-> Deleting a resource does not affect the `Storage Pool` created for it in `Linstor`. 
+> Deleting a resource does not affect the `Storage Pool` created for it in the `Linstor` backend.
 If the user recreates the deleted resource with the same name and configuration, the controller will detect that the corresponding `Storage Pools` are already created, so no changes will be made.
-The `Status.Phase` field of the created resource will be set to `Created`.
+The `status.phase` field of the created resource will be set to `Created`.
 
-2. ### [DRBDStorageClass](resource) resources
+### Using `DRBDStorageClass` resources
 
 #### Creating a `DRBDStorageClass` resource
 
-The `DRBDStorageClass` resource allows you to create the `Storage Class` in `Kubernetes` for the `Storage Pool` in `Linstor` based on the specified `DRBDStoragePool` resources. For this, you have to manually create the resource and populate the `Spec` field to reflect the desired state of the `Storage Class` in `Kubernetes`.
+- To create a `StorageClass` in `Kubernetes`, you have to create a [DRBDStorageClass](./cr.html#drbdstorageclass) resource and fill in the `spec` field with the required parameters. (Note that you cannot manually create a StorageClass for the drbd.csi.storage.deckhouse.io CSI driver).
 
-> Before creating the `Storage Class`, the configuration user provides will be validated. If errors are found, the `Storage Class` will not be created, and information about the error will be saved to the `Status` field of the `DRBDStorageClass` resource.
+- Below is an example of a resource for creating a `StorageClass` based on local volumes only (i.e., no data can be accessed over the network) and with a high data redundancy in a cluster consisting of three zones:
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStorageClass
+metadata:
+  name: haclass
+spec:
+  storagePool: storage-pool-name
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  topology: TransZonal
+  zones:
+  - zone-a
+  - zone-b
+  - zone-c
+```
+
+The `replication` parameter is omitted since it is set to `ConsistencyAndAvailability` by default, which is consistent with high redundancy requirements.
+
+- Below is an example of a resource for creating a `StorageClass` with allowed access to data over the network and no redundancy in a cluster where there are no zones (e.g., it is a good fit for testing environments):
+
+```yaml
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: DRBDStorageClass
+metadata:
+  name: testclass
+spec:
+  replication: None
+  storagePool: storage-pool-name
+  reclaimPolicy: Delete
+  topology: Ignored
+```
+
+- More examples with different usage scenarios and layouts [can be found here](./layouts.html)
+
+> Before creating the `StorageClass`, the configuration user provides will be validated.
+> If errors are found, the `StorageClass` will not be created, and the information about the error will be saved to the `status` field of the `DRBDStorageClass` resource.
 
 The `sds-drbd-controller` will then analyze the user's `DRBDStorageClass` resource and create the corresponding `Storage Class` in `Kubernetes`.
 
-> Please note that all fields of `spec` section of the `DRBDStorageClass` resource are immutable except for the `spec.isDefault` field.
+> Please note that all fields of `spec` section of the `DRBDStorageClass` resource are **immutable** except for the `spec.isDefault` field.
 
-The `sds-drbd-controller` will automatically keep the Status field up to date to reflect the results of the ongoing operations.
+The `sds-drbd-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
 #### Updating the `DRBDStorageClass` resource
 
-Currently, the `sds-drbd-controller` only supports only changing the `isDefault` field. It is **not possible** to change other configuration parameters of the created `Storage Class` by modifying the `DRBDStorageClass` resource.
+Currently, the `sds-drbd-controller` only supports changing the `isDefault` field. It is **not possible** to change other configuration parameters of the `StorageClass` created via the `DRBDStorageClass` resource.
 
 #### Deleting the `DRBDStorageClass` resource
 
-You can delete the `Storage Class` in `Kubernetes` by removing its `DRBDStorageClass` resource. The `sds-drbd-controller` will detect that the resource has been deleted and carry out all necessary operations to properly delete its associated `Storage Class`.
+You can delete the `StorageClass` in `Kubernetes` by removing its `DRBDStorageClass` resource.
+The `sds-drbd-controller` will detect that the resource has been deleted and carry out all necessary operations to properly delete its associated `StorageClass`.
 
-> The `sds-drbd-controller` will only delete the `StorageClass` associated with the resource if the `status.Phase` field of the `DRBDStorageClass` field of the `DRBDStorageClass` resource is set to `Created`. Otherwise, the controller will not delete the `StorageClass`. The resource will **not be** deleted either.
+> The `sds-drbd-controller` will only delete the `StorageClass` associated with the resource if the `status.phase` field of the `DRBDStorageClass` resource is set to `Created`. Otherwise, the controller will only delete the `DRBDStorageClass` resource while its associated `StorageClass` will not be affected.
 
-## Additional features for applications that use LINSTOR storage
+## Additional features for applications
 
-In a hyperconverged infrastructure, you may want your Pods to run on the same nodes as their data volumes, as this will help maximize storage performance.
+### Hosting an application "closer" to the data (data locality)
 
-The linstor module provides a custom `linstor` kube-scheduler for such tasks. It takes into account where exactly the data is stored and tries to schedule Pod first on those nodes where data is available locally.
+In a hyperconverged infrastructure, you may want your pods to run on the same nodes as their data volumes, as this will help maximize storage performance.
 
-Any Pod that uses linstor volumes will be automatically configured to use the `linstor` scheduler.
+The module provides a custom scheduler for such tasks. It takes into account where exactly the data is stored and tries to schedule pods first on those nodes where the data is available locally.
+Any pod that uses sds-drbd volumes will be automatically configured to use this scheduler.
 
-Data locality is determined by the `volumeAccess` parameter in a `DRDBStorageClass` resource.
+Data locality is determined by the `volumeAccess` parameter when the `DRBDStorageClass` resource is being created.
