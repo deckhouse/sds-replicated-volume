@@ -69,7 +69,7 @@ The `sds-drbd-controller` will then process the `DRBDStoragePool` resource defin
 
 Information about the controller's progress and results is available in the `status` field of the created `DRBDStoragePool` resource.
 
-> Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error. 
+> Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
 >
 > Invalid `Storage Pools` will not be created in `LINSTOR`.
 
@@ -91,7 +91,7 @@ Currently, the `sds-drbd-controller` does not handle the deletion of `DRBDStorag
 If the user recreates the deleted resource with the same name and configuration, the controller will detect that the corresponding `Storage Pools` are already created, so no changes will be made.
 The `status.phase` field of the created resource will be set to `Created`.
 
-2. ### Using `DRBDStorageClass` resources
+### Using `DRBDStorageClass` resources
 
 #### Creating a `DRBDStorageClass` resource
 
@@ -148,7 +148,7 @@ Currently, the `sds-drbd-controller` only supports changing the `isDefault` fiel
 
 #### Deleting the `DRBDStorageClass` resource
 
-You can delete the `StorageClass` in `Kubernetes` by removing its `DRBDStorageClass` resource. 
+You can delete the `StorageClass` in `Kubernetes` by removing its `DRBDStorageClass` resource.
 The `sds-drbd-controller` will detect that the resource has been deleted and carry out all necessary operations to properly delete its associated `StorageClass`.
 
 > The `sds-drbd-controller` will only delete the `StorageClass` associated with the resource if the `status.phase` field of the `DRBDStorageClass` resource is set to `Created`. Otherwise, the controller will only delete the `DRBDStorageClass` resource while its associated `StorageClass` will not be affected.

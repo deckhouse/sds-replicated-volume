@@ -48,7 +48,6 @@ spec:
 
 > **Caution!** Regardless of the StorageClass settings, pods cannot be moved to zones without data replicas. This restricts the use of a zonal StorageClass: a pod cannot be rescheduled to another zone (even in case of a crash) from the zone where it was originally created.
 
-
 ## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
 - An example of a `DRBDStorageClass` resource:
