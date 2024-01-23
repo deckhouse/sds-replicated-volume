@@ -876,7 +876,7 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 
 		equal, message := controller.CompareDRBDStorageClassAndStorageClass(&drbdsc, storageClass)
 		Expect(equal).To(BeFalse())
-		Expect(message).To(Equal("DRBDStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(DRBDStorageClass: linstor.csi.linbit.com, StorageClass: not-equal); ReclaimPolicy are not equal(DRBDStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(DRBDStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
+		Expect(message).To(Equal("DRBDStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(DRBDStorageClass: drbd.csi.storage.deckhouse.io, StorageClass: not-equal); ReclaimPolicy are not equal(DRBDStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(DRBDStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
 	})
 
 	It("LabelNodes_set_labels", func() {

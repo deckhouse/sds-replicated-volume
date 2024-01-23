@@ -40,7 +40,7 @@ import (
 const (
 	linstorResourcesWatcherCtrlName = "linstor-resources-watcher-controller"
 	missMatchedLabel                = "storage.deckhouse.io/linstor-settings-mismatch"
-	PVCSIDriver                     = "linstor.csi.linbit.com"
+	PVCSIDriver                     = "drbd.csi.storage.deckhouse.io"
 	replicasOnSameRGKey             = "replicas_on_same"
 	replicasOnDifferentRGKey        = "replicas_on_different"
 	replicasOnSameSCKey             = "replicasOnSame"
