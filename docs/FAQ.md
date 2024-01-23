@@ -194,9 +194,8 @@ Yes, this is the expected behavior. Only the `isDefault` field is editable in th
 
 The child StorageClass is only deleted if the status of the DRBDStorageClass resource is `Created`. Otherwise, you will need to either restore the DRBDStorageClass resource to a working state or delete the StorageClass yourself.
 
-## I noticed that when creating a Storage Pool / Storage Class in the corresponding resource, an error was displayed, but then everything was fine, and the desired entity was created. Is this the expected behavior?
-
-Yes, this is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
+## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?```
+This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
 
