@@ -150,14 +150,12 @@ journalctl -fu bashible
 
 #### **Под завис на стадии `ContainerCreating`**
 
-Если под завис на стадии `ContainerCreating`, а в выводе `kubectl describe pod` есть ошибки вида:
+Если под завис на стадии `ContainerCreating`, а в выводе `kubectl describe pod` есть ошибки следующего вида, то значит устройство все еще смонтировано на одном из других узлов:
 
 ```text
 rpc error: code = Internal desc = NodePublishVolume failed for pvc-b3e51b8a-9733-4d9a-bf34-84e0fee3168d: checking
 for exclusive open failed: wrong medium type, check device health
 ```
-
-значит, устройство все еще смонтировано на одном из других узлов.
 
 Проверить это можно с помощью следующей команды:
 
