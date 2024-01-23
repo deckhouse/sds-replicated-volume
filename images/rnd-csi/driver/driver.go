@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/sirupsen/logrus"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/grpc"
 	"net"
@@ -30,6 +29,8 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"rnd-csi/pkg/logger"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sync"
 	"time"
 )
@@ -45,9 +46,7 @@ const (
 )
 
 var (
-	gitTreeState = "not a git tree"
-	commit       string
-	version      string
+	version string
 )
 
 type Driver struct {
@@ -61,20 +60,17 @@ type Driver struct {
 
 	srv     *grpc.Server
 	httpSrv http.Server
-	log     *logrus.Entry
-
-	//mounter     Mounter
-
-	//healthChecker *HealthChecker
+	log     *logger.Logger
 
 	readyMu sync.Mutex // protects ready
 	ready   bool
+	cl      client.Client
 }
 
 // NewDriver returns a CSI plugin that contains the necessary gRPC
 // interfaces to interact with Kubernetes over unix domain sockets for
 // managaing  disks
-func NewDriver(ep, driverName, address string, nodeName *string, log *logrus.Entry) (*Driver, error) {
+func NewDriver(ep, driverName, address string, nodeName *string, log *logger.Logger, cl client.Client) (*Driver, error) {
 
 	if driverName == "" {
 		driverName = DefaultDriverName
@@ -87,6 +83,7 @@ func NewDriver(ep, driverName, address string, nodeName *string, log *logrus.Ent
 		address:           address,
 		log:               log,
 		waitActionTimeout: defaultWaitActionTimeout,
+		cl:                cl,
 	}, nil
 }
 
@@ -108,7 +105,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	// remove the socket if it's already there. This can happen if we
 	// deploy a new version and the socket was created from the old running
 	// plugin.
-	d.log.WithField("socket", grpcAddr).Info("removing socket")
+	d.log.Info(fmt.Sprintf("socket %s removing socket", grpcAddr))
 	if err := os.Remove(grpcAddr); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove unix domain socket file %s, error: %s", grpcAddr, err)
 	}
@@ -122,7 +119,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	errHandler := func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		resp, err := handler(ctx, req)
 		if err != nil {
-			d.log.WithError(err).WithField("method", info.FullMethod).Error("method failed")
+			d.log.Error(err, fmt.Sprintf("method %s method failed ", info.FullMethod))
 		}
 		return resp, err
 	}
@@ -147,10 +144,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	}
 
 	d.ready = true
-	d.log.WithFields(logrus.Fields{
-		"grpc_addr": grpcAddr,
-		"http_addr": d.address,
-	}).Info("starting server")
+	d.log.Info(fmt.Sprintf("grpc_addr %s http_addr %s starting server", grpcAddr, d.address))
 
 	var eg errgroup.Group
 	eg.Go(func() error {
@@ -177,16 +171,4 @@ func (d *Driver) Run(ctx context.Context) error {
 	})
 
 	return eg.Wait()
-}
-
-func GetVersion() string {
-	return version
-}
-
-func GetCommit() string {
-	return commit
-}
-
-func GetTreeState() string {
-	return gitTreeState
 }

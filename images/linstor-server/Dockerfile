@@ -148,7 +148,7 @@ RUN { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "fal
 	 sed -r -i 's/^deb(.*)$/deb\1 contrib/' /etc/apt/sources.list && \
    apt-get update && \
 	# Install useful utilities and general dependencies
-	 apt-get install -y udev drbd-utils jq net-tools iputils-ping iproute2 dnsutils netcat sysstat curl util-linux && \
+	 apt-get install -y udev drbd-utils jq net-tools iputils-ping iproute2 dnsutils netcat sysstat curl utils-linux && \
 	# Install dependencies for optional features \
 	 apt-get install -y \
 	# cryptsetup: luks layer

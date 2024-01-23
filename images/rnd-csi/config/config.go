@@ -19,7 +19,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"strconv"
+	"rnd-csi/pkg/logger"
 )
 
 const (
@@ -30,7 +30,7 @@ const (
 type Options struct {
 	NodeName string
 	Version  string
-	LogLevel uint32
+	Loglevel logger.Verbosity
 }
 
 func NewConfig() (*Options, error) {
@@ -41,15 +41,11 @@ func NewConfig() (*Options, error) {
 		return nil, fmt.Errorf("[NewConfig] required %s env variable is not specified", NodeName)
 	}
 
-	if os.Getenv(LogLevel) == "" {
-		opts.LogLevel = 2
+	loglevel := os.Getenv(LogLevel)
+	if loglevel == "" {
+		opts.Loglevel = logger.DebugLevel
 	} else {
-		logLevel, err := strconv.ParseUint(os.Getenv(LogLevel), 10, 32)
-		if err != nil {
-			fmt.Println("error read LOG_LEVEL")
-			return nil, err
-		}
-		opts.LogLevel = uint32(logLevel)
+		opts.Loglevel = logger.Verbosity(loglevel)
 	}
 
 	opts.Version = "dev"

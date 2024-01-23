@@ -18,52 +18,62 @@ package driver
 
 import (
 	"context"
+	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 )
 
 func (d *Driver) NodeStageVolume(ctx context.Context, request *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeStageVolume")
+	return &csi.NodeStageVolumeResponse{}, nil
 }
 
 func (d *Driver) NodeUnstageVolume(ctx context.Context, request *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeUnstageVolume")
+	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
 func (d *Driver) NodePublishVolume(ctx context.Context, request *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodePublishVolume")
+	fmt.Println("------------- NodePublishVolume --------------")
+	fmt.Println(request)
+	fmt.Println("------------- NodePublishVolume --------------")
+	return &csi.NodePublishVolumeResponse{}, nil
 }
 
 func (d *Driver) NodeUnpublishVolume(ctx context.Context, request *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeUnpublishVolume")
+	fmt.Println("------------- NodeUnpublishVolume --------------")
+	fmt.Println(request)
+	fmt.Println("------------- NodeUnpublishVolume --------------")
+	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
 
 func (d *Driver) NodeGetVolumeStats(ctx context.Context, request *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeGetVolumeStats")
+	return &csi.NodeGetVolumeStatsResponse{}, nil
 }
 
 func (d *Driver) NodeExpandVolume(ctx context.Context, request *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeExpandVolume")
+	return &csi.NodeExpandVolumeResponse{}, nil
 }
 
 func (d *Driver) NodeGetCapabilities(ctx context.Context, request *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
-	//TODO implement me
-	panic("implement me")
+	d.log.Info("method NodeGetCapabilities")
+	return &csi.NodeGetCapabilitiesResponse{}, nil
 }
 
 func (d *Driver) NodeGetInfo(ctx context.Context, request *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
-	d.log.Info("method NodeGetInfo")
+	d.log.Info("method NodeGetInfo 0 2")
 	d.log.Info("hostID = ", d.hostID)
 
 	return &csi.NodeGetInfoResponse{
-		NodeId:             d.hostID,
-		MaxVolumesPerNode:  0,
-		AccessibleTopology: nil,
+		NodeId:            d.hostID,
+		MaxVolumesPerNode: 10,
+		AccessibleTopology: &csi.Topology{
+			Segments: map[string]string{
+				topologyKey: d.hostID,
+			},
+		},
 	}, nil
-
 }

@@ -18,10 +18,9 @@ package driver
 
 import (
 	"context"
-
+	"fmt"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/ptypes/wrappers"
-	"github.com/sirupsen/logrus"
 )
 
 // GetPluginInfo returns metadata of the plugin
@@ -31,15 +30,13 @@ func (d *Driver) GetPluginInfo(_ context.Context, _ *csi.GetPluginInfoRequest) (
 		VendorVersion: version,
 	}
 
-	d.log.WithFields(logrus.Fields{
-		"response": resp,
-		"method":   "get_plugin_info",
-	}).Info("get plugin info called")
+	d.log.Info(fmt.Sprintf("response : %+v ", resp))
 	return resp, nil
 }
 
 // GetPluginCapabilities returns available capabilities of the plugin
 func (d *Driver) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabilitiesRequest) (*csi.GetPluginCapabilitiesResponse, error) {
+	d.log.Info("method GetPluginCapabilities")
 	resp := &csi.GetPluginCapabilitiesResponse{
 		Capabilities: []*csi.PluginCapability{
 			{
@@ -59,6 +56,13 @@ func (d *Driver) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabi
 			{
 				Type: &csi.PluginCapability_VolumeExpansion_{
 					VolumeExpansion: &csi.PluginCapability_VolumeExpansion{
+						Type: csi.PluginCapability_VolumeExpansion_ONLINE,
+					},
+				},
+			},
+			{
+				Type: &csi.PluginCapability_VolumeExpansion_{
+					VolumeExpansion: &csi.PluginCapability_VolumeExpansion{
 						Type: csi.PluginCapability_VolumeExpansion_OFFLINE,
 					},
 				},
@@ -66,16 +70,13 @@ func (d *Driver) GetPluginCapabilities(_ context.Context, _ *csi.GetPluginCapabi
 		},
 	}
 
-	d.log.WithFields(logrus.Fields{
-		"response": resp,
-		"method":   "get_plugin_capabilities",
-	}).Info("get plugin capabitilies called")
+	d.log.Info(fmt.Sprintf("response method get_plugin_capabilities get plugin capabitilies called : %+v", resp))
 	return resp, nil
 }
 
 // Probe returns the health and readiness of the plugin
 func (d *Driver) Probe(_ context.Context, _ *csi.ProbeRequest) (*csi.ProbeResponse, error) {
-	d.log.WithField("method", "probe").Info("probe called")
+	d.log.Info("method Probe")
 	d.readyMu.Lock()
 	defer d.readyMu.Unlock()
 
