@@ -215,7 +215,7 @@ If the information provided is not enough to identify the problem, refer to the 
 
 Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using the `LINSTOR` PV during the migration.
 
-> **Plase note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all `LINSTOR` volume management functionality).
+> **Please note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all `LINSTOR` volume management functionality).
 
 ### Migration steps
 
