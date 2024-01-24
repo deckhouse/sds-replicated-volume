@@ -197,18 +197,119 @@ The child StorageClass is only deleted if the status of the DRBDStorageClass res
 ## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?```
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
+## When running commands in the LINSTOR CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
+
+In the `sds-drbd` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when LINSTOR doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
+
+```shell
+alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+linstor --help
+```
+
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
 
 Information about the reasons for the failure is saved to the `Status.Reason` field of the `DRBDStoragePool` and `DRBDStorageClass` resources.
 If the information provided is not enough to identify the problem, refer to the sds-drbd-controller logs.
 
-## Migrating to DRBDStorageClass
+## Migrating from the linstor built-in module to sds-drbd
 
-In this module, StorageClasses are managed via the DRBDStorageClass resource. StorageClasses are not supposed to be created manually.
+Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using the `LINSTOR` PV during the migration.
 
-When migrating off the Linstor module, you must delete the old StorageClasses and create new ones via the DRBDStorageClass resource according to the table below.
+> **Plase note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all `LINSTOR` volume management functionality).
 
-Note that for the old StorageClass, you have to use the option from the parameter section of the StorageClass itself, whereas when creating a new one, you have to specify the corresponding option in the DRBDStorageClass.
+### Migration steps
+
+- Make sure there are no faulty `LINSTOR` resources in the cluster. The command below should return an empty list:
+
+```shell
+alias linstor='kubectl -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
+linstor resource list --faulty
+```
+
+> **Caution!** You should fix all `LINSTOR` resources before migrating.
+- Disable the `linstor` module:
+
+```shell
+kubectl patch moduleconfig linstor --type=merge -p '{"spec": {"enabled": false}}'
+```
+
+- Wait for the `d8-linstor` namespace to be deleted.
+
+```shell
+kubectl get namespace d8-linstor
+```
+
+- Create a `ModuleConfig` resource for `sds-node-configurator`.
+
+```shell
+kubectl apply -f -<<EOF
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: sds-node-configurator
+spec:
+  enabled: true
+  version: 1
+EOF
+```
+
+- Wait for the `sds-node-configurator` module to become `Ready`.
+
+```shell
+kubectl get moduleconfig sds-node-configurator
+```
+
+- Create a `ModuleConfig` resource for `sds-drbd`.
+
+> **Caution!** If you fail to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-drbd` module settings, the value for this parameter will be derived from the `linstor` module when installing the `sds-drbd` module. If this parameter is not defined there as well, it will remain empty.
+
+```shell
+k apply -f - <<EOF
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: sds-drbd
+spec:
+  enabled: true
+  version: 1
+EOF
+```
+
+- Wait for the `sds-drbd` module to become `Ready`.
+
+```shell
+kubectl get moduleconfig sds-drbd
+```
+
+- Check the `sds-drbd` module settings
+
+```shell
+kubectl get moduleconfig sds-drbd -oyaml
+```
+
+- Wait for all pods in the `d8-sds-drbd` and `d8-sds-node-configurator` namespaces to become `Ready` or `Completed`.
+
+```shell
+kubectl get po -n d8-sds-node-configurator
+kubectl get po -n d8-sds-drbd
+```
+
+- Override the alias for the `linstor` command and check the `LINSTOR` resources:
+
+```shell
+alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+linstor resource list --faulty
+```
+
+If there are no faulty resources, then the migration was successful.
+
+### Migrating to DRBDStorageClass
+
+Note that StorageClasses in this module are managed via the `DRBDStorageClass` resource. StorageClasses should not be created manually.
+
+When migrating from the linstor module, you must delete old StorageClasses and create new ones via the `DRBDStorageClass` resource (refer to the table below).
+
+Note that in the old StorageClasses, you should pick up the option from the parameter section of the StorageClass itself, while for the new StorageClass, you should specify the corresponding option in `DRBDStorageClass`. 
 
 | StorageClass parameter                     | DRBDStorageClass      | Default parameter | Notes                                                     |
 |-------------------------------------------|-----------------------|-|----------------------------------------------------------------|
@@ -223,4 +324,10 @@ On top of these, the following parameters are available:
 - reclaimPolicy (Delete, Retain) - corresponds to the reclaimPolicy parameter of the old StorageClass
 - zones - list of zones to be used for hosting resources ( the actual names of the zones in the cloud). Please note that remote access to a volume with data is only possible within a single zone!
 - volumeAccess can be "Local" (access is strictly within the node), "EventuallyLocal" (the data replica will be synchronized on the node with the running pod a while after the start), "PreferablyLocal" (remote access to the volume with data is allowed, volumeBindingMode: WaitForFirstConsumer), "Any" (remote access to the volume with data is allowed, volumeBindingMode: Immediate).
-- If you need to use `volumeBindingMode: Immediate`, set the volumeAccess parameter of the DRBDStorageClass to `Any`.
+- If you need to use `volumeBindingMode: Immediate`, set the volumeAccess parameter of the `DRBDStorageClass` to `Any`.
+
+You can read more about working with `DRBDStorageClass` resources [here](./usage.html).
+
+### Migrating to DRBDStoragePool
+
+The `DRBDStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `DRBDStoragePool` resources, click [here](./usage.html).
