@@ -211,7 +211,7 @@ linstor --help
 Information about the reasons for the failure is saved to the `Status.Reason` field of the `DRBDStoragePool` and `DRBDStorageClass` resources.
 If the information provided is not enough to identify the problem, refer to the sds-drbd-controller logs.
 
-## Migrating from the linstor built-in module to sds-drbd
+## Migrating from the Deckhouse Kubernetes Platform [linstor](https://deckhouse.ru/documentation/v1.57/modules/041-linstor/)  built-in module to sds-drbd
 
 Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using the `LINSTOR` PV during the migration.
 
