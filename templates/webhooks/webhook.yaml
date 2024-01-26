@@ -2,9 +2,9 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: "dsc-validation"
+  name: "d8-sds-drbd-dsc-validation"
 webhooks:
-  - name: "dsc-validation.storage.deckhouse.io"
+  - name: "d8-sds-drbd-dsc-validation.storage.deckhouse.io"
     rules:
       - apiGroups: ["storage.deckhouse.io"]
         apiVersions: ["v1alpha1"]
@@ -25,9 +25,9 @@ webhooks:
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: "sc-validation"
+  name: "d8-sds-drbd-sc-validation"
 webhooks:
-  - name: "sc-validation.storage.deckhouse.io"
+  - name: "d8-sds-drbd-sc-validation.storage.deckhouse.io"
     rules:
       - apiGroups: ["storage.k8s.io"]
         apiVersions: ["v1"]
