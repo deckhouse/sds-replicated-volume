@@ -49,6 +49,7 @@ const (
 	LinstorEncryptionType     = "SSL" // "Plain"
 	reachableTimeout          = 10 * time.Second
 	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-drbd-node"
+	DRBDNodeEvictKet          = "storage.deckhouse.io/sds-drbd-evict"
 	DisklessStoragePool       = "DfltDisklessStorPool"
 )
 
@@ -117,6 +118,15 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 		return err
 	}
 
+	evictNodeSeletor := copyMap(configNodeSelector)
+	evictNodeSeletor[DRBDNodeEvictKet] = "true"
+
+	selectedKubernetesNodesForEvict, err := GetKubernetesNodesBySelector(ctx, cl, evictNodeSeletor)
+	if err != nil {
+		log.Error(err, "Failed get nodes from Kubernetes by selector:"+fmt.Sprint(evictNodeSeletor))
+		return err
+	}
+
 	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
 	if err != nil {
 		log.Error(err, "Failed get LINSTOR nodes")
@@ -140,12 +150,22 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 		log.Info("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector)) //TODO: log.Warn
 	}
 
-	// Remove logic
 	allKubernetesNodes, err := GetAllKubernetesNodes(ctx, cl)
 	if err != nil {
 		log.Error(err, "Failed get all nodes from Kubernetes")
 		return err
 	}
+
+	// Evict logic
+	drbdNodesToEvict := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodesForEvict)
+
+	err = evictDRBDNodes(ctx, cl, lc, log, drbdNodesToEvict, linstorSatelliteNodes)
+	if err != nil {
+		log.Error(err, "Failed evict DRBD nodes:")
+		return err
+	}
+
+	// Remove logic
 	drbdNodesToRemove := DiffNodeLists(allKubernetesNodes, selectedKubernetesNodes)
 
 	err = removeDRBDNodes(ctx, cl, lc, log, drbdNodesToRemove, linstorSatelliteNodes, drbdStorageClasses, drbdNodeSelector)
@@ -160,6 +180,52 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 		return err
 	}
 
+	return nil
+}
+
+func evictDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, drbdNodesToEvict v1.NodeList, linstorSatelliteNodes []lclient.Node) error {
+	// log.Debug("evictDRBDNodes: Start")
+	for _, drbdNodeToEvict := range drbdNodesToEvict.Items {
+		// log.Debug("removeDRBDNodes: Process Kubernetes node: " + drbdNodeToEvict.Name)
+
+		for _, linstorNode := range linstorSatelliteNodes {
+			if drbdNodeToEvict.Name == linstorNode.Name {
+				// #TODO: Should we add ConfigureDRBDNode here?
+				log.Info("Remove LINSTOR node: " + drbdNodeToEvict.Name)
+				nodeName := drbdNodeToEvict.Name
+				resourcesSuccessfulAdded := appendAdditionalResourceForNode(ctx, cl, lc, log, nodeName)
+
+				if resourcesSuccessfulAdded {
+					log.Info("node will be deleted", "name", drbdNodeToEvict.Name)
+
+					// delete node if all resources increased to desired count
+					//err = lc.Nodes.Delete(ctx, drbdNodeToEvict.Name)
+					//if err != nil {
+					//	log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToEvict.Name)
+					//}
+					break
+				}
+			}
+		}
+
+		//if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(drbdNodeToEvict.Labels)) {
+		//	log.Info("Kubernetes node: " + drbdNodeToEvict.Name + "  have drbd label. Unset it")
+		//	log.Error(nil, "Warning! Delete logic not yet implemented. Removal of LINSTOR nodes is prohibited.")
+		//
+		//	// TODO: now it should be uncomment?
+		//	originalNode := drbdNodeToEvict.DeepCopy()
+		//	newNode := drbdNodeToEvict.DeepCopy()
+		//	for labelKey := range drbdNodeSelector {
+		//		delete(newNode.Labels, labelKey)
+		//	}
+		//
+		//	err := cl.Patch(ctx, newNode, client.MergeFrom(originalNode))
+		//	if err != nil {
+		//		log.Error(err, "Unable unset drbd labels from node %s. "+drbdNodeToEvict.Name)
+		//	}
+		//}
+
+	}
 	return nil
 }
 
@@ -694,4 +760,15 @@ func resourceFilter(resources []lclient.Resource, f func(resource lclient.Resour
 		}
 	}
 	return filtered
+}
+
+// Make to sure we not destroy orginal NodeSelector
+func copyMap(original map[string]string) map[string]string {
+	duplicate := make(map[string]string, len(original))
+
+	for key, value := range original {
+		duplicate[key] = value
+	}
+
+	return duplicate
 }
