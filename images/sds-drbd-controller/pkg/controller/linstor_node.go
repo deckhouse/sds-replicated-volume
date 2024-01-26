@@ -172,146 +172,17 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, 
 			if drbdNodeToRemove.Name == linstorNode.Name {
 				// #TODO: Should we add ConfigureDRBDNode here?
 				log.Info("Remove LINSTOR node: " + drbdNodeToRemove.Name)
-
 				nodeName := drbdNodeToRemove.Name
+				resourcesSuccessfulAdded := appendAdditionalResourceForNode(ctx, cl, lc, log, nodeName)
 
-				overrideProps := lclient.GenericPropsModify{OverrideProps: map[string]string{"AutoplaceTarget": "false"}}
-				err := lc.Nodes.Modify(ctx, nodeName, lclient.NodeModify{GenericPropsModify: overrideProps})
-				if err != nil {
-					log.Error(err, "Warning! Couldnot set node autoplace prop to false")
-				}
-
-				// Get all resource from linstor controller
-				resources, err := GetAllResources(ctx, lc)
-				if err != nil {
-					log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
-				}
-				log.Info("available", "resources", resources)
-
-				// If only one resource is not expanded we couldnot remove node
-				nodeToBeDeleted := make([]bool, 0, 10)
-
-				for _, res := range resources {
-					if res.NodeName == nodeName && res.Props["StorPoolName"] != DisklessStoragePool {
-						resDefinition, err := lc.ResourceDefinitions.Get(ctx, res.Name)
-						if err != nil {
-							log.Error(err, "could not get resource definition from controller", res.Name)
-							break
-						}
-
-						resGroup, err := lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
-						if err != nil {
-							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
-							break
-						}
-
-						desiredRelicaCount := resGroup.SelectFilter.PlaceCount + 1
-
-						// Get current resource replicas from api and only Diskfull ones
-						currentResources := resourceFilter(resources, func(resource lclient.Resource) bool {
-							if resource.Name == res.Name {
-								if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
-									return true
-								}
-							}
-							return false
-						})
-
-						if int32(len(currentResources)) >= desiredRelicaCount {
-							log.Info("No need to add resources", "name", res.Name, "desired", desiredRelicaCount, "current", len(currentResources))
-							break
-						}
-
-						needToAddResourcesCount := desiredRelicaCount - int32(len(currentResources))
-
-						resVolumes, err := lc.ResourceDefinitions.GetVolumeDefinitions(ctx, res.Name)
-						if err != nil {
-							log.Error(err, "could not get resource volumes from controller", res.Name)
-							break
-						}
-						resVolumesSizeKb := uint64(0)
-						for _, resVol := range resVolumes {
-							resVolumesSizeKb += resVol.SizeKib
-						}
-
-						// Get nodes from resource group and calc difference with available nodes
-						allNodes, err := lc.Nodes.GetAll(ctx)
-						if err != nil {
-							log.Error(err, "could not nodes from controller")
-							break
-						}
-
-						// Get available nodes with enough disk space
-						nodesWithRes, err := getNodesByResourceName(ctx, lc, res.Name)
-						if err != nil {
-							log.Error(err, "could not get nodes from ctrl by resource name: "+res.Name)
-							break
-						}
-						log.Info("Node by res name", "name", res.Name, "nodes", nodesWithRes)
-
-						// filter available nodes
-						availableNodes := getAvailableNodes(allNodes, nodesWithRes)
-						availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
-						log.Info("available", "nodes", availableNodes)
-
-						if int32(len(availableNodes)) < needToAddResourcesCount {
-							log.Error(errors.New("not enough available nodes"), "check nodes count")
-							break
-						}
-
-						log.Info("debug info:", "available node", len(availableNodes), "need to add", needToAddResourcesCount)
-
-						g := new(errgroup.Group)
-						for i := int32(0); i < needToAddResourcesCount; i++ {
-							localIndex := i
-							g.Go(func() error {
-								resCreate := lclient.ResourceCreate{
-									Resource: lclient.Resource{
-										Name:     res.Name,
-										NodeName: availableNodes[localIndex],
-									},
-								}
-								return lc.Resources.Create(ctx, resCreate)
-							})
-						}
-						if err := g.Wait(); err == nil {
-							log.Info("successful add resources")
-						} else {
-							log.Error(err, "error while creating resources on nodes")
-						}
-
-						// TODO: add retries?
-
-						// TODO: new to rewrite without PlaceCount
-						// Check replicas count after add new ones
-						newResources, err := GetAllResources(ctx, lc)
-						if err != nil {
-							log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
-							break
-						}
-						currentResources = resourceFilter(newResources, func(resource lclient.Resource) bool {
-							if resource.Name == res.Name {
-								if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
-									return true
-								}
-							}
-							return false
-						})
-						if desiredRelicaCount != int32(len(currentResources)) {
-							log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
-							nodeToBeDeleted = append(nodeToBeDeleted, false)
-						} else {
-							nodeToBeDeleted = append(nodeToBeDeleted, true)
-						}
-					}
-				}
-
-				if allSuccess(nodeToBeDeleted) {
-					// err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+				if resourcesSuccessfulAdded {
 					log.Info("node will be deleted", "name", drbdNodeToRemove.Name)
-					if err != nil {
-						log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
-					}
+
+					// delete node if all resources increased to desired count
+					//err = lc.Nodes.Delete(ctx, drbdNodeToRemove.Name)
+					//if err != nil {
+					//	log.Error(err, "unable to remove LINSTOR node: "+drbdNodeToRemove.Name)
+					//}
 					break
 				}
 			}
@@ -630,6 +501,142 @@ func getAvailableNodes(allNodes []lclient.Node, nodesToExclude []string) []strin
 		}
 	}
 	return result
+}
+
+// For chosen node add resources that become (desires resources + 1 == current resources)
+// and return True if it's right
+func appendAdditionalResourceForNode(ctx context.Context, cl client.Client, lc *lclient.Client, log logr.Logger, nodeName string) bool {
+	overrideProps := lclient.GenericPropsModify{OverrideProps: map[string]string{"AutoplaceTarget": "false"}}
+	err := lc.Nodes.Modify(ctx, nodeName, lclient.NodeModify{GenericPropsModify: overrideProps})
+	if err != nil {
+		log.Error(err, "Warning! Couldnot set node autoplace prop to false")
+	}
+
+	// Get all resource from linstor controller
+	resources, err := GetAllResources(ctx, lc)
+	if err != nil {
+		log.Error(err, "Warning! Couldnot recieve resource list from linstor controller")
+	}
+	log.Info("available", "resources", resources)
+
+	// If only one resource is not expanded we couldnot remove node
+	nodeToBeDeleted := make([]bool, 0, 10)
+
+	for _, res := range resources {
+		if res.NodeName == nodeName && res.Props["StorPoolName"] != DisklessStoragePool {
+			resDefinition, err := lc.ResourceDefinitions.Get(ctx, res.Name)
+			if err != nil {
+				log.Error(err, "could not get resource definition from controller", res.Name)
+				break
+			}
+
+			resGroup, err := lc.ResourceGroups.Get(ctx, resDefinition.ResourceGroupName)
+			if err != nil {
+				log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
+				break
+			}
+
+			desiredRelicaCount := resGroup.SelectFilter.PlaceCount + 1
+
+			// Get current resource replicas from api and only Diskfull ones
+			currentResources := resourceFilter(resources, func(resource lclient.Resource) bool {
+				if resource.Name == res.Name {
+					if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
+						return true
+					}
+				}
+				return false
+			})
+
+			if int32(len(currentResources)) >= desiredRelicaCount {
+				log.Info("No need to add resources", "name", res.Name, "desired", desiredRelicaCount, "current", len(currentResources))
+				break
+			}
+
+			needToAddResourcesCount := desiredRelicaCount - int32(len(currentResources))
+
+			resVolumes, err := lc.ResourceDefinitions.GetVolumeDefinitions(ctx, res.Name)
+			if err != nil {
+				log.Error(err, "could not get resource volumes from controller", res.Name)
+				break
+			}
+			resVolumesSizeKb := uint64(0)
+			for _, resVol := range resVolumes {
+				resVolumesSizeKb += resVol.SizeKib
+			}
+
+			// Get nodes from resource group and calc difference with available nodes
+			allNodes, err := lc.Nodes.GetAll(ctx)
+			if err != nil {
+				log.Error(err, "could not nodes from controller")
+				break
+			}
+
+			// Get available nodes with enough disk space
+			nodesWithRes, err := getNodesByResourceName(ctx, lc, res.Name)
+			if err != nil {
+				log.Error(err, "could not get nodes from ctrl by resource name: "+res.Name)
+				break
+			}
+			log.Info("Node by res name", "name", res.Name, "nodes", nodesWithRes)
+
+			// filter available nodes
+			availableNodes := getAvailableNodes(allNodes, nodesWithRes)
+			availableNodes = filterNodesWithCapacity(ctx, lc, availableNodes, resVolumesSizeKb)
+			log.Info("available", "nodes", availableNodes)
+
+			if int32(len(availableNodes)) < needToAddResourcesCount {
+				log.Error(errors.New("not enough available nodes"), "check nodes count")
+				break
+			}
+
+			log.Info("debug info:", "available node", len(availableNodes), "need to add", needToAddResourcesCount)
+
+			g := new(errgroup.Group)
+			for i := int32(0); i < needToAddResourcesCount; i++ {
+				localIndex := i
+				g.Go(func() error {
+					resCreate := lclient.ResourceCreate{
+						Resource: lclient.Resource{
+							Name:     res.Name,
+							NodeName: availableNodes[localIndex],
+						},
+					}
+					return lc.Resources.Create(ctx, resCreate)
+				})
+			}
+			if err := g.Wait(); err == nil {
+				log.Info("successful add resources")
+			} else {
+				log.Error(err, "error while creating resources on nodes")
+			}
+
+			// TODO: add retries?
+
+			// TODO: new to rewrite without PlaceCount
+			// Check replicas count after add new ones
+			newResources, err := GetAllResources(ctx, lc)
+			if err != nil {
+				log.Error(err, "could not get resource group from controller", resDefinition.ResourceGroupName)
+				break
+			}
+			currentResources = resourceFilter(newResources, func(resource lclient.Resource) bool {
+				if resource.Name == res.Name {
+					if val, ok := res.Props["StorPoolName"]; ok && val != DisklessStoragePool {
+						return true
+					}
+				}
+				return false
+			})
+			if desiredRelicaCount != int32(len(currentResources)) {
+				log.Error(errors.New("Warning! Create not enough replicas of resource"), "error creating")
+				nodeToBeDeleted = append(nodeToBeDeleted, false)
+			} else {
+				nodeToBeDeleted = append(nodeToBeDeleted, true)
+			}
+		}
+	}
+	return allSuccess(nodeToBeDeleted)
 }
 
 func getNodesByResourceName(ctx context.Context, lc *lclient.Client, resName string) ([]string, error) {
