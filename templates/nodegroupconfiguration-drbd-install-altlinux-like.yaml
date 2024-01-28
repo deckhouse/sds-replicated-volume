@@ -82,7 +82,7 @@ spec:
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
     SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
-    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsDrbd.registry.dockercfg }} | base64 -d | jq -r .auths[].auth | base64 -d)"
+    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsDrbd.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
     MODULE_SCHEME="{{ .Values.sdsDrbd.registryScheme }}"
     MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsDrbd.registry.base }} | cut -f 1 -d '/')
     MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsDrbd.registry.base }} | cut -f 2- -d '/')"/sds-drbd"
@@ -104,7 +104,7 @@ spec:
       fi
 
       # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
-      bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsDrbd.semver }}" $MODULE_REGISTRY_AUTH $MODULE_SCHEME $MODULE_REGISTRY_ADDRESS $MODULE_REGISTRY_PATH
+      bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsDrbd.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
 
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
@@ -127,7 +127,7 @@ spec:
     fi
 
     # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
-    bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsDrbd.drbd }}" $MODULE_REGISTRY_AUTH $MODULE_SCHEME $MODULE_REGISTRY_ADDRESS $MODULE_REGISTRY_PATH
+    bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsDrbd.drbd }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
