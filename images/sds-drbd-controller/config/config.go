@@ -26,6 +26,7 @@ import (
 const (
 	ScanInterval                      = 10
 	LinstorResourcesReconcileInterval = 120
+	DRBDStorageClassWatchInterval     = 120
 	ConfigSecretName                  = "d8-sds-drbd-controller-config"
 	LinstorLeaseName                  = "linstor"
 	NodeName                          = "NODE_NAME"
@@ -39,6 +40,7 @@ const (
 type Options struct {
 	ScanInterval                      int
 	LinstorResourcesReconcileInterval int
+	DRBDStorageClassWatchInterval     int
 	ConfigSecretName                  string
 	LinstorLeaseName                  string
 	MetricsPort                       string
@@ -50,6 +52,7 @@ func NewConfig() (*Options, error) {
 	var opts Options
 	opts.ScanInterval = ScanInterval
 	opts.LinstorResourcesReconcileInterval = LinstorResourcesReconcileInterval
+	opts.DRBDStorageClassWatchInterval = DRBDStorageClassWatchInterval
 	opts.LinstorLeaseName = LinstorLeaseName
 	opts.ConfigSecretName = ConfigSecretName
 

@@ -93,7 +93,15 @@ func NewLinstorNode(
 
 }
 
-func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logger.Logger, secretNamespace string, secretName string, drbdNodeSelector map[string]string) error {
+func reconcileLinstorNodes(
+	ctx context.Context,
+	cl client.Client,
+	lc *lclient.Client,
+	log logger.Logger,
+	secretNamespace string,
+	secretName string,
+	drbdNodeSelector map[string]string,
+) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, reachableTimeout)
 	defer cancel()
 
@@ -160,8 +168,15 @@ func reconcileLinstorNodes(ctx context.Context, cl client.Client, lc *lclient.Cl
 	return nil
 }
 
-func removeDRBDNodes(ctx context.Context, cl client.Client, log logger.Logger, drbdNodesToRemove v1.NodeList, linstorSatelliteNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
-
+func removeDRBDNodes(
+	ctx context.Context,
+	cl client.Client,
+	log logger.Logger,
+	drbdNodesToRemove v1.NodeList,
+	linstorSatelliteNodes []lclient.Node,
+	drbdStorageClasses sdsapi.DRBDStorageClassList,
+	drbdNodeSelector map[string]string,
+) error {
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
 		log.Info(fmt.Sprintf("Processing the node '%s' that does not match the user-defined selector.", drbdNodeToRemove.Name))
 		log.Info(fmt.Sprintf("Checking if node '%s' is a LINSTOR node.", drbdNodeToRemove.Name))
@@ -184,10 +199,17 @@ func removeDRBDNodes(ctx context.Context, cl client.Client, log logger.Logger, d
 	return nil
 }
 
-func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.Client, log logger.Logger, selectedKubernetesNodes v1.NodeList, linstorNodes []lclient.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string) error {
-
+func AddOrConfigureDRBDNodes(
+	ctx context.Context,
+	cl client.Client,
+	lc *lclient.Client,
+	log logger.Logger,
+	selectedKubernetesNodes *v1.NodeList,
+	linstorNodes []lclient.Node,
+	drbdStorageClasses sdsapi.DRBDStorageClassList,
+	drbdNodeSelector map[string]string,
+) error {
 	for _, selectedKubernetesNode := range selectedKubernetesNodes.Items {
-
 		drbdNodeProperties := KubernetesNodeLabelsToProperties(selectedKubernetesNode.Labels)
 		findMatch := false
 
@@ -219,7 +241,12 @@ func AddOrConfigureDRBDNodes(ctx context.Context, cl client.Client, lc *lclient.
 	return nil
 }
 
-func ConfigureDRBDNode(ctx context.Context, lc *lclient.Client, linstorNode lclient.Node, drbdNodeProperties map[string]string) error {
+func ConfigureDRBDNode(
+	ctx context.Context,
+	lc *lclient.Client,
+	linstorNode lclient.Node,
+	drbdNodeProperties map[string]string,
+) error {
 	needUpdate := false
 
 	for newPropertyName, newPropertyValue := range drbdNodeProperties {
@@ -258,7 +285,12 @@ func ConfigureDRBDNode(ctx context.Context, lc *lclient.Client, linstorNode lcli
 	return nil
 }
 
-func CreateDRBDNode(ctx context.Context, lc *lclient.Client, selectedKubernetesNode v1.Node, drbdNodeProperties map[string]string) error {
+func CreateDRBDNode(
+	ctx context.Context,
+	lc *lclient.Client,
+	selectedKubernetesNode v1.Node,
+	drbdNodeProperties map[string]string,
+) error {
 	newLinstorNode := lclient.Node{
 		Name: selectedKubernetesNode.Name,
 		Type: LinstorSatelliteType,
@@ -289,7 +321,12 @@ func KubernetesNodeLabelsToProperties(kubernetesNodeLabels map[string]string) ma
 	return properties
 }
 
-func GetKubernetesSecretByName(ctx context.Context, cl client.Client, secretName string, secretNamespace string) (*v1.Secret, error) {
+func GetKubernetesSecretByName(
+	ctx context.Context,
+	cl client.Client,
+	secretName string,
+	secretNamespace string,
+) (*v1.Secret, error) {
 	secret := &v1.Secret{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      secretName,
@@ -298,15 +335,15 @@ func GetKubernetesSecretByName(ctx context.Context, cl client.Client, secretName
 	return secret, err
 }
 
-func GetKubernetesNodesBySelector(ctx context.Context, cl client.Client, nodeSelector map[string]string) (v1.NodeList, error) {
-	selectedK8sNodes := v1.NodeList{}
-	err := cl.List(ctx, &selectedK8sNodes, client.MatchingLabels(nodeSelector))
+func GetKubernetesNodesBySelector(ctx context.Context, cl client.Client, nodeSelector map[string]string) (*v1.NodeList, error) {
+	selectedK8sNodes := &v1.NodeList{}
+	err := cl.List(ctx, selectedK8sNodes, client.MatchingLabels(nodeSelector))
 	return selectedK8sNodes, err
 }
 
-func GetAllKubernetesNodes(ctx context.Context, cl client.Client) (v1.NodeList, error) {
-	allKubernetesNodes := v1.NodeList{}
-	err := cl.List(ctx, &allKubernetesNodes)
+func GetAllKubernetesNodes(ctx context.Context, cl client.Client) (*v1.NodeList, error) {
+	allKubernetesNodes := &v1.NodeList{}
+	err := cl.List(ctx, allKubernetesNodes)
 	return allKubernetesNodes, err
 }
 
@@ -320,7 +357,7 @@ func GetNodeSelectorFromConfig(secret v1.Secret) (map[string]string, error) {
 	return nodeSelector, err
 }
 
-func DiffNodeLists(leftList, rightList v1.NodeList) v1.NodeList {
+func DiffNodeLists(leftList, rightList *v1.NodeList) v1.NodeList {
 	var diff v1.NodeList
 
 	for _, leftNode := range leftList.Items {
@@ -331,7 +368,7 @@ func DiffNodeLists(leftList, rightList v1.NodeList) v1.NodeList {
 	return diff
 }
 
-func ContainsNode(nodeList v1.NodeList, node v1.Node) bool {
+func ContainsNode(nodeList *v1.NodeList, node v1.Node) bool {
 	for _, item := range nodeList.Items {
 		if item.Name == node.Name {
 			return true
@@ -347,8 +384,8 @@ func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, [
 		return nil, nil, err
 	}
 
-	linstorControllerNodes := []lclient.Node{}
-	linstorSatelliteNodes := []lclient.Node{}
+	linstorControllerNodes := make([]lclient.Node, len(linstorNodes))
+	linstorSatelliteNodes := make([]lclient.Node, len(linstorNodes))
 
 	for _, linstorNode := range linstorNodes {
 		if linstorNode.Type == LinstorControllerType {
@@ -361,7 +398,12 @@ func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, [
 	return linstorSatelliteNodes, linstorControllerNodes, nil
 }
 
-func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log logger.Logger, linstorControllerNodes []lclient.Node) error {
+func removeLinstorControllerNodes(
+	ctx context.Context,
+	lc *lclient.Client,
+	log logger.Logger,
+	linstorControllerNodes []lclient.Node,
+) error {
 	for _, linstorControllerNode := range linstorControllerNodes {
 		log.Info("removeLinstorControllerNodes: Remove LINSTOR controller node: " + linstorControllerNode.Name)
 		err := lc.Nodes.Delete(ctx, linstorControllerNode.Name)
@@ -372,7 +414,15 @@ func removeLinstorControllerNodes(ctx context.Context, lc *lclient.Client, log l
 	return nil
 }
 
-func ReconcileKubernetesNodeLabels(ctx context.Context, cl client.Client, log logger.Logger, kubernetesNode v1.Node, drbdStorageClasses sdsapi.DRBDStorageClassList, drbdNodeSelector map[string]string, isDRBDNode bool) error {
+func ReconcileKubernetesNodeLabels(
+	ctx context.Context,
+	cl client.Client,
+	log logger.Logger,
+	kubernetesNode v1.Node,
+	drbdStorageClasses sdsapi.DRBDStorageClassList,
+	drbdNodeSelector map[string]string,
+	isDRBDNode bool,
+) error {
 	labelsToAdd := make(map[string]string)
 	labelsToRemove := make(map[string]string)
 	storageClassesLabelsForNode := make(map[string]string)

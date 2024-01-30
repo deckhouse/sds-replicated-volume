@@ -149,7 +149,6 @@ func ReconcileDRBDStoragePoolEvent(ctx context.Context, cl client.Client, reques
 }
 
 func ReconcileDRBDStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, drbdsp *v1alpha1.DRBDStoragePool) error { // TODO: add shouldRequeue as returned value
-
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, drbdsp.Namespace, drbdsp.Spec.Type, drbdsp.Spec.LvmVolumeGroups)
 	if !ok {
 		drbdsp.Status.Phase = "Failed"
