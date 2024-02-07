@@ -236,10 +236,10 @@ wait_for_pods_scale_down() {
   local count=0
   local max_attempts=60
 
-  until [[ $(kubectl get pods -n "$NAMESPACE" -l app="$APP_NAME" --no-headers 2>/dev/null | wc -l) -eq 0 ]] || [[ $count -eq $max_attempts ]]; do
-    echo "Waiting for pods to be deleted in namespace=$NAMESPACE with label app="$APP_NAME"... Attempt $((count+1))/$max_attempts."
+  until [[ $(kubectl get pods -n "${NAMESPACE}" -l app="${APP_NAME}" --no-headers 2>/dev/null | wc -l) -eq 0 ]] || [[ ${count} -eq ${max_attempts} ]]; do
+    echo "Waiting for pods to be deleted in namespace=${NAMESPACE} with label app="${APP_NAME}"... Attempt ${count}/${max_attempts}."
     sleep 5
-    ((count++))
+    count=$((count + 1))
   done
   
   if [[ $count -eq $max_attempts ]]; then
