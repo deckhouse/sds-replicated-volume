@@ -50,7 +50,9 @@ const (
 )
 
 var (
-	drbdNodeSelector = map[string]string{DRBDNodeSelectorKey: ""}
+	drbdNodeSelector     = map[string]string{DRBDNodeSelectorKey: ""}
+	AllowedLabels        = []string{"kubernetes.io/hostname", "topology.kubernetes.io/region", "topology.kubernetes.io/zone"}
+	AllowedLabelPrefixes = []string{"class.storage.deckhouse.io/"}
 )
 
 func NewLinstorNode(
@@ -314,8 +316,24 @@ func KubernetesNodeLabelsToProperties(kubernetesNodeLabels map[string]string) ma
 		"Aux/registered-by": LinstorNodeControllerName,
 	}
 
+	isAllowedLabel := func(label string) bool {
+		for _, allowedLabel := range AllowedLabels {
+			if label == allowedLabel {
+				return true
+			}
+		}
+		for _, prefix := range AllowedLabelPrefixes {
+			if strings.HasPrefix(label, prefix) {
+				return true
+			}
+		}
+		return false
+	}
+
 	for k, v := range kubernetesNodeLabels {
-		properties[fmt.Sprintf("Aux/%s", k)] = v
+		if isAllowedLabel(k) {
+			properties[fmt.Sprintf("Aux/%s", k)] = v
+		}
 	}
 
 	return properties
