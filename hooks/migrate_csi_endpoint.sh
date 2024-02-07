@@ -53,21 +53,13 @@ run_trigger() {
     exit 0
   fi
   
-  set +e
-  kubectl -n ${NAMESPACE} scale deployment linstor-csi-controller --replicas 0
-  kubectl -n ${NAMESPACE} delete daemonset linstor-csi-node
-  kubectl -n ${NAMESPACE} scale deployment linstor-affinity-controller --replicas 0
-  kubectl -n ${NAMESPACE} scale deployment linstor-scheduler --replicas 0
-  kubectl -n ${NAMESPACE} scale deployment sds-drbd-controller --replicas 0
-  kubectl -n ${NAMESPACE} scale deployment linstor-scheduler-admission --replicas 0
+  delete_resource ${NAMESPACE} daemonset linstor-csi-node
+  scale_down_pods ${NAMESPACE} linstor-csi-controller
+  scale_down_pods ${NAMESPACE} linstor-affinity-controller
+  scale_down_pods ${NAMESPACE} linstor-scheduler
+  scale_down_pods ${NAMESPACE} sds-drbd-controller
+  scale_down_pods ${NAMESPACE} linstor-scheduler-admission
 
-  wait_for_pods_scale_down linstor-csi-controller ${NAMESPACE}
-  wait_for_pods_scale_down linstor-csi-node ${NAMESPACE}
-  wait_for_pods_scale_down linstor-affinity-controller ${NAMESPACE}
-  wait_for_pods_scale_down linstor-scheduler ${NAMESPACE}
-  wait_for_pods_scale_down sds-drbd-controller ${NAMESPACE}
-  wait_for_pods_scale_down linstor-scheduler-admission ${NAMESPACE}
-  set -e
 
   export temp_dir=$(mktemp -d)
   cd "$temp_dir"
@@ -102,6 +94,32 @@ run_trigger() {
   kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
 }
 
+delete_resource() {
+  local NAMESPACE=$1
+  local RESOURCE_TYPE=$2
+  local RESOURCE_NAME=$3
+
+  if kubectl get $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE > /dev/null 2>&1; then
+    echo "Deleting $RESOURCE_TYPE $RESOURCE_NAME in namespace $NAMESPACE"
+    kubectl delete $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE
+  else
+    echo "$RESOURCE_TYPE $RESOURCE_NAME does not exist in namespace $NAMESPACE"
+  fi
+}
+
+scale_down_pods() {
+  local NAMESPACE=$1
+  local APP_NAME=$2
+
+  if [[ $(kubectl get pods -n "$NAMESPACE" -l app="$APP_NAME" --no-headers 2>/dev/null | wc -l) -eq 0 ]]; then
+    echo "No pods with label app=$APP_NAME in namespace $NAMESPACE"
+    return
+  fi
+
+  echo "Scaling down pods with label app=$APP_NAME in namespace $NAMESPACE"
+  kubectl scale deployment -n "$NAMESPACE" --replicas=0 "$APP_NAME"
+  wait_for_pods_scale_down "$NAMESPACE" "$APP_NAME" 
+}
 
 migrate_storage_classes() {
   sc_list=$(kubectl get sc -o json | jq -r ".items[] | select(.provisioner == \"$old_driver_name\") | .metadata.name")
@@ -199,18 +217,21 @@ migrate_pvc_pv() {
 
 
 backup() {
-  echo "Backup $1"
-  tar -czf - -C "$2/" . | split -b 100k - "$1.tar.gz.part."
-  for part in "$1.tar.gz.part."*; do
+  resource_name=$1
+  path=$2
+
+  echo "Backup $resource_name to secrets"
+  tar -czf - -C "${path}/" . | split -b 100k - "$1.tar.gz.part."
+  for part in "${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
     echo "Creating secret for $part_name"
-    kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${1}-$part_name" --from-file="$part"
+    kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${part_name}" --from-file="${part}"
   done
 }
 
 wait_for_pods_scale_down() {
-  local APP_NAME=$1
-  local NAMESPACE=$2
+  local NAMESPACE=$1
+  local APP_NAME=$2
 
   local count=0
   local max_attempts=60
