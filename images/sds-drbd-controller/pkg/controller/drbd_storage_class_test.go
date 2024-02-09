@@ -464,6 +464,137 @@ var _ = Describe(controller.DRBDStorageClassControllerName, func() {
 		Expect(mes).To(Equal("Validation of DRBDStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "))
 	})
 
+	It("ValidateDRBDStorageClass_new_drbdsc_is_default_default_drbdsc_is_already_exist_validation_failed", func() {
+		testName := generateTestName()
+		drbdsc := validSpecDrbdscTemplate
+		drbdsc.Name = testName
+		drbdsc.Spec.IsDefault = true
+
+		err := cl.Create(ctx, &drbdsc)
+		if Expect(err).NotTo(HaveOccurred()) {
+			defer func() {
+				err = cl.Delete(ctx, &drbdsc)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+			}()
+		}
+
+		newDrbdscName := generateTestName()
+		dnewDrbds := validSpecDrbdscTemplate
+		dnewDrbds.Name = newDrbdscName
+		dnewDrbds.Spec.IsDefault = true
+		zones := map[string]struct{}{
+			"first":  {},
+			"second": {},
+			"third":  {},
+		}
+
+		validation, msg := controller.ValidateDRBDStorageClass(ctx, cl, &dnewDrbds, zones)
+		Expect(validation).Should(BeFalse())
+		Expect(msg).To(Equal(fmt.Sprintf("Validation of DRBDStorageClass failed: Conflict with other default DRBDStorageClasses: %s; StorageClasses: ", drbdsc.Name)))
+	})
+
+	It("ValidateDRBDStorageClass_new_drbdsc_is_default_default_drbdsc_with_same_name_is_already_exist_validation_passed", func() {
+		testName := generateTestName()
+		drbdsc := validSpecDrbdscTemplate
+		drbdsc.Name = testName
+		drbdsc.Spec.IsDefault = true
+
+		err := cl.Create(ctx, &drbdsc)
+		if Expect(err).NotTo(HaveOccurred()) {
+			defer func() {
+				err = cl.Delete(ctx, &drbdsc)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+			}()
+		}
+
+		newDrbdscName := testName
+		dnewDrbds := validSpecDrbdscTemplate
+		dnewDrbds.Name = newDrbdscName
+		dnewDrbds.Spec.IsDefault = true
+		zones := map[string]struct{}{
+			"first":  {},
+			"second": {},
+			"third":  {},
+		}
+
+		validation, _ := controller.ValidateDRBDStorageClass(ctx, cl, &dnewDrbds, zones)
+		Expect(validation).Should(BeTrue())
+	})
+
+	It("ValidateDRBDStorageClass_new_drbdsc_is_default_default_sc_is_already_exist_validation_failed", func() {
+		sc := storagev1.StorageClass{
+			TypeMeta: metav1.TypeMeta{},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: generateTestName(),
+				Annotations: map[string]string{
+					controller.DefaultStorageClassAnnotationKey: "true",
+				},
+			},
+		}
+
+		err := cl.Create(ctx, &sc)
+		if Expect(err).NotTo(HaveOccurred()) {
+			defer func() {
+				err = cl.Delete(ctx, &sc)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+			}()
+		}
+
+		dnewDrbds := validSpecDrbdscTemplate
+		dnewDrbds.Name = generateTestName()
+		dnewDrbds.Spec.IsDefault = true
+		zones := map[string]struct{}{
+			"first":  {},
+			"second": {},
+			"third":  {},
+		}
+
+		validation, msg := controller.ValidateDRBDStorageClass(ctx, cl, &dnewDrbds, zones)
+		Expect(validation).Should(BeFalse())
+		Expect(msg).To(Equal(fmt.Sprintf("Validation of DRBDStorageClass failed: Conflict with other default DRBDStorageClasses: ; StorageClasses: %s", sc.Name)))
+	})
+
+	It("ValidateDRBDStorageClass_new_drbdsc_is_default_default_sc_with_same_name_is_already_exist_validation_passed", func() {
+		testName := generateTestName()
+		sc := storagev1.StorageClass{
+			TypeMeta: metav1.TypeMeta{},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: testName,
+				Annotations: map[string]string{
+					controller.DefaultStorageClassAnnotationKey: "true",
+				},
+			},
+		}
+
+		err := cl.Create(ctx, &sc)
+		if Expect(err).NotTo(HaveOccurred()) {
+			defer func() {
+				err = cl.Delete(ctx, &sc)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+			}()
+		}
+
+		dnewDrbds := validSpecDrbdscTemplate
+		dnewDrbds.Name = testName
+		dnewDrbds.Spec.IsDefault = true
+		zones := map[string]struct{}{
+			"first":  {},
+			"second": {},
+			"third":  {},
+		}
+
+		validation, _ := controller.ValidateDRBDStorageClass(ctx, cl, &dnewDrbds, zones)
+		Expect(validation).Should(BeTrue())
+	})
+
 	It("ValidateDRBDStorageClass_Correct_spec_Returns_true", func() {
 		testName := generateTestName()
 		drbdsc := validSpecDrbdscTemplate

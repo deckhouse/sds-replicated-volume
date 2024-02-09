@@ -101,6 +101,8 @@ const (
 
 	Created = "Created"
 	Failed  = "Failed"
+
+	DefaultStorageClassAnnotationKey = "storageclass.kubernetes.io/is-default-class"
 )
 
 func NewDRBDStorageClass(
@@ -349,27 +351,14 @@ func ValidateDRBDStorageClass(ctx context.Context, cl client.Client, drbdsc *v1a
 	failedMsgBuilder.WriteString("Validation of DRBDStorageClass failed: ")
 
 	if drbdsc.Spec.IsDefault {
-		storageClass, err := GetStorageClass(ctx, cl, drbdsc.Namespace, drbdsc.Name)
-		if err != nil && !errors.IsNotFound(err) {
+		drbdscNames, scNames, err := findAnyDefaultStorageClassEntities(ctx, cl, drbdsc.Name)
+		if err != nil {
 			validationPassed = false
-			failedMsgBuilder.WriteString(fmt.Sprintf("Unable to get StorageClass wit name: %s. Error: %s; ", drbdsc.Name, err.Error()))
+			failedMsgBuilder.WriteString(fmt.Sprintf("Unable to find default DRBDStorageClasses and Kube StorageClasses. Error: %s; ", err.Error()))
 		} else {
-			isDefault := "false"
-			exists := false
-			if storageClass != nil {
-				isDefault, exists = storageClass.Annotations["storageclass.kubernetes.io/is-default-class"]
-			}
-			if !exists || isDefault != "true" {
-				defaultDRBDSCNames, err := findDefaultDRBDStorageClasses(ctx, cl, drbdsc.Name)
-				if err != nil {
-					validationPassed = false
-					failedMsgBuilder.WriteString(fmt.Sprintf("Unable to find default StoragePool. Error: %s; ", err.Error()))
-				} else {
-					if len(defaultDRBDSCNames) > 0 {
-						validationPassed = false
-						failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default DRBDStorageClasses: %s; ", strings.Join(defaultDRBDSCNames, ",")))
-					}
-				}
+			if len(drbdscNames) > 0 || len(scNames) > 0 {
+				validationPassed = false
+				failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default DRBDStorageClasses: %s; StorageClasses: %s", strings.Join(drbdscNames, ","), strings.Join(scNames, ",")))
 			}
 		}
 	}
@@ -597,14 +586,12 @@ func RemoveString(slice []string, s string) (result []string) {
 	return
 }
 
-func findDefaultDRBDStorageClasses(ctx context.Context, cl client.Client, currentDRBDSCName string) ([]string, error) {
+func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, currentDRBDSCName string) (defaultDRBDSCNames []string, defaultSCNames []string, err error) {
 	drbdscList := &v1alpha1.DRBDStorageClassList{}
-	err := cl.List(ctx, drbdscList)
+	err = cl.List(ctx, drbdscList)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	var defaultDRBDSCNames []string
 
 	for _, drbdsc := range drbdscList.Items {
 		if drbdsc.Name != currentDRBDSCName && drbdsc.Spec.IsDefault {
@@ -612,7 +599,20 @@ func findDefaultDRBDStorageClasses(ctx context.Context, cl client.Client, curren
 		}
 	}
 
-	return defaultDRBDSCNames, nil
+	scList := &storagev1.StorageClassList{}
+	err = cl.List(ctx, scList)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for _, sc := range scList.Items {
+		isDefault := sc.Annotations[DefaultStorageClassAnnotationKey]
+		if sc.Name != currentDRBDSCName && isDefault == "true" {
+			defaultSCNames = append(defaultSCNames, sc.Name)
+		}
+	}
+
+	return defaultDRBDSCNames, defaultSCNames, nil
 }
 
 func makeStorageClassDefault(ctx context.Context, cl client.Client, drbdsc *v1alpha1.DRBDStorageClass) error {
@@ -623,15 +623,15 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, drbdsc *v1al
 	}
 
 	for _, sc := range storageClassList.Items {
-		_, isDefault := sc.Annotations["storageclass.kubernetes.io/is-default-class"]
+		_, isDefault := sc.Annotations[DefaultStorageClassAnnotationKey]
 
 		if sc.Name == drbdsc.Name && !isDefault {
 			if sc.Annotations == nil {
 				sc.Annotations = make(map[string]string)
 			}
-			sc.Annotations["storageclass.kubernetes.io/is-default-class"] = "true"
+			sc.Annotations[DefaultStorageClassAnnotationKey] = "true"
 		} else if sc.Name != drbdsc.Name && isDefault {
-			delete(sc.Annotations, "storageclass.kubernetes.io/is-default-class")
+			delete(sc.Annotations, DefaultStorageClassAnnotationKey)
 		} else {
 			continue
 		}
