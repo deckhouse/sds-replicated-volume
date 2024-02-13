@@ -138,6 +138,8 @@ migrate_storage_classes() {
 
   backup storage-classes "${temp_dir}/storage_classes" "${temp_dir}"
 
+  echo "Starting migration of StorageClasses..."
+
   for storage_class in $sc_list; do
     kubectl delete sc ${storage_class}
     kubectl create -f  ${storage_class}.yaml
@@ -178,6 +180,8 @@ migrate_pvc_pv() {
     done
 
     backup pvc-pv "${temp_dir}/pvc_pv" "${temp_dir}"
+
+    echo "Starting migration of PVs/PVCs..."
 
     for pvc_pv in $pvc_pv_list; do
       old_ifs=$IFS
