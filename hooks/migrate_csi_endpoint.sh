@@ -183,11 +183,16 @@ migrate_pvc_pv() {
       namespace=${array[0]}
       pvc=${array[1]}
       pv=${array[2]}
+      echo "Deleting pv: $pv"
       kubectl delete pv $pv --wait=false # the pv will stuck in Terminating state
+      echo "Deleting finalizer from pv: $pv"
       kubectl patch pv $pv --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
+      echo "Patching annotations in pvc: $pvc"
       kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
       kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
+      echo "Recreating pv: $pv"
       kubectl create -f pv-${pv}.yaml
+      echo "Deleting annotation from pvc $pvc to trigger pvc/pv binding"
       kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bind-completed"}]'
       # kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bound-by-controller"}]'
 
