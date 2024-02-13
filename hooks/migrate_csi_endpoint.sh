@@ -104,7 +104,7 @@ delete_resource() {
   if kubectl get $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE > /dev/null 2>&1; then
     echo "Deleting $RESOURCE_TYPE $RESOURCE_NAME in namespace $NAMESPACE"
     kubectl delete $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE
-    wait_for_pods_scale_down "$NAMESPACE" "$APP_NAME"
+    wait_for_pods_scale_down "$NAMESPACE" "$RESOURCE_NAME"
   else
     echo "$RESOURCE_TYPE $RESOURCE_NAME does not exist in namespace $NAMESPACE"
   fi
@@ -136,7 +136,7 @@ migrate_storage_classes() {
     sed -i "s/${old_driver_name}/${new_driver_name}/" ${storage_class}.yaml
   done
 
-  backup storage-classes "${temp_dir}/storage_classes"
+  backup storage-classes "${temp_dir}/storage_classes" "${temp_dir}"
 
   for storage_class in $sc_list; do
     kubectl delete sc ${storage_class}
@@ -177,7 +177,7 @@ migrate_pvc_pv() {
       IFS=$old_ifs
     done
 
-    backup pvc-pv "${temp_dir}/pvc_pv"
+    backup pvc-pv "${temp_dir}/pvc_pv" "${temp_dir}"
 
     for pvc_pv in $pvc_pv_list; do
       old_ifs=$IFS
@@ -227,14 +227,16 @@ migrate_pvc_pv() {
 backup() {
   resource_name=$1
   path=$2
+  archive_dir=$3
 
-  echo "Backup $resource_name to secrets"
-  tar -czf - -C "${path}/" . | split -b 100k - "$1.tar.gz.part."
-  for part in "${resource_name}.tar.gz.part."*; do
+  echo "Creating archive of $resource_name resources from ${path}, storing in ${archive_dir}, and splitting it into parts of 100kB each."
+  tar -czf - -C "${path}/" . | split -b 100k - "${archive_dir}/${resource_name}.tar.gz.part."
+  for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
-    echo "Creating secret for $part_name"
+    echo "Creating secret from part $part_name, file ${part}, in namespace ${NAMESPACE_FOR_BACKUP}."
     kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${part_name}" --from-file="${part}"
   done
+
 }
 
 wait_for_pods_scale_down() {
