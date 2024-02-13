@@ -102,6 +102,7 @@ delete_resource() {
   if kubectl get $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE > /dev/null 2>&1; then
     echo "Deleting $RESOURCE_TYPE $RESOURCE_NAME in namespace $NAMESPACE"
     kubectl delete $RESOURCE_TYPE $RESOURCE_NAME -n $NAMESPACE
+    wait_for_pods_scale_down "$NAMESPACE" "$APP_NAME"
   else
     echo "$RESOURCE_TYPE $RESOURCE_NAME does not exist in namespace $NAMESPACE"
   fi
@@ -118,7 +119,7 @@ scale_down_pods() {
 
   echo "Scaling down pods with label app=$APP_NAME in namespace $NAMESPACE"
   kubectl scale deployment -n "$NAMESPACE" --replicas=0 "$APP_NAME"
-  wait_for_pods_scale_down "$NAMESPACE" "$APP_NAME" 
+  wait_for_pods_scale_down "$NAMESPACE" "$APP_NAME"
 }
 
 migrate_storage_classes() {
