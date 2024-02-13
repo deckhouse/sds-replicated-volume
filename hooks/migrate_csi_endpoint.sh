@@ -75,7 +75,9 @@ run_trigger() {
   echo volumeattachments_list=$volumeattachments_list
 
   for attach in $volumeattachments_list; do
+    echo "Deleting volumeattachment: $attach"
     kubectl delete volumeattachments.storage.k8s.io ${attach} --wait=false
+    echo "Deleting finalizer from volumeattachment: $attach"
     kubectl patch volumeattachments.storage.k8s.io ${attach} --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
   done
 
