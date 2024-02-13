@@ -32,7 +32,7 @@ properties:
             type: string
             default: ""
             description: |
-              Hash of affected PVs. Used to determine if migration hook should be run again.
+              Hash of affected PVs. Used to determine if bashible migration step should be run.
       httpsClientCert:
         type: object
         default: {}
