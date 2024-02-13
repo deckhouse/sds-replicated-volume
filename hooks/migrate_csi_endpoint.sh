@@ -63,7 +63,7 @@ run_trigger() {
 
   export temp_dir=$(mktemp -d)
   cd "$temp_dir"
-  echo $temp_dir
+  echo "temporary dir: $temp_dir"
 
   migrate_storage_classes
   migrate_pvc_pv
