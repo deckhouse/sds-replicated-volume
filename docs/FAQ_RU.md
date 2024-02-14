@@ -202,7 +202,40 @@ alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- lins
 linstor --help
 ```
 
-## 
+## Поды компонентов sds-drbd не создаются на нужной мне ноде.
+
+С высокой вероятностью проблемы связаны с метками на нодах.
+
+- Проверьте [dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) в настройках модуля:
+
+```shell
+kubectl get mc sds-drbd -o=jsonpath={.spec.settings.dataNodes.nodeSelector}
+```
+
+- Проверьте селекторы, которые использует `sds-drbd-controller`:
+
+```shell
+kubectl -n d8-sds-drbd get secret d8-sds-drbd-controller-config  -o jsonpath='{.data.config}' | base64 --decode
+
+```
+
+- В секрете `d8-sds-drbd-controller-config` должны быть селекторы, которые указаны в настройках модуля, а так же дополнительно селектор `kubernetes.io/os: linux`.
+
+- Необходимо проверить, что на нужной ноде есть все указанные в секрете `d8-sds-drbd-controller-config` метки:
+
+```shell
+kubectl get node worker-0 --show-labels
+```
+
+- Если этих меток нет, то необходимо добавить метки либо через шаблоны в `NodeGroup` либо добавив метку непосредственно на ноду.
+
+- Если метки есть, то необходимо проверить, есть ли на нужной ноде метка `storage.deckhouse.io/sds-drbd-node=`. Если метки нет, то необходимо проверить, запущен ли sds-drbd-controller и если запущен, то проверить его логи:
+
+```shell
+kubectl -n d8-sds-drbd get po -l app=sds-drbd-controller
+kubectl -n d8-sds-drbd logs -l app=sds-drbd-controller
+```
+
 
 ## Я не нашел ответа на свой вопрос и испытываю проблемы с работой модуля. Что делать?
 
