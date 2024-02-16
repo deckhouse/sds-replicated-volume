@@ -17,6 +17,6 @@ properties:
       enabled:
         description: Включение резервного копирования БД модуля
       retentionCount:
-        description: Количество  резервных копий для хранения
+        description: Количество резервных копий для хранения
       schedule:
         description: Расписание резервного копирования
