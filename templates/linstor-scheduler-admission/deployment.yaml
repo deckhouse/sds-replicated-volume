@@ -73,6 +73,7 @@ spec:
         args:
         - -tls-cert-file=/etc/webhook/certs/tls.crt
         - -tls-key-file=/etc/webhook/certs/tls.key
+        - -driver=drbd.csi.storage.deckhouse.io
         image: {{ include "helm_lib_module_image" (list . "linstorSchedulerAdmission") }}
         imagePullPolicy: IfNotPresent
         ports:
