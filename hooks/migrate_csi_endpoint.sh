@@ -25,6 +25,8 @@ run_trigger() {
   export new_driver_name="drbd.csi.storage.deckhouse.io"
   export old_attacher="linstor-csi-linbit-com"
   export new_attacher="drbd-csi-storage-deckhouse-io"
+  export old_snapshot_class="linstor"
+  export new_snapshot_class="sds-drbd"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
   export SECRET_NAME="csi-migration-finished"
@@ -67,19 +69,12 @@ run_trigger() {
 
   migrate_storage_classes
   migrate_pvc_pv
+  
 
   nodes_with_volumes=$(kubectl get volumeattachments -o=jsonpath='{range .items[*]}{@.metadata.name}{"\t"}{@.spec.attacher}{"\t"}{@.status.attached}{"\t"}{@.spec.nodeName}{"\n"}{end}' | grep "${old_driver_name}" | grep 'true' | awk '{print $4}' | sort | uniq)
   echo nodes_with_volumes=$nodes_with_volumes
 
-  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r ".items[] | select(.spec.attacher == \"$old_driver_name\") | .metadata.name")
-  echo volumeattachments_list=$volumeattachments_list
-
-  for attach in $volumeattachments_list; do
-    echo "Deleting volumeattachment: $attach"
-    kubectl delete volumeattachments.storage.k8s.io ${attach} --wait=false
-    echo "Deleting finalizer from volumeattachment: $attach"
-    kubectl patch volumeattachments.storage.k8s.io ${attach} --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
-  done
+  delete_old_volume_attachments
 
 
   for node in $nodes_with_volumes; do
@@ -227,6 +222,17 @@ migrate_pvc_pv() {
   fi
 }
 
+delete_old_volume_attachments(){
+  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r ".items[] | select(.spec.attacher == \"$old_driver_name\") | .metadata.name")
+  echo volumeattachments_list=$volumeattachments_list
+
+  for attach in $volumeattachments_list; do
+    echo "Deleting volumeattachment: $attach"
+    kubectl delete volumeattachments.storage.k8s.io ${attach} --wait=false
+    echo "Deleting finalizer from volumeattachment: $attach"
+    kubectl patch volumeattachments.storage.k8s.io ${attach} --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
+  done
+}
 
 backup() {
   resource_name=$1
