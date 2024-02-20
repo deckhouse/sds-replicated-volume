@@ -239,7 +239,7 @@ kubectl -n d8-sds-drbd logs -l app=sds-drbd-controller
 
 ## Я не нашел ответа на свой вопрос и испытываю проблемы с работой модуля. Что делать?
 
-Информация о причинах неудавшейся операции должна быть отображена в поле `status.reason` ресурсов `DRBDStoragePool` и `DRBDStorageClass`.
+Информация о причинах неудавшейся операции должна отображаться в поле `status.reason` ресурсов `DRBDStoragePool` и `DRBDStorageClass`.
 Если предоставленной информации не хватает для идентификации проблемы, вы можете обратиться к логам sds-drbd-controller.
 
 ## Как выполнить миграцию со встроенного модуля [linstor](https://deckhouse.ru/documentation/v1.57/modules/041-linstor/) Deckhouse Kubernetes Platform на модуль sds-drbd?
