@@ -227,7 +227,7 @@ kubectl -n d8-sds-drbd get secret d8-sds-drbd-controller-config  -o jsonpath='{.
 kubectl get node worker-0 --show-labels
 ```
 
-- Если этих меток нет, то необходимо добавить метки либо через шаблоны в `NodeGroup` либо добавив метку непосредственно на ноду.
+- Если меток нет, то необходимо добавить метки через шаблоны в `NodeGroup` или на ноду.
 
 - Если метки есть, то необходимо проверить, есть ли на нужной ноде метка `storage.deckhouse.io/sds-drbd-node=`. Если метки нет, то необходимо проверить, запущен ли sds-drbd-controller и если запущен, то проверить его логи:
 
