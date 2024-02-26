@@ -433,7 +433,7 @@ func CompareDRBDStorageClassAndStorageClass(drbdsc *v1alpha1.DRBDStorageClass, s
 	if !reflect.DeepEqual(storageClass.Parameters, newStorageClass.Parameters) {
 		// TODO: add diff
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Parameters are not equal (DRBDStorageClass parameters: %+v, StorageClass parameters: %v); ", newStorageClass.Parameters, storageClass.Parameters))
+		failedMsgBuilder.WriteString(fmt.Sprintf("Parameters are not equal (DRBDStorageClass parameters: %+v, StorageClass parameters: %+v); ", newStorageClass.Parameters, storageClass.Parameters))
 	}
 
 	if storageClass.Provisioner != newStorageClass.Provisioner {
