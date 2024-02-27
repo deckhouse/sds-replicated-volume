@@ -97,7 +97,7 @@ before_script:
 # Vars =================================================================================================================
 
 variables:
-  MODULES_MODULE_NAME: sds-drbd
+  MODULES_MODULE_NAME: sds-replicated-volume
 
 # DEV registry
 .dev_vars:

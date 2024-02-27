@@ -1,6 +1,6 @@
 ---
-title: "Модуль sds-drbd: примеры конфигурации"
-description: "Использование и примеры работы sds-drbd-controller."
+title: "Модуль sds-replicated-volume: примеры конфигурации"
+description: "Использование и примеры работы sds-replicated-volume-controller."
 ---
 
 {{< alert level="warning" >}}
@@ -11,11 +11,11 @@ description: "Использование и примеры работы sds-drbd
 Работоспособность модуля в других условиях возможна, но не гарантируется.
 {{< /alert >}}
 
-После включения модуля `sds-drbd` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать пулы хранения и StorageClass по инструкции ниже.
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать пулы хранения и StorageClass по инструкции ниже.
 
 ## Конфигурация бэкенда LINSTOR
 
-Конфигурация `LINSTOR` в `Deckhouse` осуществляется `sds-drbd-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `DRBDStoragePool` и `DRBDStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
+Конфигурация `LINSTOR` в `Deckhouse` осуществляется `sds-replicated-volume-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
 
 > **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
 
@@ -23,17 +23,17 @@ description: "Использование и примеры работы sds-drbd
 
 Примеры конфигурации можно найти в документации модуля [sds-node-configurator](../../sds-node-configurator/stable/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
 
-### Работа с ресурсами `DRBDStoragePool`
+### Работа с ресурсами `ReplicatedStoragePool`
 
-#### Создание ресурса `DRBDStoragePool`
+#### Создание ресурса `ReplicatedStoragePool`
 
-- Для создания `Storage Pool` на определеных узлах в `LINSTOR` пользователь создает ресурс [DRBDStoragePool](./cr.html#drbdstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup).
+- Для создания `Storage Pool` на определеных узлах в `LINSTOR` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup).
 
 - Пример ресурса для классических LVM-томов (Thick):
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStoragePool
+kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
@@ -47,7 +47,7 @@ spec:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStoragePool
+kind: ReplicatedStoragePool
 metadata:
   name: thin-data
 spec:
@@ -59,47 +59,47 @@ spec:
       thinpoolname: thin-pool
 ```
 
-> Внимание! Все ресурсы `LVMVolumeGroup`, указанные в `spec` ресурса `DRBDStoragePool`, должны быть на разных узлах. (Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле).
+> Внимание! Все ресурсы `LVMVolumeGroup`, указанные в `spec` ресурса `ReplicatedStoragePool`, должны быть на разных узлах. (Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле).
 
-Результатом обработки ресурса `DRBDStoragePool` станет создание необходимого `Storage Pool` в бэкенде `LINSTOR`.
+Результатом обработки ресурса `ReplicatedStoragePool` станет создание необходимого `Storage Pool` в бэкенде `LINSTOR`.
 
-> Имя созданного `Storage Pool` будет соответствовать имени созданного ресурса `DRBDStoragePool`.
+> Имя созданного `Storage Pool` будет соответствовать имени созданного ресурса `ReplicatedStoragePool`.
 >
 > Узлы, на которых будет создан `Storage Pool`, будут взяты из ресурсов LVMVolumeGroup.
 
-Информацию о ходе работы контроллера и ее результатах можно посмотреть в поле `status` созданного ресурса `DRBDStoragePool`.
+Информацию о ходе работы контроллера и ее результатах можно посмотреть в поле `status` созданного ресурса `ReplicatedStoragePool`.
 
 > Перед фактической работой с `LINSTOR` контроллер провалидирует предоставленную ему конфигурацию и в случае ошибки предоставит информацию о причинах неудачи.
 >
 > Невалидные `Storage Pool'ы` не будут созданы в `LINSTOR`.
 
-#### Обновление ресурса `DRBDStoragePool`
+#### Обновление ресурса `ReplicatedStoragePool`
 
 Пользователь имеет возможность добавлять новые `LVMVolumeGroup` в список `spec.lvmVolumeGroups` (фактически добавить новые узлы в Storage Pool).
 
-После внесения изменений в ресурс, `sds-drbd-controller` провалидирует новую конфигурацию и в случае валидных данных выполнит необходимые операции по обновлению `Storage Pool` в бэкенде `LINSTOR`. Результаты данной операции также будут отображены в поле `status` ресурса `DRBDStoragePool`.
+После внесения изменений в ресурс, `sds-replicated-volume-controller` провалидирует новую конфигурацию и в случае валидных данных выполнит необходимые операции по обновлению `Storage Pool` в бэкенде `LINSTOR`. Результаты данной операции также будут отображены в поле `status` ресурса `ReplicatedStoragePool`.
 
-> Обратите внимание, что поле `spec.type` ресурса `DRBDStoragePool` **неизменяемое**.
+> Обратите внимание, что поле `spec.type` ресурса `ReplicatedStoragePool` **неизменяемое**.
 >
 > Контроллер не реагирует на внесенные пользователем изменения в поле `status` ресурса.
 
-#### Удаление ресурса `DRBDStoragePool`
+#### Удаление ресурса `ReplicatedStoragePool`
 
-В настоящий момент `sds-drbd-controller` никак не обрабатывает удаление ресурсов `DRBDStoragePool`.
+В настоящий момент `sds-replicated-volume-controller` никак не обрабатывает удаление ресурсов `ReplicatedStoragePool`.
 
 > Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде `LINSTOR`. Если пользователь воссоздаст удаленный ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`.
 
-### Работа с ресурсами `DRBDStorageClass`
+### Работа с ресурсами `ReplicatedStorageClass`
 
-#### Создание ресурса `DRBDStorageClass`
+#### Создание ресурса `ReplicatedStorageClass`
 
-- Для создания `StorageClass` в `Kubernetes` пользователь создает ресурс [DRBDStorageClass](./cr.html#drbdstorageclass) и заполняет поле `spec`, указывая необходимые параметры. (Ручное создание StorageClass для CSI-драйвера drbd.csi.storage.deckhouse.io запрещено).
+- Для создания `StorageClass` в `Kubernetes` пользователь создает ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) и заполняет поле `spec`, указывая необходимые параметры. (Ручное создание StorageClass для CSI-драйвера replicated.csi.storage.deckhouse.io запрещено).
 
 - Пример ресурса для создания `StorageClass` c использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: haclass
 spec:
@@ -119,7 +119,7 @@ spec:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: testclass
 spec:
@@ -132,25 +132,25 @@ spec:
 - Больше примеров с различными сценариями использования и схемами [можно найти здесь](./layouts.html)
 
 > Перед процессом непосредственно создания `StorageClass` запустится процесс валидации предоставленной конфигурации.
-> В случае обнаружения ошибок `StorageClass` создан не будет, а в поле `status` ресурса `DRBDStorageClass` отобразится информация об ошибке.
+> В случае обнаружения ошибок `StorageClass` создан не будет, а в поле `status` ресурса `ReplicatedStorageClass` отобразится информация об ошибке.
 
-Результатом обработки ресурса `DRBDStorageClass` станет создание необходимого `StorageClass` в `Kubernetes`.
+Результатом обработки ресурса `ReplicatedStorageClass` станет создание необходимого `StorageClass` в `Kubernetes`.
 
-> Обратите внимание, что все поля, кроме поля `isDefault` в поле `spec` ресурса `DRBDStorageClass`, являются **неизменяемым**.
+> Обратите внимание, что все поля, кроме поля `isDefault` в поле `spec` ресурса `ReplicatedStorageClass`, являются **неизменяемым**.
 
-Поле `status` будет обновляться `sds-drbd-controller'ом` для отображения информации о результатах проводимых операций.
+Поле `status` будет обновляться `sds-replicated-volume-controller'ом` для отображения информации о результатах проводимых операций.
 
-#### Обновление ресурса `DRBDStorageClass`
+#### Обновление ресурса `ReplicatedStorageClass`
 
-`sds-drbd-controller` в настоящий момент поддерживает только изменение поля `isDefault`. Поменять остальные параметры
-`StorageClass`, созданного через ресурс `DRBDStorageClass`, на данный момент **невозможно**.
+`sds-replicated-volume-controller` в настоящий момент поддерживает только изменение поля `isDefault`. Поменять остальные параметры
+`StorageClass`, созданного через ресурс `ReplicatedStorageClass`, на данный момент **невозможно**.
 
-#### Удаление ресурса `DRBDStorageClass`
+#### Удаление ресурса `ReplicatedStorageClass`
 
-Пользователь может удалить `StorageClass` в `Kubernetes`, удалив соответствующий ресурс `DRBDStorageClass`.
-`sds-drbd-controller` отреагирует на удаление ресурса и выполнит все необходимые операции для корректного удаления дочернего `StorageClass`.
+Пользователь может удалить `StorageClass` в `Kubernetes`, удалив соответствующий ресурс `ReplicatedStorageClass`.
+`sds-replicated-volume-controller` отреагирует на удаление ресурса и выполнит все необходимые операции для корректного удаления дочернего `StorageClass`.
 
-> `sds-drbd-controller` выполнит удаление дочернего `StorageClass` только в случае, если в поле `status.phase` ресурса `DRBDStorageClass` будет указано значение `Created`. В иных случаях будет удалён только ресурс `DRBDStorageClass`, а дочерний `StorageClass` затронут не будет.
+> `sds-replicated-volume-controller` выполнит удаление дочернего `StorageClass` только в случае, если в поле `status.phase` ресурса `ReplicatedStorageClass` будет указано значение `Created`. В иных случаях будет удалён только ресурс `ReplicatedStorageClass`, а дочерний `StorageClass` затронут не будет.
 
 ## Дополнительные возможности для приложений
 
@@ -158,6 +158,6 @@ spec:
 
 В случае гиперконвергентной инфраструктуры может возникнуть задача по приоритетному размещению пода приложения на узлах, где необходимые ему данные хранилища расположены локально. Это позволит получить максимальную производительность хранилища.
 
-Для решения этой задачи модуль предоставляет специальный планировщик учитывает размещение данных в хранилище и старается размещать под в первую очередь на тех узлах, где данные доступны локально. Данный планировщик назначается автоматически для любого пода, использующего тома sds-drbd.
+Для решения этой задачи модуль предоставляет специальный планировщик учитывает размещение данных в хранилище и старается размещать под в первую очередь на тех узлах, где данные доступны локально. Данный планировщик назначается автоматически для любого пода, использующего тома sds-replicated-volume.
 
-Data locality настраивается параметром `volumeAccess` при создании ресурса `DRBDStorageClass`.
+Data locality настраивается параметром `volumeAccess` при создании ресурса `ReplicatedStorageClass`.

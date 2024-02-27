@@ -16,7 +16,7 @@
           LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has errors
 
           The recommended course of action:
-          1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
+          1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           2. Check backing storage devices
 
     - alert: D8LinstorStoragePoolCapacityPressure
@@ -35,11 +35,11 @@
           LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 10% space left. Current free space: {{ $value }}%
 
           The recommended course of action:
-          1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
-          2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
+          1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
+          2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           3. Consider adding more backing devices or relocating some resources to other nodes:
              ```
-             alias linstor="kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor"
+             alias linstor="kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor"
              linstor resource-definition auto-place <res> --place-count +1 -s {{ $labels.storage_pool }}
              linstor resource-definition wait-sync <res>
              linstor resource delete {{ $labels.node }} <res>

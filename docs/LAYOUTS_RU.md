@@ -1,5 +1,5 @@
 ---
-title: "Модуль sds-drbd: Сценарии использования"
+title: "Модуль sds-replicated-volume: Сценарии использования"
 linkTitle: "Сценарии использования"
 ---
 
@@ -13,11 +13,11 @@ linkTitle: "Сценарии использования"
 
 ## Зональный StorageClass с запретом доступа к данным по сети и высокой степенью резервирования данных
 
-- Пример ресурса `DRBDStorageClass`:
+- Пример ресурса `ReplicatedStorageClass`:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: zonal-storage-class
 spec:
@@ -50,11 +50,11 @@ spec:
 
 ## Межзональный StorageClass с высокой степенью резервирования данных и постепенным созданием локальных реплик
 
-- Пример ресурса `DRBDStorageClass`:
+- Пример ресурса `ReplicatedStorageClass`:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: trans-zonal-storage-class
 spec:

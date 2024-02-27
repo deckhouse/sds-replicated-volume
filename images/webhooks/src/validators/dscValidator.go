@@ -87,7 +87,7 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 			arReview.Response.Result = &metav1.Status{
 				Message: fmt.Sprintf("You must set at least one zone."),
 			}
-			klog.Infof("No zones in DRBDStorageClass (%s)", string(raw))
+			klog.Infof("No zones in ReplicatedStorageClass (%s)", string(raw))
 		}
 		if (dscJson.Spec.Replication == "Availability" || dscJson.Spec.Replication == "ConsistencyAndAvailability") && len(dscJson.Spec.Zones) != 3 {
 			arReview.Response.Allowed = false
@@ -126,7 +126,7 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if dscJson.Spec.IsDefault == true {
-		dscRes := schema.GroupVersionResource{Group: "storage.deckhouse.io", Version: "v1alpha1", Resource: "drbdstorageclasses"}
+		dscRes := schema.GroupVersionResource{Group: "storage.deckhouse.io", Version: "v1alpha1", Resource: "replicatedstorageclasses"}
 
 		ctx := context.Background()
 
@@ -141,9 +141,9 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 			if listedDscClassName != dscJson.Metadata.Name && listedDscDefaultState == true {
 				arReview.Response.Allowed = false
 				arReview.Response.Result = &metav1.Status{
-					Message: fmt.Sprintf("Default DRBDStorageClass already set: %s", listedDscClassName),
+					Message: fmt.Sprintf("Default ReplicatedStorageClass already set: %s", listedDscClassName),
 				}
-				klog.Infof("Default DRBDStorageClass already set: %s (%s)", listedDscClassName, string(raw))
+				klog.Infof("Default ReplicatedStorageClass already set: %s (%s)", listedDscClassName, string(raw))
 			} else {
 				klog.Infof("Incoming request approved (%s)", string(raw))
 			}

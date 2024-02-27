@@ -26,8 +26,8 @@ import common
 
 
 NODE_SNAPSHOT_NAME = "nodes"
-MODULE_NAME = "sds-drbd"
-NODE_LABELS_TO_FOLLOW = {"storage.deckhouse.io/sds-drbd-node": ""}
+MODULE_NAME = "sds-replicated-volume"
+NODE_LABELS_TO_FOLLOW = {"storage.deckhouse.io/sds-replicated-volume-node": ""}
 QUEUE = f"/modules/{MODULE_NAME}/node-label-change"
 
 config = {
