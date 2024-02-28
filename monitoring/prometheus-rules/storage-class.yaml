@@ -18,3 +18,20 @@
           The list of outdated storage classes can be obtained through
           
           `kubectl get sc -l storage.deckhouse.io/managed-by!=sds-replicated-volume`
+
+    - alert: StorageClassIsNonOperational
+      expr: sum(kube_storageclass_info{provisioner='linstor.csi.linbit.com'} * on(storageclass) group_left() kube_storageclass_labels{label_storage_deckhouse_io_nonoperational=''}) > 0
+      for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_drbd_device_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_drbd_device_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Storage class is nonoperational
+        description: |
+          Failed to create a PV in one or more Storage Classes. It is necessary to check and determine the cause. You can obtain a list of Storage Classes by using the command:
+          
+          `kubectl get sc -l storage.deckhouse.io/nonOperational=""`
