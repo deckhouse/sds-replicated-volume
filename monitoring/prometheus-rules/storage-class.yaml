@@ -28,8 +28,8 @@
       annotations:
         plk_markup_format: "markdown"
         plk_protocol_version: "1"
-        plk_create_group_if_not_exists__d8_drbd_device_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        plk_grouped_by__d8_drbd_device_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_create_group_if_not_exists__storage_class_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__storage_class_health: "NonOperationalStorageClass,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: Storage class is nonoperational
         description: |
           Failed to create a PV in one or more Storage Classes. It is necessary to check and determine the cause. You can obtain a list of Storage Classes by using the command:
