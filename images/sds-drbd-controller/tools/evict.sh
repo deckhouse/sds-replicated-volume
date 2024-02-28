@@ -845,14 +845,14 @@ linstor_backup_database() {
     count=0
     max_attempts=10
     until [ $count -eq $max_attempts ]; do
-      echo "Checking the number of replicas for LINSTOR controller and Piraeus operator"
+      echo "Checking the number of replicas for LINSTOR controller and sds-drbd-controller"
       linstor_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment linstor-controller -o jsonpath='{.spec.replicas}')
-      piraeus_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment piraeus-operator -o jsonpath='{.spec.replicas}')
+      sds_drbd_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-drbd-controller -o jsonpath='{.spec.replicas}')
       ((count++))
-      if [[ -z "${linstor_controller_current_replicas}" || -z "${piraeus_current_replicas}" ]]; then
-        echo "Can't get the number of replicas for LINSTOR controller or piraeus-operator."
-        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and piraeus-operator after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
-          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and piraeus-operator"
+      if [[ -z "${linstor_controller_current_replicas}" || -z "${sds_drbd_controller_current_replicas}" ]]; then
+        echo "Can't get the number of replicas for LINSTOR controller or sds-drbd-controller."
+        if get_user_confirmation "Should we recheck the number of replicas for the LINSTOR controller and sds-drbd-controller after $TIMEOUT_SEC seconds? (Note that the database backup will not be performed if this is not done.)" "y" "n"; then
+          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-drbd-controller"
           sleep $TIMEOUT_SEC
           continue
         else
@@ -864,11 +864,11 @@ linstor_backup_database() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or piraeus-operator."
-      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and piraeus-operator." "y" "n"; then
+      echo "Timeout reached. Can't get the number of replicas for LINSTOR controller or sds-drbd-controller."
+      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for LINSTOR controller and sds-drbd-controller." "y" "n"; then
         exit_function
       else
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and piraeus-operator"
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for LINSTOR controller and sds-drbd-controller"
         sleep $TIMEOUT_SEC
         continue
       fi
@@ -876,10 +876,10 @@ linstor_backup_database() {
     break
   done
 
-  echo "Scale down piraeus-operator and LINSTOR controller"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment piraeus-operator --replicas=0"
-  echo "Waiting for piraeus-operator to scale down"
-  wait_for_deployment_scale_down "piraeus-operator" "${LINSTOR_NAMESPACE}"
+  echo "Scale down sds-drbd-controller and LINSTOR controller"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=0"
+  echo "Waiting for sds-drbd-controller to scale down"
+  wait_for_deployment_scale_down "sds-drbd-controller" "${LINSTOR_NAMESPACE}"
 
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=0"
   echo "Waiting for LINSTOR controller to scale down"
@@ -892,7 +892,7 @@ linstor_backup_database() {
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs -i{} sh -xc "kubectl get {} -oyaml > ./linstor_db_backup_before_evict_${current_datetime}/{}.yaml"
   echo "Database backup completed"
   echo "Scale up LINSTOR controller and Piraeus operator"
-  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment piraeus-operator --replicas=${piraeus_current_replicas}"
+  execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=${linstor_controller_current_replicas}"
   echo "Waiting for LINSTOR controller to scale up"
   sleep 15
@@ -906,9 +906,9 @@ delete_node_from_kubernetes_and_linstor() {
     until [ $count -eq $max_attempts ]; do
       echo "Checking the number of replicas for Deckhouse and Piraeus operator"
       deckhouse_current_replicas=$(kubectl -n d8-system get deployment deckhouse -o jsonpath='{.spec.replicas}')
-      piraeus_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment piraeus-operator -o jsonpath='{.spec.replicas}')
+      sds_drbd_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-drbd-controller -o jsonpath='{.spec.replicas}')
       ((count++))
-      if [[ -z "${deckhouse_current_replicas}" || -z "${piraeus_current_replicas}" ]]; then
+      if [[ -z "${deckhouse_current_replicas}" || -z "${sds_drbd_controller_current_replicas}" ]]; then
         echo "Can't get the number of replicas for Deckhouse or Piraeus operator."
         if get_user_confirmation "Should we recheck the number of replicas for Deckhouse and Piraeus operator after $TIMEOUT_SEC seconds? (Note that the node will not be deleted from Kubernetes and LINSTOR if this is not done.)" "y" "n"; then
           echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and Piraeus operator"
@@ -963,9 +963,9 @@ delete_node_from_kubernetes_and_linstor() {
     echo "Waiting for Deckhouse to scale down"
     wait_for_deployment_scale_down "deckhouse" "d8-system"
 
-    execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment piraeus-operator --replicas=0"
-    echo "Waiting for piraeus-operator to scale down"
-    wait_for_deployment_scale_down "piraeus-operator" "${LINSTOR_NAMESPACE}"
+    execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=0"
+    echo "Waiting for sds-drbd-controller to scale down"
+    wait_for_deployment_scale_down "sds-drbd-controller" "${LINSTOR_NAMESPACE}"
 
     if [[ $linstor_satellite_online == "true" ]]; then
       echo "Performing standard node deletion procedure from LINSTOR"
@@ -978,12 +978,12 @@ delete_node_from_kubernetes_and_linstor() {
     if is_linstor_satellite_does_not_exist; then
       execute_command "kubectl delete node ${NODE_FOR_EVICT}"
       execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=${deckhouse_current_replicas}"
-      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment piraeus-operator --replicas=${piraeus_current_replicas}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
       return
     else
       echo "Warning! Node ${NODE_FOR_EVICT} has not been deleted from LINSTOR. Turning Deckhouse and Piraeus operator back on."
       execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=${deckhouse_current_replicas}"
-      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment piraeus-operator --replicas=${piraeus_current_replicas}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
       echo "It is recommended to terminate the script and investigate the cause of the error."
       exit_function
       return
