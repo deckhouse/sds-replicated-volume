@@ -34,14 +34,14 @@ def create_backup(backup_type, namespace, labels={}):
     backup_archive = tarfile.open(f'{temp_path}/linstor_{backup_type}.tar', "w")
 
     for item in kubernetes.client.ApiextensionsV1Api().list_custom_resource_definition().items:
-        if item.spec.group != 'internal.linstor.linbit.com':
+        if item.spec.group != 'internal.linstor.linbit.com' and item.spec.group != 'storage.deckhouse.io':
             continue
 
         crd_name_plural = item.spec.names.plural
         version = item.spec.versions[-1]
         crd_version = version.name
 
-        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='internal.linstor.linbit.com',
+        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=item.spec.group,
                                                                                         plural=crd_name_plural,
                                                                                         version=crd_version)
 
