@@ -56,7 +56,7 @@ description: Диагностика проблем LINSTOR. Когда след�
 * Загрузите скрипт `evict.sh` на хост, имеющий доступ к API Kubernetes с правами администратора (для работы скрипта потребуются установленные `kubectl` и `jq`):
 
   ```shell
-  kubectl -n d8-system cp -c deckhouse $(kubectl -n d8-system get po -l app=deckhouse -o jsonpath='{.items[0].metadata.name}'):/deckhouse/modules/041-linstor/tools/evict.sh ./evict.sh
+  kubectl -n d8-sds-drbd cp -c sds-drbd-controller $(kubectl -n d8-sds-drbd get po -l app=sds-drbd-controller -o jsonpath='{.items[0].metadata.name}'):/tools/evict.sh ./evict.sh
   chmod 700 evict.sh
   ```
 
