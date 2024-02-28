@@ -46,6 +46,11 @@ while [[ $checkKeys == true ]]; do
   fi
 done
 
+# Temporarily allow linstor node lost
+if [[ "$1" == "node" ]] && [[ "$2" == "lost" ]]; then
+  allowed=true
+fi
+
 # check for allowed linstor ... l and linstor ... list commands
 if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   if [[ "$2" == "l" || "$2" == "list" ]]; then
@@ -57,10 +62,6 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   fi
 
   if [[ "$2" == "set-property" ]] && [[ "$4" == "AutoplaceTarget" ]]; then
-    allowed=true
-  fi
-
-  if [[ "$2" == "node" ]] && [[ "$3" == "lost" ]]; then
     allowed=true
   fi
 fi
