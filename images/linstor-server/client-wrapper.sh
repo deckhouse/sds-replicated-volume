@@ -56,11 +56,14 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
     allowed=true
   fi
 
-  if [[ "$2" == "set-property" ]] && [[ '$4' == "AutoplaceTarget" ]]; then
+  if [[ "$2" == "set-property" ]] && [[ "$4" == "AutoplaceTarget" ]]; then
+    allowed=true
+  fi
+
+  if [[ "$2" == "node" ]] && [[ "$3" == "lost" ]]; then
     allowed=true
   fi
 fi
-
 
 # check for allowed linstor ... v and linstor ... version commands
 if [[ $(echo "${valid_subcommands_ver[@]}" | fgrep -w -- $1) ]]; then
