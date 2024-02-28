@@ -891,7 +891,7 @@ linstor_backup_database() {
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs kubectl get crds -oyaml > ./linstor_db_backup_before_evict_${current_datetime}/crds.yaml
   kubectl get crds | grep -o ".*.internal.linstor.linbit.com" | xargs -i{} sh -xc "kubectl get {} -oyaml > ./linstor_db_backup_before_evict_${current_datetime}/{}.yaml"
   echo "Database backup completed"
-  echo "Scale up LINSTOR controller and Piraeus operator"
+  echo "Scale up LINSTOR controller and sds-drbd-controller"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment linstor-controller --replicas=${linstor_controller_current_replicas}"
   echo "Waiting for LINSTOR controller to scale up"
@@ -904,14 +904,14 @@ delete_node_from_kubernetes_and_linstor() {
     count=0
     max_attempts=10
     until [ $count -eq $max_attempts ]; do
-      echo "Checking the number of replicas for Deckhouse and Piraeus operator"
+      echo "Checking the number of replicas for Deckhouse and sds-drbd-controller"
       deckhouse_current_replicas=$(kubectl -n d8-system get deployment deckhouse -o jsonpath='{.spec.replicas}')
       sds_drbd_controller_current_replicas=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-drbd-controller -o jsonpath='{.spec.replicas}')
       ((count++))
       if [[ -z "${deckhouse_current_replicas}" || -z "${sds_drbd_controller_current_replicas}" ]]; then
-        echo "Can't get the number of replicas for Deckhouse or Piraeus operator."
-        if get_user_confirmation "Should we recheck the number of replicas for Deckhouse and Piraeus operator after $TIMEOUT_SEC seconds? (Note that the node will not be deleted from Kubernetes and LINSTOR if this is not done.)" "y" "n"; then
-          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and Piraeus operator"
+        echo "Can't get the number of replicas for Deckhouse or sds-drbd-controller."
+        if get_user_confirmation "Should we recheck the number of replicas for Deckhouse and sds-drbd-controller after $TIMEOUT_SEC seconds? (Note that the node will not be deleted from Kubernetes and LINSTOR if this is not done.)" "y" "n"; then
+          echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and sds-drbd-controller"
           sleep $TIMEOUT_SEC
           continue
         else
@@ -924,11 +924,11 @@ delete_node_from_kubernetes_and_linstor() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Timeout reached. Can't get the number of replicas for Deckhouse or Piraeus operator."
-      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for Deckhouse and Piraeus operator." "y" "n"; then
+      echo "Timeout reached. Can't get the number of replicas for Deckhouse or sds-drbd-controller."
+      if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for Deckhouse and sds-drbd-controller." "y" "n"; then
         exit_function
       else
-        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and Piraeus operator"
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for Deckhouse and sds-drbd-controller"
         sleep $TIMEOUT_SEC
         continue
       fi
@@ -949,14 +949,14 @@ delete_node_from_kubernetes_and_linstor() {
   fi
 
   echo "The procedure for deleting a node from LINSTOR will consist of the following actions:" 
-  echo "1. Shutting down Deckhouse and Piraeus operator"
+  echo "1. Shutting down Deckhouse and sds-drbd-controller"
   if [[ $linstor_satellite_online == "true" ]]; then
     echo "2. Standard node deletion from LINSTOR"
   else
     echo "2. Executing the command \"linstor node lost ${NODE_FOR_EVICT}\""
   fi
   echo "3. Deleting the node from Kubernetes"
-  echo "4. Turning Deckhouse and Piraeus operator back on"
+  echo "4. Turning Deckhouse and sds-drbd-controller back on"
 
   if get_user_confirmation "Perform the actions listed above?" "yes-i-am-sane-and-i-understand-what-i-am-doing" "n"; then
     execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=0"
@@ -981,7 +981,7 @@ delete_node_from_kubernetes_and_linstor() {
       execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
       return
     else
-      echo "Warning! Node ${NODE_FOR_EVICT} has not been deleted from LINSTOR. Turning Deckhouse and Piraeus operator back on."
+      echo "Warning! Node ${NODE_FOR_EVICT} has not been deleted from LINSTOR. Turning Deckhouse and sds-drbd-controller back on."
       execute_command "kubectl -n d8-system scale deployment deckhouse --replicas=${deckhouse_current_replicas}"
       execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-drbd-controller --replicas=${sds_drbd_controller_current_replicas}"
       echo "It is recommended to terminate the script and investigate the cause of the error."
