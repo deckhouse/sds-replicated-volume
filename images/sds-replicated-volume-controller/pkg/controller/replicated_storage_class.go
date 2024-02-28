@@ -43,7 +43,7 @@ import (
 )
 
 const (
-	ReplicatedStorageClassControllerName = "drbd-storage-class-controller"
+	ReplicatedStorageClassControllerName = "replicated-storage-class-controller"
 	ReplicatedStorageClassFinalizerName  = "replicatedstorageclass.storage.deckhouse.io"
 	StorageClassProvisioner              = "linstor.csi.linbit.com"
 	StorageClassKind                     = "StorageClass"
