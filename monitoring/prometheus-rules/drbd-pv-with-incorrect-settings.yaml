@@ -1,6 +1,6 @@
 - name: kubernetes.pv.settings_check
   rules:
-    - alert: DRBDPVWithIncorrectSettings
+    - alert: ReplicatedPVWithIncorrectSettings
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_linstor_settings_mismatch="true", label_storage_deckhouse_io_linstor_settings_mismatch_ignore!="true"}) > 0
       for: 5m
       labels:
@@ -9,9 +9,9 @@
       annotations:
         plk_markup_format: "markdown"
         plk_protocol_version: "1"
-        plk_create_group_if_not_exists__d8_drbd_device_health: "DRBDPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        plk_grouped_by__d8_drbd_device_health: "DRBDPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: DRBD PVs has incorrect settings
+        plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: Replicated PVs has incorrect settings
         description: |
           There are persistent volumes in the cluster that were created before migration to ReplicatedStorageClass. 
           You can recreate it, or add the label storage.deckhouse.io/linstor-settings-mismatch-ignore!=true to ignore it for the PV.
