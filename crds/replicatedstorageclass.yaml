@@ -13,7 +13,7 @@ spec:
     singular: replicatedstorageclass
     kind: ReplicatedStorageClass
     shortNames:
-      - dsc
+      - rsc
   preserveUnknownFields: false
   versions:
     - name: v1alpha1

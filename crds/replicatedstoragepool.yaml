@@ -13,7 +13,7 @@ spec:
     singular: replicatedstoragepool
     kind: ReplicatedStoragePool
     shortNames:
-      - dsp
+      - rsp
   versions:
     - name: v1alpha1
       served: true
