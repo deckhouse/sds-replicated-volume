@@ -51,7 +51,10 @@ EOF
 kubectl get mc sds-node-configurator -w
 ```
 
-- Enable the `sds-drbd` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is run with the default settings: the `DRBD` kernel module will be installed on all cluster nodes, the CSI driver will be registered, and service pods of the `sds-drbd` components will be run.
+- Enable the `sds-drbd` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is launched with the default settings. This will result in the following actions across all cluster nodes:
+  - installation of the `DRBD` kernel module;
+  - registration of the CSI driver;
+  - launch of service pods for the `sds-drbd` components.
 
 ```shell
 kubectl apply -f - <<EOF
@@ -195,7 +198,7 @@ EOF
 kubectl get dsp data -w
 ```
 
-- Confirm that the `data` Storage Pool has been created on nodes `worker-0` and `worker-1` in LINSTOR:
+- Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2` in LINSTOR:
 
 ```shell
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
@@ -213,7 +216,7 @@ linstor sp l
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- Create a [DRBDStorageClass](./cr.html#drbdstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html)) for details on how zonal DRBDStorageClasses work):
+- Create a [DRBDStorageClass](./cr.html#drbdstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal DRBDStorageClasses work):
 
 ```yaml
 kubectl apply -f -<<EOF
