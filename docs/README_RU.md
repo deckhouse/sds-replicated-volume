@@ -26,7 +26,7 @@ moduleStatus: experimental
 
 ## Быстрый старт
 
-Все команды выполнять на машине, имеющей доступ к API Kubernetes с правами администратора.
+Все команды следует выполнять на машине, имеющей доступ к API Kubernetes с правами администратора.
 
 ### Включение модулей
 
@@ -51,7 +51,7 @@ EOF
 kubectl get mc sds-node-configurator -w
 ```
 
-- Включить модуль `sds-drbd`. Возможные настройки модуля рекомендуем посмотреть в [конфигурации](./configuration.html). В примере ниже модуль запускается с настройками по умолчанию. Это приведет к тому, что на все узлы кластера будет установлен модуль ядра `DRBD`, зарегистрирован CSI драйвер, а так же запущены служебные поды компонентов `sds-drbd`.
+- Включить модуль `sds-drbd`. Возможные настройки модуля рекомендуем посмотреть в [конфигурации](./configuration.html). В примере ниже модуль запускается с настройками по умолчанию. Это приведет к тому, что на все узлы кластера будет установлен модуль ядра `DRBD`, зарегистрирован CSI драйвер, а также запущены служебные поды компонентов `sds-drbd`.
 
 ```shell
 kubectl apply -f - <<EOF
@@ -98,7 +98,7 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 ```
 
 
-- Создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) узлы `worker-0`:
+- Создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-0`:
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -123,7 +123,7 @@ kubectl get lvg vg-1-on-worker-0 -w
 
 - Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) узлы `worker-1`:
+- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -147,7 +147,7 @@ kubectl get lvg vg-1-on-worker-1 -w
 
 - Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) узлы `worker-2`:
+- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
 
 ```shell
 kubectl apply -f - <<EOF
