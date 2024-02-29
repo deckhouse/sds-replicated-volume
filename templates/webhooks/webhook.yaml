@@ -15,7 +15,7 @@ webhooks:
       service:
         namespace: "d8-{{ .Chart.Name }}"
         name: "webhooks"
-        path: "/dsc-validate"
+        path: "/rsc-validate"
       caBundle: |
         {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
     admissionReviewVersions: ["v1", "v1beta1"]
