@@ -1,6 +1,6 @@
 ---
-title: "Модуль sds-drbd"
-description: "Модуль sds-drbd: общие концепции и положения."
+title: "Модуль sds-replicated-volume"
+description: "Модуль sds-replicated-volume: общие концепции и положения."
 moduleStatus: experimental
 ---
 
@@ -11,15 +11,15 @@ moduleStatus: experimental
 
 Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. На текущий момент в качестве control-plane используется `LINSTOR`. Модуль позволяет создавать `Storage Pool` в `LINSTOR` и `StorageClass` в `Kubernetes` через создание [пользовательских ресурсов Kubernetes](./cr.html).
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/).
-> **Внимание!** Перед включением модуля `sds-drbd` необходимо включить модуль `sds-node-configurator`.
+> **Внимание!** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 >
 > **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
 >
 > **Внимание!** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 
-После включения модуля `sds-drbd` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать [пулы хранения и StorageClass'ы](./usage.html#конфигурация-бэкенда-linstor).
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать [пулы хранения и StorageClass'ы](./usage.html#конфигурация-бэкенда-linstor).
 
-> **Внимание!** Создание `StorageClass` для CSI-драйвера drbd.csi.storage.deckhouse.io пользователем запрещено.
+> **Внимание!** Создание `StorageClass` для CSI-драйвера replicated.csi.storage.deckhouse.io пользователем запрещено.
 
 Поддерживаются два режима — LVM и LVMThin.
 Каждый из них имеет свои достоинства и недостатки, подробнее о различиях читайте в [FAQ](./faq.html#когда-следует-использовать-lvm-а-когда-lvmthin).

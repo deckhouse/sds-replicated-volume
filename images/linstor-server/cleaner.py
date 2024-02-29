@@ -42,7 +42,7 @@ def singleton(class_):
 class LinstorConnection:
     def __init__(self, log_level) -> None:
         # In pod hardcoded. TODO: we can use linstor.Config.get_section('global') instead
-        self.__conn = linstor.Linstor("linstor+ssl://linstor.d8-sds-drbd.svc:3371", timeout=5)
+        self.__conn = linstor.Linstor("linstor+ssl://linstor.d8-sds-replicated-volume.svc:3371", timeout=5)
         self.__conn.keyfile = '/etc/linstor/client/tls.key'
         self.__conn.cafile = '/etc/linstor/client/ca.crt'
         self.__conn.certfile = '/etc/linstor/client/tls.crt'
@@ -54,7 +54,7 @@ class LinstorConnection:
         try:
             self.__conn.connect()
         except Exception as e:
-            logger.error(f"error while connect linstor rest service linstor.d8-sds-drbd.svc:3371 ({e})")
+            logger.error(f"error while connect linstor rest service linstor.d8-sds-replicated-volume.svc:3371 ({e})")
             return None
 
         for i in range(retries):

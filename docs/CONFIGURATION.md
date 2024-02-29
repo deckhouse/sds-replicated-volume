@@ -1,7 +1,7 @@
 ---
-title: "The sds-drbd module: configuration"
+title: "The sds-replicated-volume module: configuration"
 force_searchable: true
-description: The sds-drbd Deckhouse module's configuration.
+description: The sds-replicated-volume Deckhouse module's configuration.
 ---
 
 {{< alert level="warning" >}}

@@ -1,7 +1,7 @@
 ---
-title: "Модуль sds-drbd: настройки"
+title: "Модуль sds-replicated-volume: настройки"
 force_searchable: true
-description: Параметры настройки модуля sds-drbd Deckhouse.
+description: Параметры настройки модуля sds-replicated-volume Deckhouse.
 ---
 
 {{< alert level="warning" >}}

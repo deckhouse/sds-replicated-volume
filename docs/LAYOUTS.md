@@ -1,5 +1,5 @@
 ---
-title: "Module sds-drbd: use cases"
+title: "Module sds-replicated-volume: use cases"
 linkTitle: "Usage cases"
 ---
 
@@ -10,11 +10,11 @@ As for any other configurations, the module may work, but its smooth operation i
 
 ## Zonal StorageClass with prohibited access to data over the network and high data redundancy
 
-- An example of a `DRBDStorageClass` resource:
+- An example of a `ReplicatedStorageClass` resource:
   
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: zonal-storage-class
 spec:
@@ -47,11 +47,11 @@ spec:
 
 ## Trans-zonal StorageClass with high data redundancy and gradual creation of local replicas
 
-- An example of a `DRBDStorageClass` resource:
+- An example of a `ReplicatedStorageClass` resource:
 
 ```yaml
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
   name: trans-zonal-storage-class
 spec:
