@@ -202,10 +202,10 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 
 		log := logger.Logger{}
 		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
-		drbdStorageClasses := sdsapi.ReplicatedStorageClassList{}
+		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.AddOrConfigureDRBDNodes(ctx, cl, mockLc, log, selectedKubeNodes, []linstor.Node{}, drbdStorageClasses, drbdNodeSelector)
+		err = controller.AddOrConfigureDRBDNodes(ctx, cl, mockLc, log, selectedKubeNodes, []linstor.Node{}, replicatedStorageClasses, drbdNodeSelector)
 		Expect(err).NotTo(HaveOccurred())
 	})
 

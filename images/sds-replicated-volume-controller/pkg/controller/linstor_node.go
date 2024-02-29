@@ -174,7 +174,7 @@ func removeDRBDNodes(
 	log logger.Logger,
 	drbdNodesToRemove v1.NodeList,
 	linstorSatelliteNodes []lclient.Node,
-	drbdStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 ) error {
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
@@ -190,7 +190,7 @@ func removeDRBDNodes(
 			}
 		}
 		log.Info(fmt.Sprintf("Reconciling labels for node '%s'", drbdNodeToRemove.Name))
-		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, drbdStorageClasses, drbdNodeSelector, false)
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, drbdNodeToRemove, replicatedStorageClasses, drbdNodeSelector, false)
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
 		}
@@ -206,7 +206,7 @@ func AddOrConfigureDRBDNodes(
 	log logger.Logger,
 	selectedKubernetesNodes *v1.NodeList,
 	linstorNodes []lclient.Node,
-	drbdStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 ) error {
 	for _, selectedKubernetesNode := range selectedKubernetesNodes.Items {
@@ -224,7 +224,7 @@ func AddOrConfigureDRBDNodes(
 			}
 		}
 
-		err := ReconcileKubernetesNodeLabels(ctx, cl, log, selectedKubernetesNode, drbdStorageClasses, drbdNodeSelector, true)
+		err := ReconcileKubernetesNodeLabels(ctx, cl, log, selectedKubernetesNode, replicatedStorageClasses, drbdNodeSelector, true)
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", selectedKubernetesNode.Name, err)
 		}
@@ -419,7 +419,7 @@ func ReconcileKubernetesNodeLabels(
 	cl client.Client,
 	log logger.Logger,
 	kubernetesNode v1.Node,
-	drbdStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 	isDRBDNode bool,
 ) error {
@@ -433,7 +433,7 @@ func ReconcileKubernetesNodeLabels(
 			labelsToAdd = labels.Merge(labelsToAdd, drbdNodeSelector)
 		}
 
-		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(kubernetesNode, drbdStorageClasses)
+		storageClassesLabelsForNode = GetStorageClassesLabelsForNode(kubernetesNode, replicatedStorageClasses)
 		for labelKey, labelValue := range storageClassesLabelsForNode {
 			if _, existsInKubernetesNodeLabels := kubernetesNode.Labels[labelKey]; !existsInKubernetesNodeLabels {
 				labelsToAdd[labelKey] = labelValue
@@ -475,16 +475,16 @@ func ReconcileKubernetesNodeLabels(
 	return nil
 }
 
-func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, drbdStorageClasses sdsapi.ReplicatedStorageClassList) map[string]string {
+func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, replicatedStorageClasses sdsapi.ReplicatedStorageClassList) map[string]string {
 	storageClassesLabels := make(map[string]string)
 
-	for _, drbdStorageClass := range drbdStorageClasses.Items {
-		if drbdStorageClass.Spec.Zones == nil {
+	for _, replicatedStorageClass := range replicatedStorageClasses.Items {
+		if replicatedStorageClass.Spec.Zones == nil {
 			continue
 		}
-		for _, zone := range drbdStorageClass.Spec.Zones {
+		for _, zone := range replicatedStorageClass.Spec.Zones {
 			if zone == kubernetesNode.Labels[ZoneLabel] {
-				storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, drbdStorageClass.Name)
+				storageClassLabelKey := fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, replicatedStorageClass.Name)
 				storageClassesLabels = labels.Merge(storageClassesLabels, map[string]string{storageClassLabelKey: ""})
 				break
 			}

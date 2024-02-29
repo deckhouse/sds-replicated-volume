@@ -68,10 +68,6 @@ const (
 	TopologyZonal      = "Zonal"
 	TopologyIgnored    = "Ignored"
 
-	// DRBDControllerPlacementCount = "linstor.csi.linbit.com/placementCount"
-	// DRBDOperatorStoragePool        = "linstor.csi.linbit.com/storagePool"
-	// AutoQuorum                     = "property.linstor.csi.linbit.com/DrbdOptions/auto-quorum"
-
 	StorageClassPlacementCountKey                 = "linstor.csi.linbit.com/placementCount"
 	StorageClassAutoEvictMinReplicaCountKey       = "property.linstor.csi.linbit.com/DrbdOptions/AutoEvictMinReplicaCount"
 	StorageClassStoragePoolKey                    = "linstor.csi.linbit.com/storagePool"
@@ -151,17 +147,17 @@ func NewReplicatedStorageClass(
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 
-				newDRBDSC, ok := e.ObjectNew.(*v1alpha1.ReplicatedStorageClass)
+				newReplicatedSC, ok := e.ObjectNew.(*v1alpha1.ReplicatedStorageClass)
 				if !ok {
 					log.Error(err, "error get ObjectNew ReplicatedStorageClass")
 				}
 
-				oldDRBDSC, ok := e.ObjectOld.(*v1alpha1.ReplicatedStorageClass)
+				oldReplicatedSC, ok := e.ObjectOld.(*v1alpha1.ReplicatedStorageClass)
 				if !ok {
 					log.Error(err, "error get ObjectOld ReplicatedStorageClass")
 				}
 
-				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newDRBDSC.Spec, oldDRBDSC.Spec) {
+				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newReplicatedSC.Spec, oldReplicatedSC.Spec) {
 					log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
@@ -263,7 +259,7 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 		replicatedsc.Status.Phase = Failed
 		replicatedsc.Status.Reason = msg
 		if err := UpdateReplicatedStorageClass(ctx, cl, replicatedsc); err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update DRBD resource, name: %s", replicatedsc.Name))
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedsc.Name))
 			return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %s", err.Error())
 		}
 
@@ -294,7 +290,7 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 			replicatedsc.Status.Reason = msg
 
 			if err := UpdateReplicatedStorageClass(ctx, cl, replicatedsc); err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update DRBD resource, name: %s", replicatedsc.Name))
+				log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedsc.Name))
 				return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %s", err.Error())
 			}
 			return nil
@@ -310,7 +306,7 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	}
 	err = UpdateReplicatedStorageClass(ctx, cl, replicatedsc)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update DRBD resource, name: %s", replicatedsc.Name))
+		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedsc.Name))
 		return fmt.Errorf("error UpdateReplicatedStorageClass: %s", err.Error())
 	}
 
@@ -586,7 +582,7 @@ func RemoveString(slice []string, s string) (result []string) {
 	return
 }
 
-func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, currentDRBDSCName string) (defaultDRBDSCNames []string, defaultSCNames []string, err error) {
+func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, currentReplicatedSCName string) (defaultReplicatedSCNames []string, defaultSCNames []string, err error) {
 	replicatedscList := &v1alpha1.ReplicatedStorageClassList{}
 	err = cl.List(ctx, replicatedscList)
 	if err != nil {
@@ -594,8 +590,8 @@ func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, c
 	}
 
 	for _, replicatedsc := range replicatedscList.Items {
-		if replicatedsc.Name != currentDRBDSCName && replicatedsc.Spec.IsDefault {
-			defaultDRBDSCNames = append(defaultDRBDSCNames, replicatedsc.Name)
+		if replicatedsc.Name != currentReplicatedSCName && replicatedsc.Spec.IsDefault {
+			defaultReplicatedSCNames = append(defaultReplicatedSCNames, replicatedsc.Name)
 		}
 	}
 
@@ -607,12 +603,12 @@ func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, c
 
 	for _, sc := range scList.Items {
 		isDefault := sc.Annotations[DefaultStorageClassAnnotationKey]
-		if sc.Name != currentDRBDSCName && isDefault == "true" {
+		if sc.Name != currentReplicatedSCName && isDefault == "true" {
 			defaultSCNames = append(defaultSCNames, sc.Name)
 		}
 	}
 
-	return defaultDRBDSCNames, defaultSCNames, nil
+	return defaultReplicatedSCNames, defaultSCNames, nil
 }
 
 func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedsc *v1alpha1.ReplicatedStorageClass) error {

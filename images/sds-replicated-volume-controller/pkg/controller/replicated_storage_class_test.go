@@ -481,16 +481,16 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		newReplicatedscName := generateTestName()
-		dnewDrbds := validSpecReplicatedscTemplate
-		dnewDrbds.Name = newReplicatedscName
-		dnewDrbds.Spec.IsDefault = true
+		dnewReplicatedSC := validSpecReplicatedscTemplate
+		dnewReplicatedSC.Name = newReplicatedscName
+		dnewReplicatedSC.Spec.IsDefault = true
 		zones := map[string]struct{}{
 			"first":  {},
 			"second": {},
 			"third":  {},
 		}
 
-		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewDrbds, zones)
+		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
 		Expect(validation).Should(BeFalse())
 		Expect(msg).To(Equal(fmt.Sprintf("Validation of ReplicatedStorageClass failed: Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: ", replicatedsc.Name)))
 	})
@@ -512,16 +512,16 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		newReplicatedscName := testName
-		dnewDrbds := validSpecReplicatedscTemplate
-		dnewDrbds.Name = newReplicatedscName
-		dnewDrbds.Spec.IsDefault = true
+		dnewReplicatedSC := validSpecReplicatedscTemplate
+		dnewReplicatedSC.Name = newReplicatedscName
+		dnewReplicatedSC.Spec.IsDefault = true
 		zones := map[string]struct{}{
 			"first":  {},
 			"second": {},
 			"third":  {},
 		}
 
-		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewDrbds, zones)
+		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
 		Expect(validation).Should(BeTrue())
 	})
 
@@ -546,16 +546,16 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			}()
 		}
 
-		dnewDrbds := validSpecReplicatedscTemplate
-		dnewDrbds.Name = generateTestName()
-		dnewDrbds.Spec.IsDefault = true
+		dnewReplicatedSC := validSpecReplicatedscTemplate
+		dnewReplicatedSC.Name = generateTestName()
+		dnewReplicatedSC.Spec.IsDefault = true
 		zones := map[string]struct{}{
 			"first":  {},
 			"second": {},
 			"third":  {},
 		}
 
-		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewDrbds, zones)
+		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
 		Expect(validation).Should(BeFalse())
 		Expect(msg).To(Equal(fmt.Sprintf("Validation of ReplicatedStorageClass failed: Conflict with other default ReplicatedStorageClasses: ; StorageClasses: %s", sc.Name)))
 	})
@@ -582,16 +582,16 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			}()
 		}
 
-		dnewDrbds := validSpecReplicatedscTemplate
-		dnewDrbds.Name = testName
-		dnewDrbds.Spec.IsDefault = true
+		dnewReplicatedSC := validSpecReplicatedscTemplate
+		dnewReplicatedSC.Name = testName
+		dnewReplicatedSC.Spec.IsDefault = true
 		zones := map[string]struct{}{
 			"first":  {},
 			"second": {},
 			"third":  {},
 		}
 
-		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewDrbds, zones)
+		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
 		Expect(validation).Should(BeTrue())
 	})
 
@@ -908,11 +908,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		// Expect(err).NotTo(HaveOccurred())
 		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
 
-		drbdStorageClasses := sdsapi.ReplicatedStorageClassList{}
-		err = cl.List(ctx, &drbdStorageClasses)
+		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
+		err = cl.List(ctx, &replicatedStorageClasses)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.ReconcileKubernetesNodeLabels(ctx, cl, log, *node, drbdStorageClasses, drbdNodeSelector, true)
+		err = controller.ReconcileKubernetesNodeLabels(ctx, cl, log, *node, replicatedStorageClasses, drbdNodeSelector, true)
 		Expect(err).NotTo(HaveOccurred())
 
 		updatedNode := &v1.Node{}
