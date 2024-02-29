@@ -195,7 +195,7 @@ EOF
 - Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Completed`:
 
 ```shell
-kubectl get dsp data -w
+kubectl get rsp data -w
 ```
 
 - Проверить, что в LINSTOR создался Storage Pool `data` на узлах `worker-0`,  `worker-1` и `worker-2`:
@@ -234,7 +234,7 @@ EOF
 - Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
 
 ```shell
-kubectl get dsc replicated-storage-class -w
+kubectl get rsc replicated-storage-class -w
 ```
 
 - Проверить, что соответствующий `StorageClass` создался:

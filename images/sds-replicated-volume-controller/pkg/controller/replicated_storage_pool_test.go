@@ -57,10 +57,10 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		err := cl.Create(ctx, testReplicatedSP)
 		Expect(err).NotTo(HaveOccurred())
 
-		replicatedsp, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, testName)
+		replicatedSP, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, testName)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(replicatedsp.Name).To(Equal(testName))
-		Expect(replicatedsp.Namespace).To(Equal(testNameSpace))
+		Expect(replicatedSP.Name).To(Equal(testName))
+		Expect(replicatedSP.Namespace).To(Equal(testNameSpace))
 	})
 
 	It("UpdateReplicatedStoragePool", func() {
@@ -71,14 +71,14 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		Expect(testReplicatedSP.Labels[testLblKey]).To(Equal(""))
 
-		replicatedspLabs := map[string]string{testLblKey: testLblValue}
-		testReplicatedSP.Labels = replicatedspLabs
+		replicatedSPLabs := map[string]string{testLblKey: testLblValue}
+		testReplicatedSP.Labels = replicatedSPLabs
 
 		err := controller.UpdateReplicatedStoragePool(ctx, cl, testReplicatedSP)
 		Expect(err).NotTo(HaveOccurred())
 
-		updatedreplicatedsp, _ := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, testName)
-		Expect(updatedreplicatedsp.Labels[testLblKey]).To(Equal(testLblValue))
+		updatedreplicatedSP, _ := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, testName)
+		Expect(updatedreplicatedSP.Labels[testLblKey]).To(Equal(testLblValue))
 	})
 
 	It("UpdateMapValue", func() {
@@ -262,7 +262,7 @@ func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, repli
 		}
 	}
 
-	replicatedsp := &v1alpha1.ReplicatedStoragePool{
+	replicatedSP := &v1alpha1.ReplicatedStoragePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      replicatedStoragePoolName,
 			Namespace: namespace,
@@ -273,6 +273,6 @@ func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, repli
 		},
 	}
 
-	err := cl.Create(ctx, replicatedsp)
+	err := cl.Create(ctx, replicatedSP)
 	return err
 }
