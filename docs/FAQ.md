@@ -13,29 +13,27 @@ As for any other configurations, the module may work, but its smooth operation i
 
 ## What is difference between LVM and LVMThin?
 
-In a nutshell::
-
-- LVM is simpler and has performance comparable to that of native disk drives;
-- LVMThin allows for snapshots and overprovisioning; however, it is significantly slower.
+- LVM is simpler and has high performance that is similar to that of native disk drives, but it does not support snapshots;
+- LVMThin allows for snapshots and overprovisioning; however, it is slower than LVM.
 
 ## How do I get info about the space used?
 
 There are two options:
 
-- Using the Grafana dashboard: navigate to **Dashboards --> Storage --> LINSTOR/DRBD**  
+1. Using the Grafana dashboard:
+
+* Navigate to **Dashboards --> Storage --> LINSTOR/DRBD**  
   In the upper right corner, you'll see the amount of space used in the cluster.
 
-  > **Caution!** *Raw* space usage in the cluster is displayed.
-  > Suppose you create a volume with two replicas. In this case, these values must be divided by two to see how many such volumes can be in your cluster.
+  > **Caution!** *Raw* space usage in the cluster is displayed. Suppose you create a volume with two replicas. In this case, these values must be divided by two to see how many such volumes can be in your cluster.
 
-- Using the LINSTOR command line:
+2. Using the LINSTOR command line:
 
   ```shell
   kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor storage-pool list
   ```
 
-  > **Caution!** *Raw* space usage for each node in the cluster is displayed.
-  > Suppose you create a volume with two replicas. In this case, those two replicas must fully fit on two nodes in your cluster.
+  > **Caution!** *Raw* space usage for each node in the cluster is displayed. Suppose you create a volume with two replicas. In this case, those two replicas must fully fit on two nodes in your cluster.
 
 ## How do I set the default StorageClass?
 
@@ -43,19 +41,19 @@ Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass]
 
 ## How do I add the existing LVM Volume Group or LVMThin pool?
 
-1. Manually add the `storage.deckhouse.io/enabled=true` tag to the Volume Group:
+1. Manually add the `storage.deckhouse.io/enabled=true` LVM tag to the Volume Group:
 
    ```shell
    vgchange myvg-0 --add-tag storage.deckhouse.io/enabled=true
    ```
 
-2. This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
+   This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
 
-3. You can specify this resource in the [DRBDStoragePool](./cr.html#drbdstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
+2. Specify this resource in the [DRBDStoragePool](./cr.html#drbdstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
-## How do I evict resources from a node?
+## How do I evict DRBD resources from a node?
 
-* Download the `evict.sh` script on the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
+1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
 
   * Download the latest script version from GitHub:
 
@@ -71,21 +69,21 @@ Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass]
     chmod 700 evict.sh
     ```
 
-* Fix all faulty LINSTOR resources in the cluster. Run the following command to detect them:
+2. Fix all faulty LINSTOR resources in the cluster. Run the following command to filter them:
 
   ```shell
   kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor resource list --faulty
   ```
 
-* Check that all the pods in the `d8-sds-drbd` namespace are in the Running state:
+3. Check that all the pods in the `d8-sds-drbd` namespace are in the Running state:
 
   ```shell
   kubectl -n d8-sds-drbd get pods | grep -v Running
   ```
 
-### How do I evict resources from a node without deleting it from LINSTOR and Kubernetes
+### How do I evict DRBD resources from a node without deleting it from LINSTOR and Kubernetes
 
-Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
+1. Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
 
 ```shell
 ./evict.sh --delete-resources-only
@@ -99,7 +97,7 @@ To run the `evict.sh` script in non-interactive mode, add the `--non-interactive
 
 > **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the LINSTOR scheduler from creating resources on this node.
 
-Run the following command to allow resources and pods to be scheduled on the node again:
+2. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
 ```shell
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
@@ -107,7 +105,7 @@ linstor node set-property "worker-1" AutoplaceTarget
 kubectl uncordon "worker-1"
 ```
 
-Run the following command to check the *AutoplaceTarget* property for all nodes (the AutoplaceTarget field will be empty for nodes that are allowed to host LINSTOR resources):
+3. Run the following command to check the *AutoplaceTarget* property for all nodes (the AutoplaceTarget field will be empty for nodes that are allowed to host LINSTOR resources):
 
 ```shell
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
@@ -117,7 +115,7 @@ linstor node list -s AutoplaceTarget
 ## Troubleshooting
 
 Problems can occur at different levels of component operation.
-This simple cheat sheet will help you quickly navigate through the diagnosis of various problems with the LINSTOR-created volumes:
+This cheat sheet will help you quickly navigate through the diagnosis of various problems with the LINSTOR-created volumes:
 
 ![LINSTOR cheatsheet](./images/linstor-debug-cheatsheet.svg)
 <!--- Source: https://docs.google.com/drawings/d/19hn3nRj6jx4N_haJE0OydbGKgd-m8AUSr0IqfHfT6YA/edit --->
@@ -126,40 +124,38 @@ Some common problems are described below.
 
 ### linstor-node fail to start because the drbd module cannot be loaded
 
-Check the status of the `linstor-node` Pods:
+1. Check the status of the `linstor-node` pods:
 
 ```shell
 kubectl get pod -n d8-sds-drbd -l app=linstor-node
 ```
 
-If you see that some of them got stuck in `Init` state, check the DRBD version aw well as the bashible logs on the node:
+2. If some of those pods got stuck in `Init` state, check the DRBD version as well as the bashible logs on the node:
 
 ```shell
 cat /proc/drbd
 journalctl -fu bashible
 ```
 
-The most likely reasons why loading the kernel module fails:
+The most likely reasons why bashible is unable to load the kernel module:
 
 - You have the in-tree version of the DRBDv8 module preloaded, whereas LINSTOR requires DRBDv9.
-  Check the preloaded module version: `cat /proc/drbd`. If the file is missing, then the module is not preloaded and this is not your case.
+  Verify the preloaded module version using the following command: `cat /proc/drbd`. If the file is missing, then the module is not preloaded and this is not your case.
 
 - You have Secure Boot enabled.
-  Since the DRBD module we provide is compiled dynamically for your kernel (similar to dkms), it is not digitally signed.
-  We do not currently support running the DRBD module with a Secure Boot enabled.
+  Since the DRBD module is compiled dynamically for your kernel (similar to dkms), it is not digitally signed.
+  Currently, running the DRBD module with a Secure Boot enabled is not supported.
 
 ### The Pod cannot start due to the `FailedMount` error
 
 #### **The Pod is stuck at the `ContainerCreating` phase**
 
-If the Pod is stuck at the `ContainerCreating` phase, and the following errors are displayed when the `kubectl describe pod` command is invoked:
+If the Pod is stuck at the `ContainerCreating` phase, and if the errors like those shown below are displayed when the `kubectl describe pod` command is invoked, then it means that the device is mounted on one of the nodes.
 
 ```text
 rpc error: code = Internal desc = NodePublishVolume failed for pvc-b3e51b8a-9733-4d9a-bf34-84e0fee3168d: checking
 for exclusive open failed: wrong medium type, check device health
 ```
-
-... it means that the device is still mounted on one ot the nodes.
 
 Use the command below to see if this is the case:
 
@@ -194,7 +190,8 @@ Yes, this is the expected behavior. Only the `isDefault` field is editable in th
 
 The child StorageClass is only deleted if the status of the DRBDStorageClass resource is `Created`. Otherwise, you will need to either restore the DRBDStorageClass resource to a working state or delete the StorageClass yourself.
 
-## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?```
+## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?
+
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
 ## When running commands in the LINSTOR CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
@@ -204,6 +201,40 @@ In the `sds-drbd` module, we have restricted the list of commands that are allow
 ```shell
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
 linstor --help
+```
+
+## Service pods of sds-drbd components fail to be created on the node I need
+
+Most likely this is due to node labels.
+
+- Check [dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) in the module settings:
+
+```shell
+kubectl get mc sds-drbd -o=jsonpath={.spec.settings.dataNodes.nodeSelector}
+```
+
+- Check the selectors that `sds-drbd-controller` uses:
+
+```shell
+kubectl -n d8-sds-drbd get secret d8-sds-drbd-controller-config  -o jsonpath='{.data.config}' | base64 --decode
+
+```
+
+- The `d8-sds-drbd-controller-config` secret should contain the selectors that are specified in the module settings, as well as the `kubernetes.io/os: linux` selector.
+
+- Make sure that the target node has all the labels specified in the `d8-sds-drbd-controller-config` secret:
+
+```shell
+kubectl get node worker-0 --show-labels
+```
+
+- If there are no labels, add them to the `NodeGroup` or to the node via templates.
+
+- If there are labels, check if the target node has the `storage.deckhouse.io/sds-drbd-node=` label attached. If there is no label, check if the sds-drbd-controller is running and if it is running, examine its logs:
+
+```shell
+kubectl -n d8-sds-drbd get po -l app=sds-drbd-controller
+kubectl -n d8-sds-drbd logs -l app=sds-drbd-controller
 ```
 
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
@@ -219,7 +250,7 @@ Note that the `LINSTOR` control-plane and its CSI will be unavailable during the
 
 ### Migration steps
 
-- Make sure there are no faulty `LINSTOR` resources in the cluster. The command below should return an empty list:
+1. Make sure there are no faulty `LINSTOR` resources in the cluster. The command below should return an empty list:
 
 ```shell
 alias linstor='kubectl -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
@@ -227,19 +258,20 @@ linstor resource list --faulty
 ```
 
 > **Caution!** You should fix all `LINSTOR` resources before migrating.
-- Disable the `linstor` module:
+
+2. Disable the `linstor` module:
 
 ```shell
 kubectl patch moduleconfig linstor --type=merge -p '{"spec": {"enabled": false}}'
 ```
 
-- Wait for the `d8-linstor` namespace to be deleted.
+3. Wait for the `d8-linstor` namespace to be deleted.
 
 ```shell
 kubectl get namespace d8-linstor
 ```
 
-- Create a `ModuleConfig` resource for `sds-node-configurator`.
+4. Create a `ModuleConfig` resource for `sds-node-configurator`.
 
 ```shell
 kubectl apply -f -<<EOF
@@ -253,15 +285,15 @@ spec:
 EOF
 ```
 
-- Wait for the `sds-node-configurator` module to become `Ready`.
+5. Wait for the `sds-node-configurator` module to become `Ready`.
 
 ```shell
 kubectl get moduleconfig sds-node-configurator
 ```
 
-- Create a `ModuleConfig` resource for `sds-drbd`.
+6. Create a `ModuleConfig` resource for `sds-drbd`.
 
-> **Caution!** If you fail to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-drbd` module settings, the value for this parameter will be derived from the `linstor` module when installing the `sds-drbd` module. If this parameter is not defined there as well, it will remain empty.
+> **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-drbd` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-drbd` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
 ```shell
 k apply -f - <<EOF
@@ -275,26 +307,26 @@ spec:
 EOF
 ```
 
-- Wait for the `sds-drbd` module to become `Ready`.
+7. Wait for the `sds-drbd` module to become `Ready`.
 
 ```shell
 kubectl get moduleconfig sds-drbd
 ```
 
-- Check the `sds-drbd` module settings
+8. Check the `sds-drbd` module settings.
 
 ```shell
 kubectl get moduleconfig sds-drbd -oyaml
 ```
 
-- Wait for all pods in the `d8-sds-drbd` and `d8-sds-node-configurator` namespaces to become `Ready` or `Completed`.
+9. Wait for all pods in the `d8-sds-drbd` and `d8-sds-node-configurator` namespaces to become `Ready` or `Completed`.
 
 ```shell
 kubectl get po -n d8-sds-node-configurator
 kubectl get po -n d8-sds-drbd
 ```
 
-- Override the alias for the `linstor` command and check the `LINSTOR` resources:
+10. Override the `linstor` command alias and check the `LINSTOR` resources:
 
 ```shell
 alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
@@ -307,7 +339,7 @@ If there are no faulty resources, then the migration was successful.
 
 Note that StorageClasses in this module are managed via the `DRBDStorageClass` resource. StorageClasses should not be created manually.
 
-When migrating from the linstor module, you must delete old StorageClasses and create new ones via the `DRBDStorageClass` resource (refer to the table below).
+When migrating from the linstor module, delete old StorageClasses and create new ones via the `DRBDStorageClass` resource (refer to the table below).
 
 Note that in the old StorageClasses, you should pick up the option from the parameter section of the StorageClass itself, while for the new StorageClass, you should specify the corresponding option in `DRBDStorageClass`. 
 
@@ -331,3 +363,15 @@ You can read more about working with `DRBDStorageClass` resources [here](./usage
 ### Migrating to DRBDStoragePool
 
 The `DRBDStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `DRBDStoragePool` resources, click [here](./usage.html).
+
+## Why is it not recommended to use RAID for disks that are used by the `sds-drbd` module?
+
+DRBD with a replica count greater than 1 provides de facto network RAID. Using RAID locally may be inefficient because:
+
+- Redundant RAID dramatically increases the overhead in terms of space utilization. Here is an example: Suppose, a `DBRDStorageClass` is used with `replication` set to `ConsistencyAndAvailability`. With this setting, DRBD will store data in three replicas (one replica per three different hosts). If RAID1 is used on these hosts, a total of 6 GB of disk space will be required to store 1 GB of data. Redundant RAID is worth using for easier server maintenance when the storage costs are irrelevant. RAID1 in this case will allow you to change disks on servers without having to move data replicas from the "problem" disk.
+
+- As for RAID0, the performance gain will be unnoticeable, since data replication will be performed over the network and the network is likely to be the bottleneck. On top of that, decreased storage reliability on the host will potentially lead to data unavailability given that in DRBD, switching from a faulty replica to a healthy one is not instantaneous.
+
+## Why do you recommend using local disks (and not NAS)?
+
+Motivation: DRBD replicates data over the network. If NAS is used, the network load will increase as well as the read/write latency.
