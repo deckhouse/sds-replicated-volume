@@ -70,7 +70,7 @@ def create_backup(backup_type, namespace, labels={}):
 
 
 if __name__ == "__main__":
-    namespace = 'd8-sds-drbd'
+    namespace = 'd8-sds-replicated-volume'
     full_completed_list = []
     backup_list = []
 

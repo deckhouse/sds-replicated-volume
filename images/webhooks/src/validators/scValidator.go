@@ -29,7 +29,7 @@ func SCValidate(w http.ResponseWriter, r *http.Request) {
 	json.Unmarshal(raw, &jsonData)
 
 	if jsonData["provisioner"] == "linstor.csi.linbit.com" {
-		if arReview.Request.UserInfo.Username == "system:serviceaccount:d8-sds-drbd:sds-drbd-controller" {
+		if arReview.Request.UserInfo.Username == "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller" {
 			arReview.Response.Allowed = true
 			klog.Infof("Incoming request approved (%s)", string(raw))
 		} else if arReview.Request.Operation == "DELETE" {
@@ -38,9 +38,9 @@ func SCValidate(w http.ResponseWriter, r *http.Request) {
 		} else {
 			arReview.Response.Allowed = false
 			arReview.Response.Result = &metav1.Status{
-				Message: "Manual operations with this StorageClass is prohibited. Please use DRBDStorageClass instead.",
+				Message: "Manual operations with this StorageClass is prohibited. Please use ReplicatedStorageClass instead.",
 			}
-			klog.Infof("Incoming request denied: Manual operations with this StorageClass is prohibited. Please use DRBDStorageClass instead (%s)", string(raw))
+			klog.Infof("Incoming request denied: Manual operations with this StorageClass is prohibited. Please use ReplicatedStorageClass instead (%s)", string(raw))
 		}
 	} else {
 		arReview.Response.Allowed = true

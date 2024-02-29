@@ -1,6 +1,6 @@
 ---
-title: "Модуль sds-drbd: Custom Resources"
-description: "Модуль sds-drbd Custom Resources: DRBDStoragePool и DRBDStorageClass."
+title: "Модуль sds-replicated-volume: Custom Resources"
+description: "Модуль sds-replicated-volume Custom Resources: ReplicatedStoragePool и ReplicatedStorageClass."
 ---
 
 {{< alert level="warning" >}}

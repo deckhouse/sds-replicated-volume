@@ -19,7 +19,7 @@ rules:
     apiGroups:
       - storage.deckhouse.io
     resources:
-      - drbdstorageclasses
+      - replicatedstorageclasses
   - verbs:
       - get
       - list

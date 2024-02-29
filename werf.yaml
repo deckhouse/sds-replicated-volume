@@ -1,4 +1,4 @@
-project: sds-drbd
+project: sds-replicated-volume
 configVersion: 1
 ---
 {{ tpl (.Files.Get ".werf/images.yaml") $ }}

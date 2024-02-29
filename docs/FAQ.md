@@ -1,5 +1,5 @@
 ---
-title: "The sds-drbd module: FAQ"
+title: "The sds-replicated-volume module: FAQ"
 description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? LINSTOR performance and reliability notes, comparison to Ceph. How to add existing LINSTOR LVM or LVMThin pool. How to configure Prometheus to use LINSTOR for storing data. Controller's work-flow questions.
 ---
 
@@ -31,7 +31,7 @@ There are two options:
 - Using the LINSTOR command line:
 
   ```shell
-  kubectl exec -n d8-sds-drbd deploy/linstor-controller -- linstor storage-pool list
+  kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
   ```
 
   > **Caution!** *Raw* space usage for each node in the cluster is displayed.
@@ -39,7 +39,7 @@ There are two options:
 
 ## How do I set the default StorageClass?
 
-Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass](./cr.html#drbdstorageclass) custom resource.
+Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorageClass](./cr.html#replicatedstorageclass) custom resource.
 
 ## How do I add the existing LVM Volume Group or LVMThin pool?
 
@@ -51,7 +51,7 @@ Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass]
 
 2. This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
 
-3. You can specify this resource in the [DRBDStoragePool](./cr.html#drbdstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
+3. You can specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
 ## How do I evict resources from a node?
 
@@ -74,13 +74,13 @@ Set the `spec.IsDefault` field to `true` in the corresponding [DRBDStorageClass]
 * Fix all faulty LINSTOR resources in the cluster. Run the following command to detect them:
 
   ```shell
-  kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor resource list --faulty
+  kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor resource list --faulty
   ```
 
-* Check that all the pods in the `d8-sds-drbd` namespace are in the Running state:
+* Check that all the pods in the `d8-sds-replicated-volume` namespace are in the Running state:
 
   ```shell
-  kubectl -n d8-sds-drbd get pods | grep -v Running
+  kubectl -n d8-sds-replicated-volume get pods | grep -v Running
   ```
 
 ### How do I evict resources from a node without deleting it from LINSTOR and Kubernetes
@@ -102,7 +102,7 @@ To run the `evict.sh` script in non-interactive mode, add the `--non-interactive
 Run the following command to allow resources and pods to be scheduled on the node again:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor node set-property "worker-1" AutoplaceTarget
 kubectl uncordon "worker-1"
 ```
@@ -110,7 +110,7 @@ kubectl uncordon "worker-1"
 Run the following command to check the *AutoplaceTarget* property for all nodes (the AutoplaceTarget field will be empty for nodes that are allowed to host LINSTOR resources):
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor node list -s AutoplaceTarget
 ```
 
@@ -129,7 +129,7 @@ Some common problems are described below.
 Check the status of the `linstor-node` Pods:
 
 ```shell
-kubectl get pod -n d8-sds-drbd -l app=linstor-node
+kubectl get pod -n d8-sds-replicated-volume -l app=linstor-node
 ```
 
 If you see that some of them got stuck in `Init` state, check the DRBD version aw well as the bashible logs on the node:
@@ -164,7 +164,7 @@ for exclusive open failed: wrong medium type, check device health
 Use the command below to see if this is the case:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor resource list -r pvc-b3e51b8a-9733-4d9a-bf34-84e0fee3168d
 ```
 
@@ -182,36 +182,36 @@ dmesg | grep 'Remote failed to finish a request within'
 
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
-## I have deleted the DRBDStoragePool resource, yet its associated Storage Pool in the LINSTOR backend is still there. Is it supposed to be like this?
+## I have deleted the ReplicatedStoragePool resource, yet its associated Storage Pool in the LINSTOR backend is still there. Is it supposed to be like this?
 
-Yes, this is the expected behavior. Currently, the `sds-drbd` module does not process operations when deleting the `DRBDStoragePool` resource.
+Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the `ReplicatedStoragePool` resource.
 
-## I am unable to update the fields in the DRBDStorageClass resource spec. Is this the expected behavior?  
+## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
 Yes, this is the expected behavior. Only the `isDefault` field is editable in the `spec`. All the other fields in the resource `spec` are made immutable.
 
-## When you delete a DRBDStorageClass resource, its child StorageClass in Kubernetes is not deleted. What can I do in this case?
+## When you delete a ReplicatedStorageClass resource, its child StorageClass in Kubernetes is not deleted. What can I do in this case?
 
-The child StorageClass is only deleted if the status of the DRBDStorageClass resource is `Created`. Otherwise, you will need to either restore the DRBDStorageClass resource to a working state or delete the StorageClass yourself.
+The child StorageClass is only deleted if the status of the ReplicatedStorageClass resource is `Created`. Otherwise, you will need to either restore the ReplicatedStorageClass resource to a working state or delete the StorageClass yourself.
 
 ## I noticed that an error occurred when trying to create a Storage Pool / Storage Class, but in the end the necessary entity was successfully created. Is this behavior acceptable?```
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
 ## When running commands in the LINSTOR CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
 
-In the `sds-drbd` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when LINSTOR doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
+In the `sds-replicated-volume` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when LINSTOR doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor --help
 ```
 
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
 
-Information about the reasons for the failure is saved to the `Status.Reason` field of the `DRBDStoragePool` and `DRBDStorageClass` resources.
-If the information provided is not enough to identify the problem, refer to the sds-drbd-controller logs.
+Information about the reasons for the failure is saved to the `Status.Reason` field of the `ReplicatedStoragePool` and `ReplicatedStorageClass` resources.
+If the information provided is not enough to identify the problem, refer to the sds-replicated-volume-controller logs.
 
-## Migrating from the Deckhouse Kubernetes Platform [linstor](https://deckhouse.io/documentation/v1.57/modules/041-linstor/)  built-in module to sds-drbd
+## Migrating from the Deckhouse Kubernetes Platform [linstor](https://deckhouse.io/documentation/v1.57/modules/041-linstor/)  built-in module to sds-replicated-volume
 
 Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using the `LINSTOR` PV during the migration.
 
@@ -259,59 +259,59 @@ EOF
 kubectl get moduleconfig sds-node-configurator
 ```
 
-- Create a `ModuleConfig` resource for `sds-drbd`.
+- Create a `ModuleConfig` resource for `sds-replicated-volume`.
 
-> **Caution!** If you fail to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-drbd` module settings, the value for this parameter will be derived from the `linstor` module when installing the `sds-drbd` module. If this parameter is not defined there as well, it will remain empty.
+> **Caution!** If you fail to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings, the value for this parameter will be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty.
 
 ```shell
 k apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
-  name: sds-drbd
+  name: sds-replicated-volume
 spec:
   enabled: true
   version: 1
 EOF
 ```
 
-- Wait for the `sds-drbd` module to become `Ready`.
+- Wait for the `sds-replicated-volume` module to become `Ready`.
 
 ```shell
-kubectl get moduleconfig sds-drbd
+kubectl get moduleconfig sds-replicated-volume
 ```
 
-- Check the `sds-drbd` module settings
+- Check the `sds-replicated-volume` module settings
 
 ```shell
-kubectl get moduleconfig sds-drbd -oyaml
+kubectl get moduleconfig sds-replicated-volume -oyaml
 ```
 
-- Wait for all pods in the `d8-sds-drbd` and `d8-sds-node-configurator` namespaces to become `Ready` or `Completed`.
+- Wait for all pods in the `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces to become `Ready` or `Completed`.
 
 ```shell
 kubectl get po -n d8-sds-node-configurator
-kubectl get po -n d8-sds-drbd
+kubectl get po -n d8-sds-replicated-volume
 ```
 
 - Override the alias for the `linstor` command and check the `LINSTOR` resources:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor resource list --faulty
 ```
 
 If there are no faulty resources, then the migration was successful.
 
-### Migrating to DRBDStorageClass
+### Migrating to ReplicatedStorageClass
 
-Note that StorageClasses in this module are managed via the `DRBDStorageClass` resource. StorageClasses should not be created manually.
+Note that StorageClasses in this module are managed via the `ReplicatedStorageClass` resource. StorageClasses should not be created manually.
 
-When migrating from the linstor module, you must delete old StorageClasses and create new ones via the `DRBDStorageClass` resource (refer to the table below).
+When migrating from the linstor module, you must delete old StorageClasses and create new ones via the `ReplicatedStorageClass` resource (refer to the table below).
 
-Note that in the old StorageClasses, you should pick up the option from the parameter section of the StorageClass itself, while for the new StorageClass, you should specify the corresponding option in `DRBDStorageClass`. 
+Note that in the old StorageClasses, you should pick up the option from the parameter section of the StorageClass itself, while for the new StorageClass, you should specify the corresponding option in `ReplicatedStorageClass`. 
 
-| StorageClass parameter                     | DRBDStorageClass      | Default parameter | Notes                                                     |
+| StorageClass parameter                     | ReplicatedStorageClass      | Default parameter | Notes                                                     |
 |-------------------------------------------|-----------------------|-|----------------------------------------------------------------|
 | linstor.csi.linbit.com/placementCount: "1" | replication: "None"   | | A single volume replica with data will be created                  |
 | linstor.csi.linbit.com/placementCount: "2" | replication: "Availability" | | Two volume replicas with data will be created                  |
@@ -324,10 +324,10 @@ On top of these, the following parameters are available:
 - reclaimPolicy (Delete, Retain) - corresponds to the reclaimPolicy parameter of the old StorageClass
 - zones - list of zones to be used for hosting resources ( the actual names of the zones in the cloud). Please note that remote access to a volume with data is only possible within a single zone!
 - volumeAccess can be "Local" (access is strictly within the node), "EventuallyLocal" (the data replica will be synchronized on the node with the running pod a while after the start), "PreferablyLocal" (remote access to the volume with data is allowed, volumeBindingMode: WaitForFirstConsumer), "Any" (remote access to the volume with data is allowed, volumeBindingMode: Immediate).
-- If you need to use `volumeBindingMode: Immediate`, set the volumeAccess parameter of the `DRBDStorageClass` to `Any`.
+- If you need to use `volumeBindingMode: Immediate`, set the volumeAccess parameter of the `ReplicatedStorageClass` to `Any`.
 
-You can read more about working with `DRBDStorageClass` resources [here](./usage.html).
+You can read more about working with `ReplicatedStorageClass` resources [here](./usage.html).
 
-### Migrating to DRBDStoragePool
+### Migrating to ReplicatedStoragePool
 
-The `DRBDStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `DRBDStoragePool` resources, click [here](./usage.html).
+The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).

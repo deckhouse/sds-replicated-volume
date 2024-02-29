@@ -96,9 +96,9 @@ spec:
         args:
           - startController
           - --log-level
-          - {{ .Values.sdsDrbd.logLevel }}
+          - {{ .Values.sdsReplicatedVolume.logLevel }}
           - --log-level-linstor
-          - {{ .Values.sdsDrbd.logLevel }}
+          - {{ .Values.sdsReplicatedVolume.logLevel }}
         env:
           - name: JAVA_OPTS
             value: -Djdk.tls.acknowledgeCloseNotify=true
@@ -133,7 +133,7 @@ spec:
             value: '[{"name":"metrics","port":3370},{"name":"linstor","port":3371}]'
           - name: K8S_AWAIT_ELECTION_STATUS_ENDPOINT
             value: :9999
-          {{- if .Values.sdsDrbd.internal.masterPassphrase }}
+          {{- if .Values.sdsReplicatedVolume.internal.masterPassphrase }}
           - name: MASTER_PASSPHRASE
             valueFrom:
               secretKeyRef:

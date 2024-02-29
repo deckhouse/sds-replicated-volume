@@ -22,8 +22,8 @@ import os
 import unittest
 
 
-NAMESPACE   = "d8-sds-drbd"
-MODULE_NAME = "sdsDrbd"
+NAMESPACE   = "d8-sds-replicated-volume"
+MODULE_NAME = "sdsReplicatedVolume"
 
 def json_load(path: str):
     with open(path, "r", encoding="utf-8") as f:
