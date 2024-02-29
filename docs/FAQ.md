@@ -200,26 +200,26 @@ alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-contr
 linstor --help
 ```
 
-## Service pods of sds-drbd components fail to be created on the node I need
+## Service pods of sds-replicated-volume components fail to be created on the node I need
 
 Most likely this is due to node labels.
 
 - Check [dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) in the module settings:
 
 ```shell
-kubectl get mc sds-drbd -o=jsonpath={.spec.settings.dataNodes.nodeSelector}
+kubectl get mc sds-replicated-volume -o=jsonpath={.spec.settings.dataNodes.nodeSelector}
 ```
 
-- Check the selectors that `sds-drbd-controller` uses:
+- Check the selectors that `sds-replicated-volume-controller` uses:
 
 ```shell
-kubectl -n d8-sds-drbd get secret d8-sds-drbd-controller-config  -o jsonpath='{.data.config}' | base64 --decode
+kubectl -n d8-sds-replicated-volume get secret d8-sds-replicated-volume-controller-config  -o jsonpath='{.data.config}' | base64 --decode
 
 ```
 
-- The `d8-sds-drbd-controller-config` secret should contain the selectors that are specified in the module settings, as well as the `kubernetes.io/os: linux` selector.
+- The `d8-sds-replicated-volume-controller-config` secret should contain the selectors that are specified in the module settings, as well as the `kubernetes.io/os: linux` selector.
 
-- Make sure that the target node has all the labels specified in the `d8-sds-drbd-controller-config` secret:
+- Make sure that the target node has all the labels specified in the `d8-sds-replicated-volume-controller-config` secret:
 
 ```shell
 kubectl get node worker-0 --show-labels
@@ -227,11 +227,11 @@ kubectl get node worker-0 --show-labels
 
 - If there are no labels, add them to the `NodeGroup` or to the node via templates.
 
-- If there are labels, check if the target node has the `storage.deckhouse.io/sds-drbd-node=` label attached. If there is no label, check if the sds-drbd-controller is running and if it is running, examine its logs:
+- If there are labels, check if the target node has the `storage.deckhouse.io/sds-replicated-volume-node=` label attached. If there is no label, check if the sds-replicated-volume-controller is running and if it is running, examine its logs:
 
 ```shell
-kubectl -n d8-sds-drbd get po -l app=sds-drbd-controller
-kubectl -n d8-sds-drbd logs -l app=sds-drbd-controller
+kubectl -n d8-sds-replicated-volume get po -l app=sds-replicated-volume-controller
+kubectl -n d8-sds-replicated-volume logs -l app=sds-replicated-volume-controller
 ```
 
 ## I have not found an answer to my question and am having trouble getting the module to work. What do I do?
@@ -290,7 +290,7 @@ kubectl get moduleconfig sds-node-configurator
 
 6. Create a `ModuleConfig` resource for `sds-replicated-volume`.
 
-> **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-drbd` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+> **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
 ```shell
 k apply -f - <<EOF

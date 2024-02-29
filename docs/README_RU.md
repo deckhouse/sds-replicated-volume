@@ -51,17 +51,17 @@ EOF
 kubectl get mc sds-node-configurator -w
 ```
 
-- Включить модуль `sds-drbd`. Возможные настройки модуля рекомендуем посмотреть в [конфигурации](./configuration.html). В примере ниже модуль запускается с настройками по умолчанию. Это приведет к тому, что на всех узлах кластера будет:
+- Включить модуль `sds-replicated-volume`. Возможные настройки модуля рекомендуем посмотреть в [конфигурации](./configuration.html). В примере ниже модуль запускается с настройками по умолчанию. Это приведет к тому, что на всех узлах кластера будет:
   - установлен модуль ядра `DRBD`;
   - зарегистрирован CSI драйвер;
-  - запущены служебные поды компонентов `sds-drbd`.
+  - запущены служебные поды компонентов `sds-replicated-volume`.
 
 ```shell
 kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
-  name: sds-drbd
+  name: sds-replicated-volume
 spec:
   enabled: true
   version: 1
@@ -71,13 +71,13 @@ EOF
 - Дождаться, когда модуль перейдет в состояние `Ready`.
 
 ```shell
-kubectl get mc sds-drbd -w
+kubectl get mc sds-replicated-volume -w
 ```
 
-- Проверить, что в namespace `d8-sds-drbd` и `d8-sds-node-configurator` все поды в состоянии `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы `DRBD`.
+- Проверить, что в namespace `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды в состоянии `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы `DRBD`.
 
 ```shell
-kubectl -n d8-sds-drbd get pod -owide -w
+kubectl -n d8-sds-replicated-volume get pod -owide -w
 kubectl -n d8-sds-node-configurator get pod -o wide -w
 ```
 
@@ -108,7 +108,7 @@ kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LvmVolumeGroup
 metadata:
-  name: "vg-1-on-worker-0" # Имя может быть любым подходящим для имен ресурсов в Kubernetes. Именно это имя ресурса LvmVolumeGroup будет в дальнейшем использоваться для создания DRBDStoragePool
+  name: "vg-1-on-worker-0" # Имя может быть любым подходящим для имен ресурсов в Kubernetes. Именно это имя ресурса LvmVolumeGroup будет в дальнейшем использоваться для создания ReplicatedStoragePool
 spec:
   type: Local
   blockDeviceNames:  # указываем имена ресурсов BlockDevice, которые расположены на нужной нам узле и CONSUMABLE которых выставлен в true. Обратите внимание, что имя узлы мы ннигде не указываем. Имя узлы берется из ресурсов BlockDevice
@@ -174,12 +174,12 @@ kubectl get lvg vg-1-on-worker-2 -w
 
 - Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
 
-- Теперь, когда у нас на узлах созданы нужные LVM VG, мы можем создать из них [DRBDStoragePool](./cr.html#drbdstoragepool):
+- Теперь, когда у нас на узлах созданы нужные LVM VG, мы можем создать из них [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
 
 ```yaml
 kubectl apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStoragePool
+kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
@@ -192,7 +192,7 @@ EOF
 
 ```
 
-- Дождаться, когда созданный ресурс `DRBDStoragePool` перейдет в состояние `Completed`:
+- Дождаться, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Completed`:
 
 ```shell
 kubectl get dsp data -w
@@ -201,7 +201,7 @@ kubectl get dsp data -w
 - Проверить, что в LINSTOR создался Storage Pool `data` на узлах `worker-0`,  `worker-1` и `worker-2`:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor sp l
 
 ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -216,34 +216,34 @@ linstor sp l
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- Создать ресурс [DRBDStorageClass](./cr.html#drbdstorageclass) для кластера, в котором нет зон (работа зональных DRBDStorageClass подробнее описана в [сценариях использования](./layouts.html)):
+- Создать ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) для кластера, в котором нет зон (работа зональных ReplicatedStorageClass подробнее описана в [сценариях использования](./layouts.html)):
 
 ```yaml
 kubectl apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
-  name: drbd-storage-class
+  name: replicated-storage-class
 spec:
-  storagePool: data # Указываем имя DRBDStoragePool, созданного ранее
+  storagePool: data # Указываем имя ReplicatedStoragePool, созданного ранее
   reclaimPolicy: Delete
   topology: Ignored # - если указываем такую топологию, то в кластере не должно быть зон (узлов с метками topology.kubernetes.io/zone).
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `DRBDStorageClass` перейдет в состояние `Created`:
+- Дождаться, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
 
 ```shell
-kubectl get dsc drbd-storage-class -w
+kubectl get dsc replicated-storage-class -w
 ```
 
 - Проверить, что соответствующий `StorageClass` создался:
 
 ```shell
-kubectl get sc drbd-storage-class
+kubectl get sc replicated-storage-class
 ```
 
-- Если `StorageClass` с именем `drbd-storage-class` появился, значит настройка модуля `sds-drbd` завершена. Теперь пользователи могут создавать PV, указывая `StorageClass` с именем `drbd-storage-class`. При указанных выше настройках будет создаваться том с 3мя репликами на разных узлах.
+- Если `StorageClass` с именем `replicated-storage-class` появился, значит настройка модуля `sds-replicated-volume` завершена. Теперь пользователи могут создавать PV, указывая `StorageClass` с именем `replicated-storage-class`. При указанных выше настройках будет создаваться том с 3мя репликами на разных узлах.
 
 
 

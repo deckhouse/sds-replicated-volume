@@ -51,17 +51,17 @@ EOF
 kubectl get mc sds-node-configurator -w
 ```
 
-- Enable the `sds-drbd` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is launched with the default settings. This will result in the following actions across all cluster nodes:
+- Enable the `sds-replicated-volume` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is launched with the default settings. This will result in the following actions across all cluster nodes:
   - installation of the `DRBD` kernel module;
   - registration of the CSI driver;
-  - launch of service pods for the `sds-drbd` components.
+  - launch of service pods for the `sds-replicated-volume` components.
 
 ```shell
 kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
-  name: sds-drbd
+  name: sds-replicated-volume
 spec:
   enabled: true
   version: 1
@@ -71,13 +71,13 @@ EOF
 - Wait for the module to become `Ready`.
 
 ```shell
-kubectl get mc sds-drbd -w
+kubectl get mc sds-replicated-volume -w
 ```
 
-- Make sure that all pods in `d8-sds-drbd` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where `DRBD` resources are intended to be used.
+- Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where `DRBD` resources are intended to be used.
   
 ```shell
-kubectl -n d8-sds-drbd get pod -owide -w
+kubectl -n d8-sds-replicated-volume get pod -owide -w
 kubectl -n d8-sds-node-configurator get pod -o wide -w
 ```
 
@@ -108,7 +108,7 @@ kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: LvmVolumeGroup
 metadata:
-  name: "vg-1-on-worker-0" # The name can be any fully qualified resource name in Kubernetes. This LvmVolumeGroup resource name will be used to create DRBDStoragePool in the future
+  name: "vg-1-on-worker-0" # The name can be any fully qualified resource name in Kubernetes. This LvmVolumeGroup resource name will be used to create ReplicatedStoragePool in the future
 spec:
   type: Local
   blockDeviceNames:  # specify the names of the BlockDevice resources that are located on the target node and whose CONSUMABLE is set to true. Note that the node name is not specified anywhere since it is derived from BlockDevice resources.
@@ -174,12 +174,12 @@ kubectl get lvg vg-1-on-worker-2 -w
 
 - The resource becoming `Operational` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
 
-- Now that we have all the LVM VGs created on the nodes, create a [DRBDStoragePool](./cr.html#drbdstoragepool) out of those VGs:
+- Now that we have all the LVM VGs created on the nodes, create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) out of those VGs:
 
 ```yaml
 kubectl apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStoragePool
+kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
@@ -192,7 +192,7 @@ EOF
 
 ```
 
-- Wait for the created `DRBDStoragePool` resource to become `Completed`:
+- Wait for the created `ReplicatedStoragePool` resource to become `Completed`:
 
 ```shell
 kubectl get dsp data -w
@@ -201,7 +201,7 @@ kubectl get dsp data -w
 - Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2` in LINSTOR:
 
 ```shell
-alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor sp l
 
 ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -216,34 +216,34 @@ linstor sp l
 ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ```
 
-- Create a [DRBDStorageClass](./cr.html#drbdstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal DRBDStorageClasses work):
+- Create a [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal ReplicatedStorageClasses work):
 
 ```yaml
 kubectl apply -f -<<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: DRBDStorageClass
+kind: ReplicatedStorageClass
 metadata:
-  name: drbd-storage-class
+  name: replicated-storage-class
 spec:
-  storagePool: data # Here, specify the name of the DRBDStoragePool you created earlier
+  storagePool: data # Here, specify the name of the ReplicatedStoragePool you created earlier
   reclaimPolicy: Delete
   topology: Ignored # - note that setting "ignored" means there should be no zones (nodes labeled topology.kubernetes.io/zone) in the cluster
 EOF
 ```
 
-- Wait for the created `DRBDStorageClass` resource to become `Created`:
+- Wait for the created `ReplicatedStorageClass` resource to become `Created`:
 
 ```shell
-kubectl get dsc drbd-storage-class -w
+kubectl get dsc replicated-storage-class -w
 ```
 
 - Confirm that the corresponding `StorageClass` has been created:
 
 ```shell
-kubectl get sc drbd-storage-class
+kubectl get sc replicated-storage-class
 ```
 
-- If `StorageClass` with the name `drbd-storage-class` is shown, then the configuration of the `sds-drbd` module is complete. Now users can create PVs by specifying `StorageClass` with the name `drbd-storage-class`. Given the above settings, a volume will be created with 3 replicas on different nodes.
+- If `StorageClass` with the name `replicated-storage-class` is shown, then the configuration of the `sds-replicated-volume` module is complete. Now users can create PVs by specifying `StorageClass` with the name `replicated-storage-class`. Given the above settings, a volume will be created with 3 replicas on different nodes.
 
 ## System requirements and recommendations
 
@@ -254,6 +254,6 @@ kubectl get sc drbd-storage-class
 
 ### Recommendations
 
-- Avoid using RAID. The reasons are detailed in the [FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-drbd-module).
+- Avoid using RAID. The reasons are detailed in the [FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
 
 - Use local physical disks. The reasons are detailed in the [FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
