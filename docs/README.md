@@ -245,7 +245,7 @@ kubectl get sc drbd-storage-class
 ## System requirements and recommendations
 
 ### Requirements
-- Stock kernels shipped with the [supported distributions](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
+- Stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
 - High-speed 10Gbps network.
 - Do not use another SDS (Software defined storage) to provide disks to our SDS.
 
