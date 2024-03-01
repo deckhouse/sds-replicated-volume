@@ -2,9 +2,9 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
-  name: "d8-sds-replicated-volume-dsc-validation"
+  name: "d8-sds-replicated-volume-rsc-validation"
 webhooks:
-  - name: "d8-sds-replicated-volume-dsc-validation.storage.deckhouse.io"
+  - name: "d8-sds-replicated-volume-rsc-validation.storage.deckhouse.io"
     rules:
       - apiGroups: ["storage.deckhouse.io"]
         apiVersions: ["v1alpha1"]
