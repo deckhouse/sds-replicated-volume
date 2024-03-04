@@ -4,17 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sds-replicated-volume-controller/api/v1alpha1"
+	"sds-replicated-volume-controller/pkg/logger"
+	"time"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
-	"sds-replicated-volume-controller/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"time"
 )
 
 const (
@@ -48,7 +49,7 @@ func NewReplicatedStorageClassWatcher(
 			time.Sleep(time.Second * time.Duration(interval))
 			log.Info("[NewReplicatedStorageClassWatcher] starts reconciliation loop")
 
-			dscs, err := GetAllReplicatedStorageClasses(ctx, cl)
+			rscs, err := GetAllReplicatedStorageClasses(ctx, cl)
 			if err != nil {
 				log.Error(err, "[NewReplicatedStorageClassWatcher] unable to get all ReplicatedStorageClasses")
 				continue
@@ -65,10 +66,10 @@ func NewReplicatedStorageClassWatcher(
 			}
 
 			storagePoolsNodes := SortNodesByStoragePool(nodeList, sps)
-			dspZones := GetReplicatedStoragePoolsZones(storagePoolsNodes)
+			rspZones := GetReplicatedStoragePoolsZones(storagePoolsNodes)
 
-			healthyDSCs := ReconcileReplicatedStorageClassPools(ctx, cl, log, dscs, sps)
-			healthyDSCs = ReconcileReplicatedStorageClassZones(ctx, cl, log, healthyDSCs, dspZones)
+			healthyDSCs := ReconcileReplicatedStorageClassPools(ctx, cl, log, rscs, sps)
+			healthyDSCs = ReconcileReplicatedStorageClassZones(ctx, cl, log, healthyDSCs, rspZones)
 			ReconcileReplicatedStorageClassReplication(ctx, cl, log, healthyDSCs, storagePoolsNodes)
 
 			log.Info("[NewReplicatedStorageClassWatcher] ends reconciliation loop")
@@ -99,20 +100,20 @@ func ReconcileReplicatedStorageClassPools(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	dscs map[string]v1alpha1.ReplicatedStorageClass,
+	rscs map[string]v1alpha1.ReplicatedStorageClass,
 	sps map[string][]lapi.StoragePool,
 ) map[string]v1alpha1.ReplicatedStorageClass {
-	healthy := make(map[string]v1alpha1.ReplicatedStorageClass, len(dscs))
-	for _, dsc := range dscs {
-		if _, exist := sps[dsc.Spec.StoragePool]; exist {
-			healthy[dsc.Name] = dsc
+	healthy := make(map[string]v1alpha1.ReplicatedStorageClass, len(rscs))
+	for _, rsc := range rscs {
+		if _, exist := sps[rsc.Spec.StoragePool]; exist {
+			healthy[rsc.Name] = rsc
 
-			removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByStoragePool)
+			removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByStoragePool)
 		} else {
-			err := errors.New(fmt.Sprintf("storage pool %s does not exist", dsc.Spec.StoragePool))
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassPools] storage pool validation failed for the ReplicatedStorageClass %s", dsc.Name))
+			err := errors.New(fmt.Sprintf("storage pool %s does not exist", rsc.Spec.StoragePool))
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassPools] storage pool validation failed for the ReplicatedStorageClass %s", rsc.Name))
 
-			setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByStoragePool)
+			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByStoragePool)
 		}
 	}
 
@@ -123,25 +124,25 @@ func ReconcileReplicatedStorageClassReplication(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	dscs map[string]v1alpha1.ReplicatedStorageClass,
+	rscs map[string]v1alpha1.ReplicatedStorageClass,
 	spNodes map[string][]v1.Node,
 ) {
 	log.Info("[ReconcileReplicatedStorageClassReplication] starts reconcile")
 
-	for _, dsc := range dscs {
-		log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s replication type %s", dsc.Name, dsc.Spec.Replication))
-		switch dsc.Spec.Replication {
+	for _, rsc := range rscs {
+		log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s replication type %s", rsc.Name, rsc.Spec.Replication))
+		switch rsc.Spec.Replication {
 		case ReplicationNone:
 		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
-			nodes := spNodes[dsc.Spec.StoragePool]
+			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {
 				if zone, exist := node.Labels[ZoneLabel]; exist {
 					zoneNodesCount[zone]++
 				}
 			}
-			log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s topology type %s", dsc.Name, dsc.Spec.Topology))
-			switch dsc.Spec.Topology {
+			log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s topology type %s", rsc.Name, rsc.Spec.Topology))
+			switch rsc.Spec.Topology {
 			// As we need to place 3 storage replicas in a some random zone, we check if at least one zone has enough nodes for quorum.
 			case TopologyZonal:
 				var enoughNodes bool
@@ -153,16 +154,16 @@ func ReconcileReplicatedStorageClassReplication(
 
 				if !enoughNodes {
 					err := errors.New("not enough nodes in a single zone for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", dsc.Name))
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
 
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we need to place every storage replica in a different zone, we check if at least one node is available in every selected zone.
 			case TopologyTransZonal:
 				enoughNodes := true
-				for _, zone := range dsc.Spec.Zones {
+				for _, zone := range rsc.Spec.Zones {
 					nodesCount := zoneNodesCount[zone]
 					if nodesCount < 1 {
 						enoughNodes = false
@@ -171,28 +172,28 @@ func ReconcileReplicatedStorageClassReplication(
 
 				if !enoughNodes {
 					err := errors.New("not enough nodes are available in the zones for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", dsc.Name))
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
 
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 				// As we do not care about zones, we just check if selected storage pool has enough nodes for quorum.
 			case TopologyIgnored:
-				if len(spNodes[dsc.Spec.StoragePool]) < 3 {
+				if len(spNodes[rsc.Spec.StoragePool]) < 3 {
 					err := errors.New("not enough nodes are available in the zones for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", dsc.Name))
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
 
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByReplicasLabel)
+					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
 				}
 			}
 		default:
 			err := errors.New("unsupported replication type")
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replication type validation failed for ReplicatedStorageClass %s", dsc.Name))
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replication type validation failed for ReplicatedStorageClass %s", rsc.Name))
 
-			setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, "storage.deckhouse.io/nonOperational")
+			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, "storage.deckhouse.io/nonOperational")
 		}
 	}
 	log.Info("[ReconcileReplicatedStorageClassReplication] ends reconcile")
@@ -202,32 +203,32 @@ func ReconcileReplicatedStorageClassZones(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	dscs map[string]v1alpha1.ReplicatedStorageClass,
-	dspZones map[string][]string,
+	rscs map[string]v1alpha1.ReplicatedStorageClass,
+	rspZones map[string][]string,
 ) map[string]v1alpha1.ReplicatedStorageClass {
 	log.Info("[ReconcileReplicatedStorageClassZones] starts reconcile")
-	healthyDSCs := make(map[string]v1alpha1.ReplicatedStorageClass, len(dscs))
+	healthyDSCs := make(map[string]v1alpha1.ReplicatedStorageClass, len(rscs))
 
-	for _, dsc := range dscs {
+	for _, rsc := range rscs {
 		var (
 			healthy = true
 			err     error
-			zones   = dspZones[dsc.Spec.StoragePool]
+			zones   = rspZones[rsc.Spec.StoragePool]
 		)
 
-		for _, zone := range dsc.Spec.Zones {
+		for _, zone := range rsc.Spec.Zones {
 			if !slices.Contains(zones, zone) {
 				healthy = false
-				err = errors.New(fmt.Sprintf("no such zone %s exists in the DRBStoragePool %s", zone, dsc.Spec.StoragePool))
-				log.Error(err, fmt.Sprintf("zones validation failed for the ReplicatedStorageClass %s", dsc.Name))
+				err = errors.New(fmt.Sprintf("no such zone %s exists in the DRBStoragePool %s", zone, rsc.Spec.StoragePool))
+				log.Error(err, fmt.Sprintf("zones validation failed for the ReplicatedStorageClass %s", rsc.Name))
 			}
 		}
 
 		if healthy {
-			healthyDSCs[dsc.Name] = dsc
-			removeNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByZonesLabel)
+			healthyDSCs[rsc.Name] = rsc
+			removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByZonesLabel)
 		} else {
-			setNonOperationalLabelOnStorageClass(ctx, cl, log, dsc, NonOperationalByZonesLabel)
+			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByZonesLabel)
 		}
 	}
 	log.Info("[ReconcileReplicatedStorageClassZones] ends reconcile")
@@ -235,20 +236,20 @@ func ReconcileReplicatedStorageClassZones(
 	return healthyDSCs
 }
 
-func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, dsc v1alpha1.ReplicatedStorageClass, label string) {
+func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc v1alpha1.ReplicatedStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
-		Namespace: dsc.Namespace,
-		Name:      dsc.Name,
+		Namespace: rsc.Namespace,
+		Name:      rsc.Name,
 	}, sc)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[setNonOperationalLabelOnStorageClass] unable to get the Kubernetes Storage Class %s", dsc.Name))
+		log.Error(err, fmt.Sprintf("[setNonOperationalLabelOnStorageClass] unable to get the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
 	if _, set := sc.Labels[label]; set {
-		log.Info(fmt.Sprintf("[setNonOperationalLabelOnStorageClass] a NonOperational label is already set for the Kubernetes Storage Class %s", dsc.Name))
+		log.Info(fmt.Sprintf("[setNonOperationalLabelOnStorageClass] a NonOperational label is already set for the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
@@ -260,38 +261,38 @@ func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client,
 
 	err = cl.Update(ctx, sc)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to update the Kubernetes Storage Class %s", dsc.Name))
+		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to update the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
-	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully set a NonOperational label on the Kubernetes Storage Class %s", dsc.Name))
+	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully set a NonOperational label on the Kubernetes Storage Class %s", rsc.Name))
 }
 
-func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, dsc v1alpha1.ReplicatedStorageClass, label string) {
+func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc v1alpha1.ReplicatedStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
-		Namespace: dsc.Namespace,
-		Name:      dsc.Name,
+		Namespace: rsc.Namespace,
+		Name:      rsc.Name,
 	}, sc)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to get the Kubernetes Storage Class %s", dsc.Name))
+		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to get the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
 	if _, set := sc.Labels[label]; !set {
-		log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] a NonOperational label is not set for the Kubernetes Storage Class %s", dsc.Name))
+		log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] a NonOperational label is not set for the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
 	delete(sc.Labels, label)
 	err = cl.Update(ctx, sc)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to update the Kubernetes Storage Class %s", dsc.Name))
+		log.Error(err, fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] unable to update the Kubernetes Storage Class %s", rsc.Name))
 		return
 	}
 
-	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully removed a NonOperational label from the Kubernetes Storage Class %s", dsc.Name))
+	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully removed a NonOperational label from the Kubernetes Storage Class %s", rsc.Name))
 }
 
 func GetReplicatedStoragePoolsZones(spNodes map[string][]v1.Node) map[string][]string {
@@ -341,10 +342,10 @@ func GetAllReplicatedStorageClasses(ctx context.Context, cl client.Client) (map[
 		return nil, err
 	}
 
-	dscs := make(map[string]v1alpha1.ReplicatedStorageClass, len(l.Items))
-	for _, dsc := range l.Items {
-		dscs[dsc.Name] = dsc
+	rscs := make(map[string]v1alpha1.ReplicatedStorageClass, len(l.Items))
+	for _, rsc := range l.Items {
+		rscs[rsc.Name] = rsc
 	}
 
-	return dscs, nil
+	return rscs, nil
 }

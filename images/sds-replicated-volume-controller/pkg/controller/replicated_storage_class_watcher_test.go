@@ -2,6 +2,10 @@ package controller
 
 import (
 	"context"
+	"sds-replicated-volume-controller/api/v1alpha1"
+	"sds-replicated-volume-controller/pkg/logger"
+	"testing"
+
 	client2 "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
@@ -9,11 +13,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/strings/slices"
-	"sds-replicated-volume-controller/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"testing"
 )
 
 func TestReplicatedStorageClassWatcher(t *testing.T) {
@@ -34,7 +35,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp    = "sp3"
 		)
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
@@ -113,7 +114,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		actual := ReconcileReplicatedStorageClassPools(ctx, cl, log, dscs, sps)
+		actual := ReconcileReplicatedStorageClassPools(ctx, cl, log, rscs, sps)
 		assert.Equal(t, expected, actual)
 
 		badSc := &storagev1.StorageClass{}
@@ -137,7 +138,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp    = "sp3"
 		)
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
@@ -215,7 +216,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		actual := ReconcileReplicatedStorageClassPools(ctx, cl, log, dscs, sps)
+		actual := ReconcileReplicatedStorageClassPools(ctx, cl, log, rscs, sps)
 		assert.Equal(t, expected, actual)
 
 		badSc := &storagev1.StorageClass{}
@@ -266,7 +267,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			},
 		}
 
-		newActual := ReconcileReplicatedStorageClassPools(ctx, cl, log, dscs, newSps)
+		newActual := ReconcileReplicatedStorageClassPools(ctx, cl, log, rscs, newSps)
 		assert.Equal(t, newExpected, newActual)
 
 		updatedBadSc := &storagev1.StorageClass{}
@@ -335,7 +336,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			secondName = "second"
 		)
 
-		dscs := []v1alpha1.ReplicatedStorageClass{
+		rscs := []v1alpha1.ReplicatedStorageClass{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
@@ -351,8 +352,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		var err error
-		for _, dsc := range dscs {
-			err = cl.Create(ctx, &dsc)
+		for _, rsc := range rscs {
+			err = cl.Create(ctx, &rsc)
 			if err != nil {
 				t.Error(err)
 			}
@@ -360,8 +361,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 
 		if err == nil {
 			defer func() {
-				for _, dsc := range dscs {
-					err = cl.Delete(ctx, &dsc)
+				for _, rsc := range rscs {
+					err = cl.Delete(ctx, &rsc)
 					if err != nil {
 						t.Error(err)
 					}
@@ -386,7 +387,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			dspName     = "dsp-test"
+			rspName     = "rsp-test"
 		)
 		nodeList := v1.NodeList{
 			Items: []v1.Node{
@@ -415,12 +416,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
 		actual := GetReplicatedStoragePoolsZones(spNodes)
-		assert.True(t, slices.Contains(actual[dspName], zone1))
-		assert.True(t, slices.Contains(actual[dspName], zone2))
+		assert.True(t, slices.Contains(actual[rspName], zone1))
+		assert.True(t, slices.Contains(actual[rspName], zone2))
 	})
 
 	t.Run("ReconcileReplicatedStorageClassReplication_replication_Availability_topology_Zonal_not_enough_nodes_label_sc", func(t *testing.T) {
@@ -428,8 +429,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			labelNode1  = "label-node1"
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -451,26 +452,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -487,12 +488,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -505,8 +506,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			labelNode2  = "label-node2"
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -539,26 +540,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -575,12 +576,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -595,8 +596,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -629,27 +630,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -666,12 +667,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -682,8 +683,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		const (
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -702,26 +703,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -738,12 +739,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -758,8 +759,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -792,27 +793,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -829,12 +830,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -846,8 +847,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -871,26 +872,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -907,12 +908,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -925,8 +926,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode2 = "no-label-node2"
 			noLabelNode  = "no-label-node3"
 			zone1        = "test-zone1"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -948,26 +949,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -984,12 +985,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1025,15 +1026,15 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
@@ -1048,8 +1049,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1071,27 +1072,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1108,12 +1109,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1149,15 +1150,15 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
@@ -1169,8 +1170,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			labelNode1  = "label-node1"
 			labelNode2  = "label-node2"
 			noLabelNode = "no-label-node"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1189,26 +1190,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1225,12 +1226,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1257,15 +1258,15 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
@@ -1279,8 +1280,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1310,26 +1311,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1346,12 +1347,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1364,8 +1365,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			labelNode2 = "label-node2"
 			labelNode3 = "label-node3"
 			zone1      = "test-zone1"
-			dscName    = "dsc-test"
-			dspName    = "dsp-test"
+			rscName    = "rsc-test"
+			rspName    = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1398,26 +1399,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1434,12 +1435,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByZonesLabel]
@@ -1454,8 +1455,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1      = "test-zone1"
 			zone2      = "test-zone2"
 			zone3      = "test-zone3"
-			dscName    = "dsc-test"
-			dspName    = "dsp-test"
+			rscName    = "rsc-test"
+			rspName    = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1488,27 +1489,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1525,12 +1526,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1545,8 +1546,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1      = "test-zone1"
 			zone2      = "test-zone2"
 			zone3      = "test-zone3"
-			dscName    = "dsc-test"
-			dspName    = "dsp-test"
+			rscName    = "rsc-test"
+			rspName    = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1579,27 +1580,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1616,12 +1617,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1632,8 +1633,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		const (
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1652,26 +1653,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1688,12 +1689,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1705,8 +1706,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1730,26 +1731,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1766,12 +1767,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1786,8 +1787,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode = "no-label-node"
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1817,26 +1818,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1853,12 +1854,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -1894,15 +1895,15 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
@@ -1918,8 +1919,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			zone1       = "test-zone1"
 			zone2       = "test-zone2"
 			zone3       = "test-zone3"
-			dscName     = "dsc-test"
-			dspName     = "dsp-test"
+			rscName     = "rsc-test"
+			rspName     = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -1949,27 +1950,27 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -1986,12 +1987,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -2027,15 +2028,15 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
@@ -2047,8 +2048,8 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			noLabelNode1 = "no-label-node1"
 			noLabelNode2 = "no-label-node2"
 			noLabelNode3 = "no-label-node3"
-			dscName      = "dsc-test"
-			dspName      = "dsp-test"
+			rscName      = "rsc-test"
+			rspName      = "rsp-test"
 		)
 
 		nodeList := &v1.NodeList{
@@ -2067,26 +2068,26 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes := map[string][]v1.Node{
-			dspName: nodeList.Items,
+			rspName: nodeList.Items,
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -2103,12 +2104,12 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		updatedSc := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, updatedSc)
 
 		_, exist := updatedSc.Labels[NonOperationalByReplicasLabel]
@@ -2135,33 +2136,33 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 		}
 
 		spNodes = map[string][]v1.Node{
-			dspName: updatedNodeList.Items,
+			rspName: updatedNodeList.Items,
 		}
 
-		ReconcileReplicatedStorageClassReplication(ctx, cl, log, dscs, spNodes)
+		ReconcileReplicatedStorageClassReplication(ctx, cl, log, rscs, spNodes)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByReplicasLabel]
 		assert.False(t, exist)
 	})
 
-	t.Run("ReconcileReplicatedStorageClassZones_correct_zones_returns_healthy_dsc_no_label_sc", func(t *testing.T) {
+	t.Run("ReconcileReplicatedStorageClassZones_correct_zones_returns_healthy_rsc_no_label_sc", func(t *testing.T) {
 		const (
 			zone1   = "test-zone1"
 			zone2   = "test-zone2"
 			zone3   = "test-zone3"
-			dscName = "dsp-test"
-			dspName = "dsp-test"
+			rscName = "rsp-test"
+			rspName = "rsp-test"
 		)
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -2178,50 +2179,50 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
-		dspZones := map[string][]string{
-			dspName: {zone1, zone2, zone3},
+		rspZones := map[string][]string{
+			rspName: {zone1, zone2, zone3},
 		}
 
-		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, dscs, dspZones)
-		_, healthy := healthyDsc[dscName]
+		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, rscs, rspZones)
+		_, healthy := healthyDsc[rscName]
 		assert.True(t, healthy)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist := scWithNoLabel.Labels[NonOperationalByZonesLabel]
 		assert.False(t, exist)
 	})
 
-	t.Run("ReconcileReplicatedStorageClassZones_incorrect_zones_doesnt_return_unhealthy_dsc_and_label_sc", func(t *testing.T) {
+	t.Run("ReconcileReplicatedStorageClassZones_incorrect_zones_doesnt_return_unhealthy_rsc_and_label_sc", func(t *testing.T) {
 		const (
 			zone1   = "test-zone1"
 			zone2   = "test-zone2"
 			zone3   = "test-zone3"
-			dscName = "dsp-test"
-			dspName = "dsp-test"
+			rscName = "rsp-test"
+			rspName = "rsp-test"
 		)
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -2238,50 +2239,50 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
-		dspZones := map[string][]string{
-			dspName: {zone1, zone2},
+		rspZones := map[string][]string{
+			rspName: {zone1, zone2},
 		}
 
-		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, dscs, dspZones)
-		_, healthy := healthyDsc[dscName]
+		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, rscs, rspZones)
+		_, healthy := healthyDsc[rscName]
 		assert.False(t, healthy)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist := scWithNoLabel.Labels[NonOperationalByZonesLabel]
 		assert.True(t, exist)
 	})
 
-	t.Run("ReconcileReplicatedStorageClassZones_unhealthy_dsc_fixed_removes_label_sc", func(t *testing.T) {
+	t.Run("ReconcileReplicatedStorageClassZones_unhealthy_rsc_fixed_removes_label_sc", func(t *testing.T) {
 		const (
 			zone1   = "test-zone1"
 			zone2   = "test-zone2"
 			zone3   = "test-zone3"
-			dscName = "dsp-test"
-			dspName = "dsp-test"
+			rscName = "rsp-test"
+			rspName = "rsp-test"
 		)
 
 		sc := &storagev1.StorageClass{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      dscName,
+				Name:      rscName,
 				Namespace: namespace,
 			},
 		}
@@ -2298,49 +2299,49 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		dscs := map[string]v1alpha1.ReplicatedStorageClass{
-			dscName: {
+		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
-					Name:      dscName,
+					Name:      rscName,
 					Namespace: namespace,
 				},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
-					StoragePool: dspName,
+					StoragePool: rspName,
 				},
 			},
 		}
 
-		dspZones := map[string][]string{
-			dspName: {zone1, zone2},
+		rspZones := map[string][]string{
+			rspName: {zone1, zone2},
 		}
 
-		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, dscs, dspZones)
-		_, healthy := healthyDsc[dscName]
+		healthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, rscs, rspZones)
+		_, healthy := healthyDsc[rscName]
 		assert.False(t, healthy)
 
 		scWithLbl := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithLbl)
 
 		_, exist := scWithLbl.Labels[NonOperationalByZonesLabel]
 		assert.True(t, exist)
 
 		updatedDspZones := map[string][]string{
-			dspName: {zone1, zone2, zone3},
+			rspName: {zone1, zone2, zone3},
 		}
 
-		updatedHealthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, dscs, updatedDspZones)
-		_, healthy = updatedHealthyDsc[dscName]
+		updatedHealthyDsc := ReconcileReplicatedStorageClassZones(ctx, cl, log, rscs, updatedDspZones)
+		_, healthy = updatedHealthyDsc[rscName]
 		assert.True(t, healthy)
 
 		scWithNoLabel := &storagev1.StorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
 			Namespace: namespace,
-			Name:      dscName,
+			Name:      rscName,
 		}, scWithNoLabel)
 
 		_, exist = scWithNoLabel.Labels[NonOperationalByZonesLabel]

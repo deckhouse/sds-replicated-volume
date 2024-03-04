@@ -18,9 +18,10 @@ package main
 
 import (
 	"flag"
-	"k8s.io/klog/v2"
 	"net/http"
 	"webhooks/validators"
+
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -39,6 +40,6 @@ func main() {
 	flag.Parse()
 
 	http.HandleFunc("/sc-validate", validators.SCValidate)
-	http.HandleFunc("/dsc-validate", validators.DSCValidate)
+	http.HandleFunc("/rsc-validate", validators.DSCValidate)
 	klog.Fatal(http.ListenAndServeTLS(port, tlscert, tlskey, nil))
 }
