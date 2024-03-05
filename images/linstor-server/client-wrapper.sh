@@ -32,6 +32,7 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "- error-reports list/show"
   echo "- controller version"
   echo "- advise resource/maintainance"
+  echo "- resource-definition delete"
   exit 0
 fi
 
@@ -48,6 +49,11 @@ done
 
 # Temporarily allow linstor node lost
 if [[ "$1" == "node" ]] && [[ "$2" == "lost" ]]; then
+  allowed=true
+fi
+
+# Allow linstor resource-definition delete
+if [[ "$1" == "resource-definition" ]] && [[ "$2" == "delete" ]]; then
   allowed=true
 fi
 
