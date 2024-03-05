@@ -32,6 +32,7 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "- error-reports list/show"
   echo "- controller version"
   echo "- advise resource/maintainance"
+  echo "- resource-definition delete"
   exit 0
 fi
 
@@ -46,6 +47,16 @@ while [[ $checkKeys == true ]]; do
   fi
 done
 
+# Temporarily allow linstor node lost
+ if [[ "$1" == "node" ]] && [[ "$2" == "lost" ]]; then
+   allowed=true
+ fi
+
+# Allow linstor resource-definition delete
+if [[ "$1" == "resource-definition" ]] && [[ "$2" == "delete" ]]; then
+  allowed=true
+fi
+
 # check for allowed linstor ... l and linstor ... list commands
 if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   if [[ "$2" == "l" || "$2" == "list" ]]; then
@@ -56,7 +67,7 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
     allowed=true
   fi
 
-  if [[ "$2" == "set-property" ]] && [[ '$4' == "AutoplaceTarget" ]]; then
+  if [[ "$2" == "set-property" ]] && [[ "$4" == "AutoplaceTarget" ]]; then
     allowed=true
   fi
 fi

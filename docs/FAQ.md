@@ -52,19 +52,10 @@ Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorage
 
 1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
 
-  * Download the latest script version from GitHub:
-
-    ```shell
-    curl -fsSL -o evict.sh https://raw.githubusercontent.com/deckhouse/deckhouse/main/modules/041-linstor/tools/evict.sh
-    chmod 700 evict.sh
-    ```
-
-  * Alternatively, download the script from the `deckhouse` pod:
-
-    ```shell
-    kubectl -n d8-system cp -c deckhouse $(kubectl -n d8-system get po -l app=deckhouse -o jsonpath='{.items[0].metadata.name}'):/deckhouse/modules/041-linstor/tools/evict.sh ./evict.sh
-    chmod 700 evict.sh
-    ```
+  ```shell
+  kubectl -n d8-sds-replicated-volume cp -c sds-replicated-volume-controller $(kubectl -n d8-sds-replicated-volume get po -l app=sds-replicated-volume-controller -o jsonpath='{.items[0].metadata.name}'):/tools/evict.sh ./evict.sh
+  chmod 700 evict.sh
+  ```
 
 2. Fix all faulty LINSTOR resources in the cluster. Run the following command to filter them:
 
