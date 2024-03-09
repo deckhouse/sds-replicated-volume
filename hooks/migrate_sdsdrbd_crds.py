@@ -33,6 +33,7 @@ afterHelm: 10
 def main(ctx: hook.Context):
     kubernetes.config.load_incluster_config()
 
+    # Delete old webhooks
     custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='admissionregistration.k8s.io',
                                                                                     plural='validatingwebhookconfigurations',
                                                                                     version='v1')
@@ -45,11 +46,12 @@ def main(ctx: hook.Context):
                                                                               name=item['metadata']['name'])
             print(f"Deleted webhook {item['metadata']['name']}")
 
+    # Migration of DRBDStoragePools to ReplicatedStoragePools
     try:
         custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='storage.deckhouse.io',
                                                                                         plural='drbdstoragepools',
                                                                                         version='v1alpha1')
-
+        print(f"DRBDStoragePools to migrate: {custom_object}")
         for item in custom_object['items']:
             try:
                 if item['spec'].get('lvmvolumegroups'):
@@ -87,7 +89,7 @@ def main(ctx: hook.Context):
 
 
     except Exception as e:
-        print(f"No DRBDStoragePools, continue")
+        print(f"Exception while migration of DRBDStoragePools to ReplicatedStoragePools: {e}")
 
     webhook_ready = False
     tries = 0
@@ -102,11 +104,12 @@ def main(ctx: hook.Context):
                 sleep(10)
                 tries += 1
 
+    # Migration of DRBDStorageClasses to ReplicatedStorageClasses
     try:
         custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='storage.deckhouse.io',
                                                                                         plural='drbdstorageclasses',
                                                                                         version='v1alpha1')
-
+        print(f"DRBDStorageClasses to migrate: {custom_object}")
         for item in custom_object['items']:
             try:
                 kubernetes.client.CustomObjectsApi().create_cluster_custom_object(
@@ -160,7 +163,7 @@ def main(ctx: hook.Context):
                 print(f"DRBDStorageClass {item['metadata']['name']} message while deletion: {e.error_message}")
 
     except Exception as e:
-        print(f"No DRBDStorageClasses, continue")
+        print(f"Exception while migration of DRBDStorageClasses to ReplicatedStorageClasses: {e}")
 
 if __name__ == "__main__":
     hook.run(main, config=config)
