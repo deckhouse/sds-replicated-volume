@@ -38,6 +38,7 @@ def main(ctx: hook.Context):
                                                                                     plural='validatingwebhookconfigurations',
                                                                                     version='v1')
 
+    print(f"ValidatingWebhookConfigurations to delete: {custom_object}")
     for item in custom_object['items']:
         if item['metadata']['name'] in ['d8-sds-drbd-dsc-validation', 'd8-sds-drbd-sc-validation']:
             kubernetes.client.CustomObjectsApi().delete_cluster_custom_object(group='admissionregistration.k8s.io',
@@ -46,7 +47,7 @@ def main(ctx: hook.Context):
                                                                               name=item['metadata']['name'])
             print(f"Deleted webhook {item['metadata']['name']}")
 
-    # Migration of DRBDStoragePools to ReplicatedStoragePools
+    # Migration from DRBDStoragePools to ReplicatedStoragePools
     try:
         custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='storage.deckhouse.io',
                                                                                         plural='drbdstoragepools',
@@ -101,7 +102,7 @@ def main(ctx: hook.Context):
                 sleep(10)
                 tries += 1
 
-    # Migration of DRBDStorageClasses to ReplicatedStorageClasses
+    # Migration from DRBDStorageClasses to ReplicatedStorageClasses
     try:
         custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='storage.deckhouse.io',
                                                                                         plural='drbdstorageclasses',
