@@ -52,12 +52,13 @@ def main(ctx: hook.Context):
 
         for item in custom_object['items']:
             try:
-                if item['spec'].get('thinpoolname'):
-                    item['spec']['thinPoolName'] = item['spec']['thinpoolname']
-                    del item['spec']['thinpoolname']
                 if item['spec'].get('lvmvolumegroups'):
                     item['spec']['lvmVolumeGroups'] = item['spec']['lvmvolumegroups']
                     del item['spec']['lvmvolumegroups']
+                    for lvg in item['spec']['lvmVolumeGroups']:
+                        if lvg.get('thinpoolname'):
+                            lvg['thinPoolName'] = lvg['thinpoolname']
+                            del lvg['thinpoolname']
                 kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group='storage.deckhouse.io',
                                                                                   plural='replicatedstoragepools',
                                                                                   version='v1alpha1',
