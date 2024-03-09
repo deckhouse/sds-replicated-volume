@@ -72,11 +72,8 @@ def main(ctx: hook.Context):
                 print(f"ReplicatedStoragePool {item['metadata']['name']} created")
 
             except Exception as e:
-                if e.status == 409:
-                    print("ReplicatedStoragePool {item['metadata']['name']} already exists")
-                else:
-                    print(f"ReplicatedStoragePool {item['metadata']['name']} message while creation: {e}")
-                    continue
+                print(f"ReplicatedStoragePool {item['metadata']['name']} message while creation: {e}")
+                continue
 
             try:
                 kubernetes.client.CustomObjectsApi().delete_cluster_custom_object(group='storage.deckhouse.io',
@@ -123,11 +120,8 @@ def main(ctx: hook.Context):
                     'spec': item['spec']})
                 print(f"ReplicatedStorageClass {item['metadata']['name']} created")
             except Exception as e:
-                if e.status == 409:
-                    print("ReplicatedStorageClass {item['metadata']['name']} already exists")
-                else:
-                    print(f"ReplicatedStorageClass {item['metadata']['name']} message while creation: {e}")
-                    continue
+                print(f"ReplicatedStorageClass {item['metadata']['name']} message while creation: {e}")
+                continue
 
             try:
                 kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
