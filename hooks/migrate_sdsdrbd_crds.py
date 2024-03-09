@@ -122,21 +122,6 @@ def main(ctx: hook.Context):
                     'metadata': {'name': item['metadata']['name']},
                     'spec': item['spec']})
                 print(f"ReplicatedStorageClass {item['metadata']['name']} created")
-
-                kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
-                    group='storage.deckhouse.io',
-                    plural='drbdstorageclasses',
-                    version='v1alpha1',
-                    name=item['metadata']['name'],
-                    body={"metadata": {"finalizers": []}}
-                    )
-                print(f"Removed finalizer from DRBDStorageClass {item['metadata']['name']}")
-
-                kubernetes.client.CustomObjectsApi().delete_cluster_custom_object(group='storage.deckhouse.io',
-                                                                                  plural='drbdstorageclasses',
-                                                                                  version='v1alpha1',
-                                                                                  name=item['metadata']['name'])
-                print(f"DRBDStorageClass {item['metadata']['name']} deleted")
             except Exception as e:
                 if e.status == 409:
                     print("ReplicatedStorageClass {item['metadata']['name']} already exists")
