@@ -77,11 +77,12 @@ def main(ctx: hook.Context):
     backup_type = 'initial'
     kubernetes.config.load_incluster_config()
 
-    initial_old_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
-                                                                                     label_selector='sds-drbd.deckhouse.io/initial-backup')
+    # initial_old_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
+    #                                                                                  label_selector='sds-drbd.deckhouse.io/initial-backup')
     initial_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
                                                                                   label_selector='sds-replicated-volume.deckhouse.io/initial-backup')
-    if len(initial_backup_secrets.items) > 0 or len(initial_old_backup_secrets.items) > 0:
+    # if len(initial_backup_secrets.items) > 0 or len(initial_old_backup_secrets.items) > 0:
+    if len(initial_backup_secrets.items) > 0:
         print('Initial backup exists')
     else:
         create_backup(backup_type=backup_type, namespace=namespace, labels={'sds-replicated-volume.deckhouse.io/initial-backup': ''})
