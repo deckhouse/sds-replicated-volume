@@ -75,7 +75,7 @@ def main(ctx: hook.Context):
                 if e.status == 409:
                     print("ReplicatedStoragePool {item['metadata']['name']} already exists")
                 else:
-                    print(f"ReplicatedStoragePool {item['metadata']['name']} message while creation: {e.error_message}")
+                    print(f"ReplicatedStoragePool {item['metadata']['name']} message while creation: {e}")
                     continue
 
             try:
@@ -85,11 +85,11 @@ def main(ctx: hook.Context):
                                                                                   name=item['metadata']['name'])
                 print(f"DRBDStoragePool {item['metadata']['name']} deleted")
             except Exception as e:
-                print(f"DRBDStoragePool {item['metadata']['name']} message while deletion: {e.error_message}")
+                print(f"DRBDStoragePool {item['metadata']['name']} message while deletion: {e}")
 
 
     except Exception as e:
-        print(f"Exception while migration of DRBDStoragePools to ReplicatedStoragePools: {e}")
+        print(f"Exception occurred during the migration process from DRBDStoragePools to ReplicatedStoragePools: {e}")
 
     webhook_ready = False
     tries = 0
@@ -141,7 +141,7 @@ def main(ctx: hook.Context):
                 if e.status == 409:
                     print("ReplicatedStorageClass {item['metadata']['name']} already exists")
                 else:
-                    print(f"ReplicatedStorageClass {item['metadata']['name']} message while creation: {e.error_message}")
+                    print(f"ReplicatedStorageClass {item['metadata']['name']} message while creation: {e}")
                     continue
 
             try:
@@ -160,10 +160,10 @@ def main(ctx: hook.Context):
                                                                                   name=item['metadata']['name'])
                 print(f"DRBDStorageClass {item['metadata']['name']} deleted")
             except Exception as e:
-                print(f"DRBDStorageClass {item['metadata']['name']} message while deletion: {e.error_message}")
+                print(f"DRBDStorageClass {item['metadata']['name']} message while deletion: {e}")
 
     except Exception as e:
-        print(f"Exception while migration of DRBDStorageClasses to ReplicatedStorageClasses: {e}")
+        print(f"Exception occurred during the migration process from DRBDStorageClasses to ReplicatedStorageClasses: {e}")
 
 if __name__ == "__main__":
     hook.run(main, config=config)
