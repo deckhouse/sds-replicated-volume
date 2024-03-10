@@ -35,9 +35,9 @@ def main(ctx: hook.Context):
                                                                                     plural='validatingwebhookconfigurations',
                                                                                     version='v1')
 
-    print(f"ValidatingWebhookConfigurations to delete: {custom_object}")
     for item in custom_object['items']:
         if item['metadata']['name'] in ['d8-sds-drbd-dsc-validation', 'd8-sds-drbd-sc-validation']:
+            print(f"ValidatingWebhookConfigurations to delete: {item}")
             kubernetes.client.CustomObjectsApi().delete_cluster_custom_object(group='admissionregistration.k8s.io',
                                                                               plural='validatingwebhookconfigurations',
                                                                               version='v1',
@@ -147,7 +147,7 @@ def create_custom_resource(group, plural, version, kind, name, spec):
           else:
               print(f"Failed to create {kind} {name} after {max_attempts} attempts")
               return False
-              
+
 
 if __name__ == "__main__":
     hook.run(main, config=config)
