@@ -17,10 +17,7 @@
 import base64
 import kubernetes
 from deckhouse import hook
-import os
-import tarfile
-import tempfile
-import yaml
+import time
 
 from re import search
 from time import sleep
@@ -54,26 +51,17 @@ def main(ctx: hook.Context):
                                                                                         version='v1alpha1')
         print(f"DRBDStoragePools to migrate: {custom_object}")
         for item in custom_object['items']:
-            try:
-                if item['spec'].get('lvmvolumegroups'):
-                    item['spec']['lvmVolumeGroups'] = item['spec']['lvmvolumegroups']
-                    del item['spec']['lvmvolumegroups']
-                    for lvg in item['spec']['lvmVolumeGroups']:
-                        if lvg.get('thinpoolname'):
-                            lvg['thinPoolName'] = lvg['thinpoolname']
-                            del lvg['thinpoolname']
-                kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group='storage.deckhouse.io',
-                                                                                  plural='replicatedstoragepools',
-                                                                                  version='v1alpha1',
-                                                                                  body={
-                      'apiVersion': 'storage.deckhouse.io/v1alpha1',
-                      'kind': 'ReplicatedStoragePool',
-                      'metadata': {'name': item['metadata']['name']},
-                      'spec': item['spec']})
-                print(f"ReplicatedStoragePool {item['metadata']['name']} created")
+            if item['spec'].get('lvmvolumegroups'):
+                item['spec']['lvmVolumeGroups'] = item['spec']['lvmvolumegroups']
+                del item['spec']['lvmvolumegroups']
+                for lvg in item['spec']['lvmVolumeGroups']:
+                    if lvg.get('thinpoolname'):
+                        lvg['thinPoolName'] = lvg['thinpoolname']
+                        del lvg['thinpoolname']
 
-            except Exception as e:
-                print(f"ReplicatedStoragePool {item['metadata']['name']} message while creation: {e}")
+            created = create_custom_resource('storage.deckhouse.io', 'replicatedstoragepools', 'v1alpha1', 'ReplicatedStoragePool', item['metadata']['name'], item['spec'])
+            if not created:
+                print(f"Skipping deletion for {item['metadata']['name']} due to creation failure")
                 continue
 
             try:
@@ -109,19 +97,9 @@ def main(ctx: hook.Context):
                                                                                         version='v1alpha1')
         print(f"DRBDStorageClasses to migrate: {custom_object}")
         for item in custom_object['items']:
-            try:
-                kubernetes.client.CustomObjectsApi().create_cluster_custom_object(
-                    group='storage.deckhouse.io',
-                    plural='replicatedstorageclasses',
-                    version='v1alpha1',
-                    body={
-                    'apiVersion': 'storage.deckhouse.io/v1alpha1',
-                    'kind': 'ReplicatedStorageClass',
-                    'metadata': {'name': item['metadata']['name']},
-                    'spec': item['spec']})
-                print(f"ReplicatedStorageClass {item['metadata']['name']} created")
-            except Exception as e:
-                print(f"ReplicatedStorageClass {item['metadata']['name']} message while creation: {e}")
+            created = create_custom_resource('storage.deckhouse.io', 'replicatedstorageclasses', 'v1alpha1', 'ReplicatedStorageClass', item['metadata']['name'], item['spec'])
+            if not created:
+                print(f"Skipping deletion for {item['metadata']['name']} due to creation failure")
                 continue
 
             try:
@@ -144,6 +122,32 @@ def main(ctx: hook.Context):
 
     except Exception as e:
         print(f"Exception occurred during the migration process from DRBDStorageClasses to ReplicatedStorageClasses: {e}")
+
+def create_custom_resource(group, plural, version, kind, name, spec):
+    max_attempts = 3
+    delay_between_attempts = 10
+
+    for attempt in range(max_attempts):
+      try:
+          kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=group,
+                                                                            plural=plural,
+                                                                            version=version,
+                                                                            body={
+                  'apiVersion': f'{group}/{version}',
+                  'kind': kind,
+                  'metadata': {'name': name},
+                  'spec': spec})
+          print(f"{kind} {name} created")
+          return True
+      except Exception as e:
+          print(f"Attempt {attempt + 1} failed for {kind} {name} with message: {e}")
+          if attempt < max_attempts - 1:
+              print(f"Retrying in {delay_between_attempts} seconds...")
+              time.sleep(delay_between_attempts)
+          else:
+              print(f"Failed to create {kind} {name} after {max_attempts} attempts")
+              return False
+              
 
 if __name__ == "__main__":
     hook.run(main, config=config)
