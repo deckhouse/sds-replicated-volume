@@ -102,6 +102,8 @@ def main(ctx: hook.Context):
                                                                                         version='v1alpha1')
         print(f"DRBDStorageClasses to migrate: {custom_object}")
         for item in custom_object['items']:
+            if not item['spec'].get('topology'):
+                item['spec']['topology'] ='Ignored'
             isCreated = create_custom_resource('storage.deckhouse.io', 'replicatedstorageclasses', 'v1alpha1', 'ReplicatedStorageClass', item['metadata']['name'], item['spec'])
             if not isCreated:
                 print(f"Skipping deletion for {item['metadata']['name']} due to creation failure")
