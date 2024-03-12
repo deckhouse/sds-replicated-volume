@@ -82,14 +82,14 @@ def main(ctx: hook.Context):
     except Exception as e:
         print(f"Exception occurred during the migration process from DRBDStoragePools to ReplicatedStoragePools: {e}")
 
-    webhook_ready = False
+    webhook_pod_ready = False
     tries = 0
     current_pods = kubernetes.client.CoreV1Api().list_namespaced_pod('d8-sds-replicated-volume')
     while not webhook_pod_ready and tries < 30:
         for item in current_pods.items:
             if search(r'^webhooks-', item.metadata.name):
-                webhook_ready = item.status.container_statuses[0].ready
-                if webhook_ready:
+                webhook_pod_ready = item.status.container_statuses[0].ready
+                if webhook_pod_ready:
                     print(f'webhook {item.metadata.name} pod is ready')
                     break
                 sleep(10)
