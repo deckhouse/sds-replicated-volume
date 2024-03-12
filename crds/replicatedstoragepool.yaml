@@ -43,7 +43,7 @@ spec:
                   x-kubernetes-validations:
                     - rule: self == oldSelf
                       message: Value is immutable.
-                lvmvolumegroups:
+                lvmVolumeGroups:
                   type: array
                   description: |
                     An array of names of LVMVolumeGroup resources, whose Volume Groups/Thin-pools will be used to allocate
@@ -58,7 +58,7 @@ spec:
                         type: string
                         description: |
                           Selected LVMVolumeGroup resource's name.
-                      thinpoolname:
+                      thinPoolName:
                         type: string
                         description: |
                           Selected Thin-pool name.

@@ -31,17 +31,18 @@ beforeHelm: 10
 
 def create_backup(backup_type, namespace, labels={}):
     temp_path = tempfile.mkdtemp()
-    backup_archive = tarfile.open(f'{temp_path}/linstor_{backup_type}.tar', "w")
+    backup_archive_name = f'sds-replicated-volume-{backup_type}.tar'
+    backup_archive = tarfile.open(f'{temp_path}/{backup_archive_name}', "w")
 
     for item in kubernetes.client.ApiextensionsV1Api().list_custom_resource_definition().items:
-        if item.spec.group != 'internal.linstor.linbit.com':
+        if item.spec.group != 'internal.linstor.linbit.com' and item.spec.group != 'storage.deckhouse.io':
             continue
 
         crd_name_plural = item.spec.names.plural
         version = item.spec.versions[-1]
         crd_version = version.name
 
-        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='internal.linstor.linbit.com',
+        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=item.spec.group,
                                                                                         plural=crd_name_plural,
                                                                                         version=crd_version)
 
@@ -51,7 +52,7 @@ def create_backup(backup_type, namespace, labels={}):
 
     backup_archive.close()
 
-    with open(f'{temp_path}/linstor_{backup_type}.tar', 'rb') as backup_archive:
+    with open(f'{temp_path}/{backup_archive_name}', 'rb') as backup_archive:
         encoded_string = base64.b64encode(backup_archive.read())
 
     step = 262144 # 256kB
@@ -59,7 +60,7 @@ def create_backup(backup_type, namespace, labels={}):
         body = kubernetes.client.V1Secret(
             api_version="v1",
             kind="Secret",
-            metadata=kubernetes.client.V1ObjectMeta(name=f'linstor-{backup_type}-backup-{chunk_pos}',
+            metadata=kubernetes.client.V1ObjectMeta(name=f'sds-replicated-volume-{backup_type}-backup-{chunk_pos}',
                                                     namespace=namespace,
                                                     labels=labels),
             data={'filepart': encoded_string[chunk_pos * step:(chunk_pos + 1) * step].decode("utf-8")}
@@ -76,15 +77,17 @@ def main(ctx: hook.Context):
     namespace = 'd8-system'
     backup_type = 'initial'
     kubernetes.config.load_incluster_config()
+    backup_secret_label='sds-replicated-volume.deckhouse.io/initial-backup'
 
-    initial_old_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
-                                                                                     label_selector='sds-drbd.deckhouse.io/initial-backup')
+    # initial_old_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
+    #                                                                                  label_selector='sds-drbd.deckhouse.io/initial-backup')
     initial_backup_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace,
-                                                                                  label_selector='sds-replicated-volume.deckhouse.io/initial-backup')
-    if len(initial_backup_secrets.items) > 0 or len(initial_old_backup_secrets.items) > 0:
+                                                                                  label_selector=backup_secret_label)
+    # if len(initial_backup_secrets.items) > 0 or len(initial_old_backup_secrets.items) > 0:
+    if len(initial_backup_secrets.items) > 0:
         print('Initial backup exists')
     else:
-        create_backup(backup_type=backup_type, namespace=namespace, labels={'sds-replicated-volume.deckhouse.io/initial-backup': ''})
+        create_backup(backup_type=backup_type, namespace=namespace, labels={backup_secret_label: ''})
 
 
 if __name__ == "__main__":
