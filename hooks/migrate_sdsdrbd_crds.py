@@ -27,6 +27,11 @@ configVersion: v1
 afterHelm: 10
 """
 
+# This webhook ensures the migration of resources from the sds-drbd module to the sds-replicated-volume:
+# - Removes old sds-drbd webhooks (if any)
+# - Migrates DRBDStoragePool to ReplicatedStoragePool
+# - Migrates DRBDStorageClass to ReplicatedStorageClass
+
 def main(ctx: hook.Context):
     kubernetes.config.load_incluster_config()
 
@@ -59,8 +64,8 @@ def main(ctx: hook.Context):
                         lvg['thinPoolName'] = lvg['thinpoolname']
                         del lvg['thinpoolname']
 
-            created = create_custom_resource('storage.deckhouse.io', 'replicatedstoragepools', 'v1alpha1', 'ReplicatedStoragePool', item['metadata']['name'], item['spec'])
-            if not created:
+            isCreated = create_custom_resource('storage.deckhouse.io', 'replicatedstoragepools', 'v1alpha1', 'ReplicatedStoragePool', item['metadata']['name'], item['spec'])
+            if not isCreated:
                 print(f"Skipping deletion for {item['metadata']['name']} due to creation failure")
                 continue
 
@@ -71,7 +76,7 @@ def main(ctx: hook.Context):
                                                                                   name=item['metadata']['name'])
                 print(f"DRBDStoragePool {item['metadata']['name']} deleted")
             except Exception as e:
-                print(f"DRBDStoragePool {item['metadata']['name']} message while deletion: {e}")
+                print(f"DRBDStoragePool {item['metadata']['name']} deletion error: {e}")
 
 
     except Exception as e:
@@ -80,7 +85,7 @@ def main(ctx: hook.Context):
     webhook_ready = False
     tries = 0
     current_pods = kubernetes.client.CoreV1Api().list_namespaced_pod('d8-sds-replicated-volume')
-    while not webhook_ready and tries < 30:
+    while not webhook_pod_ready and tries < 30:
         for item in current_pods.items:
             if search(r'^webhooks-', item.metadata.name):
                 webhook_ready = item.status.container_statuses[0].ready
@@ -97,8 +102,8 @@ def main(ctx: hook.Context):
                                                                                         version='v1alpha1')
         print(f"DRBDStorageClasses to migrate: {custom_object}")
         for item in custom_object['items']:
-            created = create_custom_resource('storage.deckhouse.io', 'replicatedstorageclasses', 'v1alpha1', 'ReplicatedStorageClass', item['metadata']['name'], item['spec'])
-            if not created:
+            isCreated = create_custom_resource('storage.deckhouse.io', 'replicatedstorageclasses', 'v1alpha1', 'ReplicatedStorageClass', item['metadata']['name'], item['spec'])
+            if not isCreated:
                 print(f"Skipping deletion for {item['metadata']['name']} due to creation failure")
                 continue
 
@@ -118,7 +123,7 @@ def main(ctx: hook.Context):
                                                                                   name=item['metadata']['name'])
                 print(f"DRBDStorageClass {item['metadata']['name']} deleted")
             except Exception as e:
-                print(f"DRBDStorageClass {item['metadata']['name']} message while deletion: {e}")
+                print(f"DRBDStorageClass {item['metadata']['name']} deletion error: {e}")
 
     except Exception as e:
         print(f"Exception occurred during the migration process from DRBDStorageClasses to ReplicatedStorageClasses: {e}")
