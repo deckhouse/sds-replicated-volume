@@ -284,7 +284,7 @@ kubectl get moduleconfig sds-node-configurator
 > **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
 ```shell
-k apply -f - <<EOF
+kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
@@ -351,6 +351,80 @@ You can read more about working with `ReplicatedStorageClass` resources [here](.
 ### Migrating to ReplicatedStoragePool
 
 The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
+
+## Migrating from sds-drbd module to sds-replicated-volume
+
+Note that the module control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using `DRBD` PV during the migration.
+
+> **Please note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all module volume management functionality).
+
+### Migration steps
+
+1. Make sure there are no faulty `DRBD` resources in the cluster. The command below should return an empty list:
+
+```shell
+alias linstor='kubectl -n d8-sds-drbd exec -ti deploy/linstor-controller -- linstor'
+linstor resource list --faulty
+```
+
+> **Caution!** You should fix all `DRBD` resources before migrating.
+
+2. Disable the `sds-drbd` module:
+
+```shell
+kubectl patch moduleconfig sds-drbd --type=merge -p '{"spec": {"enabled": false}}'
+```
+
+3. Wait for the `d8-sds-drbd` namespace to be deleted.
+
+```shell
+kubectl get namespace d8-sds-drbd
+```
+
+4. Create a `ModuleConfig` resource for `sds-replicated-volume`.
+
+> **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
+
+```shell
+kubectl apply -f - <<EOF
+apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: sds-replicated-volume
+spec:
+  enabled: true
+  version: 1
+EOF
+```
+
+5. Wait for the `sds-replicated-volume` module to become `Ready`.
+
+```shell
+kubectl get moduleconfig sds-replicated-volume
+```
+
+6. Check the `sds-replicated-volume` module settings.
+
+```shell
+kubectl get moduleconfig sds-replicated-volume -oyaml
+```
+
+7. Wait for all pods in the `d8-sds-replicated-volume` namespaces to become `Ready` or `Completed`.
+
+```shell
+kubectl get po -n d8-sds-replicated-volume
+```
+
+8. Override the `linstor` command alias and check the `DRBD` resources:
+
+```shell
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+linstor resource list --faulty
+```
+
+If there are no faulty resources, then the migration was successful.
+
+> **Caution!** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any DRBDStoragePool or DRBDStorageClass left in cluster. If they exist after the migration, please inform our support team.
 
 ## Why is it not recommended to use RAID for disks that are used by the `sds-replicated-volume` module?
 
