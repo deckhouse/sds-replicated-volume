@@ -424,7 +424,7 @@ linstor resource list --faulty
 
 If there are no faulty resources, then the migration was successful.
 
-> **Caution!** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any resources left in the DRBDStoragePool and DRBDStorageClass clusters. If they exist after the migration, please inform our support team.
+> **Caution!** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any DRBDStoragePool or DRBDStorageClass left in cluster. If they exist after the migration, please inform our support team.
 
 ## Why is it not recommended to use RAID for disks that are used by the `sds-replicated-volume` module?
 
