@@ -285,7 +285,7 @@ kubectl get moduleconfig sds-node-configurator
 > **Внимание!** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `linstor`. Если этот параметр не указан и там, то только в этом случае он останется пустым и все узлы кластера будут считаться узлами для хранения данных.
 
 ```shell
-k apply -f - <<EOF
+kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
@@ -387,7 +387,7 @@ kubectl get namespace d8-sds-drbd
 > **Внимание!** Если в настройках модуля `sds-replicated-volume` не будет указан параметр `settings.dataNodes.nodeSelector`, то значение для этого параметра при установке модуля `sds-replicated-volume` будет взято из модуля `sds-drbd`. Если этот параметр не указан и там, то только в этом случае он останется пустым и все узлы кластера будут считаться узлами для хранения данных.
 
 ```shell
-k apply -f - <<EOF
+kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
@@ -425,7 +425,7 @@ linstor resource list --faulty
 
 Если “плохие” ресурсы не обнаружены, значит миграция была успешной.
 
-> **Внимание!** Ресурсы DRBDStoragePool и DRBDStorageClass в процессе будут автоматически мигрированы на ReplicatedStoragePool и ReplicatedStorageClass, вмешательства пользователя для этого не требуется. Логика работы этих ресурсов не изменится.
+> **Внимание!** Ресурсы DRBDStoragePool и DRBDStorageClass в процессе будут автоматически мигрированы на ReplicatedStoragePool и ReplicatedStorageClass, вмешательства пользователя для этого не требуется. Логика работы этих ресурсов не изменится. Однако, стоит проверить, не осталось ли в кластере ресурсов DRBDStoragePool и DRBDStorageClass, если после миграции они существуют - сообщите, пожалуйста, в нашу поддержку.
 
 ## Почему не рекомендуется использовать RAID для дисков, которые используются модулем `sds-replicated-volume`?
 

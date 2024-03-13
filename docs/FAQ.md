@@ -284,7 +284,7 @@ kubectl get moduleconfig sds-node-configurator
 > **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `linstor` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
 ```shell
-k apply -f - <<EOF
+kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
@@ -386,7 +386,7 @@ kubectl get namespace d8-sds-drbd
 > **Caution!** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
 ```shell
-k apply -f - <<EOF
+kubectl apply -f - <<EOF
 apiVersion: deckhouse.io/v1alpha1
 kind: ModuleConfig
 metadata:
@@ -424,7 +424,7 @@ linstor resource list --faulty
 
 If there are no faulty resources, then the migration was successful.
 
-> **Caution!** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change.
+> **Caution!** The resources DRBDStoragePool and DRBDStorageClass will be automatically migrated to ReplicatedStoragePool and ReplicatedStorageClass during the process, no user intervention is required for this. The functionality of these resources will not change. However, it is worth checking if there are any resources left in the DRBDStoragePool and DRBDStorageClass clusters. If they exist after the migration, please inform our support team.
 
 ## Why is it not recommended to use RAID for disks that are used by the `sds-replicated-volume` module?
 
