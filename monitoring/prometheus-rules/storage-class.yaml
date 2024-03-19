@@ -20,7 +20,7 @@
           `kubectl get sc -l storage.deckhouse.io/managed-by!=sds-replicated-volume`
           
     - alert: StorageClassIsNonOperational
-      expr: sum(kube_storageclass_info{provisioner='linstor.csi.linbit.com'} * on(storageclass) group_left() kube_storageclass_labels{label_storage_deckhouse_io_nonoperational=''}) > 0
+      expr: sum(kube_storageclass_info{provisioner='linstor.csi.linbit.com'} * on(storageclass) group_left() kube_storageclass_labels{label_storage_deckhouse_io_nonoperational='true'}) > 0
       for: 5m
       labels:
         severity_level: "4"
