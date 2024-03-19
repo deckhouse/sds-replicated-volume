@@ -257,7 +257,7 @@ func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client,
 		sc.Labels = make(map[string]string)
 	}
 
-	sc.Labels[label] = ""
+	sc.Labels[label] = "true"
 
 	err = cl.Update(ctx, sc)
 	if err != nil {
