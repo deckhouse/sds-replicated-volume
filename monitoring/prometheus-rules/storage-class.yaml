@@ -1,6 +1,6 @@
 - name: kubernetes.replicated.storage_class
   rules:
-    - alert: ReplicatedPoolIsNotManagedThroughReplicatedStorageClass
+    - alert: StorageClassIsNotManagedThroughReplicatedStorageClass
       expr: sum(kube_storageclass_info{provisioner='linstor.csi.linbit.com'} * on(storageclass) group_left() kube_storageclass_labels{label_storage_deckhouse_io_managed_by!='sds-replicated-volume'}) > 0
       for: 5m
       labels:
@@ -11,7 +11,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "D8ReplicatedOutdatedPool,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "D8ReplicatedOutdatedPool,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: Replicated pool is not managed through ReplicatedStorageClass
+        summary: Storage class is not managed through ReplicatedStorageClass
         description: |
           There are storage classes in the cluster that are not managed through ReplicatedStorageClass objects, but manually. 
           It is necessary to migrate from them to storage classes that are managed through ReplicatedStorageClass. 
