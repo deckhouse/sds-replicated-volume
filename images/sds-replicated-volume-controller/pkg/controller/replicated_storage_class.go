@@ -95,6 +95,9 @@ const (
 	StorageClassParamAutoDiskfulKey             = "property.linstor.csi.linbit.com/DrbdOptions/auto-diskful"
 	StorageClassParamAutoDiskfulAllowCleanupKey = "property.linstor.csi.linbit.com/DrbdOptions/auto-diskful-allow-cleanup"
 
+	ManagedLabelKey   = "storage.deckhouse.io/managed-by"
+	ManagedLabelValue = "sds-replicated-volume"
+
 	Created = "Created"
 	Failed  = "Failed"
 
@@ -294,6 +297,12 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 				return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %s", err.Error())
 			}
 			return nil
+		}
+
+		err = ReconcileStorageClassLabels(ctx, cl, storageClass)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to reconcile storage class labels, name: %s", replicatedSC.Name))
+			return fmt.Errorf("error ReconcileStorageClassLabels: %s", err.Error())
 		}
 
 		log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass and StorageClass are equal.")
@@ -526,7 +535,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *v1alpha1.Repli
 			APIVersion: StorageClassAPIVersion,
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Labels:          map[string]string{"storage.deckhouse.io/managed-by": "sds-replicated-volume"},
+			Labels:          map[string]string{ManagedLabelKey: ManagedLabelValue},
 			Name:            replicatedSC.Name,
 			Namespace:       replicatedSC.Namespace,
 			OwnerReferences: nil,
@@ -633,6 +642,30 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC
 		}
 
 		err := cl.Update(ctx, &sc)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageClass *storagev1.StorageClass) error {
+	needUpdate := false
+	if storageClass.Labels == nil {
+		storageClass.Labels = make(map[string]string)
+		needUpdate = true
+	}
+
+	val, exist := storageClass.Labels[ManagedLabelKey]
+	if !exist || val != ManagedLabelValue {
+		needUpdate = true
+	}
+
+	storageClass.Labels[ManagedLabelKey] = ManagedLabelValue
+
+	if needUpdate {
+		err := cl.Update(ctx, storageClass)
 		if err != nil {
 			return err
 		}
