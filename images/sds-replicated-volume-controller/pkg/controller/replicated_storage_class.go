@@ -662,9 +662,8 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 		needUpdate = true
 	}
 
-	storageClass.Labels[ManagedLabelKey] = ManagedLabelValue
-
 	if needUpdate {
+		storageClass.Labels[ManagedLabelKey] = ManagedLabelValue
 		err := cl.Update(ctx, storageClass)
 		if err != nil {
 			return err
