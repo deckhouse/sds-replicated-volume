@@ -1,6 +1,6 @@
 - name: kubernetes.sds_drbd.storage_class
   rules:
-    - alert: SDSDRBDModuleIsDeprecated
+    - alert: SDSDRBDModuleNeedsMigration
       expr: d8_kubernetes_version == 1
       for: 5m
       labels:
