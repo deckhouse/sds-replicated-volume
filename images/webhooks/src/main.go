@@ -40,6 +40,6 @@ func main() {
 	flag.Parse()
 
 	http.HandleFunc("/sc-validate", validators.SCValidate)
-	http.HandleFunc("/rsc-validate", validators.DSCValidate)
+	http.HandleFunc("/rsc-validate", validators.RSCValidate)
 	klog.Fatal(http.ListenAndServeTLS(port, tlscert, tlskey, nil))
 }

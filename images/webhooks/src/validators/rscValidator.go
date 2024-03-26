@@ -36,7 +36,7 @@ type rscSpec struct {
 	Zones           []string `json:"zones"`
 }
 
-func DSCValidate(w http.ResponseWriter, r *http.Request) {
+func RSCValidate(w http.ResponseWriter, r *http.Request) {
 	arReview := v1beta1.AdmissionReview{}
 	if err := json.NewDecoder(r.Body).Decode(&arReview); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -97,9 +97,15 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 			}
 			klog.Infof("Incorrect combination of replication and zones (%s)", string(raw))
 		}
-	}
 
-	if rscJson.Spec.Topology == "Zonal" {
+		if len(clusterZoneList) == 0 {
+			arReview.Response.Allowed = false
+			arReview.Response.Result = &metav1.Status{
+				Message: fmt.Sprintf("TransZonal topology denied in cluster without zones. Use Ignored instead."),
+			}
+			klog.Infof("TransZonal topology denied in cluster without zones. Use Ignored instead (%s)", string(raw))
+		}
+	} else if rscJson.Spec.Topology == "Zonal" {
 		if len(rscJson.Spec.Zones) != 0 {
 			arReview.Response.Allowed = false
 			arReview.Response.Result = &metav1.Status{
@@ -107,9 +113,15 @@ func DSCValidate(w http.ResponseWriter, r *http.Request) {
 			}
 			klog.Infof("No zones must be set with Zonal topology (%s)", string(raw))
 		}
-	}
 
-	if rscJson.Spec.Topology == "Ignored" {
+		if len(clusterZoneList) == 0 {
+			arReview.Response.Allowed = false
+			arReview.Response.Result = &metav1.Status{
+				Message: fmt.Sprintf("Zonal topology denied in cluster without zones. Use Ignored instead."),
+			}
+			klog.Infof("Zonal topology denied in cluster without zones. Use Ignored instead (%s)", string(raw))
+		}
+	} else if rscJson.Spec.Topology == "Ignored" {
 		if len(clusterZoneList) != 0 {
 			arReview.Response.Allowed = false
 			arReview.Response.Result = &metav1.Status{
