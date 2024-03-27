@@ -42,11 +42,7 @@ spec:
 
     kernel_version_in_use="$(uname -r)"
 
-    {{- if dig "dataNodes" "nodeSelector" false .Values.sdsReplicatedVolume }}
-    is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({{ .Values.sdsReplicatedVolume.dataNodes.nodeSelector | toJson }})')
-    {{- else }}
-    is_linstor_data_node="true"
-    {{- end }}
+    is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"storage.deckhouse.io/sds-replicated-volume-node":""})')
 
     bb-log-info "we need drbd on node: "$is_linstor_data_node
 
