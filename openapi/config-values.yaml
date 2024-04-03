@@ -15,6 +15,21 @@ properties:
       - TRACE
     description: Module log level
     default: INFO
+  drbdPortRange:
+    type: object
+    description: Settings for DRBD TCP ports
+    default: {}
+    properties:
+      minPort:
+        type: integer
+        default: 7000
+        description: |
+          DRBD ports range start
+      maxPort:
+        type: integer
+        default: 7999
+        description: |
+          DRBD ports range end
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data

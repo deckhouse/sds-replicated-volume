@@ -27,6 +27,16 @@ rules:
       - ""
     resources:
       - nodes
+  - verbs:
+      - get
+      - list
+      - update
+      - create
+      - delete
+    apiGroups:
+      - "internal.linstor.linbit.com"
+    resources:
+      - "propscontainers"
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
