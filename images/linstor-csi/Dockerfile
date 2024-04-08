@@ -6,12 +6,12 @@ ARG LINSTOR_CSI_GITREPO=https://github.com/linbit/linstor-csi
 ARG LINSTOR_CSI_VERSION=1.5.0
 
 # Copy patches
-COPY ./patches /patches
+# COPY ./patches /patches
 
 RUN git clone ${LINSTOR_CSI_GITREPO} /usr/local/go/linstor-csi/ \
  && cd /usr/local/go/linstor-csi \
  && git reset --hard v${LINSTOR_CSI_VERSION} \
- && git apply /patches/*.patch \
+# && git apply /patches/*.patch \
  && cd cmd/linstor-csi \
  && go build -ldflags="-X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v${LINSTOR_CSI_VERSION}" \
  && mv ./linstor-csi /
