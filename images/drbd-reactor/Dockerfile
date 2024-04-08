@@ -3,11 +3,11 @@ ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c
 FROM $BASE_UBUNTU as utils-builder
 
 ARG UTILS_GITREPO=https://github.com/LINBIT/drbd-utils
-ARG UTILS_VERSION=9.25.0
+ARG UTILS_VERSION=9.27.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
- && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor \
+ && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -34,7 +34,7 @@ RUN dpkg-buildpackage -us -uc
 FROM $BASE_UBUNTU as reactor-builder
 
 ARG REACTOR_GITREPO=https://github.com/LINBIT/drbd-reactor
-ARG REACTOR_VERSION=1.2.0
+ARG REACTOR_VERSION=1.4.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
