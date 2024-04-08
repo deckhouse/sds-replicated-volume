@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-until [ $(grep -q 'version: 9.1' /proc/drbd 2>/dev/null && echo 1 || echo 0 ) -eq 1 ]; do
-  echo 'Waiting for DRBD version 9.1.x on host'
+until [ $(grep -q 'version: 9.2' /proc/drbd 2>/dev/null && echo 1 || echo 0 ) -eq 1 ]; do
+  echo 'Waiting for DRBD version 9.2.x on host'
   sleep 15
 done
