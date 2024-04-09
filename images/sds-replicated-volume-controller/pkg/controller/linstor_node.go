@@ -47,6 +47,8 @@ const (
 	LinstorEncryptionType     = "SSL" // "Plain"
 	reachableTimeout          = 10 * time.Second
 	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-replicated-volume-node"
+
+	InternalIP = "InternalIP"
 )
 
 var (
@@ -291,13 +293,20 @@ func CreateDRBDNode(
 	selectedKubernetesNode v1.Node,
 	drbdNodeProperties map[string]string,
 ) error {
+	var internalAddress string
+	for _, ad := range selectedKubernetesNode.Status.Addresses {
+		if ad.Type == InternalIP {
+			internalAddress = ad.Address
+		}
+	}
+
 	newLinstorNode := lclient.Node{
 		Name: selectedKubernetesNode.Name,
 		Type: LinstorSatelliteType,
 		NetInterfaces: []lclient.NetInterface{
 			{
 				Name:                    "default",
-				Address:                 net.ParseIP(selectedKubernetesNode.Status.Addresses[0].Address),
+				Address:                 net.ParseIP(internalAddress),
 				IsActive:                true,
 				SatellitePort:           LinstorNodePort,
 				SatelliteEncryptionType: LinstorEncryptionType,
