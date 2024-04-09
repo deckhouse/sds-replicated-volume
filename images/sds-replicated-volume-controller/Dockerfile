@@ -14,7 +14,7 @@ COPY . .
 WORKDIR /go/src/cmd
 RUN GOOS=linux GOARCH=amd64 go build -o stctrl
 
-FROM --platform=linux/amd64 $BASE_GOLANG_20_ALPINE
+FROM --platform=linux/amd64 $BASE_GOLANG_22_ALPINE
 COPY --from=builder /go/src/tools /tools
 COPY --from=builder /go/src/cmd/stctrl /go/src/cmd/stctrl
 

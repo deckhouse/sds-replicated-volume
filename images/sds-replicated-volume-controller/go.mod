@@ -1,6 +1,6 @@
 module sds-replicated-volume-controller
 
-go 1.21
+go 1.22
 
 toolchain go1.21.8
 
