@@ -56,7 +56,9 @@ spec:
 
     if [ $is_linstor_data_node == "false" ]; then
       if [ -e "/proc/drbd" ]; then
-        sed -i 's/^drbd$//' /etc/modules
+        if [ -e "/etc/modules" ]; then
+          sed -i 's/^drbd$//' /etc/modules
+        fi
         rmmod drbd_transport_rdma || true
         rmmod drbd_transport_tcp || true
         rmmod drbd || true
@@ -110,8 +112,10 @@ spec:
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
       else
-        if grep -q -E '^drbd$' /etc/modules; then
-          sed -i '/^drbd$/d' /etc/modules
+        if [ -e "/etc/modules" ]; then
+          if grep -q -E '^drbd$' /etc/modules; then
+            sed -i '/^drbd$/d' /etc/modules
+          fi
         fi
         bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
 
@@ -168,8 +172,10 @@ spec:
     make install
     cd drbd
     cp *.ko /lib/modules/${kernel_version_in_use}/kernel/drivers/
-    if grep -q -E '^drbd$' /etc/modules; then
-      sed -i '/^drbd$/d' /etc/modules
+    if [ -e "/etc/modules" ]; then
+      if grep -q -E '^drbd$' /etc/modules; then
+        sed -i '/^drbd$/d' /etc/modules
+      fi
     fi
     bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
     depmod
