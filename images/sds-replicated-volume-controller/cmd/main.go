@@ -95,6 +95,8 @@ func main() {
 	managerOpts := manager.Options{
 		Scheme: scheme,
 		// MetricsBindAddress: cfgParams.MetricsPort,
+		HealthProbeBindAddress: cfgParams.MetricsPort,
+
 		Cache:                   cacheOpt,
 		LeaderElection:          true,
 		LeaderElectionNamespace: cfgParams.ControllerNamespace,
