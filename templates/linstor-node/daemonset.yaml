@@ -124,6 +124,14 @@ spec:
           - containerPort: 3367
             hostPort: 3367
             protocol: TCP
+        livenessProbe:
+          exec:
+            command:
+            - ./liveness-satellite.sh
+          failureThreshold: 3
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 15
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}

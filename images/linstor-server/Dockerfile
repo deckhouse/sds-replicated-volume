@@ -212,9 +212,11 @@ EXPOSE 3366/tcp 3367/tcp
 RUN curl -Lfo /usr/bin/piraeus-entry.sh ${PIRAEUS_GITREPO}/raw/${PIRAEUS_COMMIT_REF}/dockerfiles/piraeus-server/entry.sh \
  && chmod +x /usr/bin/piraeus-entry.sh
 
-# Add liveness probe script
+# Add liveness probe scripts
 COPY liveness.sh /liveness.sh
+COPY liveness-satellite.sh /liveness-satellite.sh
 RUN chmod 755 /liveness.sh
+RUN chmod 755 /liveness-satellite.sh
 
 # Add wrapper for linstor client with only allowed commands
 COPY client-wrapper.sh /usr/local/bin/linstor
