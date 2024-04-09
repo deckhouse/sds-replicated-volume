@@ -11,9 +11,9 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_module_needs_migration: "D8ModuleNeedsMigration,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_module_needs_migration: "D8ModuleNeedsMigration,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: Module sds-drbd needs migration to  sds-replicated-volume.
+        summary: Module sds-drbd needs migration to sds-replicated-volume.
         description: |
-          Module sds-drbd needs migration to  sds-replicated-volume.
+          Module sds-drbd needs migration to sds-replicated-volume.
 
           Migration docs can be found here: 
-          `https://deckhouse.io/modules/sds-replicated-volume/stable/faq.html#Migrating-from-sds-drbd-module-to-sds-replicated-volume`
+          `https://deckhouse.io/modules/sds-replicated-volume/stable/faq.html#migrating-from-sds-drbd-module-to-sds-replicated-volume`
