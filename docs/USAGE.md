@@ -51,9 +51,9 @@ spec:
   type: LVMThin
   lvmVolumeGroups:
     - name: lvg-3
-      thinpoolname: thin-pool
+      thinPoolName: thin-pool
     - name: lvg-4
-      thinpoolname: thin-pool
+      thinPoolName: thin-pool
 ```
 
 > **Caution!** All `LVMVolumeGroup` resources in the `spec` of the `ReplicatedStoragePool` resource must reside on different nodes. (You may not refer to multiple `LVMVolumeGroup` resources located on the same node).
