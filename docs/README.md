@@ -184,7 +184,7 @@ metadata:
   name: data
 spec:
   type: LVM
-  lvmvolumegroups: # Here, specify the names of the LvmVolumeGroup resources you created earlier
+  lvmVolumeGroups: # Here, specify the names of the LvmVolumeGroup resources you created earlier
     - name: vg-1-on-worker-0
     - name: vg-1-on-worker-1
     - name: vg-1-on-worker-2

@@ -23,7 +23,7 @@ spec:
                       name:
                         description: |
                           Имя ресурса LVMVolumeGroup.
-                      thinpoolname:
+                      thinPoolName:
                         description: |
                           Имя выбранного Thin-pool в рамках указанного LVMVolumeGroup. Обязательное поле если вы создаёте ReplicatedStoragePool с типом LVMThin.
             status:
