@@ -35,7 +35,7 @@ metadata:
   name: data
 spec:
   type: LVM
-  lvmvolumegroups:
+  lvmVolumeGroups:
     - name: lvg-1
     - name: lvg-2
 ```
@@ -49,11 +49,11 @@ metadata:
   name: thin-data
 spec:
   type: LVMThin
-  lvmvolumegroups:
+  lvmVolumeGroups:
     - name: lvg-3
-      thinpoolname: thin-pool
+      thinPoolName: thin-pool
     - name: lvg-4
-      thinpoolname: thin-pool
+      thinPoolName: thin-pool
 ```
 
 > Внимание! Все ресурсы `LVMVolumeGroup`, указанные в `spec` ресурса `ReplicatedStoragePool`, должны быть на разных узлах. (Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле).
