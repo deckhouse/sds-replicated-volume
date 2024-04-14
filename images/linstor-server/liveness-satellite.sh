@@ -18,8 +18,8 @@
 # This is a workaround for https://github.com/LINBIT/linstor-server/issues/331, https://github.com/LINBIT/linstor-server/issues/219
 
 # Check if there are symptoms of lost connection in linstor controller logs
-if test -f "/var/log/linstor-controller/linstor-Satellite.log"; then
-  if [ $(tail -n 1000 /var/log/linstor-controller/linstor-Satellite.log | grep 'Target decrypted buffer is too small' | wc -l) -ne 0 ]; then
+if test -f "/var/log/linstor-satellite/linstor-Satellite.log"; then
+  if [ $(tail -n 1000 /var/log/linstor-satellite/linstor-Satellite.log | grep 'Target decrypted buffer is too small' | wc -l) -ne 0 ]; then
     exit 1
   fi
 fi
