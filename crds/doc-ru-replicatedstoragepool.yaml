@@ -13,7 +13,7 @@ spec:
                     Определяет тип Volume'ов. Может быть: 
                     - LVM (для классических LVM-томов)
                     - LVMThin (для Thin-томов)
-                lvmvolumegroups:
+                lvmVolumeGroups:
                   description: |
                     Список LVMVolumeGroup-ресурсов, Volume Group'ы/Thin-pool'ы которых будут использованы для создания Storage-pool'ов в бэкенде LINSTOR.
 
