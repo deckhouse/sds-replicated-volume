@@ -8,6 +8,65 @@ import (
 )
 
 func TestLinstorResourcesWatcher(t *testing.T) {
+	t.Run("filterNodesByAutoplaceTarget_return_correct_nodes", func(t *testing.T) {
+		nodes := []lapi.Node{
+			{
+				Name: "correct1",
+				Props: map[string]string{
+					autoplaceTarget: "true",
+				},
+			},
+			{
+				Name: "bad",
+				Props: map[string]string{
+					autoplaceTarget: "false",
+				},
+			},
+			{
+				Name:  "correct2",
+				Props: map[string]string{},
+			},
+		}
+
+		expected := []lapi.Node{
+			{
+				Name: "correct1",
+				Props: map[string]string{
+					autoplaceTarget: "true",
+				},
+			},
+			{
+				Name:  "correct2",
+				Props: map[string]string{},
+			},
+		}
+
+		actual := filterNodesByAutoplaceTarget(nodes)
+
+		assert.ElementsMatch(t, expected, actual)
+	})
+
+	t.Run("filterNodesByAutoplaceTarget_return_nothing", func(t *testing.T) {
+		nodes := []lapi.Node{
+			{
+				Name: "bad1",
+				Props: map[string]string{
+					autoplaceTarget: "false",
+				},
+			},
+			{
+				Name: "bad2",
+				Props: map[string]string{
+					autoplaceTarget: "false",
+				},
+			},
+		}
+
+		actual := filterNodesByAutoplaceTarget(nodes)
+
+		assert.Equal(t, 0, len(actual))
+	})
+
 	t.Run("filterNodesByReplicasOnDifferent_returns_correct_nodes", func(t *testing.T) {
 		key := "Aux/kubernetes.io/hostname"
 		values := []string{"test-host1"}

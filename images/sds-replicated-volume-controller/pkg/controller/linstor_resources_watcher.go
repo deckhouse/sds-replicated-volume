@@ -47,6 +47,7 @@ const (
 	replicasOnDifferentSCKey        = "replicasOnDifferent"
 	placementCountSCKey             = "placementCount"
 	storagePoolSCKey                = "storagePool"
+	autoplaceTarget                 = "AutoplaceTarget"
 )
 
 var (
@@ -233,6 +234,7 @@ func ReconcileTieBreaker(
 		nodeName, err := getNodeForTieBreaker(log, nodes, resources, rds, rgs)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to get a node for a Tie-breaker replica for the Linstor Resource, name: %s", name))
+			continue
 		}
 
 		err = createTieBreaker(ctx, lc, name, nodeName)
@@ -273,15 +275,29 @@ func getNodeForTieBreaker(
 	rgs map[string]lapi.ResourceGroup,
 ) (string, error) {
 	filteredNodes := filterNodesByUsed(nodes, resources)
+	for _, node := range filteredNodes {
+		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s uses a node %s", resources[0].Name, node.Name))
+	}
 	rg := getResourceGroupByResource(resources[0].Name, rds, rgs)
 
 	if key, exist := rg.Props[replicasOnSameRGKey]; exist {
 		filteredNodes = filterNodesByReplicasOnSame(filteredNodes, key)
+		for _, node := range filteredNodes {
+			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnSame key", node.Name))
+		}
 	}
 
 	if key, exist := rg.Props[replicasOnDifferentRGKey]; exist {
 		values := getReplicasOnDifferentValues(nodes, resources, key)
 		filteredNodes = filterNodesByReplicasOnDifferent(filteredNodes, key, values)
+		for _, node := range filteredNodes {
+			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnDifferent key", node.Name))
+		}
+	}
+
+	filteredNodes = filterNodesByAutoplaceTarget(filteredNodes)
+	for _, node := range filteredNodes {
+		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by AutoplaceTarget key", node.Name))
 	}
 
 	if len(filteredNodes) == 0 {
@@ -291,6 +307,21 @@ func getNodeForTieBreaker(
 	}
 
 	return filteredNodes[0].Name, nil
+}
+
+func filterNodesByAutoplaceTarget(nodes []lapi.Node) []lapi.Node {
+	filtered := make([]lapi.Node, 0, len(nodes))
+
+	for _, node := range nodes {
+		if val, exist := node.Props[autoplaceTarget]; exist &&
+			val == "false" {
+			continue
+		}
+
+		filtered = append(filtered, node)
+	}
+
+	return filtered
 }
 
 func filterNodesByReplicasOnDifferent(nodes []lapi.Node, key string, values []string) []lapi.Node {
