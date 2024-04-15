@@ -4,17 +4,17 @@ memory: 250Mi
 {{- end }}
 
 {{- define "drbd_prometheus_exporter_resources" }}
-cpu: 10m
+cpu: 50m
 memory: 25Mi
 {{- end }}
 
 {{- define "drbd_wait_resources" }}
-cpu: 10m
+cpu: 50m
 memory: 25Mi
 {{- end }}
 
 {{- define "linstor_resources_cleaner" }}
-cpu: 10m
+cpu: 50m
 memory: 150Mi
 {{- end }}
 
