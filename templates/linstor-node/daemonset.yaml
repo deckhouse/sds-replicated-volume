@@ -46,13 +46,13 @@ spec:
       minAllowed:
         {{- include "drbd_prometheus_exporter_resources" . | nindent 8 }}
       maxAllowed:
-        cpu: 20m
+        cpu: 100m
         memory: 50Mi
     - containerName: linstor-resources-cleaner
       minAllowed:
         {{- include "linstor_resources_cleaner" . | nindent 8 }}
       maxAllowed:
-        cpu: 10m
+        cpu: 100m
         memory: 150Mi
 {{- end }}
 ---
