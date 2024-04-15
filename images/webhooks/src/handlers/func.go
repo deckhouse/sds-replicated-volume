@@ -18,7 +18,9 @@ package handlers
 
 import (
 	"context"
+	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/go-logr/logr"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/api/resource/v1alpha2"
 	sv1 "k8s.io/api/storage/v1"
@@ -29,6 +31,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"net/http"
 	"os"
+	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/slok/kubewebhook/v2/pkg/log"
@@ -38,6 +41,7 @@ import (
 	kwhmutating "github.com/slok/kubewebhook/v2/pkg/webhook/mutating"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func NewKubeClient(kubeconfigPath string) (client.Client, error) {
@@ -48,6 +52,8 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 		kubeconfigPath = os.Getenv("kubeconfig")
 	}
 
+	controllerruntime.SetLogger(logr.New(ctrllog.NullLogSink{}))
+
 	config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
 
 	if err != nil {
@@ -57,6 +63,7 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 			v1alpha2.AddToScheme,
+			dh.AddToScheme,
 			snc.AddToScheme,
 			clientgoscheme.AddToScheme,
 			extv1.AddToScheme,

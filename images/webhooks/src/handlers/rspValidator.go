@@ -18,20 +18,25 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"slices"
 )
 
 const (
-	LVMThinType = "LVMThin"
+	LVMThinType                   = "LVMThin"
+	sdsReplicatedVolumeModuleName = "sds-replicated-volume"
 )
 
 func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
@@ -113,6 +118,43 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 					}
 				}
 				break
+			}
+		}
+
+		if thinPoolExists {
+			ctx := context.Background()
+			cl, err := NewKubeClient("")
+			if err != nil {
+				klog.Fatal(err.Error())
+			}
+
+			srvModuleConfig := &dh.ModuleConfig{}
+
+			err = cl.Get(ctx, types.NamespacedName{Name: sdsReplicatedVolumeModuleName, Namespace: ""}, srvModuleConfig)
+			if err != nil {
+				klog.Fatal(err)
+			}
+
+			if value, exists := srvModuleConfig.Spec.Settings["enableThinProvisioning"]; exists && value == true {
+				klog.Info("Thin pools support is enabled")
+			} else {
+				klog.Info("Enabling thin pools support")
+				patchBytes, err := json.Marshal(map[string]interface{}{
+					"spec": map[string]interface{}{
+						"settings": map[string]interface{}{
+							"enableThinProvisioning": true,
+						},
+					},
+				})
+
+				if err != nil {
+					klog.Fatalf("Error marshalling patch: %s", err.Error())
+				}
+
+				err = cl.Patch(context.TODO(), srvModuleConfig, client.RawPatch(types.MergePatchType, patchBytes))
+				if err != nil {
+					klog.Fatalf("Error patching object: %s", err.Error())
+				}
 			}
 		}
 

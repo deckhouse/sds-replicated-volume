@@ -12,6 +12,16 @@ metadata:
   name: d8:{{ .Chart.Name }}:webhooks
   {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks")) | nindent 2 }}
 rules:
+  - apiGroups:
+      - deckhouse.io
+    resources:
+      - moduleconfigs
+    verbs:
+      - get
+      - watch
+      - update
+      - list
+      - patch
   - verbs:
       - get
       - list
