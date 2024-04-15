@@ -4,13 +4,18 @@ memory: 250Mi
 {{- end }}
 
 {{- define "drbd_prometheus_exporter_resources" }}
-cpu: 10m
+cpu: 50m
 memory: 25Mi
 {{- end }}
 
 {{- define "drbd_wait_resources" }}
-cpu: 10m
+cpu: 50m
 memory: 25Mi
+{{- end }}
+
+{{- define "linstor_resources_cleaner" }}
+cpu: 50m
+memory: 150Mi
 {{- end }}
 
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
@@ -41,8 +46,14 @@ spec:
       minAllowed:
         {{- include "drbd_prometheus_exporter_resources" . | nindent 8 }}
       maxAllowed:
-        cpu: 20m
+        cpu: 100m
         memory: 50Mi
+    - containerName: linstor-resources-cleaner
+      minAllowed:
+        {{- include "linstor_resources_cleaner" . | nindent 8 }}
+      maxAllowed:
+        cpu: 100m
+        memory: 150Mi
 {{- end }}
 ---
 apiVersion: apps/v1
@@ -97,7 +108,7 @@ spec:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+            {{- include "linstor_resources_cleaner" . | nindent 12 }}
 {{- end }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
@@ -136,7 +147,7 @@ spec:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+            {{- include "linstor_satellite_resources" . | nindent 12 }}
 {{- end }}
         securityContext:
           privileged: true
@@ -222,7 +233,7 @@ spec:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
+            {{- include "drbd_prometheus_exporter_resources" . | nindent 12 }}
 {{- end }}
         securityContext: {}
         terminationMessagePath: /dev/termination-log
