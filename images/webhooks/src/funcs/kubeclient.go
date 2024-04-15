@@ -1,6 +1,7 @@
 package funcs
 
 import (
+	dhctl "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -24,6 +25,7 @@ func NewKubeClient() (client.Client, error) {
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 			linstor.AddToScheme,
+			dhctl.AddToScheme,
 			clientgoscheme.AddToScheme,
 			extv1.AddToScheme,
 			v1.AddToScheme,
