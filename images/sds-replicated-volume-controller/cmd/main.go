@@ -115,7 +115,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if _, err := controller.NewLinstorNode(ctx, mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
+	if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewLinstorNode controller")
 		os.Exit(1)
 	}
@@ -145,11 +145,11 @@ func main() {
 	}
 	log.Info("the NewLinstorResourcesWatcher controller starts")
 
-	if _, err = controller.NewReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStorageClassWatcher controller")
+	if _, err = controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log); err != nil {
+		log.Error(err, "failed to create the RunReplicatedStorageClassWatcher controller")
 		os.Exit(1)
 	}
-	log.Info("the NewReplicatedStorageClassWatcher controller starts")
+	log.Info("the RunReplicatedStorageClassWatcher controller starts")
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "unable to set up health check")
