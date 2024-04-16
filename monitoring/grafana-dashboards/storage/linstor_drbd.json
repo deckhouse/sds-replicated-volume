@@ -701,7 +701,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "sum by (module) (round(increase(linstor_error_reports_count{module!=\"\", node=~\"$node\"}[$__interval_sx4])))",
+          "expr": "sum by (module) (round(increase(linstor_error_reports_count{module!=\"\", node=~\"$node\"}[$__rate_interval])))",
           "instant": false,
           "legendFormat": "{{ module }}",
           "refId": "A"
@@ -842,7 +842,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "avg_over_time(linstor_scrape_duration_seconds[$__interval_sx3])",
+          "expr": "avg_over_time(linstor_scrape_duration_seconds[$__rate_interval])",
           "legendFormat": "allocated",
           "refId": "A"
         }
@@ -1253,7 +1253,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(drbd_device_written_bytes_total[$__interval_sx3]) and topk(5, avg_over_time(drbd_device_written_bytes_total[$__interval_sx3]) > 0)",
+          "expr": "rate(drbd_device_written_bytes_total[$__rate_interval]) and topk(5, avg_over_time(drbd_device_written_bytes_total[$__rate_interval]) > 0)",
           "instant": false,
           "legendFormat": "{{name}} on {{node}}",
           "refId": "A"
@@ -1342,7 +1342,7 @@
       "targets": [
         {
           "exemplar": true,
-          "expr": "rate(drbd_device_read_bytes_total[$__interval_sx3]) and topk(5, avg_over_time(drbd_device_read_bytes_total[$__interval_sx3]) > 0)",
+          "expr": "rate(drbd_device_read_bytes_total[$__rate_interval]) and topk(5, avg_over_time(drbd_device_read_bytes_total[$__rate_interval]) > 0)",
           "instant": false,
           "legendFormat": "{{name}} on {{node}}",
           "refId": "A"
@@ -1453,7 +1453,7 @@
           },
           "editorMode": "code",
           "exemplar": true,
-          "expr": "avg_over_time(scrape_duration_seconds{job=\"linstor-node\"}[$__interval_sx3])",
+          "expr": "avg_over_time(scrape_duration_seconds{job=\"linstor-node\"}[$__rate_interval])",
           "legendFormat": "{{node}}",
           "range": true,
           "refId": "A"
