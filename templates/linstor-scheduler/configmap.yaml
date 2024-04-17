@@ -6,12 +6,11 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler")) | nindent 2 }}
 data:
-  {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
   scheduler-config.yaml: |-
-    {{- if semverCompare ">= 1.23" .Values.global.discovery.kubernetesVersion }}
-    apiVersion: kubescheduler.config.k8s.io/v1beta3
+    {{- if semverCompare ">= 1.26" .Values.global.discovery.kubernetesVersion }}
+    apiVersion: kubescheduler.config.k8s.io/v1
     {{- else }}
-    apiVersion: kubescheduler.config.k8s.io/v1beta2
+    apiVersion: kubescheduler.config.k8s.io/v1beta3
     {{- end }}
     kind: KubeSchedulerConfiguration
     profiles:
@@ -24,21 +23,3 @@ data:
         enableHTTPS: false
         httpTimeout: 300000s
         nodeCacheCapable: false
-  {{- else }}
-  policy.cfg: |-
-    {
-      "kind": "Policy",
-      "apiVersion": "v1",
-      "extenders": [
-        {
-          "urlPrefix": "http://localhost:8099",
-          "apiVersion": "v1beta1",
-          "filterVerb": "filter",
-          "prioritizeVerb": "prioritize",
-          "weight": 5,
-          "enableHttps": false,
-          "nodeCacheCapable": false
-        }
-      ]
-    }
-  {{- end }}
