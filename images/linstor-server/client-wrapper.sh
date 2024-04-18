@@ -24,7 +24,7 @@ allowed=false
 
 if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "This wrapper is designed to minimize manual intervention in the module's operation. We are continuously improving the built-in capabilities to avoid the need for console commands. Please try to use them as much as possible. The allowed commands at the moment are:"
-  echo "- storage-pool list/show"
+  echo "- storage-pool list/show/delete"
   echo "- node list/show"
   echo "- resource list/show/lv"
   echo "- volume list/show"
@@ -54,6 +54,11 @@ done
 
 # Allow linstor resource-definition delete
 if [[ "$1" == "resource-definition" ]] && [[ "$2" == "delete" ]]; then
+  allowed=true
+fi
+
+# Allow linstor storage pool delete
+if [[ "$1" == "storage-pool" ]] && [[ "$2" == "delete" ]]; then
   allowed=true
 fi
 
