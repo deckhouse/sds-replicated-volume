@@ -30,6 +30,9 @@ spec:
               type: object
               description: |
                 Defines desired rules for Linstor's Storage-pools.
+              required:
+                - type
+                - lvmVolumeGroups
               properties:
                 type:
                   type: string
