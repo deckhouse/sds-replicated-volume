@@ -20,6 +20,7 @@ rules:
       - storage.deckhouse.io
     resources:
       - replicatedstorageclasses
+      - lvmvolumegroups
   - verbs:
       - get
       - list
