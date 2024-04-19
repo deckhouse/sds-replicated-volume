@@ -337,7 +337,7 @@ func renameLinbitLabels(ctx context.Context, cl client.Client, nodes []v1.Node) 
 
 		for k, v := range node.Labels {
 			if strings.HasPrefix(k, LinbitStoragePoolPrefixLabelKey) {
-				postfix := k[len(LinbitStoragePoolPrefixLabelKey):]
+				postfix, _ := strings.CutPrefix(k, LinbitStoragePoolPrefixLabelKey)
 
 				sdsKey := SdsStoragePoolPrefixLabelKey + postfix
 				node.Labels[sdsKey] = v
