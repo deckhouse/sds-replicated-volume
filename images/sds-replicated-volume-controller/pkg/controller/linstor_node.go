@@ -52,13 +52,11 @@ const (
 	reachableTimeout          = 10 * time.Second
 	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-replicated-volume-node"
 
-	LinbitHostnameLabelKey             = "linbit.com/hostname"
-	LinbitDfltDisklessStorPoolLabelKey = "linbit.com/sp-DfltDisklessStorPool"
-	LinbitStoragePoolPrefixLabelKey    = "linbit.com/sp-"
+	LinbitHostnameLabelKey          = "linbit.com/hostname"
+	LinbitStoragePoolPrefixLabelKey = "linbit.com/sp-"
 
-	SdsHostnameLabelKey             = "storage.deckhouse.io/sds-replicated-volume-hostname"
-	SdsDfltDisklessStorPoolLabelKey = "storage.deckhouse.io/sds-replicated-volume-sp-DfltDisklessStorPool"
-	SdsStoragePoolPrefixLabelKey    = "storage.deckhouse.io/sds-replicated-volume-sp-"
+	SdsHostnameLabelKey          = "storage.deckhouse.io/sds-replicated-volume-hostname"
+	SdsStoragePoolPrefixLabelKey = "storage.deckhouse.io/sds-replicated-volume-sp-"
 
 	InternalIP = "InternalIP"
 )
@@ -72,7 +70,6 @@ var (
 		"topology.kubernetes.io/zone",
 		"registered-by",
 		SdsHostnameLabelKey,
-		SdsDfltDisklessStorPoolLabelKey,
 		DRBDNodeSelectorKey,
 	}
 
@@ -334,11 +331,6 @@ func renameLinbitLabels(ctx context.Context, cl client.Client, nodes []v1.Node) 
 		if value, exist := node.Labels[LinbitHostnameLabelKey]; exist {
 			node.Labels[SdsHostnameLabelKey] = value
 			delete(node.Labels, LinbitHostnameLabelKey)
-		}
-
-		if value, exist := node.Labels[LinbitDfltDisklessStorPoolLabelKey]; exist {
-			node.Labels[SdsDfltDisklessStorPoolLabelKey] = value
-			delete(node.Labels, LinbitDfltDisklessStorPoolLabelKey)
 		}
 
 		for k, v := range node.Labels {

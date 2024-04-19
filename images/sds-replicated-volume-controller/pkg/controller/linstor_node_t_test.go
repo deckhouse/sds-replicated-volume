@@ -153,6 +153,9 @@ func TestRenameLinbitLabels(t *testing.T) {
 		linbitDfltDisklessStorPoolLabelValue = "test-dflt"
 		linbitStoragePoolPrefixLabelValue    = "test-sp"
 		postfix                              = "postfix"
+
+		SdsDfltDisklessStorPoolLabelKey    = "storage.deckhouse.io/sds-replicated-volume-sp-DfltDisklessStorPool"
+		LinbitDfltDisklessStorPoolLabelKey = "linbit.com/sp-DfltDisklessStorPool"
 	)
 	ctx := context.Background()
 	cl := newFakeClient()
