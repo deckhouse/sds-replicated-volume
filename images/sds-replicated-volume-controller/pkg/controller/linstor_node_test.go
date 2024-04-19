@@ -201,7 +201,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		log := logger.Logger{}
-		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
+		drbdNodeSelector := map[string]string{controller.SdsReplicatedVolumeNodeSelectorKey: ""}
 		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
 		Expect(err).NotTo(HaveOccurred())
 

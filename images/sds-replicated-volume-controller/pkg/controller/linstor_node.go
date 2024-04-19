@@ -42,15 +42,15 @@ import (
 const (
 	LinstorDriverName = "linstor.csi.linbit.com"
 
-	LinstorNodeControllerName = "linstor-node-controller"
-	LinstorControllerType     = "CONTROLLER"
-	LinstorSatelliteType      = "SATELLITE"
-	LinstorOnlineStatus       = "ONLINE"
-	LinstorOfflineStatus      = "OFFLINE"
-	LinstorNodePort           = 3367  //
-	LinstorEncryptionType     = "SSL" // "Plain"
-	reachableTimeout          = 10 * time.Second
-	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-replicated-volume-node"
+	LinstorNodeControllerName          = "linstor-node-controller"
+	LinstorControllerType              = "CONTROLLER"
+	LinstorSatelliteType               = "SATELLITE"
+	LinstorOnlineStatus                = "ONLINE"
+	LinstorOfflineStatus               = "OFFLINE"
+	LinstorNodePort                    = 3367  //
+	LinstorEncryptionType              = "SSL" // "Plain"
+	reachableTimeout                   = 10 * time.Second
+	SdsReplicatedVolumeNodeSelectorKey = "storage.deckhouse.io/sds-replicated-volume-node"
 
 	LinbitHostnameLabelKey          = "linbit.com/hostname"
 	LinbitStoragePoolPrefixLabelKey = "linbit.com/sp-"
@@ -62,7 +62,7 @@ const (
 )
 
 var (
-	drbdNodeSelector = map[string]string{DRBDNodeSelectorKey: ""}
+	drbdNodeSelector = map[string]string{SdsReplicatedVolumeNodeSelectorKey: ""}
 
 	allowedLabels = []string{
 		"kubernetes.io/hostname",
@@ -70,7 +70,7 @@ var (
 		"topology.kubernetes.io/zone",
 		"registered-by",
 		SdsHostnameLabelKey,
-		DRBDNodeSelectorKey,
+		SdsReplicatedVolumeNodeSelectorKey,
 	}
 
 	allowedPrefixes = []string{

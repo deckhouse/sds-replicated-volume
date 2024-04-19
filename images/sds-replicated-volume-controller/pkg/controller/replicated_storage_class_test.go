@@ -906,7 +906,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		// storageClassLabelKey := fmt.Sprintf("%s/%s", controller.StorageClassLabelKeyPrefix, replicatedSC.Name)
 		// err = controller.LabelNodes(ctx, cl, storageClassLabelKey, replicatedSC.Spec.Zones)
 		// Expect(err).NotTo(HaveOccurred())
-		drbdNodeSelector := map[string]string{controller.DRBDNodeSelectorKey: ""}
+		drbdNodeSelector := map[string]string{controller.SdsReplicatedVolumeNodeSelectorKey: ""}
 
 		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
 		err = cl.List(ctx, &replicatedStorageClasses)
