@@ -19,7 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
-	v13 "k8s.io/api/storage/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
 	"net"
 	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
@@ -213,7 +213,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		nodeLabels[node.Name] = node.Labels
 	}
 
-	csiList := &v13.CSINodeList{}
+	csiList := &storagev1.CSINodeList{}
 	err := cl.List(ctx, csiList)
 	if err != nil {
 		log.Error(err, "[syncCSINodesLabels] unable to list CSI nodes")
@@ -225,7 +225,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 
 		var (
 			kubeNodeLabelsToSync = make(map[string]struct{}, len(nodeLabels[csiNode.Name]))
-			syncedCSIDriver      v13.CSINodeDriver
+			syncedCSIDriver      storagev1.CSINodeDriver
 			csiTopoKeys          map[string]struct{}
 		)
 
@@ -304,7 +304,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 	return nil
 }
 
-func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *v13.CSINode, csiDriver v13.CSINodeDriver) error {
+func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, csiDriver storagev1.CSINodeDriver) error {
 	csiNode.Spec.Drivers = append(csiNode.Spec.Drivers, csiDriver)
 	err := cl.Update(ctx, csiNode)
 	if err != nil {
@@ -314,7 +314,7 @@ func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *v13.CSIN
 	return nil
 }
 
-func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *v13.CSINode, driverName string) error {
+func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, driverName string) error {
 	for i, driver := range csiNode.Spec.Drivers {
 		if driver.Name == driverName {
 			csiNode.Spec.Drivers = append(csiNode.Spec.Drivers[:i], csiNode.Spec.Drivers[i+1:]...)
