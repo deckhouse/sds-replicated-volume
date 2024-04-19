@@ -1,6 +1,6 @@
 module sds-replicated-volume-controller
 
-go 1.20
+go 1.22.1
 
 require (
 	github.com/LINBIT/golinstor v0.49.0
@@ -70,7 +70,7 @@ require (
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/component-base v0.28.3 // indirect
 	k8s.io/klog/v2 v2.100.1
 	k8s.io/kube-openapi v0.0.0-20230717233707-2695361300d9 // indirect

@@ -19,9 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	storagev1 "k8s.io/api/storage/v1"
 	"net"
+	"reflect"
 	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,25 +41,46 @@ import (
 )
 
 const (
-	LinstorNodeControllerName = "linstor-node-controller"
-	LinstorControllerType     = "CONTROLLER"
-	LinstorSatelliteType      = "SATELLITE"
-	LinstorOnlineStatus       = "ONLINE"
-	LinstorOfflineStatus      = "OFFLINE"
-	LinstorNodePort           = 3367  //
-	LinstorEncryptionType     = "SSL" // "Plain"
-	reachableTimeout          = 10 * time.Second
-	DRBDNodeSelectorKey       = "storage.deckhouse.io/sds-replicated-volume-node"
+	LinstorDriverName = "linstor.csi.linbit.com"
+
+	LinstorNodeControllerName          = "linstor-node-controller"
+	LinstorControllerType              = "CONTROLLER"
+	LinstorSatelliteType               = "SATELLITE"
+	LinstorOnlineStatus                = "ONLINE"
+	LinstorOfflineStatus               = "OFFLINE"
+	LinstorNodePort                    = 3367  //
+	LinstorEncryptionType              = "SSL" // "Plain"
+	reachableTimeout                   = 10 * time.Second
+	SdsReplicatedVolumeNodeSelectorKey = "storage.deckhouse.io/sds-replicated-volume-node"
+
+	LinbitHostnameLabelKey          = "linbit.com/hostname"
+	LinbitStoragePoolPrefixLabelKey = "linbit.com/sp-"
+
+	SdsHostnameLabelKey          = "storage.deckhouse.io/sds-replicated-volume-hostname"
+	SdsStoragePoolPrefixLabelKey = "storage.deckhouse.io/sds-replicated-volume-sp-"
 
 	InternalIP = "InternalIP"
 )
 
 var (
-	drbdNodeSelector = map[string]string{DRBDNodeSelectorKey: ""}
+	drbdNodeSelector = map[string]string{SdsReplicatedVolumeNodeSelectorKey: ""}
+
+	allowedLabels = []string{
+		"kubernetes.io/hostname",
+		"topology.kubernetes.io/region",
+		"topology.kubernetes.io/zone",
+		"registered-by",
+		SdsHostnameLabelKey,
+		SdsReplicatedVolumeNodeSelectorKey,
+	}
+
+	allowedPrefixes = []string{
+		"class.storage.deckhouse.io/",
+		SdsStoragePoolPrefixLabelKey,
+	}
 )
 
 func NewLinstorNode(
-	ctx context.Context,
 	mgr manager.Manager,
 	lc *lclient.Client,
 	configSecretName string,
@@ -124,6 +148,17 @@ func reconcileLinstorNodes(
 		return err
 	}
 
+	err = renameLinbitLabels(ctx, cl, selectedKubernetesNodes.Items)
+	if err != nil {
+		log.Error(err, "[reconcileLinstorNodes] unable to rename linbit labels")
+		return err
+	}
+
+	err = ReconcileCSINodeLabels(ctx, cl, log, selectedKubernetesNodes.Items)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("[reconcileLinstorNodes] unable to reconcile CSI node labels"))
+	}
+
 	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
 	if err != nil {
 		log.Error(err, "Failed get LINSTOR nodes")
@@ -144,7 +179,7 @@ func reconcileLinstorNodes(
 			return err
 		}
 	} else {
-		log.Info("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector)) //TODO: log.Warn
+		log.Warning("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector))
 	}
 
 	// Remove logic
@@ -165,6 +200,141 @@ func reconcileLinstorNodes(
 	if err != nil {
 		log.Error(err, "Failed remove LINSTOR controller nodes:")
 		return err
+	}
+
+	return nil
+}
+
+func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Logger, nodes []v1.Node) error {
+	nodeLabels := make(map[string]map[string]string, len(nodes))
+	for _, node := range nodes {
+		nodeLabels[node.Name] = node.Labels
+	}
+
+	csiList := &storagev1.CSINodeList{}
+	err := cl.List(ctx, csiList)
+	if err != nil {
+		log.Error(err, "[syncCSINodesLabels] unable to list CSI nodes")
+		return err
+	}
+
+	for _, csiNode := range csiList.Items {
+		log.Debug(fmt.Sprintf("[syncCSINodesLabels] starts the topology keys check for a CSI node %s", csiNode.Name))
+
+		var (
+			kubeNodeLabelsToSync = make(map[string]struct{}, len(nodeLabels[csiNode.Name]))
+			syncedCSIDriver      storagev1.CSINodeDriver
+			csiTopoKeys          map[string]struct{}
+		)
+
+		for nodeLabel := range nodeLabels[csiNode.Name] {
+			if slices.Contains(allowedLabels, nodeLabel) {
+				kubeNodeLabelsToSync[nodeLabel] = struct{}{}
+				continue
+			}
+
+			for _, prefix := range allowedPrefixes {
+				if strings.HasPrefix(nodeLabel, prefix) {
+					kubeNodeLabelsToSync[nodeLabel] = struct{}{}
+				}
+			}
+		}
+
+		for _, driver := range csiNode.Spec.Drivers {
+			if driver.Name == LinstorDriverName {
+				syncedCSIDriver = driver
+				csiTopoKeys = make(map[string]struct{}, len(driver.TopologyKeys))
+
+				for _, topoKey := range driver.TopologyKeys {
+					csiTopoKeys[topoKey] = struct{}{}
+				}
+			}
+		}
+
+		if reflect.DeepEqual(kubeNodeLabelsToSync, csiTopoKeys) {
+			log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s topology keys is synced with its corresponding node", csiNode.Name))
+			return nil
+		}
+		log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s topology keys need to be synced with its corresponding node labels", csiNode.Name))
+
+		syncedTopologyKeys := make([]string, 0, len(kubeNodeLabelsToSync))
+		for label := range kubeNodeLabelsToSync {
+			syncedTopologyKeys = append(syncedTopologyKeys, label)
+		}
+		log.Trace(fmt.Sprintf("[syncCSINodesLabels] final topology keys for a CSI node %s: %v", csiNode.Name, syncedTopologyKeys))
+		syncedCSIDriver.TopologyKeys = syncedTopologyKeys
+
+		err = removeDriverFromCSINode(ctx, cl, &csiNode, syncedCSIDriver.Name)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[syncCSINodesLabels] unable to remove driver %s from CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+			return err
+		}
+		log.Debug(fmt.Sprintf("[syncCSINodesLabels] removed old driver %s of a CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+
+		err = addDriverToCSINode(ctx, cl, &csiNode, syncedCSIDriver)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[syncCSINodesLabels] unable to add driver %s to a CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+			return err
+		}
+
+		log.Debug(fmt.Sprintf("[syncCSINodesLabels] add updated driver %s of the CSI node %s", syncedCSIDriver.Name, csiNode.Name))
+		log.Debug(fmt.Sprintf("[syncCSINodesLabels] successfully updated topology keys for CSI node %s", csiNode.Name))
+	}
+
+	return nil
+}
+
+func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, csiDriver storagev1.CSINodeDriver) error {
+	csiNode.Spec.Drivers = append(csiNode.Spec.Drivers, csiDriver)
+	err := cl.Update(ctx, csiNode)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, driverName string) error {
+	for i, driver := range csiNode.Spec.Drivers {
+		if driver.Name == driverName {
+			slices.Delete(csiNode.Spec.Drivers, i, i+1)
+		}
+	}
+	err := cl.Update(ctx, csiNode)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func renameLinbitLabels(ctx context.Context, cl client.Client, nodes []v1.Node) error {
+	var err error
+	for _, node := range nodes {
+		shouldUpdate := false
+		if value, exist := node.Labels[LinbitHostnameLabelKey]; exist {
+			node.Labels[SdsHostnameLabelKey] = value
+			delete(node.Labels, LinbitHostnameLabelKey)
+			shouldUpdate = true
+		}
+
+		for k, v := range node.Labels {
+			if strings.HasPrefix(k, LinbitStoragePoolPrefixLabelKey) {
+				postfix, _ := strings.CutPrefix(k, LinbitStoragePoolPrefixLabelKey)
+
+				sdsKey := SdsStoragePoolPrefixLabelKey + postfix
+				node.Labels[sdsKey] = v
+				delete(node.Labels, k)
+				shouldUpdate = true
+			}
+		}
+
+		if shouldUpdate {
+			err = cl.Update(ctx, &node)
+			if err != nil {
+				return err
+			}
+		}
 	}
 
 	return nil
@@ -323,8 +493,24 @@ func KubernetesNodeLabelsToProperties(kubernetesNodeLabels map[string]string) ma
 		"Aux/registered-by": LinstorNodeControllerName,
 	}
 
-	for k, v := range kubernetesNodeLabels {
-		properties[fmt.Sprintf("Aux/%s", k)] = v
+	isAllowed := func(label string) bool {
+		if slices.Contains(allowedLabels, label) {
+			return true
+		}
+
+		for _, prefix := range allowedPrefixes {
+			if strings.HasPrefix(label, prefix) {
+				return true
+			}
+		}
+
+		return false
+	}
+
+	for labelKey, labelValue := range kubernetesNodeLabels {
+		if isAllowed(labelKey) {
+			properties[fmt.Sprintf("Aux/%s", labelKey)] = labelValue
+		}
 	}
 
 	return properties

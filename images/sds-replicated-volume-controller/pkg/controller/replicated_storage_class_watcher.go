@@ -25,7 +25,7 @@ const (
 	NonOperationalByReplicasLabel         = "storage.deckhouse.io/nonOperational-not-enough-nodes-in-zones"
 )
 
-func NewReplicatedStorageClassWatcher(
+func RunReplicatedStorageClassWatcher(
 	mgr manager.Manager,
 	lc *lapi.Client,
 	interval int,
@@ -41,38 +41,44 @@ func NewReplicatedStorageClassWatcher(
 	})
 
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[NewReplicatedStorageClassWatcher] unable to create controller, name: %s", ReplicatedStorageClassWatcherCtrlName))
+		log.Error(err, fmt.Sprintf("[RunReplicatedStorageClassWatcher] unable to create controller, name: %s", ReplicatedStorageClassWatcherCtrlName))
 	}
 
 	go func() {
 		for {
 			time.Sleep(time.Second * time.Duration(interval))
-			log.Info("[NewReplicatedStorageClassWatcher] starts reconciliation loop")
+			log.Info("[RunReplicatedStorageClassWatcher] starts reconciliation loop")
 
 			rscs, err := GetAllReplicatedStorageClasses(ctx, cl)
 			if err != nil {
-				log.Error(err, "[NewReplicatedStorageClassWatcher] unable to get all ReplicatedStorageClasses")
+				log.Error(err, "[RunReplicatedStorageClassWatcher] unable to get all ReplicatedStorageClasses")
 				continue
 			}
 
 			sps, err := GetAllLinstorStoragePools(ctx, lc)
 			if err != nil {
-				log.Error(err, "[NewReplicatedStorageClassWatcher] unable to get all Linstor Storage Pools")
+				log.Error(err, "[RunReplicatedStorageClassWatcher] unable to get all Linstor Storage Pools")
 			}
 
 			nodeList, err := GetAllKubernetesNodes(ctx, cl)
 			if err != nil {
-				log.Error(err, "[NewReplicatedStorageClassWatcher] unable to get all Kubernetes nodes")
+				log.Error(err, "[RunReplicatedStorageClassWatcher] unable to get all Kubernetes nodes")
 			}
 
 			storagePoolsNodes := SortNodesByStoragePool(nodeList, sps)
+			for spName, nodes := range storagePoolsNodes {
+				for _, node := range nodes {
+					log.Trace(fmt.Sprintf("[RunReplicatedStorageClassWatcher] Storage Pool %s has node %s", spName, node.Name))
+				}
+			}
+
 			rspZones := GetReplicatedStoragePoolsZones(storagePoolsNodes)
 
 			healthyDSCs := ReconcileReplicatedStorageClassPools(ctx, cl, log, rscs, sps)
 			healthyDSCs = ReconcileReplicatedStorageClassZones(ctx, cl, log, healthyDSCs, rspZones)
 			ReconcileReplicatedStorageClassReplication(ctx, cl, log, healthyDSCs, storagePoolsNodes)
 
-			log.Info("[NewReplicatedStorageClassWatcher] ends reconciliation loop")
+			log.Info("[RunReplicatedStorageClassWatcher] ends reconciliation loop")
 		}
 	}()
 
