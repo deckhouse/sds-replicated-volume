@@ -20,10 +20,11 @@ import (
 	"context"
 	"fmt"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/utils/strings/slices"
 	"net"
+	"reflect"
 	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
+	"slices"
 	"strings"
 	"time"
 
@@ -234,9 +235,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 
 			for _, prefix := range allowedPrefixes {
 				if strings.HasPrefix(nodeLabel, prefix) {
-					if _, added := kubeNodeLabelsToSync[nodeLabel]; !added {
-						kubeNodeLabelsToSync[nodeLabel] = struct{}{}
-					}
+					kubeNodeLabelsToSync[nodeLabel] = struct{}{}
 				}
 			}
 		}
@@ -252,23 +251,7 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 			}
 		}
 
-		needSync := func() bool {
-			for nodeLabel := range kubeNodeLabelsToSync {
-				if _, exist := csiTopoKeys[nodeLabel]; !exist {
-					return true
-				}
-			}
-
-			for topoLabel := range csiTopoKeys {
-				if _, exist := kubeNodeLabelsToSync[topoLabel]; !exist {
-					return true
-				}
-			}
-
-			return false
-		}()
-
-		if !needSync {
+		if reflect.DeepEqual(kubeNodeLabelsToSync, csiTopoKeys) {
 			log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s topology keys is synced with its corresponding node", csiNode.Name))
 			return nil
 		}
@@ -314,7 +297,7 @@ func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *storagev
 func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, driverName string) error {
 	for i, driver := range csiNode.Spec.Drivers {
 		if driver.Name == driverName {
-			csiNode.Spec.Drivers = append(csiNode.Spec.Drivers[:i], csiNode.Spec.Drivers[i+1:]...)
+			slices.Delete(csiNode.Spec.Drivers, i, i+1)
 		}
 	}
 	err := cl.Update(ctx, csiNode)

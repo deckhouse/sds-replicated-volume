@@ -331,7 +331,7 @@ func TestLinstorResourcesWatcher(t *testing.T) {
 			},
 		}
 
-		actual := filterNodesByUsed(nodes, resources)
+		actual := filterOutUsedNodes(nodes, resources)
 		assert.ElementsMatch(t, expected, actual)
 	})
 
@@ -359,7 +359,7 @@ func TestLinstorResourcesWatcher(t *testing.T) {
 			},
 		}
 
-		actual := filterNodesByUsed(nodes, resources)
+		actual := filterOutUsedNodes(nodes, resources)
 		assert.Equal(t, 0, len(actual))
 	})
 

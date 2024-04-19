@@ -25,13 +25,6 @@ const (
 	NonOperationalByReplicasLabel         = "storage.deckhouse.io/nonOperational-not-enough-nodes-in-zones"
 )
 
-var (
-	DfltDisklessStorPoolLabels = []string{
-		"linbit.com/sp-DfltDisklessStorPool",
-		"storage.deckhouse.io/sds-replicated-volume-sp-DfltDisklessStorPool",
-	}
-)
-
 func RunReplicatedStorageClassWatcher(
 	mgr manager.Manager,
 	lc *lapi.Client,
@@ -146,74 +139,7 @@ func ReconcileReplicatedStorageClassReplication(
 		log.Debug(fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] ReplicatedStorageClass %s replication type %s", rsc.Name, rsc.Spec.Replication))
 		switch rsc.Spec.Replication {
 		case ReplicationNone:
-		case ReplicationAvailability:
-			nodes := spNodes[rsc.Spec.StoragePool]
-			zoneNodesCount := make(map[string]int, len(nodes))
-			dfltDisklessExist := false
-
-			for _, node := range nodes {
-				for _, label := range DfltDisklessStorPoolLabels {
-					if _, exist := node.Labels[label]; exist {
-						dfltDisklessExist = true
-						break
-					}
-				}
-
-				if zone, exist := node.Labels[ZoneLabel]; exist {
-					zoneNodesCount[zone]++
-				}
-			}
-
-			switch rsc.Spec.Topology {
-			// As we need to place 2 diskfull replicas in a some random zone, we check if at least one zone has enough nodes for quorum.
-			case TopologyZonal:
-				var enoughNodes bool
-				for _, nodesCount := range zoneNodesCount {
-					if nodesCount > 2 ||
-						nodesCount == 2 && dfltDisklessExist {
-						enoughNodes = true
-					}
-				}
-
-				if !enoughNodes {
-					err := errors.New("not enough nodes in a single zone for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
-
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				}
-				// As we need to place every storage replica in a different zone, we check if at least one node is available in every selected zone.
-			case TopologyTransZonal:
-				enoughNodes := true
-				for _, zone := range rsc.Spec.Zones {
-					nodesCount := zoneNodesCount[zone]
-					if nodesCount < 1 {
-						enoughNodes = false
-					}
-				}
-
-				if !enoughNodes {
-					err := errors.New("not enough nodes are available in the zones for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
-
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				}
-				// As we do not care about zones, we just check if selected storage pool has enough nodes for quorum.
-			case TopologyIgnored:
-				if len(spNodes[rsc.Spec.StoragePool]) < 3 {
-					err := errors.New("not enough nodes are available in the zones for a quorum")
-					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replicas validation failed for ReplicatedStorageClass %s", rsc.Name))
-
-					setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				} else {
-					removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByReplicasLabel)
-				}
-			}
-
-		case ReplicationConsistencyAndAvailability:
+		case ReplicationAvailability, ReplicationConsistencyAndAvailability:
 			nodes := spNodes[rsc.Spec.StoragePool]
 			zoneNodesCount := make(map[string]int, len(nodes))
 			for _, node := range nodes {

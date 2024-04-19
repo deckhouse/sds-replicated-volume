@@ -274,39 +274,39 @@ func getNodeForTieBreaker(
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
 ) (string, error) {
-	filteredNodes := filterNodesByUsed(nodes, resources)
-	for _, node := range filteredNodes {
-		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s uses a node %s", resources[0].Name, node.Name))
+	unusedNodes := filterOutUsedNodes(nodes, resources)
+	for _, node := range unusedNodes {
+		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s does not use a node %s", resources[0].Name, node.Name))
 	}
 	rg := getResourceGroupByResource(resources[0].Name, rds, rgs)
 
 	if key, exist := rg.Props[replicasOnSameRGKey]; exist {
-		filteredNodes = filterNodesByReplicasOnSame(filteredNodes, key)
-		for _, node := range filteredNodes {
+		unusedNodes = filterNodesByReplicasOnSame(unusedNodes, key)
+		for _, node := range unusedNodes {
 			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnSame key", node.Name))
 		}
 	}
 
 	if key, exist := rg.Props[replicasOnDifferentRGKey]; exist {
 		values := getReplicasOnDifferentValues(nodes, resources, key)
-		filteredNodes = filterNodesByReplicasOnDifferent(filteredNodes, key, values)
-		for _, node := range filteredNodes {
+		unusedNodes = filterNodesByReplicasOnDifferent(unusedNodes, key, values)
+		for _, node := range unusedNodes {
 			log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by ReplicasOnDifferent key", node.Name))
 		}
 	}
 
-	filteredNodes = filterNodesByAutoplaceTarget(filteredNodes)
-	for _, node := range filteredNodes {
+	unusedNodes = filterNodesByAutoplaceTarget(unusedNodes)
+	for _, node := range unusedNodes {
 		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] node %s has passed the filter by AutoplaceTarget key", node.Name))
 	}
 
-	if len(filteredNodes) == 0 {
+	if len(unusedNodes) == 0 {
 		err := errors.New("no any node is available to create tie-breaker")
 		log.Error(err, fmt.Sprintf("[getNodeForTieBreaker] unable to create tie-breaker for resource, name: %s", resources[0].Name))
 		return "", err
 	}
 
-	return filteredNodes[0].Name, nil
+	return unusedNodes[0].Name, nil
 }
 
 func filterNodesByAutoplaceTarget(nodes []lapi.Node) []lapi.Node {
@@ -371,8 +371,8 @@ func getResourceGroupByResource(resourceName string, rds map[string]lapi.Resourc
 	return rgs[rds[resourceName].ResourceGroupName]
 }
 
-func filterNodesByUsed(nodes []lapi.Node, resources []lapi.Resource) []lapi.Node {
-	filtered := make([]lapi.Node, 0, len(nodes))
+func filterOutUsedNodes(nodes []lapi.Node, resources []lapi.Resource) []lapi.Node {
+	unusedNodes := make([]lapi.Node, 0, len(nodes))
 	resNodes := make(map[string]struct{}, len(resources))
 
 	for _, resource := range resources {
@@ -381,11 +381,11 @@ func filterNodesByUsed(nodes []lapi.Node, resources []lapi.Resource) []lapi.Node
 
 	for _, node := range nodes {
 		if _, used := resNodes[node.Name]; !used {
-			filtered = append(filtered, node)
+			unusedNodes = append(unusedNodes, node)
 		}
 	}
 
-	return filtered
+	return unusedNodes
 }
 
 func hasDisklessReplica(resources []lapi.Resource) bool {
