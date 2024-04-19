@@ -12,5 +12,4 @@ This patch considers just the first one as the requested node.
 
 This patch renames following Linstor-csi-node labels:
     - linbit.com/hostname -> storage.deckhouse.io/sds-replicated-volume-hostname
-    - linbit.com/sp-DfltDisklessStorPool -> storage.deckhouse.io/sds-replicated-volume-sp-DfltDisklessStorPool
     - linbit.com/sp-> storage.deckhouse.io/sds-replicated-volume-sp-
