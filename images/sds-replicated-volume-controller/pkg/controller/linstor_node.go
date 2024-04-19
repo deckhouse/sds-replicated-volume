@@ -328,24 +328,29 @@ func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *sto
 func renameLinbitLabels(ctx context.Context, cl client.Client, nodes []v1.Node) error {
 	var err error
 	for _, node := range nodes {
+		shouldUpdate := false
 		if value, exist := node.Labels[LinbitHostnameLabelKey]; exist {
 			node.Labels[SdsHostnameLabelKey] = value
 			delete(node.Labels, LinbitHostnameLabelKey)
+			shouldUpdate = true
 		}
 
 		for k, v := range node.Labels {
 			if strings.HasPrefix(k, LinbitStoragePoolPrefixLabelKey) {
-				spName := k[len(LinbitStoragePoolPrefixLabelKey):]
+				postfix := k[len(LinbitStoragePoolPrefixLabelKey):]
 
-				sdsKey := SdsStoragePoolPrefixLabelKey + spName
+				sdsKey := SdsStoragePoolPrefixLabelKey + postfix
 				node.Labels[sdsKey] = v
 				delete(node.Labels, k)
+				shouldUpdate = true
 			}
 		}
 
-		err = cl.Update(ctx, &node)
-		if err != nil {
-			return err
+		if shouldUpdate {
+			err = cl.Update(ctx, &node)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
