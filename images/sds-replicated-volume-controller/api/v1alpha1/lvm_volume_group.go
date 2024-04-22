@@ -16,7 +16,10 @@ limitations under the License.
 
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 type LvmVolumeGroupList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -34,8 +37,8 @@ type LvmVolumeGroup struct {
 }
 
 type SpecThinPool struct {
-	Name string `json:"name"`
-	Size string `json:"size"`
+	Name string            `json:"name"`
+	Size resource.Quantity `json:"size"`
 }
 
 type LvmVolumeGroupSpec struct {
@@ -46,11 +49,11 @@ type LvmVolumeGroupSpec struct {
 }
 
 type LvmVolumeGroupDevice struct {
-	BlockDevice string `json:"blockDevice"`
-	DevSize     string `json:"devSize"`
-	PVSize      string `json:"pvSize"`
-	PVUuid      string `json:"pvUUID"`
-	Path        string `json:"path"`
+	BlockDevice string            `json:"blockDevice"`
+	DevSize     resource.Quantity `json:"devSize"`
+	PVSize      resource.Quantity `json:"pvSize"`
+	PVUuid      string            `json:"pvUUID"`
+	Path        string            `json:"path"`
 }
 
 type LvmVolumeGroupNode struct {
@@ -59,17 +62,17 @@ type LvmVolumeGroupNode struct {
 }
 
 type StatusThinPool struct {
-	Name       string `json:"name"`
-	ActualSize string `json:"actualSize"`
-	UsedSize   string `json:"usedSize"`
+	Name       string            `json:"name"`
+	ActualSize resource.Quantity `json:"actualSize"`
+	UsedSize   resource.Quantity `json:"usedSize"`
 }
 
 type LvmVolumeGroupStatus struct {
-	AllocatedSize string               `json:"allocatedSize"`
+	AllocatedSize resource.Quantity    `json:"allocatedSize"`
 	Health        string               `json:"health"`
 	Message       string               `json:"message"`
 	Nodes         []LvmVolumeGroupNode `json:"nodes"`
 	ThinPools     []StatusThinPool     `json:"thinPools"`
-	VGSize        string               `json:"vgSize"`
+	VGSize        resource.Quantity    `json:"vgSize"`
 	VGUuid        string               `json:"vgUUID"`
 }
