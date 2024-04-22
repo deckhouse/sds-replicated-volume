@@ -82,12 +82,13 @@ if __name__ == "__main__":
     kubernetes.config.load_incluster_config()
 
     date_time = datetime.now().strftime("%Y%m%d%H%M%S")
+    linstor_backup_label = f'sds-replicated-volume.deckhouse.io/linstor-backup-{date_time}'
     create_backup(backup_type=date_time, namespace=namespace)
     body = kubernetes.client.V1Secret(
         api_version="v1",
         kind="Secret",
         metadata=kubernetes.client.V1ObjectMeta(name=f'linstor-{date_time}-backup-completed',
-                                                namespace=namespace))
+                                                namespace=namespace), labels={linstor_backup_label: ''})
     kubernetes.client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=body)
 
     namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace)
