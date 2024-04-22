@@ -88,10 +88,10 @@ if __name__ == "__main__":
         api_version="v1",
         kind="Secret",
         metadata=kubernetes.client.V1ObjectMeta(name=f'linstor-{date_time}-backup-completed',
-                                                namespace=namespace), labels={linstor_backup_label: ''})
+                                                namespace=namespace), labels=linstor_backup_label)
     kubernetes.client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=body)
 
-    namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace)
+    namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace, label_selector=linstor_backup_label)
     for item in namespace_secrets.items:
         if re.search(r'^linstor-\d+-backup-\d+$', item.metadata.name):
             backup_list.append(item.metadata.name)
