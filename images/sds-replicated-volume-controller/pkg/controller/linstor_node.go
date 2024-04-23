@@ -100,12 +100,13 @@ func NewLinstorNode(
 				} else {
 					log.Info("END reconcile of LINSTOR nodes.")
 				}
+
+				return reconcile.Result{
+					RequeueAfter: time.Duration(interval) * time.Second,
+				}, nil
 			}
 
-			return reconcile.Result{
-				RequeueAfter: time.Duration(interval) * time.Second,
-			}, nil
-
+			return reconcile.Result{}, nil
 		}),
 	})
 
