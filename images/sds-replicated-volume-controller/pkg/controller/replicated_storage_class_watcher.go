@@ -23,6 +23,7 @@ const (
 	NonOperationalByStoragePool           = "storage.deckhouse.io/nonOperational-invalid-storage-pool-selected"
 	NonOperationalByZonesLabel            = "storage.deckhouse.io/nonOperational-invalid-zones-selected"
 	NonOperationalByReplicasLabel         = "storage.deckhouse.io/nonOperational-not-enough-nodes-in-zones"
+	NonOperationalLabel                   = "storage.deckhouse.io/nonOperational"
 )
 
 func RunReplicatedStorageClassWatcher(
@@ -199,7 +200,7 @@ func ReconcileReplicatedStorageClassReplication(
 			err := errors.New("unsupported replication type")
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassReplication] replication type validation failed for ReplicatedStorageClass %s", rsc.Name))
 
-			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, "storage.deckhouse.io/nonOperational")
+			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalLabel)
 		}
 	}
 	log.Info("[ReconcileReplicatedStorageClassReplication] ends reconcile")
