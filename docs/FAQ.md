@@ -452,4 +452,4 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 
 ## Why do you recommend using local disks (and not NAS)?
 
-Motivation: DRBD replicates data over the network. If NAS is used, the network load will increase as well as the read/write latency.
+DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
