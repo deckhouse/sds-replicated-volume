@@ -54,6 +54,16 @@ Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorage
 
 2. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
+## How to increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other?
+
+To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
+
+{{< alert level="warning" >}}
+Changing the drbdPortRange minPort/maxPort will not affect existing DRBD resources; they will continue to operate on their original ports.
+
+After changing the drbdPortRange values, the linstor controller needs to be restarted.
+{{< /alert >}}
+
 ## How do I evict DRBD resources from a node?
 
 1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
