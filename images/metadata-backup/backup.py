@@ -82,8 +82,9 @@ if __name__ == "__main__":
     kubernetes.config.load_incluster_config()
 
     date_time = datetime.now().strftime("%Y%m%d%H%M%S")
-    linstor_backup_label = 'sds-replicated-volume.deckhouse.io/linstor-db-backup'
-    create_backup(backup_type=date_time, namespace=namespace, labels={linstor_backup_label: f'{date_time}'})
+    #linstor_backup_label = 'sds-replicated-volume.deckhouse.io/linstor-db-backup'
+    label = {'sds-replicated-volume.deckhouse.io/linstor-db-backup': f'{date_time}'}
+    create_backup(backup_type=date_time, namespace=namespace, labels=label)
     body = kubernetes.client.V1Secret(
         api_version="v1",
         kind="Secret",
@@ -91,7 +92,7 @@ if __name__ == "__main__":
                                                 namespace=namespace))
     kubernetes.client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=body)
 
-    namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace, label_selector=linstor_backup_label)
+    namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace, label_selector=label)
     for item in namespace_secrets.items:
         if re.search(r'^linstor-\d+-backup-\d+$', item.metadata.name):
             backup_list.append(item.metadata.name)
