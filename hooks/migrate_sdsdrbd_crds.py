@@ -88,7 +88,7 @@ def main(ctx: hook.Context):
     while not webhook_pod_ready and tries < 30:
         print(f"migrate_sdsdrbd_crds.py: Searching webhook pod (Try number {tries})")
         for item in current_pods.items:
-            if search(r'^webhooks-', item.metadata.name) and item.status and item.status.container_statuses[0]:
+            if search(r'^webhooks-', item.metadata.name) and item.status and item.status.container_statuses:
                 webhook_pod_ready = item.status.container_statuses[0].ready
                 if webhook_pod_ready:
                     print(f'migrate_sdsdrbd_crds.py: webhook {item.metadata.name} pod is ready')
