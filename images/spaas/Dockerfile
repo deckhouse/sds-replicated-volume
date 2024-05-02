@@ -5,11 +5,15 @@ FROM $BASE_GOLANG_19_BULLSEYE as builder
 ARG SPAAS_GITREPO=https://github.com/LINBIT/saas
 ARG SPAAS_COMMIT_REF=7bef2e7976a455550bce2533487c635f20390ccf
 ARG DRBD_GITREPO=https://github.com/LINBIT/drbd
-ARG DRBD_VERSION=9.2.5
+ARG DRBD_VERSION=9.2.9
+
+# Copy patches
+COPY ./patches /patches
 
 RUN git clone ${SPAAS_GITREPO} /usr/local/go/spaas \
  && cd /usr/local/go/spaas \
  && git reset --hard ${SPAAS_COMMIT_REF} \
+ && git apply /patches/*.patch \
  && go build -o /spaas
 
 RUN apt-get update \
@@ -20,7 +24,8 @@ RUN apt-get update \
 # Using source code from GitHub repository
 RUN git clone ${DRBD_GITREPO} /drbd \
  && cd /drbd \
- && git reset --hard drbd-${DRBD_VERSION} \
+ && git checkout tags/drbd-${DRBD_VERSION}  \
+ && git submodule update --init --recursive \
  && make tarball
 
 FROM $BASE_UBUNTU
@@ -31,6 +36,7 @@ RUN apt-get update \
       make \
       coccinelle \
       libpython3-dev \
+      vim \
  && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
