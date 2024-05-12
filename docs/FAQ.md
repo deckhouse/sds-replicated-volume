@@ -64,6 +64,36 @@ Changing the drbdPortRange minPort/maxPort will not affect existing DRBD resourc
 After changing the drbdPortRange values, the linstor controller needs to be restarted.
 {{< /alert >}}
 
+## How to properly reboot a node with DRBD resources
+
+{{< alert level="warning" >}}
+For greater stability of the module, it is not recommended to reboot multiple nodes simultaneously.
+{{< /alert >}}
+
+1. Drain the node.
+
+  ```shell
+  kubectl drain test-node-1 --ignore-daemonsets --delete-emptydir-data
+  ```
+
+2. Check that there are no problematic resources in DRBD / resources in SyncTarget. If there are any, wait for synchronization / take measures to restore normal operation.
+
+  ```shell
+  # kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
+  Defaulted container "linstor-controller" out of: linstor-controller, kube-rbac-proxy
+  +----------------------------------------------------------------+
+  | ResourceName | Node | Port | Usage | Conns | State | CreatedOn |
+  |================================================================|
+  +----------------------------------------------------------------+
+  ```
+
+3. Reboot the node and wait for the synchronization of all DRBD resources. Then uncordon the node. If another node needs to be rebooted, repeat the algorithm.
+
+  ```shell
+  # kubectl uncordon test-node-1
+  node/test-node-1 uncordoned
+  ```
+
 ## How do I evict DRBD resources from a node?
 
 1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
