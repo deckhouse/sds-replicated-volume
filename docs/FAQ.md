@@ -13,6 +13,12 @@ As for any other configurations, the module may work, but its smooth operation i
 - LVM is simpler and has high performance that is similar to that of native disk drives, but it does not support snapshots;
 - LVMThin allows for snapshots and overprovisioning; however, it is slower than LVM.
 
+{{< alert level="warning" >}}
+Overprovisioning in LVMThin should be used with caution, monitoring the availability of free space in the pool (The cluster monitoring system generates separate events when the free space in the pool reaches 20%, 10%, 5%, and 1%).
+
+In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
+{{< /alert >}}
+
 ## How do I get info about the space used?
 
 There are two options:
@@ -47,6 +53,16 @@ Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorage
    This VG will be automatically discovered and a corresponding `LVMVolumeGroup` resource will be created in the cluster for it.
 
 2. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
+
+## How to increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other?
+
+To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
+
+{{< alert level="warning" >}}
+Changing the drbdPortRange minPort/maxPort will not affect existing DRBD resources; they will continue to operate on their original ports.
+
+After changing the drbdPortRange values, the linstor controller needs to be restarted.
+{{< /alert >}}
 
 ## How to properly reboot a node with DRBD resources
 
@@ -466,4 +482,4 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 
 ## Why do you recommend using local disks (and not NAS)?
 
-Motivation: DRBD replicates data over the network. If NAS is used, the network load will increase as well as the read/write latency.
+DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
