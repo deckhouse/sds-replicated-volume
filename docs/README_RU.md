@@ -1,8 +1,12 @@
 ---
 title: "Модуль sds-drbd"
 description: "Модуль sds-drbd: общие концепции и положения."
-moduleStatus: experimental
+moduleStatus: deprecated
 ---
+
+{% alert level="danger" %}
+Текущая версия модуля устарела и больше не поддерживается. Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
+{% endalert %}
 
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только в следующих случаях:

@@ -3,6 +3,10 @@ title: "The sds-drbd module: Custom Resources"
 description: "The sds-drbd module Custom Resources: DRBDStoragePool and DRBDStorageClass."
 ---
 
+{% alert level="danger" %}
+This version of the module is deprecated and is no longer supported. Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
+{% endalert %}
+
 {{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:
 - if stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux) are used;
