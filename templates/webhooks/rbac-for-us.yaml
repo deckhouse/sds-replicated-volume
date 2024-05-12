@@ -37,6 +37,13 @@ rules:
       - "internal.linstor.linbit.com"
     resources:
       - "propscontainers"
+  - apiGroups:
+      - storage.k8s.io
+    verbs:
+      - get
+      - list
+    resources:
+      - storageclasses
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1

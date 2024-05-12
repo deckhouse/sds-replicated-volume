@@ -8,9 +8,6 @@ import (
 
 	"k8s.io/api/admission/v1beta1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
@@ -59,11 +56,6 @@ func RSCValidate(w http.ResponseWriter, r *http.Request) {
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		klog.Fatal(err.Error())
-	}
-
-	client, err := dynamic.NewForConfig(config)
-	if err != nil {
-		klog.Fatal(err)
 	}
 
 	staticClient, err := kubernetes.NewForConfig(config)
@@ -139,29 +131,18 @@ func RSCValidate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rscJson.Spec.IsDefault == true {
-		rscRes := schema.GroupVersionResource{Group: "storage.deckhouse.io", Version: "v1alpha1", Resource: "replicatedstorageclasses"}
-
-		ctx := context.Background()
-
-		listedResources, err := client.Resource(rscRes).List(ctx, metav1.ListOptions{})
-		if err != nil {
-			klog.Fatal(err)
-		}
-
-		for _, item := range listedResources.Items {
-			listedDscClassName, _, _ := unstructured.NestedString(item.Object, "metadata", "name")
-			listedDscDefaultState, _, _ := unstructured.NestedBool(item.Object, "spec", "isDefault")
-			if listedDscClassName != rscJson.Metadata.Name && listedDscDefaultState == true {
-				arReview.Response.Allowed = false
-				arReview.Response.Result = &metav1.Status{
-					Message: fmt.Sprintf("Default ReplicatedStorageClass already set: %s", listedDscClassName),
+		storageClasses, _ := staticClient.StorageV1().StorageClasses().List(context.Background(), metav1.ListOptions{})
+		for _, storageClass := range storageClasses.Items {
+			for label, value := range storageClass.GetObjectMeta().GetAnnotations() {
+				if label == "storageclass.kubernetes.io/is-default-class" && value == "true" && storageClass.Name != rscJson.Metadata.Name {
+					arReview.Response.Allowed = false
+					arReview.Response.Result = &metav1.Status{
+						Message: fmt.Sprintf("Default ReplicatedStorageClass already set: %s", storageClass.Name),
+					}
+					klog.Infof("Default StorageClass already set: %s (%s)", storageClass.Name, string(raw))
 				}
-				klog.Infof("Default ReplicatedStorageClass already set: %s (%s)", listedDscClassName, string(raw))
-			} else {
-				klog.Infof("Incoming request approved (%s)", string(raw))
 			}
 		}
-
 	}
 
 	w.Header().Set("Content-Type", "application/json")
