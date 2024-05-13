@@ -28,7 +28,7 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "- node list/show"
   echo "- resource list/show/lv"
   echo "- volume list/show"
-  echo "- resource-definition list/show"
+  echo "- resource-definition list/show/delete/list-properties"
   echo "- error-reports list/show"
   echo "- controller version"
   echo "- advise resource/maintainance"
@@ -69,6 +69,10 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   fi
 
   if [[ "$2" == "s" || "$2" == "show" ]]; then
+    allowed=true
+  fi
+
+  if [[ "$2" == "lp" || "$2" == "list-properties" ]]; then
     allowed=true
   fi
 
