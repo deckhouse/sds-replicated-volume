@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	v12 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	client2 "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
+
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -2353,6 +2355,8 @@ func newFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
+	_ = v1.AddToScheme(s)
+	_ = v12.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 

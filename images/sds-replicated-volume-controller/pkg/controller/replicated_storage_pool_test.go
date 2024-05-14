@@ -18,6 +18,7 @@ package controller_test
 
 import (
 	"context"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/controller"
 	"sds-replicated-volume-controller/pkg/logger"
@@ -229,7 +230,7 @@ func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGro
 
 	vgThinPools := make([]v1alpha1.SpecThinPool, 0)
 	for thinPoolname, thinPoolsize := range thinPools {
-		vgThinPools = append(vgThinPools, v1alpha1.SpecThinPool{Name: thinPoolname, Size: thinPoolsize})
+		vgThinPools = append(vgThinPools, v1alpha1.SpecThinPool{Name: thinPoolname, Size: resource.MustParse(thinPoolsize)})
 	}
 
 	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
