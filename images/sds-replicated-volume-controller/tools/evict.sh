@@ -909,7 +909,7 @@ linstor_backup_database() {
 }
 
 delete_node_from_kubernetes_and_linstor() {
-
+  linstor_check_faulty
   diskful_resources_on_deleting_node=$(linstor -m --output-version=v1 resource list -n ${NODE_FOR_EVICT} | jq -r --arg nodeName "${NODE_FOR_EVICT}" --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '.[][] | select(.node_name == $nodeName and .props.StorPoolName != $disklessStorPoolName).name')
   for resource in $diskful_resources_on_deleting_node; do
     echo "Resource ${resource} has diskful replica on the node ${NODE_FOR_EVICT}. Checking the number of diskful replicas for this resource."
