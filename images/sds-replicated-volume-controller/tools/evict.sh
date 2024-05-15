@@ -25,7 +25,7 @@ touch ${LOG_FILE}
 exec > >(tee -a ${LOG_FILE}) 2>&1
 
 execute_command() {
-
+  echo "Executing command: $@"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     count=0
     max_attempts=10
@@ -501,7 +501,7 @@ linstor_change_replicas_count() {
       done
       
       if (( ${current_diskful_replicas_count_new} != ${desired_diskful_replicas_count} )); then
-        echo "Warning! The total number of diskfull replicas for resource ${resource_name} (${current_diskful_replicas_count}) does not equal the desired number of replicas(${desired_diskful_replicas_count}) even after changing the replica count. The following command was executed: \"linstor resource-definition auto-place --place-count ${desired_diskful_replicas_count} $resource_name\". Manual action required."
+        echo "Warning! The total number of diskfull replicas for resource ${resource_name} (${current_diskful_replicas_count}) does not equal the desired number of replicas(${desired_diskful_replicas_count}) even after changing the replica count. The following command was executed: \"linstor resource create ${node_name_for_new_replica} ${resource_name} --storage-pool ${diskful_storage_pool_name}\". Manual action required."
         exit_function
       fi
       changed_resources=$((changed_resources + 1))
