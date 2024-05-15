@@ -25,7 +25,8 @@ touch ${LOG_FILE}
 exec > >(tee -a ${LOG_FILE}) 2>&1
 
 execute_command() {
-  echo "Executing command: $@"
+  modified_command=$(echo "$@" | sed 's/originallinstor/linstor/g')
+  echo "Executing command: $modified_command"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     count=0
     max_attempts=10
