@@ -616,7 +616,7 @@ create_tiebreaker() {
 
     linstor_check_faulty
     exec_linstor_with_exit_code_check resource-definition set-property $resource_name DrbdOptions/auto-add-quorum-tiebreaker true
-    linstor resource create ${node_name} ${resource_name} --storage-pool ${DISKLESS_STORAGE_POOL} --drbd-diskless
+    # linstor resource create ${node_name} ${resource_name} --storage-pool ${DISKLESS_STORAGE_POOL} --drbd-diskless
     sleep 5
 
     while true; do
