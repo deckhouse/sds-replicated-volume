@@ -204,7 +204,7 @@ linstor-20240425074718-backup-2              Opaque                           1 
 linstor-20240425074718-backup-completed      Opaque                           0      28s     <none>
 ```
 
-Резервная копия хранится шифрованными сегментами в секретах вида `linstor-%date_time%-backup-{0..2}`, секрет вида `linstor-%date_time%-backup-completed` не содержит данных, и служит маркером корректно отработавшего процесса резервного копирования.
+Резервная копия хранится закодированными сегментами в секретах вида `linstor-%date_time%-backup-{0..2}`, секрет вида `linstor-%date_time%-backup-completed` не содержит данных, и служит маркером корректно отработавшего процесса резервного копирования.
 
 ### Процесс восстановления резервной копии 
 
@@ -257,36 +257,10 @@ LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074
 ```
 
 Создайте временный каталог для хранения частей архива
+
 ```shell
 TMPDIR=$(mktemp -d)
 echo "Временный каталог: $TMPDIR"
-```
-
-Следующей командой создайте пустой архив и объедините данные секретов в один файл
-```shell
-COMBINED="${BACKUP_NAME}_combined.tar"
-> "$COMBINED"
-```
-Далее получите список секретов по label, дешифруйте данные, и поместите данные резервной копии в архив
-```shell
-SECRETS=$(kubectl get secret -n "$NAMESPACE" -l "$LABEL_SELECTOR" --sort-by=.metadata.name -o jsonpath="{.items[*].metadata.name}")
-
-for SECRET in $SECRETS; do
-  echo "Process: $SECRET"
-  kubectl get secret -n "$NAMESPACE" "$SECRET" -o jsonpath="{.data.filepart}" | base64 --decode >> "$COMBINED"
-done
-```
-
-Распакуйте объединенный tar-файл для получения ресурсов резервной копии
-```shell
-mkdir -p "./backup"
-tar -xf "$COMBINED" -C "./backup --strip-components=2
-```
-
-Проверьте содержимое резервной копии
-```shell
-ls ./backup
-```
 ```shell
 ebsremotes.yaml                    layerdrbdvolumedefinitions.yaml        layerwritecachevolumes.yaml  propscontainers.yaml      satellitescapacity.yaml  secidrolemap.yaml         trackingdate.yaml
 files.yaml                         layerdrbdvolumes.yaml                  linstorremotes.yaml          resourceconnections.yaml  schedules.yaml           secobjectprotection.yaml  volumeconnections.yaml
