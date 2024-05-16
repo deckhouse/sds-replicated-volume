@@ -204,7 +204,7 @@ linstor-20240425074718-backup-2              Opaque                           1 
 linstor-20240425074718-backup-completed      Opaque                           0      28s     <none>
 ```
 
-The backup is stored encrypted in segments in secrets of the form linstor-%date_time%-backup-{0..2}, where the secret of the form linstor-%date_time%-backup-completed contains no data and serves as a marker for a successfully completed backup process.
+The backup is stored in encoded segments in secrets of the form linstor-%date_time%-backup-{0..2}, where the secret of the form linstor-%date_time%-backup-completed contains no data and serves as a marker for a successfully completed backup process.
 
 ### Restoration Process
 
