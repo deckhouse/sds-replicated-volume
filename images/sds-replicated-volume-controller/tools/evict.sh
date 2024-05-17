@@ -356,7 +356,7 @@ linstor_change_replicas_count() {
 
   for resource_name in $resource_names_list; do
     linstor_wait_sync 3
-    echo "Beginning the process of changing the count of diskfull replicas for resource ${resource_name}, which has replicas on the node being evicted ${NODE_FOR_EVICT}"
+    echo "Beginning the process of changing the count of diskfull replicas for resource ${resource_name}"
 
     local is_tiebreaker_needed=false
     resource_group=$(echo $resource_and_group_names | jq -r --arg resource_name "${resource_name}" '. | select(.resource == $resource_name).resource_group')
@@ -1221,6 +1221,9 @@ fi
 echo "State of all resources after evacuate resources from node ${NODE_FOR_EVICT}:"
 exec_linstor_with_exit_code_check resource list-volumes
 sleep 2
+
+echo "Check the number of replicas for resources that have been evacuated from node ${NODE_FOR_EVICT}"
+linstor_change_replicas_count 0 2 "${RESOURCE_AND_GROUP_NAMES_NEW}" "${RESOURCE_GROUPS_NEW}" "${DISKFUL_RESOURCES_TO_EVICT_NEW[@]}"
 
 linstor_check_faulty
 linstor_check_advise
