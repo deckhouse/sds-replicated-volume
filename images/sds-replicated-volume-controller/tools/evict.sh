@@ -1013,6 +1013,8 @@ delete_node_from_kubernetes_and_linstor() {
 }
 
 check_diskfull_replicas_count() {
+  local resource_name=$1
+
   RESOURCE_NODES=$(linstor -m --output-version=v1 resource list-volumes  -r "${resource_name}" | jq '[.[][] | {node_name: .node_name, storage_pool: .volumes[0].storage_pool_name, allocated_size_kib: .volumes[0].allocated_size_kib}]')
   resource_storage_pools=$(echo $RESOURCE_NODES | jq 'group_by(.storage_pool) | map({storage_pool: .[0].storage_pool, count: length})')
   diskful_storage_pools_count=$(echo $resource_storage_pools | jq --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '[.[] | select(.storage_pool != $disklessStorPoolName)] | length')
@@ -1032,6 +1034,7 @@ check_diskfull_replicas_count() {
     exit 1
   fi
 
+  echo "The total number of diskfull replicas for resource ${resource_name} is ${current_diskful_replicas_count}"
   if (( $current_diskful_replicas_count < 2 )); then
     echo "The total number of diskfull replicas for resource ${resource_name} is ${current_diskful_replicas_count}. Something went wrong. Manual action required."
     exit 1
