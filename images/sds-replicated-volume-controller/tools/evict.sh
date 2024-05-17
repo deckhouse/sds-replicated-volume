@@ -17,11 +17,16 @@
 export TIMEOUT_SEC=10
 export DISKLESS_STORAGE_POOL="DfltDisklessStorPool"
 export LINSTOR_NAMESPACE="d8-sds-replicated-volume"
+export DATE_TIME=$(date +"%Y-%m-%d_%H-%M-%S")
+export LOG_FILE="linstor_eviction_${DATE_TIME}.log"
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required but it's not installed.  Aborting." >&2; exit 1; }
+touch ${LOG_FILE}
+exec > >(tee -a ${LOG_FILE}) 2>&1
 
 execute_command() {
-
+  modified_command=$(echo "$@" | sed 's/originallinstor/linstor/g')
+  echo "Executing command: $modified_command"
   if [[ "${NON_INTERACTIVE}" == "true" ]]; then
     count=0
     max_attempts=10
@@ -351,7 +356,7 @@ linstor_change_replicas_count() {
 
   for resource_name in $resource_names_list; do
     linstor_wait_sync 3
-    echo "Beginning the process of changing the count of diskfull replicas for resource ${resource_name}, which has replicas on the node being evicted ${NODE_FOR_EVICT}"
+    echo "Beginning the process of changing the count of diskfull replicas for resource ${resource_name}"
 
     local is_tiebreaker_needed=false
     resource_group=$(echo $resource_and_group_names | jq -r --arg resource_name "${resource_name}" '. | select(.resource == $resource_name).resource_group')
@@ -497,7 +502,7 @@ linstor_change_replicas_count() {
       done
       
       if (( ${current_diskful_replicas_count_new} != ${desired_diskful_replicas_count} )); then
-        echo "Warning! The total number of diskfull replicas for resource ${resource_name} (${current_diskful_replicas_count}) does not equal the desired number of replicas(${desired_diskful_replicas_count}) even after changing the replica count. The following command was executed: \"linstor resource-definition auto-place --place-count ${desired_diskful_replicas_count} $resource_name\". Manual action required."
+        echo "Warning! The total number of diskfull replicas for resource ${resource_name} (${current_diskful_replicas_count}) does not equal the desired number of replicas(${desired_diskful_replicas_count}) even after changing the replica count. The following command was executed: \"linstor resource create ${node_name_for_new_replica} ${resource_name} --storage-pool ${diskful_storage_pool_name}\". Manual action required."
         exit_function
       fi
       changed_resources=$((changed_resources + 1))
@@ -570,7 +575,7 @@ create_tiebreaker() {
     done
 
     if [ $count -eq $max_attempts ]; then
-      echo "Maximum number of attempts reached. Can't get the total number of diskless replicas for resource ${resource_name}."
+      echo "Maximum number of attempts reached. Can't get RESOURCE_NODES for resource ${resource_name}."
       echo "Resource status:"
       exec_linstor_with_exit_code_check resource list-volumes -r $resource_name
       if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the total number of diskless replicas for resource ${resource_name}." "y" "n"; then
@@ -616,7 +621,6 @@ create_tiebreaker() {
 
     linstor_check_faulty
     exec_linstor_with_exit_code_check resource-definition set-property $resource_name DrbdOptions/auto-add-quorum-tiebreaker true
-    linstor resource create ${node_name} ${resource_name} --storage-pool ${DISKLESS_STORAGE_POOL} --drbd-diskless
     sleep 5
 
     while true; do
@@ -656,7 +660,8 @@ create_tiebreaker() {
     done
 
     if (( ${diskless_replicas_count_new} < 1 )); then
-      echo "Warning! TieBreaker for the resource did not create. Resource status:"
+      # linstor resource create ${node_name} ${resource_name} --storage-pool ${DISKLESS_STORAGE_POOL} --drbd-diskless
+      echo "Warning! TieBreaker for the resource did not created after enabling auto-add-quorum-tiebreaker. Manual action required. Resource status:"
       exec_linstor_with_exit_code_check resource list-volumes -r $resource_name
       exit_function
     fi
@@ -675,6 +680,10 @@ linstor_delete_resources_from_node() {
     linstor_wait_sync 0
     echo "Current status of the resource:"
     exec_linstor_with_exit_code_check resource list-volumes -r ${resource_name}
+
+    echo "Check diskfull replicas count for deleting resource ${resource_name}"
+    check_diskfull_replicas_count ${resource_name}
+    
     sleep 2
     echo "Setting auto-add-quorum-tiebreaker to false for resource ${resource_name} before deleting"
     exec_linstor_with_exit_code_check resource-definition set-property ${resource_name} DrbdOptions/auto-add-quorum-tiebreaker false
@@ -722,14 +731,15 @@ linstor_delete_resources_from_node() {
       break
     done
     
-    if (( $current_diskful_replicas_count == 2 )); then
-      echo "Resource ${resource_name} has an even number of diskfull replicas. Creating a TieBreaker for this resource if it does not exist."
-      create_tiebreaker ${resource_name}
-    fi
-
     echo "Setting auto-add-quorum-tiebreaker to true for resource ${resource_name} after deleting"
     exec_linstor_with_exit_code_check resource-definition set-property ${resource_name} DrbdOptions/auto-add-quorum-tiebreaker true
     sleep 2
+
+    if (( $current_diskful_replicas_count == 2 )); then
+      echo "Resource ${resource_name} has 2 diskfull replicas. Creating a TieBreaker for this resource if it does not exist."
+      create_tiebreaker ${resource_name}
+    fi
+    
     echo "Processing of resource $resource_name completed."
   done
 
@@ -900,6 +910,13 @@ linstor_backup_database() {
 }
 
 delete_node_from_kubernetes_and_linstor() {
+  linstor_check_faulty
+  diskful_resources_on_deleting_node=$(linstor -m --output-version=v1 resource list -n ${NODE_FOR_EVICT} | jq -r --arg nodeName "${NODE_FOR_EVICT}" --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '.[][] | select(.node_name == $nodeName and .props.StorPoolName != $disklessStorPoolName).name')
+  for resource in $diskful_resources_on_deleting_node; do
+    echo "Resource ${resource} has diskful replica on the node ${NODE_FOR_EVICT}. Checking the number of diskful replicas for this resource."
+    check_diskfull_replicas_count ${resource}
+  done
+
   while true; do
     count=0
     max_attempts=10
@@ -995,6 +1012,34 @@ delete_node_from_kubernetes_and_linstor() {
 
 }
 
+check_diskfull_replicas_count() {
+  local resource_name=$1
+
+  RESOURCE_NODES=$(linstor -m --output-version=v1 resource list-volumes  -r "${resource_name}" | jq '[.[][] | {node_name: .node_name, storage_pool: .volumes[0].storage_pool_name, allocated_size_kib: .volumes[0].allocated_size_kib}]')
+  resource_storage_pools=$(echo $RESOURCE_NODES | jq 'group_by(.storage_pool) | map({storage_pool: .[0].storage_pool, count: length})')
+  diskful_storage_pools_count=$(echo $resource_storage_pools | jq --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '[.[] | select(.storage_pool != $disklessStorPoolName)] | length')
+
+  if (( $diskful_storage_pools_count > 1 )); then
+      echo "Error: More than one diskful storage pool found for resource ${resource_name}."
+      echo $RESOURCE_NODES
+      exit 1
+  fi
+
+  current_diskful_replicas_count=$(echo $RESOURCE_NODES | jq --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '[.[] | select(.storage_pool != $disklessStorPoolName)] | length')
+  if [[ -z $RESOURCE_NODES || -z $current_diskful_replicas_count ]]; then
+    echo "Warning! Can't get the resource nodes or the total number of diskfull replicas for resource ${resource_name}."
+    echo "Resource status:"
+    exec_linstor_with_exit_code_check resource list-volumes -r $resource_name
+    echo "Exiting the script. Manual action required."
+    exit 1
+  fi
+
+  echo "The total number of diskfull replicas for resource ${resource_name} is ${current_diskful_replicas_count}"
+  if (( $current_diskful_replicas_count < 2 )); then
+    echo "The total number of diskfull replicas for resource ${resource_name} is ${current_diskful_replicas_count}. Something went wrong. Manual action required."
+    exit 1
+  fi
+}
 
 process_args() {
   while [[ $# -gt 0 ]]; do
@@ -1056,12 +1101,12 @@ echo "The script for evicting LINSTOR resources has been launched. Performing ne
 process_args "$@"
 
 if [[ -z "${DELETE_MODE}" ]]; then
-  #echo "Please choose the delete mode. Possible arguments: \"--delete-resources-only\" or \"--delete-node\""
-  echo "Please choose the delete mode. Possible arguments: \"--delete-node\""
+  echo "Please choose the delete mode. Possible arguments: \"--delete-resources-only\" or \"--delete-node\""
   exit 1
 fi
 
 linstor_check_faulty
+linstor_check_advise
 linstor_check_connection
 linstor_wait_sync 0
 
@@ -1179,6 +1224,9 @@ fi
 echo "State of all resources after evacuate resources from node ${NODE_FOR_EVICT}:"
 exec_linstor_with_exit_code_check resource list-volumes
 sleep 2
+
+echo "Check the number of replicas for resources that have been evacuated from node ${NODE_FOR_EVICT}"
+linstor_change_replicas_count 0 2 "${RESOURCE_AND_GROUP_NAMES_NEW}" "${RESOURCE_GROUPS_NEW}" "${DISKFUL_RESOURCES_TO_EVICT_NEW[@]}"
 
 linstor_check_faulty
 linstor_check_advise
