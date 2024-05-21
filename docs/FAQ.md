@@ -237,6 +237,69 @@ alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-contr
 linstor --help
 ```
 
+## How do I restore LINSTOR DB from backup?
+
+The backups of LINSTOR resources are stored in secrets as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
+
+An example of a correctly formatted backup looks like this:
+
+```shell
+linstor-20240425074718-backup-0              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-1              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-2              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-completed      Opaque                           0      28s     <none>
+```
+
+The backup is stored in encoded segments in secrets of the form linstor-%date_time%-backup-{0..2}, where the secret of the form linstor-%date_time%-backup-completed contains no data and serves as a marker for a successfully completed backup process.
+
+### Restoration Process
+
+Set the environment variables:
+
+```shell
+NAMESPACE="d8-sds-replicated-volume"
+BACKUP_NAME="linstor_db_backup"
+```
+
+Check for the presence of backup copies:
+
+```shell
+kubectl -n $NAMESPACE get secrets --show-labels
+```
+
+Example command output:
+
+```shell
+linstor-20240425072413-backup-0              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-1              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-2              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-completed      Opaque                           0      33m     <none>
+linstor-20240425072510-backup-0              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-1              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-2              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-completed      Opaque                           0      32m     <none>
+linstor-20240425072634-backup-0              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-1              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-2              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-completed      Opaque                           0      31m     <none>
+linstor-20240425072918-backup-0              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-1              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-2              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-completed      Opaque                           0      28m     <none>
+linstor-20240425074718-backup-0              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-1              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-2              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-completed      Opaque                           0      10m     <none>
+
+```
+
+Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable. 
+For example, let's take the label of the most recent copy from the output above:
+
+```shell
+LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718"
+
+
 ## Service pods of sds-replicated-volume components fail to be created on the node I need
 
 Most likely this is due to node labels.

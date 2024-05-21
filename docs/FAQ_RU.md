@@ -237,6 +237,99 @@ alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-contr
 linstor --help
 ```
 
+## Как восстановить БД LINSTOR из бэкапа?
+
+Резервные копии ресурсов LINSTOR лежат в секретах в виде CRD yaml файлов, и имеют сегментированный формат. 
+Резервное копирование происходит автоматически по расписанию.
+
+Пример корректно сформированного бэкапа выглядит следующим образом:
+```shell
+linstor-20240425074718-backup-0              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-1              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-2              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-completed      Opaque                           0      28s     <none>
+```
+
+Резервная копия хранится закодированными сегментами в секретах вида `linstor-%date_time%-backup-{0..2}`, секрет вида `linstor-%date_time%-backup-completed` не содержит данных, и служит маркером корректно отработавшего процесса резервного копирования.
+
+### Процесс восстановления резервной копии 
+
+Установите значения переменных окружения
+
+```shell
+NAMESPACE="d8-sds-replicated-volume"
+BACKUP_NAME="linstor_db_backup"
+```
+
+
+Проверьте наличие резервных копий
+
+```shell
+kubectl -n $NAMESPACE get secrets --show-labels
+```
+
+Пример вывода команды
+
+```shell
+linstor-20240425072413-backup-0              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-1              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-2              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
+linstor-20240425072413-backup-completed      Opaque                           0      33m     <none>
+linstor-20240425072510-backup-0              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-1              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-2              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
+linstor-20240425072510-backup-completed      Opaque                           0      32m     <none>
+linstor-20240425072634-backup-0              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-1              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-2              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
+linstor-20240425072634-backup-completed      Opaque                           0      31m     <none>
+linstor-20240425072918-backup-0              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-1              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-2              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
+linstor-20240425072918-backup-completed      Opaque                           0      28m     <none>
+linstor-20240425074718-backup-0              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-1              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-2              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
+linstor-20240425074718-backup-completed      Opaque                           0      10m     <none>
+
+```
+
+Каждая резервная копия имеет свой label со временем создания.
+Выберите нужную и скопируйте её label в переменную окружения.
+Для примера, возмём label самой актуальную копии из вывода выше:
+
+```shell
+LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718"
+```
+
+Создайте временный каталог для хранения частей архива
+
+```shell
+TMPDIR=$(mktemp -d)
+echo "Временный каталог: $TMPDIR"
+```shell
+ebsremotes.yaml                    layerdrbdvolumedefinitions.yaml        layerwritecachevolumes.yaml  propscontainers.yaml      satellitescapacity.yaml  secidrolemap.yaml         trackingdate.yaml
+files.yaml                         layerdrbdvolumes.yaml                  linstorremotes.yaml          resourceconnections.yaml  schedules.yaml           secobjectprotection.yaml  volumeconnections.yaml
+keyvaluestore.yaml                 layerluksvolumes.yaml                  linstorversion.yaml          resourcedefinitions.yaml  secaccesstypes.yaml      secroles.yaml             volumedefinitions.yaml
+layerbcachevolumes.yaml            layeropenflexresourcedefinitions.yaml  nodeconnections.yaml         resourcegroups.yaml       secaclmap.yaml           sectyperules.yaml         volumegroups.yaml
+layercachevolumes.yaml             layeropenflexvolumes.yaml              nodenetinterfaces.yaml       resources.yaml            secconfiguration.yaml    sectypes.yaml             volumes.yaml
+layerdrbdresourcedefinitions.yaml  layerresourceids.yaml                  nodes.yaml                   rollback.yaml             secdfltroles.yaml        spacehistory.yaml
+layerdrbdresources.yaml            layerstoragevolumes.yaml               nodestorpool.yaml            s3remotes.yaml            secidentities.yaml       storpooldefinitions.yaml
+
+```
+
+Если всё хорошо - восстановите нужную сущность путём применения yaml-файла
+
+```shell
+kubectl apply -f %something%.yaml
+```
+
+Или примените bulk-apply, если нужно полное восстановление
+
+```shell
+kubectl apply -f ./backup/
+```
+
 ## Служебные поды компонентов sds-replicated-volume не создаются на нужной мне ноде.
 
 С высокой вероятностью проблемы связаны с метками на нодах.
