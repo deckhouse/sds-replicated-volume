@@ -170,8 +170,6 @@ spec:
     make clean || true
     make
     make install
-    cd drbd
-    cp *.ko /lib/modules/${kernel_version_in_use}/kernel/drivers/
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
         sed -i '/^drbd$/d' /etc/modules
