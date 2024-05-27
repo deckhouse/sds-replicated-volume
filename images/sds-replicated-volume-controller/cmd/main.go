@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	goruntime "runtime"
+	"sds-replicated-volume-controller/api/linstor"
 	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/config"
 	"sds-replicated-volume-controller/pkg/controller"
@@ -43,6 +44,7 @@ import (
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		v1alpha1.AddToScheme,
+		linstor.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
 		v1.AddToScheme,
@@ -132,6 +134,12 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("the NewReplicatedStoragePool controller starts")
+
+	if _, err := controller.NewLinstorPortRangeWatcher(mgr, cfgParams.ScanInterval, *log); err != nil {
+		log.Error(err, "failed to create the NewLinstorPortRangeWatcher controller")
+		os.Exit(1)
+	}
+	log.Info("the NewLinstorPortRangeWatcher controller starts")
 
 	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewLinstorLeader controller")

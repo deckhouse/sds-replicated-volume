@@ -17,6 +17,14 @@ rules:
   - apiGroups:
       - ""
     resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
       - secrets
     verbs:
       - get
@@ -81,6 +89,17 @@ rules:
       - delete
       - watch
       - update
+  - verbs:
+      - get
+      - list
+      - update
+      - create
+      - delete
+      - watch
+    apiGroups:
+      - "internal.linstor.linbit.com"
+    resources:
+      - "propscontainers"
   - apiGroups:
       - storage.k8s.io
     resources:
