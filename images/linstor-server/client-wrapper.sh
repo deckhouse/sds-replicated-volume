@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+excluded_keys=("--yes-i-am-sane-and-i-understand-what-i-am-doing")
+
 # only allowed subcommands of linstor client
 valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "v" "resource-definition" "rd" "error-reports" "err")
 valid_subcommands_ver=("controller" "c")
@@ -38,7 +40,25 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   exit 0
 fi
 
-originalKeys=("$@")
+original_keys=("$@")
+cleaned_keys=()
+
+
+# exclude excluded_keys
+for key in "${original_keys[@]}"; do
+  skip=
+  for exclude_key in "${excluded_keys[@]}"; do
+    if [[ "$key" == "$exclude_key" ]]; then
+      skip=1
+      break
+    fi
+  done
+  if [[ -z $skip ]]; then
+    cleaned_keys+=("$key")
+  fi
+done
+
+
 checkKeys=true
 allowDangerousCommands=false
 
@@ -83,6 +103,10 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   if [[ "$2" == "set-property" ]] && [[ "$4" == "AutoplaceTarget" ]]; then
     allowed=true
   fi
+
+  if [[ "$2" == "set-property" ]] && [[ "$4" == "DrbdOptions/auto-add-quorum-tiebreaker" ]]; then
+    allowed=true
+  fi
 fi
 
 
@@ -108,7 +132,7 @@ if [[ $(echo "${valid_subcommands_advise[@]}" | fgrep -w -- $1) ]]; then
 fi
 
 if [[ $allowed == true ]]; then
-  /usr/bin/originallinstor "${originalKeys[@]}"
+  /usr/bin/originallinstor "${cleaned_keys[@]}"
 else
   echo "You're not allowed to change state of linstor cluster manually. Please contact tech support"
   exit 1
