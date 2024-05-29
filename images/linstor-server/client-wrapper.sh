@@ -103,6 +103,10 @@ if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
   if [[ "$2" == "set-property" ]] && [[ "$4" == "AutoplaceTarget" ]]; then
     allowed=true
   fi
+
+  if [[ "$2" == "set-property" ]] && [[ "$4" == "DrbdOptions/auto-add-quorum-tiebreaker" ]]; then
+    allowed=true
+  fi
 fi
 
 
