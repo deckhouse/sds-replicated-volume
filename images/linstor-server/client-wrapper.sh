@@ -128,7 +128,6 @@ if [[ $(echo "${valid_subcommands_advise[@]}" | fgrep -w -- $1) ]]; then
 fi
 
 if [[ $allowed == true ]]; then
-  $@ $1
   /usr/bin/originallinstor "${cleaned_keys[@]}"
 else
   echo "You're not allowed to change state of linstor cluster manually. Please contact tech support"
