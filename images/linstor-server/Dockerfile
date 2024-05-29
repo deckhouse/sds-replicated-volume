@@ -4,7 +4,7 @@ ARG BASE_GOLANG_21_BULLSEYE=registry.deckhouse.io/base_images/golang:1.21.6-bull
 FROM $BASE_UBUNTU as linstor-builder
 
 ARG LINSTOR_GITREPO=https://github.com/LINBIT/linstor-server
-ARG LINSTOR_VERSION=1.27.0
+ARG LINSTOR_VERSION=1.27.1
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
