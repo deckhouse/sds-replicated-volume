@@ -1,7 +1,7 @@
 ---
 title: "The sds-replicated-volume module"
 description: "The sds-replicated-volume module: General Concepts and Principles."
-moduleStatus: experimental
+moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
