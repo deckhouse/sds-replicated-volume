@@ -1,7 +1,7 @@
 ---
 title: "Модуль sds-replicated-volume"
 description: "Модуль sds-replicated-volume: общие концепции и положения."
-moduleStatus: experimental
+moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
