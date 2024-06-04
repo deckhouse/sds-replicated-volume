@@ -4,9 +4,9 @@ description: "The sds-drbd module: General Concepts and Principles."
 moduleStatus: deprecated
 ---
 
-{% alert level="danger" %}
+{{< alert level="danger" >}}
 Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
-{% endalert %}
+{{< /alert >}}
 
 {{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:

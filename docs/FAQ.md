@@ -2,6 +2,9 @@
 title: "The sds-drbd module: FAQ"
 description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? LINSTOR performance and reliability notes, comparison to Ceph. How to add existing LINSTOR LVM or LVMThin pool. How to configure Prometheus to use LINSTOR for storing data. Controller's work-flow questions.
 ---
+{{< alert level="danger" >}}
+Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
+{{< /alert >}}
 
 {{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:

@@ -3,9 +3,9 @@ title: "Модуль sds-drbd: FAQ"
 description: Диагностика проблем LINSTOR. Когда следует использовать LVM, а когда LVMThin? Производительность и надежность LINSTOR, сравнение с Ceph. Как добавить существующий LVM или LVMThin-пул в LINSTOR? Как настроить Prometheus на использование хранилища LINSTOR? Вопросы по работе контроллера.
 ---
 
-{% alert level="danger" %}
-Текущая версия модуля устарела и больше не поддерживается. Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
-{% endalert %}
+{{< alert level="danger" >}}
+Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
+{{< /alert >}}
 
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только в следующих случаях:
