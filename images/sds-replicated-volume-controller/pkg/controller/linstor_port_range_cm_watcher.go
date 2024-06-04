@@ -19,8 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	lapi "github.com/LINBIT/golinstor/client"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
 	"reflect"
@@ -40,13 +40,12 @@ import (
 const (
 	linstorPortRangeWatcherCtrlName = "linstor-port-range-watcher-controller"
 	linstorPortRangeConfigMapName   = "linstor-port-range"
-	propContainerName               = "d2ef39f4afb6fbe91ab4c9048301dc4826d84ed221a5916e92fa62fdb99deef0"
-	propKey                         = "TcpPortAutoRange"
-	propInstance                    = "/CTRLCFG"
+	linstorPropName                 = "d2ef39f4afb6fbe91ab4c9048301dc4826d84ed221a5916e92fa62fdb99deef0"
 )
 
 func NewLinstorPortRangeWatcher(
 	mgr manager.Manager,
+	lc *lapi.Client,
 	interval int,
 	log logger.Logger,
 ) (controller.Controller, error) {
@@ -57,7 +56,7 @@ func NewLinstorPortRangeWatcher(
 			if request.Name == linstorPortRangeConfigMapName {
 				log.Info("START reconcile of Linstor port range configmap with name: " + request.Name)
 
-				shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, request, log)
+				shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 				if shouldRequeue {
 					log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
 					return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
@@ -82,7 +81,7 @@ func NewLinstorPortRangeWatcher(
 					log.Info("START from CREATE reconcile of ConfigMap with name: " + e.Object.GetName())
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 
-					shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, request, log)
+					shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 					if shouldRequeue {
 						log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
 						q.AddAfter(request, time.Duration(interval)*time.Second)
@@ -107,7 +106,7 @@ func NewLinstorPortRangeWatcher(
 					if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newCM.Data, oldCM.Data) {
 						log.Info("START from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
 						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-						shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, request, log)
+						shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 						if shouldRequeue {
 							log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
 							q.AddAfter(request, time.Duration(interval)*time.Second)
@@ -123,7 +122,20 @@ func NewLinstorPortRangeWatcher(
 	return c, err
 }
 
-func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logger.Logger) (bool, error) {
+func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *corev1.ConfigMap, value string) (bool, error) {
+	configMap.Labels["storage.deckhouse.io/incorrect-port-range"] = value
+	err := cl.Update(ctx, configMap)
+	if err != nil {
+		return true, err
+	}
+	return false, nil
+}
+
+func ReconcileConfigMapEvent(ctx context.Context,
+	cl client.Client, lc *lapi.Client,
+	request reconcile.Request,
+	log logger.Logger) (bool, error) {
+
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, request.NamespacedName, configMap)
 	if err != nil {
@@ -143,52 +155,76 @@ func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, request reco
 	}
 
 	if maxPortInt < minPortInt {
+		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		if err != nil {
+			return true, err
+		}
+		log.Error(err, fmt.Sprintf("range start port %d is less than range end port %d", minPortInt, maxPortInt))
 		return false, fmt.Errorf("range start port %d is less than range end port %d", minPortInt, maxPortInt)
 	}
 
 	if maxPortInt > 65535 {
-		return false, fmt.Errorf("range end port %d must be less then 65535", maxPortInt)
-	}
-
-	if maxPortInt < 1024 {
-		return false, fmt.Errorf("range start port %d must be more then 1024", minPortInt)
-	}
-
-	objs := linstor.PropsContainersList{}
-	log.Info(fmt.Sprintf("Retrieveng list of prop containers %v", cl.List(ctx, &objs, &client.ListOptions{})))
-	propContainerExists := false
-
-	log.Info("Checking port range in crd")
-
-	for _, item := range objs.Items {
-		if item.Name == propContainerName {
-			propContainerExists = true
-			if item.Spec.PropValue != fmt.Sprintf("%s-%s", minPort, maxPort) {
-				item.Spec.PropValue = fmt.Sprintf("%s-%s", minPort, maxPort)
-				err = cl.Update(ctx, &item, &client.UpdateOptions{})
-				if err != nil {
-					return true, err
-				}
-				log.Info(fmt.Sprintf("Item updated to %s-%s", minPort, maxPort))
-			}
-		}
-	}
-
-	if propContainerExists == false {
-		err = cl.Create(ctx, &linstor.PropsContainers{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: propContainerName,
-			},
-			Spec: linstor.PropsContainersSpec{
-				PropKey:       propKey,
-				PropValue:     fmt.Sprintf("%s-%s", minPort, maxPort),
-				PropsInstance: propInstance,
-			},
-		})
+		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
-		log.Info(fmt.Sprintf("Item created with range %s-%s", minPort, maxPort))
+		log.Error(err, fmt.Sprintf("range end port %d must be less then 65535", maxPortInt))
+		return false, fmt.Errorf("range end port %d must be less then 65535", maxPortInt)
+	}
+
+	if minPortInt < 1024 {
+		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		if err != nil {
+			return true, err
+		}
+		log.Error(err, fmt.Sprintf("range start port %d must be more then 1024", minPortInt))
+		return false, fmt.Errorf("range start port %d must be more then 1024", minPortInt)
+	}
+
+	_, err = updateConfigMapLabel(ctx, cl, configMap, "false")
+	if err != nil {
+		return true, err
+	}
+
+	log.Info("Checking controller port range")
+	kvObjs, err := lc.Controller.GetProps(ctx)
+	if err != nil {
+		return true, err
+	}
+
+	for kvKey, kvItem := range kvObjs {
+		if kvKey != "TcpPortAutoRange" {
+			continue
+		}
+
+		if kvItem != fmt.Sprintf("%d-%d", minPortInt, maxPortInt) {
+			log.Info(fmt.Sprintf("Current port range %s, actual %d-%d", kvItem, minPortInt, maxPortInt))
+			err := lc.Controller.Modify(ctx, lapi.GenericPropsModify{
+				OverrideProps: map[string]string{
+					"TcpPortAutoRange": fmt.Sprintf("%d-%d", minPortInt, maxPortInt)}})
+			if err != nil {
+				return true, err
+			}
+			propObject := linstor.PropsContainers{}
+			err = cl.Get(ctx, types.NamespacedName{Namespace: "default",
+				Name: linstorPropName}, &propObject)
+			if err != nil {
+				return true, err
+			}
+
+			log.Info(fmt.Sprintf("Check port range in CR. %s, actual %d-%d",
+				propObject.Spec.PropValue,
+				minPortInt,
+				maxPortInt))
+			if propObject.Spec.PropValue != fmt.Sprintf("%d-%d", minPortInt, maxPortInt) {
+				propObject.Spec.PropValue = fmt.Sprintf("%d-%d", minPortInt, maxPortInt)
+				err = cl.Update(ctx, &propObject)
+				if err != nil {
+					return true, err
+				}
+				log.Info(fmt.Sprintf("port range in CR updated to %d-%d", minPortInt, maxPortInt))
+			}
+		}
 	}
 
 	return false, nil

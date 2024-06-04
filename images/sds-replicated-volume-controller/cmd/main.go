@@ -19,6 +19,12 @@ package main
 import (
 	"context"
 	"fmt"
+	lapi "github.com/LINBIT/golinstor/client"
+	v1 "k8s.io/api/core/v1"
+	sv1 "k8s.io/api/storage/v1"
+	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	goruntime "runtime"
 	"sds-replicated-volume-controller/api/linstor"
@@ -27,15 +33,7 @@ import (
 	"sds-replicated-volume-controller/pkg/controller"
 	kubutils "sds-replicated-volume-controller/pkg/kubeutils"
 	"sds-replicated-volume-controller/pkg/logger"
-
 	controllerruntime "sigs.k8s.io/controller-runtime"
-
-	lapi "github.com/LINBIT/golinstor/client"
-	v1 "k8s.io/api/core/v1"
-	sv1 "k8s.io/api/storage/v1"
-	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -135,7 +133,7 @@ func main() {
 	}
 	log.Info("the NewReplicatedStoragePool controller starts")
 
-	if _, err := controller.NewLinstorPortRangeWatcher(mgr, cfgParams.ScanInterval, *log); err != nil {
+	if _, err := controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewLinstorPortRangeWatcher controller")
 		os.Exit(1)
 	}

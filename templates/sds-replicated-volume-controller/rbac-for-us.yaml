@@ -22,6 +22,7 @@ rules:
       - get
       - list
       - watch
+      - update
   - apiGroups:
       - ""
     resources:
@@ -89,17 +90,6 @@ rules:
       - delete
       - watch
       - update
-  - verbs:
-      - get
-      - list
-      - update
-      - create
-      - delete
-      - watch
-    apiGroups:
-      - "internal.linstor.linbit.com"
-    resources:
-      - "propscontainers"
   - apiGroups:
       - storage.k8s.io
     resources:
@@ -112,6 +102,15 @@ rules:
       - get
       - watch
       - update
+  - apiGroups:
+      - internal.linstor.linbit.com
+    resources:
+      - propscontainers
+    verbs:
+      - list
+      - get
+      - update
+      - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
