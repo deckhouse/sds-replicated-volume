@@ -5,7 +5,7 @@ description: The sds-drbd Deckhouse module's configuration.
 ---
 
 {% alert level="danger" %}
-This version of the module is deprecated and is no longer supported. Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
+Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
 {% endalert %}
 
 {{< alert level="warning" >}}
