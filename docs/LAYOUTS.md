@@ -3,9 +3,9 @@ title: "Module sds-drbd: use cases"
 linkTitle: "Usage cases"
 ---
 
-{% alert level="danger" %}
-This version of the module is deprecated and is no longer supported. Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
-{% endalert %}
+{{< alert level="warning" >}}
+Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
+{{< /alert >}}
 
 {{< alert level="warning" >}}
 The module is guaranteed to work only in the following cases:

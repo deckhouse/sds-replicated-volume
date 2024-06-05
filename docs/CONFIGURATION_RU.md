@@ -4,9 +4,9 @@ force_searchable: true
 description: Параметры настройки модуля sds-drbd Deckhouse.
 ---
 
-{% alert level="danger" %}
-Текущая версия модуля устарела и больше не поддерживается. Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
-{% endalert %}
+{{< alert level="warning" >}}
+Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
+{{< /alert >}}
 
 {{< alert level="warning" >}}
 Работоспособность модуля гарантируется только в следующих случаях:
