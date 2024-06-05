@@ -4,7 +4,7 @@ force_searchable: true
 description: The sds-drbd Deckhouse module's configuration.
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
 {{< /alert >}}
 
