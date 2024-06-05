@@ -3,7 +3,7 @@ title: "Модуль sds-drbd: Сценарии использования"
 linkTitle: "Сценарии использования"
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
 {{< /alert >}}
 

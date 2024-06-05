@@ -3,7 +3,7 @@ title: "Модуль sds-drbd: Custom Resources"
 description: "Модуль sds-drbd Custom Resources: DRBDStoragePool и DRBDStorageClass."
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
 {{< /alert >}}
 

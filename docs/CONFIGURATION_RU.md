@@ -4,7 +4,7 @@ force_searchable: true
 description: Параметры настройки модуля sds-drbd Deckhouse.
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Переключитесь на использование модуля [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/).
 {{< /alert >}}
 

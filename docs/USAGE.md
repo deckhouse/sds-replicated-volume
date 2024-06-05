@@ -3,7 +3,7 @@ title: "The sds-drbd module: configuration examples"
 description: The sds-drbd controller usage and work-flow examples.
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
 {{< /alert >}}
 

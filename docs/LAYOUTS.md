@@ -3,7 +3,7 @@ title: "Module sds-drbd: use cases"
 linkTitle: "Usage cases"
 ---
 
-{{< alert level="danger" >}}
+{{< alert level="warning" >}}
 Use the [sds-replicated-volume](https://deckhouse.ru/modules/sds-replicated-volume/stable/) module instead.
 {{< /alert >}}
 
