@@ -498,6 +498,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *v1alpha1.Repli
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
+		storageClassParameters[quorumMinimumRedundancyWithPrefixSCKey] = "3"
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode

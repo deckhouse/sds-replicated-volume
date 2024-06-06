@@ -45,7 +45,8 @@ const (
 	replicasOnSameRGKey                     = "replicas_on_same"
 	replicasOnDifferentRGKey                = "replicas_on_different"
 	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
-	quorumMinimumRedundancyWithPrefixKey    = "DrbdOptions/Resource/quorum-minimum-redundancy"
+	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
+	quorumMinimumRedundancyWithPrefixSCKey  = "property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum-minimum-redundancy"
 	replicasOnSameSCKey                     = "replicasOnSame"
 	replicasOnDifferentSCKey                = "replicasOnDifferent"
 	placementCountSCKey                     = "placementCount"
@@ -161,10 +162,10 @@ func ReconcileParams(
 					labelsToAdd = map[string]string{missMatchedLabel: "true"}
 				}
 
-				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[quorumMinimumRedundancyWithPrefixKey] != "" {
-					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixKey]))
-					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixKey]))
-					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixKey], rg.Name)
+				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey] != "" {
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey]))
+					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
 						labelsToAdd = map[string]string{unableToSetQuorumMinimumRedundancyLabel: "true"}
@@ -536,7 +537,7 @@ func setQuorumMinimumRedundancy(ctx context.Context, lc *lapi.Client, value, rgN
 
 	err = lc.ResourceGroups.Modify(ctx, rgName, lapi.ResourceGroupModify{
 		OverrideProps: map[string]string{
-			quorumMinimumRedundancyWithPrefixKey: strconv.Itoa(quorumMinimumRedundancy),
+			quorumMinimumRedundancyWithPrefixRGKey: strconv.Itoa(quorumMinimumRedundancy),
 		},
 	})
 
