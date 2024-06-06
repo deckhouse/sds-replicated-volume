@@ -271,7 +271,7 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass with name: " + replicatedSC.Name + " is valid")
 
 	log.Info("[ReconcileReplicatedStorageClass] Try to get StorageClass with name: " + replicatedSC.Name)
-	storageClass, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
+	oldSC, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
 	if err != nil {
 		if !errors.IsNotFound(err) {
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to get storage class for ReplicatedStorageClass resource, name: %s", replicatedSC.Name))
@@ -286,20 +286,38 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " created.")
 	} else {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Compare it with ReplicatedStorageClass.")
-		equal, msg := CompareReplicatedStorageClassAndStorageClass(replicatedSC, storageClass)
+		newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
+		equal, msg := CompareStorageClasses(newSC, oldSC)
 		if !equal {
 			log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass and StorageClass are not equal.")
-			replicatedSC.Status.Phase = Failed
-			replicatedSC.Status.Reason = msg
 
-			if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedSC.Name))
-				return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %s", err.Error())
+			if canRecreateStorageClass(replicatedSC, oldSC) {
+				log.Info("[ReconcileReplicatedStorageClass] StorageClass can be recreated.")
+				if err := DeleteStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name); err != nil {
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to delete storage class, name: %s", replicatedSC.Name))
+					return fmt.Errorf("[ReconcileReplicatedStorageClass] error DeleteStorageClass: %s", err.Error())
+				}
+
+				log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " deleted. Recreate it.")
+				if err = CreateStorageClass(ctx, cl, replicatedSC); err != nil {
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to create storage class for ReplicatedStorageClass resource, name: %s", replicatedSC.Name))
+					return fmt.Errorf("[ReconcileReplicatedStorageClass] error CreateStorageClass: %s", err.Error())
+				}
+				log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " recreated.")
+			} else {
+				log.Info("[ReconcileReplicatedStorageClass] StorageClass can't be recreated.")
+				replicatedSC.Status.Phase = Failed
+				replicatedSC.Status.Reason = msg
+
+				if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
+					log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedSC.Name))
+					return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %s", err.Error())
+				}
+				return nil
 			}
-			return nil
 		}
 
-		err = ReconcileStorageClassLabels(ctx, cl, storageClass)
+		err = ReconcileStorageClassLabels(ctx, cl, oldSC)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to reconcile storage class labels, name: %s", replicatedSC.Name))
 			return fmt.Errorf("error ReconcileStorageClassLabels: %s", err.Error())
@@ -426,34 +444,33 @@ func UpdateReplicatedStorageClass(ctx context.Context, cl client.Client, replica
 	return nil
 }
 
-func CompareReplicatedStorageClassAndStorageClass(replicatedSC *v1alpha1.ReplicatedStorageClass, storageClass *storagev1.StorageClass) (bool, string) {
+func CompareStorageClasses(oldSC, newSC *storagev1.StorageClass) (bool, string) {
 	var (
 		failedMsgBuilder strings.Builder
 		equal            = true
 	)
 
-	failedMsgBuilder.WriteString("ReplicatedStorageClass and StorageClass are not equal: ")
-	newStorageClass := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
+	failedMsgBuilder.WriteString("Old StorageClass and New StorageClass are not equal: ")
 
-	if !reflect.DeepEqual(storageClass.Parameters, newStorageClass.Parameters) {
+	if !reflect.DeepEqual(oldSC.Parameters, newSC.Parameters) {
 		// TODO: add diff
 		equal = false
 		failedMsgBuilder.WriteString("Parameters are not equal; ")
 	}
 
-	if storageClass.Provisioner != newStorageClass.Provisioner {
+	if oldSC.Provisioner != newSC.Provisioner {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Provisioner are not equal(ReplicatedStorageClass: %s, StorageClass: %s); ", newStorageClass.Provisioner, storageClass.Provisioner))
+		failedMsgBuilder.WriteString(fmt.Sprintf("Provisioner are not equal(Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner))
 	}
 
-	if *storageClass.ReclaimPolicy != *newStorageClass.ReclaimPolicy {
+	if *oldSC.ReclaimPolicy != *newSC.ReclaimPolicy {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("ReclaimPolicy are not equal(ReplicatedStorageClass: %s, StorageClass: %s", string(*newStorageClass.ReclaimPolicy), string(*storageClass.ReclaimPolicy)))
+		failedMsgBuilder.WriteString(fmt.Sprintf("ReclaimPolicy are not equal(Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy)))
 	}
 
-	if *storageClass.VolumeBindingMode != *newStorageClass.VolumeBindingMode {
+	if *oldSC.VolumeBindingMode != *newSC.VolumeBindingMode {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("VolumeBindingMode are not equal(ReplicatedStorageClass: %s, StorageClass: %s); ", string(*newStorageClass.VolumeBindingMode), string(*storageClass.VolumeBindingMode)))
+		failedMsgBuilder.WriteString(fmt.Sprintf("VolumeBindingMode are not equal(Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode)))
 	}
 
 	return equal, failedMsgBuilder.String()
@@ -672,4 +689,11 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 	}
 
 	return nil
+}
+
+func canRecreateStorageClass(replicatedSC *v1alpha1.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
+	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
+	delete(newSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
+	equal, _ := CompareStorageClasses(newSC, oldSC)
+	return equal
 }

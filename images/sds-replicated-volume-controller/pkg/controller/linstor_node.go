@@ -299,8 +299,7 @@ func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *storagev
 func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, driverName string) error {
 	for i, driver := range csiNode.Spec.Drivers {
 		if driver.Name == driverName {
-			csiDriversAfterDelete := slices.Delete(csiNode.Spec.Drivers, i, i+1)
-			csiNode.Spec.Drivers = csiDriversAfterDelete
+			csiNode.Spec.Drivers = slices.Delete(csiNode.Spec.Drivers, i, i+1)
 		}
 	}
 	err := cl.Update(ctx, csiNode)
