@@ -70,7 +70,7 @@
           1. Login into node with the problem:
 
              ```
-             kubectl -n d8-linstor exec -ti $(kubectl -n d8-linstor get pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node -o name) -c linstor-satellite -- bash
+             kubectl -n d8-sds-replicated-volume exec -ti $(kubectl -n d8-sds-replicated-volume get pod --field-selector=spec.nodeName={{ $labels.node }} -l app=linstor-node -o name) -c linstor-satellite -- bash
              ```
 
           2. Check the LINSTOR peer node state:
