@@ -15,7 +15,7 @@ properties:
     properties:
       drbdVersion:
         type: string
-        default: "9.2.9"
+        default: "9.2.10"
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
