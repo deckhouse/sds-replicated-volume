@@ -5,16 +5,17 @@ env:
   MODULE_SOURCE_NAME: ${{ vars.PROD_MODULE_SOURCE_NAME }}
   CI_COMMIT_REF_NAME: ${{ github.ref_name }}
   MODULES_MODULE_NAME: ${{ vars.RENAMED_MODULE_NAME }}
-  RELEASE_CHANNEL: ${{ github.event.inputs.version }}
+  RELEASE_CHANNEL: ${{ github.event.inputs.channel }}
   MODULES_REGISTRY_LOGIN: ${{ vars.RENAMED_PROD_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
+  MODULES_READ_REGISTRY_PASSWORD: ${{ secrets.PROD_MODULES_READ_REGISTRY_PASSWORD }}
   MODULES_MODULE_TAG: ${{ github.event.inputs.tag }}
 
 on:
   workflow_dispatch:
-   inputs:
-      version:
-        description: "Select version"
+    inputs:
+      channel:
+        description: "Select release channel"
         type: choice
         default: alpha
         options:
@@ -53,23 +54,27 @@ jobs:
           echo $RELEASE_CHANNEL
           echo $MODULES_MODULE_TAG
         shell: bash
-        
+
   job-CE:
-     name: Edition CE
-     runs-on: ubuntu-latest
-     if: github.event.inputs.ce == 'true'
-     steps:
-       - run: echo "CE"
-       - name: SET VAR
-         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ce/modules" >> "$GITHUB_ENV"
-       - name: ECHO VAR
-         run: |
-           echo $MODULES_MODULE_SOURCE
-       - uses: actions/checkout@v4
-       - uses: deckhouse/modules-actions/setup@v1
-       - uses: deckhouse/modules-actions/deploy@v1
-  
+    name: Edition CE
+    runs-on: ubuntu-latest
+    if: github.event.inputs.ce == 'true'
+    steps:
+      - run: echo "CE"
+      - name: SET VAR
+        run: |
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ce/modules" >> "$GITHUB_ENV"
+      - name: ECHO VAR
+        run: |
+          echo $MODULES_MODULE_SOURCE
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - name: Check previous release
+        run: |
+          chmod +x .github/check_previous_channel_release.sh
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME ce $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
+      - uses: deckhouse/modules-actions/deploy@v1
+
   job-EE:
     name: Edition EE
     runs-on: ubuntu-latest
@@ -78,14 +83,18 @@ jobs:
       - run: echo "EE"
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ee/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ee/modules" >> "$GITHUB_ENV"
       - name: ECHO VAR
         run: |
-           echo $MODULES_MODULE_SOURCE
+          echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
       - uses: deckhouse/modules-actions/setup@v1
+      - name: Check previous release
+        run: |
+          chmod +x .github/check_previous_channel_release.sh
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME ee $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
       - uses: deckhouse/modules-actions/deploy@v1
-      
+
   job-FE:
     name: Edition FE
     runs-on: ubuntu-latest
@@ -94,10 +103,14 @@ jobs:
       - run: echo "FE"
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
       - name: ECHO VAR
         run: |
-           echo $MODULES_MODULE_SOURCE
+          echo $MODULES_MODULE_SOURCE
       - uses: actions/checkout@v4
       - uses: deckhouse/modules-actions/setup@v1
+      - name: Check previous release
+        run: |
+          chmod +x .github/check_previous_channel_release.sh
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME fe $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
       - uses: deckhouse/modules-actions/deploy@v1
