@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/utils/strings/slices"
+	"slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	core "k8s.io/api/core/v1"
@@ -64,6 +64,8 @@ var (
 	}
 
 	disklessFlags = []string{"DRBD_DISKLESS", "DISKLESS", "TIE_BREAKER"}
+
+	badLabels = []string{missMatchedLabel, unableToSetQuorumMinimumRedundancyLabel}
 )
 
 func NewLinstorResourcesWatcher(
@@ -159,14 +161,13 @@ func ReconcileParams(
 				log.Info(fmt.Sprintf("[ReconcileParams] missmatched Storage Class params: %s", strings.Join(missMatched, ",")))
 
 				labelsToAdd := make(map[string]string)
-				if len(missMatched) > 1 {
-					labelsToAdd = map[string]string{missMatchedLabel: "true"}
-				}
 
 				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey] != "" {
 					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
 					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey]))
-					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name)
+					// err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name)
+					err = setQuorumMinimumRedundancy(ctx, lc, "s", rg.Name)
+
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
 						labelsToAdd = map[string]string{unableToSetQuorumMinimumRedundancyLabel: "true"}
@@ -176,38 +177,38 @@ func ReconcileParams(
 							log.Error(err, fmt.Sprintf("[ReconcileParams] unable to get the Resource Group, name: %s", rg.Name))
 						} else {
 							rgs[RGName] = rgWithNewValue
+							missMatched = getMissMatchedParams(sc, rgs[RGName])
 						}
 					}
 
 				}
 
-				if len(labelsToAdd) > 0 {
-					if pv.Labels == nil {
-						pv.Labels = make(map[string]string)
-					}
+				if len(missMatched) > 0 {
+					labelsToAdd = map[string]string{missMatchedLabel: "true"}
+				}
 
-					updated := false
-					for key, value := range labelsToAdd {
-						pvLabelVal, exists := pv.Labels[key]
-						if !exists || pvLabelVal != value {
-							pv.Labels[key] = value
-							updated = true
-						}
-					}
+				if pv.Labels == nil {
+					pv.Labels = make(map[string]string)
+				}
 
-					if updated {
-						err = UpdatePV(ctx, cl, &pv)
-						if err != nil {
-							log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
-						}
+				newLabels, updated := setLabelsIfNeeded(pv.Labels, labelsToAdd)
+				log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
+
+				if updated {
+					pv.Labels = newLabels
+					err = UpdatePV(ctx, cl, &pv)
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
 					}
 				}
 			} else {
 				log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
 
-				if _, exist := pv.Labels[missMatchedLabel]; exist {
-					delete(pv.Labels, missMatchedLabel)
+				newLabels, updated := setLabelsIfNeeded(pv.Labels, nil)
+				log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
 
+				if updated {
+					pv.Labels = newLabels
 					err = UpdatePV(ctx, cl, &pv)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
@@ -551,4 +552,25 @@ func setQuorumMinimumRedundancy(ctx context.Context, lc *lapi.Client, value, rgN
 	})
 
 	return err
+}
+
+func setLabelsIfNeeded(originalLabels map[string]string, labelsToAdd map[string]string) (map[string]string, bool) {
+	updated := false
+
+	for _, label := range badLabels {
+		if _, exists := originalLabels[label]; exists {
+			delete(originalLabels, label)
+			updated = true
+		}
+	}
+
+	for key, value := range labelsToAdd {
+		originalLabelVal, exists := originalLabels[key]
+		if !exists || originalLabelVal != value {
+			originalLabels[key] = value
+			updated = true
+		}
+	}
+
+	return originalLabels, updated
 }
