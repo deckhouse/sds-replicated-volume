@@ -152,9 +152,10 @@ func ReconcileParams(
 
 			RGName := rds[pv.Name].ResourceGroupName
 			rg := rgs[RGName]
+			log.Debug(fmt.Sprintf("[ReconcileParams] PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
 			if missMatched := getMissMatchedParams(sc, rg); len(missMatched) > 0 {
 				log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have missmatched params."+
-					" The corresponding PV %s will have the special missmatched label %s", sc.Name, rg.Name, pv.Name, missMatchedLabel))
+					" The corresponding PV %s will have the special missmatched label %s if needed", sc.Name, rg.Name, pv.Name, missMatchedLabel))
 				log.Info(fmt.Sprintf("[ReconcileParams] missmatched Storage Class params: %s", strings.Join(missMatched, ",")))
 
 				labelsToAdd := make(map[string]string)
@@ -169,7 +170,15 @@ func ReconcileParams(
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
 						labelsToAdd = map[string]string{unableToSetQuorumMinimumRedundancyLabel: "true"}
+					} else {
+						rgWithNewValue, err := lc.ResourceGroups.Get(ctx, rg.Name)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("[ReconcileParams] unable to get the Resource Group, name: %s", rg.Name))
+						} else {
+							rgs[RGName] = rgWithNewValue
+						}
 					}
+
 				}
 
 				if len(labelsToAdd) > 0 {
