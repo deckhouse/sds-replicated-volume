@@ -694,6 +694,7 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 func canRecreateStorageClass(replicatedSC *v1alpha1.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	delete(newSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
 	equal, _ := CompareStorageClasses(newSC, oldSC)
 	return equal
 }
