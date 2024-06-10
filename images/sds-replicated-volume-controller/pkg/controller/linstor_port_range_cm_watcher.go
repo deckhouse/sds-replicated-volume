@@ -19,13 +19,16 @@ package controller
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sds-replicated-volume-controller/api/linstor"
+	"sds-replicated-volume-controller/pkg/logger"
+	"strconv"
+	"time"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"reflect"
-	"sds-replicated-volume-controller/api/linstor"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -33,14 +36,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"strconv"
-	"time"
 )
 
 const (
 	linstorPortRangeWatcherCtrlName = "linstor-port-range-watcher-controller"
 	linstorPortRangeConfigMapName   = "linstor-port-range"
 	linstorPropName                 = "d2ef39f4afb6fbe91ab4c9048301dc4826d84ed221a5916e92fa62fdb99deef0"
+	linstorTCPPortAutoRangeKey      = "TcpPortAutoRange"
 )
 
 func NewLinstorPortRangeWatcher(
@@ -122,13 +124,9 @@ func NewLinstorPortRangeWatcher(
 	return c, err
 }
 
-func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *corev1.ConfigMap, value string) (bool, error) {
+func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *corev1.ConfigMap, value string) error {
 	configMap.Labels["storage.deckhouse.io/incorrect-port-range"] = value
-	err := cl.Update(ctx, configMap)
-	if err != nil {
-		return true, err
-	}
-	return false, nil
+	return cl.Update(ctx, configMap)
 }
 
 func ReconcileConfigMapEvent(ctx context.Context,
@@ -147,15 +145,15 @@ func ReconcileConfigMapEvent(ctx context.Context,
 
 	minPortInt, err := strconv.Atoi(minPort)
 	if err != nil {
-		return true, err
+		return false, err
 	}
 	maxPortInt, err := strconv.Atoi(maxPort)
 	if err != nil {
-		return true, err
+		return false, err
 	}
 
 	if maxPortInt < minPortInt {
-		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		err := updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
@@ -164,7 +162,7 @@ func ReconcileConfigMapEvent(ctx context.Context,
 	}
 
 	if maxPortInt > 65535 {
-		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		err := updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
@@ -173,7 +171,7 @@ func ReconcileConfigMapEvent(ctx context.Context,
 	}
 
 	if minPortInt < 1024 {
-		_, err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		err := updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
@@ -181,7 +179,7 @@ func ReconcileConfigMapEvent(ctx context.Context,
 		return false, fmt.Errorf("range start port %d must be more then 1024", minPortInt)
 	}
 
-	_, err = updateConfigMapLabel(ctx, cl, configMap, "false")
+	err = updateConfigMapLabel(ctx, cl, configMap, "false")
 	if err != nil {
 		return true, err
 	}
@@ -193,15 +191,17 @@ func ReconcileConfigMapEvent(ctx context.Context,
 	}
 
 	for kvKey, kvItem := range kvObjs {
-		if kvKey != "TcpPortAutoRange" {
+		if kvKey != linstorTCPPortAutoRangeKey {
 			continue
 		}
 
-		if kvItem != fmt.Sprintf("%d-%d", minPortInt, maxPortInt) {
-			log.Info(fmt.Sprintf("Current port range %s, actual %d-%d", kvItem, minPortInt, maxPortInt))
+		portRange := fmt.Sprintf("%d-%d", minPortInt, maxPortInt)
+
+		if kvItem != portRange {
+			log.Info(fmt.Sprintf("Current port range %s, actual %s", kvItem, portRange))
 			err := lc.Controller.Modify(ctx, lapi.GenericPropsModify{
 				OverrideProps: map[string]string{
-					"TcpPortAutoRange": fmt.Sprintf("%d-%d", minPortInt, maxPortInt)}})
+					linstorTCPPortAutoRangeKey: portRange}})
 			if err != nil {
 				return true, err
 			}
@@ -212,17 +212,16 @@ func ReconcileConfigMapEvent(ctx context.Context,
 				return true, err
 			}
 
-			log.Info(fmt.Sprintf("Check port range in CR. %s, actual %d-%d",
+			log.Info(fmt.Sprintf("Check port range in CR. %s, actual %s",
 				propObject.Spec.PropValue,
-				minPortInt,
-				maxPortInt))
-			if propObject.Spec.PropValue != fmt.Sprintf("%d-%d", minPortInt, maxPortInt) {
-				propObject.Spec.PropValue = fmt.Sprintf("%d-%d", minPortInt, maxPortInt)
+				portRange))
+			if propObject.Spec.PropValue != portRange {
+				propObject.Spec.PropValue = portRange
 				err = cl.Update(ctx, &propObject)
 				if err != nil {
 					return true, err
 				}
-				log.Info(fmt.Sprintf("port range in CR updated to %d-%d", minPortInt, maxPortInt))
+				log.Info(fmt.Sprintf("port range in CR updated to %s", portRange))
 			}
 		}
 	}
