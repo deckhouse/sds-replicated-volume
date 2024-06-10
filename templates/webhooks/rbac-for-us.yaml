@@ -27,16 +27,6 @@ rules:
       - ""
     resources:
       - nodes
-  - verbs:
-      - get
-      - list
-      - update
-      - create
-      - delete
-    apiGroups:
-      - "internal.linstor.linbit.com"
-    resources:
-      - "propscontainers"
   - apiGroups:
       - storage.k8s.io
     verbs:
