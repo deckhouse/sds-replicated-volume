@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	storagev1 "k8s.io/api/storage/v1"
 	"net"
 	"reflect"
 	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
@@ -27,6 +26,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	storagev1 "k8s.io/api/storage/v1"
 
 	lclient "github.com/LINBIT/golinstor/client"
 	"gopkg.in/yaml.v3"
@@ -298,7 +299,7 @@ func addDriverToCSINode(ctx context.Context, cl client.Client, csiNode *storagev
 func removeDriverFromCSINode(ctx context.Context, cl client.Client, csiNode *storagev1.CSINode, driverName string) error {
 	for i, driver := range csiNode.Spec.Drivers {
 		if driver.Name == driverName {
-			slices.Delete(csiNode.Spec.Drivers, i, i+1)
+			csiNode.Spec.Drivers = slices.Delete(csiNode.Spec.Drivers, i, i+1)
 		}
 	}
 	err := cl.Update(ctx, csiNode)

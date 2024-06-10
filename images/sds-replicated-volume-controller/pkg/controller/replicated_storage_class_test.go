@@ -854,7 +854,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Status.Phase = controller.Created
 		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
 
-		equal, _ := controller.CompareReplicatedStorageClassAndStorageClass(&replicatedSC, storageClass)
+		equal, _ := controller.CompareStorageClasses(&replicatedSC, storageClass)
 		Expect(equal).To(BeTrue())
 	})
 
@@ -874,7 +874,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			VolumeBindingMode: &diffVBM,
 		}
 
-		equal, message := controller.CompareReplicatedStorageClassAndStorageClass(&replicatedSC, storageClass)
+		equal, message := controller.CompareStorageClasses(&replicatedSC, storageClass)
 		Expect(equal).To(BeFalse())
 		Expect(message).To(Equal("ReplicatedStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(ReplicatedStorageClass: linstor.csi.linbit.com, StorageClass: not-equal); ReclaimPolicy are not equal(ReplicatedStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(ReplicatedStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
 	})

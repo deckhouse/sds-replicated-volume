@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/utils/strings/slices"
+	"slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	core "k8s.io/api/core/v1"
@@ -38,21 +38,25 @@ import (
 )
 
 const (
-	linstorResourcesWatcherCtrlName = "linstor-resources-watcher-controller"
-	missMatchedLabel                = "storage.deckhouse.io/linstor-settings-mismatch"
-	PVCSIDriver                     = "linstor.csi.linbit.com"
-	replicasOnSameRGKey             = "replicas_on_same"
-	replicasOnDifferentRGKey        = "replicas_on_different"
-	replicasOnSameSCKey             = "replicasOnSame"
-	replicasOnDifferentSCKey        = "replicasOnDifferent"
-	placementCountSCKey             = "placementCount"
-	storagePoolSCKey                = "storagePool"
-	autoplaceTarget                 = "AutoplaceTarget"
+	linstorResourcesWatcherCtrlName         = "linstor-resources-watcher-controller"
+	missMatchedLabel                        = "storage.deckhouse.io/linstor-settings-mismatch"
+	unableToSetQuorumMinimumRedundancyLabel = "storage.deckhouse.io/unable-to-set-quorum-minimum-redundancy"
+	PVCSIDriver                             = "linstor.csi.linbit.com"
+	replicasOnSameRGKey                     = "replicas_on_same"
+	replicasOnDifferentRGKey                = "replicas_on_different"
+	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
+	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
+	quorumMinimumRedundancyWithPrefixSCKey  = "property.linstor.csi.linbit.com/DrbdOptions/Resource/quorum-minimum-redundancy"
+	replicasOnSameSCKey                     = "replicasOnSame"
+	replicasOnDifferentSCKey                = "replicasOnDifferent"
+	placementCountSCKey                     = "placementCount"
+	storagePoolSCKey                        = "storagePool"
+	autoplaceTarget                         = "AutoplaceTarget"
 )
 
 var (
 	scParamsMatchRGProps = []string{
-		"auto-quorum", "on-no-data-accessible", "on-suspended-primary-outdated", "rr-conflict",
+		"auto-quorum", "on-no-data-accessible", "on-suspended-primary-outdated", "rr-conflict", quorumMinimumRedundancyWithoutPrefixKey,
 	}
 
 	scParamsMatchRGSelectFilter = []string{
@@ -60,6 +64,8 @@ var (
 	}
 
 	disklessFlags = []string{"DRBD_DISKLESS", "DISKLESS", "TIE_BREAKER"}
+
+	badLabels = []string{missMatchedLabel, unableToSetQuorumMinimumRedundancyLabel}
 )
 
 func NewLinstorResourcesWatcher(
@@ -117,7 +123,7 @@ func NewLinstorResourcesWatcher(
 				rgMap[rg.Name] = rg
 			}
 
-			ReconcileParams(ctx, log, cl, scMap, rdMap, rgMap)
+			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap)
 			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
 
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
@@ -131,6 +137,7 @@ func ReconcileParams(
 	ctx context.Context,
 	log logger.Logger,
 	cl client.Client,
+	lc *lapi.Client,
 	scs map[string]v1.StorageClass,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
@@ -147,17 +154,47 @@ func ReconcileParams(
 
 			RGName := rds[pv.Name].ResourceGroupName
 			rg := rgs[RGName]
-
+			log.Debug(fmt.Sprintf("[ReconcileParams] PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
 			if missMatched := getMissMatchedParams(sc, rg); len(missMatched) > 0 {
 				log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have missmatched params."+
-					" The corresponding PV %s will have the special missmatched label %s", sc.Name, rg.Name, pv.Name, missMatchedLabel))
+					" The corresponding PV %s will have the special missmatched label %s if needed", sc.Name, rg.Name, pv.Name, missMatchedLabel))
 				log.Info(fmt.Sprintf("[ReconcileParams] missmatched Storage Class params: %s", strings.Join(missMatched, ",")))
+
+				labelsToAdd := make(map[string]string)
+
+				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey] != "" {
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey]))
+					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name)
+
+					if err != nil {
+						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
+						labelsToAdd = map[string]string{unableToSetQuorumMinimumRedundancyLabel: "true"}
+					} else {
+						rgWithNewValue, err := lc.ResourceGroups.Get(ctx, rg.Name)
+						if err != nil {
+							log.Error(err, fmt.Sprintf("[ReconcileParams] unable to get the Resource Group, name: %s", rg.Name))
+						} else {
+							rgs[RGName] = rgWithNewValue
+							missMatched = getMissMatchedParams(sc, rgs[RGName])
+						}
+					}
+
+				}
+
+				if len(missMatched) > 0 {
+					labelsToAdd = map[string]string{missMatchedLabel: "true"}
+				}
+
 				if pv.Labels == nil {
 					pv.Labels = make(map[string]string)
 				}
 
-				if _, exist := pv.Labels[missMatchedLabel]; !exist {
-					pv.Labels[missMatchedLabel] = "true"
+				newLabels, updated := setLabelsIfNeeded(pv.Labels, labelsToAdd)
+				log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
+
+				if updated {
+					pv.Labels = newLabels
 					err = UpdatePV(ctx, cl, &pv)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
@@ -166,9 +203,11 @@ func ReconcileParams(
 			} else {
 				log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
 
-				if _, exist := pv.Labels[missMatchedLabel]; exist {
-					delete(pv.Labels, missMatchedLabel)
+				newLabels, updated := setLabelsIfNeeded(pv.Labels, nil)
+				log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
 
+				if updated {
+					pv.Labels = newLabels
 					err = UpdatePV(ctx, cl, &pv)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
@@ -497,4 +536,40 @@ func getMissMatchedParams(sc v1.StorageClass, rg lapi.ResourceGroup) []string {
 	}
 
 	return missMatched
+}
+
+func setQuorumMinimumRedundancy(ctx context.Context, lc *lapi.Client, value, rgName string) error {
+	quorumMinimumRedundancy, err := strconv.Atoi(value)
+	if err != nil {
+		return err
+	}
+
+	err = lc.ResourceGroups.Modify(ctx, rgName, lapi.ResourceGroupModify{
+		OverrideProps: map[string]string{
+			quorumMinimumRedundancyWithPrefixRGKey: strconv.Itoa(quorumMinimumRedundancy),
+		},
+	})
+
+	return err
+}
+
+func setLabelsIfNeeded(originalLabels map[string]string, labelsToAdd map[string]string) (map[string]string, bool) {
+	updated := false
+
+	for _, label := range badLabels {
+		if _, exists := originalLabels[label]; exists {
+			delete(originalLabels, label)
+			updated = true
+		}
+	}
+
+	for key, value := range labelsToAdd {
+		originalLabelVal, exists := originalLabels[key]
+		if !exists || originalLabelVal != value {
+			originalLabels[key] = value
+			updated = true
+		}
+	}
+
+	return originalLabels, updated
 }
