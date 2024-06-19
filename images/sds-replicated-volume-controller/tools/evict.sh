@@ -813,7 +813,7 @@ kubernetes_check_node() {
   else
     echo "The cordon command has not been executed for node ${NODE_FOR_EVICT}."
     if get_user_confirmation "Perform node drain? (if confirmed, the command \"kubectl drain ${NODE_FOR_EVICT} --delete-emptydir-data  --ignore-daemonsets\" will be executed)" "y" "n"; then
-      execute_command "kubectl drain ${NODE_FOR_EVICT} --delete-emptydir-data  --ignore-daemonsets"
+      execute_command "kubectl drain ${NODE_FOR_EVICT} --delete-emptydir-data  --ignore-daemonsets --force"
       echo "Drain of node ${NODE_FOR_EVICT} completed"
       return 0
     else
