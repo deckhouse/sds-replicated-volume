@@ -19,6 +19,7 @@ export DISKLESS_STORAGE_POOL="DfltDisklessStorPool"
 export LINSTOR_NAMESPACE="d8-sds-replicated-volume"
 export DATE_TIME=$(date +"%Y-%m-%d_%H-%M-%S")
 export LOG_FILE="linstor_replicas_manager_${DATE_TIME}.log"
+export CHUNK_SIZE=10
 
 command -v jq >/dev/null 2>&1 || { echo "jq is required but it's not installed.  Aborting." >&2; exit 1; }
 touch ${LOG_FILE}
@@ -90,11 +91,11 @@ linstor_check_controller_online() {
 }
 
 exec_linstor_with_exit_code_check() {
-  execute_command kubectl -n ${LINSTOR_NAMESPACE} exec -ti deploy/linstor-controller -c linstor-controller -- originallinstor "$@"
+  execute_command kubectl -n ${LINSTOR_NAMESPACE} exec deploy/linstor-controller -c linstor-controller -- originallinstor "$@"
 }
 
 linstor() {
-  kubectl -n ${LINSTOR_NAMESPACE} exec -ti deploy/linstor-controller -c linstor-controller -- originallinstor "$@"
+  kubectl -n ${LINSTOR_NAMESPACE} exec deploy/linstor-controller -c linstor-controller -- originallinstor "$@"
 }
 
 linstor_check_faulty() {
@@ -798,6 +799,17 @@ linstor_backup_database() {
 }
 
 
+split_into_chunks() {
+  local chunk_size=$1
+  shift
+  local array=("$@")
+
+  for (( i=0; i < ${#array[@]}; i+=chunk_size )); do
+    local chunk=("${array[@]:i:chunk_size}")
+    echo "${chunk[@]}"
+  done
+}
+
 #####################################
 ################ MAIN ###############
 #####################################
@@ -809,7 +821,17 @@ linstor_wait_sync 0
 linstor_backup_database
 
 DISKFUL_RESOURCES=$(linstor -m --output-version=v1 resource-definition list | jq -r .[][].name)
-RESOURCE_AND_GROUP_NAMES=$(linstor -m --output-version=v1 resource-definition list -r ${DISKFUL_RESOURCES} | jq -r '.[][] | {resource: .name, resource_group: .resource_group_name}')
+
+mapfile -t DISKFUL_RESOURCES_ARRAY <<< "$DISKFUL_RESOURCES"
+while read -r RESOURCE_CHUNK; do
+  CHUNK_RESULT=$(kubectl -n d8-sds-replicated-volume exec deploy/linstor-controller -c linstor-controller -- originallinstor -m --output-version=v1 resource-definition list -r $RESOURCE_CHUNK | jq -r '.[][] | {resource: .name, resource_group: .resource_group_name}')
+  if [[ -n "$CHUNK_RESULT" ]]; then
+    RESOURCE_AND_GROUP_NAMES+="$CHUNK_RESULT "
+  else
+    echo "No valid JSON received for chunk: $RESOURCE_CHUNK"
+  fi
+done < <(split_into_chunks $CHUNK_SIZE "${DISKFUL_RESOURCES_ARRAY[@]}")
+
 RESOURCE_GROUPS=$(linstor -m --output-version=v1 resource-group list | jq -r '.[][] | {resource_group: .name, place_count: .select_filter.place_count}')
 ALL_STORAGE_POOLS_NODES=$(linstor -m --output-version=v1 storage-pool list | jq  '[.[][] | {storage_pool_name: .storage_pool_name, node_name: .node_name, free_capacity: .free_capacity}]')
 
