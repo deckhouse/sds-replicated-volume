@@ -46,6 +46,12 @@ spec:
 
     bb-log-info "we need drbd on node: "$is_linstor_data_node
 
+    is_ephemeral_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"node.deckhouse.io/type":"CloudEphemeral"})')
+    if [ is_ephemeral_node == "true" ]; then
+      bb-log-info "this is ephemeral node, DRBD installation rejected!"
+      is_linstor_data_node="false"
+    fi
+
     # Usermode helper has been disabled according to vendor recommendations. More information can be found here:
     # https://github.com/LINBIT/drbd/commit/819285d065f1f81bad7b97e32a64017b5e15948d
     # https://github.com/LINBIT/linstor-server/issues/121
