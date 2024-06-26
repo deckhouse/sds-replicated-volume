@@ -21,13 +21,14 @@ valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "
 valid_subcommands_ver=("controller" "c")
 valid_subcommands_lv=("resource" "r")
 valid_subcommands_advise=("advise" "adv")
-valid_subcommands_create_delete=("storage-pool" "node" "resource" "volume" "resource-definition")
+valid_subcommands_create=("node" "resource" "volume" "resource-definition")
+valid_subcommands_delete=("storage-pool" "node" "resource" "volume" "resource-definition")
 valid_keys=("-m" "--output-version=v1")
 allowed=false
 
 if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "This wrapper is designed to minimize manual intervention in the module's operation. We are continuously improving the built-in capabilities to avoid the need for console commands. Please try to use them as much as possible. The allowed commands at the moment are:"
-  echo "- storage-pool list/show/delete"
+  echo "- storage-pool list/show"
   echo "- node list/show"
   echo "- resource list/show/lv"
   echo "- volume list/show"
@@ -36,7 +37,8 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "- controller version"
   echo "- advise resource/maintainance"
   echo "- resource-definition delete"
-  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing storage-pool/node/resource/volume/resource-definition create/delete (!key before command is required!)"
+  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing node/resource/volume/resource-definition create/delete (!key before command is required!)"
+  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing storage-pool delete (!key before command is required!)"
   exit 0
 fi
 
@@ -79,9 +81,16 @@ done
    allowed=true
  fi
 
-# Allow dangerous commands (delete/create)
-if [[ $(echo "${valid_subcommands_create_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
-  if [[ "$2" == "create" || "$2" == "delete" ]]; then
+# Allow dangerous commands (create)
+if [[ $(echo "${valid_subcommands_create[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
+  if [[ "$2" == "create" ]]; then
+    allowed=true
+  fi
+fi
+
+# Allow dangerous commands (delete)
+if [[ $(echo "${valid_subcommands_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
+  if [[ "$2" == "delete" ]]; then
     allowed=true
   fi
 fi
