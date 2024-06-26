@@ -244,7 +244,17 @@ spec:
           - --csi-endpoint=unix://$(CSI_ENDPOINT)
           - --node=$(KUBE_NODE_NAME)
           - --linstor-endpoint=$(LS_CONTROLLERS)
+{{- if eq .Values.sdsReplicatedVolume.logLevel "ERROR" }}
+          - --log-level=error
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "WARN" }}
+          - --log-level=warn
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "INFO" }}
           - --log-level=info
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "DEBUG" }}
+          - --log-level=debug
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
+          - --log-level=debug
+{{- end }}
         env:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
