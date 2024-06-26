@@ -78,9 +78,11 @@ def main(ctx: hook.Context):
             except Exception as e:
                 print(f"migrate_sdsdrbd_crds.py: DRBDStoragePool {item['metadata']['name']} deletion error: {e}")
 
-
     except Exception as e:
-        print(f"migrate_sdsdrbd_crds.py: Exception occurred during the migration process from DRBDStoragePools to ReplicatedStoragePools: {e}")
+        if str(e.status) == '404':
+            pass
+        else:
+            print(f"migrate_sdsdrbd_crds.py: Exception occurred during the migration process from DRBDStoragePools to ReplicatedStoragePools: {e}")
 
     webhook_pod_ready = False
     tries = 0
@@ -129,7 +131,10 @@ def main(ctx: hook.Context):
                 print(f"migrate_sdsdrbd_crds.py: DRBDStorageClass {item['metadata']['name']} deletion error: {e}")
 
     except Exception as e:
-        print(f"migrate_sdsdrbd_crds.py: Exception occurred during the migration process from DRBDStorageClasses to ReplicatedStorageClasses: {e}")
+        if str(e.status) == '404':
+            pass
+        else:
+            print(f"migrate_sdsdrbd_crds.py: Exception occurred during the migration process from DRBDStorageClasses to ReplicatedStorageClasses: {e}")
 
 def create_custom_resource(group, plural, version, kind, name, spec):
     max_attempts = 3
