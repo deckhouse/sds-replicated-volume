@@ -61,6 +61,20 @@ spec:
       {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
+{{- if (include "helm_lib_ha_enabled" .) }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - sds-replicated-volume-controller
+                topologyKey: kubernetes.io/hostname
+              weight: 100
+{{- end }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: sds-replicated-volume-controller
