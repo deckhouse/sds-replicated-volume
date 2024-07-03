@@ -119,6 +119,7 @@ spec:
       fi
     fi
 
+    apt-get update
     apt-get -y install make gcc bind-utils patch mokutil
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
