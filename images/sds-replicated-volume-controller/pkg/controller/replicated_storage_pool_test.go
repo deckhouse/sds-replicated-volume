@@ -18,7 +18,8 @@ package controller_test
 
 import (
 	"context"
-	"sds-replicated-volume-controller/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/controller"
 	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
@@ -45,7 +46,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		log, _ = logger.NewLogger("2")
 		lc, _  = lapi.NewClient(lapi.Log(log))
 
-		testReplicatedSP = &v1alpha1.ReplicatedStoragePool{
+		testReplicatedSP = &srv.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      testName,
 				Namespace: testNameSpace,
@@ -110,7 +111,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 	})
 
 	It("GetLvmVolumeGroup", func() {
-		testLvm := &v1alpha1.LvmVolumeGroup{
+		testLvm := &snc.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      testName,
 				Namespace: testNameSpace,
@@ -222,27 +223,27 @@ shared_lvm_vg: LvmVolumeGroup type is not Local`
 })
 
 func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGroupName, namespace, lvmVGType, actualVGnameOnTheNode string, nodes []string, thinPools map[string]string) error {
-	vgNodes := make([]v1alpha1.LvmVolumeGroupNode, len(nodes))
+	vgNodes := make([]snc.LvmVolumeGroupNode, len(nodes))
 	for i, node := range nodes {
-		vgNodes[i] = v1alpha1.LvmVolumeGroupNode{Name: node}
+		vgNodes[i] = snc.LvmVolumeGroupNode{Name: node}
 	}
 
-	vgThinPools := make([]v1alpha1.SpecThinPool, 0)
+	vgThinPools := make([]snc.LvmVolumeGroupThinPoolSpec, 0)
 	for thinPoolname, thinPoolsize := range thinPools {
-		vgThinPools = append(vgThinPools, v1alpha1.SpecThinPool{Name: thinPoolname, Size: thinPoolsize})
+		vgThinPools = append(vgThinPools, snc.LvmVolumeGroupThinPoolSpec{Name: thinPoolname, Size: thinPoolsize})
 	}
 
-	lvmVolumeGroup := &v1alpha1.LvmVolumeGroup{
+	lvmVolumeGroup := &snc.LvmVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lvmVolumeGroupName,
 			Namespace: namespace,
 		},
-		Spec: v1alpha1.LvmVolumeGroupSpec{
+		Spec: snc.LvmVolumeGroupSpec{
 			Type:                  lvmVGType,
 			ActualVGNameOnTheNode: actualVGnameOnTheNode,
 			ThinPools:             vgThinPools,
 		},
-		Status: v1alpha1.LvmVolumeGroupStatus{
+		Status: snc.LvmVolumeGroupStatus{
 			Nodes: vgNodes,
 		},
 	}
@@ -252,22 +253,22 @@ func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGro
 
 func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, replicatedStoragePoolName, namespace, lvmType string, lvmVolumeGroups []map[string]string) error {
 
-	volumeGroups := make([]v1alpha1.ReplicatedStoragePoolLVMVolumeGroups, 0)
+	volumeGroups := make([]srv.ReplicatedStoragePoolLVMVolumeGroups, 0)
 	for i := range lvmVolumeGroups {
 		for key, value := range lvmVolumeGroups[i] {
-			volumeGroups = append(volumeGroups, v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+			volumeGroups = append(volumeGroups, srv.ReplicatedStoragePoolLVMVolumeGroups{
 				Name:         key,
 				ThinPoolName: value,
 			})
 		}
 	}
 
-	replicatedSP := &v1alpha1.ReplicatedStoragePool{
+	replicatedSP := &srv.ReplicatedStoragePool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      replicatedStoragePoolName,
 			Namespace: namespace,
 		},
-		Spec: v1alpha1.ReplicatedStoragePoolSpec{
+		Spec: srv.ReplicatedStoragePoolSpec{
 			Type:            "LVM",
 			LvmVolumeGroups: volumeGroups,
 		},

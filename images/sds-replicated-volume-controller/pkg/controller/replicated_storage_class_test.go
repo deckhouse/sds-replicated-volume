@@ -19,9 +19,8 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"reflect"
-	"sds-replicated-volume-controller/api/v1alpha1"
-	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/controller"
 	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
@@ -49,11 +48,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		log = logger.Logger{}
 
 		validZones                    = []string{"first", "second", "third"}
-		validSpecReplicatedSCTemplate = v1alpha1.ReplicatedStorageClass{
+		validSpecReplicatedSCTemplate = srv.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: testNameSpace,
 			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
+			Spec: srv.ReplicatedStorageClassSpec{
 				StoragePool:   "valid",
 				ReclaimPolicy: controller.ReclaimPolicyRetain,
 				Replication:   controller.ReplicationConsistencyAndAvailability,
@@ -64,11 +63,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		invalidValues               = []string{"first", "second"}
-		invalidReplicatedSCTemplate = v1alpha1.ReplicatedStorageClass{
+		invalidReplicatedSCTemplate = srv.ReplicatedStorageClass{
 			ObjectMeta: metav1.ObjectMeta{
 				Namespace: testNameSpace,
 			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
+			Spec: srv.ReplicatedStorageClassSpec{
 				StoragePool:   "",
 				ReclaimPolicy: "",
 				Replication:   controller.ReplicationConsistencyAndAvailability,
@@ -908,7 +907,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		// Expect(err).NotTo(HaveOccurred())
 		drbdNodeSelector := map[string]string{controller.SdsReplicatedVolumeNodeSelectorKey: ""}
 
-		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
+		replicatedStorageClasses := srv.ReplicatedStorageClassList{}
 		err = cl.List(ctx, &replicatedStorageClasses)
 		Expect(err).NotTo(HaveOccurred())
 

@@ -20,6 +20,8 @@ import (
 	"context"
 	"fmt"
 	lapi "github.com/LINBIT/golinstor/client"
+	"github.com/deckhouse/sds-replicated-volume/api/linstor"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -27,8 +29,6 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"os"
 	goruntime "runtime"
-	"sds-replicated-volume-controller/api/linstor"
-	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/config"
 	"sds-replicated-volume-controller/pkg/controller"
 	kubutils "sds-replicated-volume-controller/pkg/kubeutils"
@@ -41,7 +41,7 @@ import (
 
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-		v1alpha1.AddToScheme,
+		srv.AddToScheme,
 		linstor.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,

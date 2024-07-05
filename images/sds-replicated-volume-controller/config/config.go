@@ -85,3 +85,7 @@ func NewConfig() (*Options, error) {
 
 	return &opts, nil
 }
+
+type SdsReplicatedVolumeOperatorConfig struct {
+	NodeSelector map[string]string `yaml:"nodeSelector"`
+}

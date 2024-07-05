@@ -19,7 +19,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/controller"
 	"sds-replicated-volume-controller/pkg/logger"
 
@@ -202,7 +202,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 
 		log := logger.Logger{}
 		drbdNodeSelector := map[string]string{controller.SdsReplicatedVolumeNodeSelectorKey: ""}
-		replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
+		replicatedStorageClasses := srv.ReplicatedStorageClassList{}
 		Expect(err).NotTo(HaveOccurred())
 
 		err = controller.AddOrConfigureDRBDNodes(ctx, cl, mockLc, log, selectedKubeNodes, []linstor.Node{}, replicatedStorageClasses, drbdNodeSelector)

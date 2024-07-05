@@ -19,8 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"reflect"
-	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
 	"time"
@@ -133,7 +133,7 @@ func NewReplicatedStorageClass(
 	}
 
 	err = c.Watch(
-		source.Kind(mgr.GetCache(), &v1alpha1.ReplicatedStorageClass{}),
+		source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}),
 		handler.Funcs{
 			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 				log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
@@ -150,12 +150,12 @@ func NewReplicatedStorageClass(
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 
-				newReplicatedSC, ok := e.ObjectNew.(*v1alpha1.ReplicatedStorageClass)
+				newReplicatedSC, ok := e.ObjectNew.(*srv.ReplicatedStorageClass)
 				if !ok {
 					log.Error(err, "error get ObjectNew ReplicatedStorageClass")
 				}
 
-				oldReplicatedSC, ok := e.ObjectOld.(*v1alpha1.ReplicatedStorageClass)
+				oldReplicatedSC, ok := e.ObjectOld.(*srv.ReplicatedStorageClass)
 				if !ok {
 					log.Error(err, "error get ObjectOld ReplicatedStorageClass")
 				}
@@ -192,7 +192,7 @@ func NewReplicatedStorageClass(
 }
 
 func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logger.Logger) (bool, error) {
-	replicatedSC := &v1alpha1.ReplicatedStorageClass{}
+	replicatedSC := &srv.ReplicatedStorageClass{}
 	err := cl.Get(ctx, request.NamespacedName, replicatedSC)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -246,7 +246,7 @@ func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client,
 	return false, nil
 }
 
-func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log logger.Logger, replicatedSC *v1alpha1.ReplicatedStorageClass) error { // TODO: add shouldRequeue as returned value
+func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log logger.Logger, replicatedSC *srv.ReplicatedStorageClass) error { // TODO: add shouldRequeue as returned value
 	log.Info("[ReconcileReplicatedStorageClass] Validating ReplicatedStorageClass with name: " + replicatedSC.Name)
 
 	zones, err := GetClusterZones(ctx, cl)
@@ -365,7 +365,7 @@ func GetClusterZones(ctx context.Context, cl client.Client) (map[string]struct{}
 	return nodeZones, nil
 }
 
-func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *v1alpha1.ReplicatedStorageClass, zones map[string]struct{}) (bool, string) {
+func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass, zones map[string]struct{}) (bool, string) {
 	var (
 		failedMsgBuilder strings.Builder
 		validationPassed = true
@@ -436,7 +436,7 @@ func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, repli
 	return validationPassed, failedMsgBuilder.String()
 }
 
-func UpdateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *v1alpha1.ReplicatedStorageClass) error {
+func UpdateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) error {
 	err := cl.Update(ctx, replicatedSC)
 	if err != nil {
 		return err
@@ -476,7 +476,7 @@ func CompareStorageClasses(oldSC, newSC *storagev1.StorageClass) (bool, string) 
 	return equal, failedMsgBuilder.String()
 }
 
-func CreateStorageClass(ctx context.Context, cl client.Client, replicatedSC *v1alpha1.ReplicatedStorageClass) error {
+func CreateStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) error {
 	newStorageClass := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 
 	err := cl.Create(ctx, newStorageClass)
@@ -486,7 +486,7 @@ func CreateStorageClass(ctx context.Context, cl client.Client, replicatedSC *v1a
 	return nil
 }
 
-func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *v1alpha1.ReplicatedStorageClass) *storagev1.StorageClass {
+func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
 	var allowVolumeExpansion bool = true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
@@ -610,7 +610,7 @@ func RemoveString(slice []string, s string) (result []string) {
 }
 
 func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, currentReplicatedSCName string) (defaultReplicatedSCNames []string, defaultSCNames []string, err error) {
-	replicatedSCList := &v1alpha1.ReplicatedStorageClassList{}
+	replicatedSCList := &srv.ReplicatedStorageClassList{}
 	err = cl.List(ctx, replicatedSCList)
 	if err != nil {
 		return nil, nil, err
@@ -638,7 +638,7 @@ func findAnyDefaultStorageClassEntities(ctx context.Context, cl client.Client, c
 	return defaultReplicatedSCNames, defaultSCNames, nil
 }
 
-func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC *v1alpha1.ReplicatedStorageClass) error {
+func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) error {
 	storageClassList := &storagev1.StorageClassList{}
 	err := cl.List(ctx, storageClassList)
 	if err != nil {
@@ -691,7 +691,7 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 	return nil
 }
 
-func canRecreateStorageClass(replicatedSC *v1alpha1.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
+func canRecreateStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	delete(newSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
 	delete(oldSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)

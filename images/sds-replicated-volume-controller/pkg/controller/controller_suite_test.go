@@ -18,7 +18,7 @@ package controller_test
 
 import (
 	"context"
-	"sds-replicated-volume-controller/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"testing"
 
 	"github.com/google/uuid"
@@ -41,7 +41,7 @@ func TestController(t *testing.T) {
 func newFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
-	_ = v1alpha1.AddToScheme(s)
+	_ = srv.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 
@@ -49,21 +49,21 @@ func newFakeClient() client.WithWatch {
 	return cl
 }
 
-func getTestAPIStorageClasses(ctx context.Context, cl client.Client) (map[string]v1alpha1.ReplicatedStorageClass, error) {
-	resources := &v1alpha1.ReplicatedStorageClassList{
+func getTestAPIStorageClasses(ctx context.Context, cl client.Client) (map[string]srv.ReplicatedStorageClass, error) {
+	resources := &srv.ReplicatedStorageClassList{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "ReplicatedStorageClass",
 			APIVersion: "storage.deckhouse.io/v1alpha1",
 		},
 		ListMeta: metav1.ListMeta{},
-		Items:    []v1alpha1.ReplicatedStorageClass{},
+		Items:    []srv.ReplicatedStorageClass{},
 	}
 
 	if err := cl.List(ctx, resources); err != nil {
 		return nil, err
 	}
 
-	classes := make(map[string]v1alpha1.ReplicatedStorageClass, len(resources.Items))
+	classes := make(map[string]srv.ReplicatedStorageClass, len(resources.Items))
 	for _, res := range resources.Items {
 		classes[res.Name] = res
 	}

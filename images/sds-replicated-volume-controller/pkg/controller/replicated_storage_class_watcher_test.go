@@ -2,7 +2,7 @@ package controller
 
 import (
 	"context"
-	"sds-replicated-volume-controller/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
 	"testing"
 
@@ -35,13 +35,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp    = "sp3"
 		)
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: firstSp,
 				},
 			},
@@ -51,7 +51,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: secondSp,
 				},
 			},
@@ -61,7 +61,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: "unknown",
 				},
 			},
@@ -92,13 +92,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp:  {},
 		}
 
-		expected := map[string]v1alpha1.ReplicatedStorageClass{
+		expected := map[string]srv.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: firstSp,
 				},
 			},
@@ -108,7 +108,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: secondSp,
 				},
 			},
@@ -138,13 +138,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp    = "sp3"
 		)
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: firstSp,
 				},
 			},
@@ -154,7 +154,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: secondSp,
 				},
 			},
@@ -164,7 +164,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: thirdSp,
 				},
 			},
@@ -194,13 +194,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			secondSp: {},
 		}
 
-		expected := map[string]v1alpha1.ReplicatedStorageClass{
+		expected := map[string]srv.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: firstSp,
 				},
 			},
@@ -210,7 +210,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: secondSp,
 				},
 			},
@@ -235,13 +235,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			thirdSp:  {},
 		}
 
-		newExpected := map[string]v1alpha1.ReplicatedStorageClass{
+		newExpected := map[string]srv.ReplicatedStorageClass{
 			firstName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: firstSp,
 				},
 			},
@@ -251,7 +251,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: secondSp,
 				},
 			},
@@ -261,7 +261,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 					Namespace: namespace,
 				},
 
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					StoragePool: thirdSp,
 				},
 			},
@@ -336,7 +336,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			secondName = "second"
 		)
 
-		rscs := []v1alpha1.ReplicatedStorageClass{
+		rscs := []srv.ReplicatedStorageClass{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      firstName,
@@ -455,13 +455,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -543,13 +543,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -633,13 +633,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
@@ -706,13 +706,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -796,13 +796,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
@@ -875,13 +875,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -952,13 +952,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -1075,13 +1075,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					Topology:    TopologyTransZonal,
@@ -1193,13 +1193,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -1314,13 +1314,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -1402,13 +1402,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -1492,13 +1492,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
@@ -1583,13 +1583,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
@@ -1656,13 +1656,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -1734,13 +1734,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -1821,13 +1821,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyZonal,
 					StoragePool: rspName,
@@ -1953,13 +1953,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyTransZonal,
 					Zones:       []string{zone1, zone2, zone3},
@@ -2071,13 +2071,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			rspName: nodeList.Items,
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Topology:    TopologyIgnored,
 					StoragePool: rspName,
@@ -2179,13 +2179,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
@@ -2239,13 +2239,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
@@ -2299,13 +2299,13 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			}()
 		}
 
-		rscs := map[string]v1alpha1.ReplicatedStorageClass{
+		rscs := map[string]srv.ReplicatedStorageClass{
 			rscName: {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      rscName,
 					Namespace: namespace,
 				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
+				Spec: srv.ReplicatedStorageClassSpec{
 					Replication: ReplicationConsistencyAndAvailability,
 					Zones:       []string{zone1, zone2, zone3},
 					StoragePool: rspName,
@@ -2352,7 +2352,7 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 func newFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
-	_ = v1alpha1.AddToScheme(s)
+	_ = srv.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 

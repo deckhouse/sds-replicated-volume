@@ -19,9 +19,10 @@ package controller
 import (
 	"context"
 	"fmt"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"net"
 	"reflect"
-	sdsapi "sds-replicated-volume-controller/api/v1alpha1"
+	"sds-replicated-volume-controller/config"
 	"sds-replicated-volume-controller/pkg/logger"
 	"slices"
 	"strings"
@@ -167,7 +168,7 @@ func reconcileLinstorNodes(
 		return err
 	}
 
-	replicatedStorageClasses := sdsapi.ReplicatedStorageClassList{}
+	replicatedStorageClasses := srv.ReplicatedStorageClassList{}
 	err = cl.List(ctx, &replicatedStorageClasses)
 	if err != nil {
 		log.Error(err, "Failed get DRBD storage classes")
@@ -348,7 +349,7 @@ func removeDRBDNodes(
 	log logger.Logger,
 	drbdNodesToRemove v1.NodeList,
 	linstorSatelliteNodes []lclient.Node,
-	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses srv.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 ) error {
 	for _, drbdNodeToRemove := range drbdNodesToRemove.Items {
@@ -380,7 +381,7 @@ func AddOrConfigureDRBDNodes(
 	log logger.Logger,
 	selectedKubernetesNodes *v1.NodeList,
 	linstorNodes []lclient.Node,
-	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses srv.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 ) error {
 	for _, selectedKubernetesNode := range selectedKubernetesNodes.Items {
@@ -545,7 +546,7 @@ func GetAllKubernetesNodes(ctx context.Context, cl client.Client) (*v1.NodeList,
 }
 
 func GetNodeSelectorFromConfig(secret v1.Secret) (map[string]string, error) {
-	var secretConfig sdsapi.SdsReplicatedVolumeOperatorConfig
+	var secretConfig config.SdsReplicatedVolumeOperatorConfig
 	err := yaml.Unmarshal(secret.Data["config"], &secretConfig)
 	if err != nil {
 		return nil, err
@@ -616,7 +617,7 @@ func ReconcileKubernetesNodeLabels(
 	cl client.Client,
 	log logger.Logger,
 	kubernetesNode v1.Node,
-	replicatedStorageClasses sdsapi.ReplicatedStorageClassList,
+	replicatedStorageClasses srv.ReplicatedStorageClassList,
 	drbdNodeSelector map[string]string,
 	isDRBDNode bool,
 ) error {
@@ -672,7 +673,7 @@ func ReconcileKubernetesNodeLabels(
 	return nil
 }
 
-func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, replicatedStorageClasses sdsapi.ReplicatedStorageClassList) map[string]string {
+func GetStorageClassesLabelsForNode(kubernetesNode v1.Node, replicatedStorageClasses srv.ReplicatedStorageClassList) map[string]string {
 	storageClassesLabels := make(map[string]string)
 
 	for _, replicatedStorageClass := range replicatedStorageClasses.Items {

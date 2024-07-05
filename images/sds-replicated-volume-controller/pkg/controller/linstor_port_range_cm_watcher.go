@@ -19,8 +19,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	"reflect"
-	"sds-replicated-volume-controller/api/linstor"
 	"sds-replicated-volume-controller/pkg/logger"
 	"strconv"
 	"time"
