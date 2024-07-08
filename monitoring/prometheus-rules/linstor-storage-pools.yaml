@@ -32,17 +32,17 @@
         plk_grouped_by__d8_linstor_storage_pool_health: "D8LinstorStoragePoolHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: Storage pool running out of free space
         description: |
-          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 20% space left. Current free space: {{ $value }}%
+          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 10% space left. Current free space: {{ $value }}%
 
           The recommended course of action:
           1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
-          3. Consider adding more backing devices or relocating some resources to other nodes:
+          3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+          4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
              ```
-             alias linstor="kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor"
-             linstor resource-definition auto-place <res> --place-count +1 -s {{ $labels.storage_pool }}
-             linstor resource-definition wait-sync <res>
-             linstor resource delete {{ $labels.node }} <res>
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
              ```
 
     - alert: D8LinstorStoragePoolFreeCapacityLessThen10percents
@@ -63,12 +63,12 @@
           The recommended course of action:
           1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
-          3. Consider adding more backing devices or relocating some resources to other nodes:
+          3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+          4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
              ```
-             alias linstor="kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor"
-             linstor resource-definition auto-place <res> --place-count +1 -s {{ $labels.storage_pool }}
-             linstor resource-definition wait-sync <res>
-             linstor resource delete {{ $labels.node }} <res>
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
              ```
 
     - alert: D8LinstorStoragePoolFreeCapacityLessThen5percents
@@ -84,17 +84,17 @@
         plk_grouped_by__d8_linstor_storage_pool_health: "D8LinstorStoragePoolHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: Storage pool running out of free space
         description: |
-          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 5% space left. Current free space: {{ $value }}%
+          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 10% space left. Current free space: {{ $value }}%
 
           The recommended course of action:
           1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
-          3. Consider adding more backing devices or relocating some resources to other nodes:
+          3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+          4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
              ```
-             alias linstor="kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor"
-             linstor resource-definition auto-place <res> --place-count +1 -s {{ $labels.storage_pool }}
-             linstor resource-definition wait-sync <res>
-             linstor resource delete {{ $labels.node }} <res>
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
              ```
 
     - alert: D8LinstorStoragePoolFreeCapacityLessThen1percent
@@ -110,15 +110,15 @@
         plk_grouped_by__d8_linstor_storage_pool_health: "D8LinstorStoragePoolHealth,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         summary: Storage pool running out of free space
         description: |
-          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 1% space left. Current free space: {{ $value }}%
+          LINSTOR storage pool {{ $labels.storage_pool }} on node {{ $labels.node }} has less than 10% space left. Current free space: {{ $value }}%
 
           The recommended course of action:
           1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
-          3. Consider adding more backing devices or relocating some resources to other nodes:
+          3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+          4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
              ```
-             alias linstor="kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor"
-             linstor resource-definition auto-place <res> --place-count +1 -s {{ $labels.storage_pool }}
-             linstor resource-definition wait-sync <res>
-             linstor resource delete {{ $labels.node }} <res>
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+             kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
              ```

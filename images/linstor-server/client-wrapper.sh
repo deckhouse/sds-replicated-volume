@@ -88,6 +88,10 @@ fi
 
 # check for allowed linstor ... l and linstor ... list commands
 if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
+  if [[ "$2" == "wait-sync" ]]; then
+    allowed=true
+  fi
+
   if [[ "$2" == "l" || "$2" == "list" ]]; then
     allowed=true
   fi
