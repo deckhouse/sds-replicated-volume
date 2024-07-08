@@ -2417,7 +2417,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "LINSTOR / DRBD",
+  "title": "SDS-REPLICATED-VOLUME / DRBD",
   "uid": "f_tZtVlMz",
   "version": 21,
   "weekStart": ""
