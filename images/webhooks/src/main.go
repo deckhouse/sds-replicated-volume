@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2024 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,28 +18,72 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"net/http"
-	"webhooks/validators"
+	"os"
+	"webhooks/handlers"
 
-	"k8s.io/klog/v2"
+	"github.com/sirupsen/logrus"
+	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
+	storagev1 "k8s.io/api/storage/v1"
 )
 
-var (
-	tlscert, tlskey string
-)
+type config struct {
+	certFile string
+	keyFile  string
+}
+
+//goland:noinspection SpellCheckingInspection
+func httpHandlerHealthz(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "Ok.")
+}
+
+func initFlags() config {
+	cfg := config{}
+
+	fl := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fl.StringVar(&cfg.certFile, "tls-cert-file", "", "TLS certificate file")
+	fl.StringVar(&cfg.keyFile, "tls-key-file", "", "TLS key file")
+
+	fl.Parse(os.Args[1:])
+	return cfg
+}
 
 const (
-	port = ":8443"
+	port           = ":8443"
+	RSCValidatorId = "RSCValidator"
+	SCValidatorId  = "SCValidator"
 )
 
 func main() {
-	flag.StringVar(&tlscert, "tlsCertFile", "/etc/certs/tls.crt",
-		"File containing a certificate for HTTPS.")
-	flag.StringVar(&tlskey, "tlsKeyFile", "/etc/certs/tls.key",
-		"File containing a private key for HTTPS.")
-	flag.Parse()
+	logrusLogEntry := logrus.NewEntry(logrus.New())
+	logrusLogEntry.Logger.SetLevel(logrus.DebugLevel)
+	logger := kwhlogrus.NewLogrus(logrusLogEntry)
 
-	http.HandleFunc("/sc-validate", validators.SCValidate)
-	http.HandleFunc("/rsc-validate", validators.RSCValidate)
-	klog.Fatal(http.ListenAndServeTLS(port, tlscert, tlskey, nil))
+	cfg := initFlags()
+
+	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorId, &srv.ReplicatedStorageClass{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating rscValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
+	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorId, &storagev1.StorageClass{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating scValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
+	mux.Handle("/sc-validate", scValidatingWebhookHandler)
+	mux.HandleFunc("/healthz", httpHandlerHealthz)
+
+	logger.Infof("Listening on %s", port)
+	err = http.ListenAndServeTLS(port, cfg.certFile, cfg.keyFile, mux)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error serving webhook: %s", err)
+		os.Exit(1)
+	}
 }
