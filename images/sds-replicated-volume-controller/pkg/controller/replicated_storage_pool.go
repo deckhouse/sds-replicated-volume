@@ -20,8 +20,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"reflect"
-	"sds-replicated-volume-controller/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
 	"sort"
 	"strings"
@@ -79,7 +80,7 @@ func NewReplicatedStoragePool(
 	}
 
 	err = c.Watch(
-		source.Kind(mgr.GetCache(), &v1alpha1.ReplicatedStoragePool{}),
+		source.Kind(mgr.GetCache(), &srv.ReplicatedStoragePool{}),
 		handler.Funcs{
 			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
 				log.Info("START from CREATE reconcile of Replicated storage pool with name: " + e.Object.GetName())
@@ -96,8 +97,8 @@ func NewReplicatedStoragePool(
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 				log.Info("START from UPDATE reconcile of Replicated storage pool with name: " + e.ObjectNew.GetName())
 
-				oldReplicatedSP := e.ObjectOld.(*v1alpha1.ReplicatedStoragePool)
-				newReplicatedSP := e.ObjectNew.(*v1alpha1.ReplicatedStoragePool)
+				oldReplicatedSP := e.ObjectOld.(*srv.ReplicatedStoragePool)
+				newReplicatedSP := e.ObjectNew.(*srv.ReplicatedStoragePool)
 				if reflect.DeepEqual(oldReplicatedSP.Spec, newReplicatedSP.Spec) {
 					log.Info("StoragePool spec not changed. Nothing to do") // TODO: change to debug
 					log.Info("END from UPDATE reconcile of Replicated storage pool with name: " + e.ObjectNew.GetName())
@@ -132,7 +133,7 @@ func NewReplicatedStoragePool(
 }
 
 func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, request reconcile.Request, log logger.Logger, lc *lapi.Client) (bool, error) {
-	replicatedSP := &v1alpha1.ReplicatedStoragePool{}
+	replicatedSP := &srv.ReplicatedStoragePool{}
 	err := cl.Get(ctx, request.NamespacedName, replicatedSP)
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -148,7 +149,7 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 	return false, nil
 }
 
-func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *v1alpha1.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
+func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *srv.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
 	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Namespace, replicatedSP.Spec.Type, replicatedSP.Spec.LvmVolumeGroups)
 	if !ok {
 		replicatedSP.Status.Phase = "Failed"
@@ -266,7 +267,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 	return nil
 }
 
-func UpdateReplicatedStoragePool(ctx context.Context, cl client.Client, replicatedSP *v1alpha1.ReplicatedStoragePool) error {
+func UpdateReplicatedStoragePool(ctx context.Context, cl client.Client, replicatedSP *srv.ReplicatedStoragePool) error {
 	err := cl.Update(ctx, replicatedSP)
 	if err != nil {
 		return err
@@ -274,8 +275,8 @@ func UpdateReplicatedStoragePool(ctx context.Context, cl client.Client, replicat
 	return nil
 }
 
-func GetReplicatedStoragePool(ctx context.Context, cl client.Client, namespace, name string) (*v1alpha1.ReplicatedStoragePool, error) {
-	obj := &v1alpha1.ReplicatedStoragePool{}
+func GetReplicatedStoragePool(ctx context.Context, cl client.Client, namespace, name string) (*srv.ReplicatedStoragePool, error) {
+	obj := &srv.ReplicatedStoragePool{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      name,
 		Namespace: namespace,
@@ -286,8 +287,8 @@ func GetReplicatedStoragePool(ctx context.Context, cl client.Client, namespace, 
 	return obj, err
 }
 
-func GetLvmVolumeGroup(ctx context.Context, cl client.Client, namespace, name string) (*v1alpha1.LvmVolumeGroup, error) {
-	obj := &v1alpha1.LvmVolumeGroup{}
+func GetLvmVolumeGroup(ctx context.Context, cl client.Client, namespace, name string) (*snc.LvmVolumeGroup, error) {
+	obj := &snc.LvmVolumeGroup{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      name,
 		Namespace: namespace,
@@ -298,13 +299,13 @@ func GetLvmVolumeGroup(ctx context.Context, cl client.Client, namespace, name st
 	return obj, err
 }
 
-func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, namespace, lvmType string, replicatedSPLVMVolumeGroups []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]v1alpha1.LvmVolumeGroup) {
+func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, namespace, lvmType string, replicatedSPLVMVolumeGroups []srv.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]snc.LvmVolumeGroup) {
 	var lvmVolumeGroupName string
 	var nodeName string
 	nodesWithlvmVolumeGroups := make(map[string]string)
 	invalidLvmVolumeGroups := make(map[string]string)
 	lvmVolumeGroupsNames := make(map[string]bool)
-	lvmVolumeGroups := make(map[string]v1alpha1.LvmVolumeGroup)
+	lvmVolumeGroups := make(map[string]snc.LvmVolumeGroup)
 
 	for _, g := range replicatedSPLVMVolumeGroups {
 		lvmVolumeGroupName = g.Name

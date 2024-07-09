@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sds-replicated-volume-controller/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"sds-replicated-volume-controller/pkg/logger"
 	"time"
 
@@ -107,10 +107,10 @@ func ReconcileReplicatedStorageClassPools(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	rscs map[string]v1alpha1.ReplicatedStorageClass,
+	rscs map[string]srv.ReplicatedStorageClass,
 	sps map[string][]lapi.StoragePool,
-) map[string]v1alpha1.ReplicatedStorageClass {
-	healthy := make(map[string]v1alpha1.ReplicatedStorageClass, len(rscs))
+) map[string]srv.ReplicatedStorageClass {
+	healthy := make(map[string]srv.ReplicatedStorageClass, len(rscs))
 	for _, rsc := range rscs {
 		if _, exist := sps[rsc.Spec.StoragePool]; exist {
 			healthy[rsc.Name] = rsc
@@ -131,7 +131,7 @@ func ReconcileReplicatedStorageClassReplication(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	rscs map[string]v1alpha1.ReplicatedStorageClass,
+	rscs map[string]srv.ReplicatedStorageClass,
 	spNodes map[string][]v1.Node,
 ) {
 	log.Info("[ReconcileReplicatedStorageClassReplication] starts reconcile")
@@ -210,11 +210,11 @@ func ReconcileReplicatedStorageClassZones(
 	ctx context.Context,
 	cl client.Client,
 	log logger.Logger,
-	rscs map[string]v1alpha1.ReplicatedStorageClass,
+	rscs map[string]srv.ReplicatedStorageClass,
 	rspZones map[string][]string,
-) map[string]v1alpha1.ReplicatedStorageClass {
+) map[string]srv.ReplicatedStorageClass {
 	log.Info("[ReconcileReplicatedStorageClassZones] starts reconcile")
-	healthyDSCs := make(map[string]v1alpha1.ReplicatedStorageClass, len(rscs))
+	healthyDSCs := make(map[string]srv.ReplicatedStorageClass, len(rscs))
 
 	for _, rsc := range rscs {
 		var (
@@ -243,7 +243,7 @@ func ReconcileReplicatedStorageClassZones(
 	return healthyDSCs
 }
 
-func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc v1alpha1.ReplicatedStorageClass, label string) {
+func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc srv.ReplicatedStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
@@ -275,7 +275,7 @@ func setNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client,
 	log.Info(fmt.Sprintf("[removeNonOperationalLabelOnStorageClass] successfully set a NonOperational label on the Kubernetes Storage Class %s", rsc.Name))
 }
 
-func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc v1alpha1.ReplicatedStorageClass, label string) {
+func removeNonOperationalLabelOnStorageClass(ctx context.Context, cl client.Client, log logger.Logger, rsc srv.ReplicatedStorageClass, label string) {
 	sc := &storagev1.StorageClass{}
 
 	err := cl.Get(ctx, client.ObjectKey{
@@ -341,15 +341,15 @@ func GetAllLinstorStoragePools(ctx context.Context, lc *lapi.Client) (map[string
 	return result, nil
 }
 
-func GetAllReplicatedStorageClasses(ctx context.Context, cl client.Client) (map[string]v1alpha1.ReplicatedStorageClass, error) {
-	l := &v1alpha1.ReplicatedStorageClassList{}
+func GetAllReplicatedStorageClasses(ctx context.Context, cl client.Client) (map[string]srv.ReplicatedStorageClass, error) {
+	l := &srv.ReplicatedStorageClassList{}
 
 	err := cl.List(ctx, l)
 	if err != nil {
 		return nil, err
 	}
 
-	rscs := make(map[string]v1alpha1.ReplicatedStorageClass, len(l.Items))
+	rscs := make(map[string]srv.ReplicatedStorageClass, len(l.Items))
 	for _, rsc := range l.Items {
 		rscs[rsc.Name] = rsc
 	}
