@@ -24,17 +24,19 @@ import (
 
 // ScanInterval Scan block device interval seconds
 const (
-	ScanInterval                        = 10
-	LinstorResourcesReconcileInterval   = 120
-	ReplicatedStorageClassWatchInterval = 120
-	ConfigSecretName                    = "d8-sds-replicated-volume-controller-config"
-	LinstorLeaseName                    = "linstor"
-	NodeName                            = "NODE_NAME"
-	MetricsPortEnv                      = "METRICS_PORT"
-	ControllerNamespaceEnv              = "CONTROLLER_NAMESPACE"
-	HardcodedControllerNS               = "d8-sds-replicated-volume"
-	ControllerName                      = "sds-replicated-volume-controller"
-	LogLevel                            = "LOG_LEVEL"
+	ScanInterval                         = 10
+	LinstorResourcesReconcileInterval    = 120
+	ReplicatedStorageClassWatchInterval  = 120
+	ConfigSecretName                     = "d8-sds-replicated-volume-controller-config"
+	LinstorLeaseName                     = "linstor"
+	NodeName                             = "NODE_NAME"
+	DefaultHealthProbeBindAddressEnvName = "HEALTH_PROBE_BIND_ADDRESS"
+	DefaultHealthProbeBindAddress        = ":8081"
+	MetricsPortEnv                       = "METRICS_PORT"
+	ControllerNamespaceEnv               = "CONTROLLER_NAMESPACE"
+	HardcodedControllerNS                = "d8-sds-replicated-volume"
+	ControllerName                       = "sds-replicated-volume-controller"
+	LogLevel                             = "LOG_LEVEL"
 )
 
 type Options struct {
@@ -44,6 +46,7 @@ type Options struct {
 	ConfigSecretName                    string
 	LinstorLeaseName                    string
 	MetricsPort                         string
+	HealthProbeBindAddress              string
 	ControllerNamespace                 string
 	Loglevel                            logger.Verbosity
 }
@@ -66,6 +69,11 @@ func NewConfig() (*Options, error) {
 	opts.MetricsPort = os.Getenv(MetricsPortEnv)
 	if opts.MetricsPort == "" {
 		opts.MetricsPort = ":8080"
+	}
+
+	opts.HealthProbeBindAddress = os.Getenv(DefaultHealthProbeBindAddressEnvName)
+	if opts.HealthProbeBindAddress == "" {
+		opts.HealthProbeBindAddress = DefaultHealthProbeBindAddress
 	}
 
 	opts.ControllerNamespace = os.Getenv(ControllerNamespaceEnv)
