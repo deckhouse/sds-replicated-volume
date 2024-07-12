@@ -82,6 +82,21 @@ spec:
         - name: sds-replicated-volume-controller
           image: {{ include "helm_lib_module_image" (list . "sdsReplicatedVolumeController") }}
           imagePullPolicy: IfNotPresent
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+              scheme: HTTP
+            initialDelaySeconds: 5
+            failureThreshold: 2
+            periodSeconds: 1
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+              scheme: HTTP
+            periodSeconds: 1
+            failureThreshold: 3
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
