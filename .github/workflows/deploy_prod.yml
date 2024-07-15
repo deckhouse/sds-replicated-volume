@@ -34,6 +34,9 @@ on:
       fe:
         type: boolean
         description: FE
+      se:
+        type: boolean
+        description: SE
 
       tag:
         description: "Tag of the module, example v1.21.1"
@@ -104,6 +107,26 @@ jobs:
       - name: SET VAR
         run: |
           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
+      - name: ECHO VAR
+        run: |
+          echo $MODULES_MODULE_SOURCE
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - name: Check previous release
+        run: |
+          chmod +x .github/check_previous_channel_release.sh
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME fe $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
+      - uses: deckhouse/modules-actions/deploy@v1
+
+  job-SE:
+    name: Edition SE
+    runs-on: ubuntu-latest
+    if: github.event.inputs.se == 'true'
+    steps:
+      - run: echo "SE"
+      - name: SET VAR
+        run: |
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se/modules" >> "$GITHUB_ENV"
       - name: ECHO VAR
         run: |
           echo $MODULES_MODULE_SOURCE
