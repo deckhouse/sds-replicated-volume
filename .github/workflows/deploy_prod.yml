@@ -135,5 +135,5 @@ jobs:
       - name: Check previous release
         run: |
           chmod +x .github/check_previous_channel_release.sh
-          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME fe $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME se $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
       - uses: deckhouse/modules-actions/deploy@v1
