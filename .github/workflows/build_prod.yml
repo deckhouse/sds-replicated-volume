@@ -71,3 +71,22 @@ jobs:
       - uses: actions/checkout@v4
       - uses: deckhouse/modules-actions/setup@v1
       - uses: deckhouse/modules-actions/build@v1
+
+  prod_se_setup_build:
+    runs-on: ubuntu-latest
+    name: Build and Push SE
+    steps:
+      - name: SET VAR
+        run: |
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se/modules" >> "$GITHUB_ENV"
+      - run: |
+          echo $MODULES_REGISTRY
+          echo $MODULES_MODULE_NAME
+          echo $MODULES_MODULE_SOURCE
+          echo $MODULES_MODULE_TAG
+        shell: bash
+        name: Show vars
+
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - uses: deckhouse/modules-actions/build@v1
