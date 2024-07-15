@@ -34,6 +34,9 @@ on:
       fe:
         type: boolean
         description: FE
+      se:
+        type: boolean
+        description: SE
 
       tag:
         description: "Tag of the module, example v1.21.1"
