@@ -24,6 +24,8 @@ import (
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"slices"
 )
@@ -39,9 +41,26 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		return &kwhvalidating.ValidatorResult{}, nil
 	}
 
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		klog.Fatal(err.Error())
+	}
+
+	staticClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Fatal(err)
+	}
+
 	cl, err := NewKubeClient("")
 	if err != nil {
 		klog.Fatal(err)
+	}
+
+	var ephemeralNodesList []string
+
+	nodes, _ := staticClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: "node.deckhouse.io/type=CloudEphemeral"})
+	for _, node := range nodes.Items {
+		ephemeralNodesList = append(ephemeralNodesList, node.Name)
 	}
 
 	listDevice := &snc.LvmVolumeGroupList{}
@@ -83,6 +102,14 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 							thinPoolExists = true
 							break
 						}
+					}
+				}
+
+				for _, lvgNode := range lvmVG.Status.Nodes {
+					if slices.Contains(ephemeralNodesList, lvgNode.Name) {
+						klog.Infof("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
+						return &kwhvalidating.ValidatorResult{Valid: false, Message: fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)},
+							nil
 					}
 				}
 				break

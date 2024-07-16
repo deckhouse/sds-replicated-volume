@@ -52,8 +52,8 @@ func initFlags() config {
 
 const (
 	port           = ":8443"
-	RSPValidatorId = "RSPValidator"
 	RSCValidatorId = "RSCValidator"
+	RSPValidatorId = "RSPValidator"
 	SCValidatorId  = "SCValidator"
 )
 
@@ -84,8 +84,8 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
-	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
+	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)
