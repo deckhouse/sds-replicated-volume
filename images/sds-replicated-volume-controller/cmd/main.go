@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	lapi "github.com/LINBIT/golinstor/client"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
@@ -42,6 +43,7 @@ import (
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		srv.AddToScheme,
+		snc.AddToScheme,
 		linstor.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
