@@ -293,11 +293,45 @@ linstor-20240425074718-backup-completed      Opaque                           0 
 
 ```
 
-Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable. 
+Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable.
 For example, let's take the label of the most recent copy from the output above:
-
 ```shell
 LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718"
+```
+
+Create a temporary directory to store archive parts:
+```shell
+TMPDIR=$(mktemp -d)
+echo "Временный каталог: $TMPDIR"
+```
+
+Next, create an empty archive and combine the secret data into one file:
+```shell
+COMBINED="${BACKUP_NAME}_combined.tar"
+> "$COMBINED"
+```
+
+Then, retrieve the list of secrets by label, decrypt the data, and place the backup data into the archive:
+```shell
+SECRETS=$(kubectl get secret -n "$NAMESPACE" -l "$LABEL_SELECTOR" --sort-by=.metadata.name -o jsonpath="{.items[*].metadata.name}")
+
+for SECRET in $SECRETS; do
+  echo "Process: $SECRET"
+  kubectl get secret -n "$NAMESPACE" "$SECRET" -o jsonpath="{.data.filepart}" | base64 --decode >> "$COMBINED"
+done
+```
+
+Unpack the combined tar file to obtain the backup resources:
+```shell
+mkdir -p "./backup"
+tar -xf "$COMBINED" -C "./backup --strip-components=2
+```
+
+Check the contents of the backup:
+```shell
+ls ./backup
+```
+
 
 
 ## Service pods of sds-replicated-volume components fail to be created on the node I need
