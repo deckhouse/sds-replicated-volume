@@ -8,8 +8,6 @@ shell:
   beforeInstall:
     - apt-get update
     - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wget unzip git python3 python3-pip jq curl gettext-base bsdextrautils vim
-    - curl -LO https://dl.k8s.io/release/v1.26.0/bin/linux/amd64/kubectl
-    - install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-    - pip3 install kubernetes==28.1.0
+    - pip3 install kubernetes==30.1.0
   setup:
     - chmod 755 /backup.py

@@ -293,12 +293,61 @@ linstor-20240425074718-backup-completed      Opaque                           0 
 
 ```
 
-Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable. 
+Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable.
 For example, let's take the label of the most recent copy from the output above:
 
 ```shell
 LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718"
+```
 
+Create a temporary directory to store archive parts:
+```shell
+TMPDIR=$(mktemp -d)
+echo "Временный каталог: $TMPDIR"
+```
+
+Next, create an empty archive and combine the secret data into one file:
+```shell
+COMBINED="${BACKUP_NAME}_combined.tar"
+> "$COMBINED"
+```
+
+Then, retrieve the list of secrets by label, decrypt the data, and place the backup data into the archive:
+```shell
+MOBJECTS=$(kubectl get rsmb -l "$LABEL_SELECTOR" --sort-by=.metadata.name -o jsonpath="{.items[*].metadata.name}")
+
+for MOBJECT in $MOBJECTS; do
+  echo "Process: $MOBJECT"
+  kubectl get rsmb "$MOBJECT" -o jsonpath="{.data}" | base64 --decode >> "$COMBINED"
+done
+```
+
+Unpack the combined tar file to obtain the backup resources:
+```shell
+mkdir -p "./backup"
+tar -xf "$COMBINED" -C "./backup --strip-components=2
+```
+Check the contents of the backup:
+```shell
+ls ./backup
+```
+```shell
+ebsremotes.yaml                    layerdrbdvolumedefinitions.yaml        layerwritecachevolumes.yaml  propscontainers.yaml      satellitescapacity.yaml  secidrolemap.yaml         trackingdate.yaml
+files.yaml                         layerdrbdvolumes.yaml                  linstorremotes.yaml          resourceconnections.yaml  schedules.yaml           secobjectprotection.yaml  volumeconnections.yaml
+keyvaluestore.yaml                 layerluksvolumes.yaml                  linstorversion.yaml          resourcedefinitions.yaml  secaccesstypes.yaml      secroles.yaml             volumedefinitions.yaml
+layerbcachevolumes.yaml            layeropenflexresourcedefinitions.yaml  nodeconnections.yaml         resourcegroups.yaml       secaclmap.yaml           sectyperules.yaml         volumegroups.yaml
+layercachevolumes.yaml             layeropenflexvolumes.yaml              nodenetinterfaces.yaml       resources.yaml            secconfiguration.yaml    sectypes.yaml             volumes.yaml
+layerdrbdresourcedefinitions.yaml  layerresourceids.yaml                  nodes.yaml                   rollback.yaml             secdfltroles.yaml        spacehistory.yaml
+layerdrbdresources.yaml            layerstoragevolumes.yaml               nodestorpool.yaml            s3remotes.yaml            secidentities.yaml       storpooldefinitions.yaml
+```
+If everything is fine, restore the desired entity by applying the YAML file:
+```shell
+kubectl apply -f %something%.yaml
+```
+Or apply bulk-apply if full restoration is needed:
+```shell
+kubectl apply -f ./backup/
+```
 
 ## Service pods of sds-replicated-volume components fail to be created on the node I need
 
