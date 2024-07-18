@@ -27,14 +27,13 @@ spec:
 
     # Unpack package from module image and run install script
     # bb-rp-from-module-image-install package:digest registry_auth scheme registry_address registry_path
-    # TODO: Get rid of this in favour of standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
     bb-rp-from-module-image-install() {
       local MODULE_PACKAGE=$1
       local REGISTRY_AUTH=$2
       local SCHEME=$3
       local REGISTRY_ADDRESS=$4
       local REGISTRY_PATH=$5
-    
+
       bb-rp-install $MODULE_PACKAGE
     }
 
@@ -84,6 +83,7 @@ spec:
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
     MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
     MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
+    MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
 
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
@@ -101,8 +101,11 @@ spec:
         rmmod drbd || true
       fi
 
-      # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+      {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
       bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
 
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
@@ -127,8 +130,11 @@ spec:
       exit 0
     fi
 
-    # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+    {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+    bb-package-module-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    {{- else }}
     bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+    {{- end }}
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
