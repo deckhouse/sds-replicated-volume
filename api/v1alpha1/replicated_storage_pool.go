@@ -40,7 +40,7 @@ type ReplicatedStoragePoolStatus struct {
 	Reason string `json:"reason"`
 }
 
-// ReplicatedStoragePoolList contains a list of empty block device
+// ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
 type ReplicatedStoragePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`

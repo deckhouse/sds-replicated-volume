@@ -52,6 +52,7 @@ func initFlags() config {
 
 const (
 	port           = ":8443"
+	RSPValidatorId = "RSPValidator"
 	RSCValidatorId = "RSCValidator"
 	SCValidatorId  = "SCValidator"
 )
@@ -62,6 +63,12 @@ func main() {
 	logger := kwhlogrus.NewLogrus(logrusLogEntry)
 
 	cfg := initFlags()
+
+	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorId, &srv.ReplicatedStoragePool{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating rspValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
 
 	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorId, &srv.ReplicatedStorageClass{}, logger)
 	if err != nil {
@@ -77,6 +84,7 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
+	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
