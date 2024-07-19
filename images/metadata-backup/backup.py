@@ -25,20 +25,26 @@ import tarfile
 import tempfile
 import yaml
 
+objGroup = 'storage.deckhouse.io'
+objKind = 'ReplicatedStorageMetadataBackup'
+objKindPlural = 'replicatedstoragemetadatabackups'
+objVersion = 'v1alpha1'
+linstorCRDGroup = 'internal.linstor.linbit.com'
+srvBackupLabelKey = 'sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup'
 
-def create_backup(backup_type, namespace, labels={}):
+def create_backup(backup_type, labels={}):
     temp_path = tempfile.mkdtemp()
-    backup_archive = tarfile.open(f'{temp_path}/linstor_{backup_type}.tar', "w")
+    backup_archive = tarfile.open(f'{temp_path}/sds-replicated-volume_{backup_type}.tar', "w")
 
     for item in kubernetes.client.ApiextensionsV1Api().list_custom_resource_definition().items:
-        if item.spec.group != 'internal.linstor.linbit.com':
+        if item.spec.group != linstorCRDGroup:
             continue
 
         crd_name_plural = item.spec.names.plural
         version = item.spec.versions[-1]
         crd_version = version.name
 
-        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group='internal.linstor.linbit.com',
+        custom_object = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=linstorCRDGroup,
                                                                                         plural=crd_name_plural,
                                                                                         version=crd_version)
 
@@ -48,29 +54,46 @@ def create_backup(backup_type, namespace, labels={}):
 
     backup_archive.close()
 
-    with open(f'{temp_path}/linstor_{backup_type}.tar', 'rb') as backup_archive:
+    with open(f'{temp_path}/sds-replicated-volume_{backup_type}.tar', 'rb') as backup_archive:
         encoded_string = base64.b64encode(backup_archive.read())
 
-    step = 262144 # 256kB
+    step = 262144 # 256KB
     for chunk_pos in range(0, len(encoded_string) // step + 1, 1):
-        body = kubernetes.client.V1Secret(
-            api_version="v1",
-            kind="Secret",
-            metadata=kubernetes.client.V1ObjectMeta(name=f'linstor-{backup_type}-backup-{chunk_pos}',
-                                                    namespace=namespace,
-                                                    labels=labels),
-            data={'filepart': encoded_string[chunk_pos * step:(chunk_pos + 1) * step].decode("utf-8")}
-            )
-        kubernetes.client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=body)
+        objName = f'sds-replicated-volume-{backup_type}-backup-{chunk_pos}'
+        isCreated = kubernetes.client.CustomObjectsApi().create_cluster_custom_object(group=objGroup,
+                                           version=objVersion,
+                                           plural=objKindPlural,
+                                           body={
+                                             'apiVersion': f'{objGroup}/{objVersion}',
+                                             'kind': objKind,
+                                             'metadata': {'name': objName},
+                                             'spec': {'data': encoded_string[chunk_pos * step:(chunk_pos + 1) * step].decode("utf-8")}}
+                                           )
+        if not isCreated:
+            print(f"backup_job: sds-replicated-volume-{backup_type}-backup-{chunk_pos} creation failure")
+            return False
+
+    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+                                                                                     version=objVersion,
+                                                                                     plural=objKindPlural)
+    for item in backup_objects['items']:
+        kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
+            group=objGroup,
+            version=objVersion,
+            plural=objKindPlural,
+            name=item['metadata']['name'],
+            body={"metadata": {"labels": labels}})
+
     for root, dirs, files in os.walk(temp_path, topdown=False):
         for name in files:
             os.remove(os.path.join(root, name))
         for name in dirs:
             os.rmdir(os.path.join(root, name))
 
+    return True
+
 
 if __name__ == "__main__":
-    namespace = 'd8-sds-replicated-volume'
     full_completed_list = []
     backup_list = []
 
@@ -82,29 +105,24 @@ if __name__ == "__main__":
     kubernetes.config.load_incluster_config()
 
     date_time = datetime.now().strftime("%Y%m%d%H%M%S")
-    #linstor_backup_label = 'sds-replicated-volume.deckhouse.io/linstor-db-backup'
-    linstor_backup_label_key = 'sds-replicated-volume.deckhouse.io/linstor-db-backup'
-    create_backup(backup_type=date_time, namespace=namespace, labels={linstor_backup_label_key: f'{date_time}'})
-    body = kubernetes.client.V1Secret(
-        api_version="v1",
-        kind="Secret",
-        metadata=kubernetes.client.V1ObjectMeta(name=f'linstor-{date_time}-backup-completed',
-                                                namespace=namespace))
-    kubernetes.client.CoreV1Api().create_namespaced_secret(namespace=namespace, body=body)
+    success = create_backup(backup_type=date_time, labels={srvBackupLabelKey: f'{date_time}', "completed": "true"})
+    if not success:
+        print(f"backup_job: creation failure")
+        exit(1)
 
-    namespace_secrets = kubernetes.client.CoreV1Api().list_namespaced_secret(namespace=namespace, label_selector=f"linstor_backup_label_key=f{date_time}")
-    for item in namespace_secrets.items:
-        if re.search(r'^linstor-\d+-backup-\d+$', item.metadata.name):
-            backup_list.append(item.metadata.name)
-        if re.search(r'^linstor-\d+-backup-completed$', item.metadata.name):
-            full_completed_list.append(item.metadata.name)
+    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+                                                                                     version=objVersion,
+                                                                                     plural=objKindPlural)
+    for item in backup_objects['items']:
+        backup_list.append(item['metadata']['name'])
+        if re.search(r'^sds-replicated-volume-\d+-backup-0$', item['metadata']['name']):
+            full_completed_list.append(item['metadata']['name'])
     completed_list = full_completed_list[-retention:]
-    for secret_name in backup_list:
-        secret_cutted_name = re.search(r'^linstor-\d+-backup-', secret_name).group(0)
-        if f'{secret_cutted_name}completed' in completed_list:
-            continue
-        kubernetes.client.CoreV1Api().delete_namespaced_secret(namespace=namespace, name=secret_name)
-    for secret_name in full_completed_list:
-        if secret_name in completed_list:
-            continue
-        kubernetes.client.CoreV1Api().delete_namespaced_secret(namespace=namespace, name=secret_name)
+    for backup_name in backup_list:
+        backup_cut_name = re.search(r'^sds-replicated-volume-\d+-backup-', backup_name).group(0)
+        if f'{backup_cut_name}0' in completed_list:
+             continue
+        kubernetes.client.CustomObjectsApi().delete_cluster_custom_object(group=objGroup,
+                                                                          version=objVersion,
+                                                                          plural=objKindPlural,
+                                                                          name=backup_name)
