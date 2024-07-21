@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	replicatedCSIProvisioner = "linstor.csi.linbit.com"
+	replicatedCSIProvisioner = "replicated.csi.deckhouse.io"
 	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller"
 )
 

@@ -9,9 +9,9 @@ metadata:
     helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-test" )) | nindent 2 }}
 parameters:
-  linstor.csi.linbit.com/placementCount: "1"
-  linstor.csi.linbit.com/storagePool: integration-test
+  replicated.csi.deckhouse.io/placementCount: "1"
+  replicated.csi.deckhouse.io/storagePool: integration-test
 allowVolumeExpansion: true
-provisioner: linstor.csi.linbit.com
+provisioner: replicated.csi.deckhouse.io
 reclaimPolicy: Delete
 volumeBindingMode: Immediate
