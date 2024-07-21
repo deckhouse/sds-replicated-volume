@@ -168,7 +168,7 @@ spec:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
           - name: DRIVER_REG_SOCK_PATH
-            value: /var/lib/kubelet/plugins/linstor.csi.linbit.com/csi.sock
+            value: /var/lib/kubelet/plugins/replicated.csi.deckhouse.io/csi.sock
           - name: KUBE_NODE_NAME
             valueFrom:
               fieldRef:
@@ -199,7 +199,7 @@ spec:
               command:
                 - /bin/sh
                 - -c
-                - rm -rf /registration/linstor.csi.linbit.com /registration/linstor.csi.linbit.com-reg.sock
+                - rm -rf /registration/replicated.csi.deckhouse.io /registration/replicated.csi.deckhouse.io-reg.sock
         name: csi-node-driver-registrar
         resources:
           requests:
@@ -259,7 +259,7 @@ spec:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
           - name: DRIVER_REG_SOCK_PATH
-            value: /var/lib/kubelet/plugins/linstor.csi.linbit.com/csi.sock
+            value: /var/lib/kubelet/plugins/replicated.csi.deckhouse.io/csi.sock
           - name: KUBE_NODE_NAME
             valueFrom:
               fieldRef:
@@ -331,7 +331,7 @@ spec:
           - name: CSI_ENDPOINT
             value: /csi/csi.sock
           - name: DRIVER_REG_SOCK_PATH
-            value: /var/lib/kubelet/plugins/linstor.csi.linbit.com/csi.sock
+            value: /var/lib/kubelet/plugins/replicated.csi.deckhouse.io/csi.sock
           - name: KUBE_NODE_NAME
             valueFrom:
               fieldRef:
@@ -377,7 +377,7 @@ spec:
             type: ""
           name: device-dir
         - hostPath:
-            path: /var/lib/kubelet/plugins/linstor.csi.linbit.com
+            path: /var/lib/kubelet/plugins/replicated.csi.deckhouse.io
             type: DirectoryOrCreate
           name: plugin-dir
         - hostPath:
