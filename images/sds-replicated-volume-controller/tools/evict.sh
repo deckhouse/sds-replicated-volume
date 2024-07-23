@@ -799,6 +799,10 @@ exit_function(){
       echo "Performing uncordon on node ${NODE_FOR_EVICT}"
       execute_command "kubectl uncordon ${NODE_FOR_EVICT}"
     fi
+    if [[ -n ${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS} ]]; then
+      echo "Scaling up sds-replicated-volume-controller to ${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
+      execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
+    fi
     echo "Terminating the script"
     exit 0
   fi
