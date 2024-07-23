@@ -25,8 +25,8 @@ run_trigger() {
   export new_driver_name="replicated.csi.deckhouse.io"
   export old_attacher="linstor-csi-linbit-com"
   export new_attacher="replicated-csi-storage-deckhouse-io"
-  export old_snapshot_class="linstor"
-  export new_snapshot_class="sds-replicated-volume"
+  # export old_snapshot_class="linstor"
+  # export new_snapshot_class="sds-replicated-volume"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
   export SECRET_NAME="csi-migration-finished"
@@ -69,8 +69,9 @@ run_trigger() {
 
   migrate_storage_classes
   migrate_pvc_pv
+  migrate_volume_snapshot_classes
+  migrate_volume_snapshot_contents
   
-
   nodes_with_volumes=$(kubectl get volumeattachments -o=jsonpath='{range .items[*]}{@.metadata.name}{"\t"}{@.spec.attacher}{"\t"}{@.status.attached}{"\t"}{@.spec.nodeName}{"\n"}{end}' | grep "${old_driver_name}" | grep 'true' | awk '{print $4}' | sort | uniq)
   echo nodes_with_volumes=$nodes_with_volumes
 
@@ -221,6 +222,24 @@ migrate_pvc_pv() {
     echo "No PVCs to migrate after PVs/PVCs migration"
   fi
 }
+
+migrate_volume_snapshot_classes() {
+  volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r ".items[] | select(.driver == \"$old_driver_name\") | .metadata.name")
+  echo "VolumeSnapshotClasses to migrate: $volume_snapshot_classes"
+
+  for volume_snapshot_class in $volume_snapshot_classes; do
+    kubectl patch volumesnapshotclasses.snapshot.storage.k8s.io ${volume_snapshot_class} --type json -p '[{"op": "replace", "path": "/driver", "value": "'$new_driver_name'"}]'
+  done
+}
+
+migrate_volume_snapshot_contents() {
+  volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r ".items[] | select(.spec.driver == \"$old_driver_name\") | .metadata.name")
+  echo "VolumeSnapshotContents to migrate: $volume_snapshot_contents"
+
+  for volume_snapshot_content in $volume_snapshot_contents; do
+    kubectl patch volumesnapshotcontents.snapshot.storage.k8s.io ${volume_snapshot_content} --type json -p '[{"op": "replace", "path": "/spec/driver", "value": "'$new_driver_name'"}]'
+  done
+} 
 
 delete_old_volume_attachments(){
   volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r ".items[] | select(.spec.attacher == \"$old_driver_name\") | .metadata.name")
