@@ -21,7 +21,8 @@ valid_subcommands_list=("storage-pool" "sp" "node" "n" "resource" "r" "volume" "
 valid_subcommands_ver=("controller" "c")
 valid_subcommands_lv=("resource" "r")
 valid_subcommands_advise=("advise" "adv")
-valid_subcommands_create_delete=("storage-pool" "node" "resource" "volume" "resource-definition")
+valid_subcommands_delete=("storage-pool")
+valid_subcommands_create_delete=("node" "resource" "volume" "resource-definition")
 valid_keys=("-m" "--output-version=v1")
 allowed=false
 
@@ -36,7 +37,8 @@ if [[ -z "$1" || "--help" == "$1" || "-h" == "$1" ]]; then
   echo "- controller version"
   echo "- advise resource/maintainance"
   echo "- resource-definition delete"
-  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing storage-pool/node/resource/volume/resource-definition create/delete (!key before command is required!)"
+  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing node/resource/volume/resource-definition create/delete (!key before command is required!)"
+  echo "- --yes-i-am-sane-and-i-understand-what-i-am-doing storage-pool delete (!key before command is required!)"
   exit 0
 fi
 
@@ -82,6 +84,13 @@ done
 # Allow dangerous commands (delete/create)
 if [[ $(echo "${valid_subcommands_create_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
   if [[ "$2" == "create" || "$2" == "delete" ]]; then
+    allowed=true
+  fi
+fi
+
+# Allow dangerous commands (delete)
+if [[ $(echo "${valid_subcommands_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
+  if [[ "$2" == "delete" ]]; then
     allowed=true
   fi
 fi

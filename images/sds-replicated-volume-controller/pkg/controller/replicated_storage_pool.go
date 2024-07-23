@@ -22,8 +22,13 @@ import (
 	"fmt"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 	"reflect"
 	"sds-replicated-volume-controller/pkg/logger"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -115,6 +120,52 @@ func NewReplicatedStoragePool(
 						log.Error(err, "error UpdateReplicatedStoragePool")
 					}
 					return
+				}
+
+				config, err := rest.InClusterConfig()
+				if err != nil {
+					klog.Fatal(err.Error())
+				}
+
+				staticClient, err := kubernetes.NewForConfig(config)
+				if err != nil {
+					klog.Fatal(err)
+				}
+
+				var ephemeralNodesList []string
+
+				nodes, _ := staticClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{LabelSelector: "node.deckhouse.io/type=CloudEphemeral"})
+				for _, node := range nodes.Items {
+					ephemeralNodesList = append(ephemeralNodesList, node.Name)
+				}
+
+				listDevice := &snc.LvmVolumeGroupList{}
+
+				err = cl.List(ctx, listDevice)
+				if err != nil {
+					log.Error(err, "Error while getting LVM Volume Groups list")
+					return
+				}
+
+				for _, lvmVolumeGroup := range newReplicatedSP.Spec.LvmVolumeGroups {
+					for _, lvg := range listDevice.Items {
+						if lvg.Name != lvmVolumeGroup.Name {
+							continue
+						}
+						for _, lvgNode := range lvg.Status.Nodes {
+							if slices.Contains(ephemeralNodesList, lvgNode.Name) {
+								errMessage := fmt.Sprintf("Cannot create storage pool on ephemeral node (%s)", lvgNode.Name)
+								log.Error(nil, errMessage)
+								newReplicatedSP.Status.Phase = "Failed"
+								newReplicatedSP.Status.Reason = errMessage
+								err := UpdateReplicatedStoragePool(ctx, cl, newReplicatedSP)
+								if err != nil {
+									log.Error(err, "error UpdateReplicatedStoragePool")
+								}
+								return
+							}
+						}
+					}
 				}
 
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
