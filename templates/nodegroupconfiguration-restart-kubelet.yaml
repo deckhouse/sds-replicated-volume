@@ -1,4 +1,4 @@
-{{- if .Values.sdsDrbd.internal.csiMigrationHook.completed }}
+{{- if .Values.sdsReplicatedVolume.internal.csiMigrationHook.completed }}
 apiVersion: deckhouse.io/v1alpha1
 kind: NodeGroupConfiguration
 metadata:
@@ -26,7 +26,7 @@ spec:
     # The lvmetad service should not be used by LVM on the node.
     # So we disable the service and set the setting use_lvmetad to 0 in lvm.conf.
 
-    # affectedPVsHash: {{ .Values.sdsDrbd.internal.csiMigrationHook.affectedPVsHash }}
+    # affectedPVsHash: {{ .Values.sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash }}
     export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
     export kubeconfig="/etc/kubernetes/kubelet.conf"
 
