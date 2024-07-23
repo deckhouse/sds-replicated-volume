@@ -1266,8 +1266,13 @@ if [[ "${DELETE_MODE}" == "node" ]]; then
   fi
 elif [[ "${DELETE_MODE}" == "resources-only" ]]; then
   echo "Only the deletion of all resources from ${NODE_FOR_EVICT} will be executed. The node will NOT be deleted from Kubernetes and LINSTOR."
+  echo "Start function to delete diskful resources from node ${NODE_FOR_EVICT}"
   linstor_delete_resources_from_node "${DISKFUL_RESOURCES_TO_EVICT_NEW[@]}"
-  linstor_delete_resources_from_node "${DISKLESS_RESOURCES_TO_EVICT_NEW[@]}"
+
+  if [[ -n $DISKLESS_RESOURCES_TO_EVICT_NEW ]]; then
+    echo "Start function to delete diskless resources from node ${NODE_FOR_EVICT}"
+    linstor_delete_resources_from_node "${DISKLESS_RESOURCES_TO_EVICT_NEW[@]}"
+  fi
 fi
 
 echo "State of all resources after evacuate resources from node ${NODE_FOR_EVICT}:"
