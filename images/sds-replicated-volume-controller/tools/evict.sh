@@ -673,6 +673,16 @@ create_tiebreaker() {
 linstor_delete_resources_from_node() {
   local resource_names_list=("$@")
 
+  echo "Resources being deleted: "
+  echo "${resource_names_list[@]}"
+  if get_user_confirmation "Perform deletion of the resources listed above from node ${NODE_FOR_EVICT}?" "yes-i-am-sane-and-i-understand-what-i-am-doing" "n"; then
+    echo "Beginning the process of deleting resources"
+  else
+    exit_function
+    echo "Script will continue without deleting the resources listed above"
+    return
+  fi
+
   for resource_name in $resource_names_list; do
     echo "Beginning the process of deleting resource ${resource_name}, which has replicas on the node being evicted ${NODE_FOR_EVICT}"
     linstor_check_faulty
@@ -1149,6 +1159,45 @@ if [[ "${CREATE_DB_BACKUP}" == "true" ]]; then
   linstor_backup_database
 fi
 
+while true; do
+  count=0
+  max_attempts=10
+  until [ $count -eq $max_attempts ]; do
+    echo "Checking the number of replicas for the sds-replicated-volume-controller"
+    SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=$(kubectl -n ${LINSTOR_NAMESPACE} get deployment sds-replicated-volume-controller -o jsonpath='{.spec.replicas}')
+    ((count++))
+    if [[ -z "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" ]]; then
+      echo "Can't get the number of replicas for the sds-replicated-volume-controller."
+      if get_user_confirmation "Should we recheck the number of replicas for the sds-replicated-volume-controller after $TIMEOUT_SEC seconds?" "y" "n"; then
+        echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for the sds-replicated-volume-controller"
+        sleep $TIMEOUT_SEC
+        continue
+      else
+        exit_function
+      fi
+    else
+      break
+    fi
+  done
+
+  if [ $count -eq $max_attempts ]; then
+    echo "Timeout reached. Can't get the number of replicas for sds-replicated-volume-controller."
+    if get_user_confirmation "Exit the script? If not, the script will continue and recheck for the number of replicas for sds-replicated-volume-controller." "y" "n"; then
+      exit_function
+    else
+      echo "Waiting $TIMEOUT_SEC seconds and rechecking the number of replicas for sds-replicated-volume-controller"
+      sleep $TIMEOUT_SEC
+      continue
+    fi
+  fi
+  break
+done
+
+echo "Scale down sds-replicated-volume-controller"
+execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
+echo "Waiting for sds-replicated-volume-controller to scale down"
+wait_for_deployment_scale_down "sds-replicated-volume-controller" "${LINSTOR_NAMESPACE}"
+
 echo "Excluding node ${NODE_FOR_EVICT} from LINSTOR scheduler"
 exec_linstor_with_exit_code_check node set-property ${NODE_FOR_EVICT} AutoplaceTarget false
 
@@ -1230,5 +1279,8 @@ linstor_change_replicas_count 0 2 "${RESOURCE_AND_GROUP_NAMES_NEW}" "${RESOURCE_
 
 linstor_check_faulty
 linstor_check_advise
+
+echo "Turning sds-replicated-volume-controller back on."
+execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}"
 
 echo "Script operation completed"
