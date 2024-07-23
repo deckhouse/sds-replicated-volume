@@ -94,6 +94,35 @@ For greater stability of the module, it is not recommended to reboot multiple no
   node/test-node-1 uncordoned
   ```
 
+## How do I free some space on storage pool by moving resources to another
+
+1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
+
+2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`
+
+3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+
+4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
+``` shell
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
+```
+
+### How to remove DRBD resources from a node, including removal from LINSTOR and Kubernetes?
+
+Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
+
+```shell
+./evict.sh --delete-node
+```
+
+To run the `evict.sh` script in non-interactive mode, you need to add the `--non-interactive` flag when invoking it, as well as the name of the node from which you want to evict the resources. In this mode, the script will execute all actions without asking for user confirmation. Example invocation:
+
+```shell
+./evict.sh --non-interactive --delete-node --node-name "worker-1"
+```
+
 ## How do I evict DRBD resources from a node?
 
 1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
