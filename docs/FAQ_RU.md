@@ -130,7 +130,7 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor re
 kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
 ```
 
-### Как удалить DRBD-ресурсы с узла, с удалением из LINSTOR и Kubernetes?
+## Как удалить DRBD-ресурсы с узла, с удалением из LINSTOR и Kubernetes?
 
 Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-node`:
 
@@ -144,7 +144,7 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --
 ./evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
-### Как удалить DRBD-ресурсы с узла, без удаления самого узла из LINSTOR и Kubernetes?
+## Как удалить DRBD-ресурсы с узла, без удаления самого узла из LINSTOR и Kubernetes?
 
 1. Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-resources-only`:
 
