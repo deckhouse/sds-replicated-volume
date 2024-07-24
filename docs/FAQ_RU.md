@@ -115,7 +115,36 @@ Overprovisioning в LVMThin нужно использовать с осторо�
   kubectl -n d8-sds-replicated-volume get pods | grep -v Running
   ```
 
-### Как удалить DRBD-ресурсы с узла, без удаления самого узла из LINSTOR и Kubernetes?
+## Как освободить место в storage pool, через перенос на другую ноду
+
+1. Просмотрите список storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
+
+2. Посмотрите расположение томов: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`
+
+3. Определитесь с ресурсами, которые вы хотите переместить `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
+
+4. Переместите ресурсы на другую ноду (только 1-2 ресурса одновременно):
+``` shell
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
+kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
+```
+
+## Как удалить DRBD-ресурсы с узла, с удалением из LINSTOR и Kubernetes?
+
+Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-node`:
+
+```shell
+./evict.sh --delete-node
+```
+
+Для запуска скрипта `evict.sh` в неинтерактивном режиме необходимо добавить флаг `--non-interactive` при его вызове, а также имя узла, с которого необходимо выгнать ресурсы. В этом режиме скрипт выполнит все действия без запроса подтверждения от пользователя. Пример вызова:
+
+```shell
+./evict.sh --non-interactive --delete-node --node-name "worker-1"
+```
+
+## Как удалить DRBD-ресурсы с узла, без удаления самого узла из LINSTOR и Kubernetes?
 
 1. Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-resources-only`:
 
