@@ -876,7 +876,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		equal, message := controller.CompareStorageClasses(&replicatedSC, storageClass)
 		Expect(equal).To(BeFalse())
-		Expect(message).To(Equal("ReplicatedStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(ReplicatedStorageClass: replicated.csi.deckhouse.io, StorageClass: not-equal); ReclaimPolicy are not equal(ReplicatedStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(ReplicatedStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
+		Expect(message).To(Equal("ReplicatedStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(ReplicatedStorageClass: replicated.csi.storage.deckhouse.io, StorageClass: not-equal); ReclaimPolicy are not equal(ReplicatedStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(ReplicatedStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
 	})
 
 	It("LabelNodes_set_labels", func() {

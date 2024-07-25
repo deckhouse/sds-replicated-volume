@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	LinstorDriverName = "replicated.csi.deckhouse.io"
+	LinstorDriverName = "replicated.csi.storage.deckhouse.io"
 
 	LinstorNodeControllerName          = "linstor-node-controller"
 	LinstorControllerType              = "CONTROLLER"

@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	replicatedCSIProvisioner = "replicated.csi.deckhouse.io"
+	replicatedCSIProvisioner = "replicated.csi.storage.deckhouse.io"
 	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller"
 )
 

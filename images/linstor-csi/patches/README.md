@@ -17,4 +17,4 @@ This patch renames following Linstor-csi-node labels:
 
  ### Change csi endpoint
 
- Change csi endpoint from `linstor.csi.linbit.com` to `replicated.csi.deckhouse.io`.
+ Change csi endpoint from `linstor.csi.linbit.com` to `replicated.csi.storage.deckhouse.io`.
