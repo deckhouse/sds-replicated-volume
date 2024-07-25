@@ -25,13 +25,10 @@ run_trigger() {
   export new_driver_name="replicated.csi.storage.deckhouse.io"
   export old_attacher="linstor-csi-linbit-com"
   export new_attacher="replicated-csi-storage-deckhouse-io"
-  # export old_snapshot_class="linstor"
-  # export new_snapshot_class="sds-replicated-volume"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
   export SECRET_NAME="csi-migration-finished"
   export NAMESPACE="d8-sds-replicated-volume"
-  export NAMESPACE_FOR_BACKUP="d8-system"
   export timestamp="$(date +"%Y%m%d%H%M%S")"
   export affected_pvs_hash=""
   echo "Migration csi shell hook started"
@@ -263,12 +260,29 @@ backup() {
 
   echo "Creating archive of $resource_name resources from ${path}, storing in ${archive_dir}, and splitting it into parts of 100kB each."
   tar -czf - -C "${path}/" . | split -b 100k - "${archive_dir}/${resource_name}.tar.gz.part."
+
   for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
-    echo "Creating secret from part $part_name, file ${part}, in namespace ${NAMESPACE_FOR_BACKUP}."
-    kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${part_name}" --from-file="${part}"
+    base64_data=$(base64 "$part")
+    echo "Creating ReplicatedStorageMetadataBackup resource from part $part_name, file ${part}."
+    # kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${part_name}" --from-file="${part}"
+    kubectl apply -f - <<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageMetadataBackup
+metadata:
+  name: migrate-csi-backup-${timestamp}-${part_name}
+spec:
+  data: |
+    ${base64_data}
+EOF
   done
 
+  echo "Finished creating ReplicatedStorageMetadataBackup resources for ${resource_name} resources."
+  echo "Add labels to ReplicatedStorageMetadataBackup resources"
+  for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
+    part_name=$(basename "$part")
+    kubectl label replicatedstoragemetadatabackup migrate-csi-backup-${timestamp}-${part_name} sds-replicated-volume.deckhouse.io/sds-replicated-volume-csi-backup-for=${resource_name}=${timestamp} --overwrite
+  done
 }
 
 wait_for_pods_scale_down() {
