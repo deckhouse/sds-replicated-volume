@@ -22,7 +22,7 @@ get_config() {
 
 run_trigger() {
   export old_driver_name="linstor.csi.linbit.com"
-  export new_driver_name="replicated.csi.deckhouse.io"
+  export new_driver_name="replicated.csi.storage.deckhouse.io"
   export old_attacher="linstor-csi-linbit-com"
   export new_attacher="replicated-csi-storage-deckhouse-io"
   # export old_snapshot_class="linstor"
