@@ -269,9 +269,8 @@ backup() {
 
   for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
-    base64_data=$(base64 "$part")
+    base64_data=$(base64 -w 0 < "$part")
     echo "Creating ReplicatedStorageMetadataBackup resource from part $part_name, file ${part}."
-    # kubectl -n "${NAMESPACE_FOR_BACKUP}" create secret generic "migrate-csi-backup-${timestamp}-${part_name}" --from-file="${part}"
     kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStorageMetadataBackup
@@ -287,7 +286,7 @@ EOF
   echo "Add labels to ReplicatedStorageMetadataBackup resources"
   for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
-    kubectl label replicatedstoragemetadatabackup migrate-csi-backup-${timestamp}-${part_name} sds-replicated-volume.deckhouse.io/sds-replicated-volume-csi-backup-for=${resource_name}=${timestamp} --overwrite
+    kubectl label replicatedstoragemetadatabackup migrate-csi-backup-${timestamp}-${part_name} sds-replicated-volume.deckhouse.io/sds-replicated-volume-csi-backup-for-${resource_name}=${timestamp} --overwrite
   done
 }
 
