@@ -48,7 +48,7 @@ EOF
 - Дождаться, когда модуль перейдет в состояние `Ready`. На этом этапе НЕ нужно проверять поды в namespace `d8-sds-node-configurator`.
 
 ```shell
-kubectl get mc sds-node-configurator -w
+kubectl get module sds-node-configurator -w
 ```
 
 - Включить модуль `sds-replicated-volume`. Возможные настройки модуля рекомендуем посмотреть в [конфигурации](./configuration.html). В примере ниже модуль запускается с настройками по умолчанию. Это приведет к тому, что на всех узлах кластера будет:
@@ -71,7 +71,7 @@ EOF
 - Дождаться, когда модуль перейдет в состояние `Ready`.
 
 ```shell
-kubectl get mc sds-replicated-volume -w
+kubectl get module sds-replicated-volume -w
 ```
 
 - Проверить, что в namespace `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды в состоянии `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы `DRBD`.

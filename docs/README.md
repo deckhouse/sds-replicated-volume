@@ -48,7 +48,7 @@ EOF
 - Wait for it to become `Ready`. At this stage, you do NOT need to check the pods in the `d8-sds-node-configurator` namespace.
 
 ```shell
-kubectl get mc sds-node-configurator -w
+kubectl get module sds-node-configurator -w
 ```
 
 - Enable the `sds-replicated-volume` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is launched with the default settings. This will result in the following actions across all cluster nodes:
@@ -71,7 +71,7 @@ EOF
 - Wait for the module to become `Ready`.
 
 ```shell
-kubectl get mc sds-replicated-volume -w
+kubectl get module sds-replicated-volume -w
 ```
 
 - Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where `DRBD` resources are intended to be used.
