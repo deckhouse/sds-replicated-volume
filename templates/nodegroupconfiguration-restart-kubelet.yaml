@@ -2,7 +2,7 @@
 apiVersion: deckhouse.io/v1alpha1
 kind: NodeGroupConfiguration
 metadata:
-  name: sds-drbd-migrate-csi-restart-kubelet.sh
+  name: sds-replicated-volume-migrate-csi-restart-kubelet.sh
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 spec:
   weight: 101
