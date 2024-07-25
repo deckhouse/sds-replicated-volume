@@ -23,8 +23,8 @@ get_config() {
 run_trigger() {
   export old_driver_name="replicated.csi.storage.deckhouse.io"
   export new_driver_name="linstor.csi.linbit.com"
-  export old_attacher="linstor-csi-linbit-com"
-  export new_attacher="replicated-csi-storage-deckhouse-io"
+  export old_attacher="replicated-csi-storage-deckhouse-io"
+  export new_attacher="linstor-csi-linbit-com"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
   export SECRET_NAME="csi-migration-finished"
