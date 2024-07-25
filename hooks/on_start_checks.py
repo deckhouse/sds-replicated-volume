@@ -35,6 +35,7 @@ def main(ctx: hook.Context):
     custom_object_list = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=crd_group,
                                                                                          plural=crd_name_plural,
                                                                                          version=crd_version)
+    thinPoolExistence = False
     for item in custom_object_list.get('items', []):
         if item.get('spec', {}).get('prop_key', None) == 'DrbdOptions/AutoEvictAllowEviction':
             if item['spec']['prop_value'] == 'True':
@@ -46,6 +47,19 @@ def main(ctx: hook.Context):
                     body={"spec": {"prop_value": "False"}}
                     )
                 print(f"Replaced DrbdOptions/AutoEvictAllowEviction value to False in propscontainer {item['metadata']['name']}")
+        if item.get('spec', {}).get('prop_key', None) == 'StorDriver/internal/lvmthin/thinPoolGranularity':
+            thinPoolExistence = True
+
+
+    if thinPoolExistence:
+        api_response = kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
+            group="deckhouse.io",
+            plural="moduleconfigs",
+            version="v1alpha1",
+            name="sds-replicated-volume",
+            body={"spec": {"settings": {"enableThinProvisioning": True}}}
+            )
+        print(f"Thin pools presents, switching enableThinProvisioning on ({api_response})")
 
 if __name__ == "__main__":
     hook.run(main, config=config)
