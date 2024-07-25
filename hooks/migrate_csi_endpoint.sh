@@ -65,8 +65,12 @@ run_trigger() {
   cd "$temp_dir"
   echo "temporary dir: $temp_dir"
 
-  echo "Deleting validatingwebhookconfiguration d8-sds-replicated-volume-sc-validation"
-  kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io d8-sds-replicated-volume-sc-validation
+  if kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}" &>/dev/null; then
+    echo "Deleting validatingwebhookconfiguration ${WEBHOOK_NAME}"
+    kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}"
+  else
+    echo "ValidatingWebhookConfiguration ${WEBHOOK_NAME} does not exist. Skipping deletion"
+  fi
 
   migrate_storage_classes
   migrate_pvc_pv
