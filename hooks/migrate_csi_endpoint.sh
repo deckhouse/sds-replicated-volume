@@ -65,14 +65,6 @@ run_trigger() {
   cd "$temp_dir"
   echo "temporary dir: $temp_dir"
 
-  if kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}" &>/dev/null; then
-    echo "Deleting validatingwebhookconfiguration ${WEBHOOK_NAME}"
-    kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}"
-  else
-    echo "ValidatingWebhookConfiguration ${WEBHOOK_NAME} does not exist. Skipping deletion"
-  fi
-
-
   migrate_storage_classes
   migrate_pvc_pv
   migrate_volume_snapshot_classes
@@ -141,6 +133,13 @@ migrate_storage_classes() {
   backup storage-classes "${temp_dir}/storage_classes" "${temp_dir}"
 
   echo "Starting migration of StorageClasses..."
+
+  if kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}" &>/dev/null; then
+    echo "Deleting validatingwebhookconfiguration ${WEBHOOK_NAME}"
+    kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}"
+  else
+    echo "ValidatingWebhookConfiguration ${WEBHOOK_NAME} does not exist. Skipping deletion"
+  fi
 
   for storage_class in $sc_list; do
     kubectl delete sc ${storage_class}
