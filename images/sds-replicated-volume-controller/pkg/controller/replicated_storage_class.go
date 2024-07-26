@@ -453,24 +453,23 @@ func CompareStorageClasses(oldSC, newSC *storagev1.StorageClass) (bool, string) 
 	failedMsgBuilder.WriteString("Old StorageClass and New StorageClass are not equal: ")
 
 	if !reflect.DeepEqual(oldSC.Parameters, newSC.Parameters) {
-		// TODO: add diff
 		equal = false
-		failedMsgBuilder.WriteString("Parameters are not equal; ")
+		failedMsgBuilder.WriteString(fmt.Sprintf("Parameters are not equal (ReplicatedStorageClass parameters: %+v, StorageClass parameters: %+v); ", newSC.Parameters, oldSC.Parameters))
 	}
 
 	if oldSC.Provisioner != newSC.Provisioner {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("Provisioner are not equal(Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner))
+		failedMsgBuilder.WriteString(fmt.Sprintf("Provisioner are not equal (Old StorageClass: %s, New StorageClass: %s); ", oldSC.Provisioner, newSC.Provisioner))
 	}
 
 	if *oldSC.ReclaimPolicy != *newSC.ReclaimPolicy {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("ReclaimPolicy are not equal(Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy)))
+		failedMsgBuilder.WriteString(fmt.Sprintf("ReclaimPolicy are not equal (Old StorageClass: %s, New StorageClass: %s", string(*oldSC.ReclaimPolicy), string(*newSC.ReclaimPolicy)))
 	}
 
 	if *oldSC.VolumeBindingMode != *newSC.VolumeBindingMode {
 		equal = false
-		failedMsgBuilder.WriteString(fmt.Sprintf("VolumeBindingMode are not equal(Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode)))
+		failedMsgBuilder.WriteString(fmt.Sprintf("VolumeBindingMode are not equal (Old StorageClass: %s, New StorageClass: %s); ", string(*oldSC.VolumeBindingMode), string(*newSC.VolumeBindingMode)))
 	}
 
 	return equal, failedMsgBuilder.String()
