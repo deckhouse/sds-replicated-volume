@@ -16,7 +16,7 @@ on:
 
 jobs:
   prod_ce_setup_build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Build and Push CE
     steps:
       - name: SET VAR
@@ -35,7 +35,7 @@ jobs:
       - uses: deckhouse/modules-actions/build@v1
 
   prod_ee_setup_build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Build and Push EE
     steps:
       - name: SET VAR
@@ -54,7 +54,7 @@ jobs:
       - uses: deckhouse/modules-actions/build@v1
 
   prod_fe_setup_build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Build and Push FE
     steps:
       - name: SET VAR
@@ -73,7 +73,7 @@ jobs:
       - uses: deckhouse/modules-actions/build@v1
 
   prod_se_setup_build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Build and Push SE
     steps:
       - name: SET VAR

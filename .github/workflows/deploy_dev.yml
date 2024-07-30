@@ -36,7 +36,7 @@ on:
 
 jobs:
   deploy-dev:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Deploy dev
     steps:
       - name: PRINT VARS
