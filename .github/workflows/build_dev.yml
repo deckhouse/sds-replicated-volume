@@ -16,7 +16,7 @@ on:
 
 jobs:
   dev_setup_build:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, regular, selectel]
     name: Build and Push images
     steps:
       - name: Set vars for PR
