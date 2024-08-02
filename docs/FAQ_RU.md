@@ -94,27 +94,6 @@ Overprovisioning в LVMThin нужно использовать с осторо�
   node/test-node-1 uncordoned
   ```
 
-## Как выгнать DRBD-ресурсы с узла?
-
-1. Загрузите скрипт `evict.sh` на хост, имеющий доступ к API Kubernetes с правами администратора (для работы скрипта потребуются установленные `kubectl` и `jq`):
-
-  ```shell
-   kubectl -n d8-sds-replicated-volume cp -c sds-replicated-volume-controller $(kubectl -n d8-sds-replicated-volume get po -l app=sds-replicated-volume-controller -o jsonpath='{.items[0].metadata.name}'):/tools/evict.sh ./evict.sh
-   chmod 700 evict.sh
-   ```
-
-2. Исправьте все ошибочные ресурсы LINSTOR в кластере. Чтобы найти их, выполните следующую команду:
-
-  ```shell
-  kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor resource list --faulty
-  ```
-
-3. Убедитесь, что все поды в пространстве имен `d8-sds-replicated-volume` находятся в состоянии *Running*:
-
-  ```shell
-  kubectl -n d8-sds-replicated-volume get pods | grep -v Running
-  ```
-
 ## Как освободить место в storage pool, через перенос на другую ноду
 
 1. Просмотрите список storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
@@ -130,18 +109,38 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor re
 kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
 ```
 
+## Как выгнать DRBD-ресурсы с узла?
+
+1. проверьте существование скрипта `evict.sh` на любом из master-хостов:
+
+  ```shell
+   ls -l /opt/deckhouse/sbin/evict.sh
+   ```
+
+2. Исправьте все ошибочные ресурсы LINSTOR в кластере. Чтобы найти их, выполните следующую команду:
+
+  ```shell
+  kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor resource list --faulty
+  ```
+
+3. Убедитесь, что все поды в пространстве имен `d8-sds-replicated-volume` находятся в состоянии *Running*:
+
+  ```shell
+  kubectl -n d8-sds-replicated-volume get pods | grep -v Running
+  ```
+
 ## Как удалить DRBD-ресурсы с узла, с удалением из LINSTOR и Kubernetes?
 
 Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-node`:
 
 ```shell
-./evict.sh --delete-node
+/opt/deckhouse/sbin/evict.sh --delete-node
 ```
 
 Для запуска скрипта `evict.sh` в неинтерактивном режиме необходимо добавить флаг `--non-interactive` при его вызове, а также имя узла, с которого необходимо выгнать ресурсы. В этом режиме скрипт выполнит все действия без запроса подтверждения от пользователя. Пример вызова:
 
 ```shell
-./evict.sh --non-interactive --delete-node --node-name "worker-1"
+/opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
 ## Как удалить DRBD-ресурсы с узла, без удаления самого узла из LINSTOR и Kubernetes?
@@ -149,13 +148,13 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --
 1. Запустите скрипт `evict.sh` в интерактивном режиме, указав режим удаления `--delete-resources-only`:
 
 ```shell
-./evict.sh --delete-resources-only
+/opt/deckhouse/sbin/evict.sh --delete-resources-only
 ```
 
 Для запуска скрипта `evict.sh` в неинтерактивном режиме необходимо добавить флаг `--non-interactive` при его вызове, а также имя узла, с которого необходимо выгнать ресурсы. В этом режиме скрипт выполнит все действия без запроса подтверждения от пользователя. Пример вызова:
 
 ```shell
-./evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
+/opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
 > **Важно!** После завершении работы скрипта узел в Kubernetes останется в статусе *SchedulingDisabled*, а в LINSTOR у данного узла будет выставлен параметр *AutoplaceTarget=false*, что запретит планировщику LINSTOR создавать на этом узле ресурсы.
