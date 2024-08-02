@@ -42,7 +42,7 @@ run_trigger() {
 
   echo "Secret ${NAMESPACE}/${SECRET_NAME} does not exist. Starting csi migration"
 
-  sc_list=$(kubectl get sc -o json | jq -r ".items[] | select(.provisioner == \"$old_driver_name\") | .metadata.name")
+  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$old_driver_name" `.items[] | select(.provisioner == $oldDriverName) | .metadata.name`)
   pvc_pv_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
   pvc_list=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
   
