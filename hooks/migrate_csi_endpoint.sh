@@ -70,7 +70,8 @@ run_trigger() {
   migrate_volume_snapshot_classes
   migrate_volume_snapshot_contents
   
-  nodes_with_volumes=$(kubectl get volumeattachments -o=jsonpath='{range .items[*]}{@.metadata.name}{"\t"}{@.spec.attacher}{"\t"}{@.status.attached}{"\t"}{@.spec.nodeName}{"\n"}{end}' | grep "${old_driver_name}" | grep 'true' | awk '{print $4}' | sort | uniq)
+  nodes_with_volumes=$(kubectl get volumeattachments -o=json | jq -r --arg oldDriverName "${old_driver_name}" '.items[] | select(.spec.attacher == $oldDriverName) | .spec.nodeName' | sort | uniq)
+  
   echo nodes_with_volumes=$nodes_with_volumes
 
   delete_old_volume_attachments
