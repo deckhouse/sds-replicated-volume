@@ -27,7 +27,7 @@ run_trigger() {
   export new_attacher="replicated-csi-storage-deckhouse-io"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
-  export SECRET_NAME="csi-migration-finished"
+  export SECRET_NAME="csi-migration-completed"
   export NAMESPACE="d8-sds-replicated-volume"
   export timestamp="$(date +"%Y%m%d%H%M%S")"
   export affected_pvs_hash=""
