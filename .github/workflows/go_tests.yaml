@@ -1,0 +1,41 @@
+name: Go tests for images
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Go tests for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Go tests
+        run: |
+          basedir=$(pwd)
+          failed='false'
+          for dir in $(find images -type d); do
+            if ls $dir/*_test.go &> /dev/null; then
+              echo "Running tests in $dir"
+              cd $dir
+              go test -v
+              if [ $? -ne 0 ]; then
+                echo "Tests failed in $dir"
+                failed='true'
+              fi
+            cd $basedir
+            fi
+          done
+          if [ $failed == 'true' ]; then
+            exit 1
+          fi
