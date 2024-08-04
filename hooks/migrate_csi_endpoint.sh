@@ -41,11 +41,11 @@ run_trigger() {
 
   echo "Secret ${NAMESPACE}/${SECRET_NAME} does not exist. Starting csi migration"
 
-  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.provisioner == $oldDriverName) | .metadata.name`)
-  pv_pvc_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name`)
-  pvc_list_before_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name`)
-  volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.driver == $oldDriverName) | .metadata.name`)
-  volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.spec.driver == $oldDriverName) | .metadata.name`)
+  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
+  pv_pvc_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
+  pvc_list_before_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
+  volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.driver == $oldDriverName) | .metadata.name')
+  volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.driver == $oldDriverName) | .metadata.name')
 
   if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list_before_migrate" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
     echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed"
@@ -79,7 +79,7 @@ run_trigger() {
   export volume_snapshot_contents=volume_snapshot_contents
   migrate_volume_snapshot_contents
   
-  nodes_with_volumes=$(kubectl get volumeattachments -o=json | jq -r --arg oldDriverName "${OLD_DRIVER_NAME}" `.items[] | select(.spec.attacher == $oldDriverName) | .spec.nodeName` | sort | uniq)
+  nodes_with_volumes=$(kubectl get volumeattachments -o=json | jq -r --arg oldDriverName "${OLD_DRIVER_NAME}" '.items[] | select(.spec.attacher == $oldDriverName) | .spec.nodeName` | sort | uniq)
   
   echo nodes_with_volumes=$nodes_with_volumes
 
@@ -129,7 +129,7 @@ scale_down_pods() {
 }
 
 migrate_storage_classes() {
-  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.provisioner == $oldDriverName) | .metadata.name`)
+  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
   echo "StorageClasses to migrate: $sc_list"
   mkdir -p "${temp_dir}/storage_classes"
   cd "${temp_dir}/storage_classes"
@@ -217,7 +217,7 @@ migrate_pvc_pv() {
     echo "No PVs/PVCs to migrate"
   fi
 
-  pvc_list_after_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name`)
+  pvc_list_after_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
   echo "PVCs to migrate after PVs/PVCs migration: $pvc_list_after_migrate"
   if [[ -n "$pvc_list_after_migrate" ]]; then
     for pvc in $pvc_list_after_migrate; do
@@ -253,7 +253,7 @@ migrate_volume_snapshot_contents() {
 } 
 
 delete_old_volume_attachments(){
-  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" `.items[] | select(.spec.attacher == $oldDriverName) | .metadata.name`)
+  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.attacher == $oldDriverName) | .metadata.name')
   echo volumeattachments_list=$volumeattachments_list
 
   for attach in $volumeattachments_list; do
