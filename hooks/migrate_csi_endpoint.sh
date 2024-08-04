@@ -66,17 +66,17 @@ run_trigger() {
   cd "$temp_dir"
   echo "temporary dir: $temp_dir"
 
-  export sc_list=sc_list
+  export sc_list=$sc_list
   migrate_storage_classes
 
   export AFFECTED_PVS_HASH=""
-  export pv_pvc_list=pv_pvc_list
+  export pv_pvc_list=$pv_pvc_list
   migrate_pvc_pv
 
-  export volume_snapshot_classes=volume_snapshot_classes
+  export volume_snapshot_classes=$volume_snapshot_classes
   migrate_volume_snapshot_classes
 
-  export volume_snapshot_contents=volume_snapshot_contents
+  export volume_snapshot_contents=$volume_snapshot_contents
   migrate_volume_snapshot_contents
   
   nodes_with_volumes=$(kubectl get volumeattachments -o=json | jq -r --arg oldDriverName "${OLD_DRIVER_NAME}" '.items[] | select(.spec.attacher == $oldDriverName) | .spec.nodeName' | sort | uniq)
