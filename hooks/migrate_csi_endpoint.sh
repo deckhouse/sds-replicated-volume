@@ -21,16 +21,15 @@ get_config() {
 }
 
 run_trigger() {
-  export old_driver_name="replicated.csi.storage.deckhouse.io"
-  export new_driver_name="linstor.csi.linbit.com"
-  export old_attacher="replicated-csi-storage-deckhouse-io"
-  export new_attacher="linstor-csi-linbit-com"
+  export OLD_DRIVER_NAME="replicated.csi.storage.deckhouse.io"
+  export NEW_DRIVER_NAME="linstor.csi.linbit.com"
+  export OLD_ATTACHER="replicated-csi-storage-deckhouse-io"
+  export NEW_ATTACHER="linstor-csi-linbit-com"
   export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
   export LABEL_VALUE=""
-  export SECRET_NAME="csi-migration-finished"
+  export SECRET_NAME="csi-migration-completed"
   export NAMESPACE="d8-sds-replicated-volume"
-  export timestamp="$(date +"%Y%m%d%H%M%S")"
-  export affected_pvs_hash=""
+  export TIMESTAMP="$(date +"%Y%m%d%H%M%S")"
   export WEBHOOK_NAME="d8-sds-replicated-volume-sc-validation"
   echo "Migration csi shell hook started"
 
@@ -42,12 +41,14 @@ run_trigger() {
 
   echo "Secret ${NAMESPACE}/${SECRET_NAME} does not exist. Starting csi migration"
 
-  sc_list=$(kubectl get sc -o json | jq -r ".items[] | select(.provisioner == \"$old_driver_name\") | .metadata.name")
-  pvc_pv_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
-  pvc_list=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
-  
-  if [[ -z "$sc_list" && -z "$pvc_pv_list" && -z "$pvc_list" ]]; then
-    echo "No StorageClasses and PVCs/PVs to migrate. Migration not needed"
+  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
+  pv_pvc_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
+  pvc_list_before_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
+  volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.driver == $oldDriverName) | .metadata.name')
+  volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.driver == $oldDriverName) | .metadata.name')
+
+  if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list_before_migrate" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
+    echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed"
     values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
     kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
     exit 0
@@ -65,19 +66,21 @@ run_trigger() {
   cd "$temp_dir"
   echo "temporary dir: $temp_dir"
 
-  if kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}" &>/dev/null; then
-    echo "Deleting validatingwebhookconfiguration ${WEBHOOK_NAME}"
-    kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}"
-  else
-    echo "ValidatingWebhookConfiguration ${WEBHOOK_NAME} does not exist. Skipping deletion"
-  fi
-
+  export sc_list=$sc_list
   migrate_storage_classes
+
+  export AFFECTED_PVS_HASH=""
+  export pv_pvc_list=$pv_pvc_list
   migrate_pvc_pv
+
+  export volume_snapshot_classes=$volume_snapshot_classes
   migrate_volume_snapshot_classes
+
+  export volume_snapshot_contents=$volume_snapshot_contents
   migrate_volume_snapshot_contents
   
-  nodes_with_volumes=$(kubectl get volumeattachments -o=jsonpath='{range .items[*]}{@.metadata.name}{"\t"}{@.spec.attacher}{"\t"}{@.status.attached}{"\t"}{@.spec.nodeName}{"\n"}{end}' | grep "${old_driver_name}" | grep 'true' | awk '{print $4}' | sort | uniq)
+  nodes_with_volumes=$(kubectl get volumeattachments -o=json | jq -r --arg oldDriverName "${OLD_DRIVER_NAME}" '.items[] | select(.spec.attacher == $oldDriverName) | .spec.nodeName' | sort | uniq)
+  
   echo nodes_with_volumes=$nodes_with_volumes
 
   delete_old_volume_attachments
@@ -88,10 +91,10 @@ run_trigger() {
     kubectl label node $node ${LABEL_KEY}=${LABEL_VALUE} --overwrite
   done
 
-  echo affected_pvs_hash="$affected_pvs_hash"
-  if [[ -n "$affected_pvs_hash" ]]; then
+  echo AFFECTED_PVS_HASH="$AFFECTED_PVS_HASH"
+  if [[ -n "$AFFECTED_PVS_HASH" ]]; then
     echo "Set affectedPVsHash to values"
-    values::set sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash "$affected_pvs_hash"
+    values::set sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash "$AFFECTED_PVS_HASH"
   fi
   values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
   kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
@@ -126,20 +129,27 @@ scale_down_pods() {
 }
 
 migrate_storage_classes() {
-  sc_list=$(kubectl get sc -o json | jq -r ".items[] | select(.provisioner == \"$old_driver_name\") | .metadata.name")
+  sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
   echo "StorageClasses to migrate: $sc_list"
   mkdir -p "${temp_dir}/storage_classes"
   cd "${temp_dir}/storage_classes"
 
   for storage_class in $sc_list; do
     kubectl get sc ${storage_class} -o yaml > ${storage_class}.yaml
-    cp ${storage_class}.yaml old.${storage_class}.yaml.$timestamp
-    sed -i "s/${old_driver_name}/${new_driver_name}/" ${storage_class}.yaml
+    cp ${storage_class}.yaml old.${storage_class}.yaml.$TIMESTAMP
+    sed -i "s/${OLD_DRIVER_NAME}/${NEW_DRIVER_NAME}/" ${storage_class}.yaml
   done
 
   backup storage-classes "${temp_dir}/storage_classes" "${temp_dir}"
 
   echo "Starting migration of StorageClasses..."
+
+  if kubectl get validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}" &>/dev/null; then
+    echo "Deleting validatingwebhookconfiguration ${WEBHOOK_NAME}"
+    kubectl delete validatingwebhookconfigurations.admissionregistration.k8s.io "${WEBHOOK_NAME}"
+  else
+    echo "ValidatingWebhookConfiguration ${WEBHOOK_NAME} does not exist. Skipping deletion"
+  fi
 
   for storage_class in $sc_list; do
     kubectl delete sc ${storage_class}
@@ -148,18 +158,17 @@ migrate_storage_classes() {
 }
 
 migrate_pvc_pv() {
-  pvc_pv_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
-  echo "PVs/PVCs to migrate: $pvc_pv_list"
+  echo "PVs/PVCs to migrate: $pv_pvc_list"
 
   mkdir -p "${temp_dir}/pvc_pv"
   cd "${temp_dir}/pvc_pv"
 
-  escaped_old_driver_name=$(echo "$old_driver_name" | sed 's/\./\\./g')
-  echo $escaped_old_driver_name
+  escaped_OLD_DRIVER_NAME=$(echo "$OLD_DRIVER_NAME" | sed 's/\./\\./g')
+  echo $escaped_OLD_DRIVER_NAME
 
-  if [[ -n "$pvc_pv_list" ]]; then
-    affected_pvs_hash=$(echo "$pvc_pv_list" | base64 -w0 | sha256sum | awk '{print $1}')
-    for pvc_pv in $pvc_pv_list; do
+  if [[ -n "$pv_pvc_list" ]]; then
+    AFFECTED_PVS_HASH=$(echo "$pv_pvc_list" | base64 -w0 | sha256sum | awk '{print $1}')
+    for pvc_pv in $pv_pvc_list; do
       old_ifs=$IFS
       IFS='/' read -r -a array <<< "$pvc_pv"
       namespace=${array[0]}
@@ -169,11 +178,11 @@ migrate_pvc_pv() {
       kubectl get pvc $pvc -n $namespace -o yaml > pvc-${pvc}.yaml
       kubectl get pv $pv -o yaml > pv-${pv}.yaml
 
-      cp pvc-${pvc}.yaml old.pvc-${pvc}.yaml.$timestamp
-      cp pv-${pv}.yaml old.pv-${pv}.yaml.$timestamp
+      cp pvc-${pvc}.yaml old.pvc-${pvc}.yaml.$TIMESTAMP
+      cp pv-${pv}.yaml old.pv-${pv}.yaml.$TIMESTAMP
 
-      sed -i "s/$escaped_old_driver_name/$new_driver_name/g" pv-${pv}.yaml
-      sed -i "s/$old_attacher/$new_attacher/g" pv-${pv}.yaml
+      sed -i "s/$escaped_OLD_DRIVER_NAME/$NEW_DRIVER_NAME/g" pv-${pv}.yaml
+      sed -i "s/$OLD_ATTACHER/$NEW_ATTACHER/g" pv-${pv}.yaml
       sed -i '/resourceVersion: /d' pv-${pv}.yaml
       sed -i '/uid: /d' pv-${pv}.yaml
 
@@ -184,7 +193,7 @@ migrate_pvc_pv() {
 
     echo "Starting migration of PVs/PVCs..."
 
-    for pvc_pv in $pvc_pv_list; do
+    for pvc_pv in $pv_pvc_list; do
       old_ifs=$IFS
       IFS='/' read -r -a array <<< "$pvc_pv"
       namespace=${array[0]}
@@ -195,13 +204,12 @@ migrate_pvc_pv() {
       echo "Deleting finalizer from pv: $pv"
       kubectl patch pv $pv --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
       echo "Patching annotations in pvc: $pvc"
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
+      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
+      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
       echo "Recreating pv: $pv"
       kubectl create -f pv-${pv}.yaml
       echo "Deleting annotation from pvc $pvc to trigger pvc/pv binding"
       kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bind-completed"}]'
-      # kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bound-by-controller"}]'
 
       IFS=$old_ifs
     done
@@ -209,17 +217,17 @@ migrate_pvc_pv() {
     echo "No PVs/PVCs to migrate"
   fi
 
-  pvc_list=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$old_driver_name" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
-  echo "PVCs to migrate after PVs/PVCs migration: $pvc_list"
-  if [[ -n "$pvc_list" ]]; then
-    for pvc in $pvc_list; do
+  pvc_list_after_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
+  echo "PVCs to migrate after PVs/PVCs migration: $pvc_list_after_migrate"
+  if [[ -n "$pvc_list_after_migrate" ]]; then
+    for pvc in $pvc_list_after_migrate; do
       old_ifs=$IFS
       IFS='/' read -r -a array <<< "$pvc"
       namespace=${array[0]}
       pvc=${array[1]}
 
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$new_driver_name'"}]'
+      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
+      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
 
       IFS=$old_ifs
     done
@@ -229,25 +237,23 @@ migrate_pvc_pv() {
 }
 
 migrate_volume_snapshot_classes() {
-  volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r ".items[] | select(.driver == \"$old_driver_name\") | .metadata.name")
   echo "VolumeSnapshotClasses to migrate: $volume_snapshot_classes"
 
   for volume_snapshot_class in $volume_snapshot_classes; do
-    kubectl patch volumesnapshotclasses.snapshot.storage.k8s.io ${volume_snapshot_class} --type json -p '[{"op": "replace", "path": "/driver", "value": "'$new_driver_name'"}]'
+    kubectl patch volumesnapshotclasses.snapshot.storage.k8s.io ${volume_snapshot_class} --type json -p '[{"op": "replace", "path": "/driver", "value": "'$NEW_DRIVER_NAME'"}]'
   done
 }
 
 migrate_volume_snapshot_contents() {
-  volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r ".items[] | select(.spec.driver == \"$old_driver_name\") | .metadata.name")
   echo "VolumeSnapshotContents to migrate: $volume_snapshot_contents"
 
   for volume_snapshot_content in $volume_snapshot_contents; do
-    kubectl patch volumesnapshotcontents.snapshot.storage.k8s.io ${volume_snapshot_content} --type json -p '[{"op": "replace", "path": "/spec/driver", "value": "'$new_driver_name'"}]'
+    kubectl patch volumesnapshotcontents.snapshot.storage.k8s.io ${volume_snapshot_content} --type json -p '[{"op": "replace", "path": "/spec/driver", "value": "'$NEW_DRIVER_NAME'"}]'
   done
 } 
 
 delete_old_volume_attachments(){
-  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r ".items[] | select(.spec.attacher == \"$old_driver_name\") | .metadata.name")
+  volumeattachments_list=$(kubectl get volumeattachments.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.attacher == $oldDriverName) | .metadata.name')
   echo volumeattachments_list=$volumeattachments_list
 
   for attach in $volumeattachments_list; do
@@ -274,7 +280,7 @@ backup() {
 apiVersion: storage.deckhouse.io/v1alpha1
 kind: ReplicatedStorageMetadataBackup
 metadata:
-  name: migrate-csi-backup-${timestamp}-${part_name}
+  name: migrate-csi-backup-${TIMESTAMP}-${part_name}
 spec:
   data: |
     ${base64_data}
@@ -285,7 +291,7 @@ EOF
   echo "Add labels to ReplicatedStorageMetadataBackup resources"
   for part in "${archive_dir}/${resource_name}.tar.gz.part."*; do
     part_name=$(basename "$part")
-    kubectl label replicatedstoragemetadatabackup migrate-csi-backup-${timestamp}-${part_name} sds-replicated-volume.deckhouse.io/sds-replicated-volume-csi-backup-for-${resource_name}=${timestamp} --overwrite
+    kubectl label replicatedstoragemetadatabackup migrate-csi-backup-${TIMESTAMP}-${part_name} sds-replicated-volume.deckhouse.io/sds-replicated-volume-csi-backup-for-${resource_name}=${TIMESTAMP} --overwrite
   done
 }
 
