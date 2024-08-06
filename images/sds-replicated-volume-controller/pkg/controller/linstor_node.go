@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"net"
 	"reflect"
 	"sds-replicated-volume-controller/config"
@@ -27,6 +26,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 
 	storagev1 "k8s.io/api/storage/v1"
 
@@ -43,7 +44,7 @@ import (
 )
 
 const (
-	LinstorDriverName = "linstor.csi.linbit.com"
+	LinstorDriverName = "replicated.csi.storage.deckhouse.io"
 
 	LinstorNodeControllerName          = "linstor-node-controller"
 	LinstorControllerType              = "CONTROLLER"
