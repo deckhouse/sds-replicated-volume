@@ -109,27 +109,12 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor re
 kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
 ```
 
-## How to remove DRBD resources from a node, including removal from LINSTOR and Kubernetes?
-
-Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
-
-```shell
-./evict.sh --delete-node
-```
-
-To run the `evict.sh` script in non-interactive mode, you need to add the `--non-interactive` flag when invoking it, as well as the name of the node from which you want to evict the resources. In this mode, the script will execute all actions without asking for user confirmation. Example invocation:
-
-```shell
-./evict.sh --non-interactive --delete-node --node-name "worker-1"
-```
-
 ## How do I evict DRBD resources from a node?
 
-1. Upload the `evict.sh` script to the host that has administrative access to the Kubernetes API server (for the script to work, you need to have `kubectl` and `jq` installed):
+1. Check existence of `evict.sh` script on any master node:
 
   ```shell
-  kubectl -n d8-sds-replicated-volume cp -c sds-replicated-volume-controller $(kubectl -n d8-sds-replicated-volume get po -l app=sds-replicated-volume-controller -o jsonpath='{.items[0].metadata.name}'):/tools/evict.sh ./evict.sh
-  chmod 700 evict.sh
+   ls -l /opt/deckhouse/sbin/evict.sh
   ```
 
 2. Fix all faulty LINSTOR resources in the cluster. Run the following command to filter them:
@@ -144,18 +129,32 @@ To run the `evict.sh` script in non-interactive mode, you need to add the `--non
   kubectl -n d8-sds-replicated-volume get pods | grep -v Running
   ```
 
-### How do I evict DRBD resources from a node without deleting it from LINSTOR and Kubernetes
+## How to remove DRBD resources from a node, including removal from LINSTOR and Kubernetes?
+
+Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
+
+```shell
+/opt/deckhouse/sbin/evict.sh --delete-node
+```
+
+To run the `evict.sh` script in non-interactive mode, you need to add the `--non-interactive` flag when invoking it, as well as the name of the node from which you want to evict the resources. In this mode, the script will execute all actions without asking for user confirmation. Example invocation:
+
+```shell
+/opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
+```
+
+## How do I evict DRBD resources from a node without deleting it from LINSTOR and Kubernetes
 
 1. Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
 
 ```shell
-./evict.sh --delete-resources-only
+/opt/deckhouse/sbin/evict.sh --delete-resources-only
 ```
 
 To run the `evict.sh` script in non-interactive mode, add the `--non-interactive` flag followed by the name of the node to evict the resources from. In this mode, the script will perform all the necessary actions automatically (no user confirmation is required). Example:
 
 ```shell
-./evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
+/opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
 > **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the LINSTOR scheduler from creating resources on this node.

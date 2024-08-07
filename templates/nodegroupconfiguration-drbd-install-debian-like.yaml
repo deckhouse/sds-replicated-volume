@@ -41,6 +41,24 @@ spec:
 
     kernel_version_in_use="$(uname -r)"
 
+    CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
+    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
+
+    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
+    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
+    MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
+    MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
+    MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
+
+    is_master=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"node-role.kubernetes.io/control-plane": ""})')
+    if [ $is_master == "true" ]; then
+      {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
+      bb-rp-from-module-image-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
+    fi
+
     is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"storage.deckhouse.io/sds-replicated-volume-node":""})')
 
     bb-log-info "we need drbd on node: "$is_linstor_data_node
@@ -77,15 +95,6 @@ spec:
     if [ -n "$packages_to_remove" ]; then
       bb-apt-remove $packages_to_remove
     fi
-
-    CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
-    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
-
-    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
-    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
-    MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
-    MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
-    MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
 
     if [ -e "/proc/drbd" ]; then
       # DRBD check version

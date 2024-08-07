@@ -1,6 +1,5 @@
 {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
 {{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
-{{- $version := "3.4.0" }}
 
 ---
 image: {{ $.ImageName }}-artifact
@@ -8,15 +7,18 @@ from: {{ $.BASE_ALPINE_DEV }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}/scripts
+  - add: /images/{{ $.ImageName }}
     to: /
+    includePaths:
+    - scripts
+    - tools
 
 shell:
   setup:
-    - apk add wget tar
-    - wget https://github.com/fsaintjacques/semver-tool/archive/refs/tags/{{ $version }}.tar.gz
-    - tar -xvf {{ $version }}.tar.gz
-    - mv semver-tool-{{ $version }}/src/semver /d8-semver
+    - chmod a+x scripts/*
+    - mv scripts/* /
+    - chmod a+x tools/*
+    - mv tools/* /
 ---
 image: {{ $.ImageName }}
 from: {{ $.BASE_SCRATCH }}
@@ -26,7 +28,8 @@ import:
     add: /
     to: /
     includePaths:
-      - d8-semver
+      - evict.sh
+      - replicas_manager.sh
       - install
       - uninstall
     before: setup
@@ -34,4 +37,3 @@ docker:
   LABEL:
     distro: all
     version: all
-    semver: {{ $version }}
