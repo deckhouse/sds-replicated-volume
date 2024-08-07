@@ -50,7 +50,6 @@ run_trigger() {
   if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list_before_migrate" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
     echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed"
     values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
-    kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
     exit 0
   fi
   
@@ -71,7 +70,7 @@ run_trigger() {
 
   export AFFECTED_PVS_HASH=""
   export pv_pvc_list=$pv_pvc_list
-  migrate_pvc_pv
+  migrate_pv_pvc
 
   export volume_snapshot_classes=$volume_snapshot_classes
   migrate_volume_snapshot_classes
@@ -85,7 +84,6 @@ run_trigger() {
 
   delete_old_volume_attachments
 
-
   for node in $nodes_with_volumes; do
     echo "Add label ${LABEL_KEY}=${LABEL_VALUE} to node $node"
     kubectl label node $node ${LABEL_KEY}=${LABEL_VALUE} --overwrite
@@ -97,7 +95,6 @@ run_trigger() {
     values::set sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash "$AFFECTED_PVS_HASH"
   fi
   values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
-  kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
 }
 
 delete_resource() {
@@ -157,7 +154,7 @@ migrate_storage_classes() {
   done
 }
 
-migrate_pvc_pv() {
+migrate_pv_pvc() {
   echo "PVs/PVCs to migrate: $pv_pvc_list"
 
   mkdir -p "${temp_dir}/pvc_pv"
