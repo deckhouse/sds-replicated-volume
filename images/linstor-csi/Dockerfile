@@ -8,6 +8,7 @@ ARG LINSTOR_CSI_VERSION=v1.6.3
 # Copy patches
 COPY ./patches /patches
 
+RUN apk add --no-cache ca-certificates make git
 RUN git clone ${LINSTOR_CSI_GITREPO} /usr/local/go/linstor-csi/ \
  && cd /usr/local/go/linstor-csi \
  && git reset --hard ${LINSTOR_CSI_VERSION} \
