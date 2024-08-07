@@ -1,5 +1,5 @@
 ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
-ARG BASE_GOLANG_21_BULLSEYE=registry.deckhouse.io/base_images/golang:1.21.6-bullseye@sha256:a363973b58d4d5a91d6e8f700c847e87c1143459e55464fefca9e6135358af98
+ARG BASE_GOLANG_21_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.3-alpine@sha256:dbf216b880b802c22e3f4f2ef0a78396b4a9a6983cb9b767c5efc351ebf946b0
 
 FROM $BASE_GOLANG_21_BULLSEYE as builder
 ARG LINSTOR_CSI_GITREPO=https://github.com/linbit/linstor-csi
