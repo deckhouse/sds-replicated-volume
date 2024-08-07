@@ -3,7 +3,7 @@ ARG BASE_GOLANG_21_BULLSEYE=registry.deckhouse.io/base_images/golang:1.21.6-bull
 
 FROM $BASE_GOLANG_21_BULLSEYE as builder
 ARG LINSTOR_CSI_GITREPO=https://github.com/linbit/linstor-csi
-ARG LINSTOR_CSI_VERSION=98544cadb6d111d27a86a11ec07de91b99704b82
+ARG LINSTOR_CSI_VERSION=v1.6.3
 
 # Copy patches
 COPY ./patches /patches
