@@ -43,7 +43,7 @@ run_trigger() {
   volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.driver == $oldDriverName) | .metadata.name')
 
   if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
-    echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed"
+    echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed."
     values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
     kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
     kubectl -n ${NAMESPACE} label secret ${SECRET_NAME} heritage=deckhouse module=sds-replicated-volume
