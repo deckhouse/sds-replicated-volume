@@ -39,18 +39,17 @@ run_trigger() {
     exit 0
   fi
 
-  echo "Secret ${NAMESPACE}/${SECRET_NAME} does not exist. Starting csi migration"
+  echo "Secret ${NAMESPACE}/${SECRET_NAME} does not exist. Starting migration of CSI endpoint"
 
   sc_list=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
   pv_pvc_list=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
-  pvc_list_before_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
+  pvc_list=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
   volume_snapshot_classes=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.driver == $oldDriverName) | .metadata.name')
   volume_snapshot_contents=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.driver == $oldDriverName) | .metadata.name')
 
-  if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list_before_migrate" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
+  if [[ -z "$sc_list" && -z "$pv_pvc_list" && -z "$pvc_list" && -z "$volume_snapshot_classes" && -z "$volume_snapshot_contents" ]]; then
     echo "No StorageClasses, PVCs, PVs, VolumeSnapshotClasses, VolumeSnapshotContents to migrate. Migration not needed"
     values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
-    kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
     exit 0
   fi
   
@@ -71,7 +70,7 @@ run_trigger() {
 
   export AFFECTED_PVS_HASH=""
   export pv_pvc_list=$pv_pvc_list
-  migrate_pvc_pv
+  migrate_pv_pvc
 
   export volume_snapshot_classes=$volume_snapshot_classes
   migrate_volume_snapshot_classes
@@ -85,7 +84,6 @@ run_trigger() {
 
   delete_old_volume_attachments
 
-
   for node in $nodes_with_volumes; do
     echo "Add label ${LABEL_KEY}=${LABEL_VALUE} to node $node"
     kubectl label node $node ${LABEL_KEY}=${LABEL_VALUE} --overwrite
@@ -96,8 +94,28 @@ run_trigger() {
     echo "Set affectedPVsHash to values"
     values::set sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash "$AFFECTED_PVS_HASH"
   fi
+
+  sc_lis_after_migrate=$(kubectl get sc -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.provisioner == $oldDriverName) | .metadata.name')
+  pv_pvc_list_after_migrate=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.csi.driver == $oldDriverName) | .spec.claimRef.namespace + "/" + .spec.claimRef.name + "/" + .metadata.name')
+  pvc_list_after_migrate=$(kubectl get pvc --all-namespaces -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.metadata.annotations["volume.kubernetes.io/storage-provisioner"] == $oldDriverName) | .metadata.namespace + "/" + .metadata.name')
+  volume_snapshot_classes_after_migrate=$(kubectl get volumesnapshotclasses.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.driver == $oldDriverName) | .metadata.name')
+  volume_snapshot_contents_after_migrate=$(kubectl get volumesnapshotcontents.snapshot.storage.k8s.io -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.driver == $oldDriverName) | .metadata.name')
+
+  if [[ -n "$sc_lis_after_migrate" || -n "$pv_pvc_list_after_migrate" || -n "$pvc_list_after_migrate" || -n "$volume_snapshot_classes_after_migrate" || -n "$volume_snapshot_contents_after_migrate" ]]; then
+    
+    echo "StorageClasses after migration: $sc_lis_after_migrate"
+    echo "PVs/PVCs after migration: $pv_pvc_list_after_migrate"
+    echo "PVCs after migration: $pvc_list_after_migrate"
+    echo "VolumeSnapshotClasses after migration: $volume_snapshot_classes_after_migrate"
+    echo "VolumeSnapshotContents after migration: $volume_snapshot_contents_after_migrate"
+    echo "Migration failed. There are resources that were not migrated. Fail the hook to restart the migration process"
+
+    values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "false"
+    exit 1
+  fi
+
   values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
-  kubectl -n ${NAMESPACE} create secret generic ${SECRET_NAME}
+  exit 0
 }
 
 delete_resource() {
@@ -157,7 +175,7 @@ migrate_storage_classes() {
   done
 }
 
-migrate_pvc_pv() {
+migrate_pv_pvc() {
   echo "PVs/PVCs to migrate: $pv_pvc_list"
 
   mkdir -p "${temp_dir}/pvc_pv"
