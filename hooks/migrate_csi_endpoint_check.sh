@@ -55,8 +55,8 @@ run_trigger() {
   echo "VolumeSnapshotClasses: $volume_snapshot_classes"
   echo "VolumeSnapshotContents: $volume_snapshot_contents"
   echo "There are resources to migrate. Fail the hook to restart the migration process"
+  
   values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "false"
-
   exit 1
 }
 
