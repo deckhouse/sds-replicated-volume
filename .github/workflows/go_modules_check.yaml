@@ -1,0 +1,78 @@
+name: Check Go modules version
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Check Go modules version
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Go modules version check
+        run: |
+          search_dir=$(pwd)"/images"
+          
+          if [ ! -d "$search_dir" ]; then
+            echo "Directory $search_dir does not exist."
+            exit 1
+          fi
+          
+          temp_dir=$(mktemp -d)
+          
+          trap 'rm -rf "$temp_dir"' EXIT
+          
+          find "$search_dir" -name "go.mod" | while read -r go_mod_file; do
+          echo "Processing $go_mod_file"
+          
+          while IFS= read -r line; do
+            if [[ "$line" == *github.com/deckhouse/sds-* || "$line" == *github.com/deckhouse/csi-* || "$line" == *github.com/deckhouse/virtualization ]]; then
+              repository=$(echo "$line" | awk '{print $1}' | awk -F'/' '{ print "https://"$1"/"$2"/"$3".git" }')
+              pseudo_tag=$(echo "$line" | awk '{print $2}')
+              echo "Cloning repo $repository into $temp_dir"
+            
+              git clone "$repository" "$temp_dir/$repository" >/dev/null 2>&1
+              
+              if [ -d "$temp_dir/$repository/api" ]; then
+                cd "$temp_dir/$repository" || continue
+                
+                commit_info=$(git log -1 --pretty=format:"%H %cd" --date=iso-strict -- api/*)
+                short_hash=$(echo "$commit_info" | awk '{print substr($1,1,12)}')
+                commit_date=$(echo "$commit_info" | awk '{print $2}')
+                commit_date=$(date -u -d "$commit_date" +"%Y%m%d%H%M%S")
+                actual_pseudo_tag="v0.0.0-"$commit_date"-"$short_hash
+                pseudo_tag_date=$(echo $pseudo_tag | awk -F'-' '{ print $2 }')
+                echo "Latest commit in $repository: $short_hash $commit_date"
+                
+                if [[ "$pseudo_tag_date" < "$commit_date" ]]; then
+                  echo "Incorrect pseudo tag for repo $repository in file "$go_mod_file" (current: "$pseudo_tag", actual:"$actual_pseudo_tag")"
+                  echo "Incorrect pseudo tag for repo $repository in file "$go_mod_file" (current: "$pseudo_tag", actual:"$actual_pseudo_tag")" >> $temp_dir"/incorrect_alert"
+                fi
+                
+                cd - >/dev/null 2>&1
+              else
+                echo "No api directory in $repository"
+              fi
+            
+              rm -rf "$temp_dir/$repository"
+            fi
+            done < "$go_mod_file"
+          done
+          
+          alert_lines_count=$(cat $temp_dir"/incorrect_alert" | wc -l)
+          
+          if [ $alert_lines_count != 0 ]; then
+            echo "We have non-actual pseudo-tags in repository's go.mod files"
+            exit 1
+          fi
