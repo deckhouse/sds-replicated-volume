@@ -5,6 +5,7 @@ FROM $BASE_GOLANG_19_BULLSEYE as builder
 ARG LINSTOR_AFFINITY_CONTROLLER_GITREPO=https://github.com/piraeusdatastore/linstor-affinity-controller
 ARG LINSTOR_AFFINITY_CONTROLLER_VERSION=1.0.2
 
+RUN apk add --no-cache ca-certificates make git
 RUN git clone ${LINSTOR_AFFINITY_CONTROLLER_GITREPO} /usr/local/go/linstor-affinity-controller \
  && cd /usr/local/go/linstor-affinity-controller \
  && git reset --hard v${LINSTOR_AFFINITY_CONTROLLER_VERSION} \
