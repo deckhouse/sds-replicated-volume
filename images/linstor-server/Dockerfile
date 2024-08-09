@@ -94,7 +94,7 @@ ARG UTILS_VERSION=9.28.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
- && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev python3-setuptools \
+ && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -183,7 +183,7 @@ RUN { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "fal
 
 # Install linstor-server
 RUN apt-get update \
- && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort \
+ && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort python3-setuptools \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \
