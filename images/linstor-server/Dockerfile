@@ -1,10 +1,10 @@
 ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
-ARG BASE_GOLANG_19_BULLSEYE=registry.deckhouse.io/base_images/golang:1.19.3-bullseye@sha256:3d68e9eabd09f01f5851297902f2756ee2456a2e28b212e553315a3ddfcffe4b
+ARG BASE_GOLANG_22=registry.deckhouse.io/base_images/golang:1.22.3-alpine@sha256:dbf216b880b802c22e3f4f2ef0a78396b4a9a6983cb9b767c5efc351ebf946b0
 
 FROM $BASE_UBUNTU as linstor-builder
 
 ARG LINSTOR_GITREPO=https://github.com/LINBIT/linstor-server
-ARG LINSTOR_VERSION=1.24.2
+ARG LINSTOR_VERSION=1.29.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
@@ -18,15 +18,11 @@ RUN mkdir /opt/gradle && cd /opt/gradle \
  && unzip gradle-6.9.3-bin.zip \
  && ln -s /opt/gradle/gradle-6.9.3/bin/gradle /usr/local/bin/gradle
 
-# Copy patches
-COPY ./patches /patches
-
 RUN git clone ${LINSTOR_GITREPO} /linstor-server
 WORKDIR /linstor-server
 RUN git checkout v${LINSTOR_VERSION} \
  && git config --global user.email "builder@deckhouse.io" \
  && git config --global user.name "deckhouse" \
- && git am /patches/*.patch \
  && git tag -f v${LINSTOR_VERSION}
 
 RUN git config --global url."https://github.com/".insteadOf git://github.com/ \
@@ -43,9 +39,9 @@ RUN dpkg-buildpackage -us -uc
 FROM $BASE_UBUNTU as client-builder
 
 ARG API_GITREPO=https://github.com/LINBIT/linstor-api-py
-ARG API_VERSION=1.19.0
+ARG API_VERSION=1.23.0
 ARG CLIENT_GITREPO=https://github.com/LINBIT/linstor-client
-ARG CLIENT_VERSION=1.19.0
+ARG CLIENT_VERSION=1.23.0
 ARG LINSTOR_COMMON_SUBMODULE_COMMIT=999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec
 
 ENV DEBIAN_FRONTEND noninteractive
@@ -56,10 +52,7 @@ RUN apt-get update \
 
 RUN git clone --recurse-submodules ${API_GITREPO} /linstor-api-py
 WORKDIR /linstor-api-py
-RUN git checkout v${API_VERSION}
-WORKDIR /linstor-api-py/linstor-common
-RUN git checkout ${LINSTOR_COMMON_SUBMODULE_COMMIT}
-WORKDIR /linstor-api-py
+RUN git checkout v${API_VERSION} && git submodule update --init --recursive
 RUN make debrelease \
  && mv ./dist/python-linstor-${API_VERSION}.tar.gz ../python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz \
  && tar -C / -xvf /python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz
@@ -71,7 +64,7 @@ RUN rm -rf /linstor-api-py \
 
 RUN git clone ${CLIENT_GITREPO} /linstor-client
 WORKDIR /linstor-client
-RUN git checkout v${CLIENT_VERSION} \
+RUN git checkout v${CLIENT_VERSION} && git submodule update --init --recursive \
  && make debrelease \
  && mv dist/linstor-client-${CLIENT_VERSION}.tar.gz /linstor-client_$(echo ${CLIENT_VERSION} | tr '-' '~').orig.tar.gz \
  && tar -C / -xvf /linstor-client_$(echo ${CLIENT_VERSION} | tr '-' '~').orig.tar.gz
@@ -80,11 +73,12 @@ RUN dpkg-buildpackage -us -uc
 
 # ------------------------------------------------------------------------------
 
-FROM $BASE_GOLANG_19_BULLSEYE as k8s-await-election-builder
+FROM $BASE_GOLANG_22 as k8s-await-election-builder
 
 ARG K8S_AWAIT_ELECTION_GITREPO=https://github.com/LINBIT/k8s-await-election
-ARG K8S_AWAIT_ELECTION_VERSION=0.3.1
+ARG K8S_AWAIT_ELECTION_VERSION=0.4.1
 
+RUN apk add --no-cache ca-certificates make git
 RUN git clone ${K8S_AWAIT_ELECTION_GITREPO} /usr/local/go/k8s-await-election/ \
  && cd /usr/local/go/k8s-await-election \
  && git reset --hard v${K8S_AWAIT_ELECTION_VERSION} \
@@ -123,7 +117,7 @@ WORKDIR /drbd-utils-${UTILS_VERSION}
 RUN dpkg-buildpackage -us -uc
 
 ARG THIN_SEND_RECV_GITREPO=https://github.com/LINBIT/thin-send-recv
-ARG THIN_SEND_RECV_VERSION=1.0.1
+ARG THIN_SEND_RECV_VERSION=1.1.2
 
 RUN git clone --recurse-submodules ${THIN_SEND_RECV_GITREPO} /thin-send-recv
 WORKDIR /thin-send-recv
@@ -138,7 +132,7 @@ RUN dpkg-buildpackage -us -uc
 
 FROM $BASE_UBUNTU
 ARG PIRAEUS_GITREPO=https://github.com/piraeusdatastore/piraeus
-ARG PIRAEUS_COMMIT_REF=20e96f83f52631dc06d011b7f96293d4026236a1
+ARG PIRAEUS_COMMIT_REF=825ced65f69a1c1b32d19d20fb2275a8765783b0
 
 COPY --from=linstor-builder /linstor-common_*.deb /linstor-controller_*.deb /linstor-satellite_*.deb /packages/
 COPY --from=client-builder /python-linstor_*.deb /linstor-client_*.deb /packages/
@@ -189,7 +183,7 @@ RUN { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "fal
 
 # Install linstor-server
 RUN apt-get update \
- && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort \
+ && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort python3-setuptools \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \

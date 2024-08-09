@@ -1,8 +1,7 @@
 diff --git a/cmd/linstor-csi/linstor-csi.go b/cmd/linstor-csi/linstor-csi.go
-index 20b09f5..8dac370 100644
---- a/cmd/linstor-csi/linstor-csi.go
-+++ b/cmd/linstor-csi/linstor-csi.go
-@@ -40,7 +40,7 @@ func main() {
+--- a/cmd/linstor-csi/linstor-csi.go	(revision 863eaeeb6bfd4402263991b9bed0a265c5061d62)
++++ b/cmd/linstor-csi/linstor-csi.go	(revision e55e9bfc54913374323c358175b63781e6e51537)
+@@ -42,7 +42,7 @@
  	var (
  		lsEndpoint            = flag.String("linstor-endpoint", "", "Controller API endpoint for LINSTOR")
  		lsSkipTLSVerification = flag.Bool("linstor-skip-tls-verification", false, "If true, do not verify tls")
@@ -12,15 +11,14 @@ index 20b09f5..8dac370 100644
  		logLevel              = flag.String("log-level", "info", "Enable debug log output. Choose from: panic, fatal, error, warn, info, debug")
  		rps                   = flag.Float64("linstor-api-requests-per-second", 0, "Maximum allowed number of LINSTOR API requests per second. Default: Unlimited")
 diff --git a/pkg/linstor/const.go b/pkg/linstor/const.go
-index 8b732ec..d18e968 100644
---- a/pkg/linstor/const.go
-+++ b/pkg/linstor/const.go
-@@ -24,7 +24,7 @@ import (
- 
+--- a/pkg/linstor/const.go	(revision 863eaeeb6bfd4402263991b9bed0a265c5061d62)
++++ b/pkg/linstor/const.go	(revision e55e9bfc54913374323c358175b63781e6e51537)
+@@ -24,7 +24,7 @@
+
  const (
  	// DriverName is the name used in CSI calls for this driver.
 -	DriverName = "linstor.csi.linbit.com"
 +	DriverName = "replicated.csi.storage.deckhouse.io"
- 
- 	// LegacyParameterPassKey is the Aux props key in linstor where serialized CSI parameters
- 	// are stored.
+
+ 	// LinstorBackupKVName is the name of the KV store used to map L2L backups to local snapshot names
+ 	LinstorBackupKVName = "csi-backup-mapping"
