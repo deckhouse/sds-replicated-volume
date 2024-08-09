@@ -3,7 +3,7 @@ ARG BASE_GOLANG_21_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.3-alpi
 
 FROM $BASE_GOLANG_21_BULLSEYE as builder
 ARG LINSTOR_CSI_GITREPO=https://github.com/linbit/linstor-csi
-ARG LINSTOR_CSI_VERSION=v1.6.3
+ARG LINSTOR_CSI_VERSION=1.6.3
 
 # Copy patches
 COPY ./patches /patches
@@ -11,7 +11,7 @@ COPY ./patches /patches
 RUN apk add --no-cache ca-certificates make git
 RUN git clone ${LINSTOR_CSI_GITREPO} /usr/local/go/linstor-csi/ \
  && cd /usr/local/go/linstor-csi \
- && git reset --hard ${LINSTOR_CSI_VERSION} \
+ && git reset --hard v${LINSTOR_CSI_VERSION} \
  && git apply /patches/*.patch \
  && cd cmd/linstor-csi \
  && go build -ldflags="-X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v${LINSTOR_CSI_VERSION}" \
