@@ -19,14 +19,14 @@ package main
 import (
 	"flag"
 	"fmt"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"net/http"
 	"os"
-	"webhooks/handlers"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
 	storagev1 "k8s.io/api/storage/v1"
+	"webhooks/handlers"
 )
 
 type config struct {
@@ -35,7 +35,7 @@ type config struct {
 }
 
 //goland:noinspection SpellCheckingInspection
-func httpHandlerHealthz(w http.ResponseWriter, r *http.Request) {
+func httpHandlerHealthz(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, "Ok.")
 }
 
@@ -46,15 +46,19 @@ func initFlags() config {
 	fl.StringVar(&cfg.certFile, "tls-cert-file", "", "TLS certificate file")
 	fl.StringVar(&cfg.keyFile, "tls-key-file", "", "TLS key file")
 
-	fl.Parse(os.Args[1:])
+	err := fl.Parse(os.Args[1:])
+	if err != nil {
+		fmt.Printf("error parsing flags, err: %s\n", err.Error())
+		os.Exit(1)
+	}
 	return cfg
 }
 
 const (
 	port           = ":8443"
-	RSCValidatorId = "RSCValidator"
-	RSPValidatorId = "RSPValidator"
-	SCValidatorId  = "SCValidator"
+	RSCValidatorID = "RSCValidator"
+	RSPValidatorID = "RSPValidator"
+	SCValidatorID  = "SCValidator"
 )
 
 func main() {
@@ -64,19 +68,19 @@ func main() {
 
 	cfg := initFlags()
 
-	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorId, &srv.ReplicatedStoragePool{}, logger)
+	rspValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSPValidate, RSPValidatorID, &srv.ReplicatedStoragePool{}, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating rspValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
-	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorId, &srv.ReplicatedStorageClass{}, logger)
+	rscValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.RSCValidate, RSCValidatorID, &srv.ReplicatedStorageClass{}, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating rscValidatingWebhookHandler: %s", err)
 		os.Exit(1)
 	}
 
-	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorId, &storagev1.StorageClass{}, logger)
+	scValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.SCValidate, SCValidatorID, &storagev1.StorageClass{}, logger)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating scValidatingWebhookHandler: %s", err)
 		os.Exit(1)
