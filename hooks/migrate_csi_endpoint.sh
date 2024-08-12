@@ -52,7 +52,15 @@ run_trigger() {
     values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
     exit 0
   fi
-  
+
+
+  termintating_pvs=$(kubectl get pv -o json | jq -r --arg oldDriverName "$OLD_DRIVER_NAME" '.items[] | select(.spec.csi.driver == $oldDriverName and .metadata.deletionTimestamp != null) | .metadata.name')
+  if [[ -n "$termintating_pvs" ]]; then
+    echo "There are PVs with driver $OLD_DRIVER_NAME in Terminating state. Fail the hook to restart the migration process"
+    values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "false"
+    exit 1
+  fi
+
   delete_resource ${NAMESPACE} daemonset linstor-csi-node
   scale_down_pods ${NAMESPACE} linstor-csi-controller
   scale_down_pods ${NAMESPACE} linstor-affinity-controller
