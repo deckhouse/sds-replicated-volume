@@ -193,9 +193,6 @@ migrate_pv_pvc() {
       pvc=${array[1]}
       pv=${array[2]}
 
-      
-
-
       if kubectl get pvc "$pvc" -n "$namespace" -o yaml > "pvc-${pvc}.yaml" 2>/dev/null; then
         echo "PVC $pvc retrieved successfully and saved to pvc-${pvc}.yaml."
         cp pvc-${pvc}.yaml old.pvc-${pvc}.yaml.$TIMESTAMP
