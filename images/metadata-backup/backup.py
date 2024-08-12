@@ -119,6 +119,8 @@ if __name__ == "__main__":
             full_completed_list.append(item['metadata']['name'])
     completed_list = full_completed_list[-retention:]
     for backup_name in backup_list:
+        if not re.search(r'^sds-replicated-volume-\d+-backup-', backup_name):
+            continue
         backup_cut_name = re.search(r'^sds-replicated-volume-\d+-backup-', backup_name).group(0)
         if f'{backup_cut_name}0' in completed_list:
              continue
