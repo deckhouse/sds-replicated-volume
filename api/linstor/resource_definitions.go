@@ -28,7 +28,7 @@ type ResourceDefinitions struct {
 		ResourceName      string `json:"resource_name"`
 		SnapshotDspName   string `json:"snapshot_dsp_name"`
 		SnapshotName      string `json:"snapshot_name"`
-		Uuid              string `json:"uuid"`
+		UUID              string `json:"uuid"`
 	} `json:"spec"`
 }
 

@@ -26,7 +26,7 @@ type Resources struct {
 		ResourceFlags   int    `json:"resource_flags"`
 		ResourceName    string `json:"resource_name"`
 		SnapshotName    string `json:"snapshot_name"`
-		Uuid            string `json:"uuid"`
+		UUID            string `json:"uuid"`
 	} `json:"spec"`
 }
 
