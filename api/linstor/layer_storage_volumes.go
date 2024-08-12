@@ -19,7 +19,7 @@ type LayerStorageVolumes struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	Spec              struct {
-		LayerResourceId int    `json:"layer_resource_id"`
+		LayerResourceID int    `json:"layer_resource_id"`
 		NodeName        string `json:"node_name"`
 		ProviderKind    string `json:"provider_kind"`
 		StorPoolName    string `json:"stor_pool_name"`

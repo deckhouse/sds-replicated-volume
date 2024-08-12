@@ -33,7 +33,7 @@ type ResourceGroups struct {
 		ReplicasOnSame        string `json:"replicas_on_same"`
 		ResourceGroupDspName  string `json:"resource_group_dsp_name"`
 		ResourceGroupName     string `json:"resource_group_name"`
-		Uuid                  string `json:"uuid"`
+		UUID                  string `json:"uuid"`
 	} `json:"spec"`
 }
 

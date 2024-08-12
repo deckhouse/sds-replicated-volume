@@ -26,7 +26,7 @@ type LayerDrbdResourceDefinitions struct {
 		ResourceNameSuffix string `json:"resource_name_suffix"`
 		Secret             string `json:"secret"`
 		SnapshotName       string `json:"snapshot_name"`
-		TcpPort            int    `json:"tcp_port"`
+		TCPPort            int    `json:"tcp_port"`
 		TransportType      string `json:"transport_type"`
 	} `json:"spec"`
 }
