@@ -193,12 +193,18 @@ migrate_pv_pvc() {
       pvc=${array[1]}
       pv=${array[2]}
 
-      kubectl get pvc $pvc -n $namespace -o yaml > pvc-${pvc}.yaml
+      
+
+
+      if kubectl get pvc "$pvc" -n "$namespace" -o yaml > "pvc-${pvc}.yaml" 2>/dev/null; then
+        echo "PVC $pvc retrieved successfully and saved to pvc-${pvc}.yaml."
+        cp pvc-${pvc}.yaml old.pvc-${pvc}.yaml.$TIMESTAMP
+      else
+        echo "PVC $pvc does not exist or couldn't be retrieved."
+      fi
+
       kubectl get pv $pv -o yaml > pv-${pv}.yaml
-
-      cp pvc-${pvc}.yaml old.pvc-${pvc}.yaml.$TIMESTAMP
       cp pv-${pv}.yaml old.pv-${pv}.yaml.$TIMESTAMP
-
       sed -i "s/$escaped_OLD_DRIVER_NAME/$NEW_DRIVER_NAME/g" pv-${pv}.yaml
       sed -i "s/$OLD_ATTACHER/$NEW_ATTACHER/g" pv-${pv}.yaml
       sed -i '/resourceVersion: /d' pv-${pv}.yaml
@@ -217,17 +223,34 @@ migrate_pv_pvc() {
       namespace=${array[0]}
       pvc=${array[1]}
       pv=${array[2]}
+
+      echo "Checking if PVC $pvc exists in namespace $namespace"
+      if kubectl get pvc "$pvc" -n "$namespace" &>/dev/null; then
+        echo "PVC $pvc exists in namespace $namespace"
+        pvc_exists=true
+      else
+        echo "PVC $pvc does not exist in namespace $namespace. Skipping migration of PVC $pvc."
+        pvc_exists=false
+      fi
+
       echo "Deleting pv: $pv"
       kubectl delete pv $pv --wait=false # the pv will stuck in Terminating state
       echo "Deleting finalizer from pv: $pv"
       kubectl patch pv $pv --type json -p '[{"op": "remove", "path": "/metadata/finalizers"}]'
-      echo "Patching annotations in pvc: $pvc"
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
-      kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
+      
+      if [[ "$pvc_exists" == "true" ]]; then
+        echo "Patching annotations in pvc: $pvc"
+        kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.beta.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
+        kubectl patch pvc ${pvc} -n $namespace  --type=json -p='[{"op": "replace", "path": "/metadata/annotations/volume.kubernetes.io~1storage-provisioner", "value":"'$NEW_DRIVER_NAME'"}]'
+      fi
+
       echo "Recreating pv: $pv"
       kubectl create -f pv-${pv}.yaml
-      echo "Deleting annotation from pvc $pvc to trigger pvc/pv binding"
-      kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bind-completed"}]'
+
+      if [[ "$pvc_exists" == "true" ]]; then
+        echo "Deleting annotation from pvc $pvc to trigger pvc/pv binding"
+        kubectl patch pvc ${pvc} -n $namespace --type=json -p='[{"op": "remove", "path": "/metadata/annotations/pv.kubernetes.io~1bind-completed"}]'
+      fi
 
       IFS=$old_ifs
     done
