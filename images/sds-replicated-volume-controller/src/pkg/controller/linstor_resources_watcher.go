@@ -20,21 +20,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sds-replicated-volume-controller/pkg/logger"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 const (
@@ -73,20 +70,11 @@ func NewLinstorResourcesWatcher(
 	lc *lapi.Client,
 	interval int,
 	log logger.Logger,
-) (controller.Controller, error) {
+) {
 	cl := mgr.GetClient()
 	ctx := context.Background()
 
-	c, err := controller.New(linstorResourcesWatcherCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			return reconcile.Result{}, nil
-		}),
-	})
-
-	if err != nil {
-		log.Error(err, fmt.Sprintf(`[NewLinstorResourcesWatcher] unable to create controller: "%s"`, linstorResourcesWatcherCtrlName))
-		return nil, err
-	}
+	log.Info(fmt.Sprintf("[NewLinstorResourcesWatcher] the controller %s starts the work", linstorResourcesWatcherCtrlName))
 
 	go func() {
 		for {
@@ -129,8 +117,6 @@ func NewLinstorResourcesWatcher(
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
 	}()
-
-	return c, err
 }
 
 func ReconcileParams(
@@ -179,7 +165,6 @@ func ReconcileParams(
 							missMatched = getMissMatchedParams(sc, rgs[RGName])
 						}
 					}
-
 				}
 
 				if len(missMatched) > 0 {
@@ -230,7 +215,7 @@ func ReconcileTieBreaker(
 	log.Info("[ReconcileTieBreaker] starts work")
 
 	allResources := make(map[string][]lapi.Resource, len(rds)*3)
-	for name, _ := range rds {
+	for name := range rds {
 		res, err := lc.Resources.GetAll(ctx, name)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to get Linstor Resources by the Resource Definition, name: %s", name))
@@ -245,19 +230,16 @@ func ReconcileTieBreaker(
 	)
 	for name, resources := range allResources {
 		if len(resources) == 0 {
-			// TODO: log as warning
-			log.Info(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
+			log.Warning(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
 			continue
 		}
 
 		if len(resources)%2 != 0 {
-			// TODO: log as debug
 			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has odd replicas count. No need to create diskless one", name))
 			continue
 		}
 
 		if hasDisklessReplica(resources) {
-			// TODO: log as debug
 			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has already have a diskless replica. No need to create one", name))
 			continue
 		}

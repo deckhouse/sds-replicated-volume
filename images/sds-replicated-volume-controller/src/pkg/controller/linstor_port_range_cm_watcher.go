@@ -19,16 +19,16 @@ package controller
 import (
 	"context"
 	"fmt"
-	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	"reflect"
-	"sds-replicated-volume-controller/pkg/logger"
 	"strconv"
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
+	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -50,7 +50,7 @@ func NewLinstorPortRangeWatcher(
 	lc *lapi.Client,
 	interval int,
 	log logger.Logger,
-) (controller.Controller, error) {
+) error {
 	cl := mgr.GetClient()
 
 	c, err := controller.New(linstorPortRangeWatcherCtrlName, mgr, controller.Options{
@@ -70,9 +70,8 @@ func NewLinstorPortRangeWatcher(
 			return reconcile.Result{Requeue: false}, nil
 		}),
 	})
-
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.Watch(
@@ -91,18 +90,19 @@ func NewLinstorPortRangeWatcher(
 
 					log.Info("END from CREATE reconcile of ConfigMap with name: " + request.Name)
 				}
-
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 				if e.ObjectNew.GetName() == linstorPortRangeConfigMapName {
 					newCM, ok := e.ObjectNew.(*corev1.ConfigMap)
 					if !ok {
-						log.Error(err, "error get ObjectNew ConfigMap")
+						log.Error(err, fmt.Sprintf("[NewLinstorPortRangeWatcher] unable to cast a objectNew to a given type for an event %s", e.ObjectNew.GetName()))
+						return
 					}
 
 					oldCM, ok := e.ObjectOld.(*corev1.ConfigMap)
 					if !ok {
-						log.Error(err, "error get ObjectOld ConfigMap")
+						log.Error(err, fmt.Sprintf("[NewLinstorPortRangeWatcher] unable to cast a objectOld to a given type for an event %s", e.ObjectNew.GetName()))
+						return
 					}
 
 					if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newCM.Data, oldCM.Data) {
@@ -119,9 +119,9 @@ func NewLinstorPortRangeWatcher(
 			},
 		})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	return c, err
+	return err
 }
 
 func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *corev1.ConfigMap, value string) error {
@@ -132,8 +132,8 @@ func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *core
 func ReconcileConfigMapEvent(ctx context.Context,
 	cl client.Client, lc *lapi.Client,
 	request reconcile.Request,
-	log logger.Logger) (bool, error) {
-
+	log logger.Logger,
+) (bool, error) {
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, request.NamespacedName, configMap)
 	if err != nil {

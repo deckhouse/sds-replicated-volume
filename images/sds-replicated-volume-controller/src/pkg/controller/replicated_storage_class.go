@@ -20,20 +20,18 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
 	"time"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
-	"k8s.io/utils/strings/slices"
-
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/strings/slices"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -114,18 +112,16 @@ func NewReplicatedStorageClass(
 
 	c, err := controller.New(ReplicatedStorageClassControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
 			log.Info("START reconcile of ReplicatedStorageClass with name: " + request.Name)
 
 			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
 			if shouldRequeue {
 				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
-			} else {
-				log.Info("END reconcile of ReplicatedStorageClass with name: " + request.Name)
 			}
+			log.Info("END reconcile of ReplicatedStorageClass with name: " + request.Name)
 
-			return reconcile.Result{Requeue: false}, nil
+			return reconcile.Result{}, nil
 		}),
 	})
 
@@ -147,10 +143,8 @@ func NewReplicatedStorageClass(
 				}
 
 				log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
-
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-
 				newReplicatedSC, ok := e.ObjectNew.(*srv.ReplicatedStorageClass)
 				if !ok {
 					log.Error(err, "error get ObjectNew ReplicatedStorageClass")
@@ -171,7 +165,6 @@ func NewReplicatedStorageClass(
 					}
 					log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
 				}
-
 			},
 			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
 				log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
@@ -379,11 +372,9 @@ func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, repli
 		if err != nil {
 			validationPassed = false
 			failedMsgBuilder.WriteString(fmt.Sprintf("Unable to find default ReplicatedStorageClasses and Kube StorageClasses. Error: %s; ", err.Error()))
-		} else {
-			if len(replicatedSCNames) > 0 || len(scNames) > 0 {
-				validationPassed = false
-				failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: %s", strings.Join(replicatedSCNames, ","), strings.Join(scNames, ",")))
-			}
+		} else if len(replicatedSCNames) > 0 || len(scNames) > 0 {
+			validationPassed = false
+			failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: %s", strings.Join(replicatedSCNames, ","), strings.Join(scNames, ",")))
 		}
 	}
 
@@ -487,7 +478,7 @@ func CreateStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv
 }
 
 func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
-	var allowVolumeExpansion bool = true
+	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
 	storageClassParameters := map[string]string{
@@ -648,6 +639,7 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC
 	for _, sc := range storageClassList.Items {
 		_, isDefault := sc.Annotations[DefaultStorageClassAnnotationKey]
 
+		//nolint:gocritic
 		if sc.Name == replicatedSC.Name && !isDefault {
 			if sc.Annotations == nil {
 				sc.Annotations = make(map[string]string)
@@ -659,7 +651,7 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC
 			continue
 		}
 
-		err := cl.Update(ctx, &sc)
+		err = cl.Update(ctx, &sc)
 		if err != nil {
 			return err
 		}

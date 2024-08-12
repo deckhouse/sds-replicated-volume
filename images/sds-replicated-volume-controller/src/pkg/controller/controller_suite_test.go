@@ -18,19 +18,17 @@ package controller_test
 
 import (
 	"context"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"testing"
 
-	"github.com/google/uuid"
-
 	. "github.com/LINBIT/golinstor/client"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/scheme"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestController(t *testing.T) {
@@ -89,98 +87,98 @@ func MockNodes() *NodeProviderMock {
 type NodeProviderMock struct {
 }
 
-func (m *NodeProviderMock) GetAll(ctx context.Context, opts ...*ListOpts) ([]Node, error) {
+func (m *NodeProviderMock) GetAll(_ context.Context, _ ...*ListOpts) ([]Node, error) {
 	return nil, nil
 }
 
-func (m *NodeProviderMock) Get(ctx context.Context, nodeName string, opts ...*ListOpts) (Node, error) {
+func (m *NodeProviderMock) Get(_ context.Context, _ string, _ ...*ListOpts) (Node, error) {
 	return Node{}, nil
 }
 
-func (m *NodeProviderMock) Create(ctx context.Context, node Node) error {
+func (m *NodeProviderMock) Create(_ context.Context, _ Node) error {
 	return nil
 }
 
-func (m *NodeProviderMock) CreateEbsNode(ctx context.Context, name string, remoteName string) error {
+func (m *NodeProviderMock) CreateEbsNode(_ context.Context, _ string, _ string) error {
 	return nil
 }
 
-func (m *NodeProviderMock) Modify(ctx context.Context, nodeName string, props NodeModify) error {
+func (m *NodeProviderMock) Modify(_ context.Context, _ string, _ NodeModify) error {
 	return nil
 }
 
-func (m *NodeProviderMock) Delete(ctx context.Context, nodeName string) error {
+func (m *NodeProviderMock) Delete(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *NodeProviderMock) Lost(ctx context.Context, nodeName string) error {
+func (m *NodeProviderMock) Lost(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *NodeProviderMock) Reconnect(ctx context.Context, nodeName string) error {
+func (m *NodeProviderMock) Reconnect(_ context.Context, _ string) error {
 	return nil
 }
 
-func (m *NodeProviderMock) GetNetInterfaces(ctx context.Context, nodeName string, opts ...*ListOpts) ([]NetInterface, error) {
+func (m *NodeProviderMock) GetNetInterfaces(_ context.Context, _ string, _ ...*ListOpts) ([]NetInterface, error) {
 	return nil, nil
 }
 
-func (m *NodeProviderMock) GetNetInterface(ctx context.Context, nodeName, nifName string, opts ...*ListOpts) (NetInterface, error) {
+func (m *NodeProviderMock) GetNetInterface(_ context.Context, _, _ string, _ ...*ListOpts) (NetInterface, error) {
 	return NetInterface{}, nil
 }
 
-func (m *NodeProviderMock) CreateNetInterface(ctx context.Context, nodeName string, nif NetInterface) error {
+func (m *NodeProviderMock) CreateNetInterface(_ context.Context, _ string, _ NetInterface) error {
 	return nil
 }
 
-func (m *NodeProviderMock) ModifyNetInterface(ctx context.Context, nodeName, nifName string, nif NetInterface) error {
+func (m *NodeProviderMock) ModifyNetInterface(_ context.Context, _, _ string, _ NetInterface) error {
 	return nil
 }
 
-func (m *NodeProviderMock) DeleteNetinterface(ctx context.Context, nodeName, nifName string) error {
+func (m *NodeProviderMock) DeleteNetinterface(_ context.Context, _, _ string) error {
 	return nil
 }
 
-func (m *NodeProviderMock) GetStoragePoolView(ctx context.Context, opts ...*ListOpts) ([]StoragePool, error) {
+func (m *NodeProviderMock) GetStoragePoolView(_ context.Context, _ ...*ListOpts) ([]StoragePool, error) {
 	return nil, nil
 }
-func (m *NodeProviderMock) GetStoragePools(ctx context.Context, nodeName string, opts ...*ListOpts) ([]StoragePool, error) {
+func (m *NodeProviderMock) GetStoragePools(_ context.Context, _ string, _ ...*ListOpts) ([]StoragePool, error) {
 	return nil, nil
 }
 
-func (m *NodeProviderMock) GetStoragePool(ctx context.Context, nodeName, spName string, opts ...*ListOpts) (StoragePool, error) {
+func (m *NodeProviderMock) GetStoragePool(_ context.Context, _, _ string, _ ...*ListOpts) (StoragePool, error) {
 	return StoragePool{}, nil
 }
-func (m *NodeProviderMock) CreateStoragePool(ctx context.Context, nodeName string, sp StoragePool) error {
+func (m *NodeProviderMock) CreateStoragePool(_ context.Context, _ string, _ StoragePool) error {
 	return nil
 }
-func (m *NodeProviderMock) ModifyStoragePool(ctx context.Context, nodeName, spName string, genericProps GenericPropsModify) error {
+func (m *NodeProviderMock) ModifyStoragePool(_ context.Context, _, _ string, _ GenericPropsModify) error {
 	return nil
 }
-func (m *NodeProviderMock) DeleteStoragePool(ctx context.Context, nodeName, spName string) error {
+func (m *NodeProviderMock) DeleteStoragePool(_ context.Context, _, _ string) error {
 	return nil
 }
-func (m *NodeProviderMock) CreateDevicePool(ctx context.Context, nodeName string, psc PhysicalStorageCreate) error {
+func (m *NodeProviderMock) CreateDevicePool(_ context.Context, _ string, _ PhysicalStorageCreate) error {
 	return nil
 }
-func (m *NodeProviderMock) GetPhysicalStorageView(ctx context.Context, opts ...*ListOpts) ([]PhysicalStorageViewItem, error) {
+func (m *NodeProviderMock) GetPhysicalStorageView(_ context.Context, _ ...*ListOpts) ([]PhysicalStorageViewItem, error) {
 	return nil, nil
 }
-func (m *NodeProviderMock) GetPhysicalStorage(ctx context.Context, nodeName string) ([]PhysicalStorageNode, error) {
+func (m *NodeProviderMock) GetPhysicalStorage(_ context.Context, _ string) ([]PhysicalStorageNode, error) {
 	return nil, nil
 }
-func (m *NodeProviderMock) GetStoragePoolPropsInfos(ctx context.Context, nodeName string, opts ...*ListOpts) ([]PropsInfo, error) {
+func (m *NodeProviderMock) GetStoragePoolPropsInfos(_ context.Context, _ string, _ ...*ListOpts) ([]PropsInfo, error) {
 	return nil, nil
 }
-func (m *NodeProviderMock) GetPropsInfos(ctx context.Context, opts ...*ListOpts) ([]PropsInfo, error) {
+func (m *NodeProviderMock) GetPropsInfos(_ context.Context, _ ...*ListOpts) ([]PropsInfo, error) {
 	return nil, nil
 }
-func (m *NodeProviderMock) Evict(ctx context.Context, nodeName string) error {
+func (m *NodeProviderMock) Evict(_ context.Context, _ string) error {
 	return nil
 }
-func (m *NodeProviderMock) Restore(ctx context.Context, nodeName string, restore NodeRestore) error {
+func (m *NodeProviderMock) Restore(_ context.Context, _ string, _ NodeRestore) error {
 	return nil
 }
-func (m *NodeProviderMock) Evacuate(ctx context.Context, nodeName string) error {
+func (m *NodeProviderMock) Evacuate(_ context.Context, _ string) error {
 	return nil
 }

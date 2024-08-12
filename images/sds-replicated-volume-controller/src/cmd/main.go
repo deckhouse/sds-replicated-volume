@@ -19,6 +19,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	goruntime "runtime"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/linstor"
@@ -28,8 +31,6 @@ import (
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"os"
-	goruntime "runtime"
 	"sds-replicated-volume-controller/config"
 	"sds-replicated-volume-controller/pkg/controller"
 	kubutils "sds-replicated-volume-controller/pkg/kubeutils"
@@ -53,7 +54,6 @@ var (
 )
 
 func main() {
-
 	ctx := context.Background()
 
 	cfgParams, err := config.NewConfig()
@@ -63,7 +63,7 @@ func main() {
 
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		fmt.Println(fmt.Sprintf("unable to create NewLogger, err: %v", err))
+		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -136,35 +136,29 @@ func main() {
 	}
 	log.Info("the NewReplicatedStoragePool controller starts")
 
-	if _, err := controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
+	if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewLinstorPortRangeWatcher controller")
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorPortRangeWatcher controller starts")
 
-	if _, err := controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
+	if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
 		log.Error(err, "failed to create the NewLinstorLeader controller")
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorLeader controller starts")
 
-	if _, err := controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log); err != nil {
-		log.Error(err, "failed to create the NewReplicatedStoragePool controller")
-		os.Exit(1)
-	}
+	controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log)
 	log.Info("the NewLinstorResourcesWatcher controller starts")
 
-	if _, err = controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log); err != nil {
-		log.Error(err, "failed to create the RunReplicatedStorageClassWatcher controller")
-		os.Exit(1)
-	}
+	controller.RunReplicatedStorageClassWatcher(mgr, lc, cfgParams.ReplicatedStorageClassWatchInterval, *log)
 	log.Info("the RunReplicatedStorageClassWatcher controller starts")
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		log.Error(err, "unable to set up ready check")
 		os.Exit(1)
 	}

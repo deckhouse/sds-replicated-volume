@@ -24,7 +24,7 @@ linters:
   - gci
   - gocritic
   - gofmt
-  - goimports
+#  - goimports
   - gosimple
   - govet
   - ineffassign

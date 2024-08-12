@@ -19,13 +19,13 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sds-replicated-volume-controller/pkg/logger"
 	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -46,12 +46,11 @@ func NewLinstorLeader(
 	linstorLeaseName string,
 	interval int,
 	log logger.Logger,
-) (controller.Controller, error) {
+) error {
 	cl := mgr.GetClient()
 
 	c, err := controller.New(LinstorLeaderControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
 			if request.Name == linstorLeaseName {
 				log.Info("Start reconcile of linstor-controller pods.")
 				err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
@@ -65,12 +64,11 @@ func NewLinstorLeader(
 			}
 
 			return reconcile.Result{Requeue: false}, nil
-
 		}),
 	})
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = c.Watch(
@@ -88,10 +86,8 @@ func NewLinstorLeader(
 
 					log.Info("END of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
 				}
-
 			},
 			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-
 				if e.ObjectNew.GetName() == linstorLeaseName {
 					newLease, ok := e.ObjectNew.(*coordinationv1.Lease)
 					if !ok {
@@ -121,7 +117,7 @@ func NewLinstorLeader(
 						log.Info("START from UPDATE event of leases.coordination.k8s.io with name: " + e.ObjectNew.GetName())
 						log.Info("HolderIdentity changed from " + oldIdentity + " to " + newIdentity)
 						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-						err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
+						err = reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 						if err != nil {
 							log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
 							q.AddAfter(request, time.Duration(interval)*time.Second)
@@ -130,15 +126,13 @@ func NewLinstorLeader(
 					}
 				}
 			},
-			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {},
 		})
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return c, err
-
+	return err
 }
 
 func reconcileLinstorControllerPods(ctx context.Context, cl client.Client, log logger.Logger, linstorNamespace, linstorLeaseName string) error {

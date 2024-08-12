@@ -2,17 +2,17 @@ package controller
 
 import (
 	"context"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/logger"
 	"testing"
 
 	client2 "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/strings/slices"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -279,7 +279,6 @@ func TestReplicatedStorageClassWatcher(t *testing.T) {
 			_, exist := updatedBadSc.Labels[NonOperationalByStoragePool]
 			assert.False(t, exist)
 		}
-
 	})
 
 	t.Run("SortNodesByStoragePool_returns_correctly", func(t *testing.T) {

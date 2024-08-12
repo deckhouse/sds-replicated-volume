@@ -2,12 +2,13 @@ package controller
 
 import (
 	"context"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/core/v1"
 	v12 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sds-replicated-volume-controller/pkg/logger"
-	"testing"
 )
 
 func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
@@ -54,9 +55,7 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 	}
 
 	topologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	for _, lbl := range allowedLabels {
-		topologyKeys = append(topologyKeys, lbl)
-	}
+	topologyKeys = append(topologyKeys, allowedLabels...)
 	for _, lbl := range allowedPrefixes {
 		topologyKeys = append(topologyKeys, lbl+postfix)
 	}
@@ -66,9 +65,7 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 		"random2",
 		"random3",
 	}
-	for _, k := range randomKeys {
-		topologyKeys = append(topologyKeys, k)
-	}
+	topologyKeys = append(topologyKeys, randomKeys...)
 
 	csiNodes := []v12.CSINode{
 		{
@@ -124,9 +121,7 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 	}
 
 	expectedTopologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	for _, lbl := range allowedLabels {
-		expectedTopologyKeys = append(expectedTopologyKeys, lbl)
-	}
+	expectedTopologyKeys = append(expectedTopologyKeys, allowedLabels...)
 	for _, lbl := range allowedPrefixes {
 		expectedTopologyKeys = append(expectedTopologyKeys, lbl+postfix)
 	}
@@ -191,9 +186,7 @@ func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 	}
 
 	topologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	for _, lbl := range allowedLabels {
-		topologyKeys = append(topologyKeys, lbl)
-	}
+	topologyKeys = append(topologyKeys, allowedLabels...)
 	for _, lbl := range allowedPrefixes {
 		topologyKeys = append(topologyKeys, lbl+postfix)
 	}
@@ -252,9 +245,7 @@ func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 	}
 
 	expectedTopologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	for _, lbl := range allowedLabels {
-		expectedTopologyKeys = append(expectedTopologyKeys, lbl)
-	}
+	expectedTopologyKeys = append(expectedTopologyKeys, allowedLabels...)
 	for _, lbl := range allowedPrefixes {
 		expectedTopologyKeys = append(expectedTopologyKeys, lbl+postfix)
 	}

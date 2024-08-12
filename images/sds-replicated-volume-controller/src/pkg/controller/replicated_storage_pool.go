@@ -20,23 +20,23 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 	"reflect"
-	"sds-replicated-volume-controller/pkg/logger"
 	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/klog/v2"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -64,7 +64,6 @@ func NewReplicatedStoragePool(
 
 	c, err := controller.New(ReplicatedStoragePoolControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
 			log.Info("START from reconciler reconcile of replicated storage pool with name: " + request.Name)
 
 			shouldRequeue, err := ReconcileReplicatedStoragePoolEvent(ctx, cl, request, log, lc)
@@ -76,7 +75,7 @@ func NewReplicatedStoragePool(
 			}
 
 			log.Info("END from reconciler reconcile of replicated storage pool with name: " + request.Name)
-			return reconcile.Result{Requeue: false}, nil
+			return reconcile.Result{}, nil
 		}),
 	})
 
@@ -251,38 +250,38 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 		existedStoragePool, err := lc.Nodes.GetStoragePool(ctx, nodeName, replicatedSP.Name)
 		if err != nil {
-			if err == lapi.NotFoundError {
-				log.Info(fmt.Sprintf("Storage Pool %s on node %s on vg %s not found. Creating it", replicatedSP.Name, nodeName, lvmVgForLinstor))
-				err := lc.Nodes.CreateStoragePool(ctx, nodeName, newStoragePool)
-				if err != nil {
-					errMessage := fmt.Sprintf("Error creating LINSTOR Storage Pool %s on node %s on vg %s: %s", replicatedSP.Name, nodeName, lvmVgForLinstor, err.Error())
+			if errors.IsNotFound(err) {
+				log.Info(fmt.Sprintf("[ReconcileReplicatedStoragePool] Storage Pool %s on node %s on vg %s was not found. Creating it", replicatedSP.Name, nodeName, lvmVgForLinstor))
+				createErr := lc.Nodes.CreateStoragePool(ctx, nodeName, newStoragePool)
+				if createErr != nil {
+					log.Error(createErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to create Linstor Storage Pool %s on the node %s in the VG %s", newStoragePool.StoragePoolName, nodeName, lvmVgForLinstor))
 
-					log.Error(nil, errMessage)
-					log.Info("Try to delete Storage Pool from LINSTOR if it was mistakenly created")
-					err = lc.Nodes.DeleteStoragePool(ctx, nodeName, replicatedSP.Name)
-					if err != nil {
-						log.Error(nil, fmt.Sprintf("Error deleting LINSTOR Storage Pool %s on node %s on vg %s: %s", replicatedSP.Name, nodeName, lvmVgForLinstor, err.Error()))
+					log.Info(fmt.Sprintf("[ReconcileReplicatedStoragePool] Try to delete Storage Pool %s on the node %s in the VG %s from LINSTOR if it was mistakenly created", newStoragePool.StoragePoolName, nodeName, lvmVgForLinstor))
+					delErr := lc.Nodes.DeleteStoragePool(ctx, nodeName, replicatedSP.Name)
+					if delErr != nil {
+						log.Error(delErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to delete LINSTOR Storage Pool %s on node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
 					}
 
 					replicatedSP.Status.Phase = "Failed"
-					replicatedSP.Status.Reason = errMessage
-					err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
-					if err != nil {
-						return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
+					replicatedSP.Status.Reason = createErr.Error()
+					updErr := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
+					if updErr != nil {
+						log.Error(updErr, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
 					}
-					return fmt.Errorf("")
+					return createErr
 				}
-				log.Info(fmt.Sprintf("Storage Pool %s created on node %s on vg %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
-				continue
-			} else {
-				errMessage := fmt.Sprintf("Error getting LINSTOR Storage Pool %s on node %s on vg %s: %s; ", replicatedSP.Name, nodeName, lvmVgForLinstor, err.Error())
-				log.Error(nil, errMessage)
-				failedMsgBuilder.WriteString(errMessage)
-				isSuccessful = false
+
+				log.Info(fmt.Sprintf("Storage Pool %s was successfully created on the node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
 				continue
 			}
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to get the Linstor Storage Pool %s on the node %s in the VG %s", replicatedSP.Name, nodeName, lvmVgForLinstor))
+
+			failedMsgBuilder.WriteString(err.Error())
+			isSuccessful = false
+			continue
 		}
-		log.Info(fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists. Check it", replicatedSP.Name, nodeName, lvmVgForLinstor))
+
+		log.Info(fmt.Sprintf("[ReconcileReplicatedStoragePool] the Linstor Storage Pool %s on node %s on vg %s already exists. Check it", replicatedSP.Name, nodeName, lvmVgForLinstor))
 
 		if existedStoragePool.ProviderKind != newStoragePool.ProviderKind {
 			errMessage := fmt.Sprintf("Storage Pool %s on node %s on vg %s already exists but with different type %s. New type is %s. Type change is forbidden; ", replicatedSP.Name, nodeName, lvmVgForLinstor, existedStoragePool.ProviderKind, newStoragePool.ProviderKind)
@@ -304,17 +303,20 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 		replicatedSP.Status.Reason = failedMsgBuilder.String()
 		err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 		if err != nil {
-			return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
+			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
+			return err
 		}
-		return fmt.Errorf("error occurred while creating Storage Pools")
+		return fmt.Errorf("some errors have been occurred while creating Storage Pool %s, err: %s", replicatedSP.Name, failedMsgBuilder.String())
 	}
 
 	replicatedSP.Status.Phase = "Completed"
 	replicatedSP.Status.Reason = "pool creation completed"
 	err := UpdateReplicatedStoragePool(ctx, cl, replicatedSP)
 	if err != nil {
-		return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
+		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStoragePool] unable to update the Replicated Storage Pool %s", replicatedSP.Name))
+		return err
 	}
+
 	return nil
 }
 

@@ -1,10 +1,11 @@
 package controller
 
 import (
+	"testing"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/storage/v1"
-	"testing"
 )
 
 func TestLinstorResourcesWatcher(t *testing.T) {

@@ -18,18 +18,17 @@ package controller_test
 
 import (
 	"context"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/controller"
-	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
 
 	lapi "github.com/LINBIT/golinstor/client"
-
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sds-replicated-volume-controller/pkg/controller"
+	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -217,8 +216,6 @@ shared_lvm_vg: LvmVolumeGroup type is not Local`
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal("Failed"))
 		Expect(strings.TrimSpace(reconciledBadReplicatedStoragePool.Status.Reason)).To(Equal(strings.TrimSpace(expectedMsg)))
-		//Expect(reconciledBadReplicatedStoragePool.Status.Reason).To(Equal("s"))
-
 	})
 })
 
@@ -252,7 +249,6 @@ func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGro
 }
 
 func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, replicatedStoragePoolName, namespace, lvmType string, lvmVolumeGroups []map[string]string) error {
-
 	volumeGroups := make([]srv.ReplicatedStoragePoolLVMVolumeGroups, 0)
 	for i := range lvmVolumeGroups {
 		for key, value := range lvmVolumeGroups[i] {
@@ -269,7 +265,7 @@ func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, repli
 			Namespace: namespace,
 		},
 		Spec: srv.ReplicatedStoragePoolSpec{
-			Type:            "LVM",
+			Type:            lvmType,
 			LvmVolumeGroups: volumeGroups,
 		},
 	}
