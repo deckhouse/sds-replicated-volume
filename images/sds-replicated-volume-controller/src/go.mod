@@ -5,7 +5,7 @@ go 1.22.3
 require (
 	github.com/LINBIT/golinstor v0.49.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812081334-ce2ef7502824
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
 	github.com/go-logr/logr v1.4.1
 	github.com/onsi/ginkgo/v2 v2.15.0
 	github.com/onsi/gomega v1.31.0

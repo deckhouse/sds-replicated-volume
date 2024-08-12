@@ -24,11 +24,11 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 		postfix = "test-sp"
 	)
 
-	labels := make(map[string]string, len(allowedLabels)+len(allowedPrefixes))
-	for _, l := range allowedLabels {
+	labels := make(map[string]string, len(AllowedLabels)+len(AllowedPrefixes))
+	for _, l := range AllowedLabels {
 		labels[l] = ""
 	}
-	for _, p := range allowedPrefixes {
+	for _, p := range AllowedPrefixes {
 		labels[p+postfix] = ""
 	}
 	labels["not-syncable-label"] = ""
@@ -54,9 +54,9 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 		},
 	}
 
-	topologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	topologyKeys = append(topologyKeys, allowedLabels...)
-	for _, lbl := range allowedPrefixes {
+	topologyKeys := make([]string, 0, len(AllowedLabels)+len(AllowedPrefixes))
+	topologyKeys = append(topologyKeys, AllowedLabels...)
+	for _, lbl := range AllowedPrefixes {
 		topologyKeys = append(topologyKeys, lbl+postfix)
 	}
 
@@ -120,9 +120,9 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 		t.Error(err)
 	}
 
-	expectedTopologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	expectedTopologyKeys = append(expectedTopologyKeys, allowedLabels...)
-	for _, lbl := range allowedPrefixes {
+	expectedTopologyKeys := make([]string, 0, len(AllowedLabels)+len(AllowedPrefixes))
+	expectedTopologyKeys = append(expectedTopologyKeys, AllowedLabels...)
+	for _, lbl := range AllowedPrefixes {
 		expectedTopologyKeys = append(expectedTopologyKeys, lbl+postfix)
 	}
 
@@ -155,11 +155,11 @@ func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 		postfix = "test-sp"
 	)
 
-	labels := make(map[string]string, len(allowedLabels)+len(allowedPrefixes))
-	for _, l := range allowedLabels {
+	labels := make(map[string]string, len(AllowedLabels)+len(AllowedPrefixes))
+	for _, l := range AllowedLabels {
 		labels[l] = ""
 	}
-	for _, p := range allowedPrefixes {
+	for _, p := range AllowedPrefixes {
 		labels[p+postfix] = ""
 	}
 	labels["not-syncable-label"] = ""
@@ -185,9 +185,9 @@ func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 		},
 	}
 
-	topologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	topologyKeys = append(topologyKeys, allowedLabels...)
-	for _, lbl := range allowedPrefixes {
+	topologyKeys := make([]string, 0, len(AllowedLabels)+len(AllowedPrefixes))
+	topologyKeys = append(topologyKeys, AllowedLabels...)
+	for _, lbl := range AllowedPrefixes {
 		topologyKeys = append(topologyKeys, lbl+postfix)
 	}
 
@@ -244,9 +244,9 @@ func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
 		t.Error(err)
 	}
 
-	expectedTopologyKeys := make([]string, 0, len(allowedLabels)+len(allowedPrefixes))
-	expectedTopologyKeys = append(expectedTopologyKeys, allowedLabels...)
-	for _, lbl := range allowedPrefixes {
+	expectedTopologyKeys := make([]string, 0, len(AllowedLabels)+len(AllowedPrefixes))
+	expectedTopologyKeys = append(expectedTopologyKeys, AllowedLabels...)
+	for _, lbl := range AllowedPrefixes {
 		expectedTopologyKeys = append(expectedTopologyKeys, lbl+postfix)
 	}
 

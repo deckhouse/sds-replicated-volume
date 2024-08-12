@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	. "github.com/LINBIT/golinstor/client"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
@@ -40,6 +41,7 @@ func newFakeClient() client.WithWatch {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
 	_ = srv.AddToScheme(s)
+	_ = snc.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 

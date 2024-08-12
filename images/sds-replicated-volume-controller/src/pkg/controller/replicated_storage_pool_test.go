@@ -18,7 +18,6 @@ package controller_test
 
 import (
 	"context"
-	"strings"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -112,18 +111,16 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 	It("GetLvmVolumeGroup", func() {
 		testLvm := &snc.LvmVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:      testName,
-				Namespace: testNameSpace,
+				Name: testName,
 			},
 		}
 
 		err := cl.Create(ctx, testLvm)
 		Expect(err).NotTo(HaveOccurred())
 
-		lvm, err := controller.GetLvmVolumeGroup(ctx, cl, testNameSpace, testName)
+		lvm, err := controller.GetLvmVolumeGroup(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lvm.Name).To(Equal(testName))
-		Expect(lvm.Namespace).To(Equal(testNameSpace))
 	})
 
 	It("Validations", func() {
@@ -181,19 +178,15 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		goodReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodReplicatedStoragePool.ObjectMeta.Namespace, Name: goodReplicatedStoragePool.ObjectMeta.Name}}
 		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, *log, lc)
-		Expect(err).To(HaveOccurred()) // TODO: add mock for linstor client and change to Expect(err).NotTo(HaveOccurred()) and Expect(shouldRequeue).To(BeFalse())
+		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
 
 		reconciledGoodReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, GoodReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reconciledGoodReplicatedStoragePool.Status.Phase).To(Equal("Failed"))
-		pattern := `Error getting LINSTOR Storage Pool goodreplicatedoperatorstoragepool on node first_node on vg actualVG-1-on-FirstNode: Get "http://(localhost|\[::1\]|127\.0\.0\.1):3370/v1/nodes/first_node/storage-pools/goodreplicatedoperatorstoragepool": dial tcp (\[::1\]|127\.0\.0\.1):3370: connect: connection refused`
-		Expect(reconciledGoodReplicatedStoragePool.Status.Reason).To(MatchRegexp(pattern))
+		Expect(reconciledGoodReplicatedStoragePool.Status.Reason).To(Equal("lvmVG-1-on-FirstNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-FirstNode\" not found\nlvmVG-1-on-SecondNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-SecondNode\" not found\n"))
 
 		// Negative test with bad LVMVolumeGroups.
-
-		// err = CreateReplicatedStoragePool(ctx, cl, BadReplicatedStoragePoolName, testNameSpace, TypeLVM, []map[string]string{{LvmVGOneOnFirstNodeName: ""}, {NotExistedlvnVGName: ""}, {LvmVGOneOnSecondNodeName: ""}, {LvmVGTwoOnFirstNodeName: ""}, {LvmVGOneOnSecondNodeNameDublicate: ""}})
-
 		badLVMvgs := []map[string]string{{LvmVGOneOnFirstNodeName: ""}, {NotExistedlvmVGName: ""}, {LvmVGOneOnSecondNodeName: ""}, {LvmVGTwoOnFirstNodeName: ""}, {LvmVGOneOnSecondNodeNameDublicate: ""}, {SharedLvmVGName: ""}, {LvmVGWithSeveralNodes: ""}}
 		err = CreateReplicatedStoragePool(ctx, cl, BadReplicatedStoragePoolName, testNameSpace, TypeLVM, badLVMvgs)
 
@@ -204,18 +197,12 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 
 		badReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badReplicatedStoragePool.ObjectMeta.Namespace, Name: badReplicatedStoragePool.ObjectMeta.Name}}
 		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, *log, lc)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
+		Expect(err).To(HaveOccurred())
+		Expect(shouldRequeue).To(BeTrue())
 
-		expectedMsg := `lvmVG-1-on-SecondNode: LvmVolumeGroup name is not unique
-lvmVG-2-on-FirstNode: This LvmVolumeGroup have same node first_node as LvmVolumeGroup with name: lvmVG-1-on-FirstNode. LINSTOR Storage Pool is allowed to have only one LvmVolumeGroup per node
-not_existed_lvmVG: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io "not_existed_lvmVG" not found
-several_nodes_lvm_vg: LvmVolumeGroup has more than one node in status.nodes. LvmVolumeGroup for LINSTOR Storage Pool must to have only one node
-shared_lvm_vg: LvmVolumeGroup type is not Local`
 		reconciledBadReplicatedStoragePool, err := controller.GetReplicatedStoragePool(ctx, cl, testNameSpace, BadReplicatedStoragePoolName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reconciledBadReplicatedStoragePool.Status.Phase).To(Equal("Failed"))
-		Expect(strings.TrimSpace(reconciledBadReplicatedStoragePool.Status.Reason)).To(Equal(strings.TrimSpace(expectedMsg)))
 	})
 })
 

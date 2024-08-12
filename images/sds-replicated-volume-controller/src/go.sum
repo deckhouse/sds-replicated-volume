@@ -19,6 +19,8 @@ github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240704080740-046efac329a
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240704080740-046efac329a2/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812081334-ce2ef7502824 h1:cuhtTsnX483RElpAn189OQZPS9fRAVU3T3oWOeUK1P0=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812081334-ce2ef7502824/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9 h1:keKcnq6do7yxGZHeNERhhx3dH1/wQmj+x5vxcWH3CcI=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
 github.com/donovanhide/eventsource v0.0.0-20210830082556-c59027999da0 h1:C7t6eeMaEQVy6e8CarIhscYQlNmw5e3G36y7l7Y21Ao=
 github.com/donovanhide/eventsource v0.0.0-20210830082556-c59027999da0/go.mod h1:56wL82FO0bfMU5RvfXoIwSOP2ggqqxT+tAfNEIyxuHw=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=

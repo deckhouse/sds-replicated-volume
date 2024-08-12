@@ -506,7 +506,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-		storageClassParameters[quorumMinimumRedundancyWithPrefixSCKey] = "2"
+		storageClassParameters[QuorumMinimumRedundancyWithPrefixSCKey] = "2"
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode
@@ -685,8 +685,8 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 
 func canRecreateStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
-	delete(newSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
-	delete(oldSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
+	delete(newSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	equal, _ := CompareStorageClasses(newSC, oldSC)
 	return equal
 }

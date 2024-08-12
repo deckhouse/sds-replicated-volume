@@ -43,6 +43,12 @@ const (
 	linstorPortRangeConfigMapName   = "linstor-port-range"
 	linstorPropName                 = "d2ef39f4afb6fbe91ab4c9048301dc4826d84ed221a5916e92fa62fdb99deef0"
 	linstorTCPPortAutoRangeKey      = "TcpPortAutoRange"
+
+	incorrectPortRangeKey = "storage.deckhouse.io/incorrect-port-range"
+	minPortKey            = "minPort"
+	minPortValue          = 1024
+	maxPortKey            = "maxPort"
+	maxPortValue          = 65535
 )
 
 func NewLinstorPortRangeWatcher(
@@ -125,23 +131,23 @@ func NewLinstorPortRangeWatcher(
 }
 
 func updateConfigMapLabel(ctx context.Context, cl client.Client, configMap *corev1.ConfigMap, value string) error {
-	configMap.Labels["storage.deckhouse.io/incorrect-port-range"] = value
+	if configMap.Labels == nil {
+		configMap.Labels = make(map[string]string)
+	}
+
+	configMap.Labels[incorrectPortRangeKey] = value
 	return cl.Update(ctx, configMap)
 }
 
-func ReconcileConfigMapEvent(ctx context.Context,
-	cl client.Client, lc *lapi.Client,
-	request reconcile.Request,
-	log logger.Logger,
-) (bool, error) {
+func ReconcileConfigMapEvent(ctx context.Context, cl client.Client, lc *lapi.Client, request reconcile.Request, log logger.Logger) (bool, error) {
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, request.NamespacedName, configMap)
 	if err != nil {
 		return true, err
 	}
 
-	minPort := configMap.Data["minPort"]
-	maxPort := configMap.Data["maxPort"]
+	minPort := configMap.Data[minPortKey]
+	maxPort := configMap.Data[maxPortKey]
 
 	minPortInt, err := strconv.Atoi(minPort)
 	if err != nil {
@@ -153,7 +159,7 @@ func ReconcileConfigMapEvent(ctx context.Context,
 	}
 
 	if maxPortInt < minPortInt {
-		err := updateConfigMapLabel(ctx, cl, configMap, "true")
+		err = updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
@@ -161,22 +167,22 @@ func ReconcileConfigMapEvent(ctx context.Context,
 		return false, fmt.Errorf("range start port %d is less than range end port %d", minPortInt, maxPortInt)
 	}
 
-	if maxPortInt > 65535 {
-		err := updateConfigMapLabel(ctx, cl, configMap, "true")
+	if maxPortInt > maxPortValue {
+		err = updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
-		log.Error(err, fmt.Sprintf("range end port %d must be less then 65535", maxPortInt))
-		return false, fmt.Errorf("range end port %d must be less then 65535", maxPortInt)
+		log.Error(err, fmt.Sprintf("range end port %d must be less then %d", maxPortInt, maxPortValue))
+		return false, fmt.Errorf("range end port %d must be less then %d", maxPortInt, maxPortValue)
 	}
 
-	if minPortInt < 1024 {
+	if minPortInt < minPortValue {
 		err := updateConfigMapLabel(ctx, cl, configMap, "true")
 		if err != nil {
 			return true, err
 		}
-		log.Error(err, fmt.Sprintf("range start port %d must be more then 1024", minPortInt))
-		return false, fmt.Errorf("range start port %d must be more then 1024", minPortInt)
+		log.Error(err, fmt.Sprintf("range start port %d must be more then %d", minPortInt, minPortValue))
+		return false, fmt.Errorf("range start port %d must be more then %d", minPortInt, minPortValue)
 	}
 
 	err = updateConfigMapLabel(ctx, cl, configMap, "false")
@@ -199,7 +205,7 @@ func ReconcileConfigMapEvent(ctx context.Context,
 
 		if kvItem != portRange {
 			log.Info(fmt.Sprintf("Current port range %s, actual %s", kvItem, portRange))
-			err := lc.Controller.Modify(ctx, lapi.GenericPropsModify{
+			err = lc.Controller.Modify(ctx, lapi.GenericPropsModify{
 				OverrideProps: map[string]string{
 					linstorTCPPortAutoRangeKey: portRange}})
 			if err != nil {

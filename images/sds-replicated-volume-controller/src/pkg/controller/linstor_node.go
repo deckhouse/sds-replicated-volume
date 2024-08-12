@@ -66,7 +66,7 @@ const (
 var (
 	drbdNodeSelector = map[string]string{SdsReplicatedVolumeNodeSelectorKey: ""}
 
-	allowedLabels = []string{
+	AllowedLabels = []string{
 		"kubernetes.io/hostname",
 		"topology.kubernetes.io/region",
 		"topology.kubernetes.io/zone",
@@ -75,7 +75,7 @@ var (
 		SdsReplicatedVolumeNodeSelectorKey,
 	}
 
-	allowedPrefixes = []string{
+	AllowedPrefixes = []string{
 		"class.storage.deckhouse.io/",
 		SdsStoragePoolPrefixLabelKey,
 	}
@@ -229,12 +229,12 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		)
 
 		for nodeLabel := range nodeLabels[csiNode.Name] {
-			if slices.Contains(allowedLabels, nodeLabel) {
+			if slices.Contains(AllowedLabels, nodeLabel) {
 				kubeNodeLabelsToSync[nodeLabel] = struct{}{}
 				continue
 			}
 
-			for _, prefix := range allowedPrefixes {
+			for _, prefix := range AllowedPrefixes {
 				if strings.HasPrefix(nodeLabel, prefix) {
 					kubeNodeLabelsToSync[nodeLabel] = struct{}{}
 				}
@@ -494,11 +494,11 @@ func KubernetesNodeLabelsToProperties(kubernetesNodeLabels map[string]string) ma
 	}
 
 	isAllowed := func(label string) bool {
-		if slices.Contains(allowedLabels, label) {
+		if slices.Contains(AllowedLabels, label) {
 			return true
 		}
 
-		for _, prefix := range allowedPrefixes {
+		for _, prefix := range AllowedPrefixes {
 			if strings.HasPrefix(label, prefix) {
 				return true
 			}

@@ -187,7 +187,7 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 	err := cl.Get(ctx, request.NamespacedName, replicatedSP)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("StoragePool with name: " + request.Name + " not found. Object was probably deleted. Remove it from quie as deletion logic not implemented yet.") // #TODO: warn
+			log.Warning("StoragePool with name: " + request.Name + " not found. Object was probably deleted. Remove it from quie as deletion logic not implemented yet.")
 			return false, nil
 		}
 		return true, fmt.Errorf("error getting StoragePool: %s", err.Error())
@@ -200,7 +200,7 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 }
 
 func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *srv.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
-	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Namespace, replicatedSP.Spec.Type, replicatedSP.Spec.LvmVolumeGroups)
+	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Spec.Type, replicatedSP.Spec.LvmVolumeGroups)
 	if !ok {
 		replicatedSP.Status.Phase = "Failed"
 		replicatedSP.Status.Reason = msg
@@ -208,7 +208,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 		if err != nil {
 			return fmt.Errorf("error UpdateReplicatedStoragePool: %s", err.Error())
 		}
-		return nil
+		return fmt.Errorf("unable to reconcile the Replicated Storage Pool %s, reason: %s", replicatedSP.Name, msg)
 	}
 	var (
 		lvmVgForLinstor  string
@@ -244,7 +244,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 			NodeName:        nodeName,
 			ProviderKind:    lvmType,
 			Props: map[string]string{
-				StorPoolNamePropKey: lvmVgForLinstor, // TODO: change to const
+				StorPoolNamePropKey: lvmVgForLinstor,
 			},
 		}
 
@@ -340,19 +340,15 @@ func GetReplicatedStoragePool(ctx context.Context, cl client.Client, namespace, 
 	return obj, err
 }
 
-func GetLvmVolumeGroup(ctx context.Context, cl client.Client, namespace, name string) (*snc.LvmVolumeGroup, error) {
+func GetLvmVolumeGroup(ctx context.Context, cl client.Client, name string) (*snc.LvmVolumeGroup, error) {
 	obj := &snc.LvmVolumeGroup{}
 	err := cl.Get(ctx, client.ObjectKey{
-		Name:      name,
-		Namespace: namespace,
+		Name: name,
 	}, obj)
-	if err != nil {
-		return nil, err
-	}
 	return obj, err
 }
 
-func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, namespace, lvmType string, replicatedSPLVMVolumeGroups []srv.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]snc.LvmVolumeGroup) {
+func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, lvmType string, replicatedSPLVMVolumeGroups []srv.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]snc.LvmVolumeGroup) {
 	var lvmVolumeGroupName string
 	var nodeName string
 	nodesWithlvmVolumeGroups := make(map[string]string)
@@ -369,7 +365,7 @@ func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, namespace
 		}
 		lvmVolumeGroupsNames[lvmVolumeGroupName] = true
 
-		lvmVolumeGroup, err := GetLvmVolumeGroup(ctx, cl, namespace, lvmVolumeGroupName)
+		lvmVolumeGroup, err := GetLvmVolumeGroup(ctx, cl, lvmVolumeGroupName)
 		if err != nil {
 			UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("Error getting LVMVolumeGroup: %s", err.Error()))
 			continue

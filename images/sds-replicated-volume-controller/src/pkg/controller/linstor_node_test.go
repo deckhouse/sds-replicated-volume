@@ -215,10 +215,13 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 
 	It("KubernetesNodeLabelsToProperties", func() {
 		const (
-			testKey1   = "key1"
-			testKey2   = "key2"
 			testValue1 = "test_value1"
 			testValue2 = "test_value2"
+		)
+
+		var (
+			testKey1 = controller.AllowedLabels[0]
+			testKey2 = controller.AllowedLabels[1]
 		)
 
 		kubeNodeLabels := map[string]string{

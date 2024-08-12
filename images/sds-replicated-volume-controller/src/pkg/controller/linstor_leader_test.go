@@ -303,7 +303,9 @@ func TestLinstorLeaderController(t *testing.T) {
 		var err error
 		for _, pod := range podList.Items {
 			err = cl.Create(ctx, &pod)
-			t.Error(err)
+			if err != nil {
+				t.Error(err)
+			}
 		}
 		err = cl.Create(ctx, lease)
 
