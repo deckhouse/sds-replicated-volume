@@ -31,7 +31,7 @@ run_trigger() {
   export NAMESPACE="d8-sds-replicated-volume"
   export TIMESTAMP="$(date +"%Y%m%d%H%M%S")"
   export WEBHOOK_NAME="d8-sds-replicated-volume-sc-validation"
-  echo "Migration csi shell hook started"
+  echo "Csi migration shell hook started"
 
   if kubectl get secret "$SECRET_NAME" -n "$NAMESPACE" > /dev/null 2>&1; then
     echo "Secret ${NAMESPACE}/${SECRET_NAME} exists. Migration has been finished before"
