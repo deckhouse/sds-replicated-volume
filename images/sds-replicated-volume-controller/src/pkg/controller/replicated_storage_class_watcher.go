@@ -11,9 +11,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 const (

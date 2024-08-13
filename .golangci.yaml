@@ -13,6 +13,8 @@ linters-settings:
     sections:
       - standard
       - default
+      - prefix(sds-replicated-volume-controller)
+      - prefix(webhooks)
   errcheck:
     ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
 

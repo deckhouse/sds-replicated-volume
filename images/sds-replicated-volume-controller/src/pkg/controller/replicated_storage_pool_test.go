@@ -26,10 +26,11 @@ import (
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sds-replicated-volume-controller/pkg/controller"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sds-replicated-volume-controller/pkg/controller"
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
