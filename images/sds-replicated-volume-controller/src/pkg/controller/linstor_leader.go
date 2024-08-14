@@ -73,13 +73,12 @@ func NewLinstorLeader(
 	}
 
 	err = c.Watch(
-		source.Kind(mgr.GetCache(), &coordinationv1.Lease{}),
-		handler.Funcs{
-			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
+		source.Kind(mgr.GetCache(), &coordinationv1.Lease{}, &handler.TypedFuncs[*coordinationv1.Lease]{
+			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*coordinationv1.Lease], q workqueue.RateLimitingInterface) {
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 				if request.Name == linstorLeaseName {
 					log.Info("Start of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
-					err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
+					err = reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
 						q.AddAfter(request, time.Duration(interval)*time.Second)
@@ -88,28 +87,18 @@ func NewLinstorLeader(
 					log.Info("END of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
 				}
 			},
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
+			UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*coordinationv1.Lease], q workqueue.RateLimitingInterface) {
 				if e.ObjectNew.GetName() == linstorLeaseName {
-					newLease, ok := e.ObjectNew.(*coordinationv1.Lease)
-					if !ok {
-						log.Error(err, "error get  ObjectNew Lease with name: "+e.ObjectNew.GetName())
-					}
-
-					oldLease, ok := e.ObjectOld.(*coordinationv1.Lease)
-					if !ok {
-						log.Error(err, "error get  ObjectOld Lease with name: "+e.ObjectOld.GetName())
-					}
-
 					var oldIdentity, newIdentity string
 
-					if oldLease.Spec.HolderIdentity != nil {
-						oldIdentity = *oldLease.Spec.HolderIdentity
+					if e.ObjectOld.Spec.HolderIdentity != nil {
+						oldIdentity = *e.ObjectOld.Spec.HolderIdentity
 					} else {
 						oldIdentity = "nil"
 					}
 
-					if newLease.Spec.HolderIdentity != nil {
-						newIdentity = *newLease.Spec.HolderIdentity
+					if e.ObjectNew.Spec.HolderIdentity != nil {
+						newIdentity = *e.ObjectNew.Spec.HolderIdentity
 					} else {
 						newIdentity = "nil"
 					}
@@ -118,7 +107,7 @@ func NewLinstorLeader(
 						log.Info("START from UPDATE event of leases.coordination.k8s.io with name: " + e.ObjectNew.GetName())
 						log.Info("HolderIdentity changed from " + oldIdentity + " to " + newIdentity)
 						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-						err = reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
+						err := reconcileLinstorControllerPods(ctx, cl, log, request.Namespace, linstorLeaseName)
 						if err != nil {
 							log.Error(err, fmt.Sprintf("error in reconcileLinstorControllerPods. Add to retry after %d seconds.", interval))
 							q.AddAfter(request, time.Duration(interval)*time.Second)
@@ -127,7 +116,7 @@ func NewLinstorLeader(
 					}
 				}
 			},
-		})
+		}))
 
 	if err != nil {
 		return err

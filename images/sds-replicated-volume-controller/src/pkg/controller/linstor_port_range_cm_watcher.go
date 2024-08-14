@@ -81,50 +81,36 @@ func NewLinstorPortRangeWatcher(
 		return err
 	}
 
-	err = c.Watch(
-		source.Kind(mgr.GetCache(), &corev1.ConfigMap{}),
-		handler.Funcs{
-			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-				if e.Object.GetName() == linstorPortRangeConfigMapName {
-					log.Info("START from CREATE reconcile of ConfigMap with name: " + e.Object.GetName())
-					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.ConfigMap{}, &handler.TypedFuncs[*corev1.ConfigMap]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.ConfigMap], q workqueue.RateLimitingInterface) {
+			if e.Object.GetName() == linstorPortRangeConfigMapName {
+				log.Info("START from CREATE reconcile of ConfigMap with name: " + e.Object.GetName())
+				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 
+				shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
+				if shouldRequeue {
+					log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
+					q.AddAfter(request, time.Duration(interval)*time.Second)
+				}
+
+				log.Info("END from CREATE reconcile of ConfigMap with name: " + request.Name)
+			}
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*corev1.ConfigMap], q workqueue.RateLimitingInterface) {
+			if e.ObjectNew.GetName() == linstorPortRangeConfigMapName {
+				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Data, e.ObjectOld.Data) {
+					log.Info("START from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
+					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
 					if shouldRequeue {
 						log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
 						q.AddAfter(request, time.Duration(interval)*time.Second)
 					}
-
-					log.Info("END from CREATE reconcile of ConfigMap with name: " + request.Name)
+					log.Info("END from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
 				}
-			},
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-				if e.ObjectNew.GetName() == linstorPortRangeConfigMapName {
-					newCM, ok := e.ObjectNew.(*corev1.ConfigMap)
-					if !ok {
-						log.Error(err, fmt.Sprintf("[NewLinstorPortRangeWatcher] unable to cast a objectNew to a given type for an event %s", e.ObjectNew.GetName()))
-						return
-					}
-
-					oldCM, ok := e.ObjectOld.(*corev1.ConfigMap)
-					if !ok {
-						log.Error(err, fmt.Sprintf("[NewLinstorPortRangeWatcher] unable to cast a objectOld to a given type for an event %s", e.ObjectNew.GetName()))
-						return
-					}
-
-					if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newCM.Data, oldCM.Data) {
-						log.Info("START from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
-						request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-						shouldRequeue, err := ReconcileConfigMapEvent(ctx, cl, lc, request, log)
-						if shouldRequeue {
-							log.Error(err, fmt.Sprintf("error in ReconcileConfigMapEvent. Add to retry after %d seconds.", interval))
-							q.AddAfter(request, time.Duration(interval)*time.Second)
-						}
-						log.Info("END from UPDATE reconcile of ConfigMap with name: " + e.ObjectNew.GetName())
-					}
-				}
-			},
-		})
+			}
+		},
+	}))
 	if err != nil {
 		return err
 	}

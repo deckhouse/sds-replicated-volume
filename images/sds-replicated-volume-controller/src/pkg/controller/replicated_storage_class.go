@@ -130,56 +130,44 @@ func NewReplicatedStorageClass(
 		return nil, err
 	}
 
-	err = c.Watch(
-		source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}),
-		handler.Funcs{
-			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-				log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
+	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}, handler.TypedFuncs[*srv.ReplicatedStorageClass]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+			log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
-				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
+			if shouldRequeue {
+				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
+				q.AddAfter(request, time.Duration(interval)*time.Second)
+			}
+
+			log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) {
+				log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
+				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
 				if shouldRequeue {
 					log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
 					q.AddAfter(request, time.Duration(interval)*time.Second)
 				}
+				log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
+			}
+		},
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+			log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
-				log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
-			},
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-				newReplicatedSC, ok := e.ObjectNew.(*srv.ReplicatedStorageClass)
-				if !ok {
-					log.Error(err, "error get ObjectNew ReplicatedStorageClass")
-				}
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
+			if shouldRequeue {
+				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
+				q.AddAfter(request, time.Duration(interval)*time.Second)
+			}
 
-				oldReplicatedSC, ok := e.ObjectOld.(*srv.ReplicatedStorageClass)
-				if !ok {
-					log.Error(err, "error get ObjectOld ReplicatedStorageClass")
-				}
-
-				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newReplicatedSC.Spec, oldReplicatedSC.Spec) {
-					log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
-					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-					shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
-					if shouldRequeue {
-						log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
-						q.AddAfter(request, time.Duration(interval)*time.Second)
-					}
-					log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
-				}
-			},
-			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
-				log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
-
-				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
-				shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
-				if shouldRequeue {
-					log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
-					q.AddAfter(request, time.Duration(interval)*time.Second)
-				}
-
-				log.Info("END from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
-			},
-		})
+			log.Info("END from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
+		},
+	}))
 	if err != nil {
 		return nil, err
 	}
