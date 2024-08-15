@@ -122,6 +122,12 @@ run_trigger() {
     exit 1
   fi
 
+  if kubectl delete csidriver ${OLD_DRIVER_NAME} > /dev/null 2>&1; then
+    echo "CSIDriver ${OLD_DRIVER_NAME} deleted"
+  else
+    echo "CSIDriver ${OLD_DRIVER_NAME} does not exist. Skipping deletion"
+  fi
+
   values::set sdsReplicatedVolume.internal.csiMigrationHook.completed "true"
   exit 0
 }

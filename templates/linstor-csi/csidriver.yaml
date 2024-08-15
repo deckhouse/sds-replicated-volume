@@ -1,0 +1,13 @@
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: replicated.csi.storage.deckhouse.io
+spec:
+  attachRequired: true
+  fsGroupPolicy: ReadWriteOnceWithFSType
+  podInfoOnMount: true
+  requiresRepublish: false
+  seLinuxMount: true
+  storageCapacity: true
+  volumeLifecycleModes:
+    - Persistent

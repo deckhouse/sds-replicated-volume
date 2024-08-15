@@ -38,6 +38,13 @@ spec:
     if [ "$is_kubelet_restart_needed" = "true" ]; then
       echo "Kubelet restart is needed. Restarting kubelet."
       systemctl restart kubelet
+
+      echo "Sleeping for 180 seconds before restarting kubelet again."
+      sleep 180
+
+      echo "Restarting kubelet again."
+      systemctl restart kubelet
+
       bb-kubectl --kubeconfig $kubeconfig label node "$(hostname -s)" "$LABEL_KEY"-
     else
       echo "Kubelet restart is not needed. Exiting."
