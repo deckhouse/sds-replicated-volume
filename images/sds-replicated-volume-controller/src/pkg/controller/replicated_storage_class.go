@@ -130,8 +130,8 @@ func NewReplicatedStorageClass(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}, handler.TypedFuncs[*srv.ReplicatedStorageClass]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}, handler.TypedFuncs[*srv.ReplicatedStorageClass, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -143,7 +143,7 @@ func NewReplicatedStorageClass(
 
 			log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) {
 				log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
@@ -155,7 +155,7 @@ func NewReplicatedStorageClass(
 				log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
 			}
 		},
-		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*srv.ReplicatedStorageClass], q workqueue.RateLimitingInterface) {
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}

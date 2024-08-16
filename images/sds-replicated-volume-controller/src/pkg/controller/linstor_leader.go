@@ -73,8 +73,8 @@ func NewLinstorLeader(
 	}
 
 	err = c.Watch(
-		source.Kind(mgr.GetCache(), &coordinationv1.Lease{}, &handler.TypedFuncs[*coordinationv1.Lease]{
-			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*coordinationv1.Lease], q workqueue.RateLimitingInterface) {
+		source.Kind(mgr.GetCache(), &coordinationv1.Lease{}, &handler.TypedFuncs[*coordinationv1.Lease, reconcile.Request]{
+			CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*coordinationv1.Lease], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 				if request.Name == linstorLeaseName {
 					log.Info("Start of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
@@ -87,7 +87,7 @@ func NewLinstorLeader(
 					log.Info("END of CREATE event of leases.coordination.k8s.io resource with name: " + request.Name)
 				}
 			},
-			UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*coordinationv1.Lease], q workqueue.RateLimitingInterface) {
+			UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*coordinationv1.Lease], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 				if e.ObjectNew.GetName() == linstorLeaseName {
 					var oldIdentity, newIdentity string
 

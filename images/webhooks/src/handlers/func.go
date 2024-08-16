@@ -29,7 +29,7 @@ import (
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/api/resource/v1alpha2"
+	"k8s.io/api/resource/v1alpha3"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,7 +60,7 @@ func NewKubeClient(kubeconfigPath string) (client.Client, error) {
 
 	var (
 		resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-			v1alpha2.AddToScheme,
+			v1alpha3.AddToScheme,
 			dh.AddToScheme,
 			snc.AddToScheme,
 			clientgoscheme.AddToScheme,

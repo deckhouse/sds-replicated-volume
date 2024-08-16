@@ -84,8 +84,8 @@ func NewReplicatedStoragePool(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStoragePool{}, handler.TypedFuncs[*srv.ReplicatedStoragePool]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStoragePool], q workqueue.RateLimitingInterface) {
+	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStoragePool{}, handler.TypedFuncs[*srv.ReplicatedStoragePool, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStoragePool], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info("START from CREATE reconcile of Replicated storage pool with name: " + e.Object.GetName())
 
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
@@ -97,11 +97,11 @@ func NewReplicatedStoragePool(
 
 			log.Info("END from CREATE reconcile of Replicated storage pool with name: " + request.Name)
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStoragePool], q workqueue.RateLimitingInterface) {
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStoragePool], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info("START from UPDATE reconcile of Replicated storage pool with name: " + e.ObjectNew.GetName())
 
 			if reflect.DeepEqual(e.ObjectOld.Spec, e.ObjectNew.Spec) {
-				log.Info("StoragePool spec not changed. Nothing to do") // TODO: change to debug
+				log.Debug("StoragePool spec not changed. Nothing to do")
 				log.Info("END from UPDATE reconcile of Replicated storage pool with name: " + e.ObjectNew.GetName())
 				return
 			}
