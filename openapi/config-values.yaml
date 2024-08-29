@@ -1,9 +1,8 @@
 type: object
 properties:
-  # TODO: Set the option below to deprecated when the PR https://github.com/deckhouse/deckhouse/pull/7263 will reach RockSolid channel
   registryScheme:
     type: string
-    description: Change this parameter to "http" if the module registry does not support TLS.
+    description: Deprecated parameter. Remove it from ModuleConfig for Deckhouse with version greater than 1.57.
     default: https
   logLevel:
     type: string

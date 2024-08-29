@@ -45,7 +45,11 @@ spec:
     SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
     MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
+    {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
+    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registry.scheme }}"
+    {{- else }}
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
+    {{- end }}
     MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
     MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
     MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
