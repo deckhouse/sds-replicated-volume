@@ -4,11 +4,15 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
 from: {{ $.BASE_GOLANG_22_ALPINE }}
+fromCacheVersion: 20240830110000
 final: false
 
 git:
-  - add: /images/sds-replicated-volume-controller/src
-    to: /src
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/sds-replicated-volume-controller/src
     stageDependencies:
       setup:
         - "**/*"
@@ -17,7 +21,7 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /src/cmd
+    - cd /images/sds-replicated-volume-controller/src/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-replicated-volume-controller
     - chmod +x /sds-replicated-volume-controller
 

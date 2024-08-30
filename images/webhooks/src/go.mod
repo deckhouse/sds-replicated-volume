@@ -17,6 +17,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.18.4
 )
 
+replace github.com/deckhouse/sds-replicated-volume/api => ../../../api
+
 require (
 	github.com/Masterminds/semver/v3 v3.2.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

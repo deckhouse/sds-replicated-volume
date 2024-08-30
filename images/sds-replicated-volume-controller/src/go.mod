@@ -4,8 +4,8 @@ go 1.22.3
 
 require (
 	github.com/LINBIT/golinstor v0.49.0
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240705070320-a7a740787b36
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240704080740-046efac329a2
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240829091937-f1a9e132d5b9
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240816080905-ffa4f3f3c1b3
 	github.com/go-logr/logr v1.4.1
 	github.com/onsi/ginkgo/v2 v2.15.0
 	github.com/onsi/gomega v1.31.0
@@ -16,6 +16,8 @@ require (
 	k8s.io/client-go v0.28.3
 	sigs.k8s.io/controller-runtime v0.16.3
 )
+
+replace github.com/deckhouse/sds-replicated-volume/api => ../../../api
 
 require (
 	github.com/google/gnostic-models v0.6.8 // indirect
