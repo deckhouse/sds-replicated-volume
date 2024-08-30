@@ -17,6 +17,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.16.3
 )
 
+replace github.com/deckhouse/sds-replicated-volume/api => ../../../api
+
 require (
 	github.com/google/gnostic-models v0.6.8 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
