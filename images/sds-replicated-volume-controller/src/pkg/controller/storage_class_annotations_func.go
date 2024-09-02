@@ -59,9 +59,11 @@ func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log l
 		if !errors.IsNotFound(err) {
 			return false, err
 		}
+		log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s not found. Set virtualization module enabled to false", namespacedName.Namespace, namespacedName.Name))
 		return false, nil
 	}
 
+	log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s: %+v", namespacedName.Namespace, namespacedName.Name, configMap.Data))
 	virtualizationEnabledString, exist := configMap.Data[virtualizationModuleEnabledKey]
 	if !exist {
 		return false, nil
