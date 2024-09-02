@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"slices"
 
-	dh "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
@@ -33,6 +32,8 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	mc "webhooks/api"
 )
 
 const (
@@ -129,7 +130,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 				klog.Fatal(err.Error())
 			}
 
-			srvModuleConfig := &dh.ModuleConfig{}
+			srvModuleConfig := &mc.ModuleConfig{}
 
 			err = cl.Get(ctx, types.NamespacedName{Name: sdsReplicatedVolumeModuleName, Namespace: ""}, srvModuleConfig)
 			if err != nil {
