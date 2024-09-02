@@ -20,20 +20,17 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
 	"time"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
-	"k8s.io/utils/strings/slices"
-
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
+	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -41,6 +38,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 const (
@@ -114,18 +113,16 @@ func NewReplicatedStorageClass(
 
 	c, err := controller.New(ReplicatedStorageClassControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
 			log.Info("START reconcile of ReplicatedStorageClass with name: " + request.Name)
 
 			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
 			if shouldRequeue {
 				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
-			} else {
-				log.Info("END reconcile of ReplicatedStorageClass with name: " + request.Name)
 			}
+			log.Info("END reconcile of ReplicatedStorageClass with name: " + request.Name)
 
-			return reconcile.Result{Requeue: false}, nil
+			return reconcile.Result{}, nil
 		}),
 	})
 
@@ -133,59 +130,44 @@ func NewReplicatedStorageClass(
 		return nil, err
 	}
 
-	err = c.Watch(
-		source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}),
-		handler.Funcs{
-			CreateFunc: func(ctx context.Context, e event.CreateEvent, q workqueue.RateLimitingInterface) {
-				log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
+	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}, handler.TypedFuncs[*srv.ReplicatedStorageClass, reconcile.Request]{
+		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			log.Info("START from CREATE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
-				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
+			if shouldRequeue {
+				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
+				q.AddAfter(request, time.Duration(interval)*time.Second)
+			}
+
+			log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
+		},
+		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) {
+				log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
+				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
 				if shouldRequeue {
 					log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
 					q.AddAfter(request, time.Duration(interval)*time.Second)
 				}
+				log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
+			}
+		},
+		DeleteFunc: func(ctx context.Context, e event.TypedDeleteEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+			log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
 
-				log.Info("END from CREATE reconcile of ReplicatedStorageClass with name: " + request.Name)
+			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
+			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
+			if shouldRequeue {
+				log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
+				q.AddAfter(request, time.Duration(interval)*time.Second)
+			}
 
-			},
-			UpdateFunc: func(ctx context.Context, e event.UpdateEvent, q workqueue.RateLimitingInterface) {
-
-				newReplicatedSC, ok := e.ObjectNew.(*srv.ReplicatedStorageClass)
-				if !ok {
-					log.Error(err, "error get ObjectNew ReplicatedStorageClass")
-				}
-
-				oldReplicatedSC, ok := e.ObjectOld.(*srv.ReplicatedStorageClass)
-				if !ok {
-					log.Error(err, "error get ObjectOld ReplicatedStorageClass")
-				}
-
-				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(newReplicatedSC.Spec, oldReplicatedSC.Spec) {
-					log.Info("START from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
-					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
-					shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
-					if shouldRequeue {
-						log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
-						q.AddAfter(request, time.Duration(interval)*time.Second)
-					}
-					log.Info("END from UPDATE reconcile of ReplicatedStorageClass with name: " + e.ObjectNew.GetName())
-				}
-
-			},
-			DeleteFunc: func(ctx context.Context, e event.DeleteEvent, q workqueue.RateLimitingInterface) {
-				log.Info("START from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
-
-				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
-				shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, request, log)
-				if shouldRequeue {
-					log.Error(err, fmt.Sprintf("error in ReconcileReplicatedStorageClassEvent. Add to retry after %d seconds.", interval))
-					q.AddAfter(request, time.Duration(interval)*time.Second)
-				}
-
-				log.Info("END from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
-			},
-		})
+			log.Info("END from DELETE reconcile of ReplicatedStorageClass with name: " + e.Object.GetName())
+		},
+	}))
 	if err != nil {
 		return nil, err
 	}
@@ -379,11 +361,9 @@ func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, repli
 		if err != nil {
 			validationPassed = false
 			failedMsgBuilder.WriteString(fmt.Sprintf("Unable to find default ReplicatedStorageClasses and Kube StorageClasses. Error: %s; ", err.Error()))
-		} else {
-			if len(replicatedSCNames) > 0 || len(scNames) > 0 {
-				validationPassed = false
-				failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: %s", strings.Join(replicatedSCNames, ","), strings.Join(scNames, ",")))
-			}
+		} else if len(replicatedSCNames) > 0 || len(scNames) > 0 {
+			validationPassed = false
+			failedMsgBuilder.WriteString(fmt.Sprintf("Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: %s", strings.Join(replicatedSCNames, ","), strings.Join(scNames, ",")))
 		}
 	}
 
@@ -487,7 +467,7 @@ func CreateStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv
 }
 
 func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
-	var allowVolumeExpansion bool = true
+	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
 	storageClassParameters := map[string]string{
@@ -515,7 +495,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		storageClassParameters[StorageClassPlacementCountKey] = "3"
 		storageClassParameters[StorageClassAutoEvictMinReplicaCountKey] = "3"
 		storageClassParameters[StorageClassParamAutoQuorumKey] = SuspendIo
-		storageClassParameters[quorumMinimumRedundancyWithPrefixSCKey] = "2"
+		storageClassParameters[QuorumMinimumRedundancyWithPrefixSCKey] = "2"
 	}
 
 	var volumeBindingMode storagev1.VolumeBindingMode
@@ -648,6 +628,7 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC
 	for _, sc := range storageClassList.Items {
 		_, isDefault := sc.Annotations[DefaultStorageClassAnnotationKey]
 
+		//nolint:gocritic
 		if sc.Name == replicatedSC.Name && !isDefault {
 			if sc.Annotations == nil {
 				sc.Annotations = make(map[string]string)
@@ -659,7 +640,7 @@ func makeStorageClassDefault(ctx context.Context, cl client.Client, replicatedSC
 			continue
 		}
 
-		err := cl.Update(ctx, &sc)
+		err = cl.Update(ctx, &sc)
 		if err != nil {
 			return err
 		}
@@ -693,8 +674,8 @@ func ReconcileStorageClassLabels(ctx context.Context, cl client.Client, storageC
 
 func canRecreateStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass) bool {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
-	delete(newSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
-	delete(oldSC.Parameters, quorumMinimumRedundancyWithPrefixSCKey)
+	delete(newSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	equal, _ := CompareStorageClasses(newSC, oldSC)
 	return equal
 }

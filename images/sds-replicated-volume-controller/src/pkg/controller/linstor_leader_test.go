@@ -3,13 +3,15 @@ package controller
 import (
 	"context"
 	"fmt"
+	"testing"
+
 	"github.com/stretchr/testify/assert"
 	v12 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sds-replicated-volume-controller/pkg/logger"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"testing"
+
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 func TestLinstorLeaderController(t *testing.T) {
@@ -58,8 +60,14 @@ func TestLinstorLeaderController(t *testing.T) {
 		var err error
 		for _, pod := range podList.Items {
 			err = cl.Create(ctx, &pod)
+			if err != nil {
+				t.Error(err)
+			}
 		}
 		err = cl.Create(ctx, lease)
+		if err != nil {
+			t.Error(err)
+		}
 
 		if assert.NoError(t, err) {
 			defer func() {
@@ -134,8 +142,14 @@ func TestLinstorLeaderController(t *testing.T) {
 		var err error
 		for _, pod := range podList.Items {
 			err = cl.Create(ctx, &pod)
+			if err != nil {
+				t.Error(err)
+			}
 		}
 		err = cl.Create(ctx, lease)
+		if err != nil {
+			t.Error(err)
+		}
 
 		if assert.NoError(t, err) {
 			defer func() {
@@ -211,6 +225,9 @@ func TestLinstorLeaderController(t *testing.T) {
 		var err error
 		for _, pod := range podList.Items {
 			err = cl.Create(ctx, &pod)
+			if err != nil {
+				t.Error(err)
+			}
 		}
 		err = cl.Create(ctx, lease)
 
@@ -287,6 +304,9 @@ func TestLinstorLeaderController(t *testing.T) {
 		var err error
 		for _, pod := range podList.Items {
 			err = cl.Create(ctx, &pod)
+			if err != nil {
+				t.Error(err)
+			}
 		}
 		err = cl.Create(ctx, lease)
 

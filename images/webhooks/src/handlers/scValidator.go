@@ -22,12 +22,11 @@ import (
 	"fmt"
 	"reflect"
 
-	"k8s.io/klog/v2"
-
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -35,7 +34,7 @@ const (
 	allowedUserName          = "system:serviceaccount:d8-sds-replicated-volume:sds-replicated-volume-controller"
 )
 
-func SCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+func SCValidate(_ context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	sc, ok := obj.(*storagev1.StorageClass)
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
@@ -45,34 +44,29 @@ func SCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1
 	if sc.Provisioner == replicatedCSIProvisioner {
 		if arReview.UserInfo.Username == allowedUserName {
 			klog.Infof("User %s is allowed to manage storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
-			return &kwhvalidating.ValidatorResult{Valid: true},
-				nil
-		} else {
-			if arReview.Operation == model.OperationUpdate {
-				changed, err := isStorageClassChangedExceptAnnotations(arReview.OldObjectRaw, arReview.NewObjectRaw)
-				if err != nil {
-					return nil, err
-				}
-
-				if !changed {
-					klog.Infof("User %s is allowed to change annotations for storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
-					return &kwhvalidating.ValidatorResult{Valid: true},
-						nil
-				}
+			return &kwhvalidating.ValidatorResult{Valid: true}, nil
+		}
+		if arReview.Operation == model.OperationUpdate {
+			changed, err := isStorageClassChangedExceptAnnotations(arReview.OldObjectRaw, arReview.NewObjectRaw)
+			if err != nil {
+				return nil, err
 			}
 
-			klog.Infof("User %s is not allowed to manage storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
-			return &kwhvalidating.ValidatorResult{
-					Valid:   false,
-					Message: fmt.Sprintf("Direct modifications to the StorageClass (other than annotations) with the provisioner %s are not allowed. Please use ReplicatedStorageClass for such operations.", replicatedCSIProvisioner),
-				},
-				nil
+			if !changed {
+				klog.Infof("User %s is allowed to change annotations for storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
+				return &kwhvalidating.ValidatorResult{Valid: true}, nil
+			}
 		}
-	} else {
-		return &kwhvalidating.ValidatorResult{Valid: true},
+
+		klog.Infof("User %s is not allowed to manage storage classes with provisioner %s", arReview.UserInfo.Username, replicatedCSIProvisioner)
+		return &kwhvalidating.ValidatorResult{
+				Valid:   false,
+				Message: fmt.Sprintf("Direct modifications to the StorageClass (other than annotations) with the provisioner %s are not allowed. Please use ReplicatedStorageClass for such operations.", replicatedCSIProvisioner),
+			},
 			nil
 	}
 
+	return &kwhvalidating.ValidatorResult{Valid: true}, nil
 }
 
 func isStorageClassChangedExceptAnnotations(oldObjectRaw, newObjectRaw []byte) (bool, error) {

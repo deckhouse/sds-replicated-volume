@@ -20,21 +20,19 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sds-replicated-volume-controller/pkg/logger"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
-
-	"slices"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	core "k8s.io/api/core/v1"
 	v1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 const (
@@ -46,7 +44,7 @@ const (
 	replicasOnDifferentRGKey                = "replicas_on_different"
 	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
 	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
-	quorumMinimumRedundancyWithPrefixSCKey  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
+	QuorumMinimumRedundancyWithPrefixSCKey  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
 	replicasOnSameSCKey                     = "replicasOnSame"
 	replicasOnDifferentSCKey                = "replicasOnDifferent"
 	placementCountSCKey                     = "placementCount"
@@ -73,20 +71,11 @@ func NewLinstorResourcesWatcher(
 	lc *lapi.Client,
 	interval int,
 	log logger.Logger,
-) (controller.Controller, error) {
+) {
 	cl := mgr.GetClient()
 	ctx := context.Background()
 
-	c, err := controller.New(linstorResourcesWatcherCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			return reconcile.Result{}, nil
-		}),
-	})
-
-	if err != nil {
-		log.Error(err, fmt.Sprintf(`[NewLinstorResourcesWatcher] unable to create controller: "%s"`, linstorResourcesWatcherCtrlName))
-		return nil, err
-	}
+	log.Info(fmt.Sprintf("[NewLinstorResourcesWatcher] the controller %s starts the work", linstorResourcesWatcherCtrlName))
 
 	go func() {
 		for {
@@ -129,8 +118,6 @@ func NewLinstorResourcesWatcher(
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
 	}()
-
-	return c, err
 }
 
 func ReconcileParams(
@@ -162,10 +149,10 @@ func ReconcileParams(
 
 				labelsToAdd := make(map[string]string)
 
-				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey] != "" {
-					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
-					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey]))
-					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[quorumMinimumRedundancyWithPrefixSCKey], rg.Name)
+				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey] != "" {
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
+					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey]))
+					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name)
 
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
@@ -179,7 +166,6 @@ func ReconcileParams(
 							missMatched = getMissMatchedParams(sc, rgs[RGName])
 						}
 					}
-
 				}
 
 				if len(missMatched) > 0 {
@@ -230,7 +216,7 @@ func ReconcileTieBreaker(
 	log.Info("[ReconcileTieBreaker] starts work")
 
 	allResources := make(map[string][]lapi.Resource, len(rds)*3)
-	for name, _ := range rds {
+	for name := range rds {
 		res, err := lc.Resources.GetAll(ctx, name)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to get Linstor Resources by the Resource Definition, name: %s", name))
@@ -245,19 +231,16 @@ func ReconcileTieBreaker(
 	)
 	for name, resources := range allResources {
 		if len(resources) == 0 {
-			// TODO: log as warning
-			log.Info(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
+			log.Warning(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
 			continue
 		}
 
 		if len(resources)%2 != 0 {
-			// TODO: log as debug
 			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has odd replicas count. No need to create diskless one", name))
 			continue
 		}
 
 		if hasDisklessReplica(resources) {
-			// TODO: log as debug
 			log.Info(fmt.Sprintf("[ReconcileTieBreaker] the Linstor Resource, name: %s has already have a diskless replica. No need to create one", name))
 			continue
 		}

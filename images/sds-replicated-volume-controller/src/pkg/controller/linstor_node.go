@@ -21,19 +21,15 @@ import (
 	"fmt"
 	"net"
 	"reflect"
-	"sds-replicated-volume-controller/config"
-	"sds-replicated-volume-controller/pkg/logger"
 	"slices"
 	"strings"
 	"time"
 
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
-	storagev1 "k8s.io/api/storage/v1"
-
 	lclient "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"gopkg.in/yaml.v3"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -41,6 +37,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	"sds-replicated-volume-controller/config"
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 const (
@@ -68,7 +67,7 @@ const (
 var (
 	drbdNodeSelector = map[string]string{SdsReplicatedVolumeNodeSelectorKey: ""}
 
-	allowedLabels = []string{
+	AllowedLabels = []string{
 		"kubernetes.io/hostname",
 		"topology.kubernetes.io/region",
 		"topology.kubernetes.io/zone",
@@ -77,7 +76,7 @@ var (
 		SdsReplicatedVolumeNodeSelectorKey,
 	}
 
-	allowedPrefixes = []string{
+	AllowedPrefixes = []string{
 		"class.storage.deckhouse.io/",
 		SdsStoragePoolPrefixLabelKey,
 	}
@@ -94,7 +93,6 @@ func NewLinstorNode(
 
 	c, err := controller.New(LinstorNodeControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-
 			if request.Name == configSecretName {
 				log.Info("Start reconcile of LINSTOR nodes.")
 				err := reconcileLinstorNodes(ctx, cl, lc, log, request.Namespace, request.Name, drbdNodeSelector)
@@ -117,10 +115,9 @@ func NewLinstorNode(
 		return nil, err
 	}
 
-	err = c.Watch(source.Kind(mgr.GetCache(), &v1.Secret{}), &handler.EnqueueRequestForObject{})
+	err = c.Watch(source.Kind(mgr.GetCache(), &v1.Secret{}, &handler.TypedEnqueueRequestForObject[*v1.Secret]{}))
 
 	return c, err
-
 }
 
 func reconcileLinstorNodes(
@@ -160,7 +157,8 @@ func reconcileLinstorNodes(
 
 	err = ReconcileCSINodeLabels(ctx, cl, log, selectedKubernetesNodes.Items)
 	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcileLinstorNodes] unable to reconcile CSI node labels"))
+		log.Error(err, "[reconcileLinstorNodes] unable to reconcile CSI node labels")
+		return err
 	}
 
 	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
@@ -232,12 +230,12 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 		)
 
 		for nodeLabel := range nodeLabels[csiNode.Name] {
-			if slices.Contains(allowedLabels, nodeLabel) {
+			if slices.Contains(AllowedLabels, nodeLabel) {
 				kubeNodeLabelsToSync[nodeLabel] = struct{}{}
 				continue
 			}
 
-			for _, prefix := range allowedPrefixes {
+			for _, prefix := range AllowedPrefixes {
 				if strings.HasPrefix(nodeLabel, prefix) {
 					kubeNodeLabelsToSync[nodeLabel] = struct{}{}
 				}
@@ -370,8 +368,8 @@ func removeDRBDNodes(
 		if err != nil {
 			return fmt.Errorf("unable to reconcile labels for node %s: %w", drbdNodeToRemove.Name, err)
 		}
-
 	}
+
 	return nil
 }
 
@@ -412,8 +410,8 @@ func AddOrConfigureDRBDNodes(
 				return fmt.Errorf("unable to create LINSTOR node %s: %w", selectedKubernetesNode.Name, err)
 			}
 		}
-
 	}
+
 	return nil
 }
 
@@ -444,7 +442,6 @@ func ConfigureDRBDNode(
 		if !exist {
 			propertiesToDelete = append(propertiesToDelete, existingPropertyName)
 		}
-
 	}
 
 	if needUpdate || len(propertiesToDelete) != 0 {
@@ -498,11 +495,11 @@ func KubernetesNodeLabelsToProperties(kubernetesNodeLabels map[string]string) ma
 	}
 
 	isAllowed := func(label string) bool {
-		if slices.Contains(allowedLabels, label) {
+		if slices.Contains(AllowedLabels, label) {
 			return true
 		}
 
-		for _, prefix := range allowedPrefixes {
+		for _, prefix := range AllowedPrefixes {
 			if strings.HasPrefix(label, prefix) {
 				return true
 			}
@@ -574,7 +571,6 @@ func ContainsNode(nodeList *v1.NodeList, node v1.Node) bool {
 		}
 	}
 	return false
-
 }
 
 func GetLinstorNodes(ctx context.Context, lc *lclient.Client) ([]lclient.Node, []lclient.Node, error) {
@@ -638,11 +634,9 @@ func ReconcileKubernetesNodeLabels(
 				labelsToAdd[labelKey] = labelValue
 			}
 		}
-	} else {
-		if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
-			log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing DRBD label.", kubernetesNode.Name))
-			log.Error(nil, "Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
-		}
+	} else if labels.Set(drbdNodeSelector).AsSelector().Matches(labels.Set(kubernetesNode.Labels)) {
+		log.Info(fmt.Sprintf("Kubernetes node: '%s' has a DRBD label but is no longer a DRBD node. Removing DRBD label.", kubernetesNode.Name))
+		log.Error(nil, "Warning! Delete logic not yet implemented. Removal of DRBD label is prohibited.")
 	}
 
 	for labelKey := range kubernetesNode.Labels {

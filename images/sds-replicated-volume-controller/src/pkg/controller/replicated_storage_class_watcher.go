@@ -4,18 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/logger"
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 const (
@@ -31,19 +30,11 @@ func RunReplicatedStorageClassWatcher(
 	lc *lapi.Client,
 	interval int,
 	log logger.Logger,
-) (controller.Controller, error) {
+) {
 	cl := mgr.GetClient()
 	ctx := context.Background()
 
-	c, err := controller.New(ReplicatedStorageClassWatcherCtrlName, mgr, controller.Options{
-		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
-			return reconcile.Result{}, nil
-		}),
-	})
-
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[RunReplicatedStorageClassWatcher] unable to create controller, name: %s", ReplicatedStorageClassWatcherCtrlName))
-	}
+	log.Info(fmt.Sprintf("[RunReplicatedStorageClassWatcher] the controller %s starts the work", ReplicatedStorageClassWatcherCtrlName))
 
 	go func() {
 		for {
@@ -82,8 +73,6 @@ func RunReplicatedStorageClassWatcher(
 			log.Info("[RunReplicatedStorageClassWatcher] ends reconciliation loop")
 		}
 	}()
-
-	return c, err
 }
 
 func SortNodesByStoragePool(nodeList *v1.NodeList, sps map[string][]lapi.StoragePool) map[string][]v1.Node {
@@ -117,7 +106,7 @@ func ReconcileReplicatedStorageClassPools(
 
 			removeNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByStoragePool)
 		} else {
-			err := errors.New(fmt.Sprintf("storage pool %s does not exist", rsc.Spec.StoragePool))
+			err := fmt.Errorf("storage pool %s does not exist", rsc.Spec.StoragePool)
 			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClassPools] storage pool validation failed for the ReplicatedStorageClass %s", rsc.Name))
 
 			setNonOperationalLabelOnStorageClass(ctx, cl, log, rsc, NonOperationalByStoragePool)
@@ -226,7 +215,7 @@ func ReconcileReplicatedStorageClassZones(
 		for _, zone := range rsc.Spec.Zones {
 			if !slices.Contains(zones, zone) {
 				healthy = false
-				err = errors.New(fmt.Sprintf("no such zone %s exists in the DRBStoragePool %s", zone, rsc.Spec.StoragePool))
+				err = fmt.Errorf("no such zone %s exists in the DRBStoragePool %s", zone, rsc.Spec.StoragePool)
 				log.Error(err, fmt.Sprintf("zones validation failed for the ReplicatedStorageClass %s", rsc.Name))
 			}
 		}

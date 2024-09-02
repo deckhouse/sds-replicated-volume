@@ -17,11 +17,11 @@ limitations under the License.
 package logger
 
 import (
-	"flag"
 	"fmt"
+	"strconv"
+
 	"github.com/go-logr/logr"
-	"k8s.io/klog/v2"
-	"k8s.io/klog/v2/klogr"
+	"k8s.io/klog/v2/textlogger"
 )
 
 const (
@@ -48,13 +48,12 @@ type Logger struct {
 }
 
 func NewLogger(level Verbosity) (*Logger, error) {
-	klog.InitFlags(nil)
-	if err := flag.Set("v", string(level)); err != nil {
+	v, err := strconv.Atoi(string(level))
+	if err != nil {
 		return nil, err
 	}
-	flag.Parse()
 
-	log := klogr.New().WithCallDepth(1)
+	log := textlogger.NewLogger(textlogger.NewConfig(textlogger.Verbosity(v))).WithCallDepth(1)
 
 	return &Logger{log: log}, nil
 }
