@@ -17,6 +17,8 @@ require (
 	sigs.k8s.io/controller-runtime v0.19.0
 )
 
+replace github.com/deckhouse/sds-replicated-volume/api => ../../../api
+
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
