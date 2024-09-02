@@ -77,7 +77,7 @@ func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Clien
 
 	storageClassList := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassesWithReplicatedVolumeProvisioner.Items {
-		log.Trace("[getStorageClassForAnnotationsReconcile] Processing storage class %+v", storageClass)
+		log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Processing storage class %+v", storageClass))
 		if storageClass.Parameters[StorageClassParamAllowRemoteVolumeAccessKey] == "false" {
 			if storageClass.Annotations == nil {
 				storageClass.Annotations = make(map[string]string)
@@ -89,13 +89,13 @@ func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Clien
 				if value != StorageClassAnnotationToReconcileValue {
 					storageClass.Annotations[StorageClassAnnotationToReconcileKey] = StorageClassAnnotationToReconcileValue
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Trace("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey, StorageClassAnnotationToReconcileValue)
+					log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey, StorageClassAnnotationToReconcileValue))
 				}
 			} else {
 				if exists {
 					delete(storageClass.Annotations, StorageClassAnnotationToReconcileKey)
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Trace("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey)
+					log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey))
 				}
 			}
 
