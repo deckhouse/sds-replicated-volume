@@ -37,7 +37,7 @@ jobs:
           echo "Processing $go_mod_file"
           
           while IFS= read -r line; do
-            if [[ "$line" == *github.com/deckhouse/sds-* || "$line" == *github.com/deckhouse/csi-* || "$line" == *github.com/deckhouse/virtualization ]]; then
+            if [[ ("$line" == *github.com/deckhouse/sds-* || "$line" == *github.com/deckhouse/csi-* || "$line" == *github.com/deckhouse/virtualization) && "$line" =~ *replace* ]]; then
               repository=$(echo "$line" | awk '{print $1}' | awk -F'/' '{ print "https://"$1"/"$2"/"$3".git" }')
               pseudo_tag=$(echo "$line" | awk '{print $2}')
               echo "Cloning repo $repository into $temp_dir"
