@@ -40,12 +40,14 @@ func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, lo
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get virtualization module enabled")
 		return true, err
 	}
+	log.Trace(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
 
 	storageClassList, err := getStorageClassForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
 		return true, err
 	}
+	log.Trace(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Storage class list for annotations reconcile: %+v", storageClassList))
 
 	return reconcileStorageClassAnnotations(ctx, cl, log, storageClassList)
 }
@@ -124,6 +126,7 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, p
 
 func reconcileStorageClassAnnotations(ctx context.Context, cl client.Client, log logger.Logger, storageClassList *storagev1.StorageClassList) (bool, error) {
 	for _, storageClass := range storageClassList.Items {
+		log.Trace(fmt.Sprintf("[reconcileStorageClassAnnotations] Update storage class %s", storageClass.Name))
 		err := cl.Update(ctx, &storageClass)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileStorageClassAnnotations] Failed to update storage class %s", storageClass.Name))
