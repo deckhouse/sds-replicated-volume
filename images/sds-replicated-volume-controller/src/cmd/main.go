@@ -125,7 +125,7 @@ func main() {
 	}
 	log.Info("the NewLinstorNode controller starts")
 
-	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams.ScanInterval, *log); err != nil {
+	if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
 		log.Error(err, "failed to create the NewReplicatedStorageClass controller")
 		os.Exit(1)
 	}
@@ -148,6 +148,11 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("the NewLinstorLeader controller starts")
+
+	if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, *log); err != nil {
+		log.Error(err, "failed to create the NewStorageClassAnnotationsReconciler controller")
+		os.Exit(1)
+	}
 
 	controller.NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval, *log)
 	log.Info("the NewLinstorResourcesWatcher controller starts")
