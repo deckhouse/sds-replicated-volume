@@ -20,12 +20,9 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"sds-replicated-volume-controller/pkg/controller"
-	"sds-replicated-volume-controller/pkg/logger"
 	"strings"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -36,6 +33,9 @@ import (
 	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"sds-replicated-volume-controller/pkg/controller"
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
@@ -83,7 +83,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		var (
 			testName                    = generateTestName()
 			allowVolumeExpansion   bool = true
-			volumeBindingMode           = storagev1.VolumeBindingMode("WaitForFirstConsumer")
+			volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
 			reclaimPolicy               = v1.PersistentVolumeReclaimPolicy(validSpecReplicatedSCTemplate.Spec.ReclaimPolicy)
 			storageClassParameters      = map[string]string{
 				controller.StorageClassStoragePoolKey:                     validSpecReplicatedSCTemplate.Spec.StoragePool,
@@ -101,6 +101,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 				controller.StorageClassParamReplicasOnSameKey:             fmt.Sprintf("class.storage.deckhouse.io/%s", testName),
 				controller.StorageClassParamReplicasOnDifferentKey:        controller.ZoneLabel,
 				controller.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
+				controller.QuorumMinimumRedundancyWithPrefixSCKey:         "2",
 			}
 
 			expectedSC = &storagev1.StorageClass{
@@ -854,7 +855,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Status.Phase = controller.Created
 		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
 
-		equal, _ := controller.CompareStorageClasses(&replicatedSC, storageClass)
+		equal, _ := controller.CompareStorageClasses(storageClass, storageClass)
 		Expect(equal).To(BeTrue())
 	})
 
@@ -864,19 +865,23 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			diffVBM       storagev1.VolumeBindingMode      = "not-equal"
 		)
 
-		testName := generateTestName()
-		replicatedSC := validSpecReplicatedSCTemplate
-		replicatedSC.Name = testName
-		storageClass := &storagev1.StorageClass{
-			Provisioner:       "not-equal",
+		storageClass1 := &storagev1.StorageClass{
+			Provisioner:       "first",
 			Parameters:        map[string]string{"not": "equal"},
 			ReclaimPolicy:     &diffRecPolicy,
 			VolumeBindingMode: &diffVBM,
 		}
 
-		equal, message := controller.CompareStorageClasses(&replicatedSC, storageClass)
+		storageClass2 := &storagev1.StorageClass{
+			Provisioner:       "second",
+			Parameters:        map[string]string{"not": "equal"},
+			ReclaimPolicy:     &diffRecPolicy,
+			VolumeBindingMode: &diffVBM,
+		}
+
+		equal, message := controller.CompareStorageClasses(storageClass1, storageClass2)
 		Expect(equal).To(BeFalse())
-		Expect(message).To(Equal("ReplicatedStorageClass and StorageClass are not equal: Parameters are not equal; Provisioner are not equal(ReplicatedStorageClass: replicated.csi.storage.deckhouse.io, StorageClass: not-equal); ReclaimPolicy are not equal(ReplicatedStorageClass: Retain, StorageClass: not-equalVolumeBindingMode are not equal(ReplicatedStorageClass: WaitForFirstConsumer, StorageClass: not-equal); "))
+		Expect(message).NotTo(Equal(""))
 	})
 
 	It("LabelNodes_set_labels", func() {

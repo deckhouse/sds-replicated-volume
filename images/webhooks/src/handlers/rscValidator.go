@@ -18,17 +18,17 @@ package handlers
 
 import (
 	"context"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/klog/v2"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/slok/kubewebhook/v2/pkg/model"
 	kwhvalidating "github.com/slok/kubewebhook/v2/pkg/webhook/validating"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog/v2"
 )
 
-func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
+func RSCValidate(_ context.Context, _ *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	rsc, ok := obj.(*srv.ReplicatedStorageClass)
 	if !ok {
 		// If not a storage class just continue the validation chain(if there is one) and do nothing.
@@ -56,7 +56,8 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		}
 	}
 
-	if rsc.Spec.Topology == "TransZonal" {
+	switch rsc.Spec.Topology {
+	case "TransZonal":
 		if len(rsc.Spec.Zones) == 0 {
 			klog.Infof("No zones in ReplicatedStorageClass (%s)", rsc.Name)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "You must set at least one zone."},
@@ -74,7 +75,7 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "TransZonal topology denied in cluster without zones. Use Ignored instead."},
 				nil
 		}
-	} else if rsc.Spec.Topology == "Zonal" {
+	case "Zonal":
 		if len(rsc.Spec.Zones) != 0 {
 			klog.Infof("No zones must be set with Zonal topology (%s) (%s)", rsc.Spec.Topology, rsc.Spec.Zones)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "No zones must be set with Zonal topology."},
@@ -86,7 +87,7 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "Zonal topology denied in cluster without zones. Use Ignored instead."},
 				nil
 		}
-	} else if rsc.Spec.Topology == "Ignored" {
+	case "Ignored":
 		if len(clusterZoneList) != 0 {
 			klog.Infof("In a cluster with existing zones, the Ignored topology should not be used  (%s) (%s)", rsc.Spec.Topology, rsc.Spec.Zones)
 			return &kwhvalidating.ValidatorResult{Valid: false, Message: "In a cluster with existing zones, the Ignored topology should not be used."},
@@ -99,6 +100,5 @@ func RSCValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		}
 	}
 
-	return &kwhvalidating.ValidatorResult{Valid: true},
-		nil
+	return &kwhvalidating.ValidatorResult{Valid: true}, nil
 }

@@ -23,7 +23,7 @@ type VolumeDefinitions struct {
 	Spec              struct {
 		ResourceName string `json:"resource_name"`
 		SnapshotName string `json:"snapshot_name"`
-		Uuid         string `json:"uuid"`
+		UUID         string `json:"uuid"`
 		VlmFlags     int    `json:"vlm_flags"`
 		VlmNr        int    `json:"vlm_nr"`
 		VlmSize      int    `json:"vlm_size"`

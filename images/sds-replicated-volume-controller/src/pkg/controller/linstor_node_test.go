@@ -19,15 +19,16 @@ package controller_test
 import (
 	"context"
 	"fmt"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"sds-replicated-volume-controller/pkg/controller"
-	"sds-replicated-volume-controller/pkg/logger"
 
 	linstor "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"sds-replicated-volume-controller/pkg/controller"
+	"sds-replicated-volume-controller/pkg/logger"
 )
 
 var _ = Describe(controller.LinstorNodeControllerName, func() {
@@ -215,10 +216,13 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 
 	It("KubernetesNodeLabelsToProperties", func() {
 		const (
-			testKey1   = "key1"
-			testKey2   = "key2"
 			testValue1 = "test_value1"
 			testValue2 = "test_value2"
+		)
+
+		var (
+			testKey1 = controller.AllowedLabels[0]
+			testKey2 = controller.AllowedLabels[1]
 		)
 
 		kubeNodeLabels := map[string]string{
