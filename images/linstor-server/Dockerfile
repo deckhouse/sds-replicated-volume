@@ -1,5 +1,5 @@
 ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20221130@sha256:c14c3b1242536729ce5227ff833144977b4e378723858fb73a4cf40ea6daaf6a
-ARG BASE_GOLANG_19_BULLSEYE=registry.deckhouse.io/base_images/golang:1.19.3-bullseye@sha256:3d68e9eabd09f01f5851297902f2756ee2456a2e28b212e553315a3ddfcffe4b
+ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a
 
 FROM $BASE_UBUNTU as linstor-builder
 
@@ -80,7 +80,7 @@ RUN dpkg-buildpackage -us -uc
 
 # ------------------------------------------------------------------------------
 
-FROM $BASE_GOLANG_19_BULLSEYE as k8s-await-election-builder
+FROM $BASE_GOLANG_BULLSEYE as k8s-await-election-builder
 
 ARG K8S_AWAIT_ELECTION_GITREPO=https://github.com/LINBIT/k8s-await-election
 ARG K8S_AWAIT_ELECTION_VERSION=0.3.1
