@@ -118,13 +118,13 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Operational`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-0 -w
 ```
 
-- Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
 - Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
 
@@ -142,13 +142,13 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Operational`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-1 -w
 ```
 
-- Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
 - Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
 
@@ -166,13 +166,13 @@ spec:
 EOF
 ```
 
-- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Operational`:
+- Дождаться, когда созданный ресурс `LVMVolumeGroup` перейдет в состояние `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-2 -w
 ```
 
-- Если ресурс перешел в состояние `Operational`, то это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
+- Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
 
 - Теперь, когда у нас на узлах созданы нужные LVM VG, мы можем создать из них [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
 
