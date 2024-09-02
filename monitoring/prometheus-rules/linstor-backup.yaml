@@ -17,5 +17,5 @@
           Please check it with command:
           `kubectl -n d8-sds-replicated-volume get secrets | grep -E "linstor-[0-9]+-backup"`
           
-          You must remove it with command:
+          You should remove it with command:
           `kubectl -n d8-sds-replicated-volume get secrets | grep -E "linstor-[0-9]+-backup" | awk '{ print "kubectl -n d8-sds-replicated-volume delete secret "$1 }' | bash`
