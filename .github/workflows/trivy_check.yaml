@@ -48,13 +48,13 @@ jobs:
           version="drbd-9.2.10"
           git clone --depth 1 --branch $version https://github.com/LINBIT/drbd/ ./drbd
 
-          version="9.28.0"
+          version="v9.28.0"
           git clone --depth 1 --branch $version https://github.com/LINBIT/drbd-utils ./drbd-utils
 
-          version="1.4.0"
+          version="v1.4.0"
           git clone --depth 1 --branch $version https://github.com/LINBIT/drbd-reactor ./drbd-reactor
 
-          version="0.3.0"
+          version="v0.3.0"
           git clone --depth 1 --branch $version https://github.com/piraeusdatastore/linstor-affinity-controller ./linstor-affinity-controller
 
       - name: Run Trivy vulnerability scanner in fs mode
