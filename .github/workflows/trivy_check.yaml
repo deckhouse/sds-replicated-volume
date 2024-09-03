@@ -15,9 +15,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
+      - name: Check and Install Latest Trivy
+        run: |
+          mkdir -p $HOME/bin
+
+          LATEST_VERSION=$(curl -sL https://api.github.com/repos/aquasecurity/trivy/releases/latest | jq -r ".tag_name")
+          CLEAN_VERSION=${LATEST_VERSION#v}
+
+          INSTALL_TRIVY=true
+
+          if [[ -f "$HOME/bin/trivy" ]]; then
+            INSTALLED_VERSION=$("$HOME/bin/trivy" --version | grep -oE 'Version: [0-9]+\.[0-9]+\.[0-9]+' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+            if [ "$INSTALLED_VERSION" == "$CLEAN_VERSION" ]; then
+              echo "Trivy is already up-to-date (version $INSTALLED_VERSION)."
+              INSTALL_TRIVY=false
+            else
+              echo "Updating Trivy from version $INSTALLED_VERSION to $CLEAN_VERSION."
+            fi
+          else
+            echo "Trivy is not installed. Installing version $CLEAN_VERSION."
+          fi
+
+          if [ "$INSTALL_TRIVY" = true ]; then
+            wget https://github.com/aquasecurity/trivy/releases/download/$LATEST_VERSION/trivy_${CLEAN_VERSION}_Linux-64bit.tar.gz -O trivy.tar.gz
+            tar zxvf trivy.tar.gz -C $HOME/bin
+          fi
+
+          echo "$HOME/bin" >> $GITHUB_PATH
+
       - name: Run Trivy vulnerability scanner in fs mode
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          trivy-config: trivy.yaml
+        run: |
+          trivy fs . --quiet --config trivy.yaml
