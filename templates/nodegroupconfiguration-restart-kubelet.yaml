@@ -30,7 +30,7 @@ spec:
     export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
     export kubeconfig="/etc/kubernetes/kubelet.conf"
 
-    is_kubelet_restart_needed=$(bb-kubectl --kubeconfig $kubeconfig get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"'$LABEL_KEY'": ""})')
+    is_kubelet_restart_needed=$(bb-kubectl --kubeconfig $kubeconfig get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"'$LABEL_KEY'": ""})')
 
 
     echo "is_kubelet_restart_needed: $is_kubelet_restart_needed"
@@ -45,7 +45,7 @@ spec:
       echo "Restarting kubelet again."
       systemctl restart kubelet
 
-      bb-kubectl --kubeconfig $kubeconfig label node "$(hostname -s)" "$LABEL_KEY"-
+      bb-kubectl --kubeconfig $kubeconfig label node "$(hostname)" "$LABEL_KEY"-
     else
       echo "Kubelet restart is not needed. Exiting."
     fi

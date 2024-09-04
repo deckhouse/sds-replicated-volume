@@ -118,13 +118,13 @@ spec:
 EOF
 ```
 
-- Wait for the created `LVMVolumeGroup` resource to become `Operational`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-0 -w
 ```
 
-- The resource becoming `Operational` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
 
 - Next, create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-1`:
 
@@ -142,13 +142,13 @@ spec:
 EOF
 ```
 
-- Wait for the created `LVMVolumeGroup` resource to become `Operational`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-1 -w
 ```
 
-- The resource becoming `Operational` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
 
 - Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-2`:
 
@@ -166,13 +166,13 @@ spec:
 EOF
 ```
 
-- Wait for the created `LVMVolumeGroup` resource to become `Operational`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
 ```shell
 kubectl get lvg vg-1-on-worker-2 -w
 ```
 
-- The resource becoming `Operational` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
 
 - Now that we have all the LVM VGs created on the nodes, create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) out of those VGs:
 

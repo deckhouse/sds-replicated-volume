@@ -1,0 +1,21 @@
+- name: kubernetes.linstor.obsolete_backups
+  rules:
+    - alert: D8ObsoleteLinstorBackupPresents
+      expr: count(kube_secret_labels{label_sds_replicated_volume_deckhouse_io_linstor_db_backup!=""}) > 0
+      for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresents,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_linstor_obsolete_backups: "D8ObsoleteLinstorBackupPresents,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: LINSTOR obsolete backups presents in cluster
+        description: |
+          There is obsolete LINSTOR metadata backups in cluster
+          Please check it with command:
+          `kubectl -n d8-sds-replicated-volume get secrets | grep -E "linstor-[0-9]+-backup"`
+          
+          You should remove it with command:
+          `kubectl -n d8-sds-replicated-volume get secrets | grep -E "linstor-[0-9]+-backup" | awk '{ print "kubectl -n d8-sds-replicated-volume delete secret "$1 }' | bash`
