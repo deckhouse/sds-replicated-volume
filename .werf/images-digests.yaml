@@ -5,7 +5,7 @@
 
 {{- range $ImageManifest := regexSplit "\n?---[ \t]*\n" $Images -1 }}
   {{- $ImageManifest := $ImageManifest | fromYaml }}
-  {{- if $ImageManifest.image }}
+  {{- if and $ImageManifest.image (ne ($ImageManifest.final | toJson) "false") }}
     {{- $ImagesIDList = append $ImagesIDList $ImageManifest.image }}
   {{- end }}
 {{- end }}
