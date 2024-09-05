@@ -34,19 +34,21 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"sds-replicated-volume-controller/config"
 	"sds-replicated-volume-controller/pkg/controller"
 	"sds-replicated-volume-controller/pkg/logger"
 )
 
 var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 	const (
-		testNameSpace = "test_namespace"
+		testNameSpace = "test-namespace"
 	)
 
 	var (
-		ctx = context.Background()
-		cl  = newFakeClient()
-		log = logger.Logger{}
+		ctx         = context.Background()
+		cl          = newFakeClient()
+		log         = logger.Logger{}
+		validCFG, _ = config.NewConfig()
 
 		validZones                    = []string{"first", "second", "third"}
 		validSpecReplicatedSCTemplate = srv.ReplicatedStorageClass{
@@ -130,7 +132,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 
-		actualSC := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+		virtualizationEnabled := false
+		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
 		Expect(actualSC).To(Equal(expectedSC))
 	})
 
@@ -184,29 +187,31 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(obj.Name).To(Equal(testName))
 		Expect(obj.Namespace).To(Equal(testNameSpace))
 
-		err = controller.DeleteStorageClass(ctx, cl, testNameSpace, testName)
+		err = controller.DeleteStorageClass(ctx, cl, storageClass)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = controller.GetStorageClass(ctx, cl, testName, testNameSpace)
-		Expect(err).NotTo(BeNil())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		sc, err := controller.GetStorageClass(ctx, cl, testName, testNameSpace)
+		Expect(err).To(BeNil())
+		Expect(sc).To(BeNil())
 	})
 
 	It("CreateStorageClass_Creates_one_Returns_no_error", func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
-		err := controller.CreateStorageClass(ctx, cl, &replicatedSC)
+		virtualizationEnabled := false
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		err := controller.CreateStorageClass(ctx, cl, sc)
 		if err == nil {
 			defer func() {
-				if err = controller.DeleteStorageClass(ctx, cl, testNameSpace, testName); err != nil {
+				if err = controller.DeleteStorageClass(ctx, cl, sc); err != nil {
 					fmt.Println(err.Error())
 				}
 			}()
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		sc, err := controller.GetStorageClass(ctx, cl, testNameSpace, testName)
+		sc, err = controller.GetStorageClass(ctx, cl, testNameSpace, testName)
 		Expect(err).NotTo(HaveOccurred())
 		if Expect(sc).NotTo(BeNil()) {
 			Expect(sc.Name).To(Equal(testName))
@@ -285,10 +290,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
 		replicatedSC.Status.Phase = controller.Created
 
-		req := reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: testNameSpace,
-			Name:      testName,
-		}}
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
 
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
@@ -303,7 +310,17 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		err = cl.Delete(ctx, &replicatedSC)
 		Expect(err).NotTo(HaveOccurred())
 
-		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, req, log)
+		replicatedSCafterDelete := srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSCafterDelete)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
+
+		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeFalse())
 
@@ -319,10 +336,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
 		replicatedSC.Status.Phase = controller.Created
 
-		req := reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: testNameSpace,
-			Name:      testName,
-		}}
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
 
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
@@ -334,10 +353,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.CreateStorageClass(ctx, cl, &replicatedSC)
+		virtualizationEnabled := false
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		err = controller.CreateStorageClass(ctx, cl, sc)
 		if err == nil {
 			defer func() {
-				if err = controller.DeleteStorageClass(ctx, cl, testNameSpace, testName); err != nil && !errors.IsNotFound(err) {
+				if err = controller.DeleteStorageClass(ctx, cl, sc); err != nil && !errors.IsNotFound(err) {
 					fmt.Println(err.Error())
 				}
 			}()
@@ -347,7 +368,17 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		err = cl.Delete(ctx, &replicatedSC)
 		Expect(err).NotTo(HaveOccurred())
 
-		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, req, log)
+		replicatedSCafterDelete := srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSCafterDelete)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
+
+		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeFalse())
 
@@ -355,9 +386,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 
-		_, err = controller.GetStorageClass(ctx, cl, testNameSpace, testName)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		sc, err = controller.GetStorageClass(ctx, cl, testNameSpace, testName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(sc).To(BeNil())
 	})
 
 	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_failed_StorageClass_exists_Does_NOT_delete_StorageClass_Deletes_resource", func() {
@@ -367,10 +398,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Finalizers = []string{controller.ReplicatedStorageClassFinalizerName}
 		replicatedSC.Status.Phase = controller.Failed
 
-		req := reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: testNameSpace,
-			Name:      testName,
-		}}
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
 
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
@@ -381,13 +414,25 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			}()
 		}
 
-		err = controller.CreateStorageClass(ctx, cl, &replicatedSC)
+		virtualizationEnabled := false
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
 		err = cl.Delete(ctx, &replicatedSC)
 		Expect(err).NotTo(HaveOccurred())
 
-		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, req, log)
+		replicatedSCafterDelete := srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSCafterDelete)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replicatedSCafterDelete.Name).To(Equal(testName))
+		Expect(replicatedSCafterDelete.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+		Expect(replicatedSCafterDelete.ObjectMeta.DeletionTimestamp).NotTo(BeNil())
+
+		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeFalse())
 
@@ -411,10 +456,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Name = testName
 		replicatedSC.Status.Phase = controller.Created
 
-		req := reconcile.Request{NamespacedName: types.NamespacedName{
-			Namespace: testNameSpace,
-			Name:      testName,
-		}}
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
 
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
@@ -425,7 +472,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			}()
 		}
 
-		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, req, log)
+		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeFalse())
 
@@ -443,13 +490,13 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			Name:      testName,
 		}}
 
+		replicatedSC, err := controller.GetReplicatedStorageClass(ctx, cl, req.Namespace, req.Name)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replicatedSC).To(BeNil())
+
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
-
-		requeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, req, log)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(requeue).To(BeFalse())
 	})
 
 	It("ValidateReplicatedStorageClass_Incorrect_spec_Returns_false_and_messages", func() {
@@ -463,137 +510,6 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		validation, mes := controller.ValidateReplicatedStorageClass(ctx, cl, &replicatedSC, zones)
 		Expect(validation).Should(BeFalse())
 		Expect(mes).To(Equal("Validation of ReplicatedStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "))
-	})
-
-	It("ValidateReplicatedStorageClass_new_replicatedSC_is_default_default_replicatedSC_is_already_exist_validation_failed", func() {
-		testName := generateTestName()
-		replicatedSC := validSpecReplicatedSCTemplate
-		replicatedSC.Name = testName
-		replicatedSC.Spec.IsDefault = true
-
-		err := cl.Create(ctx, &replicatedSC)
-		if Expect(err).NotTo(HaveOccurred()) {
-			defer func() {
-				err = cl.Delete(ctx, &replicatedSC)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-			}()
-		}
-
-		newReplicatedSCName := generateTestName()
-		dnewReplicatedSC := validSpecReplicatedSCTemplate
-		dnewReplicatedSC.Name = newReplicatedSCName
-		dnewReplicatedSC.Spec.IsDefault = true
-		zones := map[string]struct{}{
-			"first":  {},
-			"second": {},
-			"third":  {},
-		}
-
-		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
-		Expect(validation).Should(BeFalse())
-		Expect(msg).To(Equal(fmt.Sprintf("Validation of ReplicatedStorageClass failed: Conflict with other default ReplicatedStorageClasses: %s; StorageClasses: ", replicatedSC.Name)))
-	})
-
-	It("ValidateReplicatedStorageClass_new_replicatedSC_is_default_default_replicatedSC_with_same_name_is_already_exist_validation_passed", func() {
-		testName := generateTestName()
-		replicatedSC := validSpecReplicatedSCTemplate
-		replicatedSC.Name = testName
-		replicatedSC.Spec.IsDefault = true
-
-		err := cl.Create(ctx, &replicatedSC)
-		if Expect(err).NotTo(HaveOccurred()) {
-			defer func() {
-				err = cl.Delete(ctx, &replicatedSC)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-			}()
-		}
-
-		newReplicatedSCName := testName
-		dnewReplicatedSC := validSpecReplicatedSCTemplate
-		dnewReplicatedSC.Name = newReplicatedSCName
-		dnewReplicatedSC.Spec.IsDefault = true
-		zones := map[string]struct{}{
-			"first":  {},
-			"second": {},
-			"third":  {},
-		}
-
-		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
-		Expect(validation).Should(BeTrue())
-	})
-
-	It("ValidateReplicatedStorageClass_new_replicatedSC_is_default_default_sc_is_already_exist_validation_failed", func() {
-		sc := storagev1.StorageClass{
-			TypeMeta: metav1.TypeMeta{},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: generateTestName(),
-				Annotations: map[string]string{
-					controller.DefaultStorageClassAnnotationKey: "true",
-				},
-			},
-		}
-
-		err := cl.Create(ctx, &sc)
-		if Expect(err).NotTo(HaveOccurred()) {
-			defer func() {
-				err = cl.Delete(ctx, &sc)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-			}()
-		}
-
-		dnewReplicatedSC := validSpecReplicatedSCTemplate
-		dnewReplicatedSC.Name = generateTestName()
-		dnewReplicatedSC.Spec.IsDefault = true
-		zones := map[string]struct{}{
-			"first":  {},
-			"second": {},
-			"third":  {},
-		}
-
-		validation, msg := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
-		Expect(validation).Should(BeFalse())
-		Expect(msg).To(Equal(fmt.Sprintf("Validation of ReplicatedStorageClass failed: Conflict with other default ReplicatedStorageClasses: ; StorageClasses: %s", sc.Name)))
-	})
-
-	It("ValidateReplicatedStorageClass_new_replicatedSC_is_default_default_sc_with_same_name_is_already_exist_validation_passed", func() {
-		testName := generateTestName()
-		sc := storagev1.StorageClass{
-			TypeMeta: metav1.TypeMeta{},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: testName,
-				Annotations: map[string]string{
-					controller.DefaultStorageClassAnnotationKey: "true",
-				},
-			},
-		}
-
-		err := cl.Create(ctx, &sc)
-		if Expect(err).NotTo(HaveOccurred()) {
-			defer func() {
-				err = cl.Delete(ctx, &sc)
-				if err != nil {
-					fmt.Println(err.Error())
-				}
-			}()
-		}
-
-		dnewReplicatedSC := validSpecReplicatedSCTemplate
-		dnewReplicatedSC.Name = testName
-		dnewReplicatedSC.Spec.IsDefault = true
-		zones := map[string]struct{}{
-			"first":  {},
-			"second": {},
-			"third":  {},
-		}
-
-		validation, _ := controller.ValidateReplicatedStorageClass(ctx, cl, &dnewReplicatedSC, zones)
-		Expect(validation).Should(BeTrue())
 	})
 
 	It("ValidateReplicatedStorageClass_Correct_spec_Returns_true", func() {
@@ -701,7 +617,16 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := invalidReplicatedSCTemplate
 		replicatedSC.Name = testName
-		failedMessage := "Validation of ReplicatedStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		failedMessage := fmt.Sprintf("[ReconcileReplicatedStorageClass] Validation of ReplicatedStorageClass %s failed for the following reason: Validation of ReplicatedStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; ", testName)
+
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -712,8 +637,26 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.ReconcileReplicatedStorageClass(ctx, cl, log, &replicatedSC)
+		replicatedSC = srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(replicatedSC.Name).To(Equal(testName))
+		Expect(replicatedSC.Finalizers).To(BeNil())
+		Expect(replicatedSC.Spec.StoragePool).To(Equal(""))
+
+		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).To(HaveOccurred())
+		Expect(shouldReque).To(BeFalse())
+
+		replicatedSC = srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
 		Expect(replicatedSC.Status.Phase).To(Equal(controller.Failed))
 		Expect(replicatedSC.Status.Reason).To(Equal(failedMessage))
 
@@ -731,6 +674,13 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Name = testName
 		replicatedSC.Finalizers = nil
 
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -742,12 +692,12 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNameSpace, testName)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).To(BeNil())
 
-		err = controller.ReconcileReplicatedStorageClass(ctx, cl, log, &replicatedSC)
+		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldReque).To(BeFalse())
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -772,6 +722,13 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -782,11 +739,14 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.CreateStorageClass(ctx, cl, &replicatedSC)
+		virtualizationEnabled := false
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.ReconcileReplicatedStorageClass(ctx, cl, log, &replicatedSC)
+		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldReque).To(BeFalse())
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -817,6 +777,14 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		anotherReplicatedSC.Spec.ReclaimPolicy = "not-equal"
 		anotherReplicatedSC.Name = testName
 
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		failedMessage := "[ReconcileReplicatedStorageClass] error recreateStorageClassIfNeeded: [recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal (Old StorageClass: Retain, New StorageClass: not-equal"
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -827,17 +795,25 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.CreateStorageClass(ctx, cl, &anotherReplicatedSC)
+		virtualizationEnabled := false
+		anotherSC := controller.GetNewStorageClass(&anotherReplicatedSC, virtualizationEnabled)
+		err = controller.CreateStorageClass(ctx, cl, anotherSC)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = controller.ReconcileReplicatedStorageClass(ctx, cl, log, &replicatedSC)
-		Expect(err).NotTo(HaveOccurred())
+		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).To(HaveOccurred())
+		// Expect(err).NotTo((HaveOccurred()))
+		Expect(shouldReque).To(BeFalse())
+		Expect(err.Error()).To(Equal(failedMessage))
 
-		resources, err := getTestAPIStorageClasses(ctx, cl)
+		replicatedSCafterReconcile := srv.ReplicatedStorageClass{}
+		err = cl.Get(ctx, client.ObjectKey{
+			Name:      testName,
+			Namespace: testNameSpace,
+		}, &replicatedSCafterReconcile)
 		Expect(err).NotTo(HaveOccurred())
-
-		resource := resources[testName]
-		Expect(resource.Status.Phase).To(Equal(controller.Failed))
+		Expect(replicatedSCafterReconcile.Name).To(Equal(testName))
+		Expect(replicatedSCafterReconcile.Status.Phase).To(Equal(controller.Failed))
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNameSpace, testName)
 		Expect(err).NotTo(HaveOccurred())

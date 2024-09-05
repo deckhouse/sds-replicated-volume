@@ -72,7 +72,7 @@ func getTestAPIStorageClasses(ctx context.Context, cl client.Client) (map[string
 }
 
 func generateTestName() string {
-	return "test_name" + uuid.NewString()
+	return "test-name-" + uuid.NewString()
 }
 
 func NewLinstorClientWithMockNodes() (*Client, error) {

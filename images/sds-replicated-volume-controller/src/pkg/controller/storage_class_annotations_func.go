@@ -73,7 +73,7 @@ func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log l
 }
 
 func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Client, log logger.Logger, provisioner string, virtualizationEnabled bool) (*storagev1.StorageClassList, error) {
-	storageClassesWithReplicatedVolumeProvisioner, err := getStorageClassListWithProvisioner(ctx, cl, provisioner)
+	storageClassesWithReplicatedVolumeProvisioner, err := getStorageClassListWithProvisioner(ctx, cl, log, provisioner)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get storage classes with provisioner %s", provisioner))
 		return nil, err
@@ -109,7 +109,7 @@ func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Clien
 	return storageClassList, nil
 }
 
-func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, provisioner string) (*storagev1.StorageClassList, error) {
+func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, log logger.Logger, provisioner string) (*storagev1.StorageClassList, error) {
 	storageClassList := &storagev1.StorageClassList{}
 	err := cl.List(ctx, storageClassList)
 	if err != nil {
@@ -118,7 +118,9 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, p
 
 	storageClassesWithProvisioner := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassList.Items {
+		log.Trace(fmt.Sprintf("[getStorageClassListWithProvisioner] process StorageClass %s with provisioner %s", storageClass.Name, provisioner))
 		if storageClass.Provisioner == provisioner {
+			log.Trace(fmt.Sprintf("[getStorageClassListWithProvisioner] StorageClass %s has provisioner %s and will be added to the list", storageClass.Name, provisioner))
 			storageClassesWithProvisioner.Items = append(storageClassesWithProvisioner.Items, storageClass)
 		}
 	}

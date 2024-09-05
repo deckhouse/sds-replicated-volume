@@ -20,17 +20,17 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -115,37 +115,16 @@ func NewReplicatedStorageClass(
 	c, err := controller.New(ReplicatedStorageClassControllerName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get event for ReplicatedStorageClass %s in reconciler", request.Name))
-
-			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Try to get ReplicatedStorageClass with name: %s", request.Name))
-			replicatedSC := &srv.ReplicatedStorageClass{}
-			err := cl.Get(ctx, request.NamespacedName, replicatedSC)
+			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, log, cfg, request)
 			if err != nil {
-				if errors.IsNotFound(err) {
-					log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass with name: %s not found. Skip it.", request.Name))
-					return reconcile.Result{}, nil
-				}
-				log.Error(err, fmt.Sprintf("[ReplicatedStorageClassReconciler] error getting ReplicatedStorageClass: %s. Add to retry after %d seconds.", err.Error(), cfg.ScanInterval))
-				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(cfg.ScanInterval) * time.Second}, nil
+				log.Error(err, "[ReplicatedStorageClassReconciler] error in ReconcileReplicatedStorageClassEvent")
 			}
-
-			shouldRequeue, err := ReconcileReplicatedStorageClassEvent(ctx, cl, cfg, replicatedSC, log)
-			if err != nil {
-				log.Error(err, "[ReplicatedStorageClassReconciler] error in ReconcileReplicatedStorageClassEvent. Update status of ReplicatedStorageClass.")
-				replicatedSC.Status.Phase = Failed
-				replicatedSC.Status.Reason = err.Error()
-				if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-					log.Error(err, "[ReplicatedStorageClassReconciler] unable to update resource.")
-					shouldRequeue = true
-				}
-			}
-
 			if shouldRequeue {
-				log.Error(err, fmt.Sprintf("[ReplicatedStorageClassReconciler] ReconcileReplicatedStorageClassEvent should be reconciled again. Add to retry after %d seconds.", cfg.ScanInterval))
+				log.Warning(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReconcileReplicatedStorageClassEvent should be reconciled again. Add to retry after %d seconds.", cfg.ScanInterval))
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(cfg.ScanInterval) * time.Second}, nil
 			}
 
-			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler", request.Name))
-
+			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler. No need to reconcile it again.", request.Name))
 			return reconcile.Result{}, nil
 		}),
 	})
@@ -175,78 +154,87 @@ func NewReplicatedStorageClass(
 	return c, err
 }
 
-func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client, cfg *config.Options, replicatedSC *srv.ReplicatedStorageClass, log logger.Logger) (bool, error) {
-	if replicatedSC.ObjectMeta.DeletionTimestamp != nil {
-		log.Info("[ReconcileReplicatedStorageClassEvent] ReplicatedStorageClass with name: " + replicatedSC.Name + " is marked for deletion. Removing it.")
-		// #TODO: warn
-		switch replicatedSC.Status.Phase {
-		case Failed:
-			log.Info("[ReconcileReplicatedStorageClassEvent] StorageClass with name: " + replicatedSC.Name + " was not deleted because the ReplicatedStorageClass is in a Failed state. Deliting only finalizer.")
-		case Created:
-			sc, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
-			if err != nil {
-				return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting StorageClass: %s", err.Error())
-			}
+func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client, log logger.Logger, cfg *config.Options, request reconcile.Request) (bool, error) {
+	log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] Try to get ReplicatedStorageClass with name: %s", request.Name))
 
-			if sc == nil {
-				log.Info("[ReconcileReplicatedStorageClassEvent] StorageClass with name: " + replicatedSC.Name + " not found. No need to delete it.")
-				break
-			}
-
-			log.Info("[ReconcileReplicatedStorageClassEvent] StorageClass with name: " + replicatedSC.Name + " found. Deleting it.")
-			if err := DeleteStorageClass(ctx, cl, sc); err != nil {
-				return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error DeleteStorageClass: %s", err.Error())
-			}
-			log.Info("[ReconcileReplicatedStorageClassEvent] StorageClass with name: " + replicatedSC.Name + " deleted.")
-		}
-
-		log.Info("[ReconcileReplicatedStorageClassEvent] Removing finalizer from ReplicatedStorageClass with name: " + replicatedSC.Name)
-
-		replicatedSC.ObjectMeta.Finalizers = RemoveString(replicatedSC.ObjectMeta.Finalizers, ReplicatedStorageClassFinalizerName)
-		if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-			return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %s", err.Error())
-		}
-
-		log.Info("[ReconcileReplicatedStorageClassEvent] Finalizer removed from ReplicatedStorageClass with name: " + replicatedSC.Name)
-
+	replicatedSC, err := GetReplicatedStorageClass(ctx, cl, request.Namespace, request.Name)
+	if err != nil {
+		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting ReplicatedStorageClass: %w", err)
+		return true, err
+	}
+	if replicatedSC == nil {
+		log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] ReplicatedStorageClass with name: %s not found. Finish reconcile.", request.Name))
 		return false, nil
 	}
 
-	if err := ReconcileReplicatedStorageClass(ctx, cl, log, cfg, replicatedSC); err != nil {
-		return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error ReconcileReplicatedStorageClass: %s", err.Error())
+	shouldRequeue, err := ReconcileReplicatedStorageClass(ctx, cl, log, cfg, replicatedSC)
+	if err != nil {
+		replicatedSC.Status.Phase = Failed
+		replicatedSC.Status.Reason = err.Error()
+		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClass] update ReplicatedStorageClass %+v", replicatedSC))
+		if updateErr := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); updateErr != nil {
+			err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %w", updateErr)
+			shouldRequeue = true
+		}
 	}
 
-	return false, nil
+	return shouldRequeue, err
 }
 
-func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log logger.Logger, cfg *config.Options, replicatedSC *srv.ReplicatedStorageClass) error { // TODO: add shouldRequeue as returned value
+func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log logger.Logger, cfg *config.Options, replicatedSC *srv.ReplicatedStorageClass) (bool, error) {
+	if replicatedSC.ObjectMeta.DeletionTimestamp != nil {
+		log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass with name: " + replicatedSC.Name + " is marked for deletion. Removing it.")
+		switch replicatedSC.Status.Phase {
+		case Failed:
+			log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " was not deleted because the ReplicatedStorageClass is in a Failed state. Deleting only finalizer.")
+		case Created:
+			sc, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
+			if err != nil {
+				return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %s", err.Error())
+			}
+
+			if sc == nil {
+				log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " not found. No need to delete it.")
+				break
+			}
+
+			log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Deleting it.")
+			if err := DeleteStorageClass(ctx, cl, sc); err != nil {
+				return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error DeleteStorageClass: %s", err.Error())
+			}
+			log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " deleted.")
+		}
+
+		log.Info("[ReconcileReplicatedStorageClass] Removing finalizer from ReplicatedStorageClass with name: " + replicatedSC.Name)
+
+		replicatedSC.ObjectMeta.Finalizers = RemoveString(replicatedSC.ObjectMeta.Finalizers, ReplicatedStorageClassFinalizerName)
+		if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
+			return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass after removing finalizer: %s", err.Error())
+		}
+
+		log.Info("[ReconcileReplicatedStorageClass] Finalizer removed from ReplicatedStorageClass with name: " + replicatedSC.Name)
+		return false, nil
+	}
+
 	log.Info("[ReconcileReplicatedStorageClass] Validating ReplicatedStorageClass with name: " + replicatedSC.Name)
 
 	zones, err := GetClusterZones(ctx, cl)
 	if err != nil {
-		log.Error(err, "[ReconcileReplicatedStorageClass] unable to get cluster zones")
-		return err
+		err = fmt.Errorf("[ReconcileReplicatedStorageClass] error GetClusterZones: %w", err)
+		return true, err
 	}
 
 	valid, msg := ValidateReplicatedStorageClass(ctx, cl, replicatedSC, zones)
 	if !valid {
-		err := fmt.Errorf("[ReconcileReplicatedStorageClass] Validation of ReplicatedStorageClass failed for the resource named: %s", replicatedSC.Name)
-		log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClass] Validation of ReplicatedStorageClass failed for the resource named: %s, for the following reason: %s", replicatedSC.Name, msg))
-		replicatedSC.Status.Phase = Failed
-		replicatedSC.Status.Reason = msg
-		if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedSC.Name))
-			return fmt.Errorf("[ReconcileReplicatedStorageClass] error UpdateReplicatedStorageClass: %w", err)
-		}
-
-		return err
+		err := fmt.Errorf("[ReconcileReplicatedStorageClass] Validation of ReplicatedStorageClass %s failed for the following reason: %s", replicatedSC.Name, msg)
+		return false, err
 	}
 	log.Info("[ReconcileReplicatedStorageClass] ReplicatedStorageClass with name: " + replicatedSC.Name + " is valid")
 
 	log.Info("[ReconcileReplicatedStorageClass] Try to get StorageClass with name: " + replicatedSC.Name)
 	oldSC, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
 	if err != nil {
-		return fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %w", err)
+		return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %w", err)
 	}
 
 	log.Trace("[ReconcileReplicatedStorageClass] Check if virtualization module is enabled and if the ReplicatedStorageClass has VolumeAccess set to Local")
@@ -254,35 +242,34 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal {
 		virtualizationEnabled, err = GetVirtualizationModuleEnabled(ctx, cl, log, types.NamespacedName{Name: controllerConfigMapName, Namespace: cfg.ControllerNamespace})
 		if err != nil {
-			log.Error(err, "[ReconcileReplicatedStorageClass] unable to get virtualization module enabled")
-			return err
+			err = fmt.Errorf("[ReconcileReplicatedStorageClass] error GetVirtualizationModuleEnabled: %w", err)
+			return true, err
 		}
 		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClass] ReplicatedStorageClass has VolumeAccess set to Local and virtualization module is %t", virtualizationEnabled))
 	}
 
 	if oldSC == nil {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " not found. Create it.")
-		newSC := getNewStorageClass(replicatedSC, virtualizationEnabled)
+		newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled)
 		if err = CreateStorageClass(ctx, cl, newSC); err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to create storage class for ReplicatedStorageClass resource, name: %s", replicatedSC.Name))
-			return fmt.Errorf("[ReconcileReplicatedStorageClass] error CreateStorageClass: %w", err)
+			return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error CreateStorageClass %s: %w", replicatedSC.Name, err)
 		}
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " created.")
 	} else {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Recreate it if needed.")
 		newSC := getUpdatedStorageClass(replicatedSC, oldSC, virtualizationEnabled)
-		isRecreated, err := recreateStorageClassIfNeeded(ctx, cl, log, oldSC, newSC)
+		isRecreated, shouldReque, err := recreateStorageClassIfNeeded(ctx, cl, log, oldSC, newSC)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to recreate storage class for ReplicatedStorageClass resource, name: %s", replicatedSC.Name))
-			return fmt.Errorf("[ReconcileReplicatedStorageClass] error recreateStorageClassIfNeeded: %w", err)
+			err = fmt.Errorf("[ReconcileReplicatedStorageClass] error recreateStorageClassIfNeeded: %w", err)
+			return shouldReque, err
 		}
 
 		if !isRecreated {
 			log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClass] reconcile StorageClass %s labels and annotations if needed", newSC.Name))
 			err = ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx, cl, oldSC, newSC)
 			if err != nil {
-				log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to reconcile StorageClass labels and annotations for ReplicatedStorageClass resource, name: %s", replicatedSC.Name))
-				return fmt.Errorf("[ReconcileReplicatedStorageClass] error ReconcileStorageClassLabels: %w", err)
+				err = fmt.Errorf("[ReconcileReplicatedStorageClass] error ReconcileStorageClassLabelsAndAnnotationsIfNeeded: %w", err)
+				return true, err
 			}
 		}
 	}
@@ -292,13 +279,13 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	if !slices.Contains(replicatedSC.ObjectMeta.Finalizers, ReplicatedStorageClassFinalizerName) {
 		replicatedSC.ObjectMeta.Finalizers = append(replicatedSC.ObjectMeta.Finalizers, ReplicatedStorageClassFinalizerName)
 	}
-	err = UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[ReconcileReplicatedStorageClass] unable to update resource, name: %s", replicatedSC.Name))
-		return fmt.Errorf("error UpdateReplicatedStorageClass: %s", err.Error())
+	log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] update ReplicatedStorageClass %+v", replicatedSC))
+	if err = UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
+		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %w", err)
+		return true, err
 	}
 
-	return nil
+	return false, nil
 }
 
 func GetClusterZones(ctx context.Context, cl client.Client) (map[string]struct{}, error) {
@@ -506,6 +493,21 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	return newStorageClass
 }
 
+func GetReplicatedStorageClass(ctx context.Context, cl client.Client, namespace, name string) (*srv.ReplicatedStorageClass, error) {
+	replicatedSC := &srv.ReplicatedStorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, replicatedSC)
+	if err != nil {
+		if !k8serrors.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, nil
+	}
+	return replicatedSC, nil
+}
+
 func GetStorageClass(ctx context.Context, cl client.Client, namespace, name string) (*storagev1.StorageClass, error) {
 	sc := &storagev1.StorageClass{}
 	err := cl.Get(ctx, client.ObjectKey{
@@ -513,7 +515,7 @@ func GetStorageClass(ctx context.Context, cl client.Client, namespace, name stri
 		Namespace: namespace,
 	}, sc)
 	if err != nil {
-		if !errors.IsNotFound(err) {
+		if !k8serrors.IsNotFound(err) {
 			return nil, err
 		}
 		return nil, nil
@@ -555,37 +557,37 @@ func canRecreateStorageClass(oldSC, newSC *storagev1.StorageClass) (bool, string
 	return CompareStorageClasses(newSC, oldSC)
 }
 
-func recreateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, oldSC, newSC *storagev1.StorageClass) (bool, error) {
+func recreateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, oldSC, newSC *storagev1.StorageClass) (isRecreated, shouldReque bool, err error) {
 	equal, msg := CompareStorageClasses(newSC, oldSC)
 	log.Trace(fmt.Sprintf("[recreateStorageClassIfNeeded] msg after compare: %s", msg))
 	if equal {
 		log.Info("[recreateStorageClassIfNeeded] Old and new StorageClass are equal. No need to recreate StorageClass.")
-		return false, nil
+		return false, false, nil
 	}
 
 	log.Info("[recreateStorageClassIfNeeded] ReplicatedStorageClass and StorageClass are not equal. Check if StorageClass can be recreated.")
 	canRecreate, msg := canRecreateStorageClass(oldSC, newSC)
 	if !canRecreate {
-		log.Info("[recreateStorageClassIfNeeded] StorageClass can't be recreated.")
-		return false, fmt.Errorf("[recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its immutable parameters are not equal: %s", msg)
+		err := fmt.Errorf("[recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: %s", msg)
+		return false, false, err
 	}
 
 	log.Info("[recreateStorageClassIfNeeded] StorageClass can be recreated.")
 	if err := DeleteStorageClass(ctx, cl, oldSC); err != nil {
-		log.Error(err, fmt.Sprintf("[recreateStorageClassIfNeeded] unable to delete storage class, name: %s", oldSC.Name))
-		return false, fmt.Errorf("[recreateStorageClassIfNeeded] error DeleteStorageClass: %s", err.Error())
+		err = fmt.Errorf("[recreateStorageClassIfNeeded] error DeleteStorageClass: %w", err)
+		return false, true, err
 	}
 
 	log.Info("[recreateStorageClassIfNeeded] StorageClass with name: " + oldSC.Name + " deleted. Recreate it.")
 	if err := CreateStorageClass(ctx, cl, newSC); err != nil {
-		log.Error(err, fmt.Sprintf("[recreateStorageClassIfNeeded] unable to create storage class for ReplicatedStorageClass resource, name: %s", newSC.Name))
-		return false, fmt.Errorf("[recreateStorageClassIfNeeded] error CreateStorageClass: %s", err.Error())
+		err = fmt.Errorf("[recreateStorageClassIfNeeded] error CreateStorageClass: %w", err)
+		return false, true, err
 	}
 	log.Info("[recreateStorageClassIfNeeded] StorageClass with name: " + newSC.Name + " recreated.")
-	return true, nil
+	return true, false, nil
 }
 
-func getNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
+func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	newSC.Labels = map[string]string{ManagedLabelKey: ManagedLabelValue}
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
