@@ -20,17 +20,18 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/utils/strings/slices"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -647,9 +648,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(replicatedSC.Finalizers).To(BeNil())
 		Expect(replicatedSC.Spec.StoragePool).To(Equal(""))
 
-		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).To(HaveOccurred())
-		Expect(shouldReque).To(BeFalse())
+		Expect(shouldRequeue).To(BeFalse())
 
 		replicatedSC = srv.ReplicatedStorageClass{}
 		err = cl.Get(ctx, client.ObjectKey{
@@ -682,22 +683,15 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		err := cl.Create(ctx, &replicatedSC)
-		if err == nil {
-			defer func() {
-				if err := cl.Delete(ctx, &replicatedSC); err != nil && !errors.IsNotFound(err) {
-					fmt.Println(err)
-				}
-			}()
-		}
 		Expect(err).NotTo(HaveOccurred())
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNameSpace, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).To(BeNil())
 
-		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldReque).To(BeFalse())
+		Expect(shouldRequeue).To(BeFalse())
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -716,9 +710,27 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			Expect(storageClass.Name).To(Equal(testName))
 			Expect(storageClass.Namespace).To(Equal(testNameSpace))
 		}
+
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_founded_Resource_and_StorageClass_ARE_EQUAL_Resource.Status.Phase_equals_Created", func() {
+	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_already_exists_Resource_and_StorageClass_ARE_EQUAL_Resource.Status.Phase_equals_Created", func() {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -744,9 +756,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
-		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldReque).To(BeFalse())
+		Expect(shouldRequeue).To(BeFalse())
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -784,7 +796,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			},
 		}
 
-		failedMessage := "[ReconcileReplicatedStorageClass] error recreateStorageClassIfNeeded: [recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal (Old StorageClass: Retain, New StorageClass: not-equal"
+		failedMessage := "[ReconcileReplicatedStorageClass] error updateStorageClassIfNeeded: [recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal (Old StorageClass: Retain, New StorageClass: not-equal"
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -800,10 +812,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		err = controller.CreateStorageClass(ctx, cl, anotherSC)
 		Expect(err).NotTo(HaveOccurred())
 
-		shouldReque, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).To(HaveOccurred())
-		// Expect(err).NotTo((HaveOccurred()))
-		Expect(shouldReque).To(BeFalse())
+		Expect(shouldRequeue).To(BeFalse())
 		Expect(err.Error()).To(Equal(failedMessage))
 
 		replicatedSCafterReconcile := srv.ReplicatedStorageClass{}
@@ -906,4 +917,602 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		_, exist := updatedNode.Labels[fmt.Sprintf("class.storage.deckhouse.io/%s", replicatedSC.Name)]
 		Expect(exist).To(BeTrue())
 	})
+
+	// Annotation tests
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_doesnot_exist", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessPreferablyLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_doesnot_exist", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_without_data", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessPreferablyLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).To(BeNil())
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_without_data", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).To(BeNil())
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessPreferablyLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "false"})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).NotTo(BeNil())
+		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("false"))
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "false"})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).NotTo(BeNil())
+		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("false"))
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessPreferablyLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "true"})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).NotTo(BeNil())
+		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).To(BeNil())
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.VolumeAccess = controller.VolumeAccessLocal
+
+		request := reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Namespace: testNameSpace,
+				Name:      testName,
+			},
+		}
+
+		err := createConfigMap(ctx, cl, controller.ControllerConfigMapName, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "true"})
+		Expect(err).NotTo(HaveOccurred())
+
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(configMap).NotTo(BeNil())
+		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
+		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
+		Expect(configMap.Data).NotTo(BeNil())
+		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
+
+		err = cl.Create(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCBeforeReconcile(ctx, cl, testName, testNameSpace)
+
+		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, types.NamespacedName{Name: controller.ControllerConfigMapName, Namespace: validCFG.ControllerNamespace})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(virtualizationEnabled).To(BeTrue())
+
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		Expect(scResource).NotTo(BeNil())
+		Expect(scResource.Annotations).NotTo(BeNil())
+		Expect(scResource.Annotations[controller.StorageClassAnnotationToReconcileKey]).To(Equal(controller.StorageClassAnnotationToReconcileValue))
+
+		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.Status.Phase).To(Equal(controller.Created))
+
+		storageClass := validateSCAfterReconcile(ctx, cl, replicatedSC)
+		Expect(storageClass.Annotations).NotTo(BeNil())
+		Expect(storageClass.Annotations[controller.StorageClassAnnotationToReconcileKey]).To(Equal(controller.StorageClassAnnotationToReconcileValue))
+
+		// Cleanup
+		err = cl.Delete(ctx, &replicatedSC)
+		Expect(err).NotTo(HaveOccurred())
+
+		replicatedSC = validateRSCAfterReconcile(ctx, cl, testName, testNameSpace)
+		Expect(replicatedSC.DeletionTimestamp).NotTo(BeNil())
+
+		shouldRequeue, err = controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(shouldRequeue).To(BeFalse())
+
+		_, err = getRSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		_, err = getSC(ctx, cl, testName, testNameSpace)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+
+		err = cl.Delete(ctx, configMap)
+		Expect(err).NotTo(HaveOccurred())
+
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
+	})
+
 })
+
+func validateRSCBeforeReconcile(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(replicatedSC.Name).To(Equal(testName))
+	Expect(replicatedSC.Finalizers).To(BeNil())
+	Expect(replicatedSC.Status.Phase).To(Equal(""))
+	Expect(replicatedSC.Status.Reason).To(Equal(""))
+
+	return replicatedSC
+}
+
+func validateRSCAfterReconcile(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(replicatedSC.Name).To(Equal(testName))
+	Expect(replicatedSC.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+	Expect(replicatedSC.Status).NotTo(BeNil())
+
+	return replicatedSC
+}
+
+func validateSCAfterReconcile(ctx context.Context, cl client.Client, replicatedSC srv.ReplicatedStorageClass) *storagev1.StorageClass {
+	volumeBindingMode := getVolumeBindingMode(replicatedSC.Spec.VolumeAccess)
+
+	storageClass, err := getSC(ctx, cl, replicatedSC.Name, replicatedSC.Namespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(storageClass).NotTo(BeNil())
+	Expect(storageClass.Name).To(Equal(replicatedSC.Name))
+	Expect(storageClass.Namespace).To(Equal(replicatedSC.Namespace))
+	Expect(storageClass.Provisioner).To(Equal(controller.StorageClassProvisioner))
+	Expect(*storageClass.AllowVolumeExpansion).To(BeTrue())
+	Expect(*storageClass.VolumeBindingMode).To(Equal(volumeBindingMode))
+	Expect(*storageClass.ReclaimPolicy).To(Equal(v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
+
+	return storageClass
+}
+
+func getRSC(ctx context.Context, cl client.Client, name, namespace string) (srv.ReplicatedStorageClass, error) {
+	replicatedSC := srv.ReplicatedStorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, &replicatedSC)
+
+	return replicatedSC, err
+}
+
+func getSC(ctx context.Context, cl client.Client, name, namespace string) (*storagev1.StorageClass, error) {
+	storageClass := &storagev1.StorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, storageClass)
+
+	return storageClass, err
+}
+
+func createConfigMap(ctx context.Context, cl client.Client, name, namespace string, data map[string]string) error {
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Data: data,
+	}
+	err := cl.Create(ctx, configMap)
+	return err
+}
+
+func getConfigMap(ctx context.Context, cl client.Client, namespace, name string) (*corev1.ConfigMap, error) {
+	configMap := &corev1.ConfigMap{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, configMap)
+
+	return configMap, err
+}
+
+func getVolumeBindingMode(volumeAccess string) storagev1.VolumeBindingMode {
+	if volumeAccess == controller.VolumeAccessAny {
+		return storagev1.VolumeBindingImmediate
+	}
+
+	return storagev1.VolumeBindingWaitForFirstConsumer
+}

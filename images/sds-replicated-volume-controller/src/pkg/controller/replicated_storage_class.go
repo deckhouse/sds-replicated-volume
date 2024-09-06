@@ -238,9 +238,9 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	}
 
 	log.Trace("[ReconcileReplicatedStorageClass] Check if virtualization module is enabled and if the ReplicatedStorageClass has VolumeAccess set to Local")
-	virtualizationEnabled := false
+	var virtualizationEnabled bool
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal {
-		virtualizationEnabled, err = GetVirtualizationModuleEnabled(ctx, cl, log, types.NamespacedName{Name: controllerConfigMapName, Namespace: cfg.ControllerNamespace})
+		virtualizationEnabled, err = GetVirtualizationModuleEnabled(ctx, cl, log, types.NamespacedName{Name: ControllerConfigMapName, Namespace: cfg.ControllerNamespace})
 		if err != nil {
 			err = fmt.Errorf("[ReconcileReplicatedStorageClass] error GetVirtualizationModuleEnabled: %w", err)
 			return true, err
@@ -251,26 +251,17 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	if oldSC == nil {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " not found. Create it.")
 		newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled)
+		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClass] create StorageClass %+v", newSC))
 		if err = CreateStorageClass(ctx, cl, newSC); err != nil {
 			return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error CreateStorageClass %s: %w", replicatedSC.Name, err)
 		}
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " created.")
 	} else {
-		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Recreate it if needed.")
-		newSC := getUpdatedStorageClass(replicatedSC, oldSC, virtualizationEnabled)
-		isRecreated, shouldReque, err := recreateStorageClassIfNeeded(ctx, cl, log, oldSC, newSC)
-		if err != nil {
-			err = fmt.Errorf("[ReconcileReplicatedStorageClass] error recreateStorageClassIfNeeded: %w", err)
-			return shouldReque, err
-		}
+		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Update it if needed.")
 
-		if !isRecreated {
-			log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClass] reconcile StorageClass %s labels and annotations if needed", newSC.Name))
-			err = ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx, cl, oldSC, newSC)
-			if err != nil {
-				err = fmt.Errorf("[ReconcileReplicatedStorageClass] error ReconcileStorageClassLabelsAndAnnotationsIfNeeded: %w", err)
-				return true, err
-			}
+		shouldRequeue, err := UpdateStorageClassIfNeeded(ctx, cl, log, replicatedSC, oldSC, virtualizationEnabled)
+		if err != nil {
+			return shouldRequeue, fmt.Errorf("[ReconcileReplicatedStorageClass] error updateStorageClassIfNeeded: %w", err)
 		}
 	}
 
@@ -542,7 +533,9 @@ func RemoveString(slice []string, s string) (result []string) {
 
 func ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx context.Context, cl client.Client, oldSC, newSC *storagev1.StorageClass) error {
 	if !reflect.DeepEqual(oldSC.Labels, newSC.Labels) || !reflect.DeepEqual(oldSC.Annotations, newSC.Annotations) {
-		err := cl.Update(ctx, newSC)
+		oldSC.Labels = newSC.Labels
+		oldSC.Annotations = newSC.Annotations
+		err := cl.Update(ctx, oldSC)
 		if err != nil {
 			return err
 		}
@@ -557,7 +550,7 @@ func canRecreateStorageClass(oldSC, newSC *storagev1.StorageClass) (bool, string
 	return CompareStorageClasses(newSC, oldSC)
 }
 
-func recreateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, oldSC, newSC *storagev1.StorageClass) (isRecreated, shouldReque bool, err error) {
+func recreateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, oldSC, newSC *storagev1.StorageClass) (isRecreated, shouldRequeue bool, err error) {
 	equal, msg := CompareStorageClasses(newSC, oldSC)
 	log.Trace(fmt.Sprintf("[recreateStorageClassIfNeeded] msg after compare: %s", msg))
 	if equal {
@@ -594,7 +587,6 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 		newSC.Annotations = map[string]string{StorageClassAnnotationToReconcileKey: StorageClassAnnotationToReconcileValue}
 	}
 	return newSC
-
 }
 
 func getUpdatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
@@ -603,9 +595,33 @@ func getUpdatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *sto
 	newSC.Labels[ManagedLabelKey] = ManagedLabelValue
 
 	newSC.Annotations = oldSC.Annotations
+	if newSC.Annotations == nil {
+		newSC.Annotations = make(map[string]string)
+	}
+
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
 		newSC.Annotations[StorageClassAnnotationToReconcileKey] = StorageClassAnnotationToReconcileValue
 	}
 
 	return newSC
+}
+
+func UpdateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass, virtualizationEnabled bool) (bool, error) {
+	newSC := getUpdatedStorageClass(replicatedSC, oldSC, virtualizationEnabled)
+	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] old StorageClass %+v", oldSC))
+	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] updated StorageClass %+v", newSC))
+
+	isRecreated, shouldRequeue, err := recreateStorageClassIfNeeded(ctx, cl, log, oldSC, newSC)
+	if err != nil {
+		return shouldRequeue, err
+	}
+
+	if !isRecreated {
+		err := ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx, cl, oldSC, newSC)
+		if err != nil {
+			return true, err
+		}
+	}
+
+	return shouldRequeue, nil
 }

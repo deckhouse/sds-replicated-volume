@@ -36,10 +36,10 @@ import (
 )
 
 const (
-	storageClassAnnotationsCtrlName = "storage-class-annotations-controller"
-	controllerConfigMapName         = "sds-replicated-volume-controller-config"
+	StorageClassAnnotationsCtrlName = "storage-class-annotations-controller"
+	ControllerConfigMapName         = "sds-replicated-volume-controller-config"
 	// virtualizationModuleName        = "virtualization"
-	virtualizationModuleEnabledKey = "virtualizationEnabled"
+	VirtualizationModuleEnabledKey = "virtualizationEnabled"
 )
 
 func NewStorageClassAnnotationsReconciler(
@@ -49,7 +49,7 @@ func NewStorageClassAnnotationsReconciler(
 ) error {
 	cl := mgr.GetClient()
 
-	c, err := controller.New(storageClassAnnotationsCtrlName, mgr, controller.Options{
+	c, err := controller.New(StorageClassAnnotationsCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 			log.Info(fmt.Sprintf("[storageClassAnnotationsReconciler] Get event for configmap %s/%s in reconciler", request.Namespace, request.Name))
 
@@ -71,7 +71,7 @@ func NewStorageClassAnnotationsReconciler(
 	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.ConfigMap{}, &handler.TypedFuncs[*corev1.ConfigMap, reconcile.Request]{
 		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get CREATE event for configmap %s/%s", e.Object.GetNamespace(), e.Object.GetName()))
-			if e.Object.GetName() == controllerConfigMapName {
+			if e.Object.GetName() == ControllerConfigMapName {
 				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Add it to queue.", e.Object.GetNamespace(), e.Object.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 				q.Add(request)

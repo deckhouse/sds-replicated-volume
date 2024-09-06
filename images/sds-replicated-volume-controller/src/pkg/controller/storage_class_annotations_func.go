@@ -63,9 +63,9 @@ func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log l
 		return false, nil
 	}
 
-	log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s: %+v", namespacedName.Namespace, namespacedName.Name, configMap.Data))
-	virtualizationEnabledString, exist := configMap.Data[virtualizationModuleEnabledKey]
-	if !exist {
+	log.Trace(fmt.Sprintf("[GetVirtualizationModuleEnabled] ConfigMap %s/%s: %+v", namespacedName.Namespace, namespacedName.Name, configMap))
+	virtualizationEnabledString, exists := configMap.Data[VirtualizationModuleEnabledKey]
+	if !exists {
 		return false, nil
 	}
 
