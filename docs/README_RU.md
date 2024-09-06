@@ -10,7 +10,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. На текущий момент в качестве control-plane используется `LINSTOR`. Модуль позволяет создавать `Storage Pool` в `LINSTOR` и `StorageClass` в `Kubernetes` через создание [пользовательских ресурсов Kubernetes](./cr.html).
-Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/).
+Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
 > **Внимание!** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 >
 > **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
