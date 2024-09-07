@@ -18,6 +18,7 @@ package controller_test
 
 import (
 	"context"
+	"sds-replicated-volume-controller/pkg/controller"
 	"testing"
 
 	. "github.com/LINBIT/golinstor/client"
@@ -26,6 +27,9 @@ import (
 	"github.com/google/uuid"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -183,4 +187,91 @@ func (m *NodeProviderMock) Restore(_ context.Context, _ string, _ NodeRestore) e
 }
 func (m *NodeProviderMock) Evacuate(_ context.Context, _ string) error {
 	return nil
+}
+
+func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(replicatedSC.Name).To(Equal(testName))
+	Expect(replicatedSC.Finalizers).To(BeNil())
+	Expect(replicatedSC.Status.Phase).To(Equal(""))
+	Expect(replicatedSC.Status.Reason).To(Equal(""))
+
+	return replicatedSC
+}
+
+func getAndValidateReconciledRSC(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(replicatedSC.Name).To(Equal(testName))
+	Expect(replicatedSC.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
+	Expect(replicatedSC.Status).NotTo(BeNil())
+
+	return replicatedSC
+}
+
+func getAndValidateSC(ctx context.Context, cl client.Client, replicatedSC srv.ReplicatedStorageClass) *storagev1.StorageClass {
+	volumeBindingMode := getVolumeBindingMode(replicatedSC.Spec.VolumeAccess)
+
+	storageClass, err := getSC(ctx, cl, replicatedSC.Name, replicatedSC.Namespace)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(storageClass).NotTo(BeNil())
+	Expect(storageClass.Name).To(Equal(replicatedSC.Name))
+	Expect(storageClass.Namespace).To(Equal(replicatedSC.Namespace))
+	Expect(storageClass.Provisioner).To(Equal(controller.StorageClassProvisioner))
+	Expect(*storageClass.AllowVolumeExpansion).To(BeTrue())
+	Expect(*storageClass.VolumeBindingMode).To(Equal(volumeBindingMode))
+	Expect(*storageClass.ReclaimPolicy).To(Equal(v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
+
+	return storageClass
+}
+
+func getRSC(ctx context.Context, cl client.Client, name, namespace string) (srv.ReplicatedStorageClass, error) {
+	replicatedSC := srv.ReplicatedStorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, &replicatedSC)
+
+	return replicatedSC, err
+}
+
+func getSC(ctx context.Context, cl client.Client, name, namespace string) (*storagev1.StorageClass, error) {
+	storageClass := &storagev1.StorageClass{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, storageClass)
+
+	return storageClass, err
+}
+
+func createConfigMap(ctx context.Context, cl client.Client, name, namespace string, data map[string]string) error {
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+		Data: data,
+	}
+	err := cl.Create(ctx, configMap)
+	return err
+}
+
+func getConfigMap(ctx context.Context, cl client.Client, namespace, name string) (*corev1.ConfigMap, error) {
+	configMap := &corev1.ConfigMap{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name:      name,
+		Namespace: namespace,
+	}, configMap)
+
+	return configMap, err
+}
+
+func getVolumeBindingMode(volumeAccess string) storagev1.VolumeBindingMode {
+	if volumeAccess == controller.VolumeAccessAny {
+		return storagev1.VolumeBindingImmediate
+	}
+
+	return storagev1.VolumeBindingWaitForFirstConsumer
 }

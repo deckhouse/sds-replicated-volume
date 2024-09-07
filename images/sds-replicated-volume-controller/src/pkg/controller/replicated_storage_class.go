@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -173,7 +174,9 @@ func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client,
 		replicatedSC.Status.Reason = err.Error()
 		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClass] update ReplicatedStorageClass %+v", replicatedSC))
 		if updateErr := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); updateErr != nil {
-			err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error UpdateReplicatedStorageClass: %w", updateErr)
+			// save err and add new error to it
+			err = errors.Join(err, updateErr)
+			err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error after ReconcileReplicatedStorageClass and error after UpdateReplicatedStorageClass: %w", err)
 			shouldRequeue = true
 		}
 	}
@@ -589,25 +592,35 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 	return newSC
 }
 
-func getUpdatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
+func GetUpdatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
-	newSC.Labels = oldSC.Labels
+
+	newSC.Labels = make(map[string]string, len(oldSC.Labels))
+	for k, v := range oldSC.Labels {
+		newSC.Labels[k] = v
+	}
 	newSC.Labels[ManagedLabelKey] = ManagedLabelValue
 
-	newSC.Annotations = oldSC.Annotations
-	if newSC.Annotations == nil {
-		newSC.Annotations = make(map[string]string)
+	newSC.Annotations = make(map[string]string, len(oldSC.Annotations))
+	for k, v := range oldSC.Annotations {
+		newSC.Annotations[k] = v
 	}
 
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
 		newSC.Annotations[StorageClassAnnotationToReconcileKey] = StorageClassAnnotationToReconcileValue
+	} else {
+		delete(newSC.Annotations, StorageClassAnnotationToReconcileKey)
+	}
+
+	if len(newSC.Annotations) == 0 {
+		newSC.Annotations = nil
 	}
 
 	return newSC
 }
 
 func UpdateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, replicatedSC *srv.ReplicatedStorageClass, oldSC *storagev1.StorageClass, virtualizationEnabled bool) (bool, error) {
-	newSC := getUpdatedStorageClass(replicatedSC, oldSC, virtualizationEnabled)
+	newSC := GetUpdatedStorageClass(replicatedSC, oldSC, virtualizationEnabled)
 	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] old StorageClass %+v", oldSC))
 	log.Trace(fmt.Sprintf("[UpdateStorageClassIfNeeded] updated StorageClass %+v", newSC))
 
