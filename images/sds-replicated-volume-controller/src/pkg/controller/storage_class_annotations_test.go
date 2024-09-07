@@ -100,7 +100,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Name:      controller.ControllerConfigMapName,
 			},
 		}
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(configMap).NotTo(BeNil())
@@ -150,7 +150,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Name:      controller.ControllerConfigMapName,
 			},
 		}
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(configMap).NotTo(BeNil())
@@ -215,7 +215,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -261,7 +261,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
@@ -283,7 +283,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -330,7 +330,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
@@ -352,7 +352,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -401,7 +401,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
@@ -423,7 +423,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -474,7 +474,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			},
 		}
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -486,7 +486,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Update(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -534,7 +534,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
@@ -556,7 +556,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -604,7 +604,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
@@ -626,7 +626,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		})
 		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(configMap).NotTo(BeNil())
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
@@ -679,7 +679,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		err = cl.Delete(ctx, configMap)
 		Expect(err).NotTo(HaveOccurred())
 
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace, controller.ControllerConfigMapName)
+		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})

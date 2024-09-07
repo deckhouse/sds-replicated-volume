@@ -105,7 +105,6 @@ func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Clien
 					log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey))
 				}
 			}
-
 		}
 	}
 

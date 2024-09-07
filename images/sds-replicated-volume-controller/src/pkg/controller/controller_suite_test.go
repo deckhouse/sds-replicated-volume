@@ -18,7 +18,6 @@ package controller_test
 
 import (
 	"context"
-	"sds-replicated-volume-controller/pkg/controller"
 	"testing"
 
 	. "github.com/LINBIT/golinstor/client"
@@ -28,12 +27,18 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"sds-replicated-volume-controller/pkg/controller"
+)
+
+const (
+	testNamespaceConst         = "test-namespace"
+	testNameForAnnotationTests = "rsc-test-annotation"
 )
 
 func TestController(t *testing.T) {
@@ -189,8 +194,8 @@ func (m *NodeProviderMock) Evacuate(_ context.Context, _ string) error {
 	return nil
 }
 
-func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
-	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testName string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(replicatedSC.Name).To(Equal(testName))
 	Expect(replicatedSC.Finalizers).To(BeNil())
@@ -200,8 +205,8 @@ func getAndValidateNotReconciledRSC(ctx context.Context, cl client.Client, testN
 	return replicatedSC
 }
 
-func getAndValidateReconciledRSC(ctx context.Context, cl client.Client, testName, testNameSpace string) srv.ReplicatedStorageClass {
-	replicatedSC, err := getRSC(ctx, cl, testName, testNameSpace)
+func getAndValidateReconciledRSC(ctx context.Context, cl client.Client, testName string) srv.ReplicatedStorageClass {
+	replicatedSC, err := getRSC(ctx, cl, testName)
 	Expect(err).NotTo(HaveOccurred())
 	Expect(replicatedSC.Name).To(Equal(testName))
 	Expect(replicatedSC.Finalizers).To(ContainElement(controller.ReplicatedStorageClassFinalizerName))
@@ -221,16 +226,16 @@ func getAndValidateSC(ctx context.Context, cl client.Client, replicatedSC srv.Re
 	Expect(storageClass.Provisioner).To(Equal(controller.StorageClassProvisioner))
 	Expect(*storageClass.AllowVolumeExpansion).To(BeTrue())
 	Expect(*storageClass.VolumeBindingMode).To(Equal(volumeBindingMode))
-	Expect(*storageClass.ReclaimPolicy).To(Equal(v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
+	Expect(*storageClass.ReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
 
 	return storageClass
 }
 
-func getRSC(ctx context.Context, cl client.Client, name, namespace string) (srv.ReplicatedStorageClass, error) {
+func getRSC(ctx context.Context, cl client.Client, name string) (srv.ReplicatedStorageClass, error) {
 	replicatedSC := srv.ReplicatedStorageClass{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      name,
-		Namespace: namespace,
+		Namespace: testNamespaceConst,
 	}, &replicatedSC)
 
 	return replicatedSC, err
@@ -246,7 +251,8 @@ func getSC(ctx context.Context, cl client.Client, name, namespace string) (*stor
 	return storageClass, err
 }
 
-func createConfigMap(ctx context.Context, cl client.Client, name, namespace string, data map[string]string) error {
+func createConfigMap(ctx context.Context, cl client.Client, namespace string, data map[string]string) error {
+	name := "sds-replicated-volume-controller-config"
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -258,7 +264,8 @@ func createConfigMap(ctx context.Context, cl client.Client, name, namespace stri
 	return err
 }
 
-func getConfigMap(ctx context.Context, cl client.Client, namespace, name string) (*corev1.ConfigMap, error) {
+func getConfigMap(ctx context.Context, cl client.Client, namespace string) (*corev1.ConfigMap, error) {
+	name := "sds-replicated-volume-controller-config"
 	configMap := &corev1.ConfigMap{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name:      name,

@@ -135,12 +135,12 @@ func NewReplicatedStorageClass(
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &srv.ReplicatedStorageClass{}, handler.TypedFuncs[*srv.ReplicatedStorageClass, reconcile.Request]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get CREATE event for ReplicatedStorageClass %s. Add it to queue.", e.Object.GetName()))
 			request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 			q.Add(request)
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*srv.ReplicatedStorageClass], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get UPDATE event for ReplicatedStorageClass %s. Check if it was changed.", e.ObjectNew.GetName()))
 			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) {
 				log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass %s was changed. Add it to queue.", e.ObjectNew.GetName()))
@@ -227,7 +227,7 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 		return true, err
 	}
 
-	valid, msg := ValidateReplicatedStorageClass(ctx, cl, replicatedSC, zones)
+	valid, msg := ValidateReplicatedStorageClass(replicatedSC, zones)
 	if !valid {
 		err := fmt.Errorf("[ReconcileReplicatedStorageClass] Validation of ReplicatedStorageClass %s failed for the following reason: %s", replicatedSC.Name, msg)
 		return false, err
@@ -299,7 +299,7 @@ func GetClusterZones(ctx context.Context, cl client.Client) (map[string]struct{}
 	return nodeZones, nil
 }
 
-func ValidateReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass, zones map[string]struct{}) (bool, string) {
+func ValidateReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, zones map[string]struct{}) (bool, string) {
 	var (
 		failedMsgBuilder strings.Builder
 		validationPassed = true

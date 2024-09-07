@@ -69,7 +69,7 @@ func NewStorageClassAnnotationsReconciler(
 	}
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.ConfigMap{}, &handler.TypedFuncs[*corev1.ConfigMap, reconcile.Request]{
-		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get CREATE event for configmap %s/%s", e.Object.GetNamespace(), e.Object.GetName()))
 			if e.Object.GetName() == ControllerConfigMapName {
 				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Add it to queue.", e.Object.GetNamespace(), e.Object.GetName()))
@@ -77,7 +77,7 @@ func NewStorageClassAnnotationsReconciler(
 				q.Add(request)
 			}
 		},
-		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
+		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get UPDATE event for configmap %s/%s", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
 			if e.ObjectNew.GetName() == linstorPortRangeConfigMapName {
 				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Check if it was changed.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
