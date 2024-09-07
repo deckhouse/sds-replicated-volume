@@ -1,5 +1,5 @@
 /*
-Copyright 2023 Flant JSC
+Copyright 2024 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -51,7 +50,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 
 		allowVolumeExpansion   bool = true
 		volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
-		reclaimPolicy               = v1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
+		reclaimPolicy               = corev1.PersistentVolumeReclaimPolicy(controller.ReclaimPolicyRetain)
 		storageClassParameters      = map[string]string{
 			controller.StorageClassStoragePoolKey:                     "test-sp",
 			controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,
