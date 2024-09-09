@@ -1,0 +1,56 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+from: registry.deckhouse.io/base_images/golang:1.22.7-bullseye@sha256:e5dc67bf84590c008338a0e30f56a6ed2092a38e0d2895c797dd501db73a2330
+final: false
+
+git:
+  - url: https://github.com/LINBIT/saas
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    commit: b22d7c3dbb8554af6739245d936a0dc5be01c748
+    stageDependencies:
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+# we must base on ALTLinux because SPAAS generates kernel patches for DRBD. So we need same kernel as in DRBD image and some build tools
+from: registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+  - image: drbd-artifact
+    add: /drbd/drbd-9.2.12.tar.gz
+    to: /var/cache/spaas/tarballs
+    before: setup
+
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install build-essential gcc glibc make coccinelle diffutils tar python3-dev vim-console \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
+      && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
+      && ln -sf /proc/mounts /etc/mtab \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    spaas: b22d7c3dbb8554af6739245d936a0dc5be01c748

@@ -139,7 +139,7 @@ spec:
 
     # Check, if we need gcc version 12
     gccVersion="$(cat /proc/version | grep -q x86_64-linux-gnu-gcc-12 && echo gcc-12 || echo gcc)"
-    bb-apt-install make bind9-host patch mokutil $gccVersion
+    bb-apt-install make bind9-host coccinelle patch mokutil $gccVersion
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
       bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
