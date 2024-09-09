@@ -17,7 +17,7 @@ RUN git clone ${SPAAS_GITREPO} /usr/local/go/spaas \
  && go build -o /spaas
 
 RUN apt-get update \
- && apt-get install -y make git \
+ && apt-get install -y make git jq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
