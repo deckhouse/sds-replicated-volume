@@ -45,7 +45,7 @@ jobs:
 
       - name: Prepare sub repo
         run: |
-          version="drbd-9.2.10"
+          version="drbd-9.2.12"
           git clone --depth 1 --branch $version https://github.com/LINBIT/drbd/ ./drbd
 
           version="v9.28.0"

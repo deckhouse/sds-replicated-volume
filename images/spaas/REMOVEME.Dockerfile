@@ -3,21 +3,17 @@ ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullsey
 
 FROM $BASE_GOLANG_BULLSEYE as builder
 ARG SPAAS_GITREPO=https://github.com/LINBIT/saas
-ARG SPAAS_COMMIT_REF=7bef2e7976a455550bce2533487c635f20390ccf
+ARG SPAAS_COMMIT_REF=b22d7c3dbb8554af6739245d936a0dc5be01c748
 ARG DRBD_GITREPO=https://github.com/LINBIT/drbd
-ARG DRBD_VERSION=9.2.10
-
-# Copy patches
-COPY ./patches /patches
+ARG DRBD_VERSION=9.2.12
 
 RUN git clone ${SPAAS_GITREPO} /usr/local/go/spaas \
  && cd /usr/local/go/spaas \
  && git reset --hard ${SPAAS_COMMIT_REF} \
- && git apply /patches/*.patch \
  && go build -o /spaas
 
 RUN apt-get update \
- && apt-get install -y make git \
+ && apt-get install -y make git jq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -35,8 +31,10 @@ RUN apt-get update \
       libc6-dev \
       make \
       coccinelle \
+      diffutils \
       libpython3-dev \
       vim \
+      jq \
  && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
