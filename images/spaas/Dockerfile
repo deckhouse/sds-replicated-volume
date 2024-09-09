@@ -5,7 +5,7 @@ FROM $BASE_GOLANG_BULLSEYE as builder
 ARG SPAAS_GITREPO=https://github.com/LINBIT/saas
 ARG SPAAS_COMMIT_REF=7bef2e7976a455550bce2533487c635f20390ccf
 ARG DRBD_GITREPO=https://github.com/LINBIT/drbd
-ARG DRBD_VERSION=9.2.10
+ARG DRBD_VERSION=9.2.11
 
 # Copy patches
 COPY ./patches /patches
