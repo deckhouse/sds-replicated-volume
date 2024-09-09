@@ -37,6 +37,7 @@ RUN apt-get update \
       coccinelle \
       libpython3-dev \
       vim \
+      jq \
  && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
