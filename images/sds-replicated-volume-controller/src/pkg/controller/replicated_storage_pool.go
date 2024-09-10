@@ -246,7 +246,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 		existedStoragePool, err := lc.Nodes.GetStoragePool(ctx, nodeName, replicatedSP.Name)
 		if err != nil {
-			if errors.IsNotFound(err) {
+			if err == lapi.NotFoundError {
 				log.Info(fmt.Sprintf("[ReconcileReplicatedStoragePool] Storage Pool %s on node %s on vg %s was not found. Creating it", replicatedSP.Name, nodeName, lvmVgForLinstor))
 				createErr := lc.Nodes.CreateStoragePool(ctx, nodeName, newStoragePool)
 				if createErr != nil {
