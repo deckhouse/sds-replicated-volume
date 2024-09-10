@@ -228,6 +228,6 @@ RUN chmod 755 /cleaner.py
 
 RUN mv /usr/bin/linstor /usr/bin/originallinstor
 RUN sed -i 's\32M\128M\g' /usr/share/linstor-server/bin/linstor-config
-
+RUN sed -i 's\32M\128M\g' /usr/share/linstor-server/bin/Controller
 CMD ["startSatellite"]
 ENTRYPOINT ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
