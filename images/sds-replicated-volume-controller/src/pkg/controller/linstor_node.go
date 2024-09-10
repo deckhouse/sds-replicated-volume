@@ -149,18 +149,6 @@ func reconcileLinstorNodes(
 		return err
 	}
 
-	err = renameLinbitLabels(ctx, cl, selectedKubernetesNodes.Items)
-	if err != nil {
-		log.Error(err, "[reconcileLinstorNodes] unable to rename linbit labels")
-		return err
-	}
-
-	err = ReconcileCSINodeLabels(ctx, cl, log, selectedKubernetesNodes.Items)
-	if err != nil {
-		log.Error(err, "[reconcileLinstorNodes] unable to reconcile CSI node labels")
-		return err
-	}
-
 	linstorSatelliteNodes, linstorControllerNodes, err := GetLinstorNodes(timeoutCtx, lc)
 	if err != nil {
 		log.Error(err, "Failed get LINSTOR nodes")
@@ -182,6 +170,18 @@ func reconcileLinstorNodes(
 		}
 	} else {
 		log.Warning("reconcileLinstorNodes: There are not any Kubernetes nodes for LINSTOR that can be selected by selector:" + fmt.Sprint(configNodeSelector))
+	}
+
+	err = renameLinbitLabels(ctx, cl, selectedKubernetesNodes.Items)
+	if err != nil {
+		log.Error(err, "[reconcileLinstorNodes] unable to rename linbit labels")
+		return err
+	}
+
+	err = ReconcileCSINodeLabels(ctx, cl, log, selectedKubernetesNodes.Items)
+	if err != nil {
+		log.Error(err, "[reconcileLinstorNodes] unable to reconcile CSI node labels")
+		return err
 	}
 
 	// Remove logic
@@ -229,6 +229,23 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 			csiTopoKeys          map[string]struct{}
 		)
 
+		for _, driver := range csiNode.Spec.Drivers {
+			log.Trace(fmt.Sprintf("[syncCSINodesLabels] CSI node %s has a driver %s", csiNode.Name, driver.Name))
+			if driver.Name == LinstorDriverName {
+				syncedCSIDriver = driver
+				csiTopoKeys = make(map[string]struct{}, len(driver.TopologyKeys))
+
+				for _, topoKey := range driver.TopologyKeys {
+					csiTopoKeys[topoKey] = struct{}{}
+				}
+			}
+		}
+
+		if syncedCSIDriver.Name == "" {
+			log.Debug(fmt.Sprintf("[syncCSINodesLabels] CSI node %s does not have a driver %s", csiNode.Name, LinstorDriverName))
+			continue
+		}
+
 		for nodeLabel := range nodeLabels[csiNode.Name] {
 			if slices.Contains(AllowedLabels, nodeLabel) {
 				kubeNodeLabelsToSync[nodeLabel] = struct{}{}
@@ -238,17 +255,6 @@ func ReconcileCSINodeLabels(ctx context.Context, cl client.Client, log logger.Lo
 			for _, prefix := range AllowedPrefixes {
 				if strings.HasPrefix(nodeLabel, prefix) {
 					kubeNodeLabelsToSync[nodeLabel] = struct{}{}
-				}
-			}
-		}
-
-		for _, driver := range csiNode.Spec.Drivers {
-			if driver.Name == LinstorDriverName {
-				syncedCSIDriver = driver
-				csiTopoKeys = make(map[string]struct{}, len(driver.TopologyKeys))
-
-				for _, topoKey := range driver.TopologyKeys {
-					csiTopoKeys[topoKey] = struct{}{}
 				}
 			}
 		}
