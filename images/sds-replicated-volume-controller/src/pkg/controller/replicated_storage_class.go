@@ -160,12 +160,13 @@ func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client,
 
 	replicatedSC, err := GetReplicatedStorageClass(ctx, cl, request.Namespace, request.Name)
 	if err != nil {
+		if k8serrors.IsNotFound(err) {
+			log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] ReplicatedStorageClass with name: %s not found. Finish reconcile.", request.Name))
+			return false, nil
+		}
+
 		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting ReplicatedStorageClass: %w", err)
 		return true, err
-	}
-	if replicatedSC == nil {
-		log.Info(fmt.Sprintf("[ReconcileReplicatedStorageClassEvent] ReplicatedStorageClass with name: %s not found. Finish reconcile.", request.Name))
-		return false, nil
 	}
 
 	shouldRequeue, err := ReconcileReplicatedStorageClass(ctx, cl, log, cfg, replicatedSC)
@@ -493,13 +494,8 @@ func GetReplicatedStorageClass(ctx context.Context, cl client.Client, namespace,
 		Name:      name,
 		Namespace: namespace,
 	}, replicatedSC)
-	if err != nil {
-		if !k8serrors.IsNotFound(err) {
-			return nil, err
-		}
-		return nil, nil
-	}
-	return replicatedSC, nil
+
+	return replicatedSC, err
 }
 
 func GetStorageClass(ctx context.Context, cl client.Client, namespace, name string) (*storagev1.StorageClass, error) {

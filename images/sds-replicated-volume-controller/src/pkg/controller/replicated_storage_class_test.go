@@ -487,9 +487,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			Name:      testName,
 		}}
 
-		replicatedSC, err := controller.GetReplicatedStorageClass(ctx, cl, req.Namespace, req.Name)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(replicatedSC).To(BeNil())
+		_, err := controller.GetReplicatedStorageClass(ctx, cl, req.Namespace, req.Name)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
