@@ -531,10 +531,7 @@ func ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx context.Context, cl c
 	if !reflect.DeepEqual(oldSC.Labels, newSC.Labels) || !reflect.DeepEqual(oldSC.Annotations, newSC.Annotations) {
 		oldSC.Labels = newSC.Labels
 		oldSC.Annotations = newSC.Annotations
-		err := cl.Update(ctx, oldSC)
-		if err != nil {
-			return err
-		}
+		return cl.Update(ctx, oldSC)
 	}
 	return nil
 }
