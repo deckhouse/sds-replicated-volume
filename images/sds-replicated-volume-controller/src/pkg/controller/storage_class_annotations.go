@@ -38,8 +38,7 @@ import (
 const (
 	StorageClassAnnotationsCtrlName = "storage-class-annotations-controller"
 	ControllerConfigMapName         = "sds-replicated-volume-controller-config"
-	// virtualizationModuleName        = "virtualization"
-	VirtualizationModuleEnabledKey = "virtualizationEnabled"
+	VirtualizationModuleEnabledKey  = "virtualizationEnabled"
 )
 
 func NewStorageClassAnnotationsReconciler(
