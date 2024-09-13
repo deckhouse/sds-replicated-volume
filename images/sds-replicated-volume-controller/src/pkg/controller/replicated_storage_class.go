@@ -165,8 +165,7 @@ func ReconcileReplicatedStorageClassEvent(ctx context.Context, cl client.Client,
 			return false, nil
 		}
 
-		err = fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting ReplicatedStorageClass: %w", err)
-		return true, err
+		return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting ReplicatedStorageClass: %w", err)
 	}
 
 	shouldRequeue, err := ReconcileReplicatedStorageClass(ctx, cl, log, cfg, replicatedSC)
