@@ -121,9 +121,9 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, l
 
 	storageClassesWithProvisioner := &storagev1.StorageClassList{}
 	for _, storageClass := range storageClassList.Items {
-		log.Trace(fmt.Sprintf("[getStorageClassListWithProvisioner] process StorageClass %s with provisioner %s", storageClass.Name, provisioner))
+		log.Debug(fmt.Sprintf("[getStorageClassListWithProvisioner] process StorageClass %s with provisioner %s", storageClass.Name, provisioner))
 		if storageClass.Provisioner == provisioner {
-			log.Trace(fmt.Sprintf("[getStorageClassListWithProvisioner] StorageClass %s has provisioner %s and will be added to the list", storageClass.Name, provisioner))
+			log.Debug(fmt.Sprintf("[getStorageClassListWithProvisioner] StorageClass %s has provisioner %s and will be added to the list", storageClass.Name, provisioner))
 			storageClassesWithProvisioner.Items = append(storageClassesWithProvisioner.Items, storageClass)
 		}
 	}
@@ -133,12 +133,13 @@ func getStorageClassListWithProvisioner(ctx context.Context, cl client.Client, l
 
 func reconcileStorageClassAnnotations(ctx context.Context, cl client.Client, log logger.Logger, storageClassList *storagev1.StorageClassList) (bool, error) {
 	for _, storageClass := range storageClassList.Items {
-		log.Trace(fmt.Sprintf("[reconcileStorageClassAnnotations] Update storage class %s", storageClass.Name))
+		log.Debug(fmt.Sprintf("[reconcileStorageClassAnnotations] Update storage class %s", storageClass.Name))
 		err := cl.Update(ctx, &storageClass)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcileStorageClassAnnotations] Failed to update storage class %s", storageClass.Name))
 			return true, err
 		}
+		log.Debug(fmt.Sprintf("[reconcileStorageClassAnnotations] Successfully updated storage class %s", storageClass.Name))
 	}
 
 	return false, nil
