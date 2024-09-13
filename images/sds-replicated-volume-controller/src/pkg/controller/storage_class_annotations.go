@@ -69,19 +69,21 @@ func NewStorageClassAnnotationsReconciler(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &corev1.ConfigMap{}, &handler.TypedFuncs[*corev1.ConfigMap, reconcile.Request]{
 		CreateFunc: func(_ context.Context, e event.TypedCreateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get CREATE event for configmap %s/%s", e.Object.GetNamespace(), e.Object.GetName()))
+			log.Debug(fmt.Sprintf("[storageClassAnnotationsReconciler] Get CREATE event for configmap %s/%s", e.Object.GetNamespace(), e.Object.GetName()))
 			if e.Object.GetName() == ControllerConfigMapName {
-				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Add it to queue.", e.Object.GetNamespace(), e.Object.GetName()))
+				log.Debug(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Add it to queue.", e.Object.GetNamespace(), e.Object.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.Object.GetNamespace(), Name: e.Object.GetName()}}
 				q.Add(request)
 			}
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get UPDATE event for configmap %s/%s", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
+			log.Debug(fmt.Sprintf("[storageClassAnnotationsReconciler] Get UPDATE event for configmap %s/%s", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
 			if e.ObjectNew.GetName() == ControllerConfigMapName {
-				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Check if it was changed.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
+				log.Debug(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Check if it was changed.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
+				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s old data: %+v", e.ObjectOld.GetNamespace(), e.ObjectOld.GetName(), e.ObjectOld.Data))
+				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s new data: %+v", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName(), e.ObjectNew.Data))
 				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Data, e.ObjectOld.Data) {
-					log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s was changed. Add it to queue.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
+					log.Debug(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s was changed. Add it to queue.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
 					request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 					q.Add(request)
 				}
