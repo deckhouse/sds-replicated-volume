@@ -580,7 +580,7 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	newSC.Labels = map[string]string{ManagedLabelKey: ManagedLabelValue}
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
-		newSC.Annotations = map[string]string{StorageClassAnnotationToReconcileKey: StorageClassAnnotationToReconcileValue}
+		newSC.Annotations = map[string]string{StorageClassVirtualizationAnnotationKey: StorageClassVirtualizationAnnotationValue}
 	}
 	return newSC
 }
@@ -600,9 +600,9 @@ func GetUpdatedStorageClass(replicatedSC *srv.ReplicatedStorageClass, oldSC *sto
 	}
 
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
-		newSC.Annotations[StorageClassAnnotationToReconcileKey] = StorageClassAnnotationToReconcileValue
+		newSC.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 	} else {
-		delete(newSC.Annotations, StorageClassAnnotationToReconcileKey)
+		delete(newSC.Annotations, StorageClassVirtualizationAnnotationKey)
 	}
 
 	if len(newSC.Annotations) == 0 {

@@ -387,7 +387,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.StorageClassAnnotationToReconcileKey]).To(Equal(controller.StorageClassAnnotationToReconcileValue))
+		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
 
 		// Cleanup
@@ -462,7 +462,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(len(storageClass.Annotations)).To(Equal(2))
 		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Annotations[controller.StorageClassAnnotationToReconcileKey]).To(Equal(controller.StorageClassAnnotationToReconcileValue))
+		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
 	})
 
@@ -506,7 +506,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(len(storageClass.Annotations)).To(Equal(2))
 		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Annotations[controller.StorageClassAnnotationToReconcileKey]).To(Equal(controller.StorageClassAnnotationToReconcileValue))
+		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
 
 		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)

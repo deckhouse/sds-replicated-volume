@@ -30,8 +30,8 @@ import (
 )
 
 const (
-	StorageClassAnnotationToReconcileKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
-	StorageClassAnnotationToReconcileValue = "ReadWriteOnce"
+	StorageClassVirtualizationAnnotationKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
+	StorageClassVirtualizationAnnotationValue = "ReadWriteOnce"
 )
 
 func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, log logger.Logger, request reconcile.Request) (bool, error) {
@@ -88,22 +88,22 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 				storageClass.Annotations = make(map[string]string)
 			}
 
-			value, exists := storageClass.Annotations[StorageClassAnnotationToReconcileKey]
+			value, exists := storageClass.Annotations[StorageClassVirtualizationAnnotationKey]
 
 			if virtualizationEnabled {
-				if value != StorageClassAnnotationToReconcileValue {
-					storageClass.Annotations[StorageClassAnnotationToReconcileKey] = StorageClassAnnotationToReconcileValue
+				if value != StorageClassVirtualizationAnnotationValue {
+					storageClass.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey, StorageClassAnnotationToReconcileValue))
+					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has no annotation %s with value %s and virtualizationEnabled is true. Add the annotation with the proper value and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey, StorageClassVirtualizationAnnotationValue))
 				}
 			} else {
 				if exists {
-					delete(storageClass.Annotations, StorageClassAnnotationToReconcileKey)
+					delete(storageClass.Annotations, StorageClassVirtualizationAnnotationKey)
 					if len(storageClass.Annotations) == 0 {
 						storageClass.Annotations = nil
 					}
 					storageClassList.Items = append(storageClassList.Items, storageClass)
-					log.Trace(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassAnnotationToReconcileKey))
+					log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] storage class %s has annotation %s and virtualizationEnabled is false. Remove the annotation and add the storage class to the reconcile list.", storageClass.Name, StorageClassVirtualizationAnnotationKey))
 				}
 			}
 		}
