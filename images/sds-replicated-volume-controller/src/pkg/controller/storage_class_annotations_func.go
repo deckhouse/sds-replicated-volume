@@ -40,13 +40,14 @@ func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, lo
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get virtualization module enabled")
 		return true, err
 	}
-	log.Trace(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
+	log.Debug(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Virtualization module enabled: %t", virtualizationEnabled))
 
-	storageClassList, err := getStorageClassForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
+	storageClassList, err := getStorageClassListForAnnotationsReconcile(ctx, cl, log, StorageClassProvisioner, virtualizationEnabled)
 	if err != nil {
 		log.Error(err, "[ReconcileControllerConfigMapEvent] Failed to get storage class list for annotations reconcile")
 		return true, err
 	}
+	log.Debug("[ReconcileControllerConfigMapEvent] Successfully got storage class list for annotations reconcile")
 	log.Trace(fmt.Sprintf("[ReconcileControllerConfigMapEvent] Storage class list for annotations reconcile: %+v", storageClassList))
 
 	return reconcileStorageClassAnnotations(ctx, cl, log, storageClassList)
@@ -72,7 +73,7 @@ func GetVirtualizationModuleEnabled(ctx context.Context, cl client.Client, log l
 	return virtualizationEnabledString == "true", nil
 }
 
-func getStorageClassForAnnotationsReconcile(ctx context.Context, cl client.Client, log logger.Logger, provisioner string, virtualizationEnabled bool) (*storagev1.StorageClassList, error) {
+func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.Client, log logger.Logger, provisioner string, virtualizationEnabled bool) (*storagev1.StorageClassList, error) {
 	storageClassesWithReplicatedVolumeProvisioner, err := getStorageClassListWithProvisioner(ctx, cl, log, provisioner)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get storage classes with provisioner %s", provisioner))
