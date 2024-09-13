@@ -515,11 +515,7 @@ func GetStorageClass(ctx context.Context, cl client.Client, namespace, name stri
 }
 
 func DeleteStorageClass(ctx context.Context, cl client.Client, sc *storagev1.StorageClass) error {
-	err := cl.Delete(ctx, sc)
-	if err != nil {
-		return err
-	}
-	return nil
+	return cl.Delete(ctx, sc)
 }
 
 func RemoveString(slice []string, s string) (result []string) {
