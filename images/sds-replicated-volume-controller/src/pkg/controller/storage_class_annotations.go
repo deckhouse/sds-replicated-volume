@@ -55,12 +55,12 @@ func NewStorageClassAnnotationsReconciler(
 			shouldRequeue, err := ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 			if shouldRequeue {
 				log.Error(err, fmt.Sprintf("[storageClassAnnotationsReconciler] error in ReconcileControllerConfigMapEvent. Add to retry after %d seconds.", interval))
-				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(interval) * time.Second}, nil
+				return reconcile.Result{RequeueAfter: time.Duration(interval) * time.Second}, nil
 			}
 
 			log.Info(fmt.Sprintf("[storageClassAnnotationsReconciler] Finish event for configmap %s/%s in reconciler", request.Namespace, request.Name))
 
-			return reconcile.Result{Requeue: false}, nil
+			return reconcile.Result{}, nil
 		}),
 	})
 	if err != nil {
