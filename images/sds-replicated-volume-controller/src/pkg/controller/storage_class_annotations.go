@@ -78,7 +78,7 @@ func NewStorageClassAnnotationsReconciler(
 		},
 		UpdateFunc: func(_ context.Context, e event.TypedUpdateEvent[*corev1.ConfigMap], q workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] Get UPDATE event for configmap %s/%s", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
-			if e.ObjectNew.GetName() == linstorPortRangeConfigMapName {
+			if e.ObjectNew.GetName() == ControllerConfigMapName {
 				log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s is controller configmap. Check if it was changed.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
 				if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Data, e.ObjectOld.Data) {
 					log.Trace(fmt.Sprintf("[storageClassAnnotationsReconciler] configmap %s/%s was changed. Add it to queue.", e.ObjectNew.GetNamespace(), e.ObjectNew.GetName()))
