@@ -537,10 +537,13 @@ func ReconcileStorageClassLabelsAndAnnotationsIfNeeded(ctx context.Context, cl c
 }
 
 func canRecreateStorageClass(oldSC, newSC *storagev1.StorageClass) (bool, string) {
+	newSCCopy := newSC.DeepCopy()
+	oldSCCopy := oldSC.DeepCopy()
+
 	// We can recreate StorageClass only if the following parameters are not equal. If other parameters are not equal, we can't recreate StorageClass and users must delete ReplicatedStorageClass resource and create it again manually.
-	delete(newSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
-	delete(oldSC.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
-	return CompareStorageClasses(newSC, oldSC)
+	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 
 func recreateStorageClassIfNeeded(ctx context.Context, cl client.Client, log logger.Logger, oldSC, newSC *storagev1.StorageClass) (isRecreated, shouldRequeue bool, err error) {
