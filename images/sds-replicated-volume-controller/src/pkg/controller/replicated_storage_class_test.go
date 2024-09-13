@@ -152,11 +152,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		sc, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-
-		if Expect(sc).NotTo(BeNil()) {
-			Expect(sc.Name).To(Equal(testName))
-			Expect(sc.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(sc).NotTo(BeNil())
+		Expect(sc.Name).To(Equal(testName))
+		Expect(sc.Namespace).To(Equal(testNamespaceConst))
 	})
 
 	It("DeleteStorageClass_Deletes_needed_one_Returns_no_error", func() {
@@ -188,7 +186,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		sc, err := controller.GetStorageClass(ctx, cl, testName, testNamespaceConst)
-		Expect(err).To(BeNil())
+		Expect(err).NotTo(BeNil())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(sc).To(BeNil())
 	})
 
@@ -210,10 +209,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		sc, err = controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-		if Expect(sc).NotTo(BeNil()) {
-			Expect(sc.Name).To(Equal(testName))
-			Expect(sc.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(sc).NotTo(BeNil())
+		Expect(sc.Name).To(Equal(testName))
+		Expect(sc.Namespace).To(Equal(testNamespaceConst))
 	})
 
 	It("UpdateReplicatedStorageClass_Updates_resource", func() {
@@ -351,11 +349,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
-		err = controller.CreateStorageClass(ctx, cl, sc)
+		scTemplate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		err = controller.CreateStorageClass(ctx, cl, scTemplate)
 		if err == nil {
 			defer func() {
-				if err = controller.DeleteStorageClass(ctx, cl, sc); err != nil && !errors.IsNotFound(err) {
+				if err = controller.DeleteStorageClass(ctx, cl, scTemplate); err != nil && !errors.IsNotFound(err) {
 					fmt.Println(err.Error())
 				}
 			}()
@@ -383,8 +381,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 
-		sc, err = controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
-		Expect(err).NotTo(HaveOccurred())
+		sc, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(sc).To(BeNil())
 	})
 
@@ -435,11 +434,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-
-		if Expect(storageClass).NotTo(BeNil()) {
-			Expect(storageClass.Name).To(Equal(testName))
-			Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Name).To(Equal(testName))
+		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 
 		resources, err := getTestAPIStorageClasses(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
@@ -684,7 +681,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC = getAndValidateNotReconciledRSC(ctx, cl, testName)
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
-		Expect(err).NotTo(HaveOccurred())
+		Expect(err).To(HaveOccurred())
+		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(storageClass).To(BeNil())
 
 		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
@@ -703,11 +701,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass, err = controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-
-		if Expect(storageClass).NotTo(BeNil()) {
-			Expect(storageClass.Name).To(Equal(testName))
-			Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Name).To(Equal(testName))
+		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 
 		err = cl.Delete(ctx, &replicatedSC)
 		Expect(err).NotTo(HaveOccurred())
@@ -770,11 +766,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-
-		if Expect(storageClass).NotTo(BeNil()) {
-			Expect(storageClass.Name).To(Equal(testName))
-			Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Name).To(Equal(testName))
+		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 	})
 
 	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_founded_Resource_and_StorageClass_ARE_NOT_EQUAL_Updates_resource_status_to_failed_and_reason", func() {
@@ -826,11 +820,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
 		Expect(err).NotTo(HaveOccurred())
-
-		if Expect(storageClass).NotTo(BeNil()) {
-			Expect(storageClass.Name).To(Equal(testName))
-			Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
-		}
+		Expect(storageClass).NotTo(BeNil())
+		Expect(storageClass.Name).To(Equal(testName))
+		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 	})
 
 	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_equal_Returns_true", func() {

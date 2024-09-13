@@ -195,12 +195,11 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 		case Created:
 			sc, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
 			if err != nil {
+				if k8serrors.IsNotFound(err) {
+					log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " not found. No need to delete it.")
+					break
+				}
 				return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %s", err.Error())
-			}
-
-			if sc == nil {
-				log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " not found. No need to delete it.")
-				break
 			}
 
 			log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " found. Deleting it.")
@@ -239,7 +238,9 @@ func ReconcileReplicatedStorageClass(ctx context.Context, cl client.Client, log 
 	log.Info("[ReconcileReplicatedStorageClass] Try to get StorageClass with name: " + replicatedSC.Name)
 	oldSC, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
 	if err != nil {
-		return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %w", err)
+		if !k8serrors.IsNotFound(err) {
+			return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error getting StorageClass: %w", err)
+		}
 	}
 
 	log.Trace("[ReconcileReplicatedStorageClass] Check if virtualization module is enabled and if the ReplicatedStorageClass has VolumeAccess set to Local")
@@ -505,12 +506,11 @@ func GetStorageClass(ctx context.Context, cl client.Client, namespace, name stri
 		Name:      name,
 		Namespace: namespace,
 	}, sc)
+
 	if err != nil {
-		if !k8serrors.IsNotFound(err) {
-			return nil, err
-		}
-		return nil, nil
+		return nil, err
 	}
+
 	return sc, nil
 }
 
