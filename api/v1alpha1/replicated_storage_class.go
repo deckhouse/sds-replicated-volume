@@ -33,7 +33,6 @@ type ReplicatedStorageClassList struct {
 }
 
 type ReplicatedStorageClassSpec struct {
-	IsDefault     bool     `json:"isDefault"`
 	StoragePool   string   `json:"storagePool"`
 	ReclaimPolicy string   `json:"reclaimPolicy"`
 	Replication   string   `json:"replication"`
