@@ -4,7 +4,7 @@ metadata:
   name: sds-replicated-volume-add-loop-devices-to-blacklist.sh
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 spec:
-  weight: 98
+  weight: 100
   nodeGroups: ["*"]
   bundles: ["*"]
   content: |
@@ -58,8 +58,6 @@ spec:
     }
     EOF
     }
-
-    bb-log-info "Blacklisting loop-devices from sds-replicated-volume"
 
     configure_lvm
     configure_multipath
