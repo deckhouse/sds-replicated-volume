@@ -59,5 +59,7 @@ spec:
     EOF
     }
 
+    bb-log-info "Blacklisting loop-devices from sds-replicated-volume"
+
     configure_lvm
     configure_multipath
