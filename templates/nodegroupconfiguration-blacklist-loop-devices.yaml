@@ -4,7 +4,7 @@ metadata:
   name: sds-replicated-volume-add-loop-devices-to-blacklist.sh
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 spec:
-  weight: 99
+  weight: 98
   nodeGroups: ["*"]
   bundles: ["*"]
   content: |
