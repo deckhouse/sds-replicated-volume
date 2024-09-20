@@ -70,7 +70,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		ephemeralNodesList = append(ephemeralNodesList, node.Name)
 	}
 
-	listDevice := &snc.LvmVolumeGroupList{}
+	listDevice := &snc.LVMVolumeGroupList{}
 
 	err = cl.List(ctx, listDevice)
 	if err != nil {
@@ -80,7 +80,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 	errMsg := ""
 	var lvmVolumeGroupUnique []string
 
-	for _, rspLVMvg := range rsp.Spec.LvmVolumeGroups {
+	for _, rspLVMvg := range rsp.Spec.LVMVolumeGroups {
 		lvgExists := false
 		thinPoolExists := false
 

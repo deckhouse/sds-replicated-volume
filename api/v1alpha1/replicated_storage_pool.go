@@ -27,7 +27,7 @@ type ReplicatedStoragePool struct {
 
 type ReplicatedStoragePoolSpec struct {
 	Type            string                                 `json:"type"`
-	LvmVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
+	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 }
 
 type ReplicatedStoragePoolLVMVolumeGroups struct {

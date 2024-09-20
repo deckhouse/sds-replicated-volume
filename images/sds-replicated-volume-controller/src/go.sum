@@ -11,6 +11,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b h1:EYmHWTWcWMpyxJGZK05ZxlIFnh9s66DRrxLw/LNb/xw=
 github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b/go.mod h1:H71+9G0Jr46Qs0BA3z3/xt0h9lbnJnCEYcaCJCWFBf0=
+github.com/deckhouse/sds-node-configurator/api v0.0.0-20240919102704-a035b4a92e77 h1:Y3vswUk/rnCpkZzWBk+Mlr9LtMg6EI5LkQ4GvgHCslI=
+github.com/deckhouse/sds-node-configurator/api v0.0.0-20240919102704-a035b4a92e77/go.mod h1:H71+9G0Jr46Qs0BA3z3/xt0h9lbnJnCEYcaCJCWFBf0=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9 h1:keKcnq6do7yxGZHeNERhhx3dH1/wQmj+x5vxcWH3CcI=
 github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9/go.mod h1:6yz0RtbkLVJtK2DeuvgfaqBZRl5V5ax1WsfPF5pbnvo=
 github.com/donovanhide/eventsource v0.0.0-20210830082556-c59027999da0 h1:C7t6eeMaEQVy6e8CarIhscYQlNmw5e3G36y7l7Y21Ao=
