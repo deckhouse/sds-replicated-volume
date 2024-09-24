@@ -226,10 +226,9 @@ RUN chmod 755 /usr/local/bin/linstor
 COPY cleaner.py /cleaner.py
 RUN chmod 755 /cleaner.py
 
+COPY global_common.conf /etc/drbd.d/global_common.conf
+
 RUN mv /usr/bin/linstor /usr/bin/originallinstor
-RUN sed -i 's\32M\128M\g' /usr/share/linstor-server/bin/linstor-config
-RUN sed -i 's\32M\128M\g' /usr/share/linstor-server/bin/Controller
-RUN sed -i 's\32M\128M\g' /usr/share/linstor-server/bin/Satellite
 
 CMD ["startSatellite"]
 ENTRYPOINT ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
