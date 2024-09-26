@@ -106,14 +106,20 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 ```yaml
 kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: LvmVolumeGroup
+kind: LVMVolumeGroup
 metadata:
-  name: "vg-1-on-worker-0" # Имя может быть любым подходящим для имен ресурсов в Kubernetes. Именно это имя ресурса LvmVolumeGroup будет в дальнейшем использоваться для создания ReplicatedStoragePool
+  name: "vg-1-on-worker-0" # Имя может быть любым подходящим для имен ресурсов в Kubernetes. Именно это имя ресурса LVMVolumeGroup будет в дальнейшем использоваться для создания ReplicatedStoragePool
 spec:
   type: Local
-  blockDeviceNames:  # указываем имена ресурсов BlockDevice, которые расположены на нужной нам узле и CONSUMABLE которых выставлен в true. Обратите внимание, что имя узлы мы ннигде не указываем. Имя узлы берется из ресурсов BlockDevice
-    - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
-    - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
+  local:
+    nodeName: "worker-0"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
+          - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
   actualVGNameOnTheNode: "vg-1" # имя LVM VG, которая будет создана на узле из указанных выше блочных устройств
 EOF
 ```
@@ -131,13 +137,19 @@ kubectl get lvg vg-1-on-worker-0 -w
 ```shell
 kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: LvmVolumeGroup
+kind: LVMVolumeGroup
 metadata:
   name: "vg-1-on-worker-1"
 spec:
   type: Local
-  blockDeviceNames:
-    - dev-49ff548dfacba65d951d2886c6ffc25d345bb548
+  local:
+    nodeName: "worker-1"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-49ff548dfacba65d951d2886c6ffc25d345bb548
   actualVGNameOnTheNode: "vg-1"
 EOF
 ```
@@ -155,13 +167,19 @@ kubectl get lvg vg-1-on-worker-1 -w
 ```shell
 kubectl apply -f - <<EOF
 apiVersion: storage.deckhouse.io/v1alpha1
-kind: LvmVolumeGroup
+kind: LVMVolumeGroup
 metadata:
   name: "vg-1-on-worker-2"
 spec:
   type: Local
-  blockDeviceNames:
-    - dev-75d455a9c59858cf2b571d196ffd9883f1349d2e
+  local:
+    nodeName: "worker-2"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-75d455a9c59858cf2b571d196ffd9883f1349d2e
   actualVGNameOnTheNode: "vg-1"
 EOF
 ```
@@ -184,7 +202,7 @@ metadata:
   name: data
 spec:
   type: LVM
-  lvmVolumeGroups: # Здесь указываем имена ресурсов LvmVolumeGroup, которые мы создавали ранее
+  lvmVolumeGroups: # Здесь указываем имена ресурсов LVMVolumeGroup, которые мы создавали ранее
     - name: vg-1-on-worker-0
     - name: vg-1-on-worker-1
     - name: vg-1-on-worker-2

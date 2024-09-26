@@ -3,7 +3,7 @@ module webhooks
 go 1.22.3
 
 require (
-	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240805103635-969dc811217b
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20240925090458-249de2896583
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20240812165341-a73e664454b9
 	github.com/go-logr/logr v1.4.2
 	github.com/sirupsen/logrus v1.9.3

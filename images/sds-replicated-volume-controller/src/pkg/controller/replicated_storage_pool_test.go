@@ -109,8 +109,8 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(m[""]).To(Equal("value3"))
 	})
 
-	It("GetLvmVolumeGroup", func() {
-		testLvm := &snc.LvmVolumeGroup{
+	It("GetLVMVolumeGroup", func() {
+		testLvm := &snc.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testName,
 			},
@@ -119,26 +119,26 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		err := cl.Create(ctx, testLvm)
 		Expect(err).NotTo(HaveOccurred())
 
-		lvm, err := controller.GetLvmVolumeGroup(ctx, cl, testName)
+		lvm, err := controller.GetLVMVolumeGroup(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(lvm.Name).To(Equal(testName))
 	})
 
 	It("Validations", func() {
 		const (
-			LvmVGOneOnFirstNodeName    = "lvmVG-1-on-FirstNode"
+			LVMVGOneOnFirstNodeName    = "lvmVG-1-on-FirstNode"
 			ActualVGOneOnFirstNodeName = "actualVG-1-on-FirstNode"
 
-			LvmVGTwoOnFirstNodeName    = "lvmVG-2-on-FirstNode"
+			LVMVGTwoOnFirstNodeName    = "lvmVG-2-on-FirstNode"
 			ActualVGTwoOnFirstNodeName = "actualVG-2-on-FirstNode"
 
-			LvmVGOneOnSecondNodeName          = "lvmVG-1-on-SecondNode"
-			LvmVGOneOnSecondNodeNameDublicate = "lvmVG-1-on-SecondNode"
+			LVMVGOneOnSecondNodeName          = "lvmVG-1-on-SecondNode"
+			LVMVGOneOnSecondNodeNameDublicate = "lvmVG-1-on-SecondNode"
 			ActualVGOneOnSecondNodeName       = "actualVG-1-on-SecondNode"
 
 			NotExistedlvmVGName   = "not_existed_lvmVG"
-			SharedLvmVGName       = "shared_lvm_vg"
-			LvmVGWithSeveralNodes = "several_nodes_lvm_vg"
+			SharedLVMVGName       = "shared_lvm_vg"
+			LVMVGWithSeveralNodes = "several_nodes_lvm_vg"
 
 			FirstNodeName  = "first_node"
 			SecondNodeName = "second_node"
@@ -152,25 +152,25 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 			LVMVGTypeShared               = "Shared"
 		)
 
-		err := CreateLVMVolumeGroup(ctx, cl, LvmVGOneOnFirstNodeName, testNameSpace, LVMVGTypeLocal, ActualVGOneOnFirstNodeName, []string{FirstNodeName}, nil)
+		err := CreateLVMVolumeGroup(ctx, cl, LVMVGOneOnFirstNodeName, testNameSpace, LVMVGTypeLocal, ActualVGOneOnFirstNodeName, []string{FirstNodeName}, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = CreateLVMVolumeGroup(ctx, cl, LvmVGTwoOnFirstNodeName, testNameSpace, LVMVGTypeLocal, ActualVGTwoOnFirstNodeName, []string{FirstNodeName}, nil)
+		err = CreateLVMVolumeGroup(ctx, cl, LVMVGTwoOnFirstNodeName, testNameSpace, LVMVGTypeLocal, ActualVGTwoOnFirstNodeName, []string{FirstNodeName}, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = CreateLVMVolumeGroup(ctx, cl, LvmVGOneOnSecondNodeName, testNameSpace, LVMVGTypeLocal, ActualVGOneOnSecondNodeName, []string{SecondNodeName}, nil)
+		err = CreateLVMVolumeGroup(ctx, cl, LVMVGOneOnSecondNodeName, testNameSpace, LVMVGTypeLocal, ActualVGOneOnSecondNodeName, []string{SecondNodeName}, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = CreateLVMVolumeGroup(ctx, cl, SharedLvmVGName, testNameSpace, LVMVGTypeShared, ActualVGOneOnSecondNodeName, []string{FirstNodeName, SecondNodeName, ThirdNodeName}, nil)
+		err = CreateLVMVolumeGroup(ctx, cl, SharedLVMVGName, testNameSpace, LVMVGTypeShared, ActualVGOneOnSecondNodeName, []string{FirstNodeName, SecondNodeName, ThirdNodeName}, nil)
 		Expect(err).NotTo(HaveOccurred())
 
-		err = CreateLVMVolumeGroup(ctx, cl, LvmVGWithSeveralNodes, testNameSpace, LVMVGTypeLocal, ActualVGOneOnSecondNodeName, []string{FirstNodeName, SecondNodeName, ThirdNodeName}, nil)
+		err = CreateLVMVolumeGroup(ctx, cl, LVMVGWithSeveralNodes, testNameSpace, LVMVGTypeLocal, ActualVGOneOnSecondNodeName, []string{FirstNodeName, SecondNodeName, ThirdNodeName}, nil)
 		Expect(err).NotTo(HaveOccurred())
 
 		// TODO: add mock for linstor client and add positive test
 
 		// Negative test with good LVMVolumeGroups.
-		goodLVMvgs := []map[string]string{{LvmVGOneOnFirstNodeName: ""}, {LvmVGOneOnSecondNodeName: ""}}
+		goodLVMvgs := []map[string]string{{LVMVGOneOnFirstNodeName: ""}, {LVMVGOneOnSecondNodeName: ""}}
 		err = CreateReplicatedStoragePool(ctx, cl, GoodReplicatedStoragePoolName, testNameSpace, TypeLVM, goodLVMvgs)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -188,7 +188,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(reconciledGoodReplicatedStoragePool.Status.Reason).To(Equal("lvmVG-1-on-FirstNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-FirstNode\" not found\nlvmVG-1-on-SecondNode: Error getting LVMVolumeGroup: lvmvolumegroups.storage.deckhouse.io \"lvmVG-1-on-SecondNode\" not found\n"))
 
 		// Negative test with bad LVMVolumeGroups.
-		badLVMvgs := []map[string]string{{LvmVGOneOnFirstNodeName: ""}, {NotExistedlvmVGName: ""}, {LvmVGOneOnSecondNodeName: ""}, {LvmVGTwoOnFirstNodeName: ""}, {LvmVGOneOnSecondNodeNameDublicate: ""}, {SharedLvmVGName: ""}, {LvmVGWithSeveralNodes: ""}}
+		badLVMvgs := []map[string]string{{LVMVGOneOnFirstNodeName: ""}, {NotExistedlvmVGName: ""}, {LVMVGOneOnSecondNodeName: ""}, {LVMVGTwoOnFirstNodeName: ""}, {LVMVGOneOnSecondNodeNameDublicate: ""}, {SharedLVMVGName: ""}, {LVMVGWithSeveralNodes: ""}}
 		err = CreateReplicatedStoragePool(ctx, cl, BadReplicatedStoragePoolName, testNameSpace, TypeLVM, badLVMvgs)
 
 		Expect(err).NotTo(HaveOccurred())
@@ -208,27 +208,27 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 })
 
 func CreateLVMVolumeGroup(ctx context.Context, cl client.WithWatch, lvmVolumeGroupName, namespace, lvmVGType, actualVGnameOnTheNode string, nodes []string, thinPools map[string]string) error {
-	vgNodes := make([]snc.LvmVolumeGroupNode, len(nodes))
+	vgNodes := make([]snc.LVMVolumeGroupNode, len(nodes))
 	for i, node := range nodes {
-		vgNodes[i] = snc.LvmVolumeGroupNode{Name: node}
+		vgNodes[i] = snc.LVMVolumeGroupNode{Name: node}
 	}
 
-	vgThinPools := make([]snc.LvmVolumeGroupThinPoolSpec, 0)
+	vgThinPools := make([]snc.LVMVolumeGroupThinPoolSpec, 0)
 	for thinPoolname, thinPoolsize := range thinPools {
-		vgThinPools = append(vgThinPools, snc.LvmVolumeGroupThinPoolSpec{Name: thinPoolname, Size: thinPoolsize})
+		vgThinPools = append(vgThinPools, snc.LVMVolumeGroupThinPoolSpec{Name: thinPoolname, Size: thinPoolsize})
 	}
 
-	lvmVolumeGroup := &snc.LvmVolumeGroup{
+	lvmVolumeGroup := &snc.LVMVolumeGroup{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      lvmVolumeGroupName,
 			Namespace: namespace,
 		},
-		Spec: snc.LvmVolumeGroupSpec{
+		Spec: snc.LVMVolumeGroupSpec{
 			Type:                  lvmVGType,
 			ActualVGNameOnTheNode: actualVGnameOnTheNode,
 			ThinPools:             vgThinPools,
 		},
-		Status: snc.LvmVolumeGroupStatus{
+		Status: snc.LVMVolumeGroupStatus{
 			Nodes: vgNodes,
 		},
 	}
@@ -254,7 +254,7 @@ func CreateReplicatedStoragePool(ctx context.Context, cl client.WithWatch, repli
 		},
 		Spec: srv.ReplicatedStoragePoolSpec{
 			Type:            lvmType,
-			LvmVolumeGroups: volumeGroups,
+			LVMVolumeGroups: volumeGroups,
 		},
 	}
 

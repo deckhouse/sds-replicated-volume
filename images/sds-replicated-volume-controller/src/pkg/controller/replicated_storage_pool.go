@@ -135,7 +135,7 @@ func NewReplicatedStoragePool(
 				ephemeralNodesList = append(ephemeralNodesList, node.Name)
 			}
 
-			listDevice := &snc.LvmVolumeGroupList{}
+			listDevice := &snc.LVMVolumeGroupList{}
 
 			err = cl.List(ctx, listDevice)
 			if err != nil {
@@ -143,7 +143,7 @@ func NewReplicatedStoragePool(
 				return
 			}
 
-			for _, lvmVolumeGroup := range e.ObjectNew.Spec.LvmVolumeGroups {
+			for _, lvmVolumeGroup := range e.ObjectNew.Spec.LVMVolumeGroups {
 				for _, lvg := range listDevice.Items {
 					if lvg.Name != lvmVolumeGroup.Name {
 						continue
@@ -196,7 +196,7 @@ func ReconcileReplicatedStoragePoolEvent(ctx context.Context, cl client.Client, 
 }
 
 func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *lapi.Client, log logger.Logger, replicatedSP *srv.ReplicatedStoragePool) error { // TODO: add shouldRequeue as returned value
-	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Spec.Type, replicatedSP.Spec.LvmVolumeGroups)
+	ok, msg, lvmVolumeGroups := GetAndValidateVolumeGroups(ctx, cl, replicatedSP.Spec.Type, replicatedSP.Spec.LVMVolumeGroups)
 	if !ok {
 		replicatedSP.Status.Phase = "Failed"
 		replicatedSP.Status.Reason = msg
@@ -215,13 +215,13 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 
 	failedMsgBuilder.WriteString("Error occurred while creating Storage Pools: ")
 
-	for _, replicatedSPLvmVolumeGroup := range replicatedSP.Spec.LvmVolumeGroups {
-		lvmVolumeGroup, ok := lvmVolumeGroups[replicatedSPLvmVolumeGroup.Name]
+	for _, replicatedSPLVMVolumeGroup := range replicatedSP.Spec.LVMVolumeGroups {
+		lvmVolumeGroup, ok := lvmVolumeGroups[replicatedSPLVMVolumeGroup.Name]
 		nodeName := lvmVolumeGroup.Status.Nodes[0].Name
 
 		if !ok {
-			log.Error(nil, fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map: %+v", replicatedSPLvmVolumeGroup.Name, lvmVolumeGroups))
-			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LvmVolumeGroup %s from lvmVolumeGroups map. See logs of %s for details; ", replicatedSPLvmVolumeGroup.Name, ReplicatedStoragePoolControllerName))
+			log.Error(nil, fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map: %+v", replicatedSPLVMVolumeGroup.Name, lvmVolumeGroups))
+			failedMsgBuilder.WriteString(fmt.Sprintf("Error getting LVMVolumeGroup %s from LVMVolumeGroups map. See logs of %s for details; ", replicatedSPLVMVolumeGroup.Name, ReplicatedStoragePoolControllerName))
 			isSuccessful = false
 			continue
 		}
@@ -232,7 +232,7 @@ func ReconcileReplicatedStoragePool(ctx context.Context, cl client.Client, lc *l
 			lvmVgForLinstor = lvmVolumeGroup.Spec.ActualVGNameOnTheNode
 		case TypeLVMThin:
 			lvmType = lapi.LVM_THIN
-			lvmVgForLinstor = lvmVolumeGroup.Spec.ActualVGNameOnTheNode + "/" + replicatedSPLvmVolumeGroup.ThinPoolName
+			lvmVgForLinstor = lvmVolumeGroup.Spec.ActualVGNameOnTheNode + "/" + replicatedSPLVMVolumeGroup.ThinPoolName
 		}
 
 		newStoragePool := lapi.StoragePool{
@@ -336,56 +336,56 @@ func GetReplicatedStoragePool(ctx context.Context, cl client.Client, namespace, 
 	return obj, err
 }
 
-func GetLvmVolumeGroup(ctx context.Context, cl client.Client, name string) (*snc.LvmVolumeGroup, error) {
-	obj := &snc.LvmVolumeGroup{}
+func GetLVMVolumeGroup(ctx context.Context, cl client.Client, name string) (*snc.LVMVolumeGroup, error) {
+	obj := &snc.LVMVolumeGroup{}
 	err := cl.Get(ctx, client.ObjectKey{
 		Name: name,
 	}, obj)
 	return obj, err
 }
 
-func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, lvmType string, replicatedSPLVMVolumeGroups []srv.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]snc.LvmVolumeGroup) {
+func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, lvmType string, replicatedSPLVMVolumeGroups []srv.ReplicatedStoragePoolLVMVolumeGroups) (bool, string, map[string]snc.LVMVolumeGroup) {
 	var lvmVolumeGroupName string
 	var nodeName string
 	nodesWithlvmVolumeGroups := make(map[string]string)
-	invalidLvmVolumeGroups := make(map[string]string)
+	invalidLVMVolumeGroups := make(map[string]string)
 	lvmVolumeGroupsNames := make(map[string]bool)
-	lvmVolumeGroups := make(map[string]snc.LvmVolumeGroup)
+	lvmVolumeGroups := make(map[string]snc.LVMVolumeGroup)
 
 	for _, g := range replicatedSPLVMVolumeGroups {
 		lvmVolumeGroupName = g.Name
 
 		if lvmVolumeGroupsNames[lvmVolumeGroupName] {
-			invalidLvmVolumeGroups[lvmVolumeGroupName] = "LvmVolumeGroup name is not unique"
+			invalidLVMVolumeGroups[lvmVolumeGroupName] = "LVMVolumeGroup name is not unique"
 			continue
 		}
 		lvmVolumeGroupsNames[lvmVolumeGroupName] = true
 
-		lvmVolumeGroup, err := GetLvmVolumeGroup(ctx, cl, lvmVolumeGroupName)
+		lvmVolumeGroup, err := GetLVMVolumeGroup(ctx, cl, lvmVolumeGroupName)
 		if err != nil {
-			UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("Error getting LVMVolumeGroup: %s", err.Error()))
+			UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("Error getting LVMVolumeGroup: %s", err.Error()))
 			continue
 		}
 
 		if lvmVolumeGroup.Spec.Type != LVMVGTypeLocal {
-			UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("LvmVolumeGroup type is not %s", LVMVGTypeLocal))
+			UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("LVMVolumeGroup type is not %s", LVMVGTypeLocal))
 			continue
 		}
 
 		if len(lvmVolumeGroup.Status.Nodes) != 1 {
-			UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, "LvmVolumeGroup has more than one node in status.nodes. LvmVolumeGroup for LINSTOR Storage Pool must to have only one node")
+			UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, "LVMVolumeGroup has more than one node in status.nodes. LVMVolumeGroup for LINSTOR Storage Pool must to have only one node")
 			continue
 		}
 
 		nodeName = lvmVolumeGroup.Status.Nodes[0].Name
 		if value, ok := nodesWithlvmVolumeGroups[nodeName]; ok {
-			UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("This LvmVolumeGroup have same node %s as LvmVolumeGroup with name: %s. LINSTOR Storage Pool is allowed to have only one LvmVolumeGroup per node", nodeName, value))
+			UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("This LVMVolumeGroup have same node %s as LVMVolumeGroup with name: %s. LINSTOR Storage Pool is allowed to have only one LVMVolumeGroup per node", nodeName, value))
 		}
 
 		switch lvmType {
 		case TypeLVMThin:
 			if len(g.ThinPoolName) == 0 {
-				UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("type %s but ThinPoolName is not set", TypeLVMThin))
+				UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("type %s but ThinPoolName is not set", TypeLVMThin))
 				break
 			}
 			found := false
@@ -396,11 +396,11 @@ func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, lvmType s
 				}
 			}
 			if !found {
-				UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("ThinPoolName %s is not found in Spec.ThinPools of LvmVolumeGroup %s", g.ThinPoolName, lvmVolumeGroupName))
+				UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("ThinPoolName %s is not found in Spec.ThinPools of LVMVolumeGroup %s", g.ThinPoolName, lvmVolumeGroupName))
 			}
 		case TypeLVM:
 			if len(g.ThinPoolName) != 0 {
-				UpdateMapValue(invalidLvmVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("type %s but ThinPoolName is set", TypeLVM))
+				UpdateMapValue(invalidLVMVolumeGroups, lvmVolumeGroupName, fmt.Sprintf("type %s but ThinPoolName is set", TypeLVM))
 			}
 		}
 
@@ -408,8 +408,8 @@ func GetAndValidateVolumeGroups(ctx context.Context, cl client.Client, lvmType s
 		lvmVolumeGroups[lvmVolumeGroupName] = *lvmVolumeGroup
 	}
 
-	if len(invalidLvmVolumeGroups) > 0 {
-		msg := GetOrderedMapValuesAsString(invalidLvmVolumeGroups)
+	if len(invalidLVMVolumeGroups) > 0 {
+		msg := GetOrderedMapValuesAsString(invalidLVMVolumeGroups)
 		return false, msg, nil
 	}
 
