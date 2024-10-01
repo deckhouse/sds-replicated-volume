@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright 2023 Flant JSC
+# Copyright 2024 Flant JSC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,29 +21,22 @@ from deckhouse import hook
 from typing import Callable
 import common
 
+CN_NAME = "sds-replicated-volume-scheduler-extender"
+
 def main():
     hook = GenerateCertificateHook(
         TlsSecret(
-            cn="linstor-scheduler-admission",
-            name="linstor-scheduler-admission-certs",
+            cn=CN_NAME,
+            name="scheduler-extender-https-certs",
             sansGenerator=default_sans([
-                "linstor-scheduler-admission",
-                f"linstor-scheduler-admission.{common.NAMESPACE}",
-                f"linstor-scheduler-admission.{common.NAMESPACE}.svc"]),
-            values_path_prefix=f"{common.MODULE_NAME}.internal.webhookCert"
+                CN_NAME,
+                f"{CN_NAME}.{common.NAMESPACE}",
+                f"{CN_NAME}.{common.NAMESPACE}.svc",
+                f"%CLUSTER_DOMAIN%://{CN_NAME}.{common.NAMESPACE}.svc",
+            ]),
+            values_path_prefix=f"{common.MODULE_NAME}.internal.customSchedulerExtenderCert"
             ),
-        TlsSecret(
-            cn="webhooks",
-            name="webhooks-https-certs",
-            sansGenerator=default_sans([
-                "webhooks",
-                f"webhooks.{common.NAMESPACE}",
-                f"webhooks.{common.NAMESPACE}.svc",
-                f"%CLUSTER_DOMAIN%://webhooks.{common.NAMESPACE}.svc",
-                ]),
-            values_path_prefix=f"{common.MODULE_NAME}.internal.customWebhookCert"
-            ),
-        cn="linstor-scheduler-admission",
+        cn=CN_NAME,
         common_ca=True,
         namespace=common.NAMESPACE)
 
