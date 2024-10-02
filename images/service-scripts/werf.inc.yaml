@@ -12,6 +12,7 @@ git:
     includePaths:
     - scripts
     - tools
+    before: setup
 
 shell:
   setup:
@@ -32,7 +33,7 @@ import:
       - replicas_manager.sh
       - install
       - uninstall
-    after: setup
+    before: setup
 docker:
   LABEL:
     distro: all
