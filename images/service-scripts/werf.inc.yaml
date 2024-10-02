@@ -12,7 +12,6 @@ git:
     includePaths:
     - scripts
     - tools
-    before: setup
 
 shell:
   setup:
@@ -29,7 +28,7 @@ import:
     add: /
     to: /
     includePaths:
-      - evict.sh
+      # - evict.sh
       - replicas_manager.sh
       - install
       - uninstall
