@@ -32,7 +32,7 @@ import:
       - replicas_manager.sh
       - install
       - uninstall
-    before: setup
+    after: setup
 docker:
   LABEL:
     distro: all
