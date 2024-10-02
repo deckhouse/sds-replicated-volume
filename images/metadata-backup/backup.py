@@ -100,7 +100,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("backup")
     parser.add_argument("-r", "--retentionCount", help="Retention days count", type=int)
     args = parser.parse_args()
-    retention = args.retentionCount or 3
+    retention = args.retentionCount or 7
 
     kubernetes.config.load_incluster_config()
 
