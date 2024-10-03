@@ -9,9 +9,6 @@ final: false
 git:
   - add: /images/{{ $.ImageName }}
     to: /
-    includePaths:
-    - scripts
-    - tools
 
 shell:
   setup:
