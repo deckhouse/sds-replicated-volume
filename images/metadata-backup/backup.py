@@ -121,10 +121,10 @@ if __name__ == "__main__":
         print(f"backup_job: creation failure")
         exit(1)
 
-    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+    current_backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
                                                                                      version=objVersion,
                                                                                      plural=objKindPlural)
-    for item in backup_objects['items']:
+    for item in current_backup_objects['items']:
         backup_list.append(item['metadata']['name'])
         if re.search(r'^sds-replicated-volume-\d+-backup-0$', item['metadata']['name']):
             full_completed_list.append(item['metadata']['name'])
