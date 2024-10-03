@@ -1,5 +1,5 @@
 ## Patches
 
-### Change csi endpoint
+### Scheduler extender
 
- Change csi endpoint from `linstor.csi.linbit.com` to `replicated.csi.storage.deckhouse.io`.
+ Extend scheduler with HTTPS support and our own logic.
