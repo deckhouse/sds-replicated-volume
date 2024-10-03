@@ -90,6 +90,7 @@ spec:
     # DRBD requires the kernel sources to be installed.
     # Install actual kernel headers. It can be different from current kernel version!
     # So further we check, if we need new kernel version. It is altlinux feature.
+    apt-get update
     apt-get -y install kernel-headers-modules-std-def
 
     if [ ! -e "/lib/modules/$kernel_version_in_use/build" ]; then
