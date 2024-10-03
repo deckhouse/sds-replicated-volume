@@ -75,7 +75,8 @@ def create_backup(backup_type, labels={}):
 
 ## TODO: patch only created objects
 
-    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(name= f'sds-replicated-volume-{backup_type}-backup-{chunk_pos}',
+                                                                                     group=objGroup,
                                                                                      version=objVersion,
                                                                                      plural=objKindPlural)
     for item in backup_objects['items']:
