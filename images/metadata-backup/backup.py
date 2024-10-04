@@ -75,15 +75,13 @@ def create_backup(backup_type, labels={}):
 
 ## TODO: patch only created objects (76-100)
 
-#    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
-#                                                                                     version=objVersion,
-#                                                                                     plural=objKindPlural)
+    list_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+                                                                                     version=objVersion,
+                                                                                     plural=objKindPlural)
 ## sort all object by name
     regex = re.compile(f'sds-replicated-volume-{backup_type}-backup-')
     current_backup_objects = [
-        obj for obj in kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
-                                                                                     version=objVersion,
-                                                                                     plural=objKindPlural)
+        obj for obj in list_objects.get('items', [])
         if regex.match(obj.get('metadata', {}).get('name', ''))
     ]
 
