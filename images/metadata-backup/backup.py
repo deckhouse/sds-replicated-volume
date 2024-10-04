@@ -81,7 +81,7 @@ def create_backup(backup_type, labels={}):
 ## sort all object by name
     regex = re.compile(f'sds-replicated-volume-{backup_type}-backup-')
     current_backup_objects = [
-        obj for obj in list_objects.get('items', [])
+        obj for obj in list_objects['items']
         if regex.match(obj.get('metadata', {}).get('name', ''))
     ]
 
