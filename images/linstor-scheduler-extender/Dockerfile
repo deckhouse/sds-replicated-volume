@@ -11,7 +11,7 @@ COPY ./patches /patches
 RUN git clone ${LINSTOR_SCHEDULER_EXTENDER_GITREPO} /usr/local/go/linstor-scheduler-extender \
  && cd /usr/local/go/linstor-scheduler-extender \
  && git reset --hard v${LINSTOR_SCHEDULER_EXTENDER_VERSION} \
- && git apply /patches/*.patch \
+ && [ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Patches not found. Git patching skipped" \
  && cd cmd/linstor-scheduler-extender \
  && go build -ldflags="-X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v${LINSTOR_SCHEDULER_EXTENDER_VERSION}" \
  && mv ./linstor-scheduler-extender /
