@@ -73,19 +73,10 @@ def create_backup(backup_type, labels={}):
             print(f"backup_job: sds-replicated-volume-{backup_type}-backup-{chunk_pos} creation failure")
             return False
 
-## TODO: patch only created objects (76-100)
 
     current_backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
                                                                                      version=objVersion,
                                                                                      plural=objKindPlural)
-
-## sort all object by name
-    regex = re.compile(f'sds-replicated-volume-{backup_type}-backup-')
-#    current_backup_objects = [
-#        obj for obj in list_objects['items']
-#        if regex.match(obj.get('metadata', {}).get('name', ''))
-#    ]
-##
 
     for item in current_backup_objects['items']:
         if regex.match(item.get('metadata', {}).get('name', '')):
