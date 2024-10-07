@@ -1,0 +1,12 @@
+diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
+index e176bb599..f71e00245 100644
+--- a/pkg/extender/extender.go
++++ b/pkg/extender/extender.go
+@@ -106,6 +106,7 @@ func (e *Extender) Start() error {
+ 	if e.started {
+ 		return fmt.Errorf("Extender has already been started")
+ 	}
++	log.Warnf("!!!! Started")
+ 	// TODO: Make the listen port configurable
+ 	e.server = &http.Server{Addr: ":8099"}
+ 	http.HandleFunc("/", e.serveHTTP)
