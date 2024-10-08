@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..9d4592cd4 100644
+index 73c8c307a..b873ceb1a 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,8 +3,10 @@ package extender
@@ -26,7 +26,7 @@ index 73c8c307a..9d4592cd4 100644
  	}
  	// TODO: Make the listen port configurable
  	e.server = &http.Server{Addr: ":8099"}
-+	log.Warnf("e.CertFile before go func: %s", e.CertFile)
++	log.Warnf("e before go func: %v", e)
  	http.HandleFunc("/", e.serveHTTP)
  	go func() {
 -		if err := e.server.ListenAndServe(); err != http.ErrServerClosed {
