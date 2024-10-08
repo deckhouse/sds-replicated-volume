@@ -21,7 +21,7 @@ from deckhouse import hook
 from typing import Callable
 import common
 
-CN_NAME = "sds-replicated-volume-scheduler-extender"
+CN_NAME = "linstor-scheduler-extender"
 
 def main():
     hook = GenerateCertificateHook(
