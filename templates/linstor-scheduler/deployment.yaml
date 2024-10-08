@@ -177,7 +177,7 @@ spec:
       volumes:
       - name: scheduler-extender-certs
         secret:
-            secretName: scheduler-extender-https-certs
+            secretName: linstor-scheduler-extender-https-certs
       {{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
       - configMap:
           defaultMode: 420

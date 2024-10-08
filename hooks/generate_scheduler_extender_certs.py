@@ -27,7 +27,7 @@ def main():
     hook = GenerateCertificateHook(
         TlsSecret(
             cn=CN_NAME,
-            name="scheduler-extender-https-certs",
+            name="linstor-scheduler-extender-https-certs",
             sansGenerator=default_sans([
                 CN_NAME,
                 f"{CN_NAME}.{common.NAMESPACE}",
