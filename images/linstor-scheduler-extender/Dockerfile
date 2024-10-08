@@ -30,5 +30,5 @@ RUN git clone ${LINSTOR_SCHEDULER_EXTENDER_GITREPO} /usr/local/go/linstor-schedu
 
 FROM $BASE_UBUNTU
 COPY --from=builder /linstor-scheduler-extender /
-#USER nonroot
+USER nonroot
 ENTRYPOINT ["/linstor-scheduler-extender"]
