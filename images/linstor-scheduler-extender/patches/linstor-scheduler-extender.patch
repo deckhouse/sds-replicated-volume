@@ -1,5 +1,5 @@
 diff --git a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
-index 9f61882..120a824 100644
+index 9f61882..c21277c 100644
 --- a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
 +++ b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
 @@ -24,6 +24,11 @@ import (
@@ -14,7 +14,7 @@ index 9f61882..120a824 100644
  var ext *extender.Extender
 
  func main() {
-@@ -91,8 +96,12 @@ func run(c *cli.Context) {
+@@ -91,6 +96,8 @@ func run(c *cli.Context) {
  	ext = &extender.Extender{
  		Driver:   d,
  		Recorder: recorder,
@@ -22,8 +22,4 @@ index 9f61882..120a824 100644
 +		KeyFile:  defaultKeyFile,
  	}
 
-+	log.Errorf("certFile from linstor-scheduler: %s", ext.CertFile)
-+
  	if err = ext.Start(); err != nil {
- 		log.Fatalf("Error starting scheduler extender: %v", err)
- 	}
