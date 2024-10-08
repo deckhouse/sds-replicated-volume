@@ -8,7 +8,7 @@ webhooks:
   failurePolicy: Ignore
   clientConfig:
     service:
-      name: {{ .Chart.Name }}-scheduler-extender
+      name: linstor-scheduler-extender
       namespace: d8-{{ .Chart.Name }}
       port: 8099
       path: /
