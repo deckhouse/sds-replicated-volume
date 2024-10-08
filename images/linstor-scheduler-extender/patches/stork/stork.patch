@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..3ea630399 100644
+index 73c8c307a..1538574f3 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,8 +3,10 @@ package extender
@@ -22,7 +22,7 @@ index 73c8c307a..3ea630399 100644
  	server   *http.Server
  	lock     sync.Mutex
  	started  bool
-@@ -94,7 +98,30 @@ func (e *Extender) Start() error {
+@@ -94,7 +98,34 @@ func (e *Extender) Start() error {
  	e.server = &http.Server{Addr: ":8099"}
  	http.HandleFunc("/", e.serveHTTP)
  	go func() {
@@ -40,7 +40,11 @@ index 73c8c307a..3ea630399 100644
 +				log.Warnf("KeyFile `%s` does not exists. Launch as HTTP", e.KeyFile)
 +				tlsMode = false
 +			}
++
++			log.Warnf("certFile: %s keyFile: %s tlsMode after checks: %v", e.CertFile, e.KeyFile, tlsMode)
 +		}
++
++		log.Warnf("tlsMode: %v", tlsMode)
 +
 +		if tlsMode {
 +			log.Warn("Starting as HTTPS on :8099")

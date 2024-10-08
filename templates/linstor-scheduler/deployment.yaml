@@ -158,9 +158,6 @@ spec:
                   name: linstor-client-https-cert
                   key: ca.crt
           volumeMounts:
-          - name: scheduler-extender-config
-            mountPath: /etc/sds-replicated-volume-scheduler-extender
-            readOnly: true
           - name: scheduler-extender-certs
             mountPath: /etc/sds-replicated-volume-scheduler-extender/certs
             readOnly: true
@@ -178,10 +175,6 @@ spec:
 
 {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
       volumes:
-      - name: scheduler-extender-config
-        configMap:
-          defaultMode: 420
-          name: sds-replicated-volume-scheduler-extender
       - name: scheduler-extender-certs
         secret:
             secretName: scheduler-extender-https-certs
