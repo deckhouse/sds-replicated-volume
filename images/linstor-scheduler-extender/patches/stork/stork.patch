@@ -1,12 +1,56 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index e176bb599..f71e00245 100644
+index 73c8c307a..3ea630399 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
-@@ -106,6 +106,7 @@ func (e *Extender) Start() error {
- 	if e.started {
- 		return fmt.Errorf("Extender has already been started")
- 	}
-+	log.Warnf("!!!! Started")
- 	// TODO: Make the listen port configurable
+@@ -3,8 +3,10 @@ package extender
+ import (
+ 	"context"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"net/http"
++	"os"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+@@ -77,6 +79,8 @@ var (
+ type Extender struct {
+ 	Recorder record.EventRecorder
+ 	Driver   volume.Driver
++	CertFile string `json:"cert-file"`
++	KeyFile  string `json:"key-file"`
+ 	server   *http.Server
+ 	lock     sync.Mutex
+ 	started  bool
+@@ -94,7 +98,30 @@ func (e *Extender) Start() error {
  	e.server = &http.Server{Addr: ":8099"}
  	http.HandleFunc("/", e.serveHTTP)
+ 	go func() {
+-		if err := e.server.ListenAndServe(); err != http.ErrServerClosed {
++		err := error(nil)
++		tlsMode := len(e.CertFile) > 0 && len(e.KeyFile) > 0
++
++		if tlsMode {
++			if _, exist := os.Stat(e.CertFile); errors.Is(exist, os.ErrNotExist) {
++				log.Warnf("CertFile `%s` does not exists. Launch as HTTP", e.CertFile)
++				tlsMode = false
++			}
++
++			if _, exist := os.Stat(e.KeyFile); errors.Is(exist, os.ErrNotExist) {
++				log.Warnf("KeyFile `%s` does not exists. Launch as HTTP", e.KeyFile)
++				tlsMode = false
++			}
++		}
++
++		if tlsMode {
++			log.Warn("Starting as HTTPS on :8099")
++			err = e.server.ListenAndServeTLS(e.CertFile, e.KeyFile)
++		} else {
++			log.Warn("Starting as HTTP on :8099")
++			err = e.server.ListenAndServe()
++		}
++
++		if err != http.ErrServerClosed {
+ 			log.Panicf("Error starting extender server: %v", err)
+ 		}
+ 	}()

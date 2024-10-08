@@ -1,0 +1,36 @@
+diff --git a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+index 9f61882..de7e94f 100644
+--- a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
++++ b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+@@ -24,6 +24,11 @@ import (
+ 	_ "github.com/piraeusdatastore/linstor-scheduler-extender/pkg/driver"
+ )
+
++const (
++	defaultCertFile = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.crt"
++	defaultKeyFile  = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.key"
++)
++
+ var ext *extender.Extender
+
+ func main() {
+@@ -91,6 +96,8 @@ func run(c *cli.Context) {
+ 	ext = &extender.Extender{
+ 		Driver:   d,
+ 		Recorder: recorder,
++		CertFile: defaultCertFile,
++		KeyFile:  defaultKeyFile,
+ 	}
+
+ 	if err = ext.Start(); err != nil {
+diff --git a/go.mod b/go.mod
+index 6c53624..1804bdc 100644
+--- a/go.mod
++++ b/go.mod
+@@ -15,6 +15,7 @@ replace (
+ 	github.com/kubernetes-incubator/external-storage => github.com/libopenstorage/external-storage v0.20.4-openstorage-rc7
+ 	github.com/kubernetes-incubator/external-storage v0.20.4-openstorage-rc7 => github.com/libopenstorage/external-storage v0.20.4-openstorage-rc7
+ 	github.com/libopenstorage/autopilot-api => github.com/libopenstorage/autopilot-api v0.6.1-0.20210301232050-ca2633c6e114
++	github.com/libopenstorage/stork => ./stork
+ 	github.com/portworx/sched-ops => github.com/portworx/sched-ops v1.20.4-rc1.0.20220401024625-dbc61a336f65
+ 	github.com/portworx/torpedo => github.com/portworx/torpedo v0.0.0-20220413175518-a912f1a6faa2
