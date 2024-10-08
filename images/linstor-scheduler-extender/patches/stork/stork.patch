@@ -26,7 +26,7 @@ index 73c8c307a..b873ceb1a 100644
  	}
  	// TODO: Make the listen port configurable
  	e.server = &http.Server{Addr: ":8099"}
-+	log.Warnf("e before go func: %v", e)
++	log.Warnf("e before go func: %+v", e)
  	http.HandleFunc("/", e.serveHTTP)
  	go func() {
 -		if err := e.server.ListenAndServe(); err != http.ErrServerClosed {

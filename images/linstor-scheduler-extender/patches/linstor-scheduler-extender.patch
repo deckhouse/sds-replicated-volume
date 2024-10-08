@@ -22,19 +22,8 @@ index 9f61882..120a824 100644
 +		KeyFile:  defaultKeyFile,
  	}
 
-+	log.Warnf("certFile from linstor-scheduler: %s", ext.CertFile)
++	log.Errorf("certFile from linstor-scheduler: %s", ext.CertFile)
 +
  	if err = ext.Start(); err != nil {
  		log.Fatalf("Error starting scheduler extender: %v", err)
  	}
-diff --git a/go.mod b/go.mod
-index 6c53624..1804bdc 100644
---- a/go.mod
-+++ b/go.mod
-@@ -15,6 +15,7 @@ replace (
- 	github.com/kubernetes-incubator/external-storage => github.com/libopenstorage/external-storage v0.20.4-openstorage-rc7
- 	github.com/kubernetes-incubator/external-storage v0.20.4-openstorage-rc7 => github.com/libopenstorage/external-storage v0.20.4-openstorage-rc7
- 	github.com/libopenstorage/autopilot-api => github.com/libopenstorage/autopilot-api v0.6.1-0.20210301232050-ca2633c6e114
-+	github.com/libopenstorage/stork => ./stork
- 	github.com/portworx/sched-ops => github.com/portworx/sched-ops v1.20.4-rc1.0.20220401024625-dbc61a336f65
- 	github.com/portworx/torpedo => github.com/portworx/torpedo v0.0.0-20220413175518-a912f1a6faa2
