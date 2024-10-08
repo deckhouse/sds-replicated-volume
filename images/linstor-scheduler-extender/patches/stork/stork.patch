@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..3ea630399 100644
+index 73c8c307a..85d880704 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,8 +3,10 @@ package extender
@@ -54,3 +54,11 @@ index 73c8c307a..3ea630399 100644
  			log.Panicf("Error starting extender server: %v", err)
  		}
  	}()
+@@ -149,6 +176,7 @@ func (e *Extender) getHostname(node *v1.Node) string {
+ }
+
+ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
++	log.Warnf("filter request: %+v", req.Body)
+ 	decoder := json.NewDecoder(req.Body)
+ 	defer func() {
+ 		if err := req.Body.Close(); err != nil {
