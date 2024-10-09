@@ -1,0 +1,25 @@
+diff --git a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+index 9f61882..c21277c 100644
+--- a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
++++ b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+@@ -24,6 +24,11 @@ import (
+ 	_ "github.com/piraeusdatastore/linstor-scheduler-extender/pkg/driver"
+ )
+
++const (
++	defaultCertFile string = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.crt"
++	defaultKeyFile  string = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.key"
++)
++
+ var ext *extender.Extender
+
+ func main() {
+@@ -91,6 +96,8 @@ func run(c *cli.Context) {
+ 	ext = &extender.Extender{
+ 		Driver:   d,
+ 		Recorder: recorder,
++		CertFile: defaultCertFile,
++		KeyFile:  defaultKeyFile,
+ 	}
+
+ 	if err = ext.Start(); err != nil {

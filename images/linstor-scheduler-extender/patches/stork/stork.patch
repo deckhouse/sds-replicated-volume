@@ -1,0 +1,135 @@
+diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
+index 73c8c307a..3224dd2dc 100644
+--- a/pkg/extender/extender.go
++++ b/pkg/extender/extender.go
+@@ -3,8 +3,11 @@ package extender
+ import (
+ 	"context"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"net/http"
++	"net/http/httputil"
++	"os"
+ 	"strconv"
+ 	"strings"
+ 	"sync"
+@@ -77,6 +80,8 @@ var (
+ type Extender struct {
+ 	Recorder record.EventRecorder
+ 	Driver   volume.Driver
++	CertFile string `json:"cert-file"`
++	KeyFile  string `json:"key-file"`
+ 	server   *http.Server
+ 	lock     sync.Mutex
+ 	started  bool
+@@ -94,7 +99,30 @@ func (e *Extender) Start() error {
+ 	e.server = &http.Server{Addr: ":8099"}
+ 	http.HandleFunc("/", e.serveHTTP)
+ 	go func() {
+-		if err := e.server.ListenAndServe(); err != http.ErrServerClosed {
++		err := error(nil)
++		tlsMode := len(e.CertFile) > 0 && len(e.KeyFile) > 0
++
++		if tlsMode {
++			if _, exist := os.Stat(e.CertFile); errors.Is(exist, os.ErrNotExist) {
++				log.Warnf("CertFile `%s` does not exists. Launch as HTTP", e.CertFile)
++				tlsMode = false
++			}
++
++			if _, exist := os.Stat(e.KeyFile); errors.Is(exist, os.ErrNotExist) {
++				log.Warnf("KeyFile `%s` does not exists. Launch as HTTP", e.KeyFile)
++				tlsMode = false
++			}
++		}
++
++		if tlsMode {
++			log.Warn("Starting as HTTPS on :8099")
++			err = e.server.ListenAndServeTLS(e.CertFile, e.KeyFile)
++		} else {
++			log.Warn("Starting as HTTP on :8099")
++			err = e.server.ListenAndServe()
++		}
++
++		if err != http.ErrServerClosed {
+ 			log.Panicf("Error starting extender server: %v", err)
+ 		}
+ 	}()
+@@ -149,6 +177,14 @@ func (e *Extender) getHostname(node *v1.Node) string {
+ }
+
+ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
++	payload, err := httputil.DumpRequest(req, true)
++	if err != nil {
++		log.Errorf("Error debugging filter request: %v", err)
++		http.Error(w, err.Error(), http.StatusInternalServerError)
++		return
++	}
++	log.Tracef("[filter] received request: %s", string(payload))
++
+ 	decoder := json.NewDecoder(req.Body)
+ 	defer func() {
+ 		if err := req.Body.Close(); err != nil {
+@@ -164,6 +200,13 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 		return
+ 	}
+
++	args, err = fillNodesByNames(args)
++	if err != nil {
++		log.Errorf("Cannot fill nodes: %+v", err)
++		http.Error(w, "Cannot fill nodes", http.StatusBadRequest)
++		return
++	}
++
+ 	pod := args.Pod
+ 	if pod == nil {
+ 		msg := "Empty pod received in filter request"
+@@ -192,7 +235,14 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 		}
+ 	}
+
+-	storklog.PodLog(pod).Debugf("Nodes in filter request:")
++	// nodeNames, err := getNodeNames(args)
++	// if err != nil {
++	// 	storklog.PodLog(pod).Errorln("[filter] unable to get node names from the request")
++	// 	http.Error(w, "bad request", http.StatusBadRequest)
++	// 	return
++	// }
++
++	storklog.PodLog(pod).Debugf("[filter] Nodes in filter request")
+ 	for _, node := range args.Nodes.Items {
+ 		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
+ 	}
+@@ -632,3 +682,32 @@ sendResponse:
+ 		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
+ 	}
+ }
++
++// added by Flant.com
++func fillNodesByNames(inputData schedulerapi.ExtenderArgs) (schedulerapi.ExtenderArgs, error) {
++	if inputData.NodeNames != nil && len(*inputData.NodeNames) > 0 {
++		if inputData.Nodes != nil && len(inputData.Nodes.Items) > 0 {
++			// nodes already presents in inputData
++			return inputData, nil
++		}
++	} else {
++		// return same nodes in case there is no NodeNames present
++		return inputData, fmt.Errorf("no NodeNames")
++	}
++
++	nodeList := &v1.NodeList{}
++
++	for _, nodeName := range *inputData.NodeNames {
++		node, err := core.Instance().GetNodeByName(nodeName)
++		if err != nil {
++			// log.Errorf("Error getting node %v: %v", k8sNodeName, err)
++			return inputData, fmt.Errorf("Error getting node `%s`: %+v", nodeName, err)
++		}
++
++		nodeList.Items = append(nodeList.Items, *node)
++	}
++
++	inputData.Nodes = nodeList
++	return inputData, nil
++}
++
