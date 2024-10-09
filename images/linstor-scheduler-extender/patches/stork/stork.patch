@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..e1b846bf9 100644
+index 73c8c307a..bad89b2f1 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,8 +3,11 @@ package extender
@@ -8,8 +8,8 @@ index 73c8c307a..e1b846bf9 100644
  	"encoding/json"
 +	"errors"
  	"fmt"
-+	"io"
  	"net/http"
++	"net/http/httputil"
 +	"os"
  	"strconv"
  	"strings"
@@ -55,26 +55,26 @@ index 73c8c307a..e1b846bf9 100644
  			log.Panicf("Error starting extender server: %v", err)
  		}
  	}()
-@@ -149,6 +177,13 @@ func (e *Extender) getHostname(node *v1.Node) string {
+@@ -149,6 +177,14 @@ func (e *Extender) getHostname(node *v1.Node) string {
  }
 
  func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
-+	body, err := io.ReadAll(req.Body)
++	payload, err := httputil.DumpRequest(req, true)
 +	if err != nil {
-+		log.Fatalln(err)
++		log.Errorf("Error debugging filter request: %v", err)
++		http.Error(w, err.Error(), http.StatusInternalServerError)
++		return
 +	}
-+	sb := string(body)
-+	log.Warnf("req.Body: %s", sb)
++	log.Warnf("req.Body: %s", string(payload))
 +
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -164,6 +199,8 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -163,6 +199,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 		http.Error(w, "Decode error", http.StatusBadRequest)
  		return
  	}
++ 	log.Warnf("filter request args: %+v", args)
 
-+	log.Warnf("filter request args: %+v", args)
-+
  	pod := args.Pod
  	if pod == nil {
- 		msg := "Empty pod received in filter request"
