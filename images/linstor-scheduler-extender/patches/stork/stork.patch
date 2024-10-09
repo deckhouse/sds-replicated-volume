@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..bad89b2f1 100644
+index 73c8c307a..3224dd2dc 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,8 +3,11 @@ package extender
@@ -65,16 +65,71 @@ index 73c8c307a..bad89b2f1 100644
 +		http.Error(w, err.Error(), http.StatusInternalServerError)
 +		return
 +	}
-+	log.Warnf("req.Body: %s", string(payload))
++	log.Tracef("[filter] received request: %s", string(payload))
 +
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -163,6 +199,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
- 		http.Error(w, "Decode error", http.StatusBadRequest)
+@@ -164,6 +200,13 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		return
  	}
-+ 	log.Warnf("filter request args: %+v", args)
 
++	args, err = fillNodesByNames(args)
++	if err != nil {
++		log.Errorf("Cannot fill nodes: %+v", err)
++		http.Error(w, "Cannot fill nodes", http.StatusBadRequest)
++		return
++	}
++
  	pod := args.Pod
  	if pod == nil {
+ 		msg := "Empty pod received in filter request"
+@@ -192,7 +235,14 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+ 		}
+ 	}
+
+-	storklog.PodLog(pod).Debugf("Nodes in filter request:")
++	// nodeNames, err := getNodeNames(args)
++	// if err != nil {
++	// 	storklog.PodLog(pod).Errorln("[filter] unable to get node names from the request")
++	// 	http.Error(w, "bad request", http.StatusBadRequest)
++	// 	return
++	// }
++
++	storklog.PodLog(pod).Debugf("[filter] Nodes in filter request")
+ 	for _, node := range args.Nodes.Items {
+ 		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
+ 	}
+@@ -632,3 +682,32 @@ sendResponse:
+ 		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
+ 	}
+ }
++
++// added by Flant.com
++func fillNodesByNames(inputData schedulerapi.ExtenderArgs) (schedulerapi.ExtenderArgs, error) {
++	if inputData.NodeNames != nil && len(*inputData.NodeNames) > 0 {
++		if inputData.Nodes != nil && len(inputData.Nodes.Items) > 0 {
++			// nodes already presents in inputData
++			return inputData, nil
++		}
++	} else {
++		// return same nodes in case there is no NodeNames present
++		return inputData, fmt.Errorf("no NodeNames")
++	}
++
++	nodeList := &v1.NodeList{}
++
++	for _, nodeName := range *inputData.NodeNames {
++		node, err := core.Instance().GetNodeByName(nodeName)
++		if err != nil {
++			// log.Errorf("Error getting node %v: %v", k8sNodeName, err)
++			return inputData, fmt.Errorf("Error getting node `%s`: %+v", nodeName, err)
++		}
++
++		nodeList.Items = append(nodeList.Items, *node)
++	}
++
++	inputData.Nodes = nodeList
++	return inputData, nil
++}
++
