@@ -1,4 +1,3 @@
-{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -26,4 +25,3 @@ data:
         nodeCacheCapable: false
         tlsConfig:
           caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca }}
-{{- end }}
