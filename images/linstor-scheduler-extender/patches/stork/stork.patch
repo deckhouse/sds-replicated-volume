@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..7a4820852 100644
+index 73c8c307a..c08d62e62 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,14 +3,18 @@ package extender
@@ -21,7 +21,15 @@ index 73c8c307a..7a4820852 100644
  	storklog "github.com/libopenstorage/stork/pkg/log"
  	restore "github.com/libopenstorage/stork/pkg/snapshot/controllers"
  	"github.com/portworx/sched-ops/k8s/core"
-@@ -77,6 +81,11 @@ var (
+@@ -21,6 +25,7 @@ import (
+ 	"k8s.io/apimachinery/pkg/runtime"
+ 	"k8s.io/client-go/tools/record"
+ 	schedulerapi "k8s.io/kube-scheduler/extender/v1"
++	"sigs.k8s.io/controller-runtime/pkg/manager"
+ )
+
+ const (
+@@ -77,6 +82,12 @@ var (
  type Extender struct {
  	Recorder record.EventRecorder
  	Driver   volume.Driver
@@ -29,16 +37,27 @@ index 73c8c307a..7a4820852 100644
 +	CertFile string `json:"cert-file"`
 +	KeyFile  string `json:"key-file"`
 +	LogLevel log.Level `json:"log-level" default:"DebugLevel"`
++	Manager  *manager.Manager
 +	// end of flant.com block
  	server   *http.Server
  	lock     sync.Mutex
  	started  bool
-@@ -90,13 +99,42 @@ func (e *Extender) Start() error {
+@@ -90,13 +101,52 @@ func (e *Extender) Start() error {
  	if e.started {
  		return fmt.Errorf("Extender has already been started")
  	}
 +	// block added by flant.com
 +	log.SetLevel(e.LogLevel)
++
++	if e.Manager != nil {
++		// Setup stork cache. We setup this cache for all the stork pods instead of just the leader pod.
++		// In this way, even the stork extender code can use this cache, since the extender filter/process
++		// requests can land on any stork pod.
++		if err := storkcache.CreateSharedInformerCache(*e.Manager); err != nil {
++			log.Fatalf("failed to setup shared informer cache: %v", err)
++		}
++		log.Infof("shared informer cache has been intialized")
++	}
 +	// end of flant.com block
 +
  	// TODO: Make the listen port configurable
@@ -77,7 +96,7 @@ index 73c8c307a..7a4820852 100644
  	}()
 
  	prometheus.MustRegister(HyperConvergedPodsCounter)
-@@ -149,6 +187,16 @@ func (e *Extender) getHostname(node *v1.Node) string {
+@@ -149,6 +199,16 @@ func (e *Extender) getHostname(node *v1.Node) string {
  }
 
  func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
@@ -94,7 +113,7 @@ index 73c8c307a..7a4820852 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -164,6 +212,15 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -164,6 +224,15 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		return
  	}
 
@@ -110,7 +129,7 @@ index 73c8c307a..7a4820852 100644
  	pod := args.Pod
  	if pod == nil {
  		msg := "Empty pod received in filter request"
-@@ -176,9 +233,20 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -176,9 +245,20 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		if vol.PersistentVolumeClaim == nil {
  			continue
  		}
@@ -133,7 +152,7 @@ index 73c8c307a..7a4820852 100644
  			storklog.PodLog(pod).Warnf(msg)
  			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
  			http.Error(w, msg, http.StatusBadRequest)
-@@ -192,7 +260,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -192,7 +272,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		}
  	}
 
@@ -142,7 +161,7 @@ index 73c8c307a..7a4820852 100644
  	for _, node := range args.Nodes.Items {
  		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
  	}
-@@ -385,9 +453,27 @@ func (e *Extender) collectExtenderMetrics() error {
+@@ -385,9 +465,27 @@ func (e *Extender) collectExtenderMetrics() error {
  		return nil
  	}
 
@@ -173,7 +192,7 @@ index 73c8c307a..7a4820852 100644
  	}
  	return nil
  }
-@@ -632,3 +718,50 @@ sendResponse:
+@@ -632,3 +730,50 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
