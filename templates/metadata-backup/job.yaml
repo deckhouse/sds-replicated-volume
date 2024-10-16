@@ -39,7 +39,7 @@ spec:
             command:
               - /backup.py
               - --retentionCount
-              - {{ dig "backup" "retentionCount" "7" .Values.sdsReplicatedVolume | quote }}
+              - {{ dig "backup" "retentionCount" 7 .Values.sdsReplicatedVolume | quote }}
             volumeMounts:
               - name: tmp
                 mountPath: /tmp
