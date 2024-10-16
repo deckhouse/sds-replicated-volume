@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..c08d62e62 100644
+index 73c8c307a..9d9c54c40 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,14 +3,18 @@ package extender
@@ -103,7 +103,7 @@ index 73c8c307a..c08d62e62 100644
 +	// block added by flant.com
 +	payload, err := httputil.DumpRequest(req, true)
 +	if err != nil {
-+		log.Errorf("Error debugging filter request: %v", err)
++		log.Errorf("[filter] Error debugging request: %v", err)
 +		http.Error(w, err.Error(), http.StatusInternalServerError)
 +		return
 +	}
@@ -120,8 +120,8 @@ index 73c8c307a..c08d62e62 100644
 +	// block added by flant.com
 +	args, err = fillNodesByNames(args)
 +	if err != nil {
-+		log.Errorf("Cannot fill nodes: %+v", err)
-+		http.Error(w, "Cannot fill nodes", http.StatusBadRequest)
++		log.Errorf("[filter] Cannot fill nodes: %+v", err)
++		http.Error(w, "[filter] Cannot fill nodes", http.StatusBadRequest)
 +		return
 +	}
 +	// end of flant.com block
@@ -192,7 +192,48 @@ index 73c8c307a..c08d62e62 100644
  	}
  	return nil
  }
-@@ -632,3 +730,50 @@ sendResponse:
+@@ -461,6 +559,16 @@ type localityInfo struct {
+ }
+
+ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Request) {
++	// block added by flant.com
++	payload, err := httputil.DumpRequest(req, true)
++	if err != nil {
++		log.Errorf("[prioritize] Error debugging request: %v", err)
++		http.Error(w, err.Error(), http.StatusInternalServerError)
++		return
++	}
++	log.Tracef("[prioritize] received request: %s", string(payload))
++	// end of flant.com block
++
+ 	decoder := json.NewDecoder(req.Body)
+ 	defer func() {
+ 		if err := req.Body.Close(); err != nil {
+@@ -476,6 +584,15 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+ 		return
+ 	}
+
++	// block added by flant.com
++	args, err = fillNodesByNames(args)
++	if err != nil {
++		log.Errorf("[prioritize] Cannot fill nodes: %+v", err)
++		http.Error(w, "[prioritize] Cannot fill nodes", http.StatusBadRequest)
++		return
++	}
++	// end of flant.com block
++
+ 	pod := args.Pod
+ 	storklog.PodLog(pod).Debugf("Nodes in prioritize request:")
+ 	for _, node := range args.Nodes.Items {
+@@ -495,7 +612,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+
+ 	// Score all nodes the same if hyperconvergence is disabled
+ 	disableHyperconvergence := false
+-	var err error
+ 	if pod.Annotations != nil {
+ 		if value, ok := pod.Annotations[disableHyperconvergenceAnnotation]; ok {
+ 			if disableHyperconvergence, err = strconv.ParseBool(value); err != nil {
+@@ -632,3 +748,45 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
@@ -218,16 +259,11 @@ index 73c8c307a..c08d62e62 100644
 +	for _, nodeName := range *inputData.NodeNames {
 +		if storkcache.Instance() != nil {
 +			node, err = storkcache.Instance().GetNode(nodeName)
-+			if err == nil {
-+				log.Tracef("Node %s from cache: %+v", nodeName, *node)
-+			}
-+
++			if err == nil { log.Tracef("Get node %s from cache", nodeName) }
 +			msg = fmt.Sprintf("Unable to get node info for node %s from informer cache, err: %v", nodeName, err)
 +		} else {
 +			node, err = core.Instance().GetNodeByName(nodeName)
-+			if err == nil {
-+				log.Tracef("DIRECTED node %s: %+v", nodeName, *node)
-+			}
++			if err == nil { log.Tracef("Get node %s from API-server", nodeName) }
 +			msg = fmt.Sprintf("Unable to get node info for node %s, err: %v", nodeName, err)
 +		}
 +
