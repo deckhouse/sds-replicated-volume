@@ -16,6 +16,7 @@ COPY ./patches /patches
 RUN git clone ${STORK_GITREPO} /usr/local/go/stork \
  && cd /usr/local/go/stork \
  && git reset --hard ${STORK_VERSION} \
+ && [ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/ \
  && [ -n "$(ls -A /patches/stork/*.patch 2>/dev/null)" ] && git apply /patches/stork/*.patch || echo "Stork patches not found. Git patching skipped"
 
 RUN git clone ${LINSTOR_SCHEDULER_EXTENDER_GITREPO} /usr/local/go/linstor-scheduler-extender \
