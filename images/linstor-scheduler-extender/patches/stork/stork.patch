@@ -1,3 +1,16 @@
+diff --git a/cmd/stork/stork.go b/cmd/stork/stork.go
+index 56d343a63..49ae30f98 100644
+--- a/cmd/stork/stork.go
++++ b/cmd/stork/stork.go
+@@ -264,7 +264,7 @@ func run(c *cli.Context) {
+
+ 	verbose := c.Bool("verbose")
+ 	if verbose {
+-		log.SetLevel(log.DebugLevel)
++		log.SetLevel(log.TraceLevel)
+ 	}
+
+ 	config, err := rest.InClusterConfig()
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
 index 73c8c307a..d1a51ca5c 100644
 --- a/pkg/extender/extender.go
