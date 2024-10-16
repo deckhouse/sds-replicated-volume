@@ -73,16 +73,19 @@ def create_backup(backup_type, labels={}):
             print(f"backup_job: sds-replicated-volume-{backup_type}-backup-{chunk_pos} creation failure")
             return False
 
-    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+
+    current_backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
                                                                                      version=objVersion,
                                                                                      plural=objKindPlural)
-    for item in backup_objects['items']:
-        kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
-            group=objGroup,
-            version=objVersion,
-            plural=objKindPlural,
-            name=item['metadata']['name'],
-            body={"metadata": {"labels": labels}})
+    regex = re.compile(f'sds-replicated-volume-{backup_type}-backup-')
+    for item in current_backup_objects['items']:
+        if regex.match(item.get('metadata', {}).get('name', '')):
+            kubernetes.client.CustomObjectsApi().patch_cluster_custom_object(
+                group=objGroup,
+                version=objVersion,
+                plural=objKindPlural,
+                name=item['metadata']['name'],
+                body={"metadata": {"labels": labels}})
 
     for root, dirs, files in os.walk(temp_path, topdown=False):
         for name in files:
@@ -100,7 +103,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser("backup")
     parser.add_argument("-r", "--retentionCount", help="Retention days count", type=int)
     args = parser.parse_args()
-    retention = args.retentionCount or 3
+    retention = args.retentionCount or 7
 
     kubernetes.config.load_incluster_config()
 
@@ -110,10 +113,10 @@ if __name__ == "__main__":
         print(f"backup_job: creation failure")
         exit(1)
 
-    backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
+    current_backup_objects = kubernetes.client.CustomObjectsApi().list_cluster_custom_object(group=objGroup,
                                                                                      version=objVersion,
                                                                                      plural=objKindPlural)
-    for item in backup_objects['items']:
+    for item in current_backup_objects['items']:
         backup_list.append(item['metadata']['name'])
         if re.search(r'^sds-replicated-volume-\d+-backup-0$', item['metadata']['name']):
             full_completed_list.append(item['metadata']['name'])
