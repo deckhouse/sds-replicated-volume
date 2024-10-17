@@ -23,7 +23,7 @@ data:
         weight: 5
         enableHTTPS: true
         httpTimeout: 300s
-        nodeCacheCapable: false
+        nodeCacheCapable: true
         tlsConfig:
           caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca }}
 {{- end }}
