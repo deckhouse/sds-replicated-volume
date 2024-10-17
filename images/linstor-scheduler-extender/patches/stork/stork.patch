@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..9d9c54c40 100644
+index 73c8c307a..45a3599b6 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,14 +3,18 @@ package extender
@@ -42,7 +42,7 @@ index 73c8c307a..9d9c54c40 100644
  	server   *http.Server
  	lock     sync.Mutex
  	started  bool
-@@ -90,13 +101,52 @@ func (e *Extender) Start() error {
+@@ -90,13 +101,53 @@ func (e *Extender) Start() error {
  	if e.started {
  		return fmt.Errorf("Extender has already been started")
  	}
@@ -66,16 +66,17 @@ index 73c8c307a..9d9c54c40 100644
  	go func() {
 -		if err := e.server.ListenAndServe(); err != http.ErrServerClosed {
 +		// block added by flant.com
-+		err := error(nil)
 +		tlsMode := len(e.CertFile) > 0 && len(e.KeyFile) > 0
 +
++		var err error
++
 +		if tlsMode {
-+			if _, exist := os.Stat(e.CertFile); errors.Is(exist, os.ErrNotExist) {
++			if _, err := os.Stat(e.CertFile); errors.Is(err, os.ErrNotExist) {
 +				log.Warnf("CertFile `%s` does not exists. Launch as HTTP", e.CertFile)
 +				tlsMode = false
 +			}
 +
-+			if _, exist := os.Stat(e.KeyFile); errors.Is(exist, os.ErrNotExist) {
++			if _, err := os.Stat(e.KeyFile); errors.Is(err, os.ErrNotExist) {
 +				log.Warnf("KeyFile `%s` does not exists. Launch as HTTP", e.KeyFile)
 +				tlsMode = false
 +			}
@@ -96,7 +97,7 @@ index 73c8c307a..9d9c54c40 100644
  	}()
 
  	prometheus.MustRegister(HyperConvergedPodsCounter)
-@@ -149,6 +199,16 @@ func (e *Extender) getHostname(node *v1.Node) string {
+@@ -149,6 +200,16 @@ func (e *Extender) getHostname(node *v1.Node) string {
  }
 
  func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
@@ -113,14 +114,13 @@ index 73c8c307a..9d9c54c40 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -164,6 +224,15 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -164,6 +225,14 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		return
  	}
 
 +	// block added by flant.com
-+	args, err = fillNodesByNames(args)
-+	if err != nil {
-+		log.Errorf("[filter] Cannot fill nodes: %+v", err)
++	if err = fillNodesByNames(&args); err != nil {
++		log.Errorf("[filter] Cannot fill nodes: %s", err.Error())
 +		http.Error(w, "[filter] Cannot fill nodes", http.StatusBadRequest)
 +		return
 +	}
@@ -141,10 +141,10 @@ index 73c8c307a..9d9c54c40 100644
 +
 +		if storkcache.Instance() != nil {
 +			pvc, err = storkcache.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
-+			msg = fmt.Sprintf("Unable to find PVC %s in informer cache, err: %v", vol.Name, err)
++			msg = fmt.Sprintf("Unable to find PVC %s in informer cache, err: %s", vol.Name, err.Error())
 +		} else {
 +			pvc, err = core.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
-+			msg = fmt.Sprintf("Unable to find PVC %s, err: %v", vol.Name, err)
++			msg = fmt.Sprintf("Unable to find PVC %s, err: %s", vol.Name, err.Error())
 +		}
 +
  		if err != nil {
@@ -209,13 +209,12 @@ index 73c8c307a..9d9c54c40 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -476,6 +584,15 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -476,6 +584,14 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
  		return
  	}
 
 +	// block added by flant.com
-+	args, err = fillNodesByNames(args)
-+	if err != nil {
++	if err = fillNodesByNames(&args); err != nil {
 +		log.Errorf("[prioritize] Cannot fill nodes: %+v", err)
 +		http.Error(w, "[prioritize] Cannot fill nodes", http.StatusBadRequest)
 +		return
@@ -225,7 +224,7 @@ index 73c8c307a..9d9c54c40 100644
  	pod := args.Pod
  	storklog.PodLog(pod).Debugf("Nodes in prioritize request:")
  	for _, node := range args.Nodes.Items {
-@@ -495,7 +612,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -495,7 +611,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
 
  	// Score all nodes the same if hyperconvergence is disabled
  	disableHyperconvergence := false
@@ -233,21 +232,20 @@ index 73c8c307a..9d9c54c40 100644
  	if pod.Annotations != nil {
  		if value, ok := pod.Annotations[disableHyperconvergenceAnnotation]; ok {
  			if disableHyperconvergence, err = strconv.ParseBool(value); err != nil {
-@@ -632,3 +748,45 @@ sendResponse:
+@@ -632,3 +747,43 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
 +
 +// block added by flant.com
-+func fillNodesByNames(inputData schedulerapi.ExtenderArgs) (schedulerapi.ExtenderArgs, error) {
++func fillNodesByNames(inputData *schedulerapi.ExtenderArgs) (error) {
 +	if inputData.NodeNames != nil && len(*inputData.NodeNames) > 0 {
 +		if inputData.Nodes != nil && len(inputData.Nodes.Items) > 0 {
-+			// nodes already presents in inputData
-+			return inputData, nil
++			// nodes already presents in inputData, just return 'as is'
++			return nil
 +		}
 +	} else {
-+		// return same nodes in case there is no NodeNames present
-+		return inputData, fmt.Errorf("no NodeNames")
++		return fmt.Errorf("no NodeNames")
 +	}
 +
 +	var node *v1.Node
@@ -268,14 +266,13 @@ index 73c8c307a..9d9c54c40 100644
 +		}
 +
 +		if err != nil {
-+			// log.Errorf("Error getting node %v: %v", k8sNodeName, err)
-+			return inputData, fmt.Errorf(msg)
++			return fmt.Errorf(msg)
 +		}
 +
 +		nodeList.Items = append(nodeList.Items, *node)
 +	}
 +
 +	inputData.Nodes = nodeList
-+	return inputData, nil
++	return nil
 +}
 +// end of flant.com block
