@@ -1,7 +1,8 @@
 # Release image, stored in your.registry.io/modules/<module-name>/release:<semver>
 ---
-artifact: release-channel-version-artifact
+image: release-channel-version-artifact
 from: registry.deckhouse.io/base_images/alpine:3.16.3
+final: false
 shell:
   beforeInstall:
     - apk add --no-cache curl
@@ -14,7 +15,7 @@ shell:
 image: release-channel-version
 from: registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
 import:
-  - artifact: release-channel-version-artifact
+  - image: release-channel-version-artifact
     add: /
     to: /
     after: install

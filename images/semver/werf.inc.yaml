@@ -22,7 +22,7 @@ image: {{ $.ImageName }}
 from: {{ $.BASE_SCRATCH }}
 
 import:
-  - artifact: {{ $.ImageName }}-artifact
+  - image: {{ $.ImageName }}-artifact
     add: /
     to: /
     includePaths:
