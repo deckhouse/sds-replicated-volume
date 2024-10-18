@@ -1,0 +1,46 @@
+diff --git a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+index 9f61882..0f53cf1 100644
+--- a/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
++++ b/cmd/linstor-scheduler-extender/linstor-scheduler-extender.go
+@@ -24,6 +24,11 @@ import (
+ 	_ "github.com/piraeusdatastore/linstor-scheduler-extender/pkg/driver"
+ )
+
++const (
++	defaultCertFile string = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.crt"
++	defaultKeyFile  string = "/etc/sds-replicated-volume-scheduler-extender/certs/tls.key"
++)
++
+ var ext *extender.Extender
+
+ func main() {
+@@ -88,19 +93,24 @@ func run(c *cli.Context) {
+ 		log.Fatalf("Error initializing Scheduler Driver %v: %v", "linstor", err)
+ 	}
+
++	// Create operator-sdk manager that will manage all controllers.
++	mgr, err := manager.New(config, manager.Options{})
++	if err != nil {
++		log.Fatalf("Setup controller manager: %v", err)
++	}
++
+ 	ext = &extender.Extender{
+ 		Driver:   d,
+ 		Recorder: recorder,
++		CertFile: defaultCertFile,
++		KeyFile:  defaultKeyFile,
++		LogLevel: log.GetLevel(),
++		Manager:  &mgr,
+ 	}
+
+ 	if err = ext.Start(); err != nil {
+ 		log.Fatalf("Error starting scheduler extender: %v", err)
+ 	}
+-	// Create operator-sdk manager that will manage all controllers.
+-	mgr, err := manager.New(config, manager.Options{})
+-	if err != nil {
+-		log.Fatalf("Setup controller manager: %v", err)
+-	}
+
+ 	signalChan := make(chan os.Signal, 1)
+ 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)

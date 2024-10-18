@@ -1,3 +1,4 @@
+{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -32,3 +33,4 @@ subjects:
 - kind: ServiceAccount
   name: linstor-scheduler-admission
   namespace: d8-{{ .Chart.Name }}
+{{- end }}

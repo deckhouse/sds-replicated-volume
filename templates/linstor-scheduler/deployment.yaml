@@ -15,14 +15,14 @@ memory: 25Mi
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: linstor-scheduler
+  name: linstor-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler-extender")) | nindent 2 }}
 spec:
   targetRef:
     apiVersion: "apps/v1"
     kind: Deployment
-    name: linstor-scheduler
+    name: linstor-scheduler-extender
   updatePolicy:
     updateMode: "Auto"
   resourcePolicy:
@@ -44,19 +44,19 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: linstor-scheduler
+  name: linstor-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler" )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler-extender" )) | nindent 2 }}
 spec:
   minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
   selector:
     matchLabels:
-      app: linstor-scheduler
+      app: linstor-scheduler-extender
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: linstor-scheduler
+  name: linstor-scheduler-extender
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler" )) | nindent 2 }}
 spec:
@@ -64,20 +64,21 @@ spec:
   revisionHistoryLimit: 2
   selector:
     matchLabels:
-      app: linstor-scheduler
+      app: linstor-scheduler-extender
   template:
     metadata:
       labels:
-        app: linstor-scheduler
+        app: linstor-scheduler-extender
     spec:
       {{- include "helm_lib_priority_class" (tuple . "system-cluster-critical") | nindent 6 }}
       {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
-      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "linstor-scheduler")) | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "linstor-scheduler-extender")) | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
+{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
         - name: kube-scheduler
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
           command:
@@ -131,6 +132,7 @@ spec:
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "kube_scheduler_resources" . | nindent 14 }}
               {{- end }}
+{{- end }}
         - name: linstor-scheduler-extender
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
           image: {{ include "helm_lib_module_image" (list . "linstorSchedulerExtender") }}
@@ -155,17 +157,32 @@ spec:
                 secretKeyRef:
                   name: linstor-client-https-cert
                   key: ca.crt
+          volumeMounts:
+          - name: scheduler-extender-certs
+            mountPath: /etc/sds-replicated-volume-scheduler-extender/certs
+            readOnly: true
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "linstor_scheduler_extender_resources" . | nindent 14 }}
               {{- end }}
-      {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
+          {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+          ports:
+           - containerPort: 8099
+             protocol: TCP
+          {{- end }}
+
+{{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
       volumes:
+      - name: scheduler-extender-certs
+        secret:
+            secretName: linstor-scheduler-extender-https-certs
+      {{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
       - configMap:
           defaultMode: 420
           name: linstor-scheduler
         name: scheduler-config
       {{- end }}
-      serviceAccountName: linstor-scheduler
+{{- end }}
+      serviceAccountName: linstor-scheduler-extender
