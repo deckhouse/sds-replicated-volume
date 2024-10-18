@@ -1,0 +1,69 @@
+{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+{{- $utils_version := "9.28.0" }}
+
+---
+image: {{ $.ImageName }}-utils-artifact
+from: {{ $.BASE_UBUNTU }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/drbd-utils
+    add: /
+    to: /drbd-utils
+    tag: v{{ $utils_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  # - add: /images/{{ $.ImageName }}/scripts
+  #   to: /scripts
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+    - |
+      sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
+      locale-gen
+      export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+  setup:
+    - cd /drbd-utils
+    - install /dev/null /usr/local/bin/lbvers.py
+    # make fake git hash which should created by user/shared/drbd_buildtag.sh script because there is NO .git directory
+    - echo -e '#define GITHASH "123456"\n#define GITDIFF ""' > user/shared/drbd_buildtag.h
+    - ./autogen.sh
+    - ./configure
+    - make debrelease VERSION={{ $utils_version }}
+    - mv drbd-utils-{{ $utils_version }}.tar.gz ../drbd-utils_$(echo {{ $utils_version }} | tr '-' '~').orig.tar.gz
+    - tar -C / -xvf ../drbd-utils_$(echo {{ $utils_version }} | tr '-' '~').orig.tar.gz
+    - |
+      cd /drbd-utils-{{ $utils_version }}
+      dpkg-buildpackage -us -uc
+
+    # - mv /scripts/* /
+    # - chmod +x /install
+    # - chmod +x /uninstall
+    # - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
+    # - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_SCRATCH }}
+
+# import:
+#   - artifact: {{ $.ImageName }}-artifact
+#     add: /
+#     to: /
+#     includePaths:
+#       - drbd
+#       - install
+#       - uninstall
+#     before: setup
+docker:
+  LABEL:
+    distro: all
+    version: all
+    drbd-utils: {{ $utils_version }}
