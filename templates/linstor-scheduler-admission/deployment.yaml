@@ -1,9 +1,9 @@
-{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 {{- define "linstor_scheduler_admission_resources" }}
 cpu: 20m
 memory: 50Mi
 {{- end }}
 
+{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
