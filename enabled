@@ -28,7 +28,7 @@ function __main__() {
   fi
 
   if ! values::array_has global.enabledModules "sds-node-configurator" ; then
-    if [ "$(kubectl get ns | grep -c sds-drbd)" -eq 0 ]; then
+    if [ "$(kubectl get ns | grep -c d8-sds-drbd)" -eq 0 ]; then
       echo "You must enable the sds-node-configurator module for the module to work."
       echo "false" > "$MODULE_ENABLED_RESULT"
       exit 0
