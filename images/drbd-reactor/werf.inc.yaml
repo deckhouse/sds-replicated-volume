@@ -16,8 +16,8 @@ git:
       setup:
         - "**/*"
 
-  # - add: /images/{{ $.ImageName }}/scripts
-  #   to: /scripts
+  # - add: /images/{{ $.ImageName }}/patches
+  #   to: /patches
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
@@ -31,10 +31,32 @@ shell:
       locale-gen
       export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
   setup:
+      # Clone just the repository's .git folder
+    - git clone --no-checkout --depth 1 --branch v{{ $utils_version }} https://github.com/LINBIT/drbd-utils /git-repo.tmp
+      # Move the .git folder to the directory with the files.
+    - mv /git-repo.tmp/.git drbd-utils/
+      # Delete the temporary directory
+    - rmdir /git-repo.tmp
     - cd /drbd-utils
+      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
+      # WARNING: any local changes to the files will be lost.
+    - git reset --hard HEAD
+    # cleanup all submodules directories, checked out by werf
+    - rm -rf drbd-headers/*
+    - git submodule update --init --checkout
     - install /dev/null /usr/local/bin/lbvers.py
     # make fake git hash which should created by user/shared/drbd_buildtag.sh script because there is NO .git directory
-    - echo -e '#define GITHASH "123456"\n#define GITDIFF ""' > user/shared/drbd_buildtag.h
+    # - echo -e '#define GITHASH "123456"\n#define GITDIFF ""' > user/shared/drbd_buildtag.h
+    # generate fake git ls-files list which used in Makefile
+    # - find "${PWD}" > .git-ls-files
+    # patch Makefile.in to work without git-related commands because there is NO .git folder
+    # - patch < /patches/Makefile.in.patch
+    # remove tests to build successfully
+    # replace git ls-files with just ls -R
+    # - sed -i 's/$(GIT) ls-files/ls -R/g' Makefile.in
+    # replace git submodule's path with empty string
+    # \x27 is a ' (single quote)
+    # - sed -i -r 's~(\$\(GIT\) submodule foreach.*echo \$\$path\x27)~echo \"\"~g' Makefile.in
     - ./autogen.sh
     - ./configure
     - make debrelease VERSION={{ $utils_version }}
@@ -43,12 +65,6 @@ shell:
     - |
       cd /drbd-utils-{{ $utils_version }}
       dpkg-buildpackage -us -uc
-
-    # - mv /scripts/* /
-    # - chmod +x /install
-    # - chmod +x /uninstall
-    # - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
-    # - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
 ---
 image: {{ $.ImageName }}
 from: {{ $.BASE_SCRATCH }}
