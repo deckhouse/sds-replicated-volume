@@ -1,6 +1,20 @@
 {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
 {{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
 {{- $utils_version := "9.28.0" }}
+{{- $reactor_version := "1.4.0" }}
+
+---
+image: {{ $.ImageName }}-zstd-artifact
+from: {{ $.BASE_UBUNTU }}
+final: false
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install --no-install-recommends zstd \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
 
 ---
 image: {{ $.ImageName }}-utils-artifact
@@ -16,21 +30,32 @@ git:
       setup:
         - "**/*"
 
-  # - add: /images/{{ $.ImageName }}/patches
-  #   to: /patches
+  - add: /images/{{ $.ImageName }}/scripts
+    to: /
+    stageDependencies:
+      setup:
+        - "**/*"
+import:
+  - image: {{ $.ImageName }}-zstd-artifact
+    add: /
+    to: /
+    includePaths:
+      - usr/bin/unzstd
+      - usr/bin/zstd
+    before: setup
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
+      && apt-get -y install --no-install-recommends build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
     - |
       sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
       locale-gen
       export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
-  setup:
+  beforeSetup:
       # Clone just the repository's .git folder
     - git clone --no-checkout --depth 1 --branch v{{ $utils_version }} https://github.com/LINBIT/drbd-utils /git-repo.tmp
       # Move the .git folder to the directory with the files.
@@ -65,21 +90,68 @@ shell:
     - |
       cd /drbd-utils-{{ $utils_version }}
       dpkg-buildpackage -us -uc
+  setup:
+    - /deb-install.sh /drbd-utils_{{ $utils_version }}-1_amd64.deb
+---
+image: {{ $.ImageName }}-reactor-artifact
+from: {{ $.BASE_UBUNTU }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/drbd-reactor
+    add: /
+    to: /drbd-reactor
+    tag: v{{ $reactor_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  # - add: /images/{{ $.ImageName }}/patches
+  #   to: /patches
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install --no-install-recommends build-essential debhelper git cargo rustc dh-python bash-completion \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+  setup:
+      # Clone just the repository's .git folder
+    - git clone --no-checkout --depth 1 --branch v{{ $reactor_version }} https://github.com/LINBIT/drbd-reactor /git-repo.tmp
+      # Move the .git folder to the directory with the files.
+    - mv /git-repo.tmp/.git drbd-reactor/
+      # Delete the temporary directory
+    - rmdir /git-repo.tmp
+    - cd /drbd-reactor
+      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
+      # WARNING: any local changes to the files will be lost.
+    - git reset --hard HEAD
+    - install /dev/null /usr/local/bin/lbvers.py
+    - make debrelease VERSION={{ $reactor_version }}
+    - mv drbd-reactor-{{ $reactor_version }}.tar.gz ../drbd-reactor_$(echo {{ $reactor_version }} | tr '-' '~').orig.tar.gz
+    - tar -C / -xvf ../drbd-reactor_$(echo {{ $reactor_version }} | tr '-' '~').orig.tar.gz
+    - |
+      cd /drbd-reactor-{{ $reactor_version }}
+      ls -la
+      # dpkg-buildpackage -us -uc
+
 ---
 image: {{ $.ImageName }}
 from: {{ $.BASE_SCRATCH }}
 
-# import:
-#   - artifact: {{ $.ImageName }}-artifact
-#     add: /
-#     to: /
-#     includePaths:
-#       - drbd
-#       - install
-#       - uninstall
-#     before: setup
+import:
+  - image: {{ $.ImageName }}-utils-artifact
+    add: /
+    to: /
+    includePaths:
+      - drbd
+      - install
+      - uninstall
+    before: setup
 docker:
   LABEL:
     distro: all
     version: all
     drbd-utils: {{ $utils_version }}
+    drbd-reactor: {{ $reactor_version }}
