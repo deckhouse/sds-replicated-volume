@@ -20,7 +20,7 @@ spec:
         metadata:
           namespace: d8-{{ .Chart.Name }}
           labels:
-            app: metadata-backup
+            app: metadata-backup-weekly
         spec:
           restartPolicy: OnFailure
           {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 10 }}
