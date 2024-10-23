@@ -199,10 +199,9 @@ import:
     #   - drbd-reactor_{{ $reactor_version }}/usr/**
       # - drbd-reactor_{{ $reactor_version }}/**/*.*
     before: setup
-# shell:
-#   setup:
-#     - ls -la
-#     - ls -la /usr/sbin
+shell:
+  setup:
+    - ls -la /usr/sbin
 docker:
   ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
   LABEL:
