@@ -20,9 +20,10 @@ from lib.module import values as module_values
 from deckhouse import hook
 from typing import Callable
 import common
+import os
 
-def main(ctx: hook.Context):
-    print(ctx)
+def main():
+    print(os.environ['CONFIG_VALUES_PATH'])
     common_secrets = (
         TlsSecret(
             cn="webhooks",
@@ -37,10 +38,10 @@ def main(ctx: hook.Context):
             ),
     )
 
-    d8_version = module_values.get_value("global.deckhouseVersion", ctx.values)
-    print(f"d8_version={d8_version}")
+    # d8_version = module_values.get_value("global.deckhouseVersion", ctx.values)
+    # print(f"d8_version={d8_version}")
 
-    if d8_version:
+    if 1:
         tls_secrets = (*common_secrets,
             TlsSecret(
                 cn="linstor-scheduler-admission",
