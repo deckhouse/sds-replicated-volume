@@ -109,10 +109,11 @@ function extract_libraries() {
 		fi
 
 		# find only non-empty binary files (https://stackoverflow.com/a/47678132)
-#		find ${dir_name} -type f ! -size 0 -print0 -exec grep -IL . "{}" \; |
     while IFS= read -r -d '' binfile; do
-      log "[extract_libraries] Process binary file: $binfile"
-    done < <(find ${dir_name} -type f ! -size 0 -print0 -exec grep -IL . "{}" \;)
+			if [ $(grep -IL . "${binfile}") ]; then
+        log "[extract_libraries] Process binary file: $binfile"
+			fi
+    done < <(find ${dir_name} -type f ! -size 0 -print0)
 	done
 
 # ldd /bin/bash | awk '/=>/{print $(NF-1)}'  |
