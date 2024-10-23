@@ -20,11 +20,18 @@ from lib.module import values as module_values
 from deckhouse import hook
 from typing import Callable
 import common
-import os
 
 def main():
-    print(os.environ['CONFIG_VALUES_PATH'])
-    common_secrets = (
+    hook = GenerateCertificateHook(
+        TlsSecret(
+            cn="linstor-scheduler-admission",
+            name="linstor-scheduler-admission-certs",
+            sansGenerator=default_sans([
+                "linstor-scheduler-admission",
+                f"linstor-scheduler-admission.{common.NAMESPACE}",
+                f"linstor-scheduler-admission.{common.NAMESPACE}.svc"]),
+            values_path_prefix=f"{common.MODULE_NAME}.internal.webhookCert"
+            ),
         TlsSecret(
             cn="webhooks",
             name="webhooks-https-certs",
@@ -36,28 +43,6 @@ def main():
                 ]),
             values_path_prefix=f"{common.MODULE_NAME}.internal.customWebhookCert"
             ),
-    )
-
-    # d8_version = module_values.get_value("global.deckhouseVersion", ctx.values)
-    # print(f"d8_version={d8_version}")
-
-    if True:
-        tls_secrets = (*common_secrets,
-            TlsSecret(
-                cn="linstor-scheduler-admission",
-                name="linstor-scheduler-admission-certs",
-                sansGenerator=default_sans([
-                    "linstor-scheduler-admission",
-                    f"linstor-scheduler-admission.{common.NAMESPACE}",
-                    f"linstor-scheduler-admission.{common.NAMESPACE}.svc"]),
-                values_path_prefix=f"{common.MODULE_NAME}.internal.webhookCert"
-                ),
-        )
-    else:
-        tls_secrets = common_secrets
-
-    hook = GenerateCertificateHook(
-        tls_secrets,
         cn="linstor-scheduler-admission",
         common_ca=True,
         namespace=common.NAMESPACE)
