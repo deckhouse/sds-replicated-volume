@@ -41,7 +41,7 @@ def main():
     # d8_version = module_values.get_value("global.deckhouseVersion", ctx.values)
     # print(f"d8_version={d8_version}")
 
-    if 1:
+    if True:
         tls_secrets = (*common_secrets,
             TlsSecret(
                 cn="linstor-scheduler-admission",
