@@ -165,9 +165,7 @@ shell:
     - |
       apt-get update \
       && apt-get -y install --no-install-recommends binutils zstd \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
-
+      && apt-get clean
   setup:
     - ls -la /packages
     # install all packages to same directory
@@ -176,7 +174,10 @@ shell:
       for f in /packages/*.deb; do
         /deb2distroless.sh $f /relocate
       done
+      exit 4
     - sed -i 's/usage-count yes;/usage-count no;/' /relocate/etc/drbd.d/global_common.conf
+    # cleanup
+    - rm -rf /var/lib/apt/lists/*
     - ls -la /relocate
 
 ---
