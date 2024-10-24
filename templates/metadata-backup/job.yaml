@@ -35,6 +35,9 @@ spec:
           - name: metadata-backup
             {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 12 }}
             image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
+            env:
+              - name: BACKUP_TYPE
+                value: "daily_backup"
             imagePullPolicy: IfNotPresent
             command:
               - /backup.py
