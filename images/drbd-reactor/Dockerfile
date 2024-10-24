@@ -62,6 +62,7 @@ COPY --from=reactor-builder /drbd-reactor_*.deb /packages/
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
  && apt-get -y install python3-toml \
+ && ls -la packages/ \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \
