@@ -37,7 +37,7 @@ spec:
             image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
             env:
             - name: BACKUP_TYPE
-              value: "weekly_backup"
+              value: "weekly-backup"
             imagePullPolicy: IfNotPresent
             command:
               - /backup.py

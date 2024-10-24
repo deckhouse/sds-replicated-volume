@@ -35,7 +35,7 @@ backup_type = os.getenv('BACKUP_TYPE')
 
 def create_backup(backup_date, labels={}):
     temp_path = tempfile.mkdtemp()
-    backup_archive = tarfile.open(f'{temp_path}/sds-replicated-volume_{backup_type}_{backup_date}.tar', "w")
+    backup_archive = tarfile.open(f'{temp_path}/sds-replicated-volume-{backup_type}-{backup_date}.tar', "w")
 
     for item in kubernetes.client.ApiextensionsV1Api().list_custom_resource_definition().items:
         if item.spec.group != linstorCRDGroup:
@@ -55,7 +55,7 @@ def create_backup(backup_date, labels={}):
 
     backup_archive.close()
 
-    with open(f'{temp_path}/sds-replicated-volume_{backup_type}_{backup_date}.tar', 'rb') as backup_archive:
+    with open(f'{temp_path}/sds-replicated-volume-{backup_type}-{backup_date}.tar', 'rb') as backup_archive:
         encoded_string = base64.b64encode(backup_archive.read())
 
     step = 262144 # 256KB
