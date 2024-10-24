@@ -8,7 +8,7 @@ memory: 25Mi
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: metadata-scheduled-backup
+  name: metadata-scheduled-backup-daily
   namespace: d8-{{ .Chart.Name }}
 spec:
   schedule: {{ dig "backup" "schedule" "5 * * * *" .Values.sdsReplicatedVolume }}
@@ -20,7 +20,7 @@ spec:
         metadata:
           namespace: d8-{{ .Chart.Name }}
           labels:
-            app: metadata-backup
+            app: metadata-backup-daily
         spec:
           restartPolicy: OnFailure
           {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 10 }}
