@@ -162,9 +162,11 @@ shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
     # install packages required by deb2distroless script
+    # https://salsa.debian.org/apt-team/apt-file
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends binutils zstd \
+      && apt-get -y install --no-install-recommends binutils zstd apt-file \
+      && apt-file update \
       && apt-get clean
   setup:
     - ls -la /packages
@@ -172,7 +174,7 @@ shell:
     # it's IMPORTANT!
     - |
       for f in /packages/*.deb; do
-        /deb2distroless.sh $f /relocate
+        /deb2distroless.sh $f /relocate /downloaded-cache
       done
       exit 4
     - sed -i 's/usage-count yes;/usage-count no;/' /relocate/etc/drbd.d/global_common.conf

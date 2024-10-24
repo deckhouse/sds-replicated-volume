@@ -4,6 +4,17 @@
 # DEB_FILE=$1
 
 IAM=$(basename $0)
+
+DEB_FILE=$1
+
+DEB_BASENAME=$(basename $DEB_FILE)
+# remove the last hyphen and everything after it
+PKG_NAME=${DEB_BASENAME%-*}
+
+EXTRACT_DIR="${2:-"/relocate/${PKG_NAME}"}"
+DOWNLOAD_DIR="${3:-"/download-cache"}"
+
+REQUIRED_CMDS=("apt-get" "dpkg-deb" "apt-file")
 EXCLUDED_DIRS=("etc/init.d" "lib/systemd" "usr/share/doc" "usr/share/man")
 BIN_DIRS=("usr/sbin" "usr/bin" "bin" "sbin")
 
@@ -12,18 +23,21 @@ function log() {
 	echo "${prefix} $@"
 }
 
-if ! [ -x "$(command -v apt-get)" ]; then
-  log "ERROR: apt-get is not installed." >&2
-  exit 1
-fi
-
-if ! [ -x "$(command -v dpkg-deb)" ]; then
-  log "ERROR: dpkg-deb is not installed." >&2
-  exit 1
-fi
+for cmd in ${REQUIRED_CMDS[@]}; do
+  if ! [ -x "$(command -v ${cmd})" ]; then
+    log "ERROR: ${cmd} is not installed." >&2
+    exit 1
+  fi
+done
 
 if [ -z "$( ls -A '/var/lib/apt/lists' )" ]; then
   log "ERROR: You must do 'apt-get update' before use this script."
+	exit 3
+fi
+
+# https://salsa.debian.org/apt-team/apt-file/-/blob/master/debian/apt-file.is-cache-empty
+if ! apt-get indextargets --format '$(CREATED_BY)' | grep -q ^Contents- ; then
+  log "ERROR: You must do 'apt-file update' before use this script."
 	exit 3
 fi
 
@@ -33,18 +47,21 @@ function download() {
 
 	log "Downloading ${download_pkg} to ${download_dir}..."
 	mkdir -p $download_dir
+	chown -R _apt:root ${download_dir}
+	cd ${download_dir}
 
-	apt-get --download-only -o Dir::Cache="${download_dir}/" -o Debug::NoLocking=1 install ${download_pkg}
+	# apt-get --download-only -o Dir::Cache="${download_dir}/" -o Debug::NoLocking=1 install ${download_pkg}
+	apt-get download -o Debug::NoLocking=1 ${download_pkg}
 }
 
 function extract() {
-	local deb_file=$1
+	local deb_file=${DEB_FILE}
   local deb_basename=$(basename $deb_file)
   # remove the last hyphen and everything after it
   local pkg_name=${deb_basename%-*}
 
-	local extract_dir="${2:-"/relocate/${pkg_name}"}"
-	local download_dir=$(pwd)
+	local extract_dir="${EXTRACT_DIR:-"/relocate/${pkg_name}"}"
+	#local download_dir="${DOWNLOAD_DIR:-"/download-cache"}"
 
   if [ -z "${deb_file}" -o ! -r "${deb_file}" ]; then
   	log "ERROR: Package ${deb_file} not found!"
@@ -95,12 +112,12 @@ function extract() {
 }
 
 function extract_libraries() {
-	local deb_file=$1
+	local deb_file=${DEB_FILE}
   local deb_basename=$(basename $deb_file)
   # remove the last hyphen and everything after it
   local pkg_name=${deb_basename%-*}
 
-	local extract_dir="${2:-"/relocate/${pkg_name}"}"
+	local extract_dir="${EXTRACT_DIR:-"/relocate/${pkg_name}"}"
 
 	for dir in ${BIN_DIRS[@]}; do
 	  dir_name="${extract_dir}/${dir}"
@@ -111,18 +128,31 @@ function extract_libraries() {
 		# find only non-empty binary files (https://stackoverflow.com/a/47678132)
     while IFS= read -r -d '' binfile; do
 			if [ $(grep -IL . "${binfile}") ]; then
-        log "[extract_libraries] Process binary file: $binfile"
+				process_binary "${binfile}"
 			fi
     done < <(find ${dir_name} -type f ! -size 0 -print0)
 	done
+}
 
-# ldd /bin/bash | awk '/=>/{print $(NF-1)}'  |
-#  while read n; do apt-file search $n; done |
-#   awk '{print $1}' | sed 's/://' | sort | uniq
+function process_binary() {
+	local bin="$1"
+	local download_dir="${DOWNLOAD_DIR}"
+
+	log "[process_binary] Process binary file: $bin"
+
+	mapfile -t packages < <(ldd "$bin" | awk '/=>/{print $(NF-1)}' |
+	while read n; do apt-file search $n; done |
+  awk '{print $1}' | sed 's/://' | sort | uniq)
+
+	for pkg in ${packages[@]}; do
+		download "${pkg}" "${download_dir}"
+	done
 }
 
 extract $@
 extract_libraries $@
+
+ls -laR ${DOWNLOAD_DIR}
 
 # generate a find-command to exclude some directories
 # https://stackoverflow.com/a/16595367
