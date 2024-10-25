@@ -9,9 +9,8 @@ final: false
 git:
   - add: /images/{{ $.ImageName }}
     to: /
-    includePaths:
-    - scripts
-    - tools
+    excludePaths:
+    - werf.inc.yaml
 
 shell:
   setup:
