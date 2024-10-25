@@ -18,12 +18,6 @@ git:
     stageDependencies:
       setup:
         - "**/*"
-
-  # - add: /images/{{ $.ImageName }}/scripts
-  #   to: /
-  #   stageDependencies:
-  #     setup:
-  #       - "**/*"
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
@@ -128,20 +122,12 @@ image: {{ $.ImageName }}-packages-artifact
 from: {{ $.BASE_UBUNTU }}
 final: false
 git:
-  - add: /images/{{ $.ImageName }}/scripts
+  - add: /images/scripts
     to: /
     stageDependencies:
       setup:
         - "**/*"
 import:
-  # - image: {{ $.ImageName }}-zstd-artifact
-  #   add: /
-  #   to: /
-  #   includePaths:
-  #     - usr/bin/unzstd
-  #     - usr/bin/zstd
-  #   before: setup
-
   - image: {{ $.ImageName }}-utils-artifact
     add: /
     to: /packages
@@ -169,14 +155,12 @@ shell:
       && apt-file update \
       && apt-get clean
   setup:
-    - ls -la /packages
-    # install all packages to same directory
-    # it's IMPORTANT!
     - |
       for f in /packages/*.deb; do
-        /deb2distroless.sh $f /relocate /downloaded-cache
+        /deb2distroless.sh -e /relocate -d /downloaded-cache $f
       done
-      exit 4
+      # now install (post-process) all downloaded depends
+      /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
     - sed -i 's/usage-count yes;/usage-count no;/' /relocate/etc/drbd.d/global_common.conf
     # cleanup
     - rm -rf /var/lib/apt/lists/*
@@ -191,20 +175,7 @@ import:
   - image: {{ $.ImageName }}-packages-artifact
     add: /relocate
     to: /
-    # includePaths:
-    #   # - drbd-utils_{{ $utils_version }}/**
-    #   - relocate/drbd-utils_{{ $utils_version }}/etc/**
-    #   - drbd-utils_{{ $utils_version }}/lib/**
-    #   - drbd-utils_{{ $utils_version }}/usr/**
-    #   - drbd-utils_{{ $utils_version }}/var/**
-    #   - drbd-reactor_{{ $reactor_version }}/etc/**
-    #   - drbd-reactor_{{ $reactor_version }}/lib/**
-    #   - drbd-reactor_{{ $reactor_version }}/usr/**
-      # - drbd-reactor_{{ $reactor_version }}/**/*.*
     before: setup
-shell:
-  setup:
-    - ls -la /usr/sbin
 docker:
   ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
   LABEL:
