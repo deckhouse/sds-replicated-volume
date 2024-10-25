@@ -1,0 +1,43 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
+{{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+
+{{- $controller_version := "0.3.0" }}
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_BULLSEYE }}
+final: false
+
+git:
+  - url: https://github.com/piraeusdatastore/linstor-affinity-controller
+    add: /
+    to: /usr/local/go/linstor-affinity-controller
+    tag: v{{ $controller_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/linstor-affinity-controller/cmd/linstor-affinity-controller
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ $controller_version }}"
+    - mv linstor-affinity-controller /
+    - chmod +x /linstor-affinity-controller
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /linstor-affinity-controller
+    to: /linstor-affinity-controller
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/linstor-affinity-controller"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-affinity-controller: {{ $controller_version }}

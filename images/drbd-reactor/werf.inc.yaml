@@ -169,7 +169,8 @@ shell:
 ---
 # main distroless image
 image: {{ $.ImageName }}
-from: {{ $.BASE_PYTHON }}
+# TODO: test why python3-toml package is needed in runtime image
+from: {{ $.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-packages-artifact
