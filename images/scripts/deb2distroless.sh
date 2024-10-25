@@ -3,7 +3,6 @@
 set -o errexit -o pipefail -o noclobber -o nounset
 
 # https://github.com/stickr-eng/heroku-buildpack-deb/blob/master/bin/compile
-# DEB_FILE=$1
 
 IAM=$(basename $0)
 
@@ -201,9 +200,44 @@ function process_binary() {
 
 	log "[process_binary] $bin"
 
-	mapfile -t packages < <(ldd "$bin" | awk '/=>/{print $(NF-1)}' |
+	#mapfile -t ldd_lines < <(ldd "$bin")
+
+	IFS=$'\n' read -rd '' -a ldd_lines <<< "$(ldd "$bin")"
+
+	echo "[debug] ldd_lines: ${ldd_lines[@]}"
+
+  local ldd_files=()
+	# local packages=()
+
+	for line in "${ldd_lines[@]}"; do
+    key="${line%%=>*}"
+    value="${line#*=>}"
+    key=$(echo "$key" | xargs)  # remove redundant spaces
+    value=$(echo "$value" | xargs)  # remove redundant spaces
+
+		if [[ "$value" == /* ]]; then
+			ldd_files+=("$value")
+		else
+			ldd_files+=("$key")
+		fi
+	done
+
+	echo "[debug] ldd_files: ${ldd_files[@]}"
+
+	# for ldd_file in "${ldd_files[@]}"; do
+	# 	apt-file search ${ldd_file} | awk '{print $1}' | sed 's/://' | sort | uniq
+	# done
+
+	mapfile -t packages < <(echo "${ldd_files[@]}" |
 	while read n; do apt-file search $n; done |
   awk '{print $1}' | sed 's/://' | sort | uniq)
+
+	echo "[debug] packages: ${packages[@]}"
+
+	if [ ${#packages[@]} -gt 20 ]; then
+		log "[process_binary] ERROR: Too much (${#packages[@]}) depends packages found. Aborting."
+		exit 200
+	fi
 
 	for pkg in ${packages[@]}; do
 		download "${pkg}" "${download_dir}"
@@ -221,7 +255,18 @@ function cleanup() {
 }
 
 if [ $POST_PROCESS -eq 0 ]; then
-  extract
+  if [ -z "${DEB_FILE}" -o ! -r "${DEB_FILE}" ]; then
+	  log "Looks like '${DEB_FILE}' is a package from APT's repo, not a .deb-file. Download and install it..."
+		download "${DEB_FILE}" "${DOWNLOAD_DIR}"
+
+  	for f in ${DOWNLOAD_DIR}/*.deb; do
+	  	extract "$f"
+	  done
+  else
+	  # if there is .deb file, then just extract it
+	  extract
+  fi
+
   extract_libraries
 else
   log "[Post process] Installing all packages from ${DOWNLOAD_DIR} to ${EXTRACT_DIR}..."

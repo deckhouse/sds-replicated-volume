@@ -152,7 +152,7 @@ shell:
     - |
       apt-get update \
       && apt-get -y install --no-install-recommends binutils zstd apt-file \
-      && apt-file update \
+      && apt-file update -a amd64 \
       && apt-get clean
   setup:
     - |
