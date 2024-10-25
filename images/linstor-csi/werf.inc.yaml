@@ -1,0 +1,52 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
+{{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+
+{{- $csi_version := "98544cadb6d111d27a86a11ec07de91b99704b82" }}
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_BULLSEYE }}
+final: false
+
+git:
+  - url: https://github.com/linbit/linstor-csi
+    add: /
+    to: /usr/local/go/linstor-csi
+    tag: {{ $csi_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/linstor-csi
+    - git apply /patches/*.patch
+    - cd cmd/linstor-csi
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ $csi_version }}"
+    - mv linstor-csi /
+    - chmod +x /linstor-csi
+
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /linstor-csi
+    to: /linstor-csi
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/linstor-csi"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-affinity-controller: {{ $controller_version }}
