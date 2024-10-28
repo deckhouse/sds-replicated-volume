@@ -64,7 +64,7 @@ shell:
     - ln -sf /proc/mounts /relocate/etc/mtab
     # cleanup
     - rm -rf /var/lib/apt/lists/*
-    - ls -la /relocate
+    - echo "Relocate dir content:" && ls -la /relocate
 
 ---
 image: {{ $.ImageName }}

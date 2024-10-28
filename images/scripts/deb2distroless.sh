@@ -200,17 +200,16 @@ function process_binary() {
 
 	log "[process_binary] $bin"
 
-	#mapfile -t ldd_lines < <(ldd "$bin")
+	IFS=$'\n' ldd_lines=( $(ldd "$bin") )
 
-	IFS=$'\n' read -rd '' -a ldd_lines <<< "$(ldd "$bin")"
-
-	echo "[debug] ldd_lines: ${ldd_lines[@]}"
+	# echo "[debug] ldd_lines: ${ldd_lines[@]}"
 
   local ldd_files=()
-	# local packages=()
 
 	for line in "${ldd_lines[@]}"; do
-    key="${line%%=>*}"
+		# remove something like (0x00007ffdf0199000) from line
+		line=$(echo $line | sed 's/(0x.*)//g' | xargs)
+		key="${line%%=>*}"
     value="${line#*=>}"
     key=$(echo "$key" | xargs)  # remove redundant spaces
     value=$(echo "$value" | xargs)  # remove redundant spaces
@@ -222,17 +221,26 @@ function process_binary() {
 		fi
 	done
 
-	echo "[debug] ldd_files: ${ldd_files[@]}"
+	local packages=()
+	for lib in "${ldd_files[@]}"; do
+		apt_package=$(apt-file search $lib || true)
+		if [ -z "$apt_package" ]; then
+			if [[ "${lib}" != "linux-vdso.so.1" ]]; then
+				# linux-vdso.so.1 It's a virtual shared object that doesn't have any physical file on the disk
+				# More info: https://stackoverflow.com/a/58657078
+		  	log "[process_binary] !!! Cannot find library for file '$lib'. Skipped!"
+			fi
+		else
+		  packages+=( $(echo $apt_package | awk '{print $1}' | sed 's/://') )
+		fi
+	done
+	IFS=$'\n' packages=( $(printf "%s\n" "${packages[@]}" | sort -u) ); unset IFS
 
-	# for ldd_file in "${ldd_files[@]}"; do
-	# 	apt-file search ${ldd_file} | awk '{print $1}' | sed 's/://' | sort | uniq
-	# done
+	# mapfile -t packages < <(echo "${ldd_files[@]}" |
+	# while read n; do apt-file search $n; done |
+  # awk '{print $1}' | sed 's/://' | sort | uniq)
 
-	mapfile -t packages < <(echo "${ldd_files[@]}" |
-	while read n; do apt-file search $n; done |
-  awk '{print $1}' | sed 's/://' | sort | uniq)
-
-	echo "[debug] packages: ${packages[@]}"
+	log "[process_binary] Detected packages for $bin: ${packages[@]}"
 
 	if [ ${#packages[@]} -gt 20 ]; then
 		log "[process_binary] ERROR: Too much (${#packages[@]}) depends packages found. Aborting."
