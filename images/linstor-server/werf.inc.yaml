@@ -1,0 +1,137 @@
+{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+{{- $_ := set . "BASE_PYTHON"     "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
+
+{{- $linstor_version := "1.24.2" }}
+# We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully.
+{{- $gradle_version := "6.9.3" }}
+
+---
+# build linstor-server.deb packages
+image: {{ $.ImageName }}-linstor-artifact
+from: {{ $.BASE_UBUNTU }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/linstor-server
+    add: /
+    to: /linstor-server
+    tag: v{{ $linstor_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install --no-install-recommends build-essential debhelper git default-jdk-headless gradle python3-all wget zip \
+      && apt-get -y install --no-install-recommends --reinstall ca-certificates \
+      && update-ca-certificates \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+  beforeSetup:
+    - mkdir /opt/gradle
+    - cd /opt/gradle
+    - wget -q https://services.gradle.org/distributions/gradle-{{ $gradle_version }}-bin.zip
+    - unzip gradle-{{ $gradle_version }}-bin.zip
+    - ln -s /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/local/bin/gradle
+  setup:
+      # Clone just the repository's .git folder
+    - git clone --no-checkout --depth 1 --branch v{{ $linstor_version }} https://github.com/LINBIT/linstor-server /git-repo.tmp
+      # Move the .git folder to the directory with the files.
+    - mv /git-repo.tmp/.git /linstor-server/
+      # Delete the temporary directory
+    - rmdir /git-repo.tmp
+    - cd /linstor-server
+      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
+      # WARNING: any local changes to the files will be lost.
+    - git reset --hard HEAD
+    - git config --global url."https://github.com/".insteadOf git://github.com/
+    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
+    # # cleanup all submodules directories, checked out by werf
+    # - rm -rf drbd-headers/*
+    # - git submodule update --init --checkout
+    # - install /dev/null /usr/local/bin/lbvers.py
+    - make debrelease VERSION={{ $linstor_version }}
+    - mv linstor-server-{{ $linstor_version }}.tar.gz ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
+    - tar -C / -xvf ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
+    - |
+      cd /linstor-server-{{ $linstor_version }}
+      dpkg-buildpackage -us -uc
+    - rm -rf /root/.gradle/caches/
+    - ls -la /
+
+
+---
+# get drbd-utils and drbd-reactor packages and install it into this artifact
+# image: {{ $.ImageName }}-packages-artifact
+# from: {{ $.BASE_UBUNTU }}
+# final: false
+# git:
+#   - add: /images/scripts
+#     to: /
+#     stageDependencies:
+#       setup:
+#         - "**/*"
+# import:
+#   - image: {{ $.ImageName }}-utils-artifact
+#     add: /
+#     to: /packages
+#     includePaths:
+#       - python-linstor_*.deb
+#       - drbd-utils_*.deb
+#       - thin-send-recv_*.deb
+#     before: setup
+
+#   - image: {{ $.ImageName }}-reactor-artifact
+#     add: /
+#     to: /packages
+#     includePaths:
+#       - drbd-reactor_*.deb
+#     before: setup
+
+# shell:
+#   install:
+#     - export DEBIAN_FRONTEND=noninteractive
+#     # install packages required by deb2distroless script
+#     # https://salsa.debian.org/apt-team/apt-file
+#     - |
+#       apt-get update \
+#       && apt-get -y install --no-install-recommends binutils zstd apt-file \
+#       && apt-file update -a amd64 \
+#       && apt-get clean
+#   setup:
+#     - |
+#       for f in /packages/*.deb; do
+#         /deb2distroless.sh -e /relocate -d /downloaded-cache $f
+#       done
+#       # now install (post-process) all downloaded depends
+#       /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
+#     - sed -i 's/usage-count yes;/usage-count no;/' /relocate/etc/drbd.d/global_common.conf
+#     # cleanup
+#     - rm -rf /var/lib/apt/lists/*
+#     - ls -la /relocate
+
+---
+# main distroless image
+image: {{ $.ImageName }}
+from: {{ $.BASE_SCRATCH }}
+
+# import:
+#   - image: {{ $.ImageName }}-packages-artifact
+#     add: /relocate
+#     to: /
+#     before: setup
+docker:
+  ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-server: {{ $linstor_version }}
