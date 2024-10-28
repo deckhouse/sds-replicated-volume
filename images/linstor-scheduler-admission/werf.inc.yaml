@@ -1,7 +1,7 @@
 {{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
 {{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
 
-{{- $controller_version := "0.3.0" }}
+{{- $extender_version := "0.3.2" }}
 
 ---
 image: {{ $.ImageName }}-golang-artifact
@@ -9,10 +9,10 @@ from: {{ $.BASE_GOLANG_BULLSEYE }}
 final: false
 
 git:
-  - url: https://github.com/piraeusdatastore/linstor-affinity-controller
+  - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: v{{ $controller_version }}
+    tag: v{{ $extender_version }}
     stageDependencies:
       setup:
         - "**/*"
@@ -21,8 +21,8 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-affinity-controller
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ $controller_version }}"
+    - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-scheduler-admission
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=vv{{ $extender_version }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
 ---
@@ -40,4 +40,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-affinity-controller: {{ $controller_version }}
+    linstor-scheduler-admission: {{ $extender_version }}
