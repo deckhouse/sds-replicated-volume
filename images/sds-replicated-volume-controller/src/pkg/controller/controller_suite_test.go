@@ -18,6 +18,7 @@ package controller_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	. "github.com/LINBIT/golinstor/client"
@@ -227,6 +228,7 @@ func getAndValidateSC(ctx context.Context, cl client.Client, replicatedSC srv.Re
 	Expect(*storageClass.AllowVolumeExpansion).To(BeTrue())
 	Expect(*storageClass.VolumeBindingMode).To(Equal(volumeBindingMode))
 	Expect(*storageClass.ReclaimPolicy).To(Equal(corev1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)))
+	Expect(slices.Contains(storageClass.ObjectMeta.Finalizers, controller.StorageClassFinalizerName)).To(BeTrue())
 
 	return storageClass
 }

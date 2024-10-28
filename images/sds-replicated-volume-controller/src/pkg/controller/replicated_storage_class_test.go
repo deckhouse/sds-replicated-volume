@@ -112,7 +112,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 					Name:            testName,
 					Namespace:       testNamespaceConst,
 					OwnerReferences: nil,
-					Finalizers:      nil,
+					Finalizers:      []string{controller.StorageClassFinalizerName},
 					ManagedFields:   nil,
 					Labels: map[string]string{
 						"storage.deckhouse.io/managed-by": "sds-replicated-volume",
@@ -788,7 +788,11 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			},
 		}
 
-		failedMessage := "[ReconcileReplicatedStorageClass] error updateStorageClassIfNeeded: [recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal (Old StorageClass: Retain, New StorageClass: not-equal"
+		failedMessage := "[ReconcileReplicatedStorageClass] error updateStorageClassIfNeeded: " +
+			"[recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: " +
+			"Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal " +
+			"(Old StorageClass: not-equal, New StorageClass: Retain"
+
 		err := cl.Create(ctx, &replicatedSC)
 		if err == nil {
 			defer func() {
@@ -1570,7 +1574,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 
-		scResourceAfterUpdate := controller.GetUpdatedStorageClass(&replicatedSC, storageClass, virtualizationEnabled)
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
 		Expect(scResourceAfterUpdate).NotTo(BeNil())
 		Expect(scResourceAfterUpdate.Annotations).To(BeNil())
 
@@ -1662,7 +1667,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeTrue())
 
-		scResource := controller.GetUpdatedStorageClass(&replicatedSC, storageClass, virtualizationEnabled)
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		controller.DoUpdateStorageClass(scResource, storageClass)
 		Expect(scResource).NotTo(BeNil())
 		Expect(scResource.Annotations).NotTo(BeNil())
 		Expect(len(scResource.Annotations)).To(Equal(2))
@@ -1727,8 +1733,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeFalse())
 
-		scResourceAfterUpdate := controller.GetUpdatedStorageClass(&replicatedSC, storageClass, virtualizationEnabled)
-		Expect(scResourceAfterUpdate).NotTo(BeNil())
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
 		Expect(scResourceAfterUpdate.Annotations).NotTo(BeNil())
 		Expect(len(scResourceAfterUpdate.Annotations)).To(Equal(1))
 		Expect(scResourceAfterUpdate.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
