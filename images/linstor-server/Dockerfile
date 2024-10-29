@@ -50,8 +50,8 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /linstor-api-py
 RUN git checkout v${API_VERSION} && git submodule update --init --recursive
+WORKDIR /linstor-api-py
 RUN make debrelease \
  && mv ./dist/python-linstor-${API_VERSION}.tar.gz ../python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz \
  && tar -C / -xvf /python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz
