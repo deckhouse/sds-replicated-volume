@@ -44,7 +44,8 @@ shell:
       # WARNING: any local changes to the files will be lost.
     - git reset --hard HEAD
     # cleanup all submodules directories, checked out by werf
-    - rm -rf drbd-headers/*
+    # use find instead of rm -rf because rm -rf does not remove hidden files
+    - find drbd-headers -name . -o -prune -exec rm -rf -- {} +
     - git submodule update --init --checkout
     - install /dev/null /usr/local/bin/lbvers.py
     # make fake git hash which should created by user/shared/drbd_buildtag.sh script because there is NO .git directory

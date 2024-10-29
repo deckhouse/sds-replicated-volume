@@ -1,0 +1,47 @@
+{{ define "utils:checkout-git" }}
+  # Clone just the repository's .git folder
+  - git clone --no-checkout --depth 1 --branch {{ .branch }} {{ .repo }} /git-repo.tmp
+  # Move the .git folder to the directory with the files.
+  - mv /git-repo.tmp/.git {{ .folder }}/
+  # Delete the temporary directory
+  - rmdir /git-repo.tmp
+  - cd {{ .folder }}
+    # git thinks all files are deleted, this reverts the state of the repo to HEAD.
+    # WARNING: any local changes to the files will be lost.
+  - git reset --hard HEAD
+  # cleanup all submodules directories, checked out by werf
+  # script from https://stackoverflow.com/a/53899440
+  - |
+    # SUBMODULES_BRANCHES is an array with items like:
+    # (submodule1-name submodule1-branch submodule2-name submodule2-branch)
+    SUBMODULES_BRANCHES=()
+    # .submodules is an list of (submodule1-name submodule1-branch,submodule2-name submodule2-branch)
+    # so, each module delimited with each other with comma WITHOUT SPACES (,)
+    {{- range $submod := $.submodules | splitList "," }}
+    SUBMODULES_BRANCHES+=( {{ $submod }} )
+    {{- end }}
+    echo "${SUBMODULES_BRANCHES[@]}"
+
+    git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+        while read -r KEY MODULE_PATH
+        do
+            # If the module's path exists, remove it.
+            # This is done b/c the module's path is currently
+            # not a valid git repo and adding the submodule will cause an error.
+            [ -d "${MODULE_PATH}" ] && rm -rf "${MODULE_PATH}"
+
+            NAME="$(echo "${KEY}" | sed 's/^submodule\.\(.*\)\.path$/\1/')"
+
+            url_key="$(echo "${KEY}" | sed 's/\.path$/.url/')"
+            branch_key="$(echo "${KEY}" | sed 's/\.path$/.branch/')"
+
+            URL="$(git config -f .gitmodules --get "${url_key}")"
+            BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
+
+            git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" "${URL}" "${MODULE_PATH}" || continue
+        done
+    git -C "{{ .folder }}" submodule update --init --recursive
+
+    # use find instead of rm -rf because rm -rf does not remove hidden files
+    # find linstor-common -name . -o -prune -exec rm -rf -- {} +
+{{ end }}
