@@ -93,7 +93,7 @@ ARG UTILS_VERSION=9.29.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
- && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
+ && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev jq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
