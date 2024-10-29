@@ -50,6 +50,7 @@ RUN apt-get update \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
+RUN git clone --recurse-submodules ${API_GITREPO} /linstor-api-py
 RUN git checkout v${API_VERSION} && git submodule update --init --recursive
 WORKDIR /linstor-api-py
 RUN make debrelease \
