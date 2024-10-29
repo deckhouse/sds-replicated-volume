@@ -3,7 +3,7 @@ ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e
 FROM $BASE_UBUNTU as utils-builder
 
 ARG UTILS_GITREPO=https://github.com/LINBIT/drbd-utils
-ARG UTILS_VERSION=9.28.0
+ARG UTILS_VERSION=9.29.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
@@ -34,7 +34,7 @@ RUN dpkg-buildpackage -us -uc
 FROM $BASE_UBUNTU as reactor-builder
 
 ARG REACTOR_GITREPO=https://github.com/LINBIT/drbd-reactor
-ARG REACTOR_VERSION=1.4.0
+ARG REACTOR_VERSION=1.5.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \

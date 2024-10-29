@@ -3,7 +3,7 @@ ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullsey
 
 FROM $BASE_GOLANG_BULLSEYE as builder
 ARG LINSTOR_AFFINITY_CONTROLLER_GITREPO=https://github.com/piraeusdatastore/linstor-affinity-controller
-ARG LINSTOR_AFFINITY_CONTROLLER_VERSION=0.3.0
+ARG LINSTOR_AFFINITY_CONTROLLER_VERSION=1.1.0
 
 RUN git clone ${LINSTOR_AFFINITY_CONTROLLER_GITREPO} /usr/local/go/linstor-affinity-controller \
  && cd /usr/local/go/linstor-affinity-controller \
