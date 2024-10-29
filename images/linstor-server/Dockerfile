@@ -182,7 +182,7 @@ RUN { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "fal
 
 # Install linstor-server
 RUN apt-get update \
- && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort \
+ && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort python3-setuptools \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \
