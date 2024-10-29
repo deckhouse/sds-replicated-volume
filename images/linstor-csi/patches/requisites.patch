@@ -1,16 +1,22 @@
+Subject: [PATCH] Fix requisites
+---
+Index: pkg/linstor/highlevelclient/high_level_client.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
 diff --git a/pkg/linstor/highlevelclient/high_level_client.go b/pkg/linstor/highlevelclient/high_level_client.go
-index 645599c..2f7c3f9 100644
---- a/pkg/linstor/highlevelclient/high_level_client.go
-+++ b/pkg/linstor/highlevelclient/high_level_client.go
-@@ -27,7 +27,6 @@ import (
+--- a/pkg/linstor/highlevelclient/high_level_client.go	(revision 4e4be7921b9e42f5f2ed155fc99014ac565e7f21)
++++ b/pkg/linstor/highlevelclient/high_level_client.go	(revision e825055f725e000f3630c26808d042a17bc47cfb)
+@@ -27,7 +27,6 @@
  	"github.com/container-storage-interface/spec/lib/go/csi"
- 
+
  	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
 -	"github.com/piraeusdatastore/linstor-csi/pkg/slice"
  	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
  	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
  )
-@@ -104,18 +103,8 @@ func (c *HighLevelClient) GetAllTopologyNodes(ctx context.Context, remoteAccessP
+@@ -104,18 +103,8 @@
  		accessibleSegments = []map[string]string{{}}
  	}
  

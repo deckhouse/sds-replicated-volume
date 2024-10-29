@@ -1,31 +1,24 @@
-From 110038fac54abe8f9d097d540c185a2a25eebb01 Mon Sep 17 00:00:00 2001
-From: Viktor Kramarenko <viktor.kramarenko@flant.com>
-Date: Tue, 16 Apr 2024 14:33:47 +0300
-Subject: [PATCH] Changed LinstorNodeKey and LinstorStoragePoolKeyPrefix
- consts. Signed-off-by: Viktor Kramarenko <viktor.kramarenko@flant.com>
-
+Subject: [PATCH] linbit labels changes
 ---
- pkg/topology/topology.go | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
-
+Index: pkg/topology/topology.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
 diff --git a/pkg/topology/topology.go b/pkg/topology/topology.go
-index c50d012..6dd92c5 100644
---- a/pkg/topology/topology.go
-+++ b/pkg/topology/topology.go
-@@ -47,11 +47,11 @@ const (
+--- a/pkg/topology/topology.go	(revision a0322d71ce98d92bdd4c357c9a366e149985dc5f)
++++ b/pkg/topology/topology.go	(revision 4e4be7921b9e42f5f2ed155fc99014ac565e7f21)
+@@ -47,11 +47,11 @@
  const (
  	// LinstorNodeKey refers to a node running the LINSTOR csi node service
  	// and the linstor Satellite and is therefore capable of hosting LINSTOR volumes.
 -	LinstorNodeKey = "linbit.com/hostname"
 +	LinstorNodeKey = "storage.deckhouse.io/sds-replicated-volume-hostname"
- 
+
  	// LinstorStoragePoolKeyPrefix is the prefix used when specifying the available storage
  	// pools on a node via CSI topology keys.
 -	LinstorStoragePoolKeyPrefix = "linbit.com/sp-"
 +	LinstorStoragePoolKeyPrefix = "storage.deckhouse.io/sds-replicated-volume-sp-"
- 
+
  	// LinstorStoragePoolValue is the value assigned to the storage pool label, given that the node has access to the
  	// storage pool.
--- 
-2.39.3 (Apple Git-145)
-

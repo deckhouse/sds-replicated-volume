@@ -1,8 +1,14 @@
+Subject: [PATCH] Fix csi path
+---
+Index: cmd/linstor-csi/linstor-csi.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
 diff --git a/cmd/linstor-csi/linstor-csi.go b/cmd/linstor-csi/linstor-csi.go
-index 20b09f5..8dac370 100644
---- a/cmd/linstor-csi/linstor-csi.go
-+++ b/cmd/linstor-csi/linstor-csi.go
-@@ -40,7 +40,7 @@ func main() {
+--- a/cmd/linstor-csi/linstor-csi.go	(revision 24ffba67ea151a0276bb418e65fd795b91779428)
++++ b/cmd/linstor-csi/linstor-csi.go	(revision a0322d71ce98d92bdd4c357c9a366e149985dc5f)
+@@ -42,7 +42,7 @@
  	var (
  		lsEndpoint            = flag.String("linstor-endpoint", "", "Controller API endpoint for LINSTOR")
  		lsSkipTLSVerification = flag.Bool("linstor-skip-tls-verification", false, "If true, do not verify tls")
@@ -11,16 +17,20 @@ index 20b09f5..8dac370 100644
  		node                  = flag.String("node", "", "Node ID to pass to node service")
  		logLevel              = flag.String("log-level", "info", "Enable debug log output. Choose from: panic, fatal, error, warn, info, debug")
  		rps                   = flag.Float64("linstor-api-requests-per-second", 0, "Maximum allowed number of LINSTOR API requests per second. Default: Unlimited")
+Index: pkg/linstor/const.go
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
 diff --git a/pkg/linstor/const.go b/pkg/linstor/const.go
-index 8b732ec..d18e968 100644
---- a/pkg/linstor/const.go
-+++ b/pkg/linstor/const.go
-@@ -24,7 +24,7 @@ import (
- 
+--- a/pkg/linstor/const.go	(revision 24ffba67ea151a0276bb418e65fd795b91779428)
++++ b/pkg/linstor/const.go	(revision a0322d71ce98d92bdd4c357c9a366e149985dc5f)
+@@ -24,7 +24,7 @@
+
  const (
  	// DriverName is the name used in CSI calls for this driver.
 -	DriverName = "linstor.csi.linbit.com"
 +	DriverName = "replicated.csi.storage.deckhouse.io"
- 
- 	// LegacyParameterPassKey is the Aux props key in linstor where serialized CSI parameters
- 	// are stored.
+
+ 	// LinstorBackupKVName is the name of the KV store used to map L2L backups to local snapshot names
+ 	LinstorBackupKVName = "csi-backup-mapping"
