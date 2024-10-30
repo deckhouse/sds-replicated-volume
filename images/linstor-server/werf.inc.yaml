@@ -40,40 +40,27 @@ shell:
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
   # old gradle is redundant now
-  # beforeSetup:
-  #   - mkdir /opt/gradle
-  #   - cd /opt/gradle
-  #   - wget -q https://services.gradle.org/distributions/gradle-{{ $gradle_version }}-bin.zip
-  #   - unzip gradle-{{ $gradle_version }}-bin.zip
-  #   - ln -s /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/local/bin/gradle
+  beforeSetup:
+    - mkdir /opt/gradle
+    - cd /opt/gradle
+    - wget -q https://services.gradle.org/distributions/gradle-{{ $gradle_version }}-bin.zip
+    - unzip gradle-{{ $gradle_version }}-bin.zip
+    - rm gradle-{{ $gradle_version }}-bin.zip
+    #- ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/bin/gradle
+    - ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/local/bin/gradle
   setup:
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
-    {{- $_ := set $ctx "branch" "v{{ $linstor_version }}" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $linstor_version) }}
     {{- $_ := set $ctx "folder" "/linstor-server" }}
-    {{- /* .submodules is an list of (submodule1-name submodule1-branch,submodule2-name submodule2-branch) }}
-    so, each module delimited with each other with comma WITHOUT SPACES (,) */}}
-    {{- /* If branch set to - (minus) then use branch from .git-submodules file */}}
-    {{- $_ := set $ctx "submodules" "linstor-common -" }}
-    {{ include "utils:checkout-git" $ctx }}
-      # Clone just the repository's .git folder
-    # - git clone --no-checkout --depth 1 --branch v{{ $linstor_version }} https://github.com/LINBIT/linstor-server /git-repo.tmp
-    #   # Move the .git folder to the directory with the files.
-    # - mv /git-repo.tmp/.git /linstor-server/
-    #   # Delete the temporary directory
-    # - rmdir /git-repo.tmp
-    # - cd /linstor-server
-    #   # git thinks all files are deleted, this reverts the state of the repo to HEAD.
-    #   # WARNING: any local changes to the files will be lost.
-    # - git reset --hard HEAD
-    # # cleanup all submodules directories, checked out by werf
-    # # use find instead of rm -rf because rm -rf does not remove hidden files
-    # - find linstor-common -name . -o -prune -exec rm -rf -- {} +
-    # - git submodule update --init --checkout
-    - git config --global url."https://github.com/".insteadOf git://github.com/
-    - git config --global user.email "builder@deckhouse.io"
-    - git config --global user.name "deckhouse"
+    {{- /* .submodules is an list of (submodule1-name=submodule1-branch submodule2-name=) */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- $_ := set $ctx "submodules" "linstor-common=999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
     - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git am /patches/*.patch || echo "Git patches not found. Skipped"'
+    - git tag -f v{{ $linstor_version }}
+    - ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/bin/gradle
+    - ./gradlew --version
     - make debrelease VERSION={{ $linstor_version }}
     - mv linstor-server-{{ $linstor_version }}.tar.gz ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
     - tar -C / -xvf ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz

@@ -9,19 +9,20 @@
     # git thinks all files are deleted, this reverts the state of the repo to HEAD.
     # WARNING: any local changes to the files will be lost.
   - git reset --hard HEAD
+  - git config --global url."https://github.com/".insteadOf git://github.com/
+  - git config --global user.email "builder@deckhouse.io"
+  - git config --global user.name "deckhouse"
   # cleanup all submodules directories, checked out by werf
   # script from https://stackoverflow.com/a/53899440
   - |
-    # SUBMODULES_BRANCHES is an array with items like:
-    # (submodule1-name submodule1-branch submodule2-name submodule2-branch)
     SUBMODULES_BRANCHES=()
-    # .submodules is an list of (submodule1-name submodule1-branch,submodule2-name submodule2-branch)
-    # so, each module delimited with each other with comma WITHOUT SPACES (,)
-    {{- range $submod := $.submodules | splitList "," }}
+    # .submodules is an list of (submodule1-name=submodule1-branch submodule2-name=)
+    # If branch is not set then using branch from .git-submodules file
+    {{- range $submod := $.submodules | default "" | splitList " " }}
     SUBMODULES_BRANCHES+=( {{ $submod }} )
     {{- end }}
-    echo "${SUBMODULES_BRANCHES[@]}"
 
+    echo "Processing submodules: ${SUBMODULES_BRANCHES[@]}"
     git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
         while read -r KEY MODULE_PATH
         do
@@ -37,11 +38,25 @@
 
             URL="$(git config -f .gitmodules --get "${url_key}")"
             BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
+            for submod in "${SUBMODULES_BRANCHES[@]}"; do
+              submod_name=${submod%=*}
+              submod_branch=${submod#*=}
 
-            git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" "${URL}" "${MODULE_PATH}" || continue
+              if [ -n "${submod_branch}" -a "${NAME}"=="${submod_name}" ]; then
+                echo "Override BRANCH with '${submod_branch}' for submodule '${NAME}'"
+                BRANCH="${submod_branch}"
+              fi
+            done
+
+            git -C "{{ .folder }}" submodule set-branch --branch ${BRANCH} -- ${MODULE_PATH}
+            git -C "{{ .folder }}" submodule add --force --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
+            echo "submodule ${NAME} ${MODULE_PATH} head commit: " && git -C "{{ .folder }}/${MODULE_PATH}" rev-parse HEAD
         done
-    git -C "{{ .folder }}" submodule update --init --recursive
+    git -C "{{ .folder }}" submodule update --init --recursive --checkout
+    echo "After update linstor-common head commit: " && git -C "{{ .folder }}/linstor-common" rev-parse HEAD
 
-    # use find instead of rm -rf because rm -rf does not remove hidden files
-    # find linstor-common -name . -o -prune -exec rm -rf -- {} +
+    if ! tmp=$(git diff --name-status HEAD 2>&1) || test -n "$tmp" ; then
+      echo "Auto-commit changes in .gitmodules"
+      git -C "{{ .folder }}" commit -am "Auto-commit changes in .gitmodules"
+    fi
 {{ end }}
