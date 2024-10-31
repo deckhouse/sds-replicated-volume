@@ -12,6 +12,7 @@
   - git config --global url."https://github.com/".insteadOf git://github.com/
   - git config --global user.email "builder@deckhouse.io"
   - git config --global user.name "deckhouse"
+  - git config --global advice.detachedHead false
   # cleanup all submodules directories, checked out by werf
   # script from https://stackoverflow.com/a/53899440
   - |
@@ -38,22 +39,22 @@
 
             URL="$(git config -f .gitmodules --get "${url_key}")"
             BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
+
+            git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
+
             for submod in "${SUBMODULES_BRANCHES[@]}"; do
               submod_name=${submod%=*}
               submod_branch=${submod#*=}
 
               if [ -n "${submod_branch}" -a "${NAME}"=="${submod_name}" ]; then
-                echo "Override BRANCH with '${submod_branch}' for submodule '${NAME}'"
-                BRANCH="${submod_branch}"
+                echo "Checkout branch/commit '${submod_branch}' for submodule '${NAME}'"
+                git -C "{{ .folder }}" submodule set-branch --branch ${submod_branch} -- ${MODULE_PATH}
+                git -C "{{ .folder }}/${MODULE_PATH}" checkout -f ${submod_branch}
               fi
             done
-
-            git -C "{{ .folder }}" submodule set-branch --branch ${BRANCH} -- ${MODULE_PATH}
-            git -C "{{ .folder }}" submodule add --force --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
-            echo "submodule ${NAME} ${MODULE_PATH} head commit: " && git -C "{{ .folder }}/${MODULE_PATH}" rev-parse HEAD
         done
-    git -C "{{ .folder }}" submodule update --init --recursive --checkout
-    echo "After update linstor-common head commit: " && git -C "{{ .folder }}/linstor-common" rev-parse HEAD
+    # DO NOT do submodule update, or it revert all changes for submodule's branches back :-(
+    # git -C "{{ .folder }}" submodule update --init --recursive
 
     if ! tmp=$(git diff --name-status HEAD 2>&1) || test -n "$tmp" ; then
       echo "Auto-commit changes in .gitmodules"
