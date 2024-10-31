@@ -1,5 +1,6 @@
 {{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
 {{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+{{- $_ := set . "BASE_GOLANG"     "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
 {{- $_ := set . "BASE_PYTHON"     "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
 
 {{- $linstor_version := "1.24.2" }}
@@ -9,6 +10,8 @@
 {{- $api_version := "1.19.0" }}
 {{- $client_version := "1.19.0" }}
 {{- $common_submodule_version := "999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec" }}
+{{- $k8s_await_election_version := "0.3.1" }}
+{{- $utils_version := "9.28.0" }}
 
 ---
 # build linstor-server.deb packages
@@ -94,11 +97,11 @@ git:
       setup:
         - "**/*"
 
-  - add: /images/{{ $.ImageName }}/patches
-    to: /patches
-    stageDependencies:
-      setup:
-        - "**/*"
+  # - add: /images/{{ $.ImageName }}/patches
+  #   to: /patches
+  #   stageDependencies:
+  #     setup:
+  #       - "**/*"
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
@@ -147,6 +150,25 @@ shell:
     {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
 
     - ls -la /
+
+---
+image: {{ $.ImageName }}-k8s-await-election-artifact
+from: {{ $.BASE_GOLANG }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/k8s-await-election
+    add: /
+    to: /usr/local/go/k8s-await-election
+    tag: v{{ $k8s_await_election_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  setup:
+    - cd /usr/local/go/k8s-await-election
+    - make
+    - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
 ---
 # get drbd-utils and drbd-reactor packages and install it into this artifact
@@ -202,7 +224,7 @@ shell:
 # main distroless image
 image: {{ $.ImageName }}
 from: {{ $.BASE_SCRATCH }}
-
+# TODO: get drbd-utils-artifact from drbd-reactor image
 # import:
 #   - image: {{ $.ImageName }}-packages-artifact
 #     add: /relocate

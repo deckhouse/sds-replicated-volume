@@ -28,47 +28,27 @@ shell:
       && update-ca-certificates \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
-    - |
-      sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen
-      locale-gen
-      export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+  beforeSetup:
+    - sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+    - export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
   setup:
-      # Clone just the repository's .git folder
-    - git clone --no-checkout --depth 1 --branch v{{ $utils_version }} https://github.com/LINBIT/drbd-utils /git-repo.tmp
-      # Move the .git folder to the directory with the files.
-    - mv /git-repo.tmp/.git drbd-utils/
-      # Delete the temporary directory
-    - rmdir /git-repo.tmp
-    - cd /drbd-utils
-      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
-      # WARNING: any local changes to the files will be lost.
-    - git reset --hard HEAD
-    # cleanup all submodules directories, checked out by werf
-    # use find instead of rm -rf because rm -rf does not remove hidden files
-    - find drbd-headers -name . -o -prune -exec rm -rf -- {} +
-    - git submodule update --init --checkout
+    # clone drbd-utils git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-utils" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $utils_version) }}
+    {{- $_ := set $ctx "folder" "/drbd-utils" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
     - install /dev/null /usr/local/bin/lbvers.py
-    # make fake git hash which should created by user/shared/drbd_buildtag.sh script because there is NO .git directory
-    # - echo -e '#define GITHASH "123456"\n#define GITDIFF ""' > user/shared/drbd_buildtag.h
-    # generate fake git ls-files list which used in Makefile
-    # - find "${PWD}" > .git-ls-files
-    # patch Makefile.in to work without git-related commands because there is NO .git folder
-    # - patch < /patches/Makefile.in.patch
-    # remove tests to build successfully
-    # replace git ls-files with just ls -R
-    # - sed -i 's/$(GIT) ls-files/ls -R/g' Makefile.in
-    # replace git submodule's path with empty string
-    # \x27 is a ' (single quote)
-    # - sed -i -r 's~(\$\(GIT\) submodule foreach.*echo \$\$path\x27)~echo \"\"~g' Makefile.in
-    - ./autogen.sh
-    - ./configure
-    - make debrelease VERSION={{ $utils_version }}
-    - mv drbd-utils-{{ $utils_version }}.tar.gz ../drbd-utils_$(echo {{ $utils_version }} | tr '-' '~').orig.tar.gz
-    - tar -C / -xvf ../drbd-utils_$(echo {{ $utils_version }} | tr '-' '~').orig.tar.gz
-    - |
-      cd /drbd-utils-{{ $utils_version }}
-      dpkg-buildpackage -us -uc
-      ls -la /
+    - ./autogen.sh && ./configure
+
+    # make .deb package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "drbd-utils" }}
+    {{- $_ := set $ctx "version" $utils_version }}
+    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+
+    - ls -la /
 
 ---
 # build drbd-reactor .deb packages
