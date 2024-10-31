@@ -1,4 +1,22 @@
+{{- /*
+  utils:checkout-git clone a specified Git repo and its submodules
+  Parameters (* for required):
+    * .folder     - Folder path to which clone the repo
+    * .repo       - Git repo URL
+    * .branch     - Name of branch/commit/tag to clone
+      .submodules - String with submodules and their's branches like: "submodule1-name=submodule1-branch submodule2-name="
+                    If branch is not set then branch will use from .git-submodules file
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
+  {{- $_ := set $ctx "branch" (printf "v%s" $linstor_version) }}
+  {{- $_ := set $ctx "folder" "/linstor-server" }}
+  {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
+  {{- include "utils:checkout-git" $ctx | nindent 2 }}
+*/}}
+
 {{ define "utils:checkout-git" }}
+  - 'echo ">>> utils:checkout-git <<< folder={{ .folder }} repo={{ .repo }} branch={{ .branch }}"'
   # Clone just the repository's .git folder
   - git clone --no-checkout --depth 1 --branch {{ .branch }} {{ .repo }} /git-repo.tmp
   # Move the .git folder to the directory with the files.
@@ -17,7 +35,7 @@
   # script from https://stackoverflow.com/a/53899440
   - |
     SUBMODULES_BRANCHES=()
-    # .submodules is an list of (submodule1-name=submodule1-branch submodule2-name=)
+    # .submodules is a string like "submodule1-name=submodule1-branch submodule2-name="
     # If branch is not set then using branch from .git-submodules file
     {{- range $submod := $.submodules | default "" | splitList " " }}
     SUBMODULES_BRANCHES+=( {{ $submod }} )
@@ -60,4 +78,27 @@
       echo "Auto-commit changes in .gitmodules"
       git -C "{{ .folder }}" commit -am "Auto-commit changes in .gitmodules"
     fi
+{{ end }}
+
+{{- /*
+  utils:build-deb-pkg builds a Debian/Ubuntu .deb package from current folder
+  Requirements: build-essential, debhelper and other build tools should be already installed in build container
+  Parameters (* for required):
+    * .name       - Name of deb package
+    * .version    - Desired version of deb package
+      .gen_path   - Path to files generated with 'make debrelease'. If not specified, then use current directory
+
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "name" "linstor-server" }}
+  {{- $_ := set $ctx "version" $linstor_version }}
+  {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+*/}}
+{{ define "utils:build-deb-pkg" }}
+  - 'echo ">>> utils:build-deb-pkg <<< name={{ .name }} version={{ .version }} pwd=$(pwd)"'
+  - make debrelease VERSION={{ .version }}
+  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz ../{{ .name }}_$(echo {{ .version }} | tr '-' '~').orig.tar.gz
+  - tar -C / -xvf ../{{ .name }}_$(echo {{ .version }} | tr '-' '~').orig.tar.gz
+  - cd /{{ .name }}-{{ .version }}
+  - dpkg-buildpackage -us -uc
 {{ end }}

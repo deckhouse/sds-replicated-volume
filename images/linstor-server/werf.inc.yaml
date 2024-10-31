@@ -50,22 +50,25 @@ shell:
     - rm gradle-{{ $gradle_version }}-bin.zip
     - ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/local/bin/gradle
   setup:
+    # clone linstor-server git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
     {{- $_ := set $ctx "branch" (printf "v%s" $linstor_version) }}
     {{- $_ := set $ctx "folder" "/linstor-server" }}
-    {{- /* .submodules is an list of (submodule1-name=submodule1-branch submodule2-name=) */}}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
     {{- /* If branch is not set then using branch from .git-submodules file */}}
-    {{- $_ := set $ctx "submodules" "linstor-common=999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec" }}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    # apply git patches to upstream's code
     - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git am /patches/*.patch || echo "Git patches not found. Skipped"'
     - git tag -f v{{ $linstor_version }}
-    - make debrelease VERSION={{ $linstor_version }}
-    - mv linstor-server-{{ $linstor_version }}.tar.gz ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
-    - tar -C / -xvf ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
-    - |
-      cd /linstor-server-{{ $linstor_version }}
-      dpkg-buildpackage -us -uc
+
+    # make .deb package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "linstor-server" }}
+    {{- $_ := set $ctx "version" $linstor_version }}
+    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    # some cleanup
     - rm -rf /root/.gradle/caches/
     - ls -la /
 
@@ -107,29 +110,42 @@ shell:
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
   setup:
-    # TODO: move this to define
-      # Clone just the repository's .git folder
-    - git clone --no-checkout --depth 1 --branch v{{ $api_version }} https://github.com/LINBIT/linstor-api-py /git-repo.tmp
-      # Move the .git folder to the directory with the files.
-    - mv /git-repo.tmp/.git /linstor-api-py/
-      # Delete the temporary directory
-    - rmdir /git-repo.tmp
-    - cd /linstor-api-py
-      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
-      # WARNING: any local changes to the files will be lost.
-    - git reset --hard HEAD
-    # cleanup all submodules directories, checked out by werf
-    # use find instead of rm -rf because rm -rf does not remove hidden files
-    - find linstor-common -name . -o -prune -exec rm -rf -- {} +
-    - git submodule update --init --checkout
-    - cd linstor-common && git checkout {{ $common_submodule_version }} && cd ..
-    - make debrelease VERSION={{ $client_version }}
-    - mv dist/python-linstor-{{ $api_version }}.tar.gz ../python-linstor_$(echo {{ $api_version }} | tr '-' '~').orig.tar.gz
-    - tar -C / -xvf ../python-linstor_$(echo {{ $api_version }} | tr '-' '~').orig.tar.gz
-    - |
-      cd /python-linstor-{{ $api_version }}
-      dpkg-buildpackage -us -uc
-    - rm -rf /linstor-api-py && mv /python-linstor-{{ $api_version }} /linstor-api-py
+    # clone linstor-api-py git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-api-py" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $api_version) }}
+    {{- $_ := set $ctx "folder" "/linstor-api-py" }}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    # make .deb package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "python-linstor" }}
+    {{- $_ := set $ctx "version" $api_version }}
+    {{- $_ := set $ctx "gen_path" "./dist" }}
+    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+
+    - rm -rf /linstor-api-py && mv /{{ $ctx.name }}-{{ $ctx.version }} /linstor-api-py
+
+    # clone linstor-client git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-client" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $client_version) }}
+    {{- $_ := set $ctx "folder" "/linstor-client" }}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- /* $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) */}}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    # make .deb package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "linstor-client" }}
+    {{- $_ := set $ctx "version" $client_version }}
+    {{- $_ := set $ctx "gen_path" "./dist" }}
+    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+
     - ls -la /
 
 ---
