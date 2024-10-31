@@ -3,7 +3,8 @@
 {{- $_ := set . "BASE_PYTHON"     "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
 
 {{- $linstor_version := "1.24.2" }}
-# We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully.
+# We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
+# Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
 {{- $gradle_version := "6.9.3" }}
 {{- $api_version := "1.19.0" }}
 {{- $client_version := "1.19.0" }}
@@ -39,14 +40,14 @@ shell:
       && update-ca-certificates \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
-  # old gradle is redundant now
+  # We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
+  # Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
   beforeSetup:
     - mkdir /opt/gradle
     - cd /opt/gradle
     - wget -q https://services.gradle.org/distributions/gradle-{{ $gradle_version }}-bin.zip
     - unzip gradle-{{ $gradle_version }}-bin.zip
     - rm gradle-{{ $gradle_version }}-bin.zip
-    #- ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/bin/gradle
     - ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/local/bin/gradle
   setup:
     {{- $ctx := dict }}
@@ -59,8 +60,6 @@ shell:
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git am /patches/*.patch || echo "Git patches not found. Skipped"'
     - git tag -f v{{ $linstor_version }}
-    - ln -sf /opt/gradle/gradle-{{ $gradle_version }}/bin/gradle /usr/bin/gradle
-    - ./gradlew --version
     - make debrelease VERSION={{ $linstor_version }}
     - mv linstor-server-{{ $linstor_version }}.tar.gz ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
     - tar -C / -xvf ../linstor-server_$(echo {{ $linstor_version }} | tr '-' '~').orig.tar.gz
