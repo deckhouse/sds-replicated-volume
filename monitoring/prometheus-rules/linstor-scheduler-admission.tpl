@@ -35,6 +35,4 @@
           The recommended course of action:
           1. Retrieve details of the Deployment: `kubectl -n d8-sds-replicated-volume describe deploy linstor-scheduler-admission`
           2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod -l app=linstor-scheduler-admission`
-{{- else }}
-[]
 {{- end }}
