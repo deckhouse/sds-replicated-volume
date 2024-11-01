@@ -1,4 +1,4 @@
-{{- if (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
+{{- if and (ne "dev" .Values.global.deckhouseVersion) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 - name: kubernetes.linstor.scheduler_state
   rules:
     - alert: D8LinstorSchedulerAdmissionPodIsNotReady
