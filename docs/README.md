@@ -265,7 +265,8 @@ kubectl get sc replicated-storage-class
 
 ## System requirements and recommendations
 
-### Requirements
+### Requirements 
+(Applies for signle-zone and multi-zone deployments)
 - Stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
 - High-speed 10Gbps network or more.
 - Network latency between nodes must be between 0.5ms - 1ms in order to achive highest performance
