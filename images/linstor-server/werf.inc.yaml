@@ -13,10 +13,23 @@
 {{- $k8s_await_election_version := "0.3.1" }}
 {{- $piraeus_version := "20e96f83f52631dc06d011b7f96293d4026236a1" }}
 
+# just a list with AltLinux's packages replaces Ubuntu's ones
+
+# Ubuntu package       | AltLinux package
+#########################################
+# default-jre-headless | java-11-openjre-headless
+# dnsutils             | bind-utils
+# gradle               | javapackages-tools
+# iputils-ping         | iputils
+# nvme-cli             | nvme
+# python3-all          | python3
+# python3-natsort      | python3-module-natsort
+# zfsutils-linux       | zfs-utils
+
 ---
 # build linstor-server.deb packages
 image: {{ $.ImageName }}-server-artifact
-from: {{ $.BASE_UBUNTU }}
+from: {{ $.BASE_ALT_P11 }}
 final: false
 
 git:
@@ -36,11 +49,14 @@ git:
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
+    # in Alt Linux there is no '--no-install-recommends' apt-get option
+    # in Alt Linux there is no '--reinstall' apt-get option (apt-get -y install --reinstall ca-certificates)
+    # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends build-essential debhelper git default-jdk-headless gradle python3-all wget zip rpm \
-      && apt-get -y install --no-install-recommends --reinstall ca-certificates \
-      && update-ca-certificates \
+      && apt-get -y install build-essential debhelper git java-11-openjdk-headless python3 wget unzip \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
   # We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
@@ -70,8 +86,7 @@ shell:
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-server" }}
     {{- $_ := set $ctx "version" $linstor_version }}
-    {{- $_ := set $ctx "spec" "linstor.spec" }}
-    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
     # some cleanup
     - rm -rf /root/.gradle/caches/
     - ls -la /
@@ -291,19 +306,6 @@ shell:
     # Script for cleaner sidecar
     - cp /utils/cleaner.py /cleaner.py && chmod 755 /cleaner.py
 
-
-  # just a list with AltLinux's packages replaces Ubuntu's ones
-
-  # Ubuntu package       | AltLinux package
-  #########################################
-  # iputils-ping         | iputils
-  # dnsutils             | bind-utils
-  # nvme-cli             | nvme
-  # zfsutils-linux       | zfs-utils
-  # default-jre-headless | java-11-openjdk-headless
-  # python3-all          | python3
-  # python3-natsort      | python3-module-natsort
-
   setup:
     # Source https://github.com/piraeusdatastore/piraeus/blob/master/dockerfiles/piraeus-server/Dockerfile
     - |
@@ -341,7 +343,7 @@ shell:
 
     # Install linstor-server
     - |
-      apt-get install -y java-11-openjdk-headless thin-provisioning-tools python3 python3-module-natsort
+      apt-get install -y java-11-openjre-headless thin-provisioning-tools python3 python3-module-natsort
       # .deb-packages "installed" (more pricesely just extracted) in packages-artifact
       # dpkg -i packages/*.deb
       sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
