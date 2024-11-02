@@ -38,7 +38,7 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends build-essential debhelper git default-jdk-headless gradle python3-all wget zip \
+      && apt-get -y install --no-install-recommends build-essential debhelper git default-jdk-headless gradle python3-all wget zip rpm \
       && apt-get -y install --no-install-recommends --reinstall ca-certificates \
       && update-ca-certificates \
       && apt-get clean \
@@ -70,10 +70,12 @@ shell:
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-server" }}
     {{- $_ := set $ctx "version" $linstor_version }}
-    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    {{- $_ := set $ctx "spec" "linstor.spec" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
     # some cleanup
     - rm -rf /root/.gradle/caches/
     - ls -la /
+    - exit 5
 
 ---
 image: {{ $.ImageName }}-client-artifact
@@ -166,76 +168,16 @@ shell:
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
 ---
-# install piraeus, and combine all other packages into this artifact
-# image: {{ $.ImageName }}-packages-artifact
-# from: {{ $.BASE_UBUNTU }}
-# final: false
-# git:
-#   - add: /images/scripts
-#     to: /
-#     stageDependencies:
-#       setup:
-#         - "**/*"
-# import:
-#   - image: {{ $.ImageName }}-server-artifact
-#     add: /
-#     to: /packages
-#     includePaths:
-#       - linstor-common_*.deb
-#       - linstor-controller_*.deb
-#       - linstor-satellite_*.deb
-#     before: setup
-
-#   - image: {{ $.ImageName }}-client-artifact
-#     add: /
-#     to: /packages
-#     includePaths:
-#       - python-linstor_*.deb
-#       - linstor-client_*.deb
-#     before: setup
-
-#   - image: drbd-reactor-utils-artifact
-#     add: /
-#     # to /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
-#     to: /drbd-utils
-#     includePaths:
-#       - python-linstor_*.deb
-#       - drbd-utils_*.deb
-#       - thin-send-recv_*.deb
-#     before: setup
-
-#   - image: {{ $.ImageName }}-k8s-await-election-artifact
-#     add: /
-#     to: /usr/bin
-#     includePaths:
-#       - k8s-await-election
-#     before: setup
-
-# shell:
-#   install:
-#     - export DEBIAN_FRONTEND=noninteractive
-#     # install packages required by deb2distroless script
-#     # https://salsa.debian.org/apt-team/apt-file
-#     - |
-#       apt-get update \
-#       && apt-get -y install --no-install-recommends binutils zstd apt-file \
-#       && apt-file update -a amd64 \
-#       && apt-get clean
-#   setup:
-#     # - |
-#     #   for f in /packages/*.deb; do
-#     #     /deb2distroless.sh -e /relocate -d /downloaded-cache $f
-#     #   done
-#     #   # now install (post-process) all downloaded depends
-#     #   /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
-#     # cleanup
-#     - rm -rf /var/lib/apt/lists/*
-#     - ls -la /relocate
-
----
-# main image based on AltLinux for now because we need bash and other tools
-image: {{ $.ImageName }}
-from: {{ $.BASE_ALT_P11 }}
+# extract all packages into this artifact
+image: {{ $.ImageName }}-packages-artifact
+from: {{ $.BASE_UBUNTU }}
+final: false
+git:
+  - add: /images/scripts
+    to: /
+    stageDependencies:
+      setup:
+        - "**/*"
 import:
   - image: {{ $.ImageName }}-server-artifact
     add: /
@@ -256,13 +198,74 @@ import:
 
   - image: drbd-reactor-utils-artifact
     add: /
-    # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
+    # to /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
     to: /drbd-utils
     includePaths:
       - python-linstor_*.deb
       - drbd-utils_*.deb
       - thin-send-recv_*.deb
     before: setup
+
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    # install packages required by deb2distroless script
+    # https://salsa.debian.org/apt-team/apt-file
+    - |
+      apt-get update \
+      && apt-get -y install --no-install-recommends binutils zstd apt-file \
+      && apt-file update -a amd64 \
+      && apt-get clean
+  setup:
+    - mv /drbd-utils/* /packages/
+    - |
+      for f in /packages/*.deb; do
+        /deb2distroless.sh -e /relocate -d /downloaded-cache $f
+      done
+      # now install (post-process) all downloaded depends
+      /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
+    # cleanup
+    - rm -rf /var/lib/apt/lists/*
+    - ls -la /relocate
+
+---
+# main image based on AltLinux for now because we need bash and other tools
+image: {{ $.ImageName }}
+from: {{ $.BASE_ALT_P11 }}
+git:
+  - add: /images/{{ $.ImageName }}
+    to: /utils
+    stageDependencies:
+      install:
+        - "**/*"
+
+import:
+  # - image: {{ $.ImageName }}-server-artifact
+  #   add: /
+  #   to: /packages
+  #   includePaths:
+  #     - linstor-common_*.deb
+  #     - linstor-controller_*.deb
+  #     - linstor-satellite_*.deb
+  #   before: setup
+
+  # - image: {{ $.ImageName }}-client-artifact
+  #   add: /
+  #   to: /packages
+  #   includePaths:
+  #     - python-linstor_*.deb
+  #     - linstor-client_*.deb
+  #   before: setup
+
+  # - image: drbd-reactor-utils-artifact
+  #   add: /
+  #   # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
+  #   to: /drbd-utils
+  #   includePaths:
+  #     - python-linstor_*.deb
+  #     - drbd-utils_*.deb
+  #     - thin-send-recv_*.deb
+  #   before: setup
 
   - image: {{ $.ImageName }}-k8s-await-election-artifact
     add: /
@@ -271,23 +274,37 @@ import:
       - k8s-await-election
     before: setup
 
-# import:
-#   - image: {{ $.ImageName }}-packages-artifact
-#     add: /relocate
-#     to: /
-#     before: setup
+  # - image: {{ $.ImageName }}-packages-artifact
+  #   add: /relocate
+  #   to: /relocate
+  #   before: setup
 shell:
+  # add some scripts to image to be able to use them
+  install:
+    # Add liveness probe scripts
+    - cp /utils/liveness.sh /liveness.sh && cp /utils/liveness-satellite.sh /liveness-satellite.sh
+    - chmod 755 /liveness.sh /liveness-satellite.sh
+
+    # Add wrapper for linstor client with only allowed commands
+    - cp /utils/client-wrapper.sh /usr/local/bin/linstor && chmod 755 /usr/local/bin/linstor
+
+    # Script for cleaner sidecar
+    - cp /utils/cleaner.py /cleaner.py && chmod 755 /cleaner.py
+
+
   # just a list with AltLinux's packages replaces Ubuntu's ones
 
-  # Ubuntu package | AltLinux package
-  ###################################
-  # iputils-ping   | iputils
-  # dnsutils       | bind-utils
-  # nvme-cli       | nvme
-  # zfsutils-linux | zfs-utils
+  # Ubuntu package       | AltLinux package
+  #########################################
+  # iputils-ping         | iputils
+  # dnsutils             | bind-utils
+  # nvme-cli             | nvme
+  # zfsutils-linux       | zfs-utils
+  # default-jre-headless | java-11-openjdk-headless
+  # python3-all          | python3
+  # python3-natsort      | python3-module-natsort
 
   setup:
-    - mv /drbd-utils/* /packages/
     # Source https://github.com/piraeusdatastore/piraeus/blob/master/dockerfiles/piraeus-server/Dockerfile
     - |
       { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus
@@ -310,11 +327,59 @@ shell:
       # xfsprogs: LINSTOR can create file systems; xfs deps
       # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
       # zfsutils-linux: for zfs storage pools
-      apt-get install -y cryptsetup e2fsprogs lsscsi lvm2 multipath-tools nvme procps socat xfsprogs zstd zfs-utils
+
+      # using echo 'Yes, do as I say!' and --force-yes to ignore these warnings:
+      # WARNING: The following essential packages will be removed
+      # This should NOT be done unless you know exactly what you are doing!
+      # sysvinit
+      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi lvm2 multipath-tools nvme procps socat xfsprogs zstd zfs-utils
+
+    - |
+      ln -sf /proc/mounts /etc/mtab
+      sed -i 's/udev_rules.*=.*/udev_rules=0/ ; s/udev_sync.*=.*/udev_sync=0/ ; s/obtain_device_list_from_udev.*=.*/obtain_device_list_from_udev=0/' /etc/lvm/lvm.conf
+      sed -i '/^devices {/a global_filter = [ "r|^/dev/drbd|", "r|^/dev/loop[0-9]+|" ]' /etc/lvm/lvm.conf
+
+    # Install linstor-server
+    - |
+      apt-get install -y java-11-openjdk-headless thin-provisioning-tools python3 python3-module-natsort
+      # .deb-packages "installed" (more pricesely just extracted) in packages-artifact
+      # dpkg -i packages/*.deb
+      sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
+
+    # Log directory need to be group writable. OpenShift assigns random UID and GID, without extra RBAC changes we can only influence the GID.
+    - |
+      mkdir /var/log/linstor-controller &&
+      chown 0:1000 /var/log/linstor-controller &&
+      chmod -R 0775 /var/log/linstor-controller &&
+      # Ensure we log to files in containers, otherwise SOS reports won't show any logs at all
+      sed -i 's#<!-- <appender-ref ref="FILE" /> -->#<appender-ref ref="FILE" />#' /usr/share/linstor-server/lib/conf/logback.xml
+
+    # install piraeus-entry
+    - |
+      curl -Lfo /usr/bin/piraeus-entry.sh https://github.com/piraeusdatastore/piraeus/raw/{{ $piraeus_version }}/dockerfiles/piraeus-server/entry.sh
+      chmod +x /usr/bin/piraeus-entry.sh
+
+    - mv /usr/bin/linstor /usr/bin/originallinstor
+
+    # cleanup phase
+    - |
+      # remove udev, no need for it in the container
+      apt-get remove -y udev
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
 
 docker:
-  ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
+  # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
+  # satellite: 3366/tcp 3367/tcp
+  EXPOSE: ["3376/tcp", "3377/tcp", "3370/tcp", "3371/tcp", "3366/tcp", "3367/tcp"]
+  ENTRYPOINT: ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
+  CMD: ["startSatellite"]
   LABEL:
     distro: all
     version: all
-    linstor-server: zzz
+    linstor-server: {{ $linstor_version }}
+    linstor-api-py: {{ $api_version }}
+    linstor-client: {{ $client_version }}
+    linstor-common: {{ $common_submodule_version }}
+    k8s-await-election: {{ $k8s_await_election_version }}
+    piraeus-entry: {{ $piraeus_version }}

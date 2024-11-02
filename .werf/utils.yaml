@@ -102,3 +102,15 @@
   - cd /{{ .name }}-{{ .version }}
   - dpkg-buildpackage -us -uc
 {{ end }}
+
+{{ define "utils:build-rpm-pkg" }}
+  - 'echo ">>> utils:build-rpm-pkg <<< name={{ .name }} version={{ .version }} spec_file={{ .spec }} pwd=$(pwd)"'
+  - mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+  # we need debrelease first
+  - make tarball KEEPNAME=1 VERSION={{ .version }}
+  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz ~/rpmbuild/SOURCES/
+  - mv {{ .spec }} ~/rpmbuild/SPECS
+  - cd ~/rpmbuild/SPECS
+  - SPEC_FILE=$(basename "{{ .spec }}")
+  - rpmbuild -v -ba $SPEC_FILE
+{{ end }}
