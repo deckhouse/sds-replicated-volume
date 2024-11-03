@@ -265,9 +265,11 @@ kubectl get sc replicated-storage-class
 
 ## System requirements and recommendations
 
-### Requirements
+### Requirements 
+(Applies for signle-zone and multi-zone deployments)
 - Stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
-- High-speed 10Gbps network.
+- High-speed 10Gbps network or more.
+- Network latency between nodes must be between 0.5ms - 1ms in order to achive highest performance
 - Do not use another SDS (Software defined storage) to provide disks to our SDS.
 
 ### Recommendations
@@ -275,3 +277,5 @@ kubectl get sc replicated-storage-class
 - Avoid using RAID. The reasons are detailed in the [FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
 
 - Use local physical disks. The reasons are detailed in the [FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
+
+- In order for cluster to be operational, but with performance degradation, network latency should not be higher than 20ms between nodes
