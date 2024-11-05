@@ -28,7 +28,7 @@ RUN git checkout v${LINSTOR_VERSION} \
  && git config --global user.name "deckhouse" \
  && git tag -f v${LINSTOR_VERSION} \
  && git apply /patches/*.patch \
- && git commit -m "applied patches"
+ && git commit -am "applied patches"
 
 RUN git config --global url."https://github.com/".insteadOf git://github.com/ \
  && make debrelease \
