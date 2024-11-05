@@ -1,17 +1,30 @@
-Subject: [PATCH] Fix symlinks
+From 01dbcfa84ac0f59a2dfa2008db108f52073bb0f0 Mon Sep 17 00:00:00 2001
+From: Andrei Kvapil <kvapss@gmail.com>
+Date: Tue, 3 Oct 2023 13:32:21 +0200
+Subject: [PATCH] Automatically fix symlinks for devices
+
+This change is workaround for specific set of issues, often related to udev,
+which lead to the disappearance of symlinks for LVM devices on a working system.
+These issues commonly occur during device resizing and deactivation,
+causing LINSTOR exceptions during accessing DRBD super-block of volume.
+
+fixes: https://github.com/LINBIT/linstor-server/issues/326
+
+Signed-off-by: Andrei Kvapil <kvapss@gmail.com>
 ---
-Index: satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
+ .../linstor/layer/dmsetup/DmSetupUtils.java   | 129 +++++++++++++++++-
+ .../linbit/linstor/layer/drbd/DrbdLayer.java  |  13 ++
+ .../linstor/layer/storage/utils/Commands.java |  14 ++
+ 3 files changed, 155 insertions(+), 1 deletion(-)
+
 diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
---- a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java	(revision 5ae791a32309644bdc429253e234b25a250390aa)
-+++ b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java	(revision feeb6957a2a94fb90a54ad7e499e16e95ebb5081)
-@@ -17,7 +17,16 @@
-
+index ba753577d..2929229f4 100644
+--- a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
++++ b/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUtils.java
+@@ -17,7 +17,16 @@ import com.linbit.utils.StringUtils;
+ 
  import javax.annotation.Nullable;
-
+ 
 +import java.io.File;
  import java.io.IOException;
 +import java.io.UncheckedIOException;
@@ -25,10 +38,19 @@ diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUti
  import java.util.HashSet;
  import java.util.Set;
  import java.util.regex.Matcher;
-@@ -187,6 +196,125 @@
+@@ -29,7 +38,7 @@ public class DmSetupUtils
+     private static final String DM_SETUP_MESSAGE_FLUSH_ON_SUSPEND = "flush_on_suspend";
+ 
+     private static final Pattern DM_SETUP_LS_PATTERN = Pattern.compile(
+-        "^([^\\s]+)\\s+\\(([0-9]+)(?::\\s|,\\s)([0-9]+)\\)$",
++        "^([^\\s]+)\\s+\\(([0-9]+)[:,]\\s*([0-9]+)\\)$",
+         Pattern.MULTILINE
+     );
+ 
+@@ -187,6 +196,124 @@ public class DmSetupUtils
          return ret;
      }
-
+ 
 +    public static void fixSymlinkForDevice(ExtCmd extCmd, String devicePath) throws StorageException
 +    {
 +        try
@@ -105,7 +127,7 @@ diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUti
 +                    }
 +                } else {
 +                    System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
-+                 }
++                }
 +
 +                // ------- create symlink -----
 +
@@ -147,30 +169,25 @@ diff --git a/satellite/src/main/java/com/linbit/linstor/layer/dmsetup/DmSetupUti
 +        return String.join("-", parts[0], parts[1]);
 +    }
 +
-+
      public static void remove(ExtCmd extCmd, String identifier) throws StorageException
      {
          Commands.genericExecutor(
-Index: satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
 diff --git a/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java b/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java
---- a/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java	(revision 5ae791a32309644bdc429253e234b25a250390aa)
-+++ b/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java	(revision feeb6957a2a94fb90a54ad7e499e16e95ebb5081)
-@@ -31,6 +31,7 @@
+index 16034c550..d44d2bc57 100644
+--- a/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java
++++ b/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.java
+@@ -37,6 +37,7 @@ import com.linbit.linstor.core.objects.Volume;
  import com.linbit.linstor.core.pojos.LocalPropsChangePojo;
  import com.linbit.linstor.dbdrivers.DatabaseException;
  import com.linbit.linstor.layer.DeviceLayer;
 +import com.linbit.linstor.layer.dmsetup.DmSetupUtils;
- import com.linbit.linstor.layer.drbd.drbdstate.DiskState;
  import com.linbit.linstor.layer.drbd.drbdstate.DrbdConnection;
  import com.linbit.linstor.layer.drbd.drbdstate.DrbdEventPublisher;
-@@ -1031,6 +1032,18 @@
+ import com.linbit.linstor.layer.drbd.drbdstate.DrbdResource;
+@@ -1143,6 +1144,18 @@ public class DrbdLayer implements DeviceLayer
              metaDiskPath = drbdVlmData.getDataDevice();
          }
-
+ 
 +        if (!Files.exists(Paths.get(metaDiskPath))) {
 +            errorReporter.logWarning("Device path %s does not exist, fixing symlink", metaDiskPath);
 +            try
@@ -186,26 +203,22 @@ diff --git a/satellite/src/main/java/com/linbit/linstor/layer/drbd/DrbdLayer.jav
          MdSuperblockBuffer mdUtils = new MdSuperblockBuffer();
          try
          {
-Index: server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
-diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
---- a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java	(revision 5ae791a32309644bdc429253e234b25a250390aa)
-+++ b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java	(revision feeb6957a2a94fb90a54ad7e499e16e95ebb5081)
-@@ -8,6 +8,7 @@
+diff --git a/satellite/src/main/java/com/linbit/linstor/layer/storage/utils/Commands.java b/satellite/src/main/java/com/linbit/linstor/layer/storage/utils/Commands.java
+index a63c78cba..1228cb74e 100644
+--- a/server/src/main/java/com/linbit/linstor/layer/storage/utils/Commands.java
++++ b/server/src/main/java/com/linbit/linstor/layer/storage/utils/Commands.java
+@@ -8,6 +8,7 @@ import com.linbit.SizeConv.SizeUnit;
  import com.linbit.extproc.ExtCmd;
  import com.linbit.extproc.ExtCmd.OutputData;
  import com.linbit.extproc.ExtCmdUtils;
 +import com.linbit.linstor.layer.dmsetup.DmSetupUtils;
  import com.linbit.linstor.storage.StorageException;
  import com.linbit.utils.StringUtils;
-
-@@ -17,6 +18,11 @@
+ 
+@@ -17,6 +18,11 @@ import java.util.Collection;
  import java.util.Collections;
  import java.util.List;
-
+ 
 +import java.nio.file.Files;
 +import java.nio.file.Paths;
 +import java.time.LocalDateTime;
@@ -214,7 +227,7 @@ diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
  public class Commands
  {
      public interface RetryHandler
-@@ -191,6 +197,14 @@
+@@ -191,6 +197,14 @@ public class Commands
      )
          throws StorageException
      {
@@ -229,3 +242,5 @@ diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
          OutputData output = genericExecutor(
              extCmd,
              new String[] {"blockdev", "--getsize64", devicePath},
+-- 
+2.39.3 (Apple Git-145)
