@@ -26,7 +26,7 @@ WORKDIR /linstor-server
 RUN git checkout v${LINSTOR_VERSION} \
  && git config --global user.email "builder@deckhouse.io" \
  && git config --global user.name "deckhouse" \
- && git am /patches/*.patch \
+ && git apply /patches/*.patch \
  && git tag -f v${LINSTOR_VERSION}
 
 RUN git config --global url."https://github.com/".insteadOf git://github.com/ \
