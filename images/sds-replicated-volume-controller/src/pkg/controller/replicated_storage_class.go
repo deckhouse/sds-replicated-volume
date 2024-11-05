@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -46,11 +47,13 @@ import (
 
 const (
 	ReplicatedStorageClassControllerName = "replicated-storage-class-controller"
-	ReplicatedStorageClassFinalizerName  = "replicatedstorageclass.storage.deckhouse.io"
-	StorageClassFinalizerName            = "storage.deckhouse.io/sds-replicated-volume"
-	StorageClassProvisioner              = "replicated.csi.storage.deckhouse.io"
-	StorageClassKind                     = "StorageClass"
-	StorageClassAPIVersion               = "storage.k8s.io/v1"
+	// ???
+	ReplicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
+	// ???
+	StorageClassFinalizerName = "storage.deckhouse.io/sds-replicated-volume"
+	StorageClassProvisioner   = "replicated.csi.storage.deckhouse.io"
+	StorageClassKind          = "StorageClass"
+	StorageClassAPIVersion    = "storage.k8s.io/v1"
 
 	ZoneLabel                  = "topology.kubernetes.io/zone"
 	StorageClassLabelKeyPrefix = "class.storage.deckhouse.io"
@@ -612,8 +615,8 @@ func updateStorageClassMetaDataIfNeeded(
 		return nil
 	}
 
-	oldSC.Labels = copyMap(newSC.Labels)
-	oldSC.Annotations = copyMap(newSC.Annotations)
+	oldSC.Labels = maps.Clone(newSC.Labels)
+	oldSC.Annotations = maps.Clone(newSC.Annotations)
 	oldSC.Finalizers = append([]string{}, newSC.Finalizers...)
 
 	return cl.Update(ctx, oldSC)
@@ -687,13 +690,13 @@ func DoUpdateStorageClass(
 	// Copy Labels from oldSC to newSC if they do not exist in newSC
 	if len(oldSC.Labels) > 0 {
 		if newSC.Labels == nil {
-			newSC.Labels = copyMap(oldSC.Labels)
+			newSC.Labels = maps.Clone(oldSC.Labels)
 		} else {
 			updateMap(newSC.Labels, oldSC.Labels, false)
 		}
 	}
 
-	copyAnotations := copyMap(oldSC.Annotations)
+	copyAnotations := maps.Clone(oldSC.Annotations)
 	delete(copyAnotations, StorageClassVirtualizationAnnotationKey)
 
 	// Copy relevant Annotations from oldSC to newSC, excluding StorageClassVirtualizationAnnotationKey
@@ -764,14 +767,6 @@ func updateReplicatedStorageClassStatus(
 	replicatedSC.Status.Reason = reason
 	log.Trace(fmt.Sprintf("[updateReplicatedStorageClassStatus] update ReplicatedStorageClass %+v", replicatedSC))
 	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
-}
-
-func copyMap(m map[string]string) map[string]string {
-	copied := make(map[string]string, len(m))
-	for k, v := range m {
-		copied[k] = v
-	}
-	return copied
 }
 
 func updateMap(dst, src map[string]string, rw bool) {
