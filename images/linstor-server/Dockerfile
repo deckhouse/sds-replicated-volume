@@ -26,8 +26,9 @@ WORKDIR /linstor-server
 RUN git checkout v${LINSTOR_VERSION} \
  && git config --global user.email "builder@deckhouse.io" \
  && git config --global user.name "deckhouse" \
+ && git tag -f v${LINSTOR_VERSION} \
  && git apply /patches/*.patch \
- && git tag -f v${LINSTOR_VERSION}
+ && git commit -am "apply patch"
 
 RUN git config --global url."https://github.com/".insteadOf git://github.com/ \
  && make debrelease \
