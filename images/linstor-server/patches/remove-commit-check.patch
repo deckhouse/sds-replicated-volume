@@ -1,14 +1,18 @@
+From 0aa2aae92a1c7d5e2f92e4e865309ef1928d6a99 Mon Sep 17 00:00:00 2001
+From: "v.oleynikov" <vasily.oleynikov@flant.com>
+Date: Wed, 6 Nov 2024 12:57:06 +0300
 Subject: [PATCH] Removed commit checks
+
+Signed-off-by: v.oleynikov <vasily.oleynikov@flant.com>
 ---
-Index: Makefile
-IDEA additional info:
-Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
-<+>UTF-8
-===================================================================
+ Makefile | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
 diff --git a/Makefile b/Makefile
---- a/Makefile	(revision feeb6957a2a94fb90a54ad7e499e16e95ebb5081)
-+++ b/Makefile	(revision 0aa2aae92a1c7d5e2f92e4e865309ef1928d6a99)
-@@ -82,14 +82,14 @@
+index 0646cedd7..05ae776c6 100644
+--- a/Makefile
++++ b/Makefile
+@@ -82,14 +82,14 @@ debrelease:
  check-all-committed:
  ifneq ($(FORCE),1)
  	if ! tmp=$$(git diff --name-status HEAD 2>&1) || test -n "$$tmp" ; then \
@@ -26,3 +30,5 @@ diff --git a/Makefile b/Makefile
  		fi; \
  	done
  endif
+--
+2.43.0
