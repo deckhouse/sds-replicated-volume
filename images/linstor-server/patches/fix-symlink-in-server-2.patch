@@ -1,0 +1,253 @@
+From e8560acad472b921602fc6ed0029687d35005478 Mon Sep 17 00:00:00 2001
+From: "v.oleynikov" <vasily.oleynikov@flant.com>
+Date: Wed, 6 Nov 2024 17:39:48 +0300
+Subject: [PATCH 2/2] Fix symlinks in server
+
+---
+ .../linstor/storage/utils/Commands.java       | 198 +++++++++---------
+ 1 file changed, 100 insertions(+), 98 deletions(-)
+
+diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
+index 1794245b0..89b0c9070 100644
+--- a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
++++ b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
+@@ -26,129 +26,131 @@ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.List;
+
+-private static final Pattern DM_SETUP_LS_PATTERN = Pattern.compile(
+-        "^([^\\s]+)\\s+\\(([0-9]+)[:,]\\s*([0-9]+)\\)$",
+-        Pattern.MULTILINE
+-    );
+-
+-public static void fixSymlinkForDevice(ExtCmd extCmd, String devicePath) throws StorageException
++public class DmSetupUtils
+ {
+-    try
+-    {
+-        OutputData outputData = extCmd.exec("dmsetup", "ls");
+-        ExtCmdUtils.checkExitCode(
+-            outputData,
+-            StorageException::new,
+-            "listing devices from dmsetup ls failed "
++    private static final Pattern DM_SETUP_LS_PATTERN = Pattern.compile(
++            "^([^\\s]+)\\s+\\(([0-9]+)[:,]\\s*([0-9]+)\\)$",
++            Pattern.MULTILINE
+         );
+
+-        String stdOut = new String(outputData.stdoutData);
+-        Matcher matcher = DM_SETUP_LS_PATTERN.matcher(stdOut);
+-        String dmName = resolveDMName(devicePath);
+-        String dmPath = "/dev/mapper/" + dmName;
+-        String minor = null;
+-
+-        while (matcher.find())
+-        {
+-            String devName = matcher.group(1);
+-            minor = matcher.group(3);
+-
+-            if (devName.equals(dmName))
+-            {
+-                break;
+-            }
+-        }
+-        if (minor == null)
++    public static void fixSymlinkForDevice(ExtCmd extCmd, String devicePath) throws StorageException
++    {
++        try
+         {
+-            throw new StorageException(
+-                "Device \"" + dmName + "\" (generated from \"" + devicePath + "\") not found in dmsetup output:\n\n" + stdOut
++            OutputData outputData = extCmd.exec("dmsetup", "ls");
++            ExtCmdUtils.checkExitCode(
++                outputData,
++                StorageException::new,
++                "listing devices from dmsetup ls failed "
+             );
+-        }
+
+-        for (String path : new String[]{devicePath, dmPath}) {
+-            if (Files.exists(Paths.get(path))) {
+-                continue;
+-            }
+-
+-            System.out.println("Symbolic link \"" + path + "\" does not exist. Proceeding to create it.");
++            String stdOut = new String(outputData.stdoutData);
++            Matcher matcher = DM_SETUP_LS_PATTERN.matcher(stdOut);
++            String dmName = resolveDMName(devicePath);
++            String dmPath = "/dev/mapper/" + dmName;
++            String minor = null;
+
+-            // ------- create dir ------
+-            Path dirPath = Paths.get(path).getParent();
++            while (matcher.find())
++            {
++                String devName = matcher.group(1);
++                minor = matcher.group(3);
+
+-            if (!Files.exists(dirPath)) {
+-                Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxr-xr-x");
+-                FileAttribute<Set<PosixFilePermission>> fileAttributes = PosixFilePermissions.asFileAttribute(permissions);
+-                Files.createDirectory(dirPath, fileAttributes);
+-                System.out.println("Directory \"" + dirPath + "\" successfully created with permissions 'rwxr-xr-x'.");
+-           } else {
+-                System.out.println("Directory \"" + dirPath + "\" already exists.");
++                if (devName.equals(dmName))
++                {
++                    break;
++                }
++            }
++            if (minor == null)
++            {
++                throw new StorageException(
++                    "Device \"" + dmName + "\" (generated from \"" + devicePath + "\") not found in dmsetup output:\n\n" + stdOut
++                );
+             }
+-            // ------- create dir ---------
+-            // ------- create symlink -----
+
+-            Path originFileRelativePath = Paths.get("../dm-" + minor);
+-            File originFile = new File("/dev/dm-" + minor);
++            for (String path : new String[]{devicePath, dmPath}) {
++                if (Files.exists(Paths.get(path))) {
++                    continue;
++                }
+
++                System.out.println("Symbolic link \"" + path + "\" does not exist. Proceeding to create it.");
+
+-            if (originFile.exists()) {
+-                System.out.println("Origin file  \"" + originFile + "\" found. Proceeding to create a symlink.");
+-                    Path newLink = FileSystems.getDefault().getPath(path);
++                // ------- create dir ------
++                Path dirPath = Paths.get(path).getParent();
+
+-                try {
+-                    Files.createSymbolicLink(newLink, originFileRelativePath);
+-                    System.out.println("Symlink \"" + newLink + "\" created, pointing to \"" + originFileRelativePath + "\"");
+-                }
+-                catch (IOException e) {
+-                    System.err.println(e);
++                if (!Files.exists(dirPath)) {
++                    Set<PosixFilePermission> permissions = PosixFilePermissions.fromString("rwxr-xr-x");
++                    FileAttribute<Set<PosixFilePermission>> fileAttributes = PosixFilePermissions.asFileAttribute(permissions);
++                    Files.createDirectory(dirPath, fileAttributes);
++                    System.out.println("Directory \"" + dirPath + "\" successfully created with permissions 'rwxr-xr-x'.");
++               } else {
++                    System.out.println("Directory \"" + dirPath + "\" already exists.");
+                 }
+-                catch (UncheckedIOException e) {
+-                    System.err.println(e);
++                // ------- create dir ---------
++                // ------- create symlink -----
++
++                Path originFileRelativePath = Paths.get("../dm-" + minor);
++                File originFile = new File("/dev/dm-" + minor);
++
++
++                if (originFile.exists()) {
++                    System.out.println("Origin file  \"" + originFile + "\" found. Proceeding to create a symlink.");
++                        Path newLink = FileSystems.getDefault().getPath(path);
++
++                    try {
++                        Files.createSymbolicLink(newLink, originFileRelativePath);
++                        System.out.println("Symlink \"" + newLink + "\" created, pointing to \"" + originFileRelativePath + "\"");
++                    }
++                    catch (IOException e) {
++                        System.err.println(e);
++                    }
++                    catch (UncheckedIOException e) {
++                        System.err.println(e);
++                    }
++                } else {
++                    System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
+                 }
+-            } else {
+-                System.out.println("Origin file \"" + originFile + "\" not found. Unable to create symbolic link");
+-            }
+
+-            // ------- create symlink -----
++                // ------- create symlink -----
+
+
+
+-            // OutputData symlinkOutput = extCmd.exec("ln", "-s", "../dm-" + minor, path);
+-            // ExtCmdUtils.checkExitCode(
+-            //     symlinkOutput,
+-            //     StorageException::new,
+-            //     "Failed to create device symlink"
+-            // );
++                // OutputData symlinkOutput = extCmd.exec("ln", "-s", "../dm-" + minor, path);
++                // ExtCmdUtils.checkExitCode(
++                //     symlinkOutput,
++                //     StorageException::new,
++                //     "Failed to create device symlink"
++                // );
++            }
++        }
++        catch (IOException ioExc)
++        {
++            throw new StorageException(
++                "Failed to fix device symlink",
++                ioExc
++            );
++        }
++        catch (ChildProcessTimeoutException exc)
++        {
++            throw new StorageException(
++                "Fixing device symlink timed out",
++                exc
++            );
+         }
+     }
+-    catch (IOException ioExc)
+-    {
+-        throw new StorageException(
+-            "Failed to fix device symlink",
+-            ioExc
+-        );
+-    }
+-    catch (ChildProcessTimeoutException exc)
+-    {
+-        throw new StorageException(
+-            "Fixing device symlink timed out",
+-            exc
+-        );
+-    }
+-}
+
+-public static String resolveDMName(String devicePath)
+-{
+-    String[] parts = devicePath.replaceFirst("^/dev/", "").split("/");
+-    if (parts[0].equals("mapper"))
++    public static String resolveDMName(String devicePath)
+     {
+-        return parts[1];
++        String[] parts = devicePath.replaceFirst("^/dev/", "").split("/");
++        if (parts[0].equals("mapper"))
++        {
++            return parts[1];
++        }
++        parts[0] = parts[0].replace("-", "--");
++        parts[1] = parts[1].replace("-", "--");
++        return String.join("-", parts[0], parts[1]);
+     }
+-    parts[0] = parts[0].replace("-", "--");
+-    parts[1] = parts[1].replace("-", "--");
+-    return String.join("-", parts[0], parts[1]);
+ }
+
+-
+ public class Commands
+ {
+     public interface RetryHandler
+@@ -307,7 +309,7 @@ public class Commands
+           DateTimeFormatter dtf = DateTimeFormatter.ofPattern("yyyy/MM/dd/HH:mm:ss:SSS");
+           LocalDateTime now = LocalDateTime.now();
+           System.out.println(dtf.format(now) + " [GetBlockSizeInKib] WARN - Device path " + devicePath + " does not exist, fixing symlink");
+-          fixSymlinkForDevice(extCmd, devicePath);
++          DmSetupUtils.fixSymlinkForDevice(extCmd, devicePath);
+         }
+
+         OutputData output = genericExecutor(
+--
+2.43.0
