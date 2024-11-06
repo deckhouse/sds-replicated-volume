@@ -4,7 +4,7 @@ ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullsey
 FROM $BASE_UBUNTU as linstor-builder
 
 ARG LINSTOR_GITREPO=https://github.com/LINBIT/linstor-server
-ARG LINSTOR_VERSION=1.29.1
+ARG LINSTOR_VERSION=1.29.2
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
@@ -26,8 +26,8 @@ WORKDIR /linstor-server
 RUN git checkout v${LINSTOR_VERSION} \
  && git config --global user.email "builder@deckhouse.io" \
  && git config --global user.name "deckhouse" \
- && git am /patches/*.patch \
- && git tag -f v${LINSTOR_VERSION} 
+ && git tag -f v${LINSTOR_VERSION} \
+ && git apply /patches/*.patch
 
 RUN git config --global url."https://github.com/".insteadOf git://github.com/ \
  && make debrelease \
