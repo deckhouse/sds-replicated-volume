@@ -54,7 +54,7 @@ shell:
     # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build sudo git java-11-openjdk-headless python3 wget unzip \
+      && apt-get -y install build-essential rpm-build sudo git java-11-openjdk-devel python3 wget unzip \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -82,10 +82,10 @@ shell:
     {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     # apply git patches to upstream's code
-    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git am /patches/*.patch || echo "Git patches not found. Skipped"'
+    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && ( git apply /patches/*.patch && git commit -am "Auto-commit patched files" ) || echo "Git patches not found. Skipped"'
     - git tag -f v{{ $linstor_version }}
 
-    # make .deb package
+    # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-server" }}
     {{- $_ := set $ctx "version" $linstor_version }}
@@ -94,7 +94,9 @@ shell:
     # some cleanup
     - rm -rf /root/.gradle/caches/
     - ls -la /
-    - exit 5
+    # linstor-common-1.24.2-1.noarch.rpm
+    # linstor-controller-1.24.2-1.noarch.rpm
+    # linstor-satellite-1.24.2-1.noarch.rpm
 
 ---
 image: {{ $.ImageName }}-client-artifact
@@ -188,64 +190,64 @@ shell:
 
 ---
 # extract all packages into this artifact
-image: {{ $.ImageName }}-packages-artifact
-from: {{ $.BASE_UBUNTU }}
-final: false
-git:
-  - add: /images/scripts
-    to: /
-    stageDependencies:
-      setup:
-        - "**/*"
-import:
-  - image: {{ $.ImageName }}-server-artifact
-    add: /
-    to: /packages
-    includePaths:
-      - linstor-common_*.deb
-      - linstor-controller_*.deb
-      - linstor-satellite_*.deb
-    before: setup
+# image: {{ $.ImageName }}-packages-artifact
+# from: {{ $.BASE_UBUNTU }}
+# final: false
+# git:
+#   - add: /images/scripts
+#     to: /
+#     stageDependencies:
+#       setup:
+#         - "**/*"
+# import:
+#   - image: {{ $.ImageName }}-server-artifact
+#     add: /
+#     to: /packages
+#     includePaths:
+#       - linstor-common_*.deb
+#       - linstor-controller_*.deb
+#       - linstor-satellite_*.deb
+#     before: setup
 
-  - image: {{ $.ImageName }}-client-artifact
-    add: /
-    to: /packages
-    includePaths:
-      - python-linstor_*.deb
-      - linstor-client_*.deb
-    before: setup
+#   - image: {{ $.ImageName }}-client-artifact
+#     add: /
+#     to: /packages
+#     includePaths:
+#       - python-linstor_*.deb
+#       - linstor-client_*.deb
+#     before: setup
 
-  - image: drbd-reactor-utils-artifact
-    add: /
-    # to /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
-    to: /drbd-utils
-    includePaths:
-      - python-linstor_*.deb
-      - drbd-utils_*.deb
-      - thin-send-recv_*.deb
-    before: setup
+#   - image: drbd-reactor-utils-artifact
+#     add: /
+#     # to /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
+#     to: /drbd-utils
+#     includePaths:
+#       - python-linstor_*.deb
+#       - drbd-utils_*.deb
+#       - thin-send-recv_*.deb
+#     before: setup
 
-shell:
-  install:
-    - export DEBIAN_FRONTEND=noninteractive
-    # install packages required by deb2distroless script
-    # https://salsa.debian.org/apt-team/apt-file
-    - |
-      apt-get update \
-      && apt-get -y install --no-install-recommends binutils zstd apt-file \
-      && apt-file update -a amd64 \
-      && apt-get clean
-  setup:
-    - mv /drbd-utils/* /packages/
-    - |
-      for f in /packages/*.deb; do
-        /deb2distroless.sh -e /relocate -d /downloaded-cache $f
-      done
-      # now install (post-process) all downloaded depends
-      /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
-    # cleanup
-    - rm -rf /var/lib/apt/lists/*
-    - ls -la /relocate
+# shell:
+#   install:
+#     - export DEBIAN_FRONTEND=noninteractive
+#     # install packages required by deb2distroless script
+#     # https://salsa.debian.org/apt-team/apt-file
+#     - |
+#       apt-get update \
+#       && apt-get -y install --no-install-recommends binutils zstd apt-file \
+#       && apt-file update -a amd64 \
+#       && apt-get clean
+#   setup:
+#     - mv /drbd-utils/* /packages/
+#     - |
+#       for f in /packages/*.deb; do
+#         /deb2distroless.sh -e /relocate -d /downloaded-cache $f
+#       done
+#       # now install (post-process) all downloaded depends
+#       /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
+#     # cleanup
+#     - rm -rf /var/lib/apt/lists/*
+#     - ls -la /relocate
 
 ---
 # main image based on AltLinux for now because we need bash and other tools
@@ -259,32 +261,32 @@ git:
         - "**/*"
 
 import:
-  # - image: {{ $.ImageName }}-server-artifact
-  #   add: /
-  #   to: /packages
-  #   includePaths:
-  #     - linstor-common_*.deb
-  #     - linstor-controller_*.deb
-  #     - linstor-satellite_*.deb
-  #   before: setup
+  - image: {{ $.ImageName }}-server-artifact
+    add: /
+    to: /packages
+    includePaths:
+      - linstor-common-*.rpm
+      - linstor-controller-*.rpm
+      - linstor-satellite-*.rpm
+    before: setup
 
-  # - image: {{ $.ImageName }}-client-artifact
-  #   add: /
-  #   to: /packages
-  #   includePaths:
-  #     - python-linstor_*.deb
-  #     - linstor-client_*.deb
-  #   before: setup
+  - image: {{ $.ImageName }}-client-artifact
+    add: /
+    to: /packages
+    includePaths:
+      - python-linstor_*.deb
+      - linstor-client_*.deb
+    before: setup
 
-  # - image: drbd-reactor-utils-artifact
-  #   add: /
-  #   # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
-  #   to: /drbd-utils
-  #   includePaths:
-  #     - python-linstor_*.deb
-  #     - drbd-utils_*.deb
-  #     - thin-send-recv_*.deb
-  #   before: setup
+  - image: drbd-reactor-utils-artifact
+    add: /
+    # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
+    to: /drbd-utils
+    includePaths:
+      - python-linstor_*.deb
+      - drbd-utils_*.deb
+      - thin-send-recv_*.deb
+    before: setup
 
   - image: {{ $.ImageName }}-k8s-await-election-artifact
     add: /
@@ -311,6 +313,7 @@ shell:
     - cp /utils/cleaner.py /cleaner.py && chmod 755 /cleaner.py
 
   setup:
+    - mv /drbd-utils/* /packages/
     # Source https://github.com/piraeusdatastore/piraeus/blob/master/dockerfiles/piraeus-server/Dockerfile
     - |
       { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus

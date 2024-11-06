@@ -1,8 +1,20 @@
 diff --git a/linstor.spec b/linstor.spec
-index f94f0e523..7e880f91d 100644
+index f94f0e523..cf465ae86 100644
 --- a/linstor.spec
 +++ b/linstor.spec
-@@ -74,6 +74,7 @@ cp %{_builddir}/%{NAME_VERS}/docs/linstor.toml-example %{buildroot}/%{_sysconfdi
+@@ -23,11 +23,7 @@ BuildRequires: java-11-openjdk-headless java-11-openjdk-devel python
+ %define GRADLE_J11_PATH -Pjava11=lib64
+ %else
+ %define GRADLE_J11_PATH -Pjava11=lib
+-    %if 0%{?rhel} > 8
+ BuildRequires: java-11-openjdk-headless java-11-openjdk-devel python3
+-    %else
+-BuildRequires: java-11-openjdk-headless java-11-openjdk-devel python2
+-    %endif
+ %endif
+
+ %description
+@@ -74,6 +70,7 @@ cp %{_builddir}/%{NAME_VERS}/docs/linstor.toml-example %{buildroot}/%{_sysconfdi
  ### common
  %package common
  Summary: Common files shared between controller and satellite
@@ -10,3 +22,28 @@ index f94f0e523..7e880f91d 100644
  Requires: jre-11-headless
  ## This should really be included in the jre-headless dependencies, but it isn't.
  Requires: tzdata-java
+@@ -93,6 +90,7 @@ Linstor shared components between linstor-controller and linstor-satellite
+ ### controller
+ %package controller
+ Summary: Linstor controller specific files
++Group: System Environment/Daemons
+ Requires: linstor-common = %{version}
+ Requires(post): jre-11-headless
+
+@@ -113,7 +111,7 @@ Linstor controller manages linstor satellites and persistant data storage.
+ %{FIREWALLD_SERVICES}/linstor-controller.xml
+ %{_sysconfdir}/linstor/linstor.toml-example
+
+-%posttrans controller
++%post controller
+ %{LS_PREFIX}/bin/controller.postinst.sh
+ %systemd_post linstor-controller.service
+ test -f %{_bindir}/firewall-cmd && firewall-cmd --reload --quiet || :
+@@ -124,6 +122,7 @@ test -f %{_bindir}/firewall-cmd && firewall-cmd --reload --quiet || :
+ ### satellite
+ %package satellite
+ Summary: Linstor satellite specific files
++Group: System Environment/Daemons
+ Requires: linstor-common = %{version}
+ Requires: lvm2
+

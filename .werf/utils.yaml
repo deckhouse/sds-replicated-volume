@@ -135,8 +135,9 @@
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
-  # instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
+  # TODO: instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
   - sudo -u rpmbuilder rpmbuild -v -ba $SPEC_FILE
+  - mv /home/rpmbuilder/RPM/RPMS/noarch/*.rpm /
 {{ end }}
 
 {{- /*
