@@ -8,3 +8,7 @@ These issues commonly manifest during device resizing and deactivation,
 causing LINSTOR exceptions when accessing DRBD super-block of volume.
 
 - Upstream: https://github.com/LINBIT/linstor-server/pull/370
+
+### Fix linstor.spec
+
+Fixes error 'error: Group field must be present in package: linstor-common' when building RPM package (for ALT Linux)

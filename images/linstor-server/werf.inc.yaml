@@ -47,18 +47,21 @@ git:
       setup:
         - "**/*"
 shell:
-  install:
+  beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
     # in Alt Linux there is no '--no-install-recommends' apt-get option
     # in Alt Linux there is no '--reinstall' apt-get option (apt-get -y install --reinstall ca-certificates)
     # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
       apt-get update \
-      && apt-get -y install build-essential debhelper git java-11-openjdk-headless python3 wget unzip \
+      && apt-get -y install build-essential rpm-build sudo git java-11-openjdk-headless python3 wget unzip \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
   # We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
   # Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
   beforeSetup:
@@ -86,7 +89,8 @@ shell:
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "linstor-server" }}
     {{- $_ := set $ctx "version" $linstor_version }}
-    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    {{- $_ := set $ctx "spec" "linstor.spec" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
     # some cleanup
     - rm -rf /root/.gradle/caches/
     - ls -la /

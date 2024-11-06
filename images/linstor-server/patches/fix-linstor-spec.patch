@@ -1,0 +1,12 @@
+diff --git a/linstor.spec b/linstor.spec
+index f94f0e523..7e880f91d 100644
+--- a/linstor.spec
++++ b/linstor.spec
+@@ -74,6 +74,7 @@ cp %{_builddir}/%{NAME_VERS}/docs/linstor.toml-example %{buildroot}/%{_sysconfdi
+ ### common
+ %package common
+ Summary: Common files shared between controller and satellite
++Group: System Environment/Daemons
+ Requires: jre-11-headless
+ ## This should really be included in the jre-headless dependencies, but it isn't.
+ Requires: tzdata-java

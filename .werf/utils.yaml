@@ -103,14 +103,57 @@
   - dpkg-buildpackage -us -uc
 {{ end }}
 
+{{- /*
+  utils:build-rpm-pkg builds a ALT Linux .rpm package from current folder
+  Requirements: build-essential, sudo, hasher and other build tools should be already installed in build container
+  Note: You must execute 'utils:prepare-rpm-build' before try to build RPM with this one macros!
+  Parameters (* for required):
+    * .name       - Name of RPM package
+    * .version    - Desired version of RPM package
+    * .spec       - Path to RPM's .spec file
+      .gen_path   - Path to files generated with 'make debrelease'. If not specified, then use current directory
+
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "name" "linstor-server" }}
+  {{- $_ := set $ctx "version" $linstor_version }}
+  {{- $_ := set $ctx "spec" "./linstor.spec" }}
+  {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+*/}}
+
 {{ define "utils:build-rpm-pkg" }}
   - 'echo ">>> utils:build-rpm-pkg <<< name={{ .name }} version={{ .version }} spec_file={{ .spec }} pwd=$(pwd)"'
-  - mkdir -p ~/rpmbuild/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
-  # we need debrelease first
-  - make tarball KEEPNAME=1 VERSION={{ .version }}
-  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz ~/rpmbuild/SOURCES/
-  - mv {{ .spec }} ~/rpmbuild/SPECS
-  - cd ~/rpmbuild/SPECS
+  - |
+    if ! id "rpmbuilder" >/dev/null 2>&1; then
+      echo 'User "rpmbuilder" not found! You must execute "utils:prepare-rpm-build" first'
+      exit 5
+    fi
+  - chown -R rpmbuilder:rpmbuilder .
+  # we need tarball first
+  - sudo -u rpmbuilder make tarball KEEPNAME=1 VERSION={{ .version }}
+  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz /home/rpmbuilder/RPM/SOURCES/
+  - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
+  - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
-  - rpmbuild -v -ba $SPEC_FILE
+  # instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
+  - sudo -u rpmbuilder rpmbuild -v -ba $SPEC_FILE
+{{ end }}
+
+{{- /*
+  utils:prepare-rpm-build prepares build environment for building RPM packages
+  Requirements: build-essential, hasher and other build tools should be already installed in build container
+  Parameters (* for required):
+    None
+
+  Example:
+  {{- $ctx := dict }}
+  {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+*/}}
+{{ define "utils:prepare-rpm-build" }}
+  - 'echo ">>> utils:prepare-rpm-build <<< name={{ .name }} version={{ .version }} pwd=$(pwd)"'
+  - groupadd -f -g 744 rpmbuilder && useradd -m -g rpmbuilder -u 744 rpmbuilder
+  - sed -i "s/# root ALL=(ALL:ALL) ALL/root ALL=(ALL:ALL) ALL/" /etc/sudoers
+  - echo 'Defaults env_keep += "SPEC_FILE"' >> /etc/sudoers
+  - mkdir -p /home/rpmbuilder/RPM/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+  - chown -R 744:744 /home/rpmbuilder
 {{ end }}
