@@ -1,4 +1,4 @@
-From 85098645442e71069f6bf95fef702ca729f50d96 Mon Sep 17 00:00:00 2001
+From 865a87f7b28e32f8531a40abd0d498e317b162d1 Mon Sep 17 00:00:00 2001
 From: "v.oleynikov" <vasily.oleynikov@flant.com>
 Date: Wed, 6 Nov 2024 17:32:56 +0300
 Subject: [PATCH] Fix symlinks in server
@@ -10,14 +10,14 @@ Subject: [PATCH] Fix symlinks in server
  create mode 100644 server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 
 diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
-index cad3b37ba..0e77914e0 100644
+index cad3b37ba..c36dbbdd8 100644
 --- a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
 +++ b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
 @@ -10,6 +10,7 @@ import com.linbit.extproc.ExtCmd.OutputData;
  import com.linbit.extproc.ExtCmdUtils;
  import com.linbit.linstor.storage.StorageException;
  import com.linbit.utils.StringUtils;
-+import com.linbit.storage.utils.DmSetupUtils;
++import com.linbit.linstor.storage.utils.DmSetupUtils;
 
  import java.io.IOException;
  import java.util.ArrayList;
