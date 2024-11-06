@@ -1,12 +1,12 @@
-From 594cba43dca42439973b35a9d2de21407613f581 Mon Sep 17 00:00:00 2001
+From fed1543400188d8897ec228f0e4214e911778efe Mon Sep 17 00:00:00 2001
 From: "v.oleynikov" <vasily.oleynikov@flant.com>
 Date: Wed, 6 Nov 2024 17:32:56 +0300
 Subject: [PATCH] Fix symlinks in server
 
 ---
  .../linstor/storage/utils/Commands.java       |   9 ++
- .../linstor/storage/utils/DmSetupUtils.java   | 140 ++++++++++++++++++
- 2 files changed, 149 insertions(+)
+ .../linstor/storage/utils/DmSetupUtils.java   | 142 ++++++++++++++++++
+ 2 files changed, 151 insertions(+)
  create mode 100644 server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 
 diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
@@ -38,10 +38,12 @@ index cad3b37ba..0e77914e0 100644
              new String[]
 diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java b/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 new file mode 100644
-index 000000000..38a767407
+index 000000000..06fab631c
 --- /dev/null
 +++ b/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
-@@ -0,0 +1,140 @@
+@@ -0,0 +1,142 @@
++package com.linbit.linstor.storage.utils.dmsetuputils;
++
 +import com.linbit.extproc.ExtCmd;
 +import com.linbit.extproc.ExtCmd.OutputData;
 +import com.linbit.linstor.storage.StorageException;
