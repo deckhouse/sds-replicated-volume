@@ -1,0 +1,28 @@
+Subject: [PATCH] Removed commit checks
+---
+Index: Makefile
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/Makefile b/Makefile
+--- a/Makefile	(revision feeb6957a2a94fb90a54ad7e499e16e95ebb5081)
++++ b/Makefile	(revision 0aa2aae92a1c7d5e2f92e4e865309ef1928d6a99)
+@@ -82,14 +82,14 @@
+ check-all-committed:
+ ifneq ($(FORCE),1)
+ 	if ! tmp=$$(git diff --name-status HEAD 2>&1) || test -n "$$tmp" ; then \
+-		echo >&2 "$$tmp"; echo >&2 "Uncommitted changes"; exit 1; \
++		echo >&2 "$$tmp"; echo >&2 "Uncommitted changes"; \
+ 	fi
+ 	if ! grep -q "^linstor-server ($(DEBVERSION)" debian/changelog ; then \
+-		echo >&2 "debian/changelog needs update"; exit 1; \
++		echo >&2 "debian/changelog needs update"; \
+ 	fi
+ 	for df in "$(DOCKERFILE_CONTROLLER)" "$(DOCKERFILE_SATELLITE)"; do \
+ 		if test "$$(grep -c "ENV LINSTOR_VERSION $(VERSION)" "$$df")" -ne 2 ; then \
+-			echo >&2 "LINSTOR_VERSION in $$df needs update"; exit 1; \
++			echo >&2 "LINSTOR_VERSION in $$df needs update"; \
+ 		fi; \
+ 	done
+ endif
