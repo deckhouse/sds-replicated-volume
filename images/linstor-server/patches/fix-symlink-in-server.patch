@@ -1,4 +1,4 @@
-From 5dcb5a7171685164f28e1d81c79cae958f99cb5d Mon Sep 17 00:00:00 2001
+From 4d64fda35d8c7044451eff315bb57ffcfc05cb2b Mon Sep 17 00:00:00 2001
 From: "v.oleynikov" <vasily.oleynikov@flant.com>
 Date: Wed, 6 Nov 2024 17:32:56 +0300
 Subject: [PATCH] Fix symlinks in server
@@ -38,7 +38,7 @@ index cad3b37ba..0e77914e0 100644
              new String[]
 diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java b/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 new file mode 100644
-index 000000000..5ab767367
+index 000000000..7327c7b11
 --- /dev/null
 +++ b/server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 @@ -0,0 +1,136 @@
@@ -54,7 +54,7 @@ index 000000000..5ab767367
 +import java.nio.file.attribute.PosixFilePermissions;
 +
 +
-+private class DmSetupUtils
++public  class DmSetupUtils
 +{
 +    private static final Pattern DM_SETUP_LS_PATTERN = Pattern.compile(
 +            "^([^\\s]+)\\s+\\(([0-9]+)[:,]\\s*([0-9]+)\\)$",
