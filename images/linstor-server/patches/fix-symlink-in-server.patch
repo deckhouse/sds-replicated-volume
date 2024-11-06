@@ -1,19 +1,19 @@
-From 865a87f7b28e32f8531a40abd0d498e317b162d1 Mon Sep 17 00:00:00 2001
+From 330f1f7c7af0df202f489b5ad38572cab8b37d10 Mon Sep 17 00:00:00 2001
 From: "v.oleynikov" <vasily.oleynikov@flant.com>
 Date: Wed, 6 Nov 2024 17:32:56 +0300
 Subject: [PATCH] Fix symlinks in server
 
 ---
- .../linstor/storage/utils/Commands.java       |   9 +
+ .../linstor/storage/utils/Commands.java       |  13 ++
  .../linstor/storage/utils/DmSetupUtils.java   | 158 ++++++++++++++++++
- 2 files changed, 167 insertions(+)
+ 2 files changed, 171 insertions(+)
  create mode 100644 server/src/main/java/com/linbit/linstor/storage/utils/DmSetupUtils.java
 
 diff --git a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
-index cad3b37ba..c36dbbdd8 100644
+index cad3b37ba..1c720c20c 100644
 --- a/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
 +++ b/server/src/main/java/com/linbit/linstor/storage/utils/Commands.java
-@@ -10,6 +10,7 @@ import com.linbit.extproc.ExtCmd.OutputData;
+@@ -10,12 +10,17 @@ import com.linbit.extproc.ExtCmd.OutputData;
  import com.linbit.extproc.ExtCmdUtils;
  import com.linbit.linstor.storage.StorageException;
  import com.linbit.utils.StringUtils;
@@ -21,7 +21,17 @@ index cad3b37ba..c36dbbdd8 100644
 
  import java.io.IOException;
  import java.util.ArrayList;
-@@ -170,6 +171,14 @@ public class Commands
+ import java.util.Collection;
+ import java.util.Collections;
+ import java.util.List;
++import java.nio.file.Files;
++import java.nio.file.Paths;
++import java.time.LocalDateTime;
++import java.time.format.DateTimeFormatter;
+
+ public class Commands
+ {
+@@ -170,6 +175,14 @@ public class Commands
      )
          throws StorageException
      {
