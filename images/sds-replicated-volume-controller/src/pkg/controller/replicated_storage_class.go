@@ -696,15 +696,15 @@ func DoUpdateStorageClass(
 		}
 	}
 
-	copyAnotations := maps.Clone(oldSC.Annotations)
-	delete(copyAnotations, StorageClassVirtualizationAnnotationKey)
+	copyAnnotations := maps.Clone(oldSC.Annotations)
+	delete(copyAnnotations, StorageClassVirtualizationAnnotationKey)
 
 	// Copy relevant Annotations from oldSC to newSC, excluding StorageClassVirtualizationAnnotationKey
-	if len(copyAnotations) > 0 {
+	if len(copyAnnotations) > 0 {
 		if newSC.Annotations == nil {
-			newSC.Annotations = copyAnotations
+			newSC.Annotations = copyAnnotations
 		} else {
-			updateMap(newSC.Annotations, oldSC.Annotations, false)
+			updateMap(newSC.Annotations, copyAnnotations, false)
 		}
 	}
 
