@@ -316,13 +316,13 @@ func ReconcileDeleteReplicatedStorageClass(
 		log.Info("[ReconcileDeleteReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name +
 			" was not deleted because the ReplicatedStorageClass is in a Failed state. Deleting only finalizer.")
 	case Created:
-		log.Info("[ReconcileDeleteReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name +
-			" found. Deleting it.")
 		if sc == nil {
 			log.Info("[ReconcileDeleteReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name +
 				" no need to delete.")
 			break
 		}
+		log.Info("[ReconcileDeleteReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name +
+			" found. Deleting it.")
 
 		if err := DeleteStorageClass(ctx, cl, sc); err != nil {
 			return true, fmt.Errorf("[ReconcileDeleteReplicatedStorageClass] error DeleteStorageClass: %s",
