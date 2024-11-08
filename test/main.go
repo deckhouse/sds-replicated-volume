@@ -21,9 +21,9 @@ import (
     "sigs.k8s.io/controller-runtime/pkg/manager"
 
     "sds-replicated-volume-controller/config"
-    "sds-replicated-volume-controller/pkg/controller"
+//    "sds-replicated-volume-controller/pkg/controller"
     kubutils "sds-replicated-volume-controller/pkg/kubeutils"
-    "sds-replicated-volume-controller/pkg/logger"
+//    "sds-replicated-volume-controller/pkg/logger"
 
     _ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 )
@@ -76,11 +76,11 @@ func main() {
 
     fmt.Println("  step 1.2.1")
 
-    log, err := logger.NewLogger(cfgParams.Loglevel)
-    if err != nil {
-            fmt.Printf("unable to create NewLogger, err: %v\n", err)
-            panic("unable to create NewLogger")
-    }
+//    log, err := logger.NewLogger(cfgParams.Loglevel)
+//    if err != nil {
+//            fmt.Printf("unable to create NewLogger, err: %v\n", err)
+//            panic("unable to create NewLogger")
+//    }
 
     cacheOpt := cache.Options{
         DefaultNamespaces: map[string]cache.Config{
@@ -117,39 +117,39 @@ func main() {
     fmt.Println("  step 1.5")
 
 
-    // VVVVVVVVVVVVVVVVVVVVVVVVVVVVV
-
-    if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewLinstorNode controller")
-    }
-
-    if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewReplicatedStorageClass controller")
-    }
-
-    if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewReplicatedStoragePool controller")
-    }
-
-    if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewLinstorPortRangeWatcher controller")
-    }
-
-    if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewLinstorLeader controller")
-    }
-
-    if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, *log); err != nil {
-            fmt.Println(err)
-            panic("failed to create the NewStorageClassAnnotationsReconciler controller")
-    }
-
-    // AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+//    // VVVVVVVVVVVVVVVVVVVVVVVVVVVVV
+//
+//    if _, err := controller.NewLinstorNode(mgr, lc, cfgParams.ConfigSecretName, cfgParams.ScanInterval, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewLinstorNode controller")
+//    }
+//
+//    if _, err := controller.NewReplicatedStorageClass(mgr, cfgParams, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewReplicatedStorageClass controller")
+//    }
+//
+//    if _, err := controller.NewReplicatedStoragePool(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewReplicatedStoragePool controller")
+//    }
+//
+//    if err = controller.NewLinstorPortRangeWatcher(mgr, lc, cfgParams.ScanInterval, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewLinstorPortRangeWatcher controller")
+//    }
+//
+//    if err = controller.NewLinstorLeader(mgr, cfgParams.LinstorLeaseName, cfgParams.ScanInterval, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewLinstorLeader controller")
+//    }
+//
+//    if err = controller.NewStorageClassAnnotationsReconciler(mgr, cfgParams.ScanInterval, *log); err != nil {
+//            fmt.Println(err)
+//            panic("failed to create the NewStorageClassAnnotationsReconciler controller")
+//    }
+//
+//    // AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 
     NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval)
