@@ -16,9 +16,9 @@ import (
     extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
     apiruntime "k8s.io/apimachinery/pkg/runtime"
     clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-    "sigs.k8s.io/controller-runtime/pkg/cache"
+//    "sigs.k8s.io/controller-runtime/pkg/cache"
     "sigs.k8s.io/controller-runtime/pkg/client"
-    "sigs.k8s.io/controller-runtime/pkg/manager"
+//    "sigs.k8s.io/controller-runtime/pkg/manager"
 
     "sds-replicated-volume-controller/config"
     kubutils "sds-replicated-volume-controller/pkg/kubeutils"
@@ -54,50 +54,56 @@ func main() {
 
     fmt.Println("  step 1.1")
 
-    // Setup scheme for all resources
-    scheme := apiruntime.NewScheme()
-    for _, f := range resourcesSchemeFuncs {
-        err := f(scheme)
-        if err != nil {
-            panic("failed to add to scheme")
-        }
-    }
-
-    fmt.Println("  step 1.2")
+//    // Setup scheme for all resources
+//    scheme := apiruntime.NewScheme()
+//    for _, f := range resourcesSchemeFuncs {
+//        err := f(scheme)
+//        if err != nil {
+//            panic("failed to add to scheme")
+//        }
+//    }
+//
+//    fmt.Println("  step 1.2")
 
     cfgParams, err := config.NewConfig()
     if err != nil {
             fmt.Println("unable to create NewConfig " + err.Error())
     }
 
-    fmt.Println("ControllerNamespace: " + cfgParams.ControllerNamespace)
+//    fmt.Println("ControllerNamespace: " + cfgParams.ControllerNamespace)
+//
+//    fmt.Println("  step 1.2.1")
+//
+//    cacheOpt := cache.Options{
+//        DefaultNamespaces: map[string]cache.Config{
+//            cfgParams.ControllerNamespace: {},
+//        },
+//    }
+//
+//    fmt.Println("  step 1.3")
+//
+//    managerOpts := manager.Options{
+//        Scheme: scheme,
+//        // MetricsBindAddress: cfgParams.MetricsPort,
+//        HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
+//        Cache:                   cacheOpt,
+//        LeaderElection:          true,
+//        LeaderElectionNamespace: cfgParams.ControllerNamespace,
+//        LeaderElectionID:        config.ControllerName,
+//    }
+//
+//    fmt.Println("  step 1.4")
+//
+//    mgr, err := manager.New(kConfig, managerOpts)
+//    if err != nil {
+//            fmt.Println(err)
+//            panic("failed to create a manager")
+//    }
 
-    fmt.Println("  step 1.2.1")
-
-    cacheOpt := cache.Options{
-        DefaultNamespaces: map[string]cache.Config{
-            cfgParams.ControllerNamespace: {},
-        },
-    }
-
-    fmt.Println("  step 1.3")
-
-    managerOpts := manager.Options{
-        Scheme: scheme,
-        // MetricsBindAddress: cfgParams.MetricsPort,
-        HealthProbeBindAddress:  cfgParams.HealthProbeBindAddress,
-        Cache:                   cacheOpt,
-        LeaderElection:          true,
-        LeaderElectionNamespace: cfgParams.ControllerNamespace,
-        LeaderElectionID:        config.ControllerName,
-    }
-
-    fmt.Println("  step 1.4")
-
-    mgr, err := manager.New(kConfig, managerOpts)
+    cl, err := client.New(kConfig, client.Options{})
     if err != nil {
-            fmt.Println(err)
-            panic("failed to create a manager")
+        fmt.Println(err)
+        panic("error by creating a client")
     }
 
     lc, err := lapi.NewClient()
@@ -108,7 +114,8 @@ func main() {
 
     fmt.Println("  step 1.5")
 
-    NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval)
+    NewLinstorResourcesWatcher(cl, lc, cfgParams.LinstorResourcesReconcileInterval)
+//    NewLinstorResourcesWatcher(mgr, lc, cfgParams.LinstorResourcesReconcileInterval)
 }
 
 func GetStorageClasses(ctx context.Context, cl client.Client) ([]sv1.StorageClass, error) {
@@ -125,8 +132,7 @@ func GetStorageClasses(ctx context.Context, cl client.Client) ([]sv1.StorageClas
     return listStorageClasses.Items, nil
 }
 
-func NewLinstorResourcesWatcher(mgr manager.Manager, lc *lapi.Client, interval int) {
-    cl := mgr.GetClient()
+func NewLinstorResourcesWatcher(cl client.Client, lc *lapi.Client, interval int) {
     ctx := context.Background()
 
     scs, err := GetStorageClasses(ctx, cl)
