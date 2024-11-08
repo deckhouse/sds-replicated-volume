@@ -21,7 +21,7 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /images/sds-replicated-volume-controller/src/cmd
+    - cd /images/sds-replicated-volume-controller/src/cmd/
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-replicated-volume-controller
     - chmod +x /sds-replicated-volume-controller
 
