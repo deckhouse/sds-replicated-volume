@@ -150,7 +150,7 @@ shell:
     {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
-    # copy RPM spec-file for python-api
+    # copy RPM spec-file
     - cp /patches/linstor-python-api.spec /linstor-api-py/
     # substitute version in .spec-file
     - sed -i -e 's/<VERSION>/{{ $api_version }}/g' linstor-python-api.spec
@@ -164,18 +164,6 @@ shell:
     {{- $_ := set $ctx "tarball_cmd" "make release" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
-    # a hack to fix error like 'File /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python-linstor-1.19.0.tar.gz: No such file or directory'
-    # - |
-    #   mkdir -p build/bdist.linux-x86_64/rpm/SOURCES \
-    #   && ln -s /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python-linstor-{{ $api_version }}.tar.gz \
-    #   /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python_linstor-{{ $api_version }}.tar.gz
-    #
-    # # and modify python3-setuptools (Ubuntu) with ALTLinux package
-    # - sed -i -e 's/python3-setuptools/python3-module-setuptools/g' setup.cfg
-    # # make .rpm package
-    # - chown -R rpmbuilder:rpmbuilder .
-    # - sudo -u rpmbuilder make rpm
-
     # clone linstor-client git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-client" }}
@@ -186,12 +174,22 @@ shell:
     {{- /* $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) */}}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
-    # make .deb package
+    # copy RPM spec-file
+    - cp /patches/linstor-client.spec /linstor-client/
+    # substitute version in .spec-file
+    - sed -i -e 's/<VERSION>/{{ $client_version }}/g' linstor-client.spec
+    # install python-linstor because it's required for linstor-client
+    - rpm -ihv --nodeps /python_linstor-{{ $api_version }}-1.noarch.rpm
+
+    # make .rpm package
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "name" "linstor-client" }}
+    {{- $_ := set $ctx "name" "linstor_client" }}
     {{- $_ := set $ctx "version" $client_version }}
+    {{- $_ := set $ctx "spec" "linstor-client.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
-    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    # make release-no-doc because doc generation fail in some reasons
+    {{- $_ := set $ctx "tarball_cmd" "make release-no-doc" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
 
@@ -301,7 +299,7 @@ import:
     to: /packages
     includePaths:
       - python_linstor-*.rpm
-      - linstor-client_*.deb
+      - linstor_client-*.rpm
     before: setup
 
   - image: drbd-reactor-utils-artifact

@@ -22,6 +22,7 @@ BuildArch: noarch
 Vendor: LINBIT HA-Solutions GmbH
 Packager: LINSTOR Team <drbd-user@lists.linbit.com>
 Url: https://www.linbit.com
+# FLANT: change to package names for ALTLinux
 BuildRequires:  python3-module-setuptools
 
 %description
@@ -64,4 +65,4 @@ rm -rf $RPM_BUILD_ROOT
 
 %files -f INSTALLED_FILES
 # FLANT: Comment out because of error 'Non-white space follows %defattr() ...'
-#%defattr(-,root,root)
+# %defattr(-,root,root)
