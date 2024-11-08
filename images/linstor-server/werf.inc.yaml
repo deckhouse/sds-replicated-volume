@@ -22,13 +22,15 @@
 # dnsutils             | bind-utils
 # gradle               | javapackages-tools
 # iputils-ping         | iputils
+# libkeyutils-dev      | libkeyutils
+# libxml2-utils        | libxml2
 # nvme-cli             | nvme
 # python3-all          | python3
 # python3-<MODULENAME> | python3-module-<MODULENAME>
 # zfsutils-linux       | zfs-utils
 
 ---
-# build linstor-server.deb packages
+# build linstor-server packages
 image: {{ $.ImageName }}-server-artifact
 from: {{ $.BASE_ALT_P11 }}
 final: false
@@ -55,7 +57,7 @@ shell:
     # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build sudo git java-11-openjdk-devel python3 wget unzip \
+      && apt-get -y install build-essential rpm-build rpm-macros-intro-conflicts sudo git java-11-openjdk-devel python3 wget unzip \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -131,7 +133,7 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build sudo git python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
+      && apt-get -y install build-essential rpm-build rpm-macros-intro-conflicts sudo git python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -375,8 +377,10 @@ shell:
     # Install linstor-server
     - |
       apt-get install -y java-11-openjre-headless thin-provisioning-tools python3 python3-module-natsort
-      # .deb-packages "installed" (more pricesely just extracted) in packages-artifact
-      # dpkg -i packages/*.deb
+      for package in /packages/*.rpm; do
+        echo "Install package ${f}..."
+        rpm -ihv --nodeps "$f"
+      done
       sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
 
     # Log directory need to be group writable. OpenShift assigns random UID and GID, without extra RBAC changes we can only influence the GID.

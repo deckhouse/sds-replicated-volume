@@ -130,7 +130,7 @@
     fi
   - |
     TARBALL_CMD="make tarball"
-    if [[ "{{ .tarball_cmd }}" != "" ]]; then
+    if [[ "{{ .tarball_cmd }}" != "<no value>" ]]; then
       TARBALL_CMD="{{ .tarball_cmd }}"
       echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
     fi
