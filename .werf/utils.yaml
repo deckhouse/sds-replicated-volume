@@ -128,14 +128,21 @@
       echo 'User "rpmbuilder" not found! You must execute "utils:prepare-rpm-build" first'
       exit 5
     fi
+  - |
+    TARBALL_CMD="make tarball"
+    if [[ "{{ .tarball_cmd }}" != "" ]]; then
+      TARBALL_CMD="{{ .tarball_cmd }}"
+      echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
+    fi
   - chown -R rpmbuilder:rpmbuilder .
   # we need tarball first
-  - sudo -u rpmbuilder make tarball KEEPNAME=1 VERSION={{ .version }}
+  - sudo -u rpmbuilder ${TARBALL_CMD} KEEPNAME=1 VERSION={{ .version }}
   - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz /home/rpmbuilder/RPM/SOURCES/
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
   # TODO: instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
+  - echo "Building RPM with ${SPEC_FILE}"
   - sudo -u rpmbuilder rpmbuild -v -ba $SPEC_FILE
   - mv /home/rpmbuilder/RPM/RPMS/noarch/*.rpm /
 {{ end }}

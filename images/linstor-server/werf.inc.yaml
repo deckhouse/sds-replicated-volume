@@ -18,12 +18,13 @@
 # Ubuntu package       | AltLinux package
 #########################################
 # default-jre-headless | java-11-openjre-headless
+# dh-python            | ? rpm-build-python3
 # dnsutils             | bind-utils
 # gradle               | javapackages-tools
 # iputils-ping         | iputils
 # nvme-cli             | nvme
 # python3-all          | python3
-# python3-natsort      | python3-module-natsort
+# python3-<MODULENAME> | python3-module-<MODULENAME>
 # zfsutils-linux       | zfs-utils
 
 ---
@@ -97,10 +98,10 @@ shell:
     # linstor-common-1.24.2-1.noarch.rpm
     # linstor-controller-1.24.2-1.noarch.rpm
     # linstor-satellite-1.24.2-1.noarch.rpm
-
+# TODO: server артефакт вроде сбилдил, теперь нужно сбилдить все остальные
 ---
 image: {{ $.ImageName }}-client-artifact
-from: {{ $.BASE_UBUNTU }}
+from: {{ $.BASE_ALT_P11 }}
 final: false
 
 git:
@@ -120,16 +121,24 @@ git:
       setup:
         - "**/*"
 
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
 shell:
-  install:
+  beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends build-essential debhelper git python3-all python3-setuptools help2man bash-completion docbook-xsl xsltproc dh-python \
-      && apt-get -y install --no-install-recommends --reinstall ca-certificates \
-      && update-ca-certificates \
+      && apt-get -y install build-essential rpm-build sudo git python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
   setup:
     # clone linstor-api-py git repo
     {{- $ctx := dict }}
@@ -141,14 +150,31 @@ shell:
     {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
-    # make .deb package
-    {{- $ctx := dict }}
-    {{- $_ := set $ctx "name" "python-linstor" }}
-    {{- $_ := set $ctx "version" $api_version }}
-    {{- $_ := set $ctx "gen_path" "./dist" }}
-    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    # copy RPM spec-file for python-api
+    - cp /patches/linstor-python-api.spec /linstor-api-py/
+    # substitute version in .spec-file
+    - sed -i -e 's/<VERSION>/{{ $api_version }}/g' linstor-python-api.spec
 
-    - rm -rf /linstor-api-py && mv /{{ $ctx.name }}-{{ $ctx.version }} /linstor-api-py
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "python_linstor" }}
+    {{- $_ := set $ctx "version" $api_version }}
+    {{- $_ := set $ctx "spec" "linstor-python-api.spec" }}
+    {{- $_ := set $ctx "gen_path" "./dist" }}
+    {{- $_ := set $ctx "tarball_cmd" "make release" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    # a hack to fix error like 'File /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python-linstor-1.19.0.tar.gz: No such file or directory'
+    # - |
+    #   mkdir -p build/bdist.linux-x86_64/rpm/SOURCES \
+    #   && ln -s /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python-linstor-{{ $api_version }}.tar.gz \
+    #   /linstor-api-py/build/bdist.linux-x86_64/rpm/SOURCES/python_linstor-{{ $api_version }}.tar.gz
+    #
+    # # and modify python3-setuptools (Ubuntu) with ALTLinux package
+    # - sed -i -e 's/python3-setuptools/python3-module-setuptools/g' setup.cfg
+    # # make .rpm package
+    # - chown -R rpmbuilder:rpmbuilder .
+    # - sudo -u rpmbuilder make rpm
 
     # clone linstor-client git repo
     {{- $ctx := dict }}
@@ -274,7 +300,7 @@ import:
     add: /
     to: /packages
     includePaths:
-      - python-linstor_*.deb
+      - python_linstor-*.rpm
       - linstor-client_*.deb
     before: setup
 

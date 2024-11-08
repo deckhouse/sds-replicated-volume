@@ -12,3 +12,7 @@ causing LINSTOR exceptions when accessing DRBD super-block of volume.
 ### Fix linstor.spec
 
 Fixes error 'error: Group field must be present in package: linstor-common' when building RPM package (for ALT Linux)
+
+### linstor-python-api.spec
+
+Spec file for RPM building of Linstor's python-api library.
