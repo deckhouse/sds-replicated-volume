@@ -113,7 +113,7 @@ func NewLinstorResourcesWatcher(
 			}
 
 			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap)
-			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
+			//ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
 
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
