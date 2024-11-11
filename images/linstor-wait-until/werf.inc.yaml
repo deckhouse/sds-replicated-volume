@@ -1,0 +1,53 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
+{{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+
+{{- $linstor_wait_until_version := "0.2.1" }}
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_BULLSEYE }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/linstor-wait-until
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    tag: v{{ $linstor_wait_until_version }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}
+    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w"
+    - mv {{ $.ImageName }} /
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-wait-until: {{ $linstor_wait_until_version }}

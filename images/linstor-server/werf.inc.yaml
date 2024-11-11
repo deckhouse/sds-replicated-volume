@@ -414,7 +414,7 @@ docker:
   ENTRYPOINT: ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
   CMD: ["startSatellite"]
   LABEL:
-    distro: all
+    distro: ALTLinux
     version: all
     linstor-server: {{ $linstor_version }}
     linstor-api-py: {{ $api_version }}

@@ -205,7 +205,7 @@ shell:
 docker:
   ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
   LABEL:
-    distro: all
+    distro: ALTLinux
     version: all
     drbd-utils: {{ $utils_version }}
     drbd-reactor: {{ $reactor_version }}
