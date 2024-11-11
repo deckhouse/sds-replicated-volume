@@ -55,7 +55,7 @@ shell:
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
     - install /dev/null /usr/local/bin/lbvers.py
-    - ./autogen.sh && ./configure && ./configure --enable-spec --without-manual --with-initscripttype=sysv
+    - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
     # substitute ubuntu packages with ALTLinux's ones
     - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
     # try fix error with brp-alt (https://lists.altlinux.org/pipermail/devel/2019-March/207454.html https://bugzilla.altlinux.org/10382):
@@ -70,6 +70,10 @@ shell:
     {{- $_ := set $ctx "name" "drbd-utils" }}
     {{- $_ := set $ctx "version" $utils_version }}
     {{- $_ := set $ctx "spec" "drbd.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
+    # PS. ./configure --with-initscripttype=sysv does not work for some reason
+    {{- $_ := set $ctx "rpmbuild_args" "--without=manual --define \\'initscripttype sysv\\'" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     # clone thin-send-recv git repo

@@ -108,10 +108,13 @@
   Requirements: build-essential, sudo, hasher and other build tools should be already installed in build container
   Note: You must execute 'utils:prepare-rpm-build' before try to build RPM with this one macros!
   Parameters (* for required):
-    * .name       - Name of RPM package
-    * .version    - Desired version of RPM package
-    * .spec       - Path to RPM's .spec file
-      .gen_path   - Path to files generated with 'make debrelease'. If not specified, then use current directory
+    * .name          - Name of RPM package
+    * .version       - Desired version of RPM package
+    * .spec          - Path to RPM's .spec file
+      .gen_path      - Path to files generated with 'make debrelease'. If not specified, then use current directory
+      .tarball_cmd   - Command to make tarball (Default: 'make tarball')
+      .rpmbuild_args - Additional arguments for rpmbuild command (like "--define \\'some_macro some_value\\'")
+      .arch          - To which CPU arch .rpm package will be builded (Default: noarch)
 
   Example:
   {{- $ctx := dict }}
@@ -134,6 +137,19 @@
       TARBALL_CMD="{{ .tarball_cmd }}"
       echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
     fi
+  - |
+    RPMBUILD_ARGS=()
+    if [[ "{{ .rpmbuild_args }}" != "<no value>" ]]; then
+      RPMBUILD_ARGS=( {{ .rpmbuild_args }} )
+      echo "Set RPMBUILD_ARGS to '${RPMBUILD_ARGS[@]}'"
+    fi
+  - |
+    ARCH="noarch"
+    if [[ "{{ .arch }}" != "<no value>" ]]; then
+      ARCH="{{ .arch }}"
+      echo "Set ARCH to '${ARCH}'"
+    fi
+
   - chown -R rpmbuilder:rpmbuilder .
   # we need tarball first
   - sudo -u rpmbuilder ${TARBALL_CMD} KEEPNAME=1 VERSION={{ .version }}
@@ -142,9 +158,10 @@
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
   # TODO: instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
-  - echo "Building RPM with ${SPEC_FILE}"
-  - sudo -u rpmbuilder rpmbuild -v -ba $SPEC_FILE
-  - mv /home/rpmbuilder/RPM/RPMS/noarch/*.rpm /
+  - RPM_CMD="rpmbuild -v -ba --clean ${RPMBUILD_ARGS[@]} $SPEC_FILE"
+  - 'echo "Building RPM: sudo -H -u rpmbuilder -- sh -c ${RPM_CMD}"'
+  - sudo -H -u rpmbuilder -- sh -c "${RPM_CMD}"
+  - mv /home/rpmbuilder/RPM/RPMS/${ARCH}/*.rpm /
 {{ end }}
 
 {{- /*
