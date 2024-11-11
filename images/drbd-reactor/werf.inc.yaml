@@ -58,12 +58,6 @@ shell:
     - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
     # substitute ubuntu packages with ALTLinux's ones
     - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
-    # try fix error with brp-alt (https://lists.altlinux.org/pipermail/devel/2019-March/207454.html https://bugzilla.altlinux.org/10382):
-    # 028-check_contents.brp: ERROR: Contents of files listed above match pattern                                                ↵
-    # /var/lib/(cache|lib|lock|log|nis|run|spool|www|yp)/
-    #- sed -i -e '8i %define _localstatedir %_var' drbd.spec
-    # No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd.service
-    # - sed -i -e '8i %global debug_package %{nil}' drbd.spec
 
     # make .rpm package
     {{- $ctx := dict }}
@@ -83,14 +77,20 @@ shell:
     {{- $_ := set $ctx "folder" "/thin-send-recv" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
-    # make .deb package
+    # make .rpm package
     {{- $ctx := dict }}
     {{- $_ := set $ctx "name" "thin-send-recv" }}
     {{- $_ := set $ctx "version" $thin_send_recv_version }}
-    {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+    {{- $_ := set $ctx "spec" "thin_send_recv.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-utils_9.28.0-1_amd64.deb
+    # drbd-9.28.0-1.x86_64.rpm
+    # drbd-utils-9.28.0-1.x86_64.rpm
+    # drbd-utils-debuginfo-9.28.0-1.x86_64.rpm
+    # thin-send-recv-1.0.1-1.x86_64.rpm
+    # thin-send-recv-debuginfo-1.0.1-1.x86_64.rpm
 
 ---
 # build drbd-reactor .deb packages

@@ -112,7 +112,7 @@
     * .version       - Desired version of RPM package
     * .spec          - Path to RPM's .spec file
       .gen_path      - Path to files generated with 'make debrelease'. If not specified, then use current directory
-      .tarball_cmd   - Command to make tarball (Default: 'make tarball')
+      .tarball_cmd   - Command to make tarball (Default: 'make release')
       .rpmbuild_args - Additional arguments for rpmbuild command (like "--define \\'some_macro some_value\\'")
       .arch          - To which CPU arch .rpm package will be builded (Default: noarch)
 
@@ -132,20 +132,20 @@
       exit 5
     fi
   - |
-    TARBALL_CMD="make tarball"
-    if [[ "{{ .tarball_cmd }}" != "<no value>" ]]; then
+    TARBALL_CMD="make release"
+    if [ "{{ .tarball_cmd }}" != "<no value>" ]; then
       TARBALL_CMD="{{ .tarball_cmd }}"
       echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
     fi
   - |
     RPMBUILD_ARGS=()
-    if [[ "{{ .rpmbuild_args }}" != "<no value>" ]]; then
-      RPMBUILD_ARGS=( {{ .rpmbuild_args }} )
+    if [ "{{ .rpmbuild_args }}" != "<no value>" ]; then
+      IFS=' ' read -a RPMBUILD_ARGS <<< "{{ .rpmbuild_args }}"
       echo "Set RPMBUILD_ARGS to '${RPMBUILD_ARGS[@]}'"
     fi
   - |
     ARCH="noarch"
-    if [[ "{{ .arch }}" != "<no value>" ]]; then
+    if [ "{{ .arch }}" != "<no value>" ]; then
       ARCH="{{ .arch }}"
       echo "Set ARCH to '${ARCH}'"
     fi

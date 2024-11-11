@@ -93,6 +93,7 @@ shell:
     {{- $_ := set $ctx "name" "linstor-server" }}
     {{- $_ := set $ctx "version" $linstor_version }}
     {{- $_ := set $ctx "spec" "linstor.spec" }}
+    {{- $_ := set $ctx "tarball_cmd" "make tarball" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
     # some cleanup
     - rm -rf /root/.gradle/caches/
@@ -163,7 +164,6 @@ shell:
     {{- $_ := set $ctx "version" $api_version }}
     {{- $_ := set $ctx "spec" "linstor-python-api.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
-    {{- $_ := set $ctx "tarball_cmd" "make release" }}
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     # clone linstor-client git repo
