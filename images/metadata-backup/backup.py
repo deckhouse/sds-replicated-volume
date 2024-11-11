@@ -132,3 +132,6 @@ if __name__ == "__main__":
                                                                           version=objVersion,
                                                                           plural=objKindPlural,
                                                                           name=backup_name)
+
+
+## bump CI
