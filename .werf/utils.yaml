@@ -115,6 +115,7 @@
       .tarball_cmd   - Command to make tarball (Default: 'make release')
       .rpmbuild_args - Additional arguments for rpmbuild command (like "--define \\'some_macro some_value\\'")
       .arch          - To which CPU arch .rpm package will be builded (Default: noarch)
+      .no_debug_pkg  - if 'true' (default) then remove debug symbols and packages from results
 
   Example:
   {{- $ctx := dict }}
@@ -149,6 +150,18 @@
       ARCH="{{ .arch }}"
       echo "Set ARCH to '${ARCH}'"
     fi
+  - |
+    NO_DEBUG_PKG="true"
+    if [ "{{ .no_debug_pkg }}" == "false" ]; then
+      NO_DEBUG_PKG="false"
+      echo "Set NO_DEBUG_PKG to '${NO_DEBUG_PKG}'"
+    fi
+  - |
+    if [ "${NO_DEBUG_PKG}" == "true" ]; then
+      # add special arguments to rpmbuild
+      # https://stackoverflow.com/a/66681875
+      RPMBUILD_ARGS+=( "--define 'debug_package %{nil}'" )
+    fi
 
   - chown -R rpmbuilder:rpmbuilder .
   # we need tarball first
@@ -162,6 +175,11 @@
   - 'echo "Building RPM: sudo -H -u rpmbuilder -- sh -c ${RPM_CMD}"'
   - sudo -H -u rpmbuilder -- sh -c "${RPM_CMD}"
   - mv /home/rpmbuilder/RPM/RPMS/${ARCH}/*.rpm /
+  - |
+    if [ "${NO_DEBUG_PKG}" == "true" ]; then
+      echo "Remove all debuginfo packages because NO_DEBUG_PKG is 'true'"
+      rm /*-debuginfo-*.rpm
+    fi
 {{ end }}
 
 {{- /*

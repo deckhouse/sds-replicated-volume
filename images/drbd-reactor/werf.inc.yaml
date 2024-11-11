@@ -3,6 +3,8 @@
 {{- $_ := set . "BASE_PYTHON"     "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
 {{- $_ := set . "BASE_ALT_P11"    "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
 
+{{- $_ := set . "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git" }}
+
 {{- $utils_version := "9.28.0" }}
 {{- $thin_send_recv_version := "1.0.1" }}
 {{- $reactor_version := "1.4.0" }}
@@ -35,7 +37,7 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build rpm-macros-intro-conflicts sudo git flex clitest xsltproc locales libxml2 po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-devel \
+      && apt-get -y install {{ .BUILD_PACKAGES }} flex clitest xsltproc locales libxml2 po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-devel \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -95,7 +97,7 @@ shell:
 ---
 # build drbd-reactor .deb packages
 image: {{ $.ImageName }}-reactor-artifact
-from: {{ $.BASE_UBUNTU }}
+from: {{ $.BASE_ALT_P11 }}
 final: false
 
 git:
@@ -107,64 +109,70 @@ git:
       setup:
         - "**/*"
 
-  # - add: /images/{{ $.ImageName }}/patches
-  #   to: /patches
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
 shell:
-  install:
+  beforeInstall:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends build-essential debhelper git cargo rustc dh-python bash-completion \
-      && apt-get -y install --no-install-recommends --reinstall ca-certificates \
-      && update-ca-certificates \
+      && apt-get -y install {{ .BUILD_PACKAGES }} rust-cargo bash-completion \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
   setup:
-      # Clone just the repository's .git folder
-    - git clone --no-checkout --depth 1 --branch v{{ $reactor_version }} https://github.com/LINBIT/drbd-reactor /git-repo.tmp
-      # Move the .git folder to the directory with the files.
-    - mv /git-repo.tmp/.git drbd-reactor/
-      # Delete the temporary directory
-    - rmdir /git-repo.tmp
-    - cd /drbd-reactor
-      # git thinks all files are deleted, this reverts the state of the repo to HEAD.
-      # WARNING: any local changes to the files will be lost.
-    - git reset --hard HEAD
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-reactor" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $reactor_version) }}
+    {{- $_ := set $ctx "folder" "/drbd-reactor" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    # apply git patches to upstream's code
+    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && ( git apply /patches/*.patch && git commit -am "Auto-commit patched files" ) || echo "Git patches not found. Skipped"'
+    - git tag -f v{{ $reactor_version }}
+
     - install /dev/null /usr/local/bin/lbvers.py
-    - make debrelease VERSION={{ $reactor_version }}
-    - mv drbd-reactor-{{ $reactor_version }}.tar.gz ../drbd-reactor_$(echo {{ $reactor_version }} | tr '-' '~').orig.tar.gz
-    - tar -C / -xvf ../drbd-reactor_$(echo {{ $reactor_version }} | tr '-' '~').orig.tar.gz
-    - |
-      cd /drbd-reactor-{{ $reactor_version }}
-      dpkg-buildpackage -us -uc
-      ls -la /
+
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "drbd-reactor" }}
+    {{- $_ := set $ctx "version" $reactor_version }}
+    {{- $_ := set $ctx "spec" "drbd-reactor.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    - ls -la /
+    # drbd-reactor-1.4.0-1.x86_64.rpm
+    # drbd-reactor-debuginfo-1.4.0-1.x86_64.rpm
 
 ---
-# get drbd-utils and drbd-reactor packages and install it into this artifact
-image: {{ $.ImageName }}-packages-artifact
-from: {{ $.BASE_UBUNTU }}
-final: false
-git:
-  - add: /images/scripts
-    to: /
-    stageDependencies:
-      setup:
-        - "**/*"
+# main almost distroless image
+image: {{ $.ImageName }}
+from: {{ $.BASE_ALT_P11 }}
+# git:
+#   - add: /images/scripts
+#     to: /
+#     stageDependencies:
+#       setup:
+#         - "**/*"
 import:
   - image: {{ $.ImageName }}-utils-artifact
     add: /
     to: /packages
     includePaths:
-      - python-linstor_*.deb
-      - drbd-utils_*.deb
-      - thin-send-recv_*.deb
+      # - python-linstor-*.rpm
+      - drbd-utils-*.rpm
+      - thin-send-recv-*.rpm
     before: setup
 
   - image: {{ $.ImageName }}-reactor-artifact
     add: /
     to: /packages
     includePaths:
-      - drbd-reactor_*.deb
+      - drbd-reactor-*.rpm
     before: setup
 
 shell:
@@ -172,34 +180,28 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     # install packages required by deb2distroless script
     # https://salsa.debian.org/apt-team/apt-file
+    # - |
+    #   apt-get update \
+    #   && apt-get -y install --no-install-recommends binutils zstd apt-file \
+    #   && apt-file update -a amd64 \
+    #   && apt-get clean
+    # install required depends
     - |
       apt-get update \
-      && apt-get -y install --no-install-recommends binutils zstd apt-file \
-      && apt-file update -a amd64 \
+      && apt-get -y install libkeyutils kmod sysklogd \
       && apt-get clean
   setup:
+    - ls -la /packages
     - |
-      for f in /packages/*.deb; do
-        /deb2distroless.sh -e /relocate -d /downloaded-cache $f
+      for f in /packages/*.rpm; do
+        echo "Install ${f}"
+        rpm -ihv --nodeps --noscripts $f
       done
-      # now install (post-process) all downloaded depends
-      /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
-    - sed -i 's/usage-count yes;/usage-count no;/' /relocate/etc/drbd.d/global_common.conf
+
+    - sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf
     # cleanup
     - rm -rf /var/lib/apt/lists/*
-    - ls -la /relocate
 
----
-# main distroless image
-image: {{ $.ImageName }}
-# TODO: test why python3-toml package is needed in runtime image
-from: {{ $.BASE_SCRATCH }}
-
-import:
-  - image: {{ $.ImageName }}-packages-artifact
-    add: /relocate
-    to: /
-    before: setup
 docker:
   ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
   LABEL:

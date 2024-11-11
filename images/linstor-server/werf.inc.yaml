@@ -3,6 +3,8 @@
 {{- $_ := set . "BASE_GOLANG"     "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
 {{- $_ := set . "BASE_ALT_P11"    "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
 
+{{- $_ := set . "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git" }}
+
 {{- $linstor_version := "1.24.2" }}
 # We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
 # Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
@@ -57,7 +59,7 @@ shell:
     # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build rpm-macros-intro-conflicts sudo git java-11-openjdk-devel python3 wget unzip \
+      && apt-get -y install {{ .BUILD_PACKAGES }} java-11-openjdk-devel python3 wget unzip \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -134,7 +136,7 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install build-essential rpm-build rpm-macros-intro-conflicts sudo git python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
+      && apt-get -y install {{ .BUILD_PACKAGES }} python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -309,9 +311,9 @@ import:
     # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
     to: /drbd-utils
     includePaths:
-      - python-linstor_*.deb
-      - drbd-utils_*.deb
-      - thin-send-recv_*.deb
+      - python-linstor-*.rpm
+      - drbd-utils-*.rpm
+      - thin-send-recv-*.rpm
     before: setup
 
   - image: {{ $.ImageName }}-k8s-await-election-artifact
