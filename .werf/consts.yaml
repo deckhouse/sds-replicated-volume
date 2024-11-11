@@ -1,0 +1,10 @@
+# base images
+{{- $_ := set $ "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set $ "BASE_ALT_P11"    "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+
+# component versions
+{{- $_ := set $ "DRBD_VERSION" "9.2.10" }}
+
+# custom constants
+{{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git" }}
+
