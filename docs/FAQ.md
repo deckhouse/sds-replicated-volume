@@ -267,18 +267,20 @@ linstor --help
 
 ## How do I restore LINSTOR DB from backup?
 
-The backups of LINSTOR resources are stored in secrets as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
+The backups of LINSTOR resources are stored as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
 
 An example of a correctly formatted backup looks like this:
 
 ```shell
-linstor-20240425074718-backup-0              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-1              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-2              Opaque                           1      28s     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-completed      Opaque                           0      28s     <none>
+sds-replicated-volume-daily-backup-20241112130501-backup-0    97m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130501
+sds-replicated-volume-daily-backup-20241112130501-backup-1    97m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130501
+sds-replicated-volume-daily-backup-20241112140501-backup-0    37m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112140501
+sds-replicated-volume-daily-backup-20241112140501-backup-1    37m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112140501
+sds-replicated-volume-weekly-backup-20241112130400-backup-0   98m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130400
+sds-replicated-volume-weekly-backup-20241112130400-backup-1   98m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130400
 ```
 
-The backup is stored in encoded segments in secrets of the form linstor-%date_time%-backup-{0..2}, where the secret of the form linstor-%date_time%-backup-completed contains no data and serves as a marker for a successfully completed backup process.
+The backup is stored in encoded segments in secrets of the form `sds-replicated-volume-{daily|weekly}-backup-%date_time%-backup-{0..2}`.
 
 ### Restoration Process
 
@@ -292,33 +294,18 @@ BACKUP_NAME="linstor_db_backup"
 Check for the presence of backup copies:
 
 ```shell
-kubectl -n $NAMESPACE get secrets --show-labels
+kubectl get rsmb --show-labels
 ```
 
 Example command output:
 
 ```shell
-linstor-20240425072413-backup-0              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
-linstor-20240425072413-backup-1              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
-linstor-20240425072413-backup-2              Opaque                           1      33m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072413
-linstor-20240425072413-backup-completed      Opaque                           0      33m     <none>
-linstor-20240425072510-backup-0              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
-linstor-20240425072510-backup-1              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
-linstor-20240425072510-backup-2              Opaque                           1      32m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072510
-linstor-20240425072510-backup-completed      Opaque                           0      32m     <none>
-linstor-20240425072634-backup-0              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
-linstor-20240425072634-backup-1              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
-linstor-20240425072634-backup-2              Opaque                           1      31m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072634
-linstor-20240425072634-backup-completed      Opaque                           0      31m     <none>
-linstor-20240425072918-backup-0              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
-linstor-20240425072918-backup-1              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
-linstor-20240425072918-backup-2              Opaque                           1      28m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425072918
-linstor-20240425072918-backup-completed      Opaque                           0      28m     <none>
-linstor-20240425074718-backup-0              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-1              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-2              Opaque                           1      10m     sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074718
-linstor-20240425074718-backup-completed      Opaque                           0      10m     <none>
-
+sds-replicated-volume-daily-backup-20241112130501-backup-0    97m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130501
+sds-replicated-volume-daily-backup-20241112130501-backup-1    97m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130501
+sds-replicated-volume-daily-backup-20241112140501-backup-0    37m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112140501
+sds-replicated-volume-daily-backup-20241112140501-backup-1    37m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112140501
+sds-replicated-volume-weekly-backup-20241112130400-backup-0   98m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130400
+sds-replicated-volume-weekly-backup-20241112130400-backup-1   98m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130400
 ```
 
 Each backup has its own label with the creation time. Choose the desired one and copy its label into an environment variable.
@@ -331,7 +318,7 @@ LABEL_SELECTOR="sds-replicated-volume.deckhouse.io/linstor-db-backup=20240425074
 Create a temporary directory to store archive parts:
 ```shell
 TMPDIR=$(mktemp -d)
-echo "Временный каталог: $TMPDIR"
+echo "Temporary directory: $TMPDIR"
 ```
 
 Next, create an empty archive and combine the secret data into one file:
@@ -346,7 +333,7 @@ MOBJECTS=$(kubectl get rsmb -l "$LABEL_SELECTOR" --sort-by=.metadata.name -o jso
 
 for MOBJECT in $MOBJECTS; do
   echo "Process: $MOBJECT"
-  kubectl get rsmb "$MOBJECT" -o jsonpath="{.data}" | base64 --decode >> "$COMBINED"
+  kubectl get rsmb "$MOBJECT" -o jsonpath="{.spec.data}" | base64 --decode >> "$COMBINED"
 done
 ```
 
