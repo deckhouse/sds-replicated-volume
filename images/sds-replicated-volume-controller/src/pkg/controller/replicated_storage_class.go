@@ -47,9 +47,9 @@ import (
 
 const (
 	ReplicatedStorageClassControllerName = "replicated-storage-class-controller"
-	// ???
+	// TODO
 	ReplicatedStorageClassFinalizerName = "replicatedstorageclass.storage.deckhouse.io"
-	// ???
+	// TODO
 	StorageClassFinalizerName = "storage.deckhouse.io/sds-replicated-volume"
 	StorageClassProvisioner   = "replicated.csi.storage.deckhouse.io"
 	StorageClassKind          = "StorageClass"
