@@ -2,7 +2,7 @@
 
 # Ubuntu package       | AltLinux package
 #########################################
-# default-jre-headless | java-11-openjre-headless
+# default-jre-headless | java-11-openjdk-headless
 # dh-python            | ? rpm-build-python3
 # dnsutils             | bind-utils
 # gradle               | javapackages-tools
@@ -200,67 +200,6 @@ shell:
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
 ---
-# extract all packages into this artifact
-# image: {{ $.ImageName }}-packages-artifact
-# from: {{ $.BASE_UBUNTU }}
-# final: false
-# git:
-#   - add: /images/scripts
-#     to: /
-#     stageDependencies:
-#       setup:
-#         - "**/*"
-# import:
-#   - image: {{ $.ImageName }}-server-artifact
-#     add: /
-#     to: /packages
-#     includePaths:
-#       - linstor-common_*.deb
-#       - linstor-controller_*.deb
-#       - linstor-satellite_*.deb
-#     before: setup
-
-#   - image: {{ $.ImageName }}-client-artifact
-#     add: /
-#     to: /packages
-#     includePaths:
-#       - python-linstor_*.deb
-#       - linstor-client_*.deb
-#     before: setup
-
-#   - image: drbd-reactor-utils-artifact
-#     add: /
-#     # to /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
-#     to: /drbd-utils
-#     includePaths:
-#       - python-linstor_*.deb
-#       - drbd-utils_*.deb
-#       - thin-send-recv_*.deb
-#     before: setup
-
-# shell:
-#   install:
-#     - export DEBIAN_FRONTEND=noninteractive
-#     # install packages required by deb2distroless script
-#     # https://salsa.debian.org/apt-team/apt-file
-#     - |
-#       apt-get update \
-#       && apt-get -y install --no-install-recommends binutils zstd apt-file \
-#       && apt-file update -a amd64 \
-#       && apt-get clean
-#   setup:
-#     - mv /drbd-utils/* /packages/
-#     - |
-#       for f in /packages/*.deb; do
-#         /deb2distroless.sh -e /relocate -d /downloaded-cache $f
-#       done
-#       # now install (post-process) all downloaded depends
-#       /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
-#     # cleanup
-#     - rm -rf /var/lib/apt/lists/*
-#     - ls -la /relocate
-
----
 # main image based on AltLinux for now because we need bash and other tools
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_ALT_P11 }}
@@ -306,10 +245,6 @@ import:
       - k8s-await-election
     before: setup
 
-  # - image: {{ $.ImageName }}-packages-artifact
-  #   add: /relocate
-  #   to: /relocate
-  #   before: setup
 shell:
   # add some scripts to image to be able to use them
   install:
@@ -361,7 +296,7 @@ shell:
 
     # Install linstor-server
     - |
-      apt-get install -y java-11-openjre-headless thin-provisioning-tools python3 python3-module-natsort
+      apt-get install -y java-11-openjdk-headless thin-provisioning-tools python3 python3-module-natsort
       for package in /packages/*.rpm; do
         echo "Install package ${f}..."
         rpm -ihv --nodeps "$f"
