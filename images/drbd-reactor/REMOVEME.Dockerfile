@@ -1,5 +1,3 @@
-TODO: remove this file after migrate to Werf!
-
 ARG BASE_UBUNTU=registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc
 
 FROM $BASE_UBUNTU as utils-builder
@@ -64,7 +62,6 @@ COPY --from=reactor-builder /drbd-reactor_*.deb /packages/
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
  && apt-get -y install python3-toml \
- && ls -la packages/ \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \
