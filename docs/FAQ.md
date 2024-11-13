@@ -267,7 +267,7 @@ linstor --help
 
 ## How do I restore LINSTOR DB from backup?
 
-The backups of LINSTOR resources are stored as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
+The backups of LINSTOR resources are stored in Custom Resources `replicatedstoragemetadatabackups.storage.deckhouse.io` and have a segmented format. Backup occurs automatically on a schedule.
 
 An example of a correctly formatted backup looks like this:
 
@@ -280,7 +280,7 @@ sds-replicated-volume-weekly-backup-20241112130400-backup-0   98m     completed=
 sds-replicated-volume-weekly-backup-20241112130400-backup-1   98m     completed=true,sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup=20241112130400
 ```
 
-The backup is stored in encoded segments in secrets of the form `sds-replicated-volume-{daily|weekly}-backup-%date_time%-backup-{0..2}`.
+The backup is stored in encoded segments in Custom Resources `replicatedstoragemetadatabackups.storage.deckhouse.io` of the form `sds-replicated-volume-{daily|weekly}-backup-%date_time%-backup-{0..2}`.
 
 ### Restoration Process
 
