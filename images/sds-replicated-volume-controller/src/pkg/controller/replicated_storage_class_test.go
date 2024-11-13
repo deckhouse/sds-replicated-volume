@@ -150,7 +150,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		sc, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		sc, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc).NotTo(BeNil())
 		Expect(sc.Name).To(Equal(testName))
@@ -185,7 +185,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		err = controller.DeleteStorageClass(ctx, cl, storageClass)
 		Expect(err).NotTo(HaveOccurred())
 
-		sc, err := controller.GetStorageClass(ctx, cl, testName, testNamespaceConst)
+		sc, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(BeNil())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(sc).To(BeNil())
@@ -207,7 +207,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 
-		sc, err = controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		sc, err = controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(sc).NotTo(BeNil())
 		Expect(sc.Name).To(Equal(testName))
@@ -381,7 +381,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 
-		sc, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		sc, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(sc).To(BeNil())
@@ -432,7 +432,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(requeue).To(BeFalse())
 
-		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).NotTo(BeNil())
 		Expect(storageClass.Name).To(Equal(testName))
@@ -680,7 +680,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		replicatedSC = getAndValidateNotReconciledRSC(ctx, cl, testName)
 
-		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).To(HaveOccurred())
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 		Expect(storageClass).To(BeNil())
@@ -699,7 +699,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		Expect(slices.Contains(resource.Finalizers, controller.ReplicatedStorageClassFinalizerName)).To(BeTrue())
 
-		storageClass, err = controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		storageClass, err = controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).NotTo(BeNil())
 		Expect(storageClass.Name).To(Equal(testName))
@@ -764,7 +764,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		resFinalizers := strings.Join(resource.Finalizers, "")
 		Expect(strings.Contains(resFinalizers, controller.ReplicatedStorageClassFinalizerName))
 
-		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).NotTo(BeNil())
 		Expect(storageClass.Name).To(Equal(testName))
@@ -822,7 +822,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(replicatedSCafterReconcile.Name).To(Equal(testName))
 		Expect(replicatedSCafterReconcile.Status.Phase).To(Equal(controller.Failed))
 
-		storageClass, err := controller.GetStorageClass(ctx, cl, testNamespaceConst, testName)
+		storageClass, err := controller.GetStorageClass(ctx, cl, testName)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(storageClass).NotTo(BeNil())
 		Expect(storageClass.Name).To(Equal(testName))

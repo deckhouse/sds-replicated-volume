@@ -38,7 +38,7 @@ import (
 )
 
 const (
-	testNamespaceConst         = "test-namespace"
+	testNamespaceConst         = ""
 	testNameForAnnotationTests = "rsc-test-annotation"
 )
 
