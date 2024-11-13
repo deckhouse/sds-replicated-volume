@@ -1,19 +1,13 @@
-{{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
-{{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
-{{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-
-{{- $csi_version := "98544cadb6d111d27a86a11ec07de91b99704b82" }}
-
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG_BULLSEYE }}
+from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 
 git:
   - url: https://github.com/linbit/linstor-csi
     add: /
     to: /usr/local/go/linstor-csi
-    commit: {{ $csi_version }}
+    commit: {{ $.Versions.LINSTOR_CSI }}
     stageDependencies:
       setup:
         - "**/*"
@@ -31,13 +25,13 @@ shell:
     - cd /usr/local/go/linstor-csi
     - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
     - cd cmd/linstor-csi
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ $csi_version }}"
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ $.Versions.LINSTOR_CSI }}"
     - mv linstor-csi /
     - chmod +x /linstor-csi
 
 ---
 image: {{ $.ImageName }}-packages-artifact
-from: {{ $.BASE_UBUNTU }}
+from: {{ $.Root.BASE_UBUNTU }}
 final: false
 git:
   - add: /images/scripts
@@ -68,7 +62,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
@@ -85,4 +79,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-csi: {{ $csi_version }}
+    linstor-csi: {{ $.Versions.LINSTOR_CSI }}

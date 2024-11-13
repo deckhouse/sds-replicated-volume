@@ -1,8 +1,6 @@
-{{- $_ := set . "BASE_ALT_P11"    "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
-
 ---
 image: metadata-backup
-from: {{ .BASE_ALT_P11 }}
+from: {{ $.Root.BASE_ALT_P11 }}
 git:
   - add: /images/metadata-backup/backup.py
     to: /backup.py

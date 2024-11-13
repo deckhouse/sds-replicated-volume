@@ -1,9 +1,39 @@
 # base images
-{{- $_ := set $ "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set $ "BASE_ALT_P11"    "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+{{- $_ := set $ "BASE_ALPINE_DEV"  "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
+{{- $_ := set $ "BASE_ALT_P11"     "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+{{- $_ := set $ "BASE_GOLANG_1_22" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
+{{- $_ := set $ "BASE_PYTHON"      "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
+{{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
+{{- $_ := set $ "BASE_UBUNTU"      "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+
 
 # component versions
-{{- $_ := set $ "DRBD_VERSION" "9.2.10" }}
+{{- $versions := dict }}
+{{- $_ := set $versions "DRBD" "9.2.10" }}
+{{- $_ := set $versions "DRBD_REACTOR" "1.4.0" }}
+{{- $_ := set $versions "DRBD_UTILS" "9.28.0" }}
+{{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
+{{- $_ := set $versions "LINSTOR_API_PY" "1.19.0" }}
+{{- $_ := set $versions "LINSTOR_CLIENT" "1.19.0" }}
+{{- $_ := set $versions "LINSTOR_COMMON" "999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec" }}
+{{- $_ := set $versions "LINSTOR_CSI" "98544cadb6d111d27a86a11ec07de91b99704b82" }}
+{{- $_ := set $versions "LINSTOR_K8S_AWAIT_ELECTION" "0.3.1" }}
+{{- $_ := set $versions "LINSTOR_SCHEDULER_EXTENDER" "0.3.2" }}
+# the closest version I found for the stork's module version v1.4.1-0.20220512171133-b99428ee1ddf which used in linstor-scheduler-extender v0.3.2
+# https://github.com/libopenstorage/stork/pull/1097/commits
+{{- $_ := set $versions "LINSTOR_SCHEDULER_STORK" "2.11.5" }}
+{{- $_ := set $versions "LINSTOR_SERVER" "1.24.2" }}
+# We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
+# Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
+{{- $_ := set $versions "LINSTOR_SERVER_GRADLE" "6.9.3" }}
+{{- $_ := set $versions "LINSTOR_SERVER_PIRAEUS" "20e96f83f52631dc06d011b7f96293d4026236a1" }}
+{{- $_ := set $versions "LINSTOR_WAIT_UNTIL" "0.2.1" }}
+{{- $_ := set $versions "SEMVER_TOOL" "3.4.0" }}
+{{- $_ := set $versions "SPAAS" "7bef2e7976a455550bce2533487c635f20390ccf" }}
+{{- $_ := set $versions "THIN_SEND_RECV" "1.0.1" }}
+
+{{- $_ := set $ "VERSIONS" $versions }}
+
 
 # custom constants
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git" }}

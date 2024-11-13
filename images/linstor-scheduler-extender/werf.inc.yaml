@@ -1,22 +1,13 @@
-{{- $_ := set . "BASE_GOLANG_BULLSEYE" "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
-{{- $_ := set . "BASE_UBUNTU"     "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
-{{- $_ := set . "BASE_SCRATCH" "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-
-{{- $extender_version := "0.3.2" }}
-# the closest version I found for the stork's module version v1.4.1-0.20220512171133-b99428ee1ddf which used in linstor-scheduler-extender v0.3.2
-# https://github.com/libopenstorage/stork/pull/1097/commits
-{{- $stork_version := "2.11.5" }}
-
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG_BULLSEYE }}
+from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 
 git:
   - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    tag: v{{ $extender_version }}
+    tag: v{{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}
     stageDependencies:
       setup:
         - "**/*"
@@ -24,7 +15,7 @@ git:
   - url: https://github.com/libopenstorage/stork
     add: /
     to: /usr/local/go/stork
-    tag: v{{ $stork_version }}
+    tag: v{{ $.Versions.LINSTOR_SCHEDULER_STORK }}
     stageDependencies:
       beforeSetup:
         - "**/*"
@@ -54,12 +45,12 @@ shell:
     - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
     - go mod tidy
     - cd cmd/linstor-scheduler-extender
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=vv{{ $extender_version }}"
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
@@ -72,4 +63,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    linstor-scheduler-extender: {{ $extender_version }}
+    linstor-scheduler-extender: {{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}

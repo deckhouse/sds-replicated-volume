@@ -1,13 +1,13 @@
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.root.BASE_ALT_P11 }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
   - url: https://github.com/LINBIT/drbd/
     add: /
     to: /drbd
-    tag: drbd-{{ $.root.DRBD_VERSION }}
+    tag: drbd-{{ $.Versions.DRBD }}
     stageDependencies:
       setup:
         - "**/*"
@@ -22,7 +22,7 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install {{ $.root.BUILD_PACKAGES }} \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} \
       && apt-get -y install ca-certificates \
       && update-ca-trust \
       && apt-get clean \
@@ -38,17 +38,17 @@ shell:
     # clone drbd git repo
     {{- $ctx := dict }}
     {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd" }}
-    {{- $_ := set $ctx "branch" (printf "drbd-%s" $.root.DRBD_VERSION) }}
+    {{- $_ := set $ctx "branch" (printf "drbd-%s" $.Versions.DRBD) }}
     {{- $_ := set $ctx "folder" "/drbd" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     # - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
-    - git commit -am "Auto-commit" && git tag -f drbd-{{ $.root.DRBD_VERSION }}
+    - git commit -am "Auto-commit" && git tag -f drbd-{{ $.Versions.DRBD }}
     # tarball required by spaas image
-    - make tarball VERSION="{{ $.root.DRBD_VERSION }}"
+    - make tarball VERSION="{{ $.Versions.DRBD }}"
 ---
 image: {{ $.ImageName }}
-from: {{ $.root.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-artifact
@@ -63,4 +63,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    drbd: {{ $.root.DRBD_VERSION }}
+    drbd: {{ $.Versions.DRBD }}
