@@ -179,8 +179,7 @@ func ReconcileReplicatedStorageClassEvent(
 			return false, nil
 		}
 
-		return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] "+
-			"error getting ReplicatedStorageClass: %w", err)
+		return true, fmt.Errorf("error getting ReplicatedStorageClass: %w", err)
 	}
 
 	sc, err := GetStorageClass(ctx, cl, replicatedSC.Namespace, replicatedSC.Name)
@@ -189,14 +188,12 @@ func ReconcileReplicatedStorageClassEvent(
 			log.Info("[ReconcileReplicatedStorageClassEvent] StorageClass with name: " +
 				replicatedSC.Name + " not found.")
 		} else {
-			return true, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] error getting StorageClass: %s",
-				err.Error())
+			return true, fmt.Errorf("error getting StorageClass: %w", err)
 		}
 	}
 
 	if sc != nil && sc.Provisioner != StorageClassProvisioner {
-		return false, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] "+
-			"Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
+		return false, fmt.Errorf("Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
 	}
 
 	// Handle deletion
@@ -275,8 +272,7 @@ func ReconcileReplicatedStorageClass(
 			replicatedSC.Name + " not found. Create it.")
 		log.Trace(fmt.Sprintf("[ReconcileReplicatedStorageClass] create StorageClass %+v", newSC))
 		if err = CreateStorageClass(ctx, cl, newSC); err != nil {
-			return true, fmt.Errorf("[ReconcileReplicatedStorageClass] error CreateStorageClass %s: %w",
-				replicatedSC.Name, err)
+			return true, fmt.Errorf("error CreateStorageClass %s: %w", replicatedSC.Name, err)
 		}
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name + " created.")
 	} else {
@@ -284,8 +280,7 @@ func ReconcileReplicatedStorageClass(
 			" storage class if needed.")
 		shouldRequeue, err := UpdateStorageClassIfNeeded(ctx, cl, log, newSC, oldSC)
 		if err != nil {
-			return shouldRequeue, fmt.Errorf("[ReconcileReplicatedStorageClass] "+
-				"error updateStorageClassIfNeeded: %w", err)
+			return shouldRequeue, fmt.Errorf("error updateStorageClassIfNeeded: %w", err)
 		}
 	}
 
@@ -325,8 +320,7 @@ func ReconcileDeleteReplicatedStorageClass(
 			" found. Deleting it.")
 
 		if err := DeleteStorageClass(ctx, cl, sc); err != nil {
-			return true, fmt.Errorf("[ReconcileDeleteReplicatedStorageClass] error DeleteStorageClass: %s",
-				err.Error())
+			return true, fmt.Errorf("error DeleteStorageClass: %w", err)
 		}
 		log.Info("[ReconcileDeleteReplicatedStorageClass] StorageClass with name: " + replicatedSC.Name +
 			" deleted.")
@@ -338,8 +332,7 @@ func ReconcileDeleteReplicatedStorageClass(
 	replicatedSC.ObjectMeta.Finalizers = RemoveString(replicatedSC.ObjectMeta.Finalizers,
 		ReplicatedStorageClassFinalizerName)
 	if err := UpdateReplicatedStorageClass(ctx, cl, replicatedSC); err != nil {
-		return true, fmt.Errorf("[ReconcileDeleteReplicatedStorageClass] error UpdateReplicatedStorageClass "+
-			"after removing finalizer: %s", err.Error())
+		return true, fmt.Errorf("error UpdateReplicatedStorageClass after removing finalizer: %w", err)
 	}
 
 	log.Info("[ReconcileDeleteReplicatedStorageClass] Finalizer removed from ReplicatedStorageClass with name: " +

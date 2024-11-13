@@ -788,7 +788,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			},
 		}
 
-		failedMessage := "[ReconcileReplicatedStorageClass] error updateStorageClassIfNeeded: " +
+		failedMessage := "error updateStorageClassIfNeeded: " +
 			"[recreateStorageClassIfNeeded] The StorageClass cannot be recreated because its parameters are not equal: " +
 			"Old StorageClass and New StorageClass are not equal: ReclaimPolicy are not equal " +
 			"(Old StorageClass: not-equal, New StorageClass: Retain"
