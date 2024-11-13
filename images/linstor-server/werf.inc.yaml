@@ -296,12 +296,18 @@ shell:
       rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
       rename 'linstor-common' '002-linstor-common' /packages/linstor-common-*.rpm
 
+      # thin-send-recv moving from /packages because it should be installed separately
+      mv /packages/thin-send-recv-*.rpm /
+
       echo "Install our own RPM packages..."
       for package in /packages/*.rpm; do
         echo "    => ${package}"
-        # thin-send-recv installation fail if we don't add --noscripts
         rpm -ihv "$package"
       done
+
+      # thin-send-recv installation fail if we don't add --noscripts
+      echo "Install thin-send-recv RPM..."
+      rpm -ihv --nodeps /thin-send-recv-*.rpm && rm /thin-send-recv-*.rpm
 
     - |
       # Install useful utilities and optional dependencies
@@ -347,7 +353,7 @@ shell:
       # remove udev, no need for it in the container
       apt-get remove -y udev
       apt-get clean
-      rm -rf /var/lib/apt/lists/*
+      rm -rf /var/lib/apt/lists/* /packages
 
 docker:
   # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
