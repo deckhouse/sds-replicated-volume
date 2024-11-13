@@ -692,7 +692,7 @@ func DoUpdateStorageClass(
 		if newSC.Labels == nil {
 			newSC.Labels = maps.Clone(oldSC.Labels)
 		} else {
-			updateMap(newSC.Labels, oldSC.Labels, false)
+			updateMap(newSC.Labels, oldSC.Labels)
 		}
 	}
 
@@ -704,7 +704,7 @@ func DoUpdateStorageClass(
 		if newSC.Annotations == nil {
 			newSC.Annotations = copyAnnotations
 		} else {
-			updateMap(newSC.Annotations, copyAnnotations, false)
+			updateMap(newSC.Annotations, copyAnnotations)
 		}
 	}
 
@@ -769,16 +769,10 @@ func updateReplicatedStorageClassStatus(
 	return UpdateReplicatedStorageClass(ctx, cl, replicatedSC)
 }
 
-func updateMap(dst, src map[string]string, rw bool) {
-	if rw {
-		for k, v := range src {
+func updateMap(dst, src map[string]string) {
+	for k, v := range src {
+		if _, exists := dst[k]; !exists {
 			dst[k] = v
-		}
-	} else {
-		for k, v := range src {
-			if _, exists := dst[k]; !exists {
-				dst[k] = v
-			}
 		}
 	}
 }
