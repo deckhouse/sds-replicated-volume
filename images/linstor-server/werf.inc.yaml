@@ -279,7 +279,7 @@ shell:
       LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
       LINSTOR_SATELLITE_DEPS="lvm2"
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
-      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd"
+      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux"
 
       apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
 
@@ -301,11 +301,8 @@ shell:
       done
 
     - |
-      # Install useful utilities and general dependencies
+      # Install useful utilities and optional dependencies
 
-      apt-get install -y jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux
-
-      # Install dependencies for optional features
       # cryptsetup: luks layer
       # e2fsprogs: LINSTOR can create file systems
       # lsscsi: exos layer
