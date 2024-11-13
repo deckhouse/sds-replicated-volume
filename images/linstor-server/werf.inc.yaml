@@ -273,13 +273,16 @@ shell:
       echo "Install required packages..."
 
       # lvm2: manage lvm storage pools
+      # multipath-tools: exos layer
+      # nvme-cli: nvme layer
       # socat: used with thin-send-recv to send snapshots to another LINSTOR cluster
       # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      # zfsutils-linux: for zfs storage pools
       DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils lsb-init openssh"
       LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
       LINSTOR_SATELLITE_DEPS="lvm2"
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
-      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux"
+      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
 
       apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
 
@@ -306,18 +309,14 @@ shell:
       # cryptsetup: luks layer
       # e2fsprogs: LINSTOR can create file systems
       # lsscsi: exos layer
-      # lvm2: manage lvm storage pools
-      # multipath-tools: exos layer
-      # nvme-cli: nvme layer
       # procps: used by LINSTOR to find orphaned send/receive processes
       # xfsprogs: LINSTOR can create file systems; xfs deps
-      # zfsutils-linux: for zfs storage pools
 
       # using echo 'Yes, do as I say!' and --force-yes to ignore these warnings:
       # WARNING: The following essential packages will be removed
       # This should NOT be done unless you know exactly what you are doing!
       # sysvinit
-      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi multipath-tools nvme procps xfsprogs zfs-utils
+      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi procps xfsprogs
 
     - |
       echo "Patch some files..."
