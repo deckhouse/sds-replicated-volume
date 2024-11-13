@@ -594,6 +594,26 @@ func DeleteStorageClass(ctx context.Context, cl client.Client, sc *storagev1.Sto
 	return fmt.Errorf("deletion of StorageClass with multiple(%v) finalizers is not allowed", finalizers)
 }
 
+// areSlicesEqualIgnoreOrder compares two slices as sets, ignoring order
+func areSlicesEqualIgnoreOrder(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	set := make(map[string]struct{}, len(a))
+	for _, item := range a {
+		set[item] = struct{}{}
+	}
+
+	for _, item := range b {
+		if _, found := set[item]; !found {
+			return false
+		}
+	}
+
+	return true
+}
+
 func updateStorageClassMetaDataIfNeeded(
 	ctx context.Context,
 	cl client.Client,
@@ -601,9 +621,7 @@ func updateStorageClassMetaDataIfNeeded(
 ) error {
 	needsUpdate := !maps.Equal(oldSC.Labels, newSC.Labels) ||
 		!maps.Equal(oldSC.Annotations, newSC.Annotations) ||
-		!slices.EqualFunc(newSC.Finalizers, oldSC.Finalizers, func(a, b string) bool {
-			return a == b
-		})
+		!areSlicesEqualIgnoreOrder(newSC.Finalizers, oldSC.Finalizers)
 
 	if !needsUpdate {
 		return nil
@@ -611,7 +629,7 @@ func updateStorageClassMetaDataIfNeeded(
 
 	oldSC.Labels = maps.Clone(newSC.Labels)
 	oldSC.Annotations = maps.Clone(newSC.Annotations)
-	oldSC.Finalizers = append([]string{}, newSC.Finalizers...)
+	oldSC.Finalizers = slices.Clone(newSC.Finalizers)
 
 	return cl.Update(ctx, oldSC)
 }
