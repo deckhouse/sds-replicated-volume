@@ -272,12 +272,16 @@ shell:
       # install some required packages
       echo "Install required packages..."
 
+      # lvm2: manage lvm storage pools
+      # socat: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
       DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils lsb-init openssh"
       LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
       LINSTOR_SATELLITE_DEPS="lvm2"
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
+      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd"
 
-      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS}
+      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
 
       # install this package individually with --nodeps flag to avoid error:
       # error: Failed dependencies:
@@ -288,7 +292,6 @@ shell:
       # rename our packages to install it on specified order
       rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
       rename 'linstor-common' '002-linstor-common' /packages/linstor-common-*.rpm
-      # rename 'python_linstor' '003-python_linstor' /packages/python_linstor-*.rpm
 
       echo "Install our own RPM packages..."
       for package in /packages/*.rpm; do
@@ -301,6 +304,7 @@ shell:
       # Install useful utilities and general dependencies
 
       apt-get install -y jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux
+
       # Install dependencies for optional features
       # cryptsetup: luks layer
       # e2fsprogs: LINSTOR can create file systems
@@ -309,30 +313,25 @@ shell:
       # multipath-tools: exos layer
       # nvme-cli: nvme layer
       # procps: used by LINSTOR to find orphaned send/receive processes
-      # socat: used with thin-send-recv to send snapshots to another LINSTOR cluster
       # xfsprogs: LINSTOR can create file systems; xfs deps
-      # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
       # zfsutils-linux: for zfs storage pools
 
       # using echo 'Yes, do as I say!' and --force-yes to ignore these warnings:
       # WARNING: The following essential packages will be removed
       # This should NOT be done unless you know exactly what you are doing!
       # sysvinit
-      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi multipath-tools nvme procps socat xfsprogs zstd zfs-utils
+      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi multipath-tools nvme procps xfsprogs zfs-utils
 
     - |
+      echo "Patch some files..."
       ln -sf /proc/mounts /etc/mtab
       sed -i 's/udev_rules.*=.*/udev_rules=0/ ; s/udev_sync.*=.*/udev_sync=0/ ; s/obtain_device_list_from_udev.*=.*/obtain_device_list_from_udev=0/' /etc/lvm/lvm.conf
       sed -i '/^devices {/a global_filter = [ "r|^/dev/drbd|", "r|^/dev/loop[0-9]+|" ]' /etc/lvm/lvm.conf
-
-    # Install linstor-server
-    - |
-      apt-get install -y thin-provisioning-tools
-
       sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
 
     # Log directory need to be group writable. OpenShift assigns random UID and GID, without extra RBAC changes we can only influence the GID.
     - |
+      echo "Create log directory..."
       mkdir /var/log/linstor-controller &&
       chown 0:1000 /var/log/linstor-controller &&
       chmod -R 0775 /var/log/linstor-controller &&
@@ -341,6 +340,7 @@ shell:
 
     # install piraeus-entry
     - |
+      echo "Install piraeus-entry..."
       curl -Lfo /usr/bin/piraeus-entry.sh https://github.com/piraeusdatastore/piraeus/raw/{{ $.Versions.LINSTOR_SERVER_PIRAEUS }}/dockerfiles/piraeus-server/entry.sh
       chmod +x /usr/bin/piraeus-entry.sh
 
