@@ -178,7 +178,7 @@
   - |
     if [ "${NO_DEBUG_PKG}" == "true" ]; then
       echo "Remove all debuginfo packages because NO_DEBUG_PKG is 'true'"
-      rm /*-debuginfo-*.rpm
+      rm -f /*-debuginfo-*.rpm
     fi
 {{ end }}
 
