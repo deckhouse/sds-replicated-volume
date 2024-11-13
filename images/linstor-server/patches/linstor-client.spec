@@ -22,7 +22,8 @@ Prefix: %{_prefix}
 BuildArch: noarch
 Vendor: LINBIT HA-Solutions GmbH
 Packager: LINSTOR Team <drbd-user@lists.linbit.com>
-Requires:  python-linstor >= 1.19.0
+# FLANT: In ALTLinux was some weird error with _ (underscore) and - (minus) in package filenames. So fix it here with change - to _
+Requires:  python_linstor >= 1.19.0
 Url: https://www.linbit.com
 # FLANT: change to package names for ALTLinux
 BuildRequires:  python3-module-setuptools

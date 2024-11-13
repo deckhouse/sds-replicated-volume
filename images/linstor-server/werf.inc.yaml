@@ -265,11 +265,42 @@ shell:
       { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus
     # Enable contrib repos for zfsutils
     - sed -r -i 's/^deb(.*)$/deb\1 contrib/' /etc/apt/sources.list
-    - apt-get update
+    - echo "Update packages list..." && apt-get update
+
+    # install our own RPM packages first
+    - |
+      # install some required packages
+      echo "Install required packages..."
+
+      DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils lsb-init openssh"
+      LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
+      LINSTOR_SATELLITE_DEPS="lvm2"
+      LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
+
+      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS}
+
+      # install this package individually with --nodeps flag to avoid error:
+      # error: Failed dependencies:
+      #  python3(distutils.version) < 0 is needed by python_linstor-1.19.0-1.noarch
+      echo "Install python_linstor RPM..."
+      rpm -ihv --nodeps /packages/python_linstor-*.rpm && rm /packages/python_linstor-*.rpm
+
+      # rename our packages to install it on specified order
+      rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
+      rename 'linstor-common' '002-linstor-common' /packages/linstor-common-*.rpm
+      # rename 'python_linstor' '003-python_linstor' /packages/python_linstor-*.rpm
+
+      echo "Install our own RPM packages..."
+      for package in /packages/*.rpm; do
+        echo "    => ${package}"
+        # thin-send-recv installation fail if we don't add --noscripts
+        rpm -ihv "$package"
+      done
+
     - |
       # Install useful utilities and general dependencies
 
-      apt-get install -y udev drbd-utils jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux
+      apt-get install -y jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux
       # Install dependencies for optional features
       # cryptsetup: luks layer
       # e2fsprogs: LINSTOR can create file systems
@@ -287,7 +318,7 @@ shell:
       # WARNING: The following essential packages will be removed
       # This should NOT be done unless you know exactly what you are doing!
       # sysvinit
-      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi lvm2 multipath-tools nvme procps socat xfsprogs zstd zfs-utils
+      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi multipath-tools nvme procps socat xfsprogs zstd zfs-utils
 
     - |
       ln -sf /proc/mounts /etc/mtab
@@ -296,11 +327,8 @@ shell:
 
     # Install linstor-server
     - |
-      apt-get install -y java-11-openjdk-headless thin-provisioning-tools python3 python3-module-natsort
-      for package in /packages/*.rpm; do
-        echo "Install package ${f}..."
-        rpm -ihv --nodeps "$f"
-      done
+      apt-get install -y thin-provisioning-tools
+
       sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
 
     # Log directory need to be group writable. OpenShift assigns random UID and GID, without extra RBAC changes we can only influence the GID.
