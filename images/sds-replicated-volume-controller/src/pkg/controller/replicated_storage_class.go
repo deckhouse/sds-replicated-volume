@@ -599,9 +599,11 @@ func updateStorageClassMetaDataIfNeeded(
 	cl client.Client,
 	newSC, oldSC *storagev1.StorageClass,
 ) error {
-	needsUpdate := !reflect.DeepEqual(oldSC.Labels, newSC.Labels) ||
-		!reflect.DeepEqual(oldSC.Annotations, newSC.Annotations) ||
-		!reflect.DeepEqual(oldSC.Finalizers, newSC.Finalizers)
+	needsUpdate := !maps.Equal(oldSC.Labels, newSC.Labels) ||
+		!maps.Equal(oldSC.Annotations, newSC.Annotations) ||
+		!slices.EqualFunc(newSC.Finalizers, oldSC.Finalizers, func(a, b string) bool {
+			return a == b
+		})
 
 	if !needsUpdate {
 		return nil
