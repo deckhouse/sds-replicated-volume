@@ -138,11 +138,6 @@ shell:
     {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $.Versions.LINSTOR_COMMON) }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
 
-    # copy RPM spec-file
-    # - cp /patches/linstor-python-api.spec /linstor-api-py/
-    # # substitute version in .spec-file
-    # - sed -i -e 's/<VERSION>/{{ $.Versions.LINSTOR_API_PY }}/g' linstor-python-api.spec
-
     # patch sdist to do not replace - with _ or RPM build will fail
     # - sed -i "s/canonicalize_name(name).replace('-', '_')/canonicalize_name(name)/g" /usr/lib64/python3/site-packages/setuptools/_distutils/dist.py
     - sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" /usr/lib64/python3/site-packages/setuptools/_core_metadata.py
@@ -155,6 +150,8 @@ shell:
     {{- $_ := set $ctx "version" $.Versions.LINSTOR_API_PY }}
     {{- $_ := set $ctx "spec" "dist/python-linstor.spec" }}
     {{- $_ := set $ctx "gen_path" "./dist" }}
+    # fix error: python3(distutils.version) < 0 is needed by python-linstor-1.19.0-1.noarch when installing this package
+    {{- $_ := set $ctx "rpmbuild_args" "--define \\'_python3_req_skip distutils.version\\'" }}
     {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' python-linstor.spec" }}
 
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
@@ -174,7 +171,7 @@ shell:
     # substitute version in .spec-file
     #- sed -i -e 's/<VERSION>/{{ $.Versions.LINSTOR_CLIENT }}/g' linstor-client.spec
     # install python-linstor because it's required for linstor-client
-    - rpm -ihv --nodeps /python-linstor-{{ $.Versions.LINSTOR_API_PY }}-1.noarch.rpm
+    - rpm -ihv /python-linstor-{{ $.Versions.LINSTOR_API_PY }}-1.noarch.rpm
 
     # make .rpm package
     # make only spec before building RPM
@@ -235,8 +232,8 @@ import:
     add: /
     to: /packages
     includePaths:
-      - python_linstor-*.rpm
-      - linstor_client-*.rpm
+      - python-linstor-*.rpm
+      - linstor-client-*.rpm
     before: setup
 
   - image: drbd-reactor-utils-artifact
@@ -244,7 +241,7 @@ import:
     # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
     to: /drbd-utils
     includePaths:
-      - python-linstor-*.rpm
+      # - python-linstor-*.rpm
       - drbd-utils-*.rpm
       - thin-send-recv-*.rpm
     before: setup
@@ -283,34 +280,31 @@ shell:
       # install some required packages
       echo "Install required packages..."
 
+      # cryptsetup: luks layer
+      # e2fsprogs: LINSTOR can create file systems
+      # lsscsi: exos layer
       # lvm2: manage lvm storage pools
       # multipath-tools: exos layer
       # nvme-cli: nvme layer
+      # procps: used by LINSTOR to find orphaned send/receive processes
       # socat: used with thin-send-recv to send snapshots to another LINSTOR cluster
-      # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      # xfsprogs: LINSTOR can create file systems; xfs deps
       # zfsutils-linux: for zfs storage pools
-      DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils openssh"
+      # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils openssh lsb-core"
       LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
       LINSTOR_SATELLITE_DEPS="lvm2"
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
       THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
 
       apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
-      # cp -r /usr/lib64/python3/site-packages/setuptools/_distutils/ /usr/lib64/python3/site-packages/distutils/
-      exit 5
-
-      # install this package individually with --nodeps flag to avoid error:
-      # error: Failed dependencies:
-      #  python3(distutils.version) < 0 is needed by python_linstor-1.19.0-1.noarch
-      echo "Install python_linstor RPM..."
-      rpm -ihv --nodeps /packages/python_linstor-*.rpm && rm /packages/python_linstor-*.rpm
 
       # rename our packages to install it on specified order
       rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
       rename 'linstor-common' '002-linstor-common' /packages/linstor-common-*.rpm
-
-      # thin-send-recv moving from /packages because it should be installed separately
-      mv /packages/thin-send-recv-*.rpm /
+      rename 'python-linstor' '003-python-linstor' /packages/python-linstor-*.rpm
+      # install thin-send-recv in last position
+      rename 'thin-send-recv' 'z-thin-send-recv' /packages/thin-send-recv-*.rpm
 
       echo "Install our own RPM packages..."
       for package in /packages/*.rpm; do
@@ -318,33 +312,18 @@ shell:
         rpm -ihv "$package"
       done
 
-      # thin-send-recv installation fail if we don't add --noscripts
-      echo "Install thin-send-recv RPM..."
-      rpm -ihv --nodeps /thin-send-recv-*.rpm && rm /thin-send-recv-*.rpm
-
 # The following packages have unmet dependencies:
 # │ │ linstor-server/setup    drbd-utils: Depends: /usr/lib/lsb/init-functions but it is not installable
 # │ │ linstor-server/setup    python_linstor: Depends: python3(distutils.version) (< 0) but it is not installable
 # │ │ linstor-server/setup  E: Unmet dependencies. Try 'apt-get --fix-broken install' with no packages (or specify a        ↵
 # solution).
-# попробовать создать пустой distutils/version?
-# /usr/lib64/python3/site-packages/setuptools/_distutils/version.py
-# а что делать с rpm -qf /usr/lib/lsb/init-functions?
 
     - |
-      # Install useful utilities and optional dependencies
-
-      # cryptsetup: luks layer
-      # e2fsprogs: LINSTOR can create file systems
-      # lsscsi: exos layer
-      # procps: used by LINSTOR to find orphaned send/receive processes
-      # xfsprogs: LINSTOR can create file systems; xfs deps
-
       # using echo 'Yes, do as I say!' and --force-yes to ignore these warnings:
       # WARNING: The following essential packages will be removed
       # This should NOT be done unless you know exactly what you are doing!
       # sysvinit
-      echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi procps xfsprogs
+      # echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi procps xfsprogs
 
     - |
       echo "Patch some files..."
@@ -373,7 +352,19 @@ shell:
     # cleanup phase
     - |
       # remove udev, no need for it in the container
-      apt-get remove -y udev
+      # apt-get remove -y udev
+      # do not remove because of bunch of errors:
+      #  The following packages have unmet dependencies:
+      #  You might want to run `apt-get --fix-broken install' to correct these:
+      #    dmsetup: Depends: udev (>= 150-alt4)
+      #             Depends: /lib/udev/rules.d
+      #    drbd-utils: Depends: /usr/lib/lsb/init-functions but it is not installable
+      #                Depends: udev
+      #    linstor-client: Depends: /bin/python3 but it is not installable
+      #    systemd: Depends: udev (= 1:255.11-alt1:p11+356646.300.27.1)
+      #    udev-rules-sgutils: Depends: /lib/udev/rules.d
+      #    zfs-utils: Depends: /lib/udev/rules.d
+      #               Depends: udev
       apt-get clean
       rm -rf /var/lib/apt/lists/* /packages
 
