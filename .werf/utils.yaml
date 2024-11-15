@@ -134,25 +134,25 @@
     fi
   - |
     TARBALL_CMD="make release"
-    if [ "{{ .tarball_cmd }}" != "<no value>" ]; then
+    if [ "{{ .tarball_cmd | default "" }}" != "" ]; then
       TARBALL_CMD="{{ .tarball_cmd }}"
       echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
     fi
   - |
     RPMBUILD_ARGS=()
-    if [ "{{ .rpmbuild_args }}" != "<no value>" ]; then
+    if [ "{{ .rpmbuild_args | default "" }}" != "" ]; then
       IFS=' ' read -a RPMBUILD_ARGS <<< "{{ .rpmbuild_args }}"
       echo "Set RPMBUILD_ARGS to '${RPMBUILD_ARGS[@]}'"
     fi
   - |
     ARCH="noarch"
-    if [ "{{ .arch }}" != "<no value>" ]; then
+    if [ "{{ .arch | default "" }}" != "" ]; then
       ARCH="{{ .arch }}"
       echo "Set ARCH to '${ARCH}'"
     fi
   - |
     NO_DEBUG_PKG="true"
-    if [ "{{ .no_debug_pkg }}" == "false" ]; then
+    if [ "{{ .no_debug_pkg | default "true" }}" == "false" ]; then
       NO_DEBUG_PKG="false"
       echo "Set NO_DEBUG_PKG to '${NO_DEBUG_PKG}'"
     fi
@@ -170,6 +170,12 @@
   - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
   - cd /home/rpmbuilder/RPM/SPECS
   - SPEC_FILE=$(basename "{{ .spec }}")
+  - |
+    if [ "{{ .spec_patch | default "" }}" != "" ]; then
+      echo "Patching spec file with '{{ .spec_patch }}'"
+      {{ .spec_patch | default "" }}
+    fi
+
   # TODO: instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
   - RPM_CMD="rpmbuild -v -ba --clean ${RPMBUILD_ARGS[@]} $SPEC_FILE"
   - 'echo "Building RPM: sudo -H -u rpmbuilder -- sh -c ${RPM_CMD}"'
