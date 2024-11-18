@@ -84,13 +84,13 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       affinity: {}
       initContainers:
-        - env:
+        - command:
+            - /linstor-drbd-wait
+          env:
             - name: FILE_CONTENT
               value: "version: 9.2"
             - name: WAITING_MSG
               value: "Waiting for DRBD version 9.2.x on host"
-        - command:
-            - /linstor-drbd-wait
           image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
           imagePullPolicy: IfNotPresent
           name: wait-drbd-ver-9-2
