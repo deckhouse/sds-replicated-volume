@@ -1,3 +1,4 @@
+{{- if and (ne "dev" .Values.global.deckhouseVersion) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 - name: kubernetes.linstor.scheduler_state
   rules:
     - alert: D8LinstorSchedulerAdmissionPodIsNotReady
@@ -34,3 +35,4 @@
           The recommended course of action:
           1. Retrieve details of the Deployment: `kubectl -n d8-sds-replicated-volume describe deploy linstor-scheduler-admission`
           2. View the status of the Pod and try to figure out why it is not running: `kubectl -n d8-sds-replicated-volume describe pod -l app=linstor-scheduler-admission`
+{{- end }}

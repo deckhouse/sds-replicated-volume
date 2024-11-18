@@ -56,19 +56,17 @@ spec:
       thinPoolName: thin-pool
 ```
 
-> **Caution!** All `LVMVolumeGroup` resources in the `spec` of the `ReplicatedStoragePool` resource must reside on different nodes. (You may not refer to multiple `LVMVolumeGroup` resources located on the same node).
+Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
 
-The `sds-replicated-volume-controller` will then process the `ReplicatedStoragePool` resource defined by the user and create the corresponding `Storage Pool` in the `Linstor` backend.
+Invalid `Storage Pools` will not be created in `LINSTOR`.
 
-> The name of the `Storage Pool` being created will match the name of the created `ReplicatedStoragePool` resource.
->
-> The `Storage Pool` will be created on the nodes defined in the LVMVolumeGroup resources.
+For all `LVMVolumeGroup` resources in the `spec` of the `ReplicatedStoragePool` resource the following rules must be met:
+ - They must reside on different nodes. You may not refer to multiple `LVMVolumeGroup` resources located on the same node.
+ - All nodes should be of type other than `CloudEphemeral` (see [Node types](https://deckhouse.io/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#node-types))
 
 Information about the controller's progress and results is available in the `status` field of the created `ReplicatedStoragePool` resource.
 
-> Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
->
-> Invalid `Storage Pools` will not be created in `LINSTOR`.
+The `sds-replicated-volume-controller` will then process the `ReplicatedStoragePool` resource defined by the user and create the corresponding `Storage Pool` in the `Linstor` backend. The name of the `Storage Pool` being created will match the name of the created `ReplicatedStoragePool` resource. The `Storage Pool` will be created on the nodes defined in the LVMVolumeGroup resources.
 
 #### Updating the `ReplicatedStoragePool` resource
 
