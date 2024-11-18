@@ -294,7 +294,7 @@ shell:
       DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils openssh lsb-core"
       LINSTOR_COMMON_DEPS="java-11-openjdk-headless"
       LINSTOR_SATELLITE_DEPS="lvm2"
-      LINSTOR_PYTHON_DEPS="python3 python3-module-natsort"
+      LINSTOR_PYTHON_DEPS="python3 python3-module-natsort python3-module-distutils-extra"
       THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
 
       apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
