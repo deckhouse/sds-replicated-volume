@@ -319,8 +319,9 @@ shell:
 # solution).
 
     - |
-      # fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
-      apt-get install -y glibc-locales
+      # glibc-locales: fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
+      # bash-completion: use bash completion for linstor's commands
+      apt-get install -y glibc-locales bash-completion
 
     - |
       echo "Patch some files..."
