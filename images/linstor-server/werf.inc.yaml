@@ -319,11 +319,8 @@ shell:
 # solution).
 
     - |
-      # using echo 'Yes, do as I say!' and --force-yes to ignore these warnings:
-      # WARNING: The following essential packages will be removed
-      # This should NOT be done unless you know exactly what you are doing!
-      # sysvinit
-      # echo 'Yes, do as I say!' | apt-get install -y --force-yes cryptsetup e2fsprogs lsscsi procps xfsprogs
+      # fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
+      apt-get install -y glibc-locales
 
     - |
       echo "Patch some files..."
