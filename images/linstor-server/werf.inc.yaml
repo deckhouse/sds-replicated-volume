@@ -297,7 +297,11 @@ shell:
       LINSTOR_PYTHON_DEPS="python3 python3-module-natsort python3-module-distutils-extra"
       THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
 
-      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS}
+      # glibc-locales: fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
+      # bash-completion: use bash completion for linstor's commands
+      OPTIONAL_DEPS="glibc-locales bash-completion"
+
+      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS} ${OPTIONAL_DEPS}
 
       # rename our packages to install it on specified order
       rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
@@ -317,11 +321,6 @@ shell:
 # │ │ linstor-server/setup    python_linstor: Depends: python3(distutils.version) (< 0) but it is not installable
 # │ │ linstor-server/setup  E: Unmet dependencies. Try 'apt-get --fix-broken install' with no packages (or specify a        ↵
 # solution).
-
-    - |
-      # glibc-locales: fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
-      # bash-completion: use bash completion for linstor's commands
-      apt-get install -y glibc-locales bash-completion
 
     - |
       echo "Patch some files..."
