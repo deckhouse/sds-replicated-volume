@@ -53,6 +53,7 @@ func getEnv(envName string, defaultValue string) string {
 func mainExecution(log *logger.Logger, filePath string, fileContent string, waitingMsg string, sleepSec int64) int {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+	log.Info(fmt.Sprintf("Start to watch file '%s' for string '%s'", filePath, fileContent))
 
 	for {
 		// Open the file for reading
@@ -85,6 +86,7 @@ func mainExecution(log *logger.Logger, filePath string, fileContent string, wait
 
 		// If string found, exit the loop
 		if found {
+			log.Debug(fmt.Sprintf("Found string '%s' in file '%s'", fileContent, filePath))
 			break
 		}
 
