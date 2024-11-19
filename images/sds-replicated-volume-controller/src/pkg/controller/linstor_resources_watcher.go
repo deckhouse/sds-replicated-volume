@@ -39,6 +39,7 @@ const (
 	linstorResourcesWatcherCtrlName         = "linstor-resources-watcher-controller"
 	missMatchedLabel                        = "storage.deckhouse.io/linstor-settings-mismatch"
 	unableToSetQuorumMinimumRedundancyLabel = "storage.deckhouse.io/unable-to-set-quorum-minimum-redundancy"
+	pvNotEnoughReplicasLabel                = "storage.deckhouse.io/pv-not-enough-replicas"
 	PVCSIDriver                             = "replicated.csi.storage.deckhouse.io"
 	replicasOnSameRGKey                     = "replicas_on_same"
 	replicasOnDifferentRGKey                = "replicas_on_different"
@@ -112,8 +113,23 @@ func NewLinstorResourcesWatcher(
 				rgMap[rg.Name] = rg
 			}
 
-			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap)
-			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
+			pvsList, err := GetListPV(ctx, cl)
+			if err != nil {
+				log.Error(err, "[NewLinstorResourcesWatcher] unable to get Persistent Volumes")
+			}
+
+			resMap := make(map[string][]lapi.Resource, len(rdMap))
+			for name := range rdMap {
+				res, err := lc.Resources.GetAll(ctx, name)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[NewLinstorResourcesWatcher] unable to get Linstor Resources, name: %s", name))
+				}
+				resMap[name] = res
+			}
+
+			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap, pvsList)
+			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap, resMap)
+			ReconcilePVReplicas(ctx, log, cl, lc, rdMap, rgMap, resMap, pvsList)
 
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
@@ -128,12 +144,9 @@ func ReconcileParams(
 	scs map[string]v1.StorageClass,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
+	pvs []core.PersistentVolume,
 ) {
 	log.Info("[ReconcileParams] starts work")
-	pvs, err := GetListPV(ctx, cl)
-	if err != nil {
-		log.Error(err, "[ReconcileParams] unable to get Persistent Volumes")
-	}
 
 	for _, pv := range pvs {
 		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == PVCSIDriver {
@@ -206,30 +219,94 @@ func ReconcileParams(
 	log.Info("[ReconcileParams] ends work")
 }
 
+func ReconcilePVReplicas(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	lc *lapi.Client,
+	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
+	rgs map[string]lapi.ResourceGroup,
+	res map[string][]lapi.Resource,
+	pvs []core.PersistentVolume,
+) {
+	log.Info("[ReconcilePVReplicas] starts work")
+
+	for _, pv := range pvs {
+		if pv.Spec.CSI != nil && pv.Spec.CSI.Driver == PVCSIDriver {
+			RGName := rds[pv.Name].ResourceGroupName
+			rg := rgs[RGName]
+			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] PV: %s, RG: %s", pv.Name, rg.Name))
+
+			enoughReplicas := checkPVMinReplicasCount(ctx, log, lc, rg, res[pv.Name])
+
+			if pv.Labels == nil {
+				pv.Labels = make(map[string]string)
+			}
+
+			origLabelVal, exists := pv.Labels[pvNotEnoughReplicasLabel]
+			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%t\"", pvNotEnoughReplicasLabel, origLabelVal, !enoughReplicas))
+
+			upd := false
+			if !enoughReplicas && (!exists || origLabelVal != "true") {
+				pv.Labels[pvNotEnoughReplicasLabel] = "true"
+				upd = true
+			}
+			if enoughReplicas && exists {
+				delete(pv.Labels, pvNotEnoughReplicasLabel)
+				upd = true
+			}
+
+			if upd {
+				err := UpdatePV(ctx, cl, &pv)
+				if err != nil {
+					log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
+				}
+			}
+		}
+	}
+
+	log.Info("[ReconcilePVReplicas] ends work")
+}
+
+func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Client, rg lapi.ResourceGroup, resList []lapi.Resource) bool {
+	placeCount := int(rg.SelectFilter.PlaceCount)
+	upVols := 0
+
+	if placeCount <= 0 {
+		return true
+	}
+
+	for _, r := range resList {
+		volList, err := lc.Resources.GetVolumes(ctx, r.Name, r.NodeName)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
+		}
+
+		for _, v := range volList {
+			if v.State.DiskState == "UpToDate" {
+				upVols += 1
+			}
+		}
+	}
+
+	return upVols >= placeCount
+}
+
 func ReconcileTieBreaker(
 	ctx context.Context,
 	log logger.Logger,
 	lc *lapi.Client,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
+	res map[string][]lapi.Resource,
 ) {
 	log.Info("[ReconcileTieBreaker] starts work")
-
-	allResources := make(map[string][]lapi.Resource, len(rds)*3)
-	for name := range rds {
-		res, err := lc.Resources.GetAll(ctx, name)
-		if err != nil {
-			log.Error(err, fmt.Sprintf("[ReconcileTieBreaker] unable to get Linstor Resources by the Resource Definition, name: %s", name))
-		}
-
-		allResources[name] = res
-	}
 
 	var (
 		nodes []lapi.Node
 		err   error
 	)
-	for name, resources := range allResources {
+	for name, resources := range res {
 		if len(resources) == 0 {
 			log.Warning(fmt.Sprintf("[ReconcileTieBreaker] no actual Linstor Resources for the Resource Definition, name: %s", name))
 			continue
@@ -300,7 +377,9 @@ func getNodeForTieBreaker(
 	for _, node := range unusedNodes {
 		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s does not use a node %s", resources[0].Name, node.Name))
 	}
-	rg := getResourceGroupByResource(resources[0].Name, rds, rgs)
+
+	RGName := rds[resources[0].Name].ResourceGroupName
+	rg := rgs[RGName]
 
 	if key, exist := rg.Props[replicasOnSameRGKey]; exist {
 		unusedNodes = filterNodesByReplicasOnSame(unusedNodes, key)
@@ -387,10 +466,6 @@ func filterNodesByReplicasOnSame(nodes []lapi.Node, key string) []lapi.Node {
 	}
 
 	return filtered
-}
-
-func getResourceGroupByResource(resourceName string, rds map[string]lapi.ResourceDefinitionWithVolumeDefinition, rgs map[string]lapi.ResourceGroup) lapi.ResourceGroup {
-	return rgs[rds[resourceName].ResourceGroupName]
 }
 
 func filterOutUsedNodes(nodes []lapi.Node, resources []lapi.Resource) []lapi.Node {
