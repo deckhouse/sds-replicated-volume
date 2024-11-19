@@ -165,7 +165,7 @@ func ReconcileParams(
 				if slices.Contains(missMatched, quorumMinimumRedundancyWithoutPrefixKey) && sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey] != "" {
 					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value is set in the Storage Class %s, value: %s, but it is not match the Resource Group %s value %s", sc.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name, rg.Props[quorumMinimumRedundancyWithPrefixRGKey]))
 					log.Info(fmt.Sprintf("[ReconcileParams] the quorum-minimum-redundancy value will be set to the Resource Group %s, value: %s", rg.Name, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey]))
-					err = setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name)
+					err := setQuorumMinimumRedundancy(ctx, lc, sc.Parameters[QuorumMinimumRedundancyWithPrefixSCKey], rg.Name)
 
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to set the quorum-minimum-redundancy value, name: %s", pv.Name))
@@ -194,7 +194,7 @@ func ReconcileParams(
 
 				if updated {
 					pv.Labels = newLabels
-					err = UpdatePV(ctx, cl, &pv)
+					err := UpdatePV(ctx, cl, &pv)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
 					}
@@ -207,7 +207,7 @@ func ReconcileParams(
 
 				if updated {
 					pv.Labels = newLabels
-					err = UpdatePV(ctx, cl, &pv)
+					err := UpdatePV(ctx, cl, &pv)
 					if err != nil {
 						log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
 					}
