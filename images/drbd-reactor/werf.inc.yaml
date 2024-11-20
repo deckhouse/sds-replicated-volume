@@ -120,7 +120,7 @@ shell:
     {{- $_ := set $ctx "folder" "/drbd-reactor" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
     # apply git patches to upstream's code
-    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && ( git apply /patches/*.patch && git commit -am "Auto-commit patched files" ) || echo "Git patches not found. Skipped"'
+    - git apply /patches/*.patch && git commit -am "Auto-commit patched files"
     - git tag -f v{{ $.Versions.DRBD_REACTOR }}
 
     - install /dev/null /usr/local/bin/lbvers.py

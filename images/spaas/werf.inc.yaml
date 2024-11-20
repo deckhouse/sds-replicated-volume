@@ -26,7 +26,7 @@ mount:
 shell:
   setup:
     - cd /usr/local/go/{{ $.ImageName }}
-    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
+    - git apply /patches/*.patch
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 ---

@@ -23,7 +23,7 @@ mount:
 shell:
   setup:
     - cd /usr/local/go/linstor-csi
-    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
+    - git apply /patches/*.patch
     - cd cmd/linstor-csi
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ $.Versions.LINSTOR_CSI }}"
     - mv linstor-csi /

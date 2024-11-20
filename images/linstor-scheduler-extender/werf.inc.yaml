@@ -37,11 +37,11 @@ shell:
   beforeSetup:
     - cd /usr/local/go/stork
     - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
-    - '[ -n "$(ls -A /patches/stork/*.patch 2>/dev/null)" ] && git apply /patches/stork/*.patch || echo "Stork patches not found. Git patching skipped"'
+    - git apply /patches/stork/*.patch
 
   setup:
     - cd /usr/local/go/{{ $.ImageName }}
-    - '[ -n "$(ls -A /patches/*.patch 2>/dev/null)" ] && git apply /patches/*.patch || echo "Git patches not found. Skipped"'
+    - git apply /patches/*.patch
     - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
     - go mod tidy
     - cd cmd/linstor-scheduler-extender
