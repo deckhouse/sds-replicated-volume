@@ -3,7 +3,7 @@ ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullsey
 
 FROM $BASE_GOLANG_BULLSEYE as builder
 ARG LINSTOR_WAIT_UNTIL_GITREPO=https://github.com/LINBIT/linstor-wait-until
-ARG LINSTOR_WAIT_UNTIL_VERSION=0.2.1
+ARG LINSTOR_WAIT_UNTIL_VERSION=0.2.3
 
 # Copy patches
 COPY ./patches /patches

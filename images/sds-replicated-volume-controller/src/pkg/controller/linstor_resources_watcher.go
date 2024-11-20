@@ -113,7 +113,7 @@ func NewLinstorResourcesWatcher(
 			}
 
 			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap)
-			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
+			//ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap)
 
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
@@ -277,7 +277,7 @@ func createTieBreaker(ctx context.Context, lc *lapi.Client, resourceName, nodeNa
 			Name:        resourceName,
 			NodeName:    nodeName,
 			Flags:       disklessFlags,
-			LayerObject: lapi.ResourceLayer{},
+			LayerObject: &lapi.ResourceLayer{},
 		},
 	}
 

@@ -4,7 +4,7 @@ ARG BASE_GOLANG_BULLSEYE=registry.deckhouse.io/base_images/golang:1.22.6-bullsey
 FROM $BASE_UBUNTU as linstor-builder
 
 ARG LINSTOR_GITREPO=https://github.com/LINBIT/linstor-server
-ARG LINSTOR_VERSION=1.24.2
+ARG LINSTOR_VERSION=1.29.2
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
@@ -43,9 +43,9 @@ RUN dpkg-buildpackage -us -uc
 FROM $BASE_UBUNTU as client-builder
 
 ARG API_GITREPO=https://github.com/LINBIT/linstor-api-py
-ARG API_VERSION=1.19.0
+ARG API_VERSION=1.23.1
 ARG CLIENT_GITREPO=https://github.com/LINBIT/linstor-client
-ARG CLIENT_VERSION=1.19.0
+ARG CLIENT_VERSION=1.23.2
 ARG LINSTOR_COMMON_SUBMODULE_COMMIT=999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec
 
 ENV DEBIAN_FRONTEND noninteractive
@@ -56,10 +56,7 @@ RUN apt-get update \
 
 RUN git clone --recurse-submodules ${API_GITREPO} /linstor-api-py
 WORKDIR /linstor-api-py
-RUN git checkout v${API_VERSION}
-WORKDIR /linstor-api-py/linstor-common
-RUN git checkout ${LINSTOR_COMMON_SUBMODULE_COMMIT}
-WORKDIR /linstor-api-py
+RUN git checkout v${API_VERSION} && git submodule update --init --recursive
 RUN make debrelease \
  && mv ./dist/python-linstor-${API_VERSION}.tar.gz ../python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz \
  && tar -C / -xvf /python-linstor_$(echo ${API_VERSION} | tr '-' '~').orig.tar.gz
@@ -83,7 +80,7 @@ RUN dpkg-buildpackage -us -uc
 FROM $BASE_GOLANG_BULLSEYE as k8s-await-election-builder
 
 ARG K8S_AWAIT_ELECTION_GITREPO=https://github.com/LINBIT/k8s-await-election
-ARG K8S_AWAIT_ELECTION_VERSION=0.3.1
+ARG K8S_AWAIT_ELECTION_VERSION=0.4.1
 
 RUN git clone ${K8S_AWAIT_ELECTION_GITREPO} /usr/local/go/k8s-await-election/ \
  && cd /usr/local/go/k8s-await-election \
@@ -96,11 +93,11 @@ RUN git clone ${K8S_AWAIT_ELECTION_GITREPO} /usr/local/go/k8s-await-election/ \
 FROM $BASE_UBUNTU as utils-builder
 
 ARG UTILS_GITREPO=https://github.com/LINBIT/drbd-utils
-ARG UTILS_VERSION=9.28.0
+ARG UTILS_VERSION=9.29.0
 
 ENV DEBIAN_FRONTEND noninteractive
 RUN apt-get update \
- && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev \
+ && apt-get -y install build-essential debhelper git flex clitest xsltproc locales libxml2-utils po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-dev jq \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/*
 
@@ -123,7 +120,7 @@ WORKDIR /drbd-utils-${UTILS_VERSION}
 RUN dpkg-buildpackage -us -uc
 
 ARG THIN_SEND_RECV_GITREPO=https://github.com/LINBIT/thin-send-recv
-ARG THIN_SEND_RECV_VERSION=1.0.1
+ARG THIN_SEND_RECV_VERSION=1.1.2
 
 RUN git clone --recurse-submodules ${THIN_SEND_RECV_GITREPO} /thin-send-recv
 WORKDIR /thin-send-recv
@@ -138,7 +135,7 @@ RUN dpkg-buildpackage -us -uc
 
 FROM $BASE_UBUNTU
 ARG PIRAEUS_GITREPO=https://github.com/piraeusdatastore/piraeus
-ARG PIRAEUS_COMMIT_REF=20e96f83f52631dc06d011b7f96293d4026236a1
+ARG PIRAEUS_COMMIT_REF=3bae14e03be62a756a7f1b767406e7e94f6d3bf3
 
 COPY --from=linstor-builder /linstor-common_*.deb /linstor-controller_*.deb /linstor-satellite_*.deb /packages/
 COPY --from=client-builder /python-linstor_*.deb /linstor-client_*.deb /packages/
@@ -189,7 +186,7 @@ RUN { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "fal
 
 # Install linstor-server
 RUN apt-get update \
- && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort \
+ && apt-get install -y default-jre-headless thin-provisioning-tools python3-all python3-natsort python3-setuptools \
  && dpkg -i packages/*.deb \
  && sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf \
  && apt-get clean \
