@@ -237,22 +237,22 @@ func ReconcilePVReplicas(
 			rg := rgs[RGName]
 			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] PV: %s, RG: %s", pv.Name, rg.Name))
 
-			enoughReplicas := checkPVMinReplicasCount(ctx, log, lc, rg, res[pv.Name])
+			replicasErrLevel := checkPVMinReplicasCount(ctx, log, lc, rg, res[pv.Name])
 
 			if pv.Labels == nil {
 				pv.Labels = make(map[string]string)
 			}
 
 			origLabelVal, exists := pv.Labels[pvNotEnoughReplicasLabel]
-			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%t\"", pvNotEnoughReplicasLabel, origLabelVal, !enoughReplicas))
+			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%t\"", pvNotEnoughReplicasLabel, origLabelVal, !replicasErrLevel))
 
 			upd := false
-			if !enoughReplicas && (!exists || origLabelVal != "true") {
-				pv.Labels[pvNotEnoughReplicasLabel] = "true"
+			if replicasErrLevel == "" && exists {
+				delete(pv.Labels, pvNotEnoughReplicasLabel)
 				upd = true
 			}
-			if enoughReplicas && exists {
-				delete(pv.Labels, pvNotEnoughReplicasLabel)
+			if replicasErrLevel != "" && replicasErrLevel != origLabelVal {
+				pv.Labels[pvNotEnoughReplicasLabel] = replicasErrLevel
 				upd = true
 			}
 
@@ -268,12 +268,12 @@ func ReconcilePVReplicas(
 	log.Info("[ReconcilePVReplicas] ends work")
 }
 
-func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Client, rg lapi.ResourceGroup, resList []lapi.Resource) bool {
+func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Client, rg lapi.ResourceGroup, resList []lapi.Resource) string {
 	placeCount := int(rg.SelectFilter.PlaceCount)
 	upVols := 0
 
 	if placeCount <= 0 {
-		return true
+		return ""
 	}
 
 	for _, r := range resList {
@@ -289,7 +289,15 @@ func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Cl
 		}
 	}
 
-	return upVols >= placeCount
+	if upVols >= placeCount {
+		return ""
+	} else if upVols <= 1 {
+		return "fatal"
+	} else if (upVols*100)/placeCount < 66 {
+		return "error"
+	} else {
+		return "warning"
+	}
 }
 
 func ReconcileTieBreaker(
