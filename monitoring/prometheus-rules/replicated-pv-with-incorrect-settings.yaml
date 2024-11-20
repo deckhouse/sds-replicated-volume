@@ -49,7 +49,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Warning] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
@@ -66,7 +66,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Error] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
@@ -83,7 +83,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Error] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
@@ -100,7 +100,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Fatal] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
@@ -117,7 +117,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Fatal] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
@@ -134,7 +134,7 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
         plk_grouped_by__d8_drbd_device_health: "ReplicatedPVSettingsCheck,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
-        summary: [Fatal] Replicated PVs has not enough replicas
+        summary: Replicated PVs has not enough replicas
         description: |
           There are persistent volumes in the cluster that has not enough replicas (set of UpToDate resources less than minimal count)
           
