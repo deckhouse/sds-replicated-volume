@@ -244,7 +244,7 @@ func ReconcilePVReplicas(
 			}
 
 			origLabelVal, exists := pv.Labels[pvNotEnoughReplicasLabel]
-			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%t\"", pvNotEnoughReplicasLabel, origLabelVal, !replicasErrLevel))
+			log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%s\"", pvNotEnoughReplicasLabel, origLabelVal, replicasErrLevel))
 
 			upd := false
 			if replicasErrLevel == "" && exists {
