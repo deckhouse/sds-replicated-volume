@@ -124,7 +124,7 @@
 ##          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
 ##          And view all Resource States with `linstor r l`
     - alert: ReplicatedPVIncorrectReplicasCountWarningS5
-      expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas="warning"}, kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas="error"}, kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas="fatal"}) > 0
+      expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas="warning|error|fatal"}) > 0
       for: 5m
       labels:
         severity_level: "5"
