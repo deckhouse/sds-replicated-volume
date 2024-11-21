@@ -137,6 +137,6 @@
         summary: Replicated PVs has not enough replicas
         description: |
           Persistent volumes in the cluster has not enough replicas (set of UpToDate resources less than minimal count)
-#          
-#          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-#          And view all Resource States with `linstor r l`
+          
+          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
+          And view all Resource States with `linstor r l`
