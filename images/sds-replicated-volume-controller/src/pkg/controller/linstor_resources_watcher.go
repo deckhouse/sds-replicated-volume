@@ -294,7 +294,7 @@ func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Cl
 		return ""
 	} else if upVols <= 1 {
 		return "fatal"
-	} else if (upVols*100)/placeCount < 66 {
+	} else if (upVols*100)/placeCount <= 50 {
 		return "error"
 	} else {
 		return "warning"
