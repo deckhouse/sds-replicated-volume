@@ -285,18 +285,19 @@ func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Cl
 
 		for _, v := range volList {
 			if v.State.DiskState == "UpToDate" {
-				upVols += 1
+				upVols++
 			}
 		}
 	}
 
-	if upVols >= placeCount {
+	switch {
+	case upVols >= placeCount:
 		return ""
-	} else if upVols <= 1 {
+	case upVols <= 1:
 		return "fatal"
-	} else if (upVols*100)/placeCount <= 50 {
+	case (upVols*100)/placeCount <= 50:
 		return "error"
-	} else {
+	default:
 		return "warning"
 	}
 }
