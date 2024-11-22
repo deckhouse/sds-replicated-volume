@@ -387,8 +387,7 @@ func getNodeForTieBreaker(
 		log.Trace(fmt.Sprintf("[getNodeForTieBreaker] resource %s does not use a node %s", resources[0].Name, node.Name))
 	}
 
-	RGName := rds[resources[0].Name].ResourceGroupName
-	rg := rgs[RGName]
+	rg := getResourceGroupByResource(resources[0].Name, rds, rgs)
 
 	if key, exist := rg.Props[replicasOnSameRGKey]; exist {
 		unusedNodes = filterNodesByReplicasOnSame(unusedNodes, key)
@@ -475,6 +474,10 @@ func filterNodesByReplicasOnSame(nodes []lapi.Node, key string) []lapi.Node {
 	}
 
 	return filtered
+}
+
+func getResourceGroupByResource(resourceName string, rds map[string]lapi.ResourceDefinitionWithVolumeDefinition, rgs map[string]lapi.ResourceGroup) lapi.ResourceGroup {
+	return rgs[rds[resourceName].ResourceGroupName]
 }
 
 func filterOutUsedNodes(nodes []lapi.Node, resources []lapi.Resource) []lapi.Node {
