@@ -280,7 +280,9 @@ func checkPVMinReplicasCount(ctx context.Context, log logger.Logger, lc *lapi.Cl
 	for _, r := range resList {
 		volList, err := lc.Resources.GetVolumes(ctx, r.Name, r.NodeName)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
+			log.Error(err, fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s",
+					r.Name, r.NodeName)
+			)
 		}
 
 		for _, v := range volList {
