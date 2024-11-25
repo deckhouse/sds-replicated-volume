@@ -27,6 +27,7 @@ shell:
 ---
 image: {{ $.ImageName }}
 # TODO: replace with BASE_SCRATCH when merge request will ready for review
+# CI_COMMIT_REF_NAME="202/merge" werf kube-run --dev -it --repo "dev-registry.deckhouse.io/sys/deckhouse-oss/modules/${MODNAME}" --namespace=d8-${MODNAME} --overrides='{"spec":{"serviceAccount": "sds-replicated-volume-controller", "hostNetwork": true}}' storage-network-controller -- /storage-network-controller --discovery --storage-network-cidr 10.128.0.0/24
 from: {{ $.BASE_GOLANG }}
 
 import:

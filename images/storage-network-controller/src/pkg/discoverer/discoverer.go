@@ -17,45 +17,116 @@ limitations under the License.
 package discoverer
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/netip"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"storage-network-controller/internal/config"
 	"storage-network-controller/internal/logger"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-func Discovery(cfg config.Options, mgr manager.Manager, log *logger.Logger) (error) {
-	addrs, err := net.InterfaceAddrs()
+type discoveredIPs []string
+
+func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) (error) {
+	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
 	if err != nil {
-		log.Error(err, "Cannot get network interfaces")
+		log.Error(err, "Cannot parse storage-network-cidr")
 		return err
 	}
 
-	networks := make([]netip.Prefix, len(cfg.StorageNetworkCIDR))
+	cl := mgr.GetClient()
 
-	for i, cidr := range cfg.StorageNetworkCIDR {
-		networks[i], err = netip.ParsePrefix(cidr)
+	// initialize in-memory node IPs cache
+	discoveredIPs := make(discoveredIPs, 0)
 
-		if err != nil {
-			log.Error(err, fmt.Sprintf("Cannot ParsePrefix for CIDR %s", cidr))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ch
+		log.Info("Received termination, signaling shutdown")
+		cancel()
+	}()
+
+	// discoverer loop
+	for {
+		if err := discovery(storageNetworks, &discoveredIPs, ctx, &cl, log); err != nil {
+			log.Error(err, "Discovery error occured")
+			cancel()
 			return err
+		}
+
+		time.Sleep(time.Duration(cfg.DiscoverySec) * time.Second)
+	}
+}
+
+func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
+	networks := make([]netip.Prefix, len(cidrs))
+
+	var err error
+
+	for i, cidr := range cidrs {
+		if networks[i], err = netip.ParsePrefix(cidr); err != nil {
+			return nil, err
 		}
 	}
 
-	for _, address := range addrs {
-		// check the address type: it should be not a loopback and in a private range
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.IsPrivate() {
-			if ipnet.IP.To4() != nil {
-				ipStr := ipnet.IP.String()
+	return networks, nil
+}
 
-				if IPInCIDR(networks, ipStr, log) {
-					log.Debug(fmt.Sprintf("IP '%s' is in CIDR blocks", ipStr))
-				} else {
-					log.Debug(fmt.Sprintf("IP '%s' not founded in any CIDR blocks", ipStr))
+func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx context.Context, cl *client.Client, log *logger.Logger) error {
+	select {
+	case <-ctx.Done():
+		// do nothing in case of cancel
+		return nil
+
+	default:
+		log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s, cachedIPs: %s", storageNetworks, *cachedIPs))
+
+		addrs, err := net.InterfaceAddrs()
+		if err != nil {
+			log.Error(err, "Cannot get network interfaces")
+			return err
+		}
+
+		var foundedIP discoveredIPs
+
+		for _, address := range addrs {
+			// check the address type: it should be not a loopback and in a private range
+			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.IsPrivate() {
+				if ipnet.IP.To4() != nil {
+					ipStr := ipnet.IP.String()
+
+					if IPInCIDR(storageNetworks, ipStr, log) {
+						log.Debug(fmt.Sprintf("IP '%s' found in CIDR blocks", ipStr))
+						foundedIP = append(foundedIP, ipStr)
+					} else {
+						log.Trace(fmt.Sprintf("IP '%s' not founded in any CIDR blocks", ipStr))
+					}
 				}
 			}
+		}
+
+		// if we found any IP that match with storageNetwork CIDRs that not already in cache
+		// TODO: theoretically, there is a possible case where the IP changes, but the length does not change
+		if len(foundedIP) != len(*cachedIPs) {
+			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
+			*cachedIPs = foundedIP
+			// TODO: get node name from env var NODE_NAME, use client to get node info (from cache) and update it status field
 		}
 	}
 

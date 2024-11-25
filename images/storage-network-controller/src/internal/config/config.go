@@ -28,14 +28,16 @@ import (
 
 const (
 	ControllerNamespaceEnv = "CONTROLLER_NAMESPACE"
+	DefaultDiscoverySec    = 15
 	HardcodedControllerNS  = "d8-sds-replicated-volume"
-	LogLevel               = "LOG_LEVEL"
+	LogLevelEnv            = "LOG_LEVEL"
 )
 
 type StorageNetworkCIDR []string
 
 type Options struct {
 	ControllerNamespace string
+	DiscoverySec				int
 	DiscoveryMode				bool
 	Loglevel            logger.Verbosity
 	StorageNetworkCIDR  StorageNetworkCIDR
@@ -61,12 +63,14 @@ func (i *StorageNetworkCIDR) Set(value string) error {
 func NewConfig() (*Options, error) {
 	var opts Options
 
-	loglevel := os.Getenv(LogLevel)
+	loglevel := os.Getenv(LogLevelEnv)
 	if loglevel == "" {
 		opts.Loglevel = logger.DebugLevel
 	} else {
 		opts.Loglevel = logger.Verbosity(loglevel)
 	}
+
+	opts.DiscoverySec = DefaultDiscoverySec
 
 	opts.ControllerNamespace = os.Getenv(ControllerNamespaceEnv)
 	if opts.ControllerNamespace == "" {

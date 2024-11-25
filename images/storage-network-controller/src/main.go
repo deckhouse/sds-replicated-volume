@@ -89,7 +89,8 @@ func main() {
 	controllerruntime.SetLogger(log.GetLogger())
 
 	if cfg.DiscoveryMode {
-		err := discoverer.Discovery(*cfg, mgr, log)
+		log.Info("Starting up in discovery mode...")
+		err := discoverer.DiscoveryLoop(*cfg, mgr, log)
 		if err != nil {
 			log.Error(err, "failed to discovery node")
 			os.Exit(2)
