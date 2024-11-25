@@ -18,36 +18,39 @@ package main
 
 import (
 	"fmt"
-	"net"
-	"net/netip"
 	"os"
 	goruntime "runtime"
 
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+
+	controllerruntime "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
 	"storage-network-controller/internal/config"
 	"storage-network-controller/internal/logger"
+	"storage-network-controller/pkg/discoverer"
 )
 
-func IPInCIDR(networks []netip.Prefix, ip string, log *logger.Logger) bool {
-	netIP, err := netip.ParseAddr(ip)
-
+func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+	// Get a config to talk to API server
+	config, err := clientConfig.ClientConfig()
 	if err != nil {
-		log.Error(err, fmt.Sprintf("IPInCIDR: cannot parse IP %s", ip))
-		return false
+		return nil, fmt.Errorf("config kubernetes error %w", err)
 	}
-
-	for _, network := range networks {
-		if network.Contains(netIP) {
-			return true
-		}
-	}
-
-	return false
+	return config, nil
 }
 
 func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
 		fmt.Println("unable to create NewConfig " + err.Error())
+		os.Exit(1)
 	}
 
 	log, err := logger.NewLogger(cfg.Loglevel)
@@ -59,35 +62,37 @@ func main() {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	addrs, err := net.InterfaceAddrs()
+	// Create default config Kubernetes client
+	kConfig, err := KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "Cannot get network interfaces")
+		log.Error(err, "error by reading a kubernetes configuration")
 		os.Exit(1)
 	}
+	log.Info("read Kubernetes config")
 
-	networks := make([]netip.Prefix, len(cfg.StorageNetworkCIDR))
+	cacheOpt := cache.Options{}
 
-	for i, cidr := range cfg.StorageNetworkCIDR {
-		networks[i], err = netip.ParsePrefix(cidr)
-
-		if err != nil {
-			log.Error(err, fmt.Sprintf("Cannot ParsePrefix for CIDR %s", cidr))
-			os.Exit(2)
-		}
+	managerOpts := manager.Options{
+		Cache:          cacheOpt,
+		LeaderElection: false,
+		// LeaderElectionNamespace: cfgParams.ControllerNamespace,
+		// LeaderElectionID:        config.ControllerName,
 	}
 
-	for _, address := range addrs {
-		// check the address type: it should be not a loopback and in a private range
-		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.IsPrivate() {
-			if ipnet.IP.To4() != nil {
-				ipStr := ipnet.IP.String()
+	mgr, err := manager.New(kConfig, managerOpts)
+	if err != nil {
+		log.Error(err, "failed to create a manager")
+		os.Exit(1)
+	}
+	log.Info("created kubernetes manager in namespace: " + cfg.ControllerNamespace)
 
-				if IPInCIDR(networks, ipStr, log) {
-					log.Debug(fmt.Sprintf("IP '%s' is in CIDR blocks", ipStr))
-				} else {
-					log.Debug(fmt.Sprintf("IP '%s' not founded in any CIDR blocks", ipStr))
-				}
-			}
+	controllerruntime.SetLogger(log.GetLogger())
+
+	if cfg.DiscoveryMode {
+		err := discoverer.Discovery(*cfg, mgr, log)
+		if err != nil {
+			log.Error(err, "failed to discovery node")
+			os.Exit(2)
 		}
 	}
 }

@@ -26,6 +26,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
+# TODO: replace with BASE_SCRATCH when merge request will ready for review
 from: {{ $.BASE_GOLANG }}
 
 import:

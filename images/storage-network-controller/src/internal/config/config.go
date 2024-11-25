@@ -19,6 +19,7 @@ package config
 import (
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 
@@ -26,15 +27,18 @@ import (
 )
 
 const (
-	LogLevel = "LOG_LEVEL"
+	ControllerNamespaceEnv = "CONTROLLER_NAMESPACE"
+	HardcodedControllerNS  = "d8-sds-replicated-volume"
+	LogLevel               = "LOG_LEVEL"
 )
 
 type StorageNetworkCIDR []string
 
 type Options struct {
-	StorageNetworkCIDR StorageNetworkCIDR
-
-	Loglevel logger.Verbosity
+	ControllerNamespace string
+	DiscoveryMode				bool
+	Loglevel            logger.Verbosity
+	StorageNetworkCIDR  StorageNetworkCIDR
 }
 
 // String is an implementation of the flag.Value interface
@@ -64,7 +68,21 @@ func NewConfig() (*Options, error) {
 		opts.Loglevel = logger.Verbosity(loglevel)
 	}
 
+	opts.ControllerNamespace = os.Getenv(ControllerNamespaceEnv)
+	if opts.ControllerNamespace == "" {
+		namespace, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+		if err != nil {
+			log.Printf("Failed to get namespace from filesystem: %v", err)
+			log.Printf("Using hardcoded namespace: %s", HardcodedControllerNS)
+			opts.ControllerNamespace = HardcodedControllerNS
+		} else {
+			log.Printf("Got namespace from filesystem: %s", string(namespace))
+			opts.ControllerNamespace = string(namespace)
+		}
+	}
+
 	fl := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fl.BoolVar(&opts.DiscoveryMode, "discovery", false, "Enable discovery mode. This mode filling an Node.Status.addresses field")
 	fl.Var(&opts.StorageNetworkCIDR, "storage-network-cidr", "Set storage network CIDR blocks. Can be passed multiple times.")
 
 	err := fl.Parse(os.Args[1:])
