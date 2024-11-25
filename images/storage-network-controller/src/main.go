@@ -23,8 +23,8 @@ import (
 	"os"
 	goruntime "runtime"
 
-	"sds-node-agent/internal/config"
-	"sds-node-agent/internal/logger"
+	"storage-network-controller/internal/config"
+	"storage-network-controller/internal/logger"
 )
 
 func IPInCIDR(networks []netip.Prefix, ip string, log *logger.Logger) bool {

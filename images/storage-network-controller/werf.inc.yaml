@@ -11,7 +11,7 @@ git:
     to: /
     includePaths:
       # - api
-      - images/sds-node-agent/src
+      - images/{{ $.ImageName }}/src
     stageDependencies:
       setup:
         - "**/*"

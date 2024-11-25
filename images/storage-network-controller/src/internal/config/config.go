@@ -22,7 +22,7 @@ import (
 	"net"
 	"os"
 
-	"sds-node-agent/internal/logger"
+	"storage-network-controller/internal/logger"
 )
 
 const (

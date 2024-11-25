@@ -1,6 +1,6 @@
-module sds-node-agent
+module storage-network-controller
 
-go 1.22.7
+go 1.22.6
 
 require (
 	github.com/go-logr/logr v1.4.2
