@@ -30,7 +30,7 @@ objKind = 'ReplicatedStorageMetadataBackup'
 objKindPlural = 'replicatedstoragemetadatabackups'
 objVersion = 'v1alpha1'
 linstorCRDGroup = 'internal.linstor.linbit.com'
-srvBackupLabelKey = 'sds-replicated-volume.deckhouse.io/sds-replicated-volume-'
+srvBackupLabelKey = 'sds-replicated-volume.deckhouse.io/sds-replicated-volume'
 backup_type = os.getenv('BACKUP_TYPE')
 
 def create_backup(backup_date, labels={}):
