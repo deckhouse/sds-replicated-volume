@@ -107,7 +107,7 @@ if __name__ == "__main__":
     retention = args.retentionCount or 7
 
     kubernetes.config.load_incluster_config()
-    label = f'{srvBackupLabelKey}'-f'{backup_type}'
+    label = {srvBackupLabelKey}-{backup_type}
     date_time = datetime.now().strftime("%Y%m%d%H%M%S")
     success = create_backup(backup_date=date_time, labels={label: f'{date_time}', "completed": "true"})
     if not success:
