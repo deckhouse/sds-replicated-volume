@@ -30,7 +30,7 @@ objKind = 'ReplicatedStorageMetadataBackup'
 objKindPlural = 'replicatedstoragemetadatabackups'
 objVersion = 'v1alpha1'
 linstorCRDGroup = 'internal.linstor.linbit.com'
-srvBackupLabelKey = 'sds-replicated-volume.deckhouse.io/sds-replicated-volume-db-backup'
+srvBackupLabelKey = 'sds-replicated-volume.deckhouse.io/sds-replicated-volume-'
 backup_type = os.getenv('BACKUP_TYPE')
 
 def create_backup(backup_date, labels={}):
@@ -107,9 +107,9 @@ if __name__ == "__main__":
     retention = args.retentionCount or 7
 
     kubernetes.config.load_incluster_config()
-
+    label = f'srvBackupLabelKey{backup_type}'
     date_time = datetime.now().strftime("%Y%m%d%H%M%S")
-    success = create_backup(backup_date=date_time, labels={srvBackupLabelKey: f'{date_time}', "completed": "true"})
+    success = create_backup(backup_date=date_time, labels={label: f'{date_time}', "completed": "true"})
     if not success:
         print(f"backup_job: creation failure")
         exit(1)
