@@ -14,11 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package discoverer
+package utils
 
 import (
 	"fmt"
 	"net/netip"
+
+	"k8s.io/api/core/v1"
 
 	"storage-network-controller/internal/logger"
 )
@@ -38,4 +40,9 @@ func IPInCIDR(networks []netip.Prefix, ip string, log *logger.Logger) bool {
 	}
 
 	return false
+}
+
+func UpdateNodeStatusWithIP(node *v1.Node, ip string) error {
+	// TODO
+	return nil
 }

@@ -18,6 +18,7 @@ package discoverer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -29,14 +30,17 @@ import (
 
 	"storage-network-controller/internal/config"
 	"storage-network-controller/internal/logger"
+	"storage-network-controller/internal/utils"
+	"storage-network-controller/pkg/cache"
 
+	"k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 type discoveredIPs []string
 
-func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) (error) {
+func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) error {
 	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
 	if err != nil {
 		log.Error(err, "Cannot parse storage-network-cidr")
@@ -44,6 +48,12 @@ func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) 
 	}
 
 	cl := mgr.GetClient()
+
+	if err = cache.CreateSharedInformerCache(mgr, log); err != nil {
+		log.Error(err, "failed to setup shared informer cache")
+		return err
+	}
+	log.Info("Shared informer cache has been intialized")
 
 	// initialize in-memory node IPs cache
 	discoveredIPs := make(discoveredIPs, 0)
@@ -111,7 +121,7 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 				if ipnet.IP.To4() != nil {
 					ipStr := ipnet.IP.String()
 
-					if IPInCIDR(storageNetworks, ipStr, log) {
+					if utils.IPInCIDR(storageNetworks, ipStr, log) {
 						log.Debug(fmt.Sprintf("IP '%s' found in CIDR blocks", ipStr))
 						foundedIP = append(foundedIP, ipStr)
 					} else {
@@ -126,9 +136,36 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 		if len(foundedIP) != len(*cachedIPs) {
 			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
 			*cachedIPs = foundedIP
-			// TODO: get node name from env var NODE_NAME, use client to get node info (from cache) and update it status field
+
+			// TODO: what if there is 2 or more IPs founded?
+
+			node, err := getMyNode()
+			if err != nil {
+				log.Error(err, "cannot get my node info")
+				return err
+			}
+
+			err = utils.UpdateNodeStatusWithIP(node, foundedIP[0])
+			if err != nil {
+				log.Error(err, "cannot update node status field")
+				return err
+			}
 		}
 	}
 
 	return nil
+}
+
+func getMyNode() (*v1.Node, error) {
+	nodeName := os.Getenv("NODE_NAME")
+	if nodeName == "" {
+		return nil, errors.New("cannot get node name because no NODE_NAME env variable")
+	}
+
+	node, err := cache.Instance().GetNode(nodeName)
+	if err != nil {
+		return nil, err
+	}
+
+	return node, nil
 }
