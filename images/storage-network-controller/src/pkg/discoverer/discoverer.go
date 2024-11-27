@@ -34,7 +34,6 @@ import (
 	"storage-network-controller/pkg/cache"
 
 	"k8s.io/api/core/v1"
-	v1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -176,20 +175,20 @@ func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl cl
 	addresses := node.Status.Addresses
 
 	// index of address with type SDSRVStorageIP (if will founded in node addresses)
-	var storage_addr_idx int = -1
+	var storageAddrIdx = -1
 	for i, addr := range addresses {
 		if addr.Type == "SDSRVStorageIP" {
-			storage_addr_idx = i
+			storageAddrIdx = i
 			break
 		}
 	}
 
-	if storage_addr_idx == -1 {
+	if storageAddrIdx == -1 {
 		// no address on node status yet
 		addresses = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
 	} else {
 		// address already exists in node.status
-		addresses[storage_addr_idx].Address = ip
+		addresses[storageAddrIdx].Address = ip
 	}
 
 	node.Status.Addresses = addresses
