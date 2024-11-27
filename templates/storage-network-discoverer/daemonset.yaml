@@ -64,7 +64,7 @@ spec:
         args:
           - --discovery
           {{- range $cidr := .Values.sdsReplicatedVolume.storageNetworkCIDRs }}
-          - --storage-network-cidr {{ $cidr }}
+          - --storage-network-cidr {{ $cidr | quote }}
           {{- end }}
         hostNetwork: true
         env:
