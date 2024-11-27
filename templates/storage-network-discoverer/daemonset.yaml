@@ -55,19 +55,19 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       affinity: {}
+      serviceAccount: storage-network-discoverer
+      serviceAccountName: storage-network-discoverer
+      hostNetwork: true
       containers:
       - name: discoverer
         image: {{ include "helm_lib_module_image" (list . "storageNetworkController") }}
         imagePullPolicy: IfNotPresent
-        serviceAccount: storage-network-discoverer
-        serviceAccountName: storage-network-discoverer
         args:
           - --discovery
           {{- range $cidr := .Values.sdsReplicatedVolume.storageNetworkCIDRs }}
           - --storage-network-cidr
           - {{ $cidr | quote }}
           {{- end }}
-        hostNetwork: true
         env:
           # Warning: "1"
           # Info: "2"
