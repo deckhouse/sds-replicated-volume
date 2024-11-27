@@ -37,23 +37,27 @@ type StorageNetworkCIDR []string
 
 type Options struct {
 	ControllerNamespace string
-	DiscoverySec				int
-	DiscoveryMode				bool
+	DiscoverySec        int
+	DiscoveryMode       bool
 	Loglevel            logger.Verbosity
 	StorageNetworkCIDR  StorageNetworkCIDR
 }
 
 // String is an implementation of the flag.Value interface
 func (i *StorageNetworkCIDR) String() string {
-	return fmt.Sprintf("%v", *i)
+	return fmt.Sprintf("%s", *i)
 }
 
 // Set is an implementation of the flag.Value interface
 func (i *StorageNetworkCIDR) Set(value string) error {
-	_, _, err := net.ParseCIDR(value)
+	ip, _, err := net.ParseCIDR(value)
 
 	if err != nil {
 		return err
+	}
+
+	if !ip.IsPrivate() {
+		return fmt.Errorf("IP %s must be in private ranges", value)
 	}
 
 	*i = append(*i, value)
