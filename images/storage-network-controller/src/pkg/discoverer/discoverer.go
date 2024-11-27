@@ -133,7 +133,8 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 
 		// if we found any IP that match with storageNetwork CIDRs that not already in cache
 		// TODO: theoretically, there is a possible case where the IP changes, but the length does not change
-		if len(foundedIP) != len(*cachedIPs) {
+		// len(foundedIP) != len(*cachedIPs)
+		if len(foundedIP) > 0 {
 			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
 			*cachedIPs = foundedIP
 
@@ -185,13 +186,16 @@ func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl cl
 
 	if storageAddrIdx == -1 {
 		// no address on node status yet
+		log.Trace(fmt.Sprintf("Append SDSRVStorageIP with IP %s to status.addresses", ip))
 		addresses = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
 	} else {
 		// address already exists in node.status
+		log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
 		addresses[storageAddrIdx].Address = ip
 	}
 
 	node.Status.Addresses = addresses
+	log.Trace(fmt.Sprintf("node.Status.Addresses: %v", node.Status.Addresses))
 	err := cl.Update(ctx, node)
 
 	if err != nil {
