@@ -68,8 +68,12 @@ spec:
           {{- end }}
         hostNetwork: true
         env:
+          # Warning: "1"
+          # Info: "2"
+          # Debug: "3"
+          # Trace: "4"
           - name: LOG_LEVEL
-            value: {{ .Values.sdsReplicatedVolume.logLevel }}
+            value: "4"
           - name: NODE_NAME
             valueFrom:
               fieldRef:
