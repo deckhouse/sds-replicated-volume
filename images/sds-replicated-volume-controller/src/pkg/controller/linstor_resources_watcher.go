@@ -67,7 +67,6 @@ var (
 	badLabels = []string{missMatchedLabel, unableToSetQuorumMinimumRedundancyLabel}
 )
 
-
 func NewLinstorResourcesWatcher(
 	mgr manager.Manager,
 	lc *lapi.Client,
