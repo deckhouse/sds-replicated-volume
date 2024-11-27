@@ -34,6 +34,7 @@ import (
 	"storage-network-controller/pkg/cache"
 
 	"k8s.io/api/core/v1"
+	v1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -145,7 +146,7 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 				return err
 			}
 
-			err = utils.UpdateNodeStatusWithIP(node, foundedIP[0])
+			err = updateNodeStatusWithIP(ctx, node, foundedIP[0], *cl, log)
 			if err != nil {
 				log.Error(err, "cannot update node status field")
 				return err
@@ -168,4 +169,35 @@ func getMyNode() (*v1.Node, error) {
 	}
 
 	return node, nil
+}
+
+func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl client.Client, log *logger.Logger) error {
+	log.Info(fmt.Sprintf("Update node '%s' status.addresses with IP %s", node.Name, ip))
+	addresses := node.Status.Addresses
+
+	// index of address with type SDSRVStorageIP (if will founded in node addresses)
+	var storage_addr_idx int = -1
+	for i, addr := range addresses {
+		if addr.Type == "SDSRVStorageIP" {
+			storage_addr_idx = i
+			break
+		}
+	}
+
+	if storage_addr_idx == -1 {
+		// no address on node status yet
+		addresses = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
+	} else {
+		// address already exists in node.status
+		addresses[storage_addr_idx].Address = ip
+	}
+
+	node.Status.Addresses = addresses
+	err := cl.Update(ctx, node)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
