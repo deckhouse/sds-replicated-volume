@@ -41,6 +41,10 @@ import (
 type discoveredIPs []string
 
 func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) error {
+	if len(cfg.StorageNetworkCIDR) == 0 {
+		return errors.New("you must specify one or more --storage-network-cidr parameter(s)")
+	}
+
 	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
 	if err != nil {
 		log.Error(err, "Cannot parse storage-network-cidr")
