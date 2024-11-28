@@ -32,7 +32,7 @@
 {{- $_ := set $versions "SPAAS" "7bef2e7976a455550bce2533487c635f20390ccf" }}
 {{- $_ := set $versions "THIN_SEND_RECV" "1.0.1" }}
 
-{{- $_ := set $ "VERSIONS" $versions }}
+{{- $_ := set $ "Versions" $versions }}
 
 
 # custom constants
