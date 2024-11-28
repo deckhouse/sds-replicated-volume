@@ -51,6 +51,7 @@ shell:
       && apt-get clean
   setup:
     - |
+      /deb2distroless.sh -e /relocate -d /downloaded-cache mount
       /deb2distroless.sh -e /relocate -d /downloaded-cache xfsprogs
       /deb2distroless.sh -e /relocate -d /downloaded-cache e2fsprogs
       # now install (post-process) all downloaded depends
