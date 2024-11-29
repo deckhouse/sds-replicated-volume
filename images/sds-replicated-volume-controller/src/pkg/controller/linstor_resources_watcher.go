@@ -199,7 +199,7 @@ func ReconcileParams(
 
 			if updated {
 				pv.Labels = newLabels
-				err := UpdatePV(ctx, cl, &pv)
+				err := UpdatePV(ctx, cl, pv)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
 				}
@@ -212,7 +212,7 @@ func ReconcileParams(
 
 			if updated {
 				pv.Labels = newLabels
-				err := UpdatePV(ctx, cl, &pv)
+				err := UpdatePV(ctx, cl, pv)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
 				}
@@ -266,7 +266,7 @@ func ReconcilePVReplicas(
 		}
 
 		if upd {
-			err := UpdatePV(ctx, cl, &pv)
+			err := UpdatePV(ctx, cl, pv)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
 			}
