@@ -50,10 +50,12 @@ shell:
       && apt-file update -a amd64 \
       && apt-get clean
   setup:
+    # util-linux need for blockdev command to work which is required when Linstor mounts it's volume
     - |
       /deb2distroless.sh -e /relocate -d /downloaded-cache mount
       /deb2distroless.sh -e /relocate -d /downloaded-cache xfsprogs
       /deb2distroless.sh -e /relocate -d /downloaded-cache e2fsprogs
+      /deb2distroless.sh -e /relocate -d /downloaded-cache util-linux
       # now install (post-process) all downloaded depends
       /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
     - ln -sf /proc/mounts /relocate/etc/mtab
