@@ -146,7 +146,7 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 				return err
 			}
 
-			err = updateNodeStatusWithIP(ctx, node, foundedIP[0], *cl, log)
+			err = updateNodeStatusWithIP(node, foundedIP[0], *cl, log)
 			if err != nil {
 				log.Error(err, "cannot update node status field")
 				return err
@@ -171,7 +171,7 @@ func getMyNode() (*v1.Node, error) {
 	return node, nil
 }
 
-func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl client.Client, log *logger.Logger) error {
+func updateNodeStatusWithIP(node *v1.Node, ip string, cl client.Client, log *logger.Logger) error {
 	log.Info(fmt.Sprintf("Update node '%s' status.addresses with IP %s", node.Name, ip))
 	addresses := node.Status.Addresses
 
@@ -196,9 +196,10 @@ func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl cl
 
 	node.Status.Addresses = addresses
 	log.Trace(fmt.Sprintf("node.Status.Addresses: %v", node.Status.Addresses))
-	err := cl.Status().Update(ctx, node)
+	err := cl.Status().Update(context.TODO(), node)
 
 	if err != nil {
+		log.Error(err, "cannot update node status addresses")
 		return err
 	}
 
