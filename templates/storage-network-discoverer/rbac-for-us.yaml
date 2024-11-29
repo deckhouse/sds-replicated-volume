@@ -28,7 +28,14 @@ rules:
     verbs:
       - get
       - list
-      - watch
+
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/status
+    verbs:
+      - get
+      - list
       - patch
       - update
 
