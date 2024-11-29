@@ -196,7 +196,7 @@ func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl cl
 
 	node.Status.Addresses = addresses
 	log.Trace(fmt.Sprintf("node.Status.Addresses: %v", node.Status.Addresses))
-	err := cl.Update(ctx, node)
+	err := cl.Status().Update(ctx, node)
 
 	if err != nil {
 		return err
