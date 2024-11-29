@@ -40,7 +40,8 @@ import (
 
 type discoveredIPs []string
 
-var DiscoveryCache cache.TTLCache[string, string]
+// create a new discoveryCache with TTL (item expiring) capabilities
+var DiscoveryCache *cache.TTLCache[string, string] = cache.NewTTL[string, string]()
 
 func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) error {
 	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
@@ -56,9 +57,6 @@ func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) 
 		return err
 	}
 	log.Info("Shared informer cache has been intialized")
-
-	// create a new discoveryCache with TTL (item expiring) capabilities
-	// DiscoveryCache := cache.NewTTL[string, string]()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
