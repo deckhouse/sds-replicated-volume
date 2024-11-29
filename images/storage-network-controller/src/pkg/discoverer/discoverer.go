@@ -40,6 +40,8 @@ import (
 
 type discoveredIPs []string
 
+var DiscoveryCache cache.TTLCache[string, string]
+
 func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) error {
 	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
 	if err != nil {
@@ -55,8 +57,8 @@ func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) 
 	}
 	log.Info("Shared informer cache has been intialized")
 
-	// initialize in-memory node IPs cache
-	discoveredIPs := make(discoveredIPs, 0)
+	// create a new discoveryCache with TTL (item expiring) capabilities
+	// DiscoveryCache := cache.NewTTL[string, string]()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -74,8 +76,8 @@ func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) 
 
 	// discoverer loop
 	for {
-		if err := discovery(storageNetworks, &discoveredIPs, ctx, &cl, log); err != nil {
-			log.Error(err, "Discovery error occured")
+		if err := discovery(ctx, storageNetworks, &cl, log, cfg); err != nil {
+			log.Error(err, "Discovery error occurred")
 			cancel()
 			return err
 		}
@@ -98,14 +100,14 @@ func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
 	return networks, nil
 }
 
-func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx context.Context, cl *client.Client, log *logger.Logger) error {
+func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.Client, log *logger.Logger, cfg config.Options) error {
 	select {
 	case <-ctx.Done():
 		// do nothing in case of cancel
 		return nil
 
 	default:
-		log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s, cachedIPs: %s", storageNetworks, *cachedIPs))
+		log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s", storageNetworks))
 
 		addrs, err := net.InterfaceAddrs()
 		if err != nil {
@@ -131,24 +133,27 @@ func discovery(storageNetworks []netip.Prefix, cachedIPs *discoveredIPs, ctx con
 			}
 		}
 
-		// if we found any IP that match with storageNetwork CIDRs that not already in cache
-		// TODO: theoretically, there is a possible case where the IP changes, but the length does not change
-		if len(foundedIP) != len(*cachedIPs) {
+		if len(foundedIP) > 0 {
 			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
-			*cachedIPs = foundedIP
 
 			// TODO: what if there is 2 or more IPs founded?
+			// for now we get only FIRST IP in founded list
+			ip := foundedIP[0]
 
-			node, err := getMyNode()
-			if err != nil {
-				log.Error(err, "cannot get my node info")
-				return err
-			}
+			// update node status only if no IP in cache
+			if _, found := DiscoveryCache.Get(ip); !found {
+				node, err := getMyNode()
+				if err != nil {
+					log.Error(err, "cannot get my node info")
+					return err
+				}
 
-			err = updateNodeStatusWithIP(ctx, node, foundedIP[0], *cl, log)
-			if err != nil {
-				log.Error(err, "cannot update node status field")
-				return err
+				err = updateNodeStatusWithIP(ctx, node, ip, *cl, log)
+				if err != nil {
+					log.Error(err, "cannot update node status field")
+					return err
+				}
+				DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
 			}
 		}
 	}

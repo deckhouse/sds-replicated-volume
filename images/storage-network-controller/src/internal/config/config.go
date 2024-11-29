@@ -19,16 +19,19 @@ package config
 import (
 	"flag"
 	"fmt"
-	"log"
 	"net"
 	"os"
+	"strconv"
 
 	"storage-network-controller/internal/logger"
 )
 
 const (
 	ControllerNamespaceEnv = "CONTROLLER_NAMESPACE"
+	DiscoverySecEnv        = "DISCOVERY_INTERVAL_SEC"
+	CacheSecEnv            = "CACHE_TTL_SEC"
 	DefaultDiscoverySec    = 15
+	DefaultCacheTTLSec     = 60
 	HardcodedControllerNS  = "d8-sds-replicated-volume"
 	LogLevelEnv            = "LOG_LEVEL"
 )
@@ -38,6 +41,7 @@ type StorageNetworkCIDR []string
 type Options struct {
 	ControllerNamespace string
 	DiscoverySec        int
+	CacheTTLSec         int
 	DiscoveryMode       bool
 	Loglevel            logger.Verbosity
 	StorageNetworkCIDR  StorageNetworkCIDR
@@ -74,17 +78,43 @@ func NewConfig() (*Options, error) {
 		opts.Loglevel = logger.Verbosity(loglevel)
 	}
 
-	opts.DiscoverySec = DefaultDiscoverySec
+	discoverySec := os.Getenv(DiscoverySecEnv)
+	if discoverySec == "" {
+		opts.DiscoverySec = DefaultDiscoverySec
+	} else {
+		i, err := strconv.Atoi(discoverySec)
+		if err != nil {
+			fmt.Printf("Failed to convert value of env var %s to integer: %s", DiscoverySecEnv, err.Error())
+			fmt.Printf("Using default %d seconds", DefaultDiscoverySec)
+			opts.DiscoverySec = DefaultDiscoverySec
+		} else {
+			opts.DiscoverySec = i
+		}
+	}
+
+	cacheTTLSec := os.Getenv(CacheSecEnv)
+	if cacheTTLSec == "" {
+		opts.CacheTTLSec = DefaultCacheTTLSec
+	} else {
+		i, err := strconv.Atoi(cacheTTLSec)
+		if err != nil {
+			fmt.Printf("Failed to convert value of env var %s to integer: %s", CacheSecEnv, err.Error())
+			fmt.Printf("Using default %d seconds", DefaultCacheTTLSec)
+			opts.CacheTTLSec = DefaultCacheTTLSec
+		} else {
+			opts.CacheTTLSec = i
+		}
+	}
 
 	opts.ControllerNamespace = os.Getenv(ControllerNamespaceEnv)
 	if opts.ControllerNamespace == "" {
 		namespace, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 		if err != nil {
-			log.Printf("Failed to get namespace from filesystem: %v", err)
-			log.Printf("Using hardcoded namespace: %s", HardcodedControllerNS)
+			fmt.Printf("Failed to get namespace from filesystem: %s", err.Error())
+			fmt.Printf("Using hardcoded namespace: %s", HardcodedControllerNS)
 			opts.ControllerNamespace = HardcodedControllerNS
 		} else {
-			log.Printf("Got namespace from filesystem: %s", string(namespace))
+			fmt.Printf("Got namespace from filesystem: %s", string(namespace))
 			opts.ControllerNamespace = string(namespace)
 		}
 	}
