@@ -142,14 +142,14 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 			if _, found := DiscoveryCache.Get(ip); !found {
 				node, err := getMyNode()
 				if err != nil {
-					log.Error(err, "cannot get my node info")
-					return err
+					log.Error(err, "cannot get my node info for now. Waiting for next reconcilation")
+					return nil
 				}
 
 				err = updateNodeStatusWithIP(ctx, node, ip, *cl, log)
 				if err != nil {
-					log.Error(err, "cannot update node status field")
-					return err
+					log.Error(err, "cannot update node status field for now. Waiting for next reconcilation")
+					return nil
 				}
 				DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
 			}
@@ -174,7 +174,7 @@ func getMyNode() (*v1.Node, error) {
 }
 
 func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl client.Client, log *logger.Logger) error {
-	log.Info(fmt.Sprintf("Update node '%s' status.addresses with IP %s", node.Name, ip))
+	log.Info(fmt.Sprintf("[updateNodeStatusWithIP] reconcile node: '%s' discovered storage IP: %s", node.Name, ip))
 	addresses := node.Status.Addresses
 
 	// index of address with type SDSRVStorageIP (if will founded in node addresses)
@@ -186,22 +186,31 @@ func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl cl
 		}
 	}
 
+	var skipUpdate = false
+
 	if storageAddrIdx == -1 {
 		// no address on node status yet
 		log.Trace(fmt.Sprintf("Append SDSRVStorageIP with IP %s to status.addresses", ip))
 		addresses = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
 	} else {
-		// address already exists in node.status
-		log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
-		addresses[storageAddrIdx].Address = ip
+		// if is same address, then skip node status update
+		if addresses[storageAddrIdx].Address == ip {
+			skipUpdate = true
+		} else {
+			// address already exists in node.status
+			log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
+			addresses[storageAddrIdx].Address = ip
+		}
 	}
 
-	node.Status.Addresses = addresses
-	err := cl.Status().Update(ctx, node)
+	if !skipUpdate {
+		node.Status.Addresses = addresses
+		err := cl.Status().Update(ctx, node)
 
-	if err != nil {
-		log.Error(err, "cannot update node status addresses")
-		return err
+		if err != nil {
+			log.Error(err, "cannot update node status addresses")
+			return err
+		}
 	}
 
 	return nil
