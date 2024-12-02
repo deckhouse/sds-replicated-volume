@@ -23,11 +23,9 @@ import (
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	"storage-network-controller/internal/config"
 	"storage-network-controller/internal/logger"
 	"storage-network-controller/pkg/discoverer"

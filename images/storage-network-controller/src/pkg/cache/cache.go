@@ -66,7 +66,6 @@ func CreateSharedInformerCache(mgr manager.Manager, log *logger.Logger) error {
 	sharedInformerCache.controllerCache, err = controllercache.New(mgr.GetConfig(), controllercache.Options{
 		Scheme: mgr.GetScheme(),
 		// flant.com TODO: make transformMap as in https://github.com/libopenstorage/stork/blob/828e9a057905b93cf1ad43155d9adac5ac8fe8c0/pkg/cache/cache.go#L72
-		// when controller-runtime package will be at least v0.12.0
 		// TransformByObject: transformMap,
 	})
 	if err != nil {
@@ -87,7 +86,7 @@ func CreateSharedInformerCache(mgr manager.Manager, log *logger.Logger) error {
 		return err
 	}
 
-	go sharedInformerCache.controllerCache.Start(context.Background())
+	go sharedInformerCache.controllerCache.Start(context.Background()) //nolint:errcheck
 
 	synced := sharedInformerCache.controllerCache.WaitForCacheSync(context.Background())
 	if !synced {
