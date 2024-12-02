@@ -83,62 +83,71 @@ func NewLinstorResourcesWatcher(
 			time.Sleep(time.Second * time.Duration(interval))
 			log.Info("[NewLinstorResourcesWatcher] starts reconcile")
 
-			scs, err := GetStorageClasses(ctx, cl)
-			if err != nil {
-				log.Error(err, "[NewLinstorResourcesWatcher] unable to get Kubernetes Storage Classes")
-				continue
-			}
-
-			scMap := make(map[string]v1.StorageClass, len(scs))
-			for _, sc := range scs {
-				scMap[sc.Name] = sc
-			}
-
-			rds, err := lc.ResourceDefinitions.GetAll(ctx, lapi.RDGetAllRequest{})
-			if err != nil {
-				log.Error(err, "[NewLinstorResourcesWatcher] unable to get Linstor Resource Definitions")
-				continue
-			}
-
-			rdMap := make(map[string]lapi.ResourceDefinitionWithVolumeDefinition, len(rds))
-			for _, rd := range rds {
-				rdMap[rd.Name] = rd
-			}
-
-			rgs, err := lc.ResourceGroups.GetAll(ctx)
-			if err != nil {
-				log.Error(err, "[NewLinstorResourcesWatcher] unable to get Linstor Resource Groups")
-				continue
-			}
-
-			rgMap := make(map[string]lapi.ResourceGroup, len(rgs))
-			for _, rg := range rgs {
-				rgMap[rg.Name] = rg
-			}
-
-			pvList, err := GetListPV(ctx, cl)
-			if err != nil {
-				log.Error(err, "[NewLinstorResourcesWatcher] unable to get Persistent Volumes")
-				continue
-			}
-
-			resMap := make(map[string][]lapi.Resource, len(rdMap))
-			for name := range rdMap {
-				res, err := lc.Resources.GetAll(ctx, name)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[NewLinstorResourcesWatcher] unable to get Linstor Resources, name: %s", name))
-					continue
-				}
-				resMap[name] = res
-			}
-
-			ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap, pvList)
-			ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap, resMap)
-			ReconcilePVReplicas(ctx, log, cl, lc, rdMap, rgMap, resMap, pvList)
+			runLinstorResourcesReconcile(ctx, log, cl, lc)
 
 			log.Info("[NewLinstorResourcesWatcher] ends reconcile")
 		}
 	}()
+}
+
+func runLinstorResourcesReconcile(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	lc *lapi.Client,
+) {
+	scs, err := GetStorageClasses(ctx, cl)
+	if err != nil {
+		log.Error(err, "[runLinstorResourcesReconcile] unable to get Kubernetes Storage Classes")
+		return
+	}
+
+	scMap := make(map[string]v1.StorageClass, len(scs))
+	for _, sc := range scs {
+		scMap[sc.Name] = sc
+	}
+
+	rds, err := lc.ResourceDefinitions.GetAll(ctx, lapi.RDGetAllRequest{})
+	if err != nil {
+		log.Error(err, "[runLinstorResourcesReconcile] unable to get Linstor Resource Definitions")
+		return
+	}
+
+	rdMap := make(map[string]lapi.ResourceDefinitionWithVolumeDefinition, len(rds))
+	for _, rd := range rds {
+		rdMap[rd.Name] = rd
+	}
+
+	rgs, err := lc.ResourceGroups.GetAll(ctx)
+	if err != nil {
+		log.Error(err, "[runLinstorResourcesReconcile] unable to get Linstor Resource Groups")
+		return
+	}
+
+	rgMap := make(map[string]lapi.ResourceGroup, len(rgs))
+	for _, rg := range rgs {
+		rgMap[rg.Name] = rg
+	}
+
+	pvList, err := GetListPV(ctx, cl)
+	if err != nil {
+		log.Error(err, "[runLinstorResourcesReconcile] unable to get Persistent Volumes")
+		return
+	}
+
+	resMap := make(map[string][]lapi.Resource, len(rdMap))
+	for name := range rdMap {
+		res, err := lc.Resources.GetAll(ctx, name)
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[runLinstorResourcesReconcile] unable to get Linstor Resources, name: %s", name))
+			return
+		}
+		resMap[name] = res
+	}
+
+	ReconcileParams(ctx, log, cl, lc, scMap, rdMap, rgMap, pvList)
+	ReconcileTieBreaker(ctx, log, lc, rdMap, rgMap, resMap)
+	ReconcilePVReplicas(ctx, log, cl, lc, rdMap, rgMap, resMap, pvList)
 }
 
 func ReconcileParams(
