@@ -28,14 +28,13 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"storage-network-controller/internal/config"
 	"storage-network-controller/internal/logger"
 	"storage-network-controller/internal/utils"
 	"storage-network-controller/pkg/cache"
-
-	"k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 type discoveredIPs []string
@@ -142,13 +141,13 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 			if _, found := DiscoveryCache.Get(ip); !found {
 				node, err := getMyNode()
 				if err != nil {
-					log.Error(err, "cannot get my node info for now. Waiting for next reconcilation")
+					log.Error(err, "cannot get my node info for now. Waiting for next reconciliation")
 					return nil
 				}
 
 				err = updateNodeStatusWithIP(ctx, node, ip, *cl, log)
 				if err != nil {
-					log.Error(err, "cannot update node status field for now. Waiting for next reconcilation")
+					log.Error(err, "cannot update node status field for now. Waiting for next reconciliation")
 					return nil
 				}
 				DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
