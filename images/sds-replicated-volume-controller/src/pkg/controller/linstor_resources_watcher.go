@@ -129,10 +129,22 @@ func runLinstorResourcesReconcile(
 		rgMap[rg.Name] = rg
 	}
 
-	pvList, err := GetListPV(ctx, cl)
+	pvs, err := GetListPV(ctx, cl)
 	if err != nil {
 		log.Error(err, "[runLinstorResourcesReconcile] unable to get Persistent Volumes")
 		return
+	}
+
+	pvList := make([]*core.PersistentVolume, 0)
+	for i := range pvs {
+		pv := &pvs[i]
+		if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != PVCSIDriver {
+			continue
+		}
+		if pv.Labels == nil {
+			pv.Labels = make(map[string]string)
+		}
+		pvList = append(pvList, pv)
 	}
 
 	resMap := make(map[string][]lapi.Resource, len(rdMap))
@@ -158,21 +170,16 @@ func ReconcileParams(
 	scs map[string]v1.StorageClass,
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
-	pvs []core.PersistentVolume,
+	pvs []*core.PersistentVolume,
 ) {
 	log.Info("[ReconcileParams] starts work")
 
-	for i := range pvs {
-		pv := &pvs[i]
-		if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != PVCSIDriver {
-			continue
-		}
-
+	for _, pv := range pvs {
 		sc := scs[pv.Spec.StorageClassName]
-
 		RGName := rds[pv.Name].ResourceGroupName
 		rg := rgs[RGName]
 		log.Debug(fmt.Sprintf("[ReconcileParams] PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
+
 		if missMatched := getMissMatchedParams(sc, rg); len(missMatched) > 0 {
 			log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have missmatched params."+
 				" The corresponding PV %s will have the special missmatched label %s if needed", sc.Name, rg.Name, pv.Name, missMatchedLabel))
@@ -202,30 +209,10 @@ func ReconcileParams(
 			if len(missMatched) > 0 {
 				labelsToAdd = map[string]string{missMatchedLabel: "true"}
 			}
-
-			newLabels, updated := setLabelsIfNeeded(pv.Labels, labelsToAdd)
-			log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
-
-			if updated {
-				pv.Labels = newLabels
-				err := UpdatePV(ctx, cl, pv)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
-				}
-			}
+			setLabelsIfNeeded(ctx, log, cl, pv, labelsToAdd)
 		} else {
 			log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
-
-			newLabels, updated := setLabelsIfNeeded(pv.Labels, nil)
-			log.Debug(fmt.Sprintf("[ReconcileParams] Update labels. Original labels: %+v; new labels: %+v; updated: %t", pv.Labels, newLabels, updated))
-
-			if updated {
-				pv.Labels = newLabels
-				err := UpdatePV(ctx, cl, pv)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
-				}
-			}
+			setLabelsIfNeeded(ctx, log, cl, pv, nil)
 		}
 	}
 
@@ -240,16 +227,11 @@ func ReconcilePVReplicas(
 	rds map[string]lapi.ResourceDefinitionWithVolumeDefinition,
 	rgs map[string]lapi.ResourceGroup,
 	res map[string][]lapi.Resource,
-	pvs []core.PersistentVolume,
+	pvs []*core.PersistentVolume,
 ) {
 	log.Info("[ReconcilePVReplicas] starts work")
 
-	for i := range pvs {
-		pv := &pvs[i]
-		if pv.Spec.CSI == nil || pv.Spec.CSI.Driver != PVCSIDriver {
-			continue
-		}
-
+	for _, pv := range pvs {
 		RGName := rds[pv.Name].ResourceGroupName
 		rg := rgs[RGName]
 		log.Debug(fmt.Sprintf("[ReconcilePVReplicas] PV: %s, RG: %s", pv.Name, rg.Name))
@@ -259,24 +241,24 @@ func ReconcilePVReplicas(
 			continue
 		}
 
-		replicasErrLevel := checkPVMinReplicasCount(ctx, log, lc, rg, resources)
+		replicasErrLevel, err := checkPVMinReplicasCount(ctx, log, lc, rg, resources)
+		if err != nil {
+			log.Error(err, "[ReconcilePVReplicas] unable to validate replicas count")
+			continue
+		}
 
 		origLabelVal, exists := pv.Labels[pvNotEnoughReplicasLabel]
 		log.Debug(fmt.Sprintf("[ReconcilePVReplicas] Update label \"%s\", old: \"%s\", new: \"%s\"", pvNotEnoughReplicasLabel, origLabelVal, replicasErrLevel))
 
-		upd := false
 		if replicasErrLevel == "" && exists {
 			delete(pv.Labels, pvNotEnoughReplicasLabel)
-			upd = true
+			if err := cl.Update(ctx, pv); err != nil {
+				log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
+			}
 		}
 		if replicasErrLevel != "" && replicasErrLevel != origLabelVal {
 			pv.Labels[pvNotEnoughReplicasLabel] = replicasErrLevel
-			upd = true
-		}
-
-		if upd {
-			err := UpdatePV(ctx, cl, pv)
-			if err != nil {
+			if err := cl.Update(ctx, pv); err != nil {
 				log.Error(err, fmt.Sprintf("[ReconcilePVReplicas] unable to update the PV, name: %s", pv.Name))
 			}
 		}
@@ -291,18 +273,19 @@ func checkPVMinReplicasCount(
 	lc *lapi.Client,
 	rg lapi.ResourceGroup,
 	resources []lapi.Resource,
-) string {
+) (string, error) {
 	placeCount := int(rg.SelectFilter.PlaceCount)
 	upVols := 0
 
 	if placeCount <= 0 {
-		return ""
+		return "", nil
 	}
 
 	for _, r := range resources {
 		volList, err := lc.Resources.GetVolumes(ctx, r.Name, r.NodeName)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
+			log.Warning(fmt.Sprintf("[checkPVMinReplicasCount] unable to get Linstor Resources Volumes, name: %s, node: %s", r.Name, r.NodeName))
+			return "", err
 		}
 
 		for _, v := range volList {
@@ -314,13 +297,13 @@ func checkPVMinReplicasCount(
 
 	switch {
 	case upVols >= placeCount:
-		return ""
+		return "", nil
 	case upVols <= 1:
-		return "fatal"
+		return "fatal", nil
 	case (upVols*100)/placeCount <= 50:
-		return "error"
+		return "error", nil
 	default:
-		return "warning"
+		return "warning", nil
 	}
 }
 
@@ -552,22 +535,7 @@ func GetListPV(ctx context.Context, cl client.Client) ([]core.PersistentVolume, 
 	if err != nil {
 		return nil, err
 	}
-
-	for i := range PersistentVolumeList.Items {
-		pv := &PersistentVolumeList.Items[i]
-		if pv.Labels == nil {
-			pv.Labels = make(map[string]string)
-		}
-	}
 	return PersistentVolumeList.Items, nil
-}
-
-func UpdatePV(ctx context.Context, cl client.Client, pv *core.PersistentVolume) error {
-	err := cl.Update(ctx, pv)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func removePrefixes(params map[string]string) map[string]string {
@@ -653,23 +621,37 @@ func setQuorumMinimumRedundancy(ctx context.Context, lc *lapi.Client, value, rgN
 	return err
 }
 
-func setLabelsIfNeeded(originalLabels map[string]string, labelsToAdd map[string]string) (map[string]string, bool) {
+func setLabelsIfNeeded(
+	ctx context.Context,
+	log logger.Logger,
+	cl client.Client,
+	pv *core.PersistentVolume,
+	labelsToAdd map[string]string,
+) {
+	log.Debug(fmt.Sprintf("[setLabelsIfNeeded] Original labels: %+v", pv.Labels))
+
+	newLabels := pv.Labels
 	updated := false
 
 	for _, label := range badLabels {
-		if _, exists := originalLabels[label]; exists {
-			delete(originalLabels, label)
+		if _, exists := newLabels[label]; exists {
+			delete(newLabels, label)
 			updated = true
 		}
 	}
 
-	for key, value := range labelsToAdd {
-		originalLabelVal, exists := originalLabels[key]
-		if !exists || originalLabelVal != value {
-			originalLabels[key] = value
+	for k, v := range labelsToAdd {
+		if origVal, exists := newLabels[k]; !exists || origVal != v {
+			newLabels[k] = v
 			updated = true
 		}
 	}
 
-	return originalLabels, updated
+	if updated {
+		log.Debug(fmt.Sprintf("[ReconcileParams] New labels: %+v", newLabels))
+
+		if err := cl.Update(ctx, pv); err != nil {
+			log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
+		}
+	}
 }
