@@ -111,7 +111,9 @@ func main() {
 		if err != nil {
 			log.Error(err, "failed to discovery node")
 			cancel()
-			os.Exit(2)
+			// disable exitAfterDefer: os.Exit will exit, and `defer cancel()` will not run
+			// because we explicitly call cancel() before exiting with error code
+			os.Exit(2) //nolint:gocritic
 		}
 	}
 }
