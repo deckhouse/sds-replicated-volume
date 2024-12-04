@@ -1,0 +1,42 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE"  "registry.deckhouse.io/base_images/golang:1.22.6-bullseye@sha256:260918a3795372a6d33225d361fe5349723be9667de865a23411b50fbcc76c5a" }}
+{{- $_ := set . "BASE_UBUNTU" "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_BULLSEYE }}
+
+git:
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/linstor-csi/src
+    stageDependencies:
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /images/linstor-csi/src/cmd/linstor-csi
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v98544cadb6d111d27a86a11ec07de91b99704b82" -o /linstor-csi
+    - chmod +x /linstor-csi
+
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_UBUNTU }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /linstor-csi
+    to: /linstor-csi
+    before: setup
+
+shell:
+  setup:
+    - apt-get update && apt-get install -y --no-install-recommends xfsprogs e2fsprogs && apt-get clean && rm -rf /var/lib/apt/lists/* && ln -sf /proc/mounts /etc/mtab
+
+docker:
+  ENTRYPOINT: ["/linstor-csi"]
