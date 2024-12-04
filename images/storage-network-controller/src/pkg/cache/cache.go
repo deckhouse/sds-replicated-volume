@@ -51,12 +51,14 @@ const (
 	cacheNotInitializedErr = "shared informer cache has not been initialized yet"
 )
 
-func CreateSharedInformerCache(mgr manager.Manager, log *logger.Logger) error {
+func CreateSharedInformerCache(ctx context.Context, mgr manager.Manager) error {
 	cacheLock.Lock()
 	defer cacheLock.Unlock()
 	if instance != nil {
 		return fmt.Errorf("shared informer cache already initialized")
 	}
+
+	log := logger.FromContext(ctx)
 
 	var err error
 
@@ -65,8 +67,6 @@ func CreateSharedInformerCache(mgr manager.Manager, log *logger.Logger) error {
 	instance = sharedInformerCache
 	sharedInformerCache.controllerCache, err = controllercache.New(mgr.GetConfig(), controllercache.Options{
 		Scheme: mgr.GetScheme(),
-		// flant.com TODO: make transformMap as in https://github.com/libopenstorage/stork/blob/828e9a057905b93cf1ad43155d9adac5ac8fe8c0/pkg/cache/cache.go#L72
-		// TransformByObject: transformMap,
 	})
 	if err != nil {
 		log.Error(err, "error creating shared informer cache")
@@ -86,7 +86,10 @@ func CreateSharedInformerCache(mgr manager.Manager, log *logger.Logger) error {
 		return err
 	}
 
-	go sharedInformerCache.controllerCache.Start(context.Background()) //nolint:errcheck
+	if err = sharedInformerCache.controllerCache.Start(ctx); err != nil {
+		log.Error(err, "error start controllerCache")
+		return err
+	}
 
 	synced := sharedInformerCache.controllerCache.WaitForCacheSync(context.Background())
 	if !synced {

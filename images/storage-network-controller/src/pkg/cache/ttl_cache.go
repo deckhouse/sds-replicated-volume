@@ -17,6 +17,7 @@ limitations under the License.
 package cache
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -41,13 +42,26 @@ type TTLCache[K comparable, V any] struct {
 
 // NewTTL creates a new TTLCache instance and starts a goroutine to periodically
 // remove expired items every 5 seconds.
-func NewTTL[K comparable, V any]() *TTLCache[K, V] {
+func NewTTL[K comparable, V any](ctx context.Context) *TTLCache[K, V] {
 	c := &TTLCache[K, V]{
 		items: make(map[K]item[V]),
 	}
 
-	go func() {
-		for range time.Tick(5 * time.Second) {
+	// starting up remove expired items loop
+	go c.removeExpiredLoop(ctx)
+
+	return c
+}
+
+// Iterate over the cache items every 5 sec and delete expired ones.
+func (c *TTLCache[K, V]) removeExpiredLoop(ctx context.Context) {
+	for range time.Tick(5 * time.Second) {
+		select {
+		case <-ctx.Done():
+			// do nothing in case of cancel, just return from this gorouting
+			return
+
+		default:
 			c.mu.Lock()
 
 			// Iterate over the cache items and delete expired ones.
@@ -59,9 +73,7 @@ func NewTTL[K comparable, V any]() *TTLCache[K, V] {
 
 			c.mu.Unlock()
 		}
-	}()
-
-	return c
+	}
 }
 
 // Set adds a new item to the cache with the specified key, value, and
@@ -83,7 +95,7 @@ func (c *TTLCache[K, V]) Get(key K) (V, bool) {
 
 	item, found := c.items[key]
 	if !found {
-		// If the key is not found, return the zero value for V and false.
+		// If the key is not found, return the nil value for V and false.
 		return item.value, false
 	}
 

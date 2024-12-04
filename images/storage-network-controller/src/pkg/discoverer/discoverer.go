@@ -23,9 +23,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
-	"os/signal"
+	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"k8s.io/api/core/v1"
@@ -39,43 +38,39 @@ import (
 
 type discoveredIPs []string
 
-// create a new discoveryCache with TTL (item expiring) capabilities
-var DiscoveryCache *cache.TTLCache[string, string] = cache.NewTTL[string, string]()
+var DiscoveryCache *cache.TTLCache[string, string]
+var MyNodeName string
 
-func DiscoveryLoop(cfg config.Options, mgr manager.Manager, log *logger.Logger) error {
+func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager) error {
+	// just syntactic sugar for logger
+	log := logger.FromContext(ctx)
+
 	storageNetworks, err := parseCIDRs(cfg.StorageNetworkCIDR)
 	if err != nil {
 		log.Error(err, "Cannot parse storage-network-cidr")
 		return err
 	}
 
+	MyNodeName := os.Getenv("NODE_NAME")
+	if MyNodeName == "" {
+		return errors.New("cannot get node name because no NODE_NAME env variable")
+	}
+
 	cl := mgr.GetClient()
 
-	if err = cache.CreateSharedInformerCache(mgr, log); err != nil {
+	if err = cache.CreateSharedInformerCache(ctx, mgr); err != nil {
 		log.Error(err, "failed to setup shared informer cache")
 		return err
 	}
 	log.Info("Shared informer cache has been intialized")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-ch
-		log.Info("Received termination, signaling shutdown")
-		cancel()
-	}()
+	// create a new DiscoveryCache with TTL (item expiring) capabilities
+	DiscoveryCache = cache.NewTTL[string, string](ctx)
 
 	// discoverer loop
 	for {
-		if err := discovery(ctx, storageNetworks, &cl, log, cfg); err != nil {
+		if err := discovery(ctx, storageNetworks, &cl, cfg); err != nil {
 			log.Error(err, "Discovery error occurred")
-			cancel()
 			return err
 		}
 
@@ -97,13 +92,15 @@ func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
 	return networks, nil
 }
 
-func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.Client, log *logger.Logger, cfg config.Options) error {
+func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.Client, cfg config.Options) error {
 	select {
 	case <-ctx.Done():
 		// do nothing in case of cancel
 		return nil
 
 	default:
+		log := logger.FromContext(ctx)
+
 		log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s", storageNetworks))
 
 		addrs, err := net.InterfaceAddrs()
@@ -133,11 +130,13 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 		if len(foundedIP) > 0 {
 			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
 
-			// TODO: what if there is 2 or more IPs founded?
-			// for now we get only FIRST IP in founded list
+			// If there is 2 or more IPs founded we get only FIRST IP and warning about others
+			if len(foundedIP) > 1 {
+				log.Warning(fmt.Sprintf("Founded more than one storage IP: %s. Use first only", strings.Join(foundedIP, ", ")))
+			}
 			ip := foundedIP[0]
 
-			// update node status only if no IP in cache
+			// check node status only if no IP in cache
 			if _, found := DiscoveryCache.Get(ip); !found {
 				node, err := getMyNode()
 				if err != nil {
@@ -145,7 +144,7 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 					return nil
 				}
 
-				err = updateNodeStatusWithIP(ctx, node, ip, *cl, log)
+				err = updateNodeStatusIfNeeded(ctx, node, ip, *cl)
 				if err != nil {
 					log.Error(err, "cannot update node status field for now. Waiting for next reconciliation")
 					return nil
@@ -159,12 +158,7 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 }
 
 func getMyNode() (*v1.Node, error) {
-	nodeName := os.Getenv("NODE_NAME")
-	if nodeName == "" {
-		return nil, errors.New("cannot get node name because no NODE_NAME env variable")
-	}
-
-	node, err := cache.Instance().GetNode(nodeName)
+	node, err := cache.Instance().GetNode(MyNodeName)
 	if err != nil {
 		return nil, err
 	}
@@ -172,44 +166,36 @@ func getMyNode() (*v1.Node, error) {
 	return node, nil
 }
 
-func updateNodeStatusWithIP(ctx context.Context, node *v1.Node, ip string, cl client.Client, log *logger.Logger) error {
-	log.Info(fmt.Sprintf("[updateNodeStatusWithIP] reconcile node: '%s' discovered storage IP: %s", node.Name, ip))
+func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl client.Client) error {
+	log := logger.FromContext(ctx)
+
+	log.Info(fmt.Sprintf("[updateNodeStatusIfNeeded] reconcile node: '%s' discovered storage IP: %s", node.Name, ip))
 	addresses := node.Status.Addresses
 
 	// index of address with type SDSRVStorageIP (if will founded in node addresses)
-	var storageAddrIdx = -1
-	for i, addr := range addresses {
-		if addr.Type == "SDSRVStorageIP" {
-			storageAddrIdx = i
-			break
-		}
-	}
-
-	var skipUpdate = false
+	storageAddrIdx := slices.IndexFunc(addresses, func(addr v1.NodeAddress) bool { return addr.Type == "SDSRVStorageIP" })
 
 	if storageAddrIdx == -1 {
 		// no address on node status yet
 		log.Trace(fmt.Sprintf("Append SDSRVStorageIP with IP %s to status.addresses", ip))
-		addresses = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
+		_ = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
 	} else {
-		// if is same address, then skip node status update
+		// if is same address, then just return and do nothing
 		if addresses[storageAddrIdx].Address == ip {
-			skipUpdate = true
-		} else {
-			// address already exists in node.status
-			log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
-			addresses[storageAddrIdx].Address = ip
+			return nil
 		}
+
+		// address already exists in node.status and it differrent from address in 'ip'
+		log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
+		addresses[storageAddrIdx].Address = ip
 	}
 
-	if !skipUpdate {
-		node.Status.Addresses = addresses
-		err := cl.Status().Update(ctx, node)
+	// node.Status.Addresses = addresses
+	err := cl.Status().Update(ctx, node)
 
-		if err != nil {
-			log.Error(err, "cannot update node status addresses")
-			return err
-		}
+	if err != nil {
+		log.Error(err, "cannot update node status addresses")
+		return err
 	}
 
 	return nil

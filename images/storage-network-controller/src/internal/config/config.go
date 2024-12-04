@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"strings"
 
 	"storage-network-controller/internal/logger"
 )
@@ -49,7 +50,7 @@ type Options struct {
 
 // String is an implementation of the flag.Value interface
 func (i *StorageNetworkCIDR) String() string {
-	return fmt.Sprintf("%s", *i)
+	return strings.Join(*i, " ")
 }
 
 // Set is an implementation of the flag.Value interface

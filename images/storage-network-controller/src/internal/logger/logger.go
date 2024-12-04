@@ -17,6 +17,7 @@ limitations under the License.
 package logger
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 
@@ -41,6 +42,8 @@ const (
 
 type (
 	Verbosity string
+	// struct just to be unique in context
+	loggerKey struct{}
 )
 
 type Logger struct {
@@ -56,6 +59,19 @@ func NewLogger(level Verbosity) (*Logger, error) {
 	log := textlogger.NewLogger(textlogger.NewConfig(textlogger.Verbosity(v))).WithCallDepth(1)
 
 	return &Logger{log: log}, nil
+}
+
+func WithLogger(ctx context.Context, logger *Logger) context.Context {
+	return context.WithValue(ctx, loggerKey{}, logger)
+}
+
+func FromContext(ctx context.Context) *Logger {
+	if logger, ok := ctx.Value(loggerKey{}).(*Logger); ok {
+		return logger
+	}
+
+	// WARNING! There will be a panic here if the logger was not initialized in the context
+	return nil
 }
 
 func (l Logger) GetLogger() logr.Logger {

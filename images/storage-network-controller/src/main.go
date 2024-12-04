@@ -17,9 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	goruntime "runtime"
+	"syscall"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -86,9 +89,25 @@ func main() {
 
 	controllerruntime.SetLogger(log.GetLogger())
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// add logger to root context to make it available everywhere, where root context is used
+	ctx = logger.WithLogger(ctx, log)
+
+	// listen for interrupts or the Linux SIGTERM signal and cancel
+	// our context, which the leader election code will observe and
+	// step down
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-ch
+		log.Info("Received termination, signaling shutdown")
+		cancel()
+	}()
+
 	if cfg.DiscoveryMode {
 		log.Info("Starting up in discovery mode...")
-		err := discoverer.DiscoveryLoop(*cfg, mgr, log)
+		err := discoverer.DiscoveryLoop(ctx, *cfg, mgr)
 		if err != nil {
 			log.Error(err, "failed to discovery node")
 			os.Exit(2)
