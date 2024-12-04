@@ -487,6 +487,8 @@ func (d Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*cs
 
 // CreateVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#createvolume
 func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+	d.log.Info("~~~creating volume with modified linstor-csi~~~")
+
 	if req.GetName() == "" {
 		return nil, missingAttr("CreateVolume", req.GetName(), "Name")
 	}
