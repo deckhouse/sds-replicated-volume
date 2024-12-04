@@ -1,10 +1,10 @@
 module storage-network-controller
 
-go 1.22.6
+go 1.22.8
 
 require (
 	github.com/go-logr/logr v1.4.2
-	k8s.io/api v0.31.0 // indirect
+	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0 // indirect
 	k8s.io/client-go v0.31.0
 	k8s.io/klog/v2 v2.130.1
