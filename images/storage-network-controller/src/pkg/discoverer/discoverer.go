@@ -38,8 +38,12 @@ import (
 
 type discoveredIPs []string
 
+const (
+	// this type will be added to node's status.addresses field
+	RVStorageIPType = "SDSRVStorageIP"
+)
+
 var DiscoveryCache *cache.TTLCache[string, string]
-var MyNodeName string
 
 func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager) error {
 	// just syntactic sugar for logger
@@ -51,8 +55,8 @@ func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager)
 		return err
 	}
 
-	MyNodeName := os.Getenv("NODE_NAME")
-	if MyNodeName == "" {
+	myNodeName := os.Getenv("NODE_NAME")
+	if myNodeName == "" {
 		return errors.New("cannot get node name because no NODE_NAME env variable")
 	}
 
@@ -69,7 +73,7 @@ func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager)
 
 	// discoverer loop
 	for {
-		if err := discovery(ctx, storageNetworks, &cl, cfg); err != nil {
+		if err := discovery(ctx, myNodeName, storageNetworks, &cl, cfg); err != nil {
 			log.Error(err, "Discovery error occurred")
 			return err
 		}
@@ -92,7 +96,7 @@ func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
 	return networks, nil
 }
 
-func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.Client, cfg config.Options) error {
+func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Prefix, cl *client.Client, cfg config.Options) error {
 	select {
 	case <-ctx.Done():
 		// do nothing in case of cancel
@@ -138,7 +142,7 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 
 			// check node status only if no IP in cache
 			if _, found := DiscoveryCache.Get(ip); !found {
-				node, err := getMyNode()
+				node, err := cache.Instance().GetNode(nodeName)
 				if err != nil {
 					log.Error(err, "cannot get my node info for now. Waiting for next reconciliation")
 					return nil
@@ -157,15 +161,6 @@ func discovery(ctx context.Context, storageNetworks []netip.Prefix, cl *client.C
 	return nil
 }
 
-func getMyNode() (*v1.Node, error) {
-	node, err := cache.Instance().GetNode(MyNodeName)
-	if err != nil {
-		return nil, err
-	}
-
-	return node, nil
-}
-
 func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl client.Client) error {
 	log := logger.FromContext(ctx)
 
@@ -173,12 +168,12 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 	addresses := node.Status.Addresses
 
 	// index of address with type SDSRVStorageIP (if will founded in node addresses)
-	storageAddrIdx := slices.IndexFunc(addresses, func(addr v1.NodeAddress) bool { return addr.Type == "SDSRVStorageIP" })
+	storageAddrIdx := slices.IndexFunc(addresses, func(addr v1.NodeAddress) bool { return addr.Type == RVStorageIPType })
 
 	if storageAddrIdx == -1 {
 		// no address on node status yet
-		log.Trace(fmt.Sprintf("Append SDSRVStorageIP with IP %s to status.addresses", ip))
-		_ = append(addresses, v1.NodeAddress{Type: "SDSRVStorageIP", Address: ip})
+		log.Trace(fmt.Sprintf("Append %s with IP %s to status.addresses", RVStorageIPType, ip))
+		_ = append(addresses, v1.NodeAddress{Type: RVStorageIPType, Address: ip})
 	} else {
 		// if is same address, then just return and do nothing
 		if addresses[storageAddrIdx].Address == ip {
@@ -186,7 +181,7 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 		}
 
 		// address already exists in node.status and it differrent from address in 'ip'
-		log.Trace(fmt.Sprintf("Change SDSRVStorageIP from %s to %s in status.addresses", addresses[storageAddrIdx].Address, ip))
+		log.Trace(fmt.Sprintf("Change %s from %s to %s in status.addresses", RVStorageIPType, addresses[storageAddrIdx].Address, ip))
 		addresses[storageAddrIdx].Address = ip
 	}
 

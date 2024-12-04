@@ -88,6 +88,7 @@ func CreateSharedInformerCache(ctx context.Context, mgr manager.Manager) error {
 
 	// Start runs all the informers known to this cache until the context is closed. It blocks.
 	// so we must run this as goroutine
+	// NOTE: error checking is not done for .Start because the error is checked just below
 	go sharedInformerCache.controllerCache.Start(ctx) //nolint: errcheck
 
 	synced := sharedInformerCache.controllerCache.WaitForCacheSync(ctx)
