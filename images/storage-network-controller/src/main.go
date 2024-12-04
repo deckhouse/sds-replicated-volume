@@ -110,6 +110,7 @@ func main() {
 		err := discoverer.DiscoveryLoop(ctx, *cfg, mgr)
 		if err != nil {
 			log.Error(err, "failed to discovery node")
+			cancel()
 			os.Exit(2)
 		}
 	}

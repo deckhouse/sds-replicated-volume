@@ -55,7 +55,8 @@ func NewTTL[K comparable, V any](ctx context.Context) *TTLCache[K, V] {
 
 // Iterate over the cache items every 5 sec and delete expired ones.
 func (c *TTLCache[K, V]) removeExpiredLoop(ctx context.Context) {
-	for range time.Tick(5 * time.Second) {
+	// endless loop
+	for {
 		select {
 		case <-ctx.Done():
 			// do nothing in case of cancel, just return from this gorouting
@@ -72,6 +73,9 @@ func (c *TTLCache[K, V]) removeExpiredLoop(ctx context.Context) {
 			}
 
 			c.mu.Unlock()
+
+			// sleep for 5 sec
+			time.Sleep(5 * time.Second)
 		}
 	}
 }
