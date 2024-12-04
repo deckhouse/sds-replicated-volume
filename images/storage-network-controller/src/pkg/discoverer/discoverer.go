@@ -172,7 +172,7 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 	if storageAddrIdx == -1 {
 		// no address on node status yet
 		log.Trace(fmt.Sprintf("Append %s with IP %s to status.addresses", RVStorageIPType, ip))
-		_ = append(addresses, v1.NodeAddress{Type: RVStorageIPType, Address: ip})
+		addresses = append(addresses, v1.NodeAddress{Type: RVStorageIPType, Address: ip}) //nolint: ineffassign,staticcheck
 	} else {
 		// if is same address, then just return and do nothing
 		if addresses[storageAddrIdx].Address == ip {
