@@ -186,7 +186,7 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 
 	log.Info(fmt.Sprintf("[updateNodeStatusIfNeeded] update node '%s' and set %s=%s", node.Name, RVStorageIPType, ip))
 
-	// node.Status.Addresses = addresses
+	node.Status.Addresses = addresses
 	err := cl.Status().Update(ctx, node)
 
 	if err != nil {
