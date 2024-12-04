@@ -136,7 +136,7 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 
 			// If there is 2 or more IPs founded we get only FIRST IP and warning about others
 			if len(foundedIP) > 1 {
-				log.Warning(fmt.Sprintf("Founded more than one storage IP: %s. Use first only", strings.Join(foundedIP, ", ")))
+				log.Warning(fmt.Sprintf("Founded more than one storage IP: %s. Use first.", strings.Join(foundedIP, ", ")))
 			}
 			ip := foundedIP[0]
 
