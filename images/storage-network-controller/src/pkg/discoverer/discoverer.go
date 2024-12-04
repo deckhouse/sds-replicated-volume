@@ -164,7 +164,6 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl client.Client) error {
 	log := logger.FromContext(ctx)
 
-	log.Info(fmt.Sprintf("[updateNodeStatusIfNeeded] reconcile node: '%s' discovered storage IP: %s", node.Name, ip))
 	addresses := node.Status.Addresses
 
 	// index of address with type SDSRVStorageIP (if will founded in node addresses)
@@ -184,6 +183,8 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 		log.Trace(fmt.Sprintf("Change %s from %s to %s in status.addresses", RVStorageIPType, addresses[storageAddrIdx].Address, ip))
 		addresses[storageAddrIdx].Address = ip
 	}
+
+	log.Info(fmt.Sprintf("[updateNodeStatusIfNeeded] update node '%s' and set %s=%s", node.Name, RVStorageIPType, ip))
 
 	// node.Status.Addresses = addresses
 	err := cl.Status().Update(ctx, node)
