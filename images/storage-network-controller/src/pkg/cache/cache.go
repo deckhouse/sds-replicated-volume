@@ -74,7 +74,7 @@ func CreateSharedInformerCache(ctx context.Context, mgr manager.Manager) error {
 	}
 
 	// indexing nodes by nodeName so that we can get node info by it's name
-	err = sharedInformerCache.controllerCache.IndexField(context.Background(), &corev1.Node{}, "metadata.name", func(obj client.Object) []string {
+	err = sharedInformerCache.controllerCache.IndexField(ctx, &corev1.Node{}, "metadata.name", func(obj client.Object) []string {
 		nodeObject, ok := obj.(*corev1.Node)
 		if !ok {
 			return []string{}
@@ -90,7 +90,7 @@ func CreateSharedInformerCache(ctx context.Context, mgr manager.Manager) error {
 	// so we must run this as goroutine
 	go sharedInformerCache.controllerCache.Start(ctx) //nolint: errcheck
 
-	synced := sharedInformerCache.controllerCache.WaitForCacheSync(context.Background())
+	synced := sharedInformerCache.controllerCache.WaitForCacheSync(ctx)
 	if !synced {
 		return fmt.Errorf("error syncing the shared informer cache")
 	}
