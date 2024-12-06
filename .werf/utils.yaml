@@ -1,0 +1,208 @@
+{{- /*
+  utils:checkout-git clone a specified Git repo and its submodules
+  Parameters (* for required):
+    * .folder     - Folder path to which clone the repo
+    * .repo       - Git repo URL
+    * .branch     - Name of branch/commit/tag to clone
+      .submodules - String with submodules and their's branches like: "submodule1-name=submodule1-branch submodule2-name="
+                    If branch is not set then branch will use from .git-submodules file
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
+  {{- $_ := set $ctx "branch" (printf "v%s" $linstor_version) }}
+  {{- $_ := set $ctx "folder" "/linstor-server" }}
+  {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) }}
+  {{- include "utils:checkout-git" $ctx | nindent 2 }}
+*/}}
+
+{{ define "utils:checkout-git" }}
+  - 'echo ">>> utils:checkout-git <<< folder={{ .folder }} repo={{ .repo }} branch={{ .branch }}"'
+  # Clone just the repository's .git folder
+  - git clone --no-checkout --depth 1 --branch {{ .branch }} {{ .repo }} /git-repo.tmp
+  # Move the .git folder to the directory with the files.
+  - mv /git-repo.tmp/.git {{ .folder }}/
+  # Delete the temporary directory
+  - rmdir /git-repo.tmp
+  - cd {{ .folder }}
+    # git thinks all files are deleted, this reverts the state of the repo to HEAD.
+    # WARNING: any local changes to the files will be lost.
+  - git reset --hard HEAD
+  - git config --global url."https://github.com/".insteadOf git://github.com/
+  - git config --global user.email "builder@deckhouse.io"
+  - git config --global user.name "deckhouse"
+  - git config --global advice.detachedHead false
+  # cleanup all submodules directories, checked out by werf
+  # script from https://stackoverflow.com/a/53899440
+  - |
+    SUBMODULES_BRANCHES=()
+    # .submodules is a string like "submodule1-name=submodule1-branch submodule2-name="
+    # If branch is not set then using branch from .git-submodules file
+    {{- range $submod := $.submodules | default "" | splitList " " }}
+    SUBMODULES_BRANCHES+=( {{ $submod }} )
+    {{- end }}
+
+    echo "Processing submodules: ${SUBMODULES_BRANCHES[@]}"
+    git -C "{{ .folder }}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' |
+        while read -r KEY MODULE_PATH
+        do
+            # If the module's path exists, remove it.
+            # This is done b/c the module's path is currently
+            # not a valid git repo and adding the submodule will cause an error.
+            [ -d "${MODULE_PATH}" ] && rm -rf "${MODULE_PATH}"
+
+            NAME="$(echo "${KEY}" | sed 's/^submodule\.\(.*\)\.path$/\1/')"
+
+            url_key="$(echo "${KEY}" | sed 's/\.path$/.url/')"
+            branch_key="$(echo "${KEY}" | sed 's/\.path$/.branch/')"
+
+            URL="$(git config -f .gitmodules --get "${url_key}")"
+            BRANCH="$(git config -f .gitmodules --get "${branch_key}" || echo "master")"
+
+            git -C "{{ .folder }}" submodule add --force -b "${BRANCH}" --name "${NAME}" -- "${URL}" "${MODULE_PATH}"
+
+            for submod in "${SUBMODULES_BRANCHES[@]}"; do
+              submod_name=${submod%=*}
+              submod_branch=${submod#*=}
+
+              if [ -n "${submod_branch}" -a "${NAME}"=="${submod_name}" ]; then
+                echo "Checkout branch/commit '${submod_branch}' for submodule '${NAME}'"
+                git -C "{{ .folder }}" submodule set-branch --branch ${submod_branch} -- ${MODULE_PATH}
+                git -C "{{ .folder }}/${MODULE_PATH}" checkout -f ${submod_branch}
+              fi
+            done
+        done
+    # DO NOT do submodule update, or it revert all changes for submodule's branches back :-(
+    # git -C "{{ .folder }}" submodule update --init --recursive
+
+    if ! tmp=$(git diff --name-status HEAD 2>&1) || test -n "$tmp" ; then
+      echo "Auto-commit changes in .gitmodules"
+      git -C "{{ .folder }}" commit -am "Auto-commit changes in .gitmodules"
+    fi
+{{ end }}
+
+{{- /*
+  utils:build-deb-pkg builds a Debian/Ubuntu .deb package from current folder
+  Requirements: build-essential, debhelper and other build tools should be already installed in build container
+  Parameters (* for required):
+    * .name       - Name of deb package
+    * .version    - Desired version of deb package
+      .gen_path   - Path to files generated with 'make debrelease'. If not specified, then use current directory
+
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "name" "linstor-server" }}
+  {{- $_ := set $ctx "version" $linstor_version }}
+  {{- include "utils:build-deb-pkg" $ctx | nindent 2 }}
+*/}}
+{{ define "utils:build-deb-pkg" }}
+  - 'echo ">>> utils:build-deb-pkg <<< name={{ .name }} version={{ .version }} pwd=$(pwd)"'
+  - make debrelease VERSION={{ .version }}
+  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz ../{{ .name }}_$(echo {{ .version }} | tr '-' '~').orig.tar.gz
+  - tar -C / -xvf ../{{ .name }}_$(echo {{ .version }} | tr '-' '~').orig.tar.gz
+  - cd /{{ .name }}-{{ .version }}
+  - dpkg-buildpackage -us -uc
+{{ end }}
+
+{{- /*
+  utils:build-rpm-pkg builds a ALT Linux .rpm package from current folder
+  Requirements: build-essential, sudo, hasher and other build tools should be already installed in build container
+  Note: You must execute 'utils:prepare-rpm-build' before try to build RPM with this one macros!
+  Parameters (* for required):
+    * .name          - Name of RPM package
+    * .version       - Desired version of RPM package
+    * .spec          - Path to RPM's .spec file
+      .gen_path      - Path to files generated with 'make debrelease'. If not specified, then use current directory
+      .tarball_cmd   - Command to make tarball (Default: 'make release')
+      .rpmbuild_args - Additional arguments for rpmbuild command (like "--define \\'some_macro some_value\\'")
+      .arch          - To which CPU arch .rpm package will be builded (Default: noarch)
+      .no_debug_pkg  - if 'true' (default) then remove debug symbols and packages from results
+
+  Example:
+  {{- $ctx := dict }}
+  {{- $_ := set $ctx "name" "linstor-server" }}
+  {{- $_ := set $ctx "version" $linstor_version }}
+  {{- $_ := set $ctx "spec" "./linstor.spec" }}
+  {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+*/}}
+
+{{ define "utils:build-rpm-pkg" }}
+  - 'echo ">>> utils:build-rpm-pkg <<< name={{ .name }} version={{ .version }} spec_file={{ .spec }} pwd=$(pwd)"'
+  - |
+    if ! id "rpmbuilder" >/dev/null 2>&1; then
+      echo 'User "rpmbuilder" not found! You must execute "utils:prepare-rpm-build" first'
+      exit 5
+    fi
+  - |
+    TARBALL_CMD="make release"
+    if [ "{{ .tarball_cmd | default "" }}" != "" ]; then
+      TARBALL_CMD="{{ .tarball_cmd }}"
+      echo "Set TARBALL_CMD to '${TARBALL_CMD}'"
+    fi
+  - |
+    RPMBUILD_ARGS=()
+    if [ "{{ .rpmbuild_args | default "" }}" != "" ]; then
+      IFS=' ' read -a RPMBUILD_ARGS <<< "{{ .rpmbuild_args }}"
+      echo "Set RPMBUILD_ARGS to '${RPMBUILD_ARGS[@]}'"
+    fi
+  - |
+    ARCH="noarch"
+    if [ "{{ .arch | default "" }}" != "" ]; then
+      ARCH="{{ .arch }}"
+      echo "Set ARCH to '${ARCH}'"
+    fi
+  - |
+    NO_DEBUG_PKG="true"
+    if [ "{{ .no_debug_pkg | default "true" }}" == "false" ]; then
+      NO_DEBUG_PKG="false"
+      echo "Set NO_DEBUG_PKG to '${NO_DEBUG_PKG}'"
+    fi
+  - |
+    if [ "${NO_DEBUG_PKG}" == "true" ]; then
+      # add special arguments to rpmbuild
+      # https://stackoverflow.com/a/66681875
+      RPMBUILD_ARGS+=( "--define 'debug_package %{nil}'" )
+    fi
+
+  - chown -R rpmbuilder:rpmbuilder .
+  # we need tarball first
+  - sudo -u rpmbuilder ${TARBALL_CMD} KEEPNAME=1 VERSION={{ .version }}
+  - mv {{ printf "%s/" (.gen_path | default ".") }}{{ .name }}-{{ .version }}.tar.gz /home/rpmbuilder/RPM/SOURCES/
+  - mv {{ .spec }} /home/rpmbuilder/RPM/SPECS
+  - cd /home/rpmbuilder/RPM/SPECS
+  - SPEC_FILE=$(basename "{{ .spec }}")
+  - |
+    if [ "{{ .spec_patch | default "" }}" != "" ]; then
+      echo "Patching spec file with '{{ .spec_patch }}'"
+      {{ .spec_patch | default "" }}
+    fi
+
+  # TODO: instead of rpmbuild try use hasher (https://www.altlinux.org/Hasher)?
+  - RPM_CMD="rpmbuild -v -ba --clean ${RPMBUILD_ARGS[@]} $SPEC_FILE"
+  - 'echo "Building RPM: sudo -H -u rpmbuilder -- sh -c ${RPM_CMD}"'
+  - sudo -H -u rpmbuilder -- sh -c "${RPM_CMD}"
+  - mv /home/rpmbuilder/RPM/RPMS/${ARCH}/*.rpm /
+  - |
+    if [ "${NO_DEBUG_PKG}" == "true" ]; then
+      echo "Remove all debuginfo packages because NO_DEBUG_PKG is 'true'"
+      rm -f /*-debuginfo-*.rpm
+    fi
+{{ end }}
+
+{{- /*
+  utils:prepare-rpm-build prepares build environment for building RPM packages
+  Requirements: build-essential, hasher and other build tools should be already installed in build container
+  Parameters (* for required):
+    None
+
+  Example:
+  {{- $ctx := dict }}
+  {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+*/}}
+{{ define "utils:prepare-rpm-build" }}
+  - 'echo ">>> utils:prepare-rpm-build <<< name={{ .name }} version={{ .version }} pwd=$(pwd)"'
+  - groupadd -f -g 744 rpmbuilder && useradd -m -g rpmbuilder -u 744 rpmbuilder
+  - sed -i "s/# root ALL=(ALL:ALL) ALL/root ALL=(ALL:ALL) ALL/" /etc/sudoers
+  - echo 'Defaults env_keep += "SPEC_FILE"' >> /etc/sudoers
+  - mkdir -p /home/rpmbuilder/RPM/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
+  - chown -R 744:744 /home/rpmbuilder
+{{ end }}

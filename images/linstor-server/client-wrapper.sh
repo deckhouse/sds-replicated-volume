@@ -69,7 +69,7 @@ while [[ $checkKeys == true ]]; do
     allowDangerousCommands=true
     shift
   fi
-  if [[ $(echo "${valid_keys[@]}" | fgrep -w -- $1) ]]; then
+  if [[ $(echo "${valid_keys[@]}" | grep -F -w -- $1) ]]; then
     shift
   else
     checkKeys=false
@@ -82,21 +82,21 @@ done
  fi
 
 # Allow dangerous commands (delete/create)
-if [[ $(echo "${valid_subcommands_create_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
+if [[ $(echo "${valid_subcommands_create_delete[@]}" | grep -F -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
   if [[ "$2" == "create" || "$2" == "delete" ]]; then
     allowed=true
   fi
 fi
 
 # Allow dangerous commands (delete)
-if [[ $(echo "${valid_subcommands_delete[@]}" | fgrep -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
+if [[ $(echo "${valid_subcommands_delete[@]}" | grep -F -w -- $1) ]] && [[ $allowDangerousCommands == true ]]; then
   if [[ "$2" == "delete" ]]; then
     allowed=true
   fi
 fi
 
 # check for allowed linstor ... l and linstor ... list commands
-if [[ $(echo "${valid_subcommands_list[@]}" | fgrep -w -- $1) ]]; then
+if [[ $(echo "${valid_subcommands_list[@]}" | grep -F -w -- $1) ]]; then
   if [[ "$2" == "wait-sync" ]]; then
     allowed=true
   fi
@@ -128,21 +128,21 @@ fi
 
 
 # check for allowed linstor ... v and linstor ... version commands
-if [[ $(echo "${valid_subcommands_ver[@]}" | fgrep -w -- $1) ]]; then
+if [[ $(echo "${valid_subcommands_ver[@]}" | grep -F -w -- $1) ]]; then
   if [[ "$2" == "v" || "$2" == "version" ]]; then
     allowed=true
   fi
 fi
 
 # check for allowed linstor ... lv commands
-if [[ $(echo "${valid_subcommands_lv[@]}" | fgrep -w -- $1) ]]; then
+if [[ $(echo "${valid_subcommands_lv[@]}" | grep -F -w -- $1) ]]; then
   if [[ "$2" == "lv" ]]; then
     allowed=true
   fi
 fi
 
 # check for allowed linstor advise commands
-if [[ $(echo "${valid_subcommands_advise[@]}" | fgrep -w -- $1) ]]; then
+if [[ $(echo "${valid_subcommands_advise[@]}" | grep -F -w -- $1) ]]; then
   if [[ "$2" == "r" || "$2" == "resource" || "$2" == "m" || "$2" == "maintenance" ]]; then
     allowed=true
   fi

@@ -7,8 +7,7 @@ git:
   - add: /
     to: /
     includePaths:
-      - api
-      - images/webhooks/src
+      - images/{{ $.ImageName }}/src
     stageDependencies:
       setup:
         - "**/*"
@@ -17,19 +16,21 @@ mount:
     to: /go/pkg
 shell:
   setup:
-    - cd /images/webhooks/src
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o webhooks
-    - mv webhooks /webhooks
-    - chmod +x /webhooks
+    - cd /images/{{ $.ImageName }}/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /webhooks
-    to: /webhooks
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
-
 docker:
-  ENTRYPOINT: ["/webhooks"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all

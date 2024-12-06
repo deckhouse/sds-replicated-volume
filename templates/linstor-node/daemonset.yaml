@@ -85,9 +85,12 @@ spec:
       affinity: {}
       initContainers:
         - command:
-            - /bin/bash
-            - -c
-            - exec /entry.sh
+            - /linstor-drbd-wait
+          env:
+            - name: FILE_CONTENT
+              value: "version: 9.2"
+            - name: WAITING_MSG
+              value: "Waiting for DRBD version 9.2.x on host"
           image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
           imagePullPolicy: IfNotPresent
           name: wait-drbd-ver-9-2

@@ -1,9 +1,6 @@
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
-
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALPINE_DEV }}
 final: false
 
 git:
@@ -20,10 +17,10 @@ shell:
     - mv tools/* /
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
-  - artifact: {{ $.ImageName }}-artifact
+  - image: {{ $.ImageName }}-artifact
     add: /
     to: /
     includePaths:
