@@ -47,6 +47,29 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	return config, nil
 }
 
+func runController(cfg config.Options, log *logger.Logger) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// add logger to root context to make it available everywhere, where root context is used
+	ctx = logger.WithLogger(ctx, log)
+
+	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
+	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
+
+	if cfg.DiscoveryMode {
+		log.Info("Starting up in discovery mode...")
+		err := discoverer.DiscoveryLoop(ctx, *cfg, mgr)
+		if err != nil {
+			log.Error(err, "failed to discovery node")
+			cancel()
+			// disable exitAfterDefer: os.Exit will exit, and `defer cancel()` will not run
+			// because we explicitly call cancel() before exiting with error code
+			os.Exit(2) //nolint:gocritic
+		}
+	}
+
+}
+
 func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
@@ -59,9 +82,6 @@ func main() {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
 		os.Exit(1)
 	}
-
-	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
-	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
 	// Create default config Kubernetes client
 	kConfig, err := KubernetesDefaultConfigCreate()
@@ -76,8 +96,6 @@ func main() {
 	managerOpts := manager.Options{
 		Cache:          cacheOpt,
 		LeaderElection: false,
-		// LeaderElectionNamespace: cfgParams.ControllerNamespace,
-		// LeaderElectionID:        config.ControllerName,
 	}
 
 	mgr, err := manager.New(kConfig, managerOpts)
@@ -89,11 +107,6 @@ func main() {
 
 	controllerruntime.SetLogger(log.GetLogger())
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// add logger to root context to make it available everywhere, where root context is used
-	ctx = logger.WithLogger(ctx, log)
-
 	// listen for interrupts or the Linux SIGTERM signal and cancel
 	// our context, which the leader election code will observe and
 	// step down
@@ -104,16 +117,4 @@ func main() {
 		log.Info("Received termination, signaling shutdown")
 		cancel()
 	}()
-
-	if cfg.DiscoveryMode {
-		log.Info("Starting up in discovery mode...")
-		err := discoverer.DiscoveryLoop(ctx, *cfg, mgr)
-		if err != nil {
-			log.Error(err, "failed to discovery node")
-			cancel()
-			// disable exitAfterDefer: os.Exit will exit, and `defer cancel()` will not run
-			// because we explicitly call cancel() before exiting with error code
-			os.Exit(2) //nolint:gocritic
-		}
-	}
 }

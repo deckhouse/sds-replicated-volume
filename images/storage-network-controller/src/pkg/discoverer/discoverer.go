@@ -196,3 +196,19 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 
 	return nil
 }
+// Aleksandr Stefurishin
+// 16:19
+// `runtime.Goexit`
+// Konstantin Neumoin
+// 16:25
+// ctx := ctrl.SetupSignalHandler()
+// log.Info("Starting manager")
+// 	if err := mgr.Start(ctx); err != nil {
+// 		log.Error(err, "Manager exited with error")
+// 		os.Exit(1)
+// 	}
+// 	log.Info("App shutting down")
+// 	ctrl "sigs.k8s.io/controller-runtime"
+// Aleksandr Stefurishin
+// 16:27
+// https://github.com/kubernetes-sigs/controller-runtime/blob/v0.19.3/pkg/manager/signals/signal.go#L30
