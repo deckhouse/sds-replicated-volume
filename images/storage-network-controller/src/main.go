@@ -47,7 +47,7 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	return config, nil
 }
 
-func runController(cfg config.Options, log *logger.Logger) error {
+func runController(cfg *config.Options, log *logger.Logger) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	// add logger to root context to make it available everywhere, where root context is used
@@ -56,38 +56,11 @@ func runController(cfg config.Options, log *logger.Logger) error {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
-	if cfg.DiscoveryMode {
-		log.Info("Starting up in discovery mode...")
-		err := discoverer.DiscoveryLoop(ctx, *cfg, mgr)
-		if err != nil {
-			log.Error(err, "failed to discovery node")
-			cancel()
-			// disable exitAfterDefer: os.Exit will exit, and `defer cancel()` will not run
-			// because we explicitly call cancel() before exiting with error code
-			os.Exit(2) //nolint:gocritic
-		}
-	}
-
-}
-
-func main() {
-	cfg, err := config.NewConfig()
-	if err != nil {
-		fmt.Println("unable to create NewConfig " + err.Error())
-		os.Exit(1)
-	}
-
-	log, err := logger.NewLogger(cfg.Loglevel)
-	if err != nil {
-		fmt.Printf("unable to create NewLogger, err: %v\n", err)
-		os.Exit(1)
-	}
-
 	// Create default config Kubernetes client
 	kConfig, err := KubernetesDefaultConfigCreate()
 	if err != nil {
-		log.Error(err, "error by reading a kubernetes configuration")
-		os.Exit(1)
+		log.Error(err, "error reading a kubernetes configuration")
+		return err
 	}
 	log.Info("read Kubernetes config")
 
@@ -101,7 +74,7 @@ func main() {
 	mgr, err := manager.New(kConfig, managerOpts)
 	if err != nil {
 		log.Error(err, "failed to create a manager")
-		os.Exit(1)
+		return err
 	}
 	log.Info("created kubernetes manager in namespace: " + cfg.ControllerNamespace)
 
@@ -117,4 +90,36 @@ func main() {
 		log.Info("Received termination, signaling shutdown")
 		cancel()
 	}()
+
+	if cfg.DiscoveryMode {
+		log.Info("Starting up in discovery mode...")
+		err := discoverer.DiscoveryLoop(ctx, cfg, mgr)
+		if err != nil {
+			log.Error(err, "failed to discovery node")
+			// cancel root context
+			cancel()
+			return err
+		}
+	}
+
+	return nil
+}
+
+func main() {
+	cfg, err := config.NewConfig()
+	if err != nil {
+		fmt.Println("unable to create NewConfig " + err.Error())
+		os.Exit(1)
+	}
+
+	log, err := logger.NewLogger(cfg.Loglevel)
+	if err != nil {
+		fmt.Printf("unable to create NewLogger, err: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := runController(cfg, log); err != nil {
+		log.Error(err, "failed to run controller: %s", err.Error())
+		os.Exit(2)
+	}
 }

@@ -45,7 +45,7 @@ const (
 
 var DiscoveryCache *cache.TTLCache[string, string]
 
-func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager) error {
+func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager) error {
 	// just syntactic sugar for logger
 	log := logger.FromContext(ctx)
 
@@ -62,18 +62,12 @@ func DiscoveryLoop(ctx context.Context, cfg config.Options, mgr manager.Manager)
 
 	cl := mgr.GetClient()
 
-	if err = cache.CreateSharedInformerCache(ctx, mgr); err != nil {
-		log.Error(err, "failed to setup shared informer cache")
-		return err
-	}
-	log.Info("Shared informer cache has been intialized")
-
 	// create a new DiscoveryCache with TTL (item expiring) capabilities
 	DiscoveryCache = cache.NewTTL[string, string](ctx)
 
 	// discoverer loop
 	for {
-		if err := discovery(ctx, myNodeName, storageNetworks, &cl, cfg); err != nil {
+		if err := discovery(ctx, myNodeName, storageNetworks, &cl, *cfg); err != nil {
 			log.Error(err, "Discovery error occurred")
 			return err
 		}
@@ -142,13 +136,7 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 
 			// check node status only if no IP in cache
 			if _, found := DiscoveryCache.Get(ip); !found {
-				node, err := cache.Instance().GetNode(nodeName)
-				if err != nil {
-					log.Error(err, "cannot get my node info for now. Waiting for next reconciliation")
-					return nil
-				}
-
-				err = updateNodeStatusIfNeeded(ctx, node, ip, *cl)
+				err := updateNodeStatusIfNeeded(ctx, nodeName, ip, *cl)
 				if err != nil {
 					log.Error(err, "cannot update node status field for now. Waiting for next reconciliation")
 					return nil
@@ -161,8 +149,18 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 	return nil
 }
 
-func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl client.Client) error {
+func updateNodeStatusIfNeeded(ctx context.Context, nodeName string, ip string, cl client.Client) error {
 	log := logger.FromContext(ctx)
+
+	node := &v1.Node{}
+	err := cl.Get(ctx, client.ObjectKey{
+		Name: nodeName,
+	}, node)
+
+	if err != nil {
+		log.Error(err, "cannot get my node info for now. Waiting for next reconciliation")
+		return nil
+	}
 
 	addresses := node.Status.Addresses
 
@@ -187,7 +185,7 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 	log.Info(fmt.Sprintf("[updateNodeStatusIfNeeded] update node '%s' and set %s=%s", node.Name, RVStorageIPType, ip))
 
 	node.Status.Addresses = addresses
-	err := cl.Status().Update(ctx, node)
+	err = cl.Status().Update(ctx, node)
 
 	if err != nil {
 		log.Error(err, "cannot update node status addresses")
@@ -196,19 +194,3 @@ func updateNodeStatusIfNeeded(ctx context.Context, node *v1.Node, ip string, cl 
 
 	return nil
 }
-// Aleksandr Stefurishin
-// 16:19
-// `runtime.Goexit`
-// Konstantin Neumoin
-// 16:25
-// ctx := ctrl.SetupSignalHandler()
-// log.Info("Starting manager")
-// 	if err := mgr.Start(ctx); err != nil {
-// 		log.Error(err, "Manager exited with error")
-// 		os.Exit(1)
-// 	}
-// 	log.Info("App shutting down")
-// 	ctrl "sigs.k8s.io/controller-runtime"
-// Aleksandr Stefurishin
-// 16:27
-// https://github.com/kubernetes-sigs/controller-runtime/blob/v0.19.3/pkg/manager/signals/signal.go#L30
