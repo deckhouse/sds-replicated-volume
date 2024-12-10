@@ -44,6 +44,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
+	kcl "sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
@@ -66,6 +67,7 @@ type Driver struct {
 	srv           *grpc.Server
 	log           *logrus.Entry
 	version       string
+	cl            kcl.Client
 	// name distingushes the driver from other drivers and is used to mark
 	// volumes so that volumes provisioned by another driver are not interfered with.
 	name string
@@ -253,6 +255,15 @@ func ConfigureKubernetesIfAvailable() func(*Driver) error {
 		d.kubeClient, err = dynamic.NewForConfig(cfg)
 
 		return err
+	}
+}
+
+// Kubeclient configures the driver with a provided Kubernetes client
+// TODO: подумать над названием
+func Kubeclient(cl kcl.Client) func(*Driver) error {
+	return func(d *Driver) error {
+		d.cl = cl
+		return nil
 	}
 }
 
@@ -488,7 +499,9 @@ func (d Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*cs
 // CreateVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#createvolume
 func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	d.log.Info("~~~creating volume with modified linstor-csi~~~")
-
+	d.log.Infof("req: %+v\n", req)
+	d.log.Infof("req params: %+v\n", req.GetParameters())
+	
 	if req.GetName() == "" {
 		return nil, missingAttr("CreateVolume", req.GetName(), "Name")
 	}
@@ -595,6 +608,84 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			},
 		}, nil
 	}
+
+	// _ = srv.DRBDCluster{
+	// 	TypeMeta: metav1.TypeMeta{
+	// 		Kind:       "DRBDCluster",
+	// 		APIVersion: "v1alpha1",
+	// 	},
+	// 	ObjectMeta: metav1.ObjectMeta{
+	// 		Name: "example-drbd-cluster",
+	// 	},
+	// 	Spec: srv.DRBDClusterSpec{
+	// 		Replicas:        3,
+	// 		QuorumPolicy:    "Majority",
+	// 		NetworkPoolName: "default-network-pool",
+	// 		SharedSecret:    "secure-secret",
+	// 		Size:            int64(volumeSize.InclusiveBytes()),
+	// 		DrbdCurrentGi:   "10Gi",
+	// 		Port:            7789,
+	// 		Minor:           1,
+	// 		AttachmentRequested: []string{
+	// 			"attachment1",
+	// 			"attachment2",
+	// 		},
+	// 		TopologySpreadConstraints: []srv.TopologySpreadConstraint{
+	// 			{
+	// 				MaxSkew:           1,
+	// 				TopologyKey:       "zone",
+	// 				WhenUnsatisfiable: "DoNotSchedule",
+	// 			},
+	// 		},
+	// 		Affinity: srv.Affinity{
+	// 			NodeAffinity: srv.NodeAffinity{
+	// 				RequiredDuringSchedulingIgnoredDuringExecution: srv.NodeSelector{
+	// 					NodeSelectorTerms: []srv.NodeSelectorTerm{
+	// 						{
+	// 							MatchExpressions: []srv.SelectorRequirement{
+	// 								{
+	// 									Key:      "kubernetes.io/e2e-az-name",
+	// 									Operator: "In",
+	// 									Values:   []string{"e2e-az1", "e2e-az2"},
+	// 								},
+	// 							},
+	// 						},
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 		AutoDiskful: srv.AutoDiskful{
+	// 			DelaySeconds: 30,
+	// 		},
+	// 		AutoRecovery: srv.AutoRecovery{
+	// 			DelaySeconds: 60,
+	// 		},
+	// 		StoragePoolSelector: []srv.LabelSelector{
+	// 			{
+	// 				MatchExpressions: []srv.SelectorRequirement{
+	// 					{
+	// 						Key:      "storage-type",
+	// 						Operator: "In",
+	// 						Values:   []string{"ssd", "hdd"},
+	// 					},
+	// 				},
+	// 			},
+	// 		},
+	// 	},
+	// 	Status: srv.DRBDClusterStatus{
+	// 		Size: 1024,
+	// 		AttachmentCompleted: []string{
+	// 			"attachment1",
+	// 		},
+	// 		Conditions: []metav1.Condition{
+	// 			{
+	// 				Type:   "Ready",
+	// 				Status: "True",
+	// 				Reason: "ClusterIsReady",
+	// 			},
+	// 		},
+	// 	},
+	// }
 
 	return d.createNewVolume(
 		ctx,
