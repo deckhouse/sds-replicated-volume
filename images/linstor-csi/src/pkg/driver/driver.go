@@ -416,7 +416,7 @@ func (d Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishV
 	if req.GetTargetPath() == "" {
 		return nil, missingAttr("NodeUnpublishVolume", req.GetVolumeId(), "TargetPath")
 	}
-
+	
 	err := d.Mounter.Unmount(req.GetTargetPath())
 	if err != nil {
 		return nil, err
@@ -575,7 +575,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}
 
 		log.Info("existing volume matches request")
-
+		
 		log.Debug("check if source snapshot exists")
 
 		snapId := d.Snapshots.CompatibleSnapshotId(snapshotForVolumeName(req.GetName()))
@@ -656,7 +656,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 										Values:   []string{"e2e-az1", "e2e-az2"},
 									},
 								},
-							},
+							},ControllerPublishVolume
 						},
 					},
 				},

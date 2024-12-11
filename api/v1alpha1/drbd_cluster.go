@@ -32,13 +32,14 @@ type DRBDClusterSpec struct {
 	Minor                     int                        `json:"minor"`
 	AttachmentRequested       []string                   `json:"attachmentRequested"`
 	TopologySpreadConstraints []TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
-	Affinity                  Affinity                  `json:"affinity,omitempty"`
-	AutoDiskful               AutoDiskful               `json:"autoDiskful,omitempty"`
-	AutoRecovery              AutoRecovery              `json:"autoRecovery,omitempty"`
+	Affinity                  Affinity                   `json:"affinity,omitempty"`
+	AutoDiskful               AutoDiskful                `json:"autoDiskful,omitempty"`
+	AutoRecovery              AutoRecovery               `json:"autoRecovery,omitempty"`
 	StoragePoolSelector       []LabelSelector            `json:"storagePoolSelector,omitempty"`
 }
 
 // TopologySpreadConstraint specifies topology constraints
+// +k8s:deepcopy-gen=true
 type TopologySpreadConstraint struct {
 	MaxSkew           int    `json:"maxSkew"`
 	TopologyKey       string `json:"topologyKey"`
@@ -46,26 +47,32 @@ type TopologySpreadConstraint struct {
 }
 
 // Affinity defines node affinity scheduling rules
+// +k8s:deepcopy-gen=true
+
 type Affinity struct {
 	NodeAffinity NodeAffinity `json:"nodeAffinity,omitempty"`
 }
 
 // NodeAffinity specifies node selection criteria
+// +k8s:deepcopy-gen=true
 type NodeAffinity struct {
 	RequiredDuringSchedulingIgnoredDuringExecution NodeSelector `json:"requiredDuringSchedulingIgnoredDuringExecution,omitempty"`
 }
 
 // NodeSelector represents constraints to match nodes
+// +k8s:deepcopy-gen=true
 type NodeSelector struct {
 	NodeSelectorTerms []NodeSelectorTerm `json:"nodeSelectorTerms"`
 }
 
 // NodeSelectorTerm defines node selection conditions
+// +k8s:deepcopy-gen=true
 type NodeSelectorTerm struct {
 	MatchExpressions []SelectorRequirement `json:"matchExpressions"`
 }
 
 // SelectorRequirement defines a key-value match condition
+// +k8s:deepcopy-gen=true
 type SelectorRequirement struct {
 	Key      string   `json:"key"`
 	Operator string   `json:"operator"`
@@ -73,30 +80,33 @@ type SelectorRequirement struct {
 }
 
 // AutoDiskful represents auto-diskful settings
+// +k8s:deepcopy-gen=true
 type AutoDiskful struct {
 	DelaySeconds int `json:"delaySeconds"`
 }
 
 // AutoRecovery represents auto-recovery settings
+// +k8s:deepcopy-gen=true
 type AutoRecovery struct {
 	DelaySeconds int `json:"delaySeconds"`
 }
 
 // LabelSelector defines match expressions for selecting resources
+// +k8s:deepcopy-gen=true
 type LabelSelector struct {
 	MatchExpressions []SelectorRequirement `json:"matchExpressions"`
 }
 
 // DRBDClusterStatus defines the observed state of DRBDCluster
+// +k8s:deepcopy-gen=true
 type DRBDClusterStatus struct {
 	Size                int64              `json:"size"`
 	AttachmentCompleted []string           `json:"attachmentCompleted"`
 	Conditions          []metav1.Condition `json:"conditions"`
 }
 
-// +kubebuilder:object:root=true
-// +kubebuilder:subresource:status
-
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // DRBDCluster is the Schema for the drbdclusters API
 type DRBDCluster struct {
 	metav1.TypeMeta   `json:",inline"`
