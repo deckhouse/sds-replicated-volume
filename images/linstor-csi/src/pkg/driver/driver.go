@@ -34,6 +34,7 @@ import (
 
 	lc "github.com/LINBIT/golinstor"
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -53,6 +54,12 @@ import (
 
 // Version is set via ldflags configued in the Makefile.
 var Version = "UNKNOWN"
+
+const (
+	ParameterCsiPvcName      = "csi.storage.k8s.io/pvc/name"
+	ParameterCsiPvcNamespace = "csi.storage.k8s.io/pvc/namespace"
+	ParameterStoragePoolName = "replicated.csi.storage.deckhouse.io/storagePool"
+)
 
 // Driver fullfils CSI controller, node, and indentity server interfaces.
 type Driver struct {
@@ -501,7 +508,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	d.log.Info("~~~creating volume with modified linstor-csi~~~")
 	d.log.Infof("req: %+v\n", req)
 	d.log.Infof("req params: %+v\n", req.GetParameters())
-	
+
 	if req.GetName() == "" {
 		return nil, missingAttr("CreateVolume", req.GetName(), "Name")
 	}
@@ -609,83 +616,89 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	// _ = srv.DRBDCluster{
-	// 	TypeMeta: metav1.TypeMeta{
-	// 		Kind:       "DRBDCluster",
-	// 		APIVersion: "v1alpha1",
-	// 	},
-	// 	ObjectMeta: metav1.ObjectMeta{
-	// 		Name: "example-drbd-cluster",
-	// 	},
-	// 	Spec: srv.DRBDClusterSpec{
-	// 		Replicas:        3,
-	// 		QuorumPolicy:    "Majority",
-	// 		NetworkPoolName: "default-network-pool",
-	// 		SharedSecret:    "secure-secret",
-	// 		Size:            int64(volumeSize.InclusiveBytes()),
-	// 		DrbdCurrentGi:   "10Gi",
-	// 		Port:            7789,
-	// 		Minor:           1,
-	// 		AttachmentRequested: []string{
-	// 			"attachment1",
-	// 			"attachment2",
-	// 		},
-	// 		TopologySpreadConstraints: []srv.TopologySpreadConstraint{
-	// 			{
-	// 				MaxSkew:           1,
-	// 				TopologyKey:       "zone",
-	// 				WhenUnsatisfiable: "DoNotSchedule",
-	// 			},
-	// 		},
-	// 		Affinity: srv.Affinity{
-	// 			NodeAffinity: srv.NodeAffinity{
-	// 				RequiredDuringSchedulingIgnoredDuringExecution: srv.NodeSelector{
-	// 					NodeSelectorTerms: []srv.NodeSelectorTerm{
-	// 						{
-	// 							MatchExpressions: []srv.SelectorRequirement{
-	// 								{
-	// 									Key:      "kubernetes.io/e2e-az-name",
-	// 									Operator: "In",
-	// 									Values:   []string{"e2e-az1", "e2e-az2"},
-	// 								},
-	// 							},
-	// 						},
-	// 					},
-	// 				},
-	// 			},
-	// 		},
-	// 		AutoDiskful: srv.AutoDiskful{
-	// 			DelaySeconds: 30,
-	// 		},
-	// 		AutoRecovery: srv.AutoRecovery{
-	// 			DelaySeconds: 60,
-	// 		},
-	// 		StoragePoolSelector: []srv.LabelSelector{
-	// 			{
-	// 				MatchExpressions: []srv.SelectorRequirement{
-	// 					{
-	// 						Key:      "storage-type",
-	// 						Operator: "In",
-	// 						Values:   []string{"ssd", "hdd"},
-	// 					},
-	// 				},
-	// 			},
-	// 		},
-	// 	},
-	// 	Status: srv.DRBDClusterStatus{
-	// 		Size: 1024,
-	// 		AttachmentCompleted: []string{
-	// 			"attachment1",
-	// 		},
-	// 		Conditions: []metav1.Condition{
-	// 			{
-	// 				Type:   "Ready",
-	// 				Status: "True",
-	// 				Reason: "ClusterIsReady",
-	// 			},
-	// 		},
-	// 	},
-	// }
+	drbdcluster := srv.DRBDCluster{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "DRBDCluster",
+			APIVersion: "v1alpha1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "example-drbd-cluster",
+		},
+		Spec: srv.DRBDClusterSpec{
+			Replicas:        3,
+			QuorumPolicy:    "Majority",
+			NetworkPoolName: "default-network-pool",
+			SharedSecret:    "secure-secret",
+			Size:            int64(volumeSize.InclusiveBytes()),
+			DrbdCurrentGi:   "10Gi",
+			Port:            7789,
+			Minor:           1,
+			AttachmentRequested: []string{
+				"attachment1",
+				"attachment2",
+			},
+			TopologySpreadConstraints: []srv.TopologySpreadConstraint{
+				{
+					MaxSkew:           1,
+					TopologyKey:       "zone",
+					WhenUnsatisfiable: "DoNotSchedule",
+				},
+			},
+			Affinity: srv.Affinity{
+				NodeAffinity: srv.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: srv.NodeSelector{
+						NodeSelectorTerms: []srv.NodeSelectorTerm{
+							{
+								MatchExpressions: []srv.SelectorRequirement{
+									{
+										Key:      "kubernetes.io/e2e-az-name",
+										Operator: "In",
+										Values:   []string{"e2e-az1", "e2e-az2"},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			AutoDiskful: srv.AutoDiskful{
+				DelaySeconds: 30,
+			},
+			AutoRecovery: srv.AutoRecovery{
+				DelaySeconds: 60,
+			},
+			StoragePoolSelector: []srv.LabelSelector{
+				{
+					MatchExpressions: []srv.SelectorRequirement{
+						{
+							Key:      ParameterStoragePoolName,
+							Operator: "In",
+							Values:   []string{req.GetParameters()[ParameterStoragePoolName]},
+						},
+					},
+				},
+			},
+		},
+		Status: srv.DRBDClusterStatus{
+			Size: 1024,
+			AttachmentCompleted: []string{
+				"attachment1",
+			},
+			Conditions: []metav1.Condition{
+				{
+					Type:   "Ready",
+					Status: "True",
+					Reason: "ClusterIsReady",
+				},
+			},
+		},
+	}
+
+	d.log.Infof("Creating new cluster")
+	err = d.cl.Create(ctx, &drbdcluster)
+	if err != nil {
+		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
+	}
 
 	return d.createNewVolume(
 		ctx,
@@ -1605,8 +1618,3 @@ func fsTypeForCapabilities(caps []*csi.VolumeCapability) (string, error) {
 
 	return fsType, nil
 }
-
-const (
-	ParameterCsiPvcName      = "csi.storage.k8s.io/pvc/name"
-	ParameterCsiPvcNamespace = "csi.storage.k8s.io/pvc/namespace"
-)
