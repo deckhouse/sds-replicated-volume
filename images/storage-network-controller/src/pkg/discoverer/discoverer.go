@@ -67,9 +67,16 @@ func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager
 
 	// discoverer loop
 	for {
-		if err := discovery(ctx, myNodeName, storageNetworks, &cl, *cfg); err != nil {
-			log.Error(err, "Discovery error occurred")
-			return err
+		select {
+		case <-ctx.Done():
+			// do nothing in case of context canceling and just return from the loop
+			return nil
+
+		default:
+			if err := discovery(ctx, myNodeName, storageNetworks, &cl, *cfg); err != nil {
+				log.Error(err, "Discovery error occurred")
+				return err
+			}
 		}
 
 		time.Sleep(time.Duration(cfg.DiscoverySec) * time.Second)
@@ -91,60 +98,53 @@ func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
 }
 
 func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Prefix, cl *client.Client, cfg config.Options) error {
-	select {
-	case <-ctx.Done():
-		// do nothing in case of cancel
-		return nil
+	log := logger.FromContext(ctx)
 
-	default:
-		log := logger.FromContext(ctx)
+	log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s", storageNetworks))
 
-		log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s", storageNetworks))
-
-		addrs, err := net.InterfaceAddrs()
-		if err != nil {
-			log.Error(err, "Cannot get network interfaces")
-			return err
-		}
-
-		var foundedIP discoveredIPs
-
-		for _, address := range addrs {
-			// check the address type: it should be not a loopback and in a private range
-			if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.IsPrivate() {
-				if ipnet.IP.To4() != nil {
-					ipStr := ipnet.IP.String()
-
-					if utils.IPInCIDR(storageNetworks, ipStr, log) {
-						log.Debug(fmt.Sprintf("IP '%s' found in CIDR blocks", ipStr))
-						foundedIP = append(foundedIP, ipStr)
-					} else {
-						log.Trace(fmt.Sprintf("IP '%s' not founded in any CIDR blocks", ipStr))
-					}
-				}
-			}
-		}
-
-		if len(foundedIP) > 0 {
-			log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
-
-			// If there is 2 or more IPs founded we get only FIRST IP and warning about others
-			if len(foundedIP) > 1 {
-				log.Warning(fmt.Sprintf("Founded more than one storage IP: %s. Use first.", strings.Join(foundedIP, ", ")))
-			}
-			ip := foundedIP[0]
-
-			// check node status only if no IP in cache
-			if _, found := DiscoveryCache.Get(ip); !found {
-				err := updateNodeStatusIfNeeded(ctx, nodeName, ip, *cl)
-				if err != nil {
-					log.Error(err, "cannot update node status field for now. Waiting for next reconciliation")
-					return nil
-				}
-				DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
-			}
-		}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		log.Error(err, "Cannot get network interfaces")
+		return err
 	}
+
+	var foundedIP discoveredIPs
+
+	for _, address := range addrs {
+		// check the address type: it should be not a loopback and in a private range
+		if ipnet, ok := address.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.IsPrivate() {
+			if ipnet.IP.To4() != nil {
+				ipStr := ipnet.IP.String()
+
+				if utils.IPInCIDR(storageNetworks, ipStr, log) {
+					log.Debug(fmt.Sprintf("IP '%s' found in CIDR blocks", ipStr))
+					foundedIP = append(foundedIP, ipStr)
+				} else {
+					log.Trace(fmt.Sprintf("IP '%s' not founded in any CIDR blocks", ipStr))
+				}
+			}
+		}
+	} // for _, address := range addrs
+
+	if len(foundedIP) > 0 {
+		log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
+
+		// If there is 2 or more IPs founded we get only FIRST IP and warning about others
+		if len(foundedIP) > 1 {
+			log.Warning(fmt.Sprintf("Founded more than one storage IP: %s. Use first.", strings.Join(foundedIP, ", ")))
+		}
+		ip := foundedIP[0]
+
+		// check node status only if no IP in cache
+		if _, found := DiscoveryCache.Get(ip); !found {
+			err := updateNodeStatusIfNeeded(ctx, nodeName, ip, *cl)
+			if err != nil {
+				log.Error(err, "cannot update node status field for now. Waiting for next reconciliation")
+				return nil
+			}
+			DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
+		}
+	} // if len(foundedIP) > 0
 
 	return nil
 }

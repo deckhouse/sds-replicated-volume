@@ -44,7 +44,8 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	return config, nil
 }
 
-func runController(cfg *config.Options, log *logger.Logger) error {
+// have a separate function so we can return an exit code w/o skipping defers
+func runController(cfg *config.Options, log *logger.Logger) int {
 	// make context from controller-runtime with signals (SIGINT, SIGTERM) handling
 	ctx := ctrl.SetupSignalHandler()
 	// add logger to root context to make it available everywhere, where root context is used
@@ -57,7 +58,7 @@ func runController(cfg *config.Options, log *logger.Logger) error {
 	kConfig, err := KubernetesDefaultConfigCreate()
 	if err != nil {
 		log.Error(err, "error reading a kubernetes configuration")
-		return err
+		return 1
 	}
 	log.Info("read Kubernetes config")
 
@@ -71,27 +72,35 @@ func runController(cfg *config.Options, log *logger.Logger) error {
 	mgr, err := ctrl.NewManager(kConfig, managerOpts)
 	if err != nil {
 		log.Error(err, "failed to create a manager")
-		return err
+		return 1
 	}
 
-	if err := mgr.Start(ctx); err != nil {
-		log.Error(err, "failed to start manager")
-		return err
-	}
 	log.Info("created kubernetes manager in namespace: " + cfg.ControllerNamespace)
 
 	ctrl.SetLogger(log.GetLogger())
 
 	if cfg.DiscoveryMode {
-		log.Info("Starting up in discovery mode...")
+		log.Info("Starting up in discovery (daemonset) mode...")
 		err := discoverer.DiscoveryLoop(ctx, cfg, mgr)
 		if err != nil {
 			log.Error(err, "failed to run discovery mode")
-			return err
+			return 1
+		}
+	} else {
+		// TODO: for future use to run in controller mode
+		// Start starts the manager and waits indefinitely.
+		// There is only two ways to have start return:
+		// An error has occurred during in one of the internal operations,
+		// such as leader election, cache start, webhooks, and so on.
+		// Or, the context is cancelled.
+		if err := mgr.Start(ctx); err != nil {
+			log.Error(err, "failed to start manager")
+			return 1
 		}
 	}
 
-	return nil
+	log.Info("Shutdown successful")
+	return 0
 }
 
 func main() {
@@ -107,8 +116,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runController(cfg, log); err != nil {
-		log.Error(err, "failed to run controller: %s", err.Error())
-		os.Exit(2)
-	}
+	os.Exit(runController(cfg, log))
 }
