@@ -626,11 +626,11 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		},
 		Spec: srv.DRBDClusterSpec{
 			Replicas:        3,
-			QuorumPolicy:    "Majority",
+			QuorumPolicy:    "majority",
 			NetworkPoolName: "default-network-pool",
 			SharedSecret:    "secure-secret",
 			Size:            int64(volumeSize.InclusiveBytes()),
-			DrbdCurrentGi:   "10Gi",
+			DrbdCurrentGi:   "1",
 			Port:            7789,
 			Minor:           1,
 			AttachmentRequested: []string{
