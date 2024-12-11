@@ -59,11 +59,12 @@ func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager
 	if myNodeName == "" {
 		return errors.New("cannot get node name because no NODE_NAME env variable")
 	}
-
+	log.Info("Before cache start")
 	if err = mgr.GetCache().Start(ctx); err != nil {
 		log.Error(err, "Cannot initialize manager's internal cache")
 		return err
 	}
+	log.Info("After cache start")
 
 	cl := mgr.GetClient()
 
