@@ -17,16 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	goruntime "runtime"
-	"syscall"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	controllerruntime "sigs.k8s.io/controller-runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"storage-network-controller/internal/config"
@@ -48,8 +45,8 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 }
 
 func runController(cfg *config.Options, log *logger.Logger) error {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// make context from controller-runtime with signals (SIGINT, SIGTERM) handling
+	ctx := ctrl.SetupSignalHandler()
 	// add logger to root context to make it available everywhere, where root context is used
 	ctx = logger.WithLogger(ctx, log)
 
@@ -71,33 +68,25 @@ func runController(cfg *config.Options, log *logger.Logger) error {
 		LeaderElection: false,
 	}
 
-	mgr, err := manager.New(kConfig, managerOpts)
+	mgr, err := ctrl.NewManager(kConfig, managerOpts)
 	if err != nil {
 		log.Error(err, "failed to create a manager")
 		return err
 	}
+
+	if err := mgr.Start(ctx); err != nil {
+		log.Error(err, "failed to start manager")
+		return err
+	}
 	log.Info("created kubernetes manager in namespace: " + cfg.ControllerNamespace)
 
-	controllerruntime.SetLogger(log.GetLogger())
-
-	// listen for interrupts or the Linux SIGTERM signal and cancel
-	// our context, which the leader election code will observe and
-	// step down
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-ch
-		log.Info("Received termination, signaling shutdown")
-		cancel()
-	}()
+	ctrl.SetLogger(log.GetLogger())
 
 	if cfg.DiscoveryMode {
 		log.Info("Starting up in discovery mode...")
 		err := discoverer.DiscoveryLoop(ctx, cfg, mgr)
 		if err != nil {
-			log.Error(err, "failed to discovery node")
-			// cancel root context
-			cancel()
+			log.Error(err, "failed to run discovery mode")
 			return err
 		}
 	}
