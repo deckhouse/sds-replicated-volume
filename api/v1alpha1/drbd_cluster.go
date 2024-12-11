@@ -21,6 +21,7 @@ import (
 )
 
 // DRBDClusterSpec defines the desired state of DRBDCluster
+// +k8s:deepcopy-gen=true
 type DRBDClusterSpec struct {
 	Replicas                  int                        `json:"replicas"`
 	QuorumPolicy              string                     `json:"quorumPolicy"`
@@ -48,7 +49,6 @@ type TopologySpreadConstraint struct {
 
 // Affinity defines node affinity scheduling rules
 // +k8s:deepcopy-gen=true
-
 type Affinity struct {
 	NodeAffinity NodeAffinity `json:"nodeAffinity,omitempty"`
 }
@@ -105,9 +105,9 @@ type DRBDClusterStatus struct {
 	Conditions          []metav1.Condition `json:"conditions"`
 }
 
+// DRBDCluster is the Schema for the drbdclusters API
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// DRBDCluster is the Schema for the drbdclusters API
 type DRBDCluster struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
