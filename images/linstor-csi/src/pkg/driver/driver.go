@@ -506,8 +506,7 @@ func (d Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*cs
 // CreateVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#createvolume
 func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	d.log.Info("~~~creating volume with modified linstor-csi~~~")
-	d.log.Infof("req: %+v\n", req)
-	d.log.Infof("req params: %+v\n", req.GetParameters())
+	fmt.Printf("req: %+v\n", req)
 
 	if req.GetName() == "" {
 		return nil, missingAttr("CreateVolume", req.GetName(), "Name")
@@ -534,6 +533,8 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse parameters: %v", err)
 	}
+
+	fmt.Printf("params: %+v\n", params)
 
 	var pvcNamespace, pvcName string
 	if params.UsePvcName {
@@ -599,11 +600,13 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 				codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
 				volId, err)
 		}
+		fmt.Printf("topos: %+v\n", topos)
 
 		volCtx, err := VolumeContextFromParameters(&params).ToMap()
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "CreateVolume failed for %s: unable to encode volume context: %v", volId, err)
 		}
+		fmt.Printf("volCtx: %+v\n", volCtx)
 
 		return &csi.CreateVolumeResponse{
 			Volume: &csi.Volume{
@@ -656,7 +659,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 										Values:   []string{"e2e-az1", "e2e-az2"},
 									},
 								},
-							},ControllerPublishVolume
+							},
 						},
 					},
 				},
@@ -1369,6 +1372,7 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 		"size": info.SizeBytes,
 	}).Debug("creating new volume")
 
+	fmt.Printf("VolumeContentSource: %+v\n", req.GetVolumeContentSource())
 	// We're cloning from a volume or snapshot.
 	if req.GetVolumeContentSource() != nil {
 		switch {
@@ -1460,12 +1464,16 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 		}
 	}
 
+	fmt.Printf("AccessibilityRequirements: %+v\n", req.GetAccessibilityRequirements())
+
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
 			info.ID, err)
 	}
+
+	fmt.Printf("topos: %+v\n", topos)
 
 	volCtx, err := VolumeContextFromParameters(params).ToMap()
 	if err != nil {
