@@ -1,9 +1,6 @@
-{{- $_ := set . "BASE_GOLANG"     "registry.deckhouse.io/base_images/golang:1.22.8-bullseye@sha256:0b709573e7e867429a436ed40d88f9a3014fc568533073438d61e9d33c918848" }}
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 
 git:
@@ -26,8 +23,7 @@ shell:
     - chmod +x /{{ $.ImageName }}
 ---
 image: {{ $.ImageName }}
-# CI_COMMIT_REF_NAME="202/merge" werf kube-run --dev -it --repo "dev-registry.deckhouse.io/sys/deckhouse-oss/modules/${MODNAME}" --namespace=d8-${MODNAME} --overrides='{"spec":{"serviceAccount": "sds-replicated-volume-controller", "hostNetwork": true}}' storage-network-controller -- /storage-network-controller --discovery --storage-network-cidr 10.128.0.0/24
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
