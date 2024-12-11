@@ -1,6 +1,6 @@
 module storage-network-controller
 
-go 1.22.8
+go 1.22.7
 
 require (
 	github.com/go-logr/logr v1.4.2
