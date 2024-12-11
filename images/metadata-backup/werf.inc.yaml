@@ -1,13 +1,16 @@
 ---
 image: metadata-backup
-from: "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc"
+from: {{ $.Root.BASE_ALT_P11 }}
 git:
   - add: /images/metadata-backup/backup.py
     to: /backup.py
+    stageDependencies:
+      setup:
+        - "**/*"
 shell:
   beforeInstall:
     - apt-get update
-    - DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wget unzip git python3 python3-pip jq curl gettext-base bsdextrautils vim
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y wget unzip git python3 python3-module-pip jq curl gettext-base util-linux vim-console
     - pip3 install kubernetes==30.1.0
   setup:
     - chmod 755 /backup.py
