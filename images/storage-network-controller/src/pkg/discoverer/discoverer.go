@@ -60,6 +60,11 @@ func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager
 		return errors.New("cannot get node name because no NODE_NAME env variable")
 	}
 
+	if err = mgr.GetCache().Start(ctx); err != nil {
+		log.Error(err, "Cannot initialize manager's internal cache")
+		return err
+	}
+
 	cl := mgr.GetClient()
 
 	// create a new DiscoveryCache with TTL (item expiring) capabilities
@@ -158,8 +163,8 @@ func updateNodeStatusIfNeeded(ctx context.Context, nodeName string, ip string, c
 	}, node)
 
 	if err != nil {
-		log.Error(err, "cannot get my node info for now. Waiting for next reconciliation")
-		return nil
+		log.Error(err, "cannot get my node info")
+		return err
 	}
 
 	addresses := node.Status.Addresses
