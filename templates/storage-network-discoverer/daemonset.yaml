@@ -65,7 +65,6 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "storageNetworkDiscoverer") }}
         imagePullPolicy: IfNotPresent
         args:
-          - --discovery
           {{- range $cidr := .Values.sdsReplicatedVolume.storageNetworkCIDRs }}
           - --storage-network-cidr
           - {{ $cidr | quote }}
