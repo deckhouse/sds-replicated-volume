@@ -79,7 +79,6 @@ func runController(cfg *config.Options, log *logger.Logger) int {
 
 	ctrl.SetLogger(log.GetLogger())
 
-	log.Info("Starting up discovery in daemonset mode...")
 	err = discoverer.DiscoveryLoop(ctx, cfg, mgr)
 	if err != nil {
 		log.Error(err, "failed to run discovery mode")

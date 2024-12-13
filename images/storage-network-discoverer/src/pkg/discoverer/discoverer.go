@@ -68,6 +68,13 @@ func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager
 		return err
 	}
 
+	log.Info("Discoverer settings:")
+	log.Info(fmt.Sprintf("* Log level: %s", cfg.Loglevel))
+	log.Info(fmt.Sprintf("* Discovery every %d seconds", cfg.DiscoverySec))
+	log.Info(fmt.Sprintf("* Cache founded IP(s) for %d seconds", cfg.CacheTTLSec))
+	log.Info(fmt.Sprintf("* Storage network CIDRs: %s", storageNetworks))
+	log.Info(fmt.Sprintf("* I discovery IPs on node %s", myNodeName))
+
 	// create a new DiscoveryCache with TTL (item expiring) capabilities
 	DiscoveryCache = cache.NewTTL[string, string](ctx)
 
@@ -105,8 +112,6 @@ func parseCIDRs(cidrs config.StorageNetworkCIDR) ([]netip.Prefix, error) {
 
 func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Prefix, cl *client.Client, cfg config.Options) error {
 	log := logger.FromContext(ctx)
-
-	log.Trace(fmt.Sprintf("[discovery] storageNetworks: %s", storageNetworks))
 
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
