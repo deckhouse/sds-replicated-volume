@@ -79,24 +79,11 @@ func runController(cfg *config.Options, log *logger.Logger) int {
 
 	ctrl.SetLogger(log.GetLogger())
 
-	if cfg.DiscoveryMode {
-		log.Info("Starting up in discovery (daemonset) mode...")
-		err := discoverer.DiscoveryLoop(ctx, cfg, mgr)
-		if err != nil {
-			log.Error(err, "failed to run discovery mode")
-			return 1
-		}
-	} else {
-		// TODO: for future use to run in controller mode
-		// Start starts the manager and waits indefinitely.
-		// There is only two ways to have start return:
-		// An error has occurred during in one of the internal operations,
-		// such as leader election, cache start, webhooks, and so on.
-		// Or, the context is cancelled.
-		if err := mgr.Start(ctx); err != nil {
-			log.Error(err, "failed to start manager")
-			return 1
-		}
+	log.Info("Starting up discovery in daemonset mode...")
+	err = discoverer.DiscoveryLoop(ctx, cfg, mgr)
+	if err != nil {
+		log.Error(err, "failed to run discovery mode")
+		return 1
 	}
 
 	log.Info("Shutdown successful")

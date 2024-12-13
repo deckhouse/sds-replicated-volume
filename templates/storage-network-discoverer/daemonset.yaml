@@ -62,7 +62,7 @@ spec:
       hostNetwork: true
       containers:
       - name: discoverer
-        image: {{ include "helm_lib_module_image" (list . "storageNetworkController") }}
+        image: {{ include "helm_lib_module_image" (list . "storageNetworkDiscoverer") }}
         imagePullPolicy: IfNotPresent
         args:
           - --discovery
