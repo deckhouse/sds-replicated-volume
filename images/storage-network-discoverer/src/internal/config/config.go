@@ -43,7 +43,6 @@ type Options struct {
 	ControllerNamespace string
 	DiscoverySec        int
 	CacheTTLSec         int
-	DiscoveryMode       bool
 	Loglevel            logger.Verbosity
 	StorageNetworkCIDR  StorageNetworkCIDR
 }
@@ -121,7 +120,6 @@ func NewConfig() (*Options, error) {
 	}
 
 	fl := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	fl.BoolVar(&opts.DiscoveryMode, "discovery", false, "Enable discovery mode. This mode filling an Node.Status.addresses field")
 	fl.Var(&opts.StorageNetworkCIDR, "storage-network-cidr", "Set storage network CIDR blocks. Can be passed multiple times.")
 
 	err := fl.Parse(os.Args[1:])
