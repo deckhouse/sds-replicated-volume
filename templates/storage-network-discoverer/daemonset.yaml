@@ -83,6 +83,15 @@ spec:
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
             value: "4"
 {{- end }}
+          # try discover storage IPs on each node every 30s
+          - name: DISCOVERY_INTERVAL_SEC
+            value: "30"
+          # If founded, storage IP will be set to node's status and cached for CACHE_TTL_SEC
+          # Discoverer DO NOT attempt to update node before this cache will expired
+          # So, do not set this value too high. (2 * DISCOVERY_INTERVAL_SEC) should be enough.
+          - name: CACHE_TTL_SEC
+            value: "60"
+          # NODE_NAME REQUIRED by discoverer
           - name: NODE_NAME
             valueFrom:
               fieldRef:

@@ -32,7 +32,7 @@ const (
 	DiscoverySecEnv        = "DISCOVERY_INTERVAL_SEC"
 	CacheSecEnv            = "CACHE_TTL_SEC"
 	DefaultDiscoverySec    = 15
-	DefaultCacheTTLSec     = 60
+	DefaultCacheTTLSec     = 30
 	HardcodedControllerNS  = "d8-sds-replicated-volume"
 	LogLevelEnv            = "LOG_LEVEL"
 )
