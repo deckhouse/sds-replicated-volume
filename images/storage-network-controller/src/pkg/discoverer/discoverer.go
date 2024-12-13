@@ -59,14 +59,14 @@ func DiscoveryLoop(ctx context.Context, cfg *config.Options, mgr manager.Manager
 	if myNodeName == "" {
 		return errors.New("cannot get node name because no NODE_NAME env variable")
 	}
-	log.Info("Before cache start")
-	if err = mgr.GetCache().Start(ctx); err != nil {
-		log.Error(err, "Cannot initialize manager's internal cache")
+
+	// we cannot do `mgr.GetClient()` because its require a cache, but we do not want cache feature
+	// so, create our own kubeclient WITHOUT cache
+	cl, err := client.New(mgr.GetConfig(), client.Options{})
+	if err != nil {
+		log.Error(err, "Cannot create k8s client")
 		return err
 	}
-	log.Info("After cache start")
-
-	cl := mgr.GetClient()
 
 	// create a new DiscoveryCache with TTL (item expiring) capabilities
 	DiscoveryCache = cache.NewTTL[string, string](ctx)
