@@ -24,7 +24,7 @@ jobs:
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
 
       - name: Run Go lint
-        run: |
+        run: | # TODO remove < if [ "$dir" == "images/linstor-csi/src" ]; then > as soon as migration is done
           basedir=$(pwd)
           failed='false'
           for dir in $(find images -type d); do

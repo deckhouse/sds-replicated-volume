@@ -30,6 +30,7 @@ spec:
               properties:
                 replicas:
                   type: integer
+                  minimum: 1
                   description: "Number of replicas."
                 quorumPolicy:
                   type: string

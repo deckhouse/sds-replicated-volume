@@ -34,7 +34,6 @@ import (
 
 	lc "github.com/LINBIT/golinstor"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
@@ -46,6 +45,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	kcl "sigs.k8s.io/controller-runtime/pkg/client"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
@@ -58,7 +58,6 @@ var Version = "UNKNOWN"
 const (
 	ParameterCsiPvcName      = "csi.storage.k8s.io/pvc/name"
 	ParameterCsiPvcNamespace = "csi.storage.k8s.io/pvc/namespace"
-	ParameterStoragePoolName = "replicated.csi.storage.deckhouse.io/storagePool"
 )
 
 // Driver fullfils CSI controller, node, and indentity server interfaces.
@@ -416,7 +415,7 @@ func (d Driver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishV
 	if req.GetTargetPath() == "" {
 		return nil, missingAttr("NodeUnpublishVolume", req.GetVolumeId(), "TargetPath")
 	}
-	
+
 	err := d.Mounter.Unmount(req.GetTargetPath())
 	if err != nil {
 		return nil, err
@@ -619,83 +618,20 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	drbdcluster := srv.DRBDCluster{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "DRBDCluster",
-			APIVersion: "v1alpha1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "example-drbd-cluster",
-		},
-		Spec: srv.DRBDClusterSpec{
-			Replicas:        3,
-			QuorumPolicy:    "majority",
-			NetworkPoolName: "default-network-pool",
-			SharedSecret:    "secure-secret",
-			Size:            int64(volumeSize.InclusiveBytes()),
-			DrbdCurrentGi:   "1",
-			Port:            7789,
-			Minor:           1,
-			AttachmentRequested: []string{
-				"attachment1",
-				"attachment2",
-			},
-			TopologySpreadConstraints: []srv.TopologySpreadConstraint{
-				{
-					MaxSkew:           1,
-					TopologyKey:       "zone",
-					WhenUnsatisfiable: "DoNotSchedule",
-				},
-			},
-			Affinity: srv.Affinity{
-				NodeAffinity: srv.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: srv.NodeSelector{
-						NodeSelectorTerms: []srv.NodeSelectorTerm{
-							{
-								MatchExpressions: []srv.SelectorRequirement{
-									{
-										Key:      "kubernetes.io/e2e-az-name",
-										Operator: "In",
-										Values:   []string{"e2e-az1", "e2e-az2"},
-									},
-								},
-							},
-						},
-					},
-				},
-			},
-			AutoDiskful: srv.AutoDiskful{
-				DelaySeconds: 30,
-			},
-			AutoRecovery: srv.AutoRecovery{
-				DelaySeconds: 60,
-			},
-			StoragePoolSelector: []srv.LabelSelector{
-				{
-					MatchExpressions: []srv.SelectorRequirement{
-						{
-							Key:      ParameterStoragePoolName,
-							Operator: "In",
-							Values:   []string{req.GetParameters()[ParameterStoragePoolName]},
-						},
-					},
-				},
-			},
-		},
-		Status: srv.DRBDClusterStatus{
-			Size: 1024,
-			AttachmentCompleted: []string{
-				"attachment1",
-			},
-			Conditions: []metav1.Condition{
-				{
-					Type:   "Ready",
-					Status: "True",
-					Reason: "ClusterIsReady",
-				},
-			},
-		},
-	}
+	r := req.GetParameters()
+	s := req.GetCapacityRange().GetRequiredBytes()
+
+	podList := &corev1.PodList{}
+	err = d.cl.List(ctx, podList, &kcl.ListOptions{Namespace: "default"})
+	if err!= nil {
+        fmt.Printf("failed to list pods: %s", err.Error())
+    }
+
+	fmt.Printf("params %+v\n", r)
+	fmt.Printf("bytes %+v\n", s)
+	fmt.Printf("pods %d", len(podList.Items))
+	
+	drbdcluster := NewDRBDCluster("test-drbdcluster")
 
 	d.log.Infof("Creating new cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
@@ -703,7 +639,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
 	}
 
-	return d.createNewVolume(
+	return d.createNewVolume(         
 		ctx,
 		&volume.Info{
 			ID:            volId,
