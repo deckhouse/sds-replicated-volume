@@ -135,7 +135,7 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 				}
 			}
 		}
-	} // for _, address := range addrs
+	}
 
 	if len(foundedIP) > 0 {
 		log.Info(fmt.Sprintf("Founded %d storage network IPs: %s", len(foundedIP), strings.Join(foundedIP, ", ")))
@@ -155,7 +155,7 @@ func discovery(ctx context.Context, nodeName string, storageNetworks []netip.Pre
 			}
 			DiscoveryCache.Set(ip, "", time.Duration(cfg.CacheTTLSec)*time.Second)
 		}
-	} // if len(foundedIP) > 0
+	}
 
 	return nil
 }
