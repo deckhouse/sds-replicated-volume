@@ -39,13 +39,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	kcl "sigs.k8s.io/controller-runtime/pkg/client"
-	corev1 "k8s.io/api/core/v1"
 
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
@@ -575,7 +575,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}
 
 		log.Info("existing volume matches request")
-		
+
 		log.Debug("check if source snapshot exists")
 
 		snapId := d.Snapshots.CompatibleSnapshotId(snapshotForVolumeName(req.GetName()))
@@ -618,20 +618,16 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	r := req.GetParameters()
-	s := req.GetCapacityRange().GetRequiredBytes()
-
 	podList := &corev1.PodList{}
 	err = d.cl.List(ctx, podList, &kcl.ListOptions{Namespace: "default"})
-	if err!= nil {
-        fmt.Printf("failed to list pods: %s", err.Error())
-    }
+	if err != nil {
+		fmt.Printf("failed to list pods: %s", err.Error())
+	}
 
-	fmt.Printf("params %+v\n", r)
-	fmt.Printf("bytes %+v\n", s)
-	fmt.Printf("pods %+v\n", podList.Items[1])
-	
-	drbdcluster := NewDRBDCluster("test-drbdcluster")
+	fmt.Println("======")
+	fmt.Printf("PLACECOUNT: %s", req.GetParameters()["PlacementCount"])
+
+	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), req.GetParameters()["PlacementCount"])
 
 	d.log.Infof("Creating new cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
@@ -639,7 +635,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
 	}
 
-	return d.createNewVolume(         
+	return d.createNewVolume(
 		ctx,
 		&volume.Info{
 			ID:            volId,

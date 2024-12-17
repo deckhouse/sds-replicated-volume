@@ -1,6 +1,7 @@
 package driver
 
 import (
+
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -8,7 +9,7 @@ import (
 var parameterStoragePoolName = "replicated.csi.storage.deckhouse.io/storagePool"
 
 
-func NewDRBDCluster(clusterName string) srv.DRBDCluster {
+func NewDRBDCluster(clusterName string, size int64, replicas string) srv.DRBDCluster {
 	typeMeta := metav1.TypeMeta{
 		Kind:       "DRBDCluster",
 		APIVersion: "v1alpha1",
@@ -60,21 +61,21 @@ func NewDRBDCluster(clusterName string) srv.DRBDCluster {
 				{
 					Key:      parameterStoragePoolName,
 					Operator: "In",
-					Values:   []string{""},
+					Values:   []string{},
 				},
 			},
 		},
 	}
 
 	spec := srv.DRBDClusterSpec{
-		Replicas:                  3,
+		Replicas:                  replicas,
 		QuorumPolicy:              "majority",
 		NetworkPoolName:           "default-network-pool",
 		SharedSecret:              "secure-secret",
-		Size:                      int64(1),
-		DrbdCurrentGi:             "1",
-		Port:                      7789,
-		Minor:                     1,
+		Size:                      size,
+		DrbdCurrentGi:             "",
+		Port:                      0,
+		Minor:                     0,
 		AttachmentRequested:       attachmentRequested,
 		TopologySpreadConstraints: topologySpreadConstraints,
 		Affinity:                  affinity,
@@ -84,10 +85,8 @@ func NewDRBDCluster(clusterName string) srv.DRBDCluster {
 	}
 
 	status := srv.DRBDClusterStatus{
-		Size: 1024,
-		AttachmentCompleted: []string{
-			"attachment1",
-		},
+		Size: size,
+		AttachmentCompleted: []string{},
 		Conditions: []metav1.Condition{
 			{
 				Type:   "Ready",

@@ -23,7 +23,7 @@ import (
 // DRBDClusterSpec defines the desired state of DRBDCluster
 // +k8s:deepcopy-gen=true
 type DRBDClusterSpec struct {
-	Replicas                  int                        `json:"replicas"`
+	Replicas                  string                        `json:"replicas"`
 	QuorumPolicy              string                     `json:"quorumPolicy"`
 	NetworkPoolName           string                     `json:"networkPoolName"`
 	SharedSecret              string                     `json:"sharedSecret"`
