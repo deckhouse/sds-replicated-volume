@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	goruntime "runtime"
@@ -45,11 +46,7 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 }
 
 // have a separate function so we can return an exit code w/o skipping defers
-func runController(cfg *config.Options, log *logger.Logger) int {
-	// make context from controller-runtime with signals (SIGINT, SIGTERM) handling
-	ctx := ctrl.SetupSignalHandler()
-	// add logger to root context to make it available everywhere, where root context is used
-	ctx = logger.WithLogger(ctx, log)
+func runController(ctx context.Context, cfg *config.Options, log *logger.Logger) int {
 
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
@@ -102,5 +99,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	os.Exit(runController(cfg, log))
+	// make context from controller-runtime with signals (SIGINT, SIGTERM) handling
+	ctx := ctrl.SetupSignalHandler()
+	// add logger to root context to make it available everywhere, where root context is used
+	ctx = logger.WithLogger(ctx, log)
+
+	os.Exit(runController(ctx, cfg, log))
 }
