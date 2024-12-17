@@ -629,7 +629,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 
 	fmt.Printf("params %+v\n", r)
 	fmt.Printf("bytes %+v\n", s)
-	fmt.Printf("pods %d", len(podList.Items))
+	fmt.Printf("pods %+v\n", podList.Items[1])
 	
 	drbdcluster := NewDRBDCluster("test-drbdcluster")
 
