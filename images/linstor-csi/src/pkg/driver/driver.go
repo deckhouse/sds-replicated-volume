@@ -39,13 +39,16 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	kcl "sigs.k8s.io/controller-runtime/pkg/client"
-	corev1 "k8s.io/api/core/v1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	kubeerr "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
@@ -575,7 +578,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}
 
 		log.Info("existing volume matches request")
-		
+
 		log.Debug("check if source snapshot exists")
 
 		snapId := d.Snapshots.CompatibleSnapshotId(snapshotForVolumeName(req.GetName()))
@@ -623,19 +626,17 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 
 	podList := &corev1.PodList{}
 	err = d.cl.List(ctx, podList, &kcl.ListOptions{Namespace: "default"})
-	if err!= nil {
-        fmt.Printf("failed to list pods: %s", err.Error())
-    }
+	if err != nil {
+		fmt.Printf("failed to list pods: %s", err.Error())
+	}
 
 	fmt.Println("======")
-	pc := params.PlacementCount
-	fmt.Printf("PLACECOUNT: %d", pc)
 
 	fmt.Printf("params %+v\n", r)
 	fmt.Printf("bytes %+v\n", s)
 	fmt.Printf("pods %+v\n", podList.Items[1])
-	
-	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), int64(pc))
+
+	drbdcluster := NewDRBDCluster(req.GetName(), req.GetCapacityRange().GetRequiredBytes(), int64(params.PlacementCount))
 
 	d.log.Infof("Creating new cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
@@ -643,7 +644,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
 	}
 
-	return d.createNewVolume(         
+	return d.createNewVolume(
 		ctx,
 		&volume.Info{
 			ID:            volId,
@@ -663,7 +664,16 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
 
-	err := d.Storage.Delete(ctx, req.GetVolumeId())
+	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
+	if err!= nil {
+		if kubeerr.IsNotFound(err) {
+			d.log.Infof("DRBD cluster %s not found", req.VolumeId)
+		} else {
+			return nil, status.Errorf(codes.Internal, "failed to delete DRBD cluster: %v", err)
+		}
+    }
+
+	err = d.Storage.Delete(ctx, req.GetVolumeId())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete volume: %v", err)
 	}
@@ -682,6 +692,19 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 	if req.GetVolumeCapability() == nil {
 		return nil, missingAttr("ControllerPublishVolume", req.GetVolumeId(), "VolumeCapability")
 	}
+
+	drbdCluster := &srv.DRBDCluster{}
+	err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to get DRBD cluster: %v", err)
+    }
+
+	drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
+
+	err = d.cl.Update(ctx, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+    }
 
 	fmt.Println("++++")
 	fmt.Printf("pub vol request: %+v\n", req)

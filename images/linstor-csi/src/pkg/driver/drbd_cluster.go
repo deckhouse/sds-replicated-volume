@@ -71,7 +71,7 @@ func NewDRBDCluster(clusterName string, size int64, replicas int64) srv.DRBDClus
 		Replicas:                  replicas,
 		QuorumPolicy:              "majority",
 		NetworkPoolName:           "default-network-pool",
-		SharedSecret:              "secure-secret",
+		SharedSecret:              "",
 		Size:                      size,
 		DrbdCurrentGi:             "",
 		Port:                      0,
