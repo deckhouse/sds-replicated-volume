@@ -628,14 +628,14 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
     }
 
 	fmt.Println("======")
-	pc, ok := r["PlacementCount"]
-	fmt.Printf("PLACECOUNT: %s:%v", pc, ok)
+	pc := params.PlacementCount
+	fmt.Printf("PLACECOUNT: %s", pc)
 
 	fmt.Printf("params %+v\n", r)
 	fmt.Printf("bytes %+v\n", s)
 	fmt.Printf("pods %+v\n", podList.Items[1])
 	
-	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), pc)
+	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), int64(pc))
 
 	d.log.Infof("Creating new cluster")
 	err = d.cl.Create(ctx, &drbdcluster)

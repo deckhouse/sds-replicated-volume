@@ -9,7 +9,7 @@ import (
 var parameterStoragePoolName = "replicated.csi.storage.deckhouse.io/storagePool"
 
 
-func NewDRBDCluster(clusterName string, size int64, replicas string) srv.DRBDCluster {
+func NewDRBDCluster(clusterName string, size int64, replicas int64) srv.DRBDCluster {
 	typeMeta := metav1.TypeMeta{
 		Kind:       "DRBDCluster",
 		APIVersion: "v1alpha1",
