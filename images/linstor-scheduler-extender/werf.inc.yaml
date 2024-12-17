@@ -1,6 +1,7 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE"  "registry.deckhouse.io/base_images/golang:1.23.1-bullseye@sha256:a24507d1a36fce86431198a979435dadb187e8d0ce0b5c181f46d6788d84a40f" }}
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+from: {{ $.BASE_GOLANG_BULLSEYE }}
 final: false
 
 git:
