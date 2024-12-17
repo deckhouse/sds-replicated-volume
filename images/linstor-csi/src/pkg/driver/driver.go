@@ -638,10 +638,10 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 
 	drbdcluster := NewDRBDCluster(req.GetName(), req.GetCapacityRange().GetRequiredBytes(), int64(params.PlacementCount))
 
-	d.log.Infof("Creating new cluster")
+	d.log.Infof("CreateVolume сreating a new DRBD cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
 	if err != nil {
-		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
+		d.log.Infof("CreateVolume failed to create a DRBD cluster: %s", err.Error())
 	}
 
 	return d.createNewVolume(
@@ -667,9 +667,9 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err!= nil {
 		if kubeerr.IsNotFound(err) {
-			d.log.Infof("DRBD cluster %s not found", req.VolumeId)
+			d.log.Infof("DeleteVolume failed to find DRBD cluster %s", req.VolumeId)
 		} else {
-			return nil, status.Errorf(codes.Internal, "failed to delete DRBD cluster: %v", err)
+			return nil, status.Errorf(codes.Internal, "DeleteVolume failed to delete DRBD cluster: %v", err)
 		}
     }
 
@@ -749,6 +749,27 @@ func (d Driver) ControllerUnpublishVolume(ctx context.Context, req *csi.Controll
 	if req.GetNodeId() == "" {
 		return nil, missingAttr("ControllerUnpublishVolume", req.GetNodeId(), "NodeId")
 	}
+
+	drbdCluster := &srv.DRBDCluster{}
+	err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerUnpublishVolume failed to get DRBD cluster: %v", err)
+    }
+
+	nodeLen := len(drbdCluster.Spec.AttachmentRequested)
+	for i, node := range drbdCluster.Spec.AttachmentRequested {
+		if node == req.GetNodeId() {
+			// If node is found, it is replaced with the last element of the slice. Slice length is then trimmed to exclude the last element
+            drbdCluster.Spec.AttachmentRequested[i] = drbdCluster.Spec.AttachmentRequested[len(drbdCluster.Spec.AttachmentRequested)-1]
+            drbdCluster.Spec.AttachmentRequested = drbdCluster.Spec.AttachmentRequested[:nodeLen-1]
+            break
+        }
+	}
+
+	err = d.cl.Update(ctx, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+    }
 
 	if err := d.Assignments.Detach(ctx, req.GetVolumeId(), req.GetNodeId()); err != nil {
 		return nil, status.Errorf(codes.Internal,
@@ -1187,7 +1208,7 @@ func (d Driver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeR
 	return &csi.NodeExpandVolumeResponse{}, nil
 }
 
-// ControllerExpandVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#controllerexpandvolume
+// ControllerExpandVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#controllerexpandvolume 
 func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerExpandVolumeRequest) (*csi.ControllerExpandVolumeResponse, error) {
 	if req.GetVolumeId() == "" {
 		return nil, missingAttr("ControllerExpandVolume", req.GetVolumeId(), "VolumeId")
@@ -1205,6 +1226,20 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
 	d.log.WithFields(logrus.Fields{
 		"existingVolume": fmt.Sprintf("%+v", existingVolume),
 	}).Debug("found existing volume")
+
+	drbdCluster := &srv.DRBDCluster{}
+	err = d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to get DRBD cluster: %v", err)
+    }
+
+	drbdCluster.Spec.Size += req.CapacityRange.GetRequiredBytes()
+
+	err = d.cl.Update(ctx, drbdCluster)
+	if err!= nil {
+        return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update DRBD cluster: %v", err)
+    }
+
 
 	requiredKiB, err := d.Storage.AllocationSizeKiB(req.CapacityRange.GetRequiredBytes(), req.CapacityRange.GetLimitBytes())
 	if err != nil {
