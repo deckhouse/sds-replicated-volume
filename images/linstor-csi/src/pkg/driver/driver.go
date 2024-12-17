@@ -629,7 +629,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 
 	fmt.Println("======")
 	pc := params.PlacementCount
-	fmt.Printf("PLACECOUNT: %s", pc)
+	fmt.Printf("PLACECOUNT: %d", pc)
 
 	fmt.Printf("params %+v\n", r)
 	fmt.Printf("bytes %+v\n", s)
