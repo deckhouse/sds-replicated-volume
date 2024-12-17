@@ -1209,10 +1209,14 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
         return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to get DRBD cluster: %v", err)
     }
 
+	fmt.Println("================================================================")
+	fmt.Printf("Size before: %d\n", drbdCluster.Spec.Size)
+	fmt.Printf("Required size: %d\n", req.CapacityRange.GetRequiredBytes())
 	drbdCluster.Spec.Size += req.CapacityRange.GetRequiredBytes()
+	fmt.Printf("Size after: %d\n", drbdCluster.Spec.Size)
 
 	err = d.cl.Update(ctx, drbdCluster)
-	if err!= nil {
+	if err != nil {
         return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update DRBD cluster: %v", err)
     }
 
@@ -1439,8 +1443,6 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 				"CreateVolume failed for %s: %v", info.ID, err)
 		}
 	}
-
-	fmt.Printf("AccessibilityRequirements: %+v\n", req.GetAccessibilityRequirements())
 
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
 	if err != nil {
