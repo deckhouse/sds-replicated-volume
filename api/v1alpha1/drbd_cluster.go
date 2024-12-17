@@ -20,6 +20,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+var parameterStoragePoolName = "replicated.csi.storage.deckhouse.io/storagePool"
+
 // DRBDClusterSpec defines the desired state of DRBDCluster
 // +k8s:deepcopy-gen=true
 type DRBDClusterSpec struct {
@@ -114,4 +116,99 @@ type DRBDCluster struct {
 
 	Spec   DRBDClusterSpec   `json:"spec"`
 	Status DRBDClusterStatus `json:"status,omitempty"`
+}
+
+func NewDRBDCluster(clusterName string, size int64, replicas int64) DRBDCluster {
+	typeMeta := metav1.TypeMeta{
+		Kind:       "DRBDCluster",
+		APIVersion: "v1alpha1",
+	}
+
+	objectMeta := metav1.ObjectMeta{
+		Name: clusterName,
+	}
+
+	attachmentRequested := []string{}
+
+	topologySpreadConstraints := []TopologySpreadConstraint{
+		{
+			MaxSkew:           1,
+			TopologyKey:       "zone",
+			WhenUnsatisfiable: "DoNotSchedule",
+		},
+	}
+
+	affinity := Affinity{
+		NodeAffinity: NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: NodeSelector{
+				NodeSelectorTerms: []NodeSelectorTerm{
+					{
+						MatchExpressions: []SelectorRequirement{
+							{
+								Key:      "kubernetes.io/e2e-az-name",
+								Operator: "In",
+								Values:   []string{"e2e-az1", "e2e-az2"},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	autoDiskful := AutoDiskful{
+		DelaySeconds: 30,
+	}
+
+	autoRecovery := AutoRecovery{
+		DelaySeconds: 60,
+	}
+
+	storagePoolSelector := []LabelSelector{
+		{
+			MatchExpressions: []SelectorRequirement{
+				{
+					Key:      parameterStoragePoolName,
+					Operator: "In",
+					Values:   []string{},
+				},
+			},
+		},
+	}
+
+	spec := DRBDClusterSpec{
+		Replicas:                  replicas,
+		QuorumPolicy:              "majority",
+		NetworkPoolName:           "default-network-pool",
+		SharedSecret:              "",
+		Size:                      size,
+		DrbdCurrentGi:             "",
+		Port:                      0,
+		Minor:                     0,
+		AttachmentRequested:       attachmentRequested,
+		TopologySpreadConstraints: topologySpreadConstraints,
+		Affinity:                  affinity,
+		AutoDiskful:               autoDiskful,
+		AutoRecovery:              autoRecovery,
+		StoragePoolSelector:       storagePoolSelector,
+	}
+
+	status := DRBDClusterStatus{
+		Size: size,
+		AttachmentCompleted: []string{},
+		Conditions: []metav1.Condition{
+			{
+				Type:   "Ready",
+				Status: "True",
+				Reason: "ClusterIsReady",
+			},
+		},
+	}
+
+	return DRBDCluster{
+		TypeMeta:   typeMeta,
+		ObjectMeta: objectMeta,
+		Spec:       spec,
+		Status:     status,
+	}
 }

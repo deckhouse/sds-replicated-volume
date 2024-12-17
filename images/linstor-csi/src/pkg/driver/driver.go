@@ -39,7 +39,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -508,7 +507,6 @@ func (d Driver) NodeGetInfo(ctx context.Context, _ *csi.NodeGetInfoRequest) (*cs
 // CreateVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#createvolume
 func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
 	d.log.Info("~~~creating volume with modified linstor-csi~~~")
-	fmt.Printf("req: %+v\n", req)
 
 	if req.GetName() == "" {
 		return nil, missingAttr("CreateVolume", req.GetName(), "Name")
@@ -535,8 +533,6 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "failed to parse parameters: %v", err)
 	}
-
-	fmt.Printf("params: %+v\n", params)
 
 	var pvcNamespace, pvcName string
 	if params.UsePvcName {
@@ -602,13 +598,11 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 				codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
 				volId, err)
 		}
-		fmt.Printf("topos: %+v\n", topos)
 
 		volCtx, err := VolumeContextFromParameters(&params).ToMap()
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "CreateVolume failed for %s: unable to encode volume context: %v", volId, err)
 		}
-		fmt.Printf("volCtx: %+v\n", volCtx)
 
 		return &csi.CreateVolumeResponse{
 			Volume: &csi.Volume{
@@ -621,22 +615,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	r := req.GetParameters()
-	s := req.GetCapacityRange().GetRequiredBytes()
-
-	podList := &corev1.PodList{}
-	err = d.cl.List(ctx, podList, &kcl.ListOptions{Namespace: "default"})
-	if err != nil {
-		fmt.Printf("failed to list pods: %s", err.Error())
-	}
-
-	fmt.Println("======")
-
-	fmt.Printf("params %+v\n", r)
-	fmt.Printf("bytes %+v\n", s)
-	fmt.Printf("pods %+v\n", podList.Items[1])
-
-	drbdcluster := NewDRBDCluster(req.GetName(), req.GetCapacityRange().GetRequiredBytes(), int64(params.PlacementCount))
+	drbdcluster := srv.NewDRBDCluster(req.GetName(), req.GetCapacityRange().GetRequiredBytes(), int64(params.PlacementCount))
 
 	d.log.Infof("CreateVolume сreating a new DRBD cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
@@ -705,9 +684,6 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 	if err!= nil {
         return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
     }
-
-	fmt.Println("++++")
-	fmt.Printf("pub vol request: %+v\n", req)
 
 	// Don't try to assign volumes that don't exist.
 	existingVolume, err := d.Storage.FindByID(ctx, req.GetVolumeId())
@@ -1240,7 +1216,6 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
         return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update DRBD cluster: %v", err)
     }
 
-
 	requiredKiB, err := d.Storage.AllocationSizeKiB(req.CapacityRange.GetRequiredBytes(), req.CapacityRange.GetLimitBytes())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "ControllerExpandVolume - expand volume failed for volume id %s: %v", req.GetVolumeId(), err)
@@ -1627,3 +1602,5 @@ func fsTypeForCapabilities(caps []*csi.VolumeCapability) (string, error) {
 
 	return fsType, nil
 }
+
+func awaitDRBDClusterResize(ctx context.Context) {}
