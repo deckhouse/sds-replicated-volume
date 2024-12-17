@@ -39,13 +39,13 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	kcl "sigs.k8s.io/controller-runtime/pkg/client"
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
@@ -575,7 +575,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}
 
 		log.Info("existing volume matches request")
-
+		
 		log.Debug("check if source snapshot exists")
 
 		snapId := d.Snapshots.CompatibleSnapshotId(snapshotForVolumeName(req.GetName()))
@@ -618,16 +618,24 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
+	r := req.GetParameters()
+	s := req.GetCapacityRange().GetRequiredBytes()
+
 	podList := &corev1.PodList{}
 	err = d.cl.List(ctx, podList, &kcl.ListOptions{Namespace: "default"})
-	if err != nil {
-		fmt.Printf("failed to list pods: %s", err.Error())
-	}
+	if err!= nil {
+        fmt.Printf("failed to list pods: %s", err.Error())
+    }
 
 	fmt.Println("======")
-	fmt.Printf("PLACECOUNT: %s", req.GetParameters()["PlacementCount"])
+	pc, ok := r["PlacementCount"]
+	fmt.Printf("PLACECOUNT: %s:%v", pc, ok)
 
-	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), req.GetParameters()["PlacementCount"])
+	fmt.Printf("params %+v\n", r)
+	fmt.Printf("bytes %+v\n", s)
+	fmt.Printf("pods %+v\n", podList.Items[1])
+	
+	drbdcluster := NewDRBDCluster("test-drbdcluster", req.GetCapacityRange().GetRequiredBytes(), pc)
 
 	d.log.Infof("Creating new cluster")
 	err = d.cl.Create(ctx, &drbdcluster)
@@ -635,7 +643,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		d.log.Infof("failed to create DRBD cluster: %s", err.Error())
 	}
 
-	return d.createNewVolume(
+	return d.createNewVolume(         
 		ctx,
 		&volume.Info{
 			ID:            volId,
@@ -674,6 +682,9 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 	if req.GetVolumeCapability() == nil {
 		return nil, missingAttr("ControllerPublishVolume", req.GetVolumeId(), "VolumeCapability")
 	}
+
+	fmt.Println("++++")
+	fmt.Printf("pub vol request: %+v\n", req)
 
 	// Don't try to assign volumes that don't exist.
 	existingVolume, err := d.Storage.FindByID(ctx, req.GetVolumeId())
