@@ -59,7 +59,7 @@ func (c *TTLCache[K, V]) removeExpiredLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			// do nothing in case of cancel, just return from this gorouting
+			// do nothing in case of cancel, just return from this goroutine
 			return
 
 		default:
