@@ -22,6 +22,7 @@ import (
 	"os"
 	goruntime "runtime"
 
+	"github.com/square/exit"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -45,8 +46,8 @@ func KubernetesDefaultConfigCreate() (*rest.Config, error) {
 	return config, nil
 }
 
-// have a separate function so we can return an exit code w/o skipping defers
-func runController(ctx context.Context, cfg *config.Options, log *logger.Logger) int {
+// have a separate function so we can return an error without skipping defers
+func runController(ctx context.Context, cfg *config.Options, log *logger.Logger) error {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
 
@@ -54,7 +55,7 @@ func runController(ctx context.Context, cfg *config.Options, log *logger.Logger)
 	kConfig, err := KubernetesDefaultConfigCreate()
 	if err != nil {
 		log.Error(err, "error reading a kubernetes configuration")
-		return 1
+		return err
 	}
 	log.Info("read Kubernetes config")
 
@@ -68,7 +69,7 @@ func runController(ctx context.Context, cfg *config.Options, log *logger.Logger)
 	mgr, err := ctrl.NewManager(kConfig, managerOpts)
 	if err != nil {
 		log.Error(err, "failed to create a manager")
-		return 1
+		return err
 	}
 
 	log.Info("created kubernetes manager in namespace: " + cfg.ControllerNamespace)
@@ -78,24 +79,24 @@ func runController(ctx context.Context, cfg *config.Options, log *logger.Logger)
 	err = discoverer.DiscoveryLoop(ctx, cfg, mgr)
 	if err != nil {
 		log.Error(err, "failed to run discovery mode")
-		return 1
+		return err
 	}
 
 	log.Info("Shutdown successful")
-	return 0
+	return nil
 }
 
 func main() {
 	cfg, err := config.NewConfig()
 	if err != nil {
 		fmt.Println("unable to create NewConfig " + err.Error())
-		os.Exit(1)
+		os.Exit(exit.NotOK)
 	}
 
 	log, err := logger.NewLogger(cfg.Loglevel)
 	if err != nil {
 		fmt.Printf("unable to create NewLogger, err: %v\n", err)
-		os.Exit(1)
+		os.Exit(exit.NotOK)
 	}
 
 	// make context from controller-runtime with signals (SIGINT, SIGTERM) handling
@@ -103,5 +104,7 @@ func main() {
 	// add logger to root context to make it available everywhere, where root context is used
 	ctx = logger.WithLogger(ctx, log)
 
-	os.Exit(runController(ctx, cfg, log))
+	err = runController(ctx, cfg, log)
+	// for err == nil exit.FromError return code 0, so we just pass err without additional 'if err != nil' here
+	os.Exit(exit.FromError(err))
 }

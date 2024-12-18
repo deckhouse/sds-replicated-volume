@@ -4,6 +4,7 @@ go 1.22.7
 
 require (
 	github.com/go-logr/logr v1.4.2
+	github.com/square/exit v1.1.0
 	k8s.io/api v0.31.0
 	k8s.io/apimachinery v0.31.0 // indirect
 	k8s.io/client-go v0.31.0
