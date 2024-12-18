@@ -123,58 +123,24 @@ func NewDRBDCluster(clusterName string, size int64, replicas int64) DRBDCluster 
 		Kind:       "DRBDCluster",
 		APIVersion: "v1alpha1",
 	}
-
 	objectMeta := metav1.ObjectMeta{
 		Name: clusterName,
 	}
 
 	attachmentRequested := []string{}
 
-	topologySpreadConstraints := []TopologySpreadConstraint{
-		{
-			MaxSkew:           1,
-			TopologyKey:       "zone",
-			WhenUnsatisfiable: "DoNotSchedule",
-		},
-	}
-
-	affinity := Affinity{
-		NodeAffinity: NodeAffinity{
-			RequiredDuringSchedulingIgnoredDuringExecution: NodeSelector{
-				NodeSelectorTerms: []NodeSelectorTerm{
-					{
-						MatchExpressions: []SelectorRequirement{
-							{
-								Key:      "kubernetes.io/e2e-az-name",
-								Operator: "In",
-								Values:   []string{"e2e-az1", "e2e-az2"},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
+	topologySpreadConstraints := []TopologySpreadConstraint{}
+	
+	affinity := Affinity{}
 
 	autoDiskful := AutoDiskful{
 		DelaySeconds: 30,
 	}
-
 	autoRecovery := AutoRecovery{
 		DelaySeconds: 60,
 	}
 
-	storagePoolSelector := []LabelSelector{
-		{
-			MatchExpressions: []SelectorRequirement{
-				{
-					Key:      parameterStoragePoolName,
-					Operator: "In",
-					Values:   []string{},
-				},
-			},
-		},
-	}
+	storagePoolSelector := []LabelSelector{}
 
 	spec := DRBDClusterSpec{
 		Replicas:                  replicas,
@@ -196,13 +162,7 @@ func NewDRBDCluster(clusterName string, size int64, replicas int64) DRBDCluster 
 	status := DRBDClusterStatus{
 		Size: size,
 		AttachmentCompleted: []string{},
-		Conditions: []metav1.Condition{
-			{
-				Type:   "Ready",
-				Status: "True",
-				Reason: "ClusterIsReady",
-			},
-		},
+		Conditions: []metav1.Condition{},
 	}
 
 	return DRBDCluster{

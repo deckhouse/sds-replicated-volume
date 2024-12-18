@@ -643,6 +643,7 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
 
+	d.log.Infof("DeleteVolume deleting DRBD cluster %s", req.VolumeId)
 	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err!= nil {
 		if kubeerr.IsNotFound(err) {
@@ -680,6 +681,7 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 
 	drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
 
+	d.log.Infof("ControllerPublishVolume updating DRBD cluster %s", req.VolumeId)
 	err = d.cl.Update(ctx, drbdCluster)
 	if err!= nil {
         return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
@@ -732,6 +734,7 @@ func (d Driver) ControllerUnpublishVolume(ctx context.Context, req *csi.Controll
         return nil, status.Errorf(codes.Internal, "ControllerUnpublishVolume failed to get DRBD cluster: %v", err)
     }
 
+	d.log.Infof("ControllerUnpublishVolume updating DRBD cluster %s", req.VolumeId)
 	nodeLen := len(drbdCluster.Spec.AttachmentRequested)
 	for i, node := range drbdCluster.Spec.AttachmentRequested {
 		if node == req.GetNodeId() {
@@ -1209,11 +1212,6 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
         return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to get DRBD cluster: %v", err)
     }
 
-	fmt.Println("================================================================")
-	fmt.Printf("Size before: %d\n", drbdCluster.Spec.Size)
-	fmt.Printf("Required size: %d\n", req.CapacityRange.GetRequiredBytes())
-	drbdCluster.Spec.Size += req.CapacityRange.GetRequiredBytes()
-	fmt.Printf("Size after: %d\n", drbdCluster.Spec.Size)
 
 	err = d.cl.Update(ctx, drbdCluster)
 	if err != nil {
@@ -1604,5 +1602,3 @@ func fsTypeForCapabilities(caps []*csi.VolumeCapability) (string, error) {
 
 	return fsType, nil
 }
-
-func awaitDRBDClusterResize(ctx context.Context) {}
