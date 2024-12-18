@@ -37,6 +37,9 @@ on:
       se:
         type: boolean
         description: SE
+      se-plus:
+        type: boolean
+        description: SE+
 
       tag:
         description: "Tag of the module, example v1.21.1"
@@ -136,4 +139,24 @@ jobs:
         run: |
           chmod +x .github/check_previous_channel_release.sh
           .github/check_previous_channel_release.sh $MODULES_MODULE_NAME se $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
+      - uses: deckhouse/modules-actions/deploy@v1
+
+  job-SE-plus:
+    name: Edition SE+
+    runs-on: [self-hosted, regular, selectel]
+    if: github.event.inputs.se-plus == 'true'
+    steps:
+      - run: echo "SE+"
+      - name: SET VAR
+        run: |
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se-plus/modules" >> "$GITHUB_ENV"
+      - name: ECHO VAR
+        run: |
+          echo $MODULES_MODULE_SOURCE
+      - uses: actions/checkout@v4
+      - uses: deckhouse/modules-actions/setup@v1
+      - name: Check previous release
+        run: |
+          chmod +x .github/check_previous_channel_release.sh
+          .github/check_previous_channel_release.sh $MODULES_MODULE_NAME se-plus $RELEASE_CHANNEL $MODULES_MODULE_TAG license-token $MODULES_READ_REGISTRY_PASSWORD
       - uses: deckhouse/modules-actions/deploy@v1
