@@ -684,7 +684,10 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{}
-	err = d.cl.Get(ctx, types.NamespacedName{Name: req.GetParameters()[ParameterCsiPvcName]}, pvc)
+	err = d.cl.Get(ctx, types.NamespacedName{
+			Name: req.GetParameters()[ParameterCsiPvcName],
+			Namespace: req.GetMutableParameters()[ParameterCsiPvcNamespace],
+		}, pvc)
 	if err!= nil {
         return nil, status.Errorf(codes.NotFound, "failed to find PVC: %v", err)
     }
