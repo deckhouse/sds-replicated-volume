@@ -28,41 +28,42 @@ description: "Использование и примеры работы sds-repl
 
 - Пример ресурса для классических LVM-томов (Thick):
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: data
-spec:
+  ```yaml
+  apiVersion: storage.deckhouse.io/v1alpha1
+  kind: ReplicatedStoragePool
+  metadata:
+    name: data
+  spec:
   type: LVM
-  lvmVolumeGroups:
+    lvmVolumeGroups:
     - name: lvg-1
     - name: lvg-2
-```
+  ```
 
 - Пример ресурса для Thin-томов LVM:
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStoragePool
-metadata:
-  name: thin-data
-spec:
-  type: LVMThin
-  lvmVolumeGroups:
-    - name: lvg-3
-      thinPoolName: thin-pool
-    - name: lvg-4
-      thinPoolName: thin-pool
-```
+  ```yaml
+  apiVersion: storage.deckhouse.io/v1alpha1
+  kind: ReplicatedStoragePool
+  metadata:
+    name: thin-data
+  spec:
+    type: LVMThin
+    lvmVolumeGroups:
+      - name: lvg-3
+        thinPoolName: thin-pool
+      - name: lvg-4
+        thinPoolName: thin-pool
+  ```
 
 Перед фактической работой с `LINSTOR` контроллер провалидирует предоставленную ему конфигурацию и в случае ошибки предоставит информацию о причинах неудачи.
 
 Невалидные `Storage Pool`'ы не будут созданы в `LINSTOR`.
 
 Для всех ресурсов `LVMVolumeGroup`, указанных в `spec` ресурса `ReplicatedStoragePool` должны быть соблюдены следующие правила:
- - Они должны быть на разных узлах. Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле.
- - Все узлы должны иметь тип отличный от `CloudEphemeral` (см. [Типы узлов](https://deckhouse.ru/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2))
+
+- Они должны быть на разных узлах. Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле.
+- Все узлы должны иметь тип отличный от `CloudEphemeral` (см. [Типы узлов](https://deckhouse.ru/products/kubernetes-platform/documentation/v1/modules/040-node-manager/#%D1%82%D0%B8%D0%BF%D1%8B-%D1%83%D0%B7%D0%BB%D0%BE%D0%B2))
 
 Информацию о ходе работы контроллера и ее результатах можно посмотреть в поле `status` созданного ресурса `ReplicatedStoragePool`.
 
@@ -92,12 +93,12 @@ spec:
 
 - Пример ресурса для создания `StorageClass` c использованием только локальных томов (запрещены подключения к данным по сети) и обеспечением высокой степени резервирования данных в кластере, состоящем из трех зон:
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
+  ```yaml
+  apiVersion: storage.deckhouse.io/v1alpha1
+  kind: ReplicatedStorageClass
+  metadata:
   name: haclass
-spec:
+  spec:
   storagePool: storage-pool-name
   volumeAccess: Local
   reclaimPolicy: Delete
@@ -106,23 +107,23 @@ spec:
   - zone-a
   - zone-b
   - zone-c
-```
+  ```
 
 Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
 
 - Пример ресурса для создания `StorageClass` c разрешенными подключениями к данным по сети и без резервирования в кластере, где отсутствуют зоны (например, подходит для тестовых окружений):
 
-```yaml
-apiVersion: storage.deckhouse.io/v1alpha1
-kind: ReplicatedStorageClass
-metadata:
-  name: testclass
-spec:
-  replication: None
-  storagePool: storage-pool-name
-  reclaimPolicy: Delete
-  topology: Ignored
-```
+  ```yaml
+  apiVersion: storage.deckhouse.io/v1alpha1
+  kind: ReplicatedStorageClass
+  metadata:
+    name: testclass
+  spec:
+    replication: None
+    storagePool: storage-pool-name
+    reclaimPolicy: Delete
+    topology: Ignored
+  ```
 
 - Больше примеров с различными сценариями использования и схемами [можно найти здесь](./layouts.html)
 
