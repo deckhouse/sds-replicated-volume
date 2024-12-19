@@ -774,7 +774,8 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 	drbdCluster := &srv.DRBDCluster{}
 	err = d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to get DRBD cluster: %v", err)
+		d.log.Infof("ControllerPublishVolume failed to get DRBD cluster: %v", err)
+		return &csi.ControllerPublishVolumeResponse{}, nil
 	}
 
 	nodeExists := false
