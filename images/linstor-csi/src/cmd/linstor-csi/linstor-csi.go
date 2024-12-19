@@ -36,7 +36,8 @@ import (
 	kubutils "github.com/piraeusdatastore/linstor-csi/pkg/kubeutils"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
-	v1 "k8s.io/api/core/v1"
+	storageV1 "k8s.io/api/storage/v1"
+	corev1 "k8s.io/api/core/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -44,7 +45,8 @@ import (
 func main() {
 	var resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		srv.AddToScheme,
-		v1.AddToScheme,
+		storageV1.AddToScheme,
+		corev1.AddToScheme,
 	}
 
 	var (
@@ -171,6 +173,7 @@ func main() {
 		driver.TopologyPrefix(*propNs),
 		driver.ConfigureKubernetesIfAvailable(),
 		driver.Kubeclient(cl),
+		driver.LinstorHighClient(c),
 	)
 	if err != nil {
 		log.Fatal(err)
