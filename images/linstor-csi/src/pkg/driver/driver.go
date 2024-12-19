@@ -775,25 +775,24 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 	err = d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
 	if err != nil {
 		d.log.Infof("ControllerPublishVolume failed to get DRBD cluster: %v", err)
-		return &csi.ControllerPublishVolumeResponse{}, nil
 	}
 
-	nodeExists := false
-	for _, node := range drbdCluster.Spec.AttachmentRequested {
-		if node == req.GetNodeId() {
-			nodeExists = true
-		}
-	}
+	// nodeExists := false
+	// for _, node := range drbdCluster.Spec.AttachmentRequested {
+	// 	if node == req.GetNodeId() {
+	// 		nodeExists = true
+	// 	}
+	// }
 
-	if !nodeExists {
-		drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
+	// if !nodeExists {
+	// 	drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
 
-		d.log.Infof("ControllerPublishVolume updating DRBD cluster %s", req.VolumeId)
-		err = d.cl.Update(ctx, drbdCluster)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
-		}
-	}
+	// 	d.log.Infof("ControllerPublishVolume updating DRBD cluster %s", req.VolumeId)
+	// 	err = d.cl.Update(ctx, drbdCluster)
+	// 	if err != nil {
+	// 		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+	// 	}
+	// }
 
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
@@ -806,33 +805,33 @@ func (d Driver) ControllerUnpublishVolume(ctx context.Context, req *csi.Controll
 	if req.GetNodeId() == "" {
 		return nil, missingAttr("ControllerUnpublishVolume", req.GetNodeId(), "NodeId")
 	}
-
-	drbdCluster := &srv.DRBDCluster{}
-	err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "ControllerUnpublishVolume failed to get a DRBD cluster: %v", err)
-	}
-
-	d.log.Info("ControllerUnpublishVolume removing node ID from Spec.AttachmentRequested of a DRBD cluster")
-	nodeLen := len(drbdCluster.Spec.AttachmentRequested)
-	for i, node := range drbdCluster.Spec.AttachmentRequested {
-		if node == req.GetNodeId() {
-			// If node is found, it is replaced with the last element of the slice. Slice length is then trimmed to exclude the last element
-			drbdCluster.Spec.AttachmentRequested[i] = drbdCluster.Spec.AttachmentRequested[len(drbdCluster.Spec.AttachmentRequested)-1]
-			drbdCluster.Spec.AttachmentRequested = drbdCluster.Spec.AttachmentRequested[:nodeLen-1]
-			break
-		}
-	}
-
-	err = d.cl.Update(ctx, drbdCluster)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
-	}
-
+	
 	if err := d.Assignments.Detach(ctx, req.GetVolumeId(), req.GetNodeId()); err != nil {
 		return nil, status.Errorf(codes.Internal,
 			"ControllerUnpublishVolume failed for %s: %v", req.GetVolumeId(), err)
 	}
+
+	drbdCluster := &srv.DRBDCluster{}
+	err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
+	if err != nil {
+		fmt.Printf("ControllerUnpublishVolume failed to get a DRBD cluster: %s", err.Error())
+	}
+
+	// d.log.Info("ControllerUnpublishVolume removing node ID from Spec.AttachmentRequested of a DRBD cluster")
+	// nodeLen := len(drbdCluster.Spec.AttachmentRequested)
+	// for i, node := range drbdCluster.Spec.AttachmentRequested {
+	// 	if node == req.GetNodeId() {
+	// 		// If node is found, it is replaced with the last element of the slice. Slice length is then trimmed to exclude the last element
+	// 		drbdCluster.Spec.AttachmentRequested[i] = drbdCluster.Spec.AttachmentRequested[len(drbdCluster.Spec.AttachmentRequested)-1]
+	// 		drbdCluster.Spec.AttachmentRequested = drbdCluster.Spec.AttachmentRequested[:nodeLen-1]
+	// 		break
+	// 	}
+	// }
+
+	// err := d.cl.Update(ctx, drbdCluster)
+	// if err != nil {
+	// 	return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+	// }
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
 }
