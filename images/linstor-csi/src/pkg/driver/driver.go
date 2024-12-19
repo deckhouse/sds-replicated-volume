@@ -684,7 +684,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	}
 
 	pvc := &corev1.PersistentVolumeClaim{}
-	err = d.cl.Get(ctx, types.NamespacedName{
+	err = d.cl.Get(ctx, kcl.ObjectKey{
 			Name: req.GetParameters()[ParameterCsiPvcName],
 			Namespace: req.GetMutableParameters()[ParameterCsiPvcNamespace],
 		}, pvc)
