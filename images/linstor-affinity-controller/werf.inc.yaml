@@ -1,0 +1,38 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
+
+git:
+  - url: https://github.com/piraeusdatastore/linstor-affinity-controller
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    tag: v{{ $.Versions.LINSTOR_AFFINITY_CONTROLLER }}
+    stageDependencies:
+      setup:
+        - "**/*"
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-affinity-controller
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ $.Versions.LINSTOR_AFFINITY_CONTROLLER }}"
+    - mv {{ $.ImageName }} /
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-affinity-controller: {{ $.Versions.LINSTOR_AFFINITY_CONTROLLER }}

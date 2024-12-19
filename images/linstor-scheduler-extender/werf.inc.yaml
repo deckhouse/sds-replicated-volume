@@ -1,0 +1,67 @@
+{{- $_ := set . "BASE_GOLANG_BULLSEYE"  "registry.deckhouse.io/base_images/golang:1.23.1-bullseye@sha256:a24507d1a36fce86431198a979435dadb187e8d0ce0b5c181f46d6788d84a40f" }}
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG_BULLSEYE }}
+final: false
+
+git:
+  - url: https://github.com/piraeusdatastore/linstor-scheduler-extender
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    tag: v{{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - url: https://github.com/libopenstorage/stork
+    add: /
+    to: /usr/local/go/stork
+    tag: v{{ $.Versions.LINSTOR_SCHEDULER_STORK }}
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  beforeSetup:
+    - cd /usr/local/go/stork
+    - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
+    - git apply /patches/stork/*.patch
+
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}
+    - git apply /patches/*.patch
+    - go mod edit -replace=github.com/libopenstorage/stork=/usr/local/go/stork
+    - go mod tidy
+    - cd cmd/linstor-scheduler-extender
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-scheduler-extender/pkg/consts.Version=v{{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}"
+    - mv {{ $.ImageName }} /
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-scheduler-extender: {{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}

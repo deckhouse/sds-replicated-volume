@@ -18,6 +18,8 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ReplicatedStoragePool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -25,22 +27,27 @@ type ReplicatedStoragePool struct {
 	Status            ReplicatedStoragePoolStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
 type ReplicatedStoragePoolSpec struct {
 	Type            string                                 `json:"type"`
 	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
 }
 
+// +k8s:deepcopy-gen=true
 type ReplicatedStoragePoolLVMVolumeGroups struct {
 	Name         string `json:"name"`
 	ThinPoolName string `json:"thinPoolName"`
 }
 
+// +k8s:deepcopy-gen=true
 type ReplicatedStoragePoolStatus struct {
 	Phase  string `json:"phase"`
 	Reason string `json:"reason"`
 }
 
 // ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ReplicatedStoragePoolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`

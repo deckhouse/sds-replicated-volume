@@ -1,0 +1,66 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/saas
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    commit: {{ $.Versions.SPAAS }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}
+    - git apply /patches/*.patch
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+# we must base on ALTLinux because SPAAS generates kernel patches for DRBD. So we need same kernel as in DRBD image and some build tools
+from: {{ $.Root.BASE_ALT_P11 }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+  - image: drbd-artifact
+    add: /drbd/drbd-{{ $.Versions.DRBD }}.tar.gz
+    to: /var/cache/spaas/tarballs
+    before: setup
+
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install build-essential gcc glibc make coccinelle python3-dev vim-console \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
+      && update-alternatives --install /usr/bin/python python /usr/bin/python3 100 \
+      && ln -sf /proc/mounts /etc/mtab \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    spaas: {{ $.Versions.SPAAS }}
