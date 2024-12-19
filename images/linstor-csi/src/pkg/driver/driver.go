@@ -674,6 +674,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	rsc := &srv.ReplicatedStorageClass{}
 	err = d.cl.Get(ctx, types.NamespacedName{Name: req.GetParameters()[ParameterCsiRspName]}, rsc)
 	if err != nil {
+		fmt.Println("================================")
 		return nil, status.Errorf(codes.NotFound, "failed to find replicated storage class: %s", err.Error())
 	}
 	if rsc.Spec.VolumeAccess == "EventuallyLocal" {
