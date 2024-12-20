@@ -66,14 +66,3 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
-  storageNetworkCIDRs:
-    description: Storage network CIDR blocks. Use only if your cluster's nodes haves dedicated network interface attached.
-    type: array
-    items:
-      type: string
-      pattern: '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$'
-    default: []
-    example: ["10.1.1.0/24"]
-    x-examples:
-    - []
-    - ["1.2.3.0/24", "3.2.1.0/16"]
