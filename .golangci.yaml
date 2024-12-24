@@ -16,8 +16,14 @@ linters-settings:
       - prefix(sds-replicated-volume-controller)
       - prefix(webhooks)
   errcheck:
-    ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
-
+    exclude-functions:
+      - fmt.Println
+      - fmt.Printf
+      - fmt.Errorf
+      - io.Copy
+      - io.Read
+      - io.Write
+      - io.Close
 linters:
   disable-all: true
   enable:
