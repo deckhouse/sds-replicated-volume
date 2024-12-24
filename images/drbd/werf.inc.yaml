@@ -1,31 +1,57 @@
-{{- $_ := set . "BASE_SCRATCH"    "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc" }}
-{{- $_ := set . "BASE_ALPINE_DEV" "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
-{{- $version := "9.2.10" }}
-
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.BASE_ALPINE_DEV }}
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
 
 git:
   - url: https://github.com/LINBIT/drbd/
     add: /
     to: /drbd
-    tag: drbd-{{ $version }}
+    tag: drbd-{{ $.Versions.DRBD }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
   - add: /images/{{ $.ImageName }}/scripts
     to: /scripts
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
 shell:
-  setup:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust \
+      && apt-get clean \
+      && rm -rf /var/lib/apt/lists/*
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+  beforeSetup:
     - mv /scripts/* /
     - chmod +x /install
     - chmod +x /uninstall
-    - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
+  setup:
+    # clone drbd git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd" }}
+    {{- $_ := set $ctx "branch" (printf "drbd-%s" $.Versions.DRBD) }}
+    {{- $_ := set $ctx "folder" "/drbd" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    # - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
+    - git commit -am "Auto-commit" && git tag -f drbd-{{ $.Versions.DRBD }}
+    # tarball required by spaas image
+    - make tarball VERSION="{{ $.Versions.DRBD }}"
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_SCRATCH }}
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
-  - artifact: {{ $.ImageName }}-artifact
+  - image: {{ $.ImageName }}-artifact
     add: /
     to: /
     includePaths:
@@ -37,4 +63,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    drbd: {{ $version }}
+    drbd: {{ $.Versions.DRBD }}

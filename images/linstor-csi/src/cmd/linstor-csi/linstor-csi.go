@@ -30,13 +30,25 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
+	kubutils "github.com/piraeusdatastore/linstor-csi/pkg/kubeutils"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	storageV1 "k8s.io/api/storage/v1"
+	corev1 "k8s.io/api/core/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 func main() {
+	var resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+		srv.AddToScheme,
+		storageV1.AddToScheme,
+		corev1.AddToScheme,
+	}
+
 	var (
 		lsEndpoint            = flag.String("linstor-endpoint", "", "Controller API endpoint for LINSTOR")
 		lsSkipTLSVerification = flag.Bool("linstor-skip-tls-verification", false, "If true, do not verify tls")
@@ -126,6 +138,26 @@ func main() {
 		log.Fatal(err)
 	}
 
+	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	scheme := apiruntime.NewScheme()
+	for _, f := range resourcesSchemeFuncs {
+		err := f(scheme)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	cl, err := kubecl.New(kConfig, kubecl.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		log.Fatal(err)
+    }	
+
 	drv, err := driver.NewDriver(
 		driver.Assignments(linstorClient),
 		driver.Endpoint(*csiEndpoint),
@@ -140,6 +172,8 @@ func main() {
 		driver.NodeInformer(linstorClient),
 		driver.TopologyPrefix(*propNs),
 		driver.ConfigureKubernetesIfAvailable(),
+		driver.Kubeclient(cl),
+		driver.LinstorHighClient(c),
 	)
 	if err != nil {
 		log.Fatal(err)

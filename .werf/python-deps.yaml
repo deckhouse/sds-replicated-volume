@@ -2,12 +2,15 @@
 ---
 image: python-dependencies
 from: registry.deckhouse.io/base_images/alpine:3.16.3
-fromCacheVersion: 20240901190343
+
 git:
   - add: /
     to: /
     includePaths:
       - lib/python
+    stageDependencies:
+      setup:
+        - lib/python/requirements.txt
 shell:
   beforeInstall:
     - apk add --no-cache python3 py3-pip

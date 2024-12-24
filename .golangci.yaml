@@ -7,8 +7,6 @@ issues:
     - "should not use dot imports"
     - "don't use an underscore in package name"
     - "exported: .*"
-  exclude-dirs:
-    - images/linstor-csi/src # TODO this is vendored code, will be replaced soon
 
 linters-settings:
   gci:
