@@ -1441,7 +1441,6 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 		"size": info.SizeBytes,
 	}).Debug("creating new volume")
 
-	fmt.Printf("VolumeContentSource: %+v\n", req.GetVolumeContentSource())
 	// We're cloning from a volume or snapshot.
 	if req.GetVolumeContentSource() != nil {
 		switch {
