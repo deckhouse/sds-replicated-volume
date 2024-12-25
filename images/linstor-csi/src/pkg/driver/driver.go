@@ -628,7 +628,6 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	// Show
 	vol, err := d.createNewVolume(
 		ctx,
 		&volume.Info{
@@ -724,7 +723,6 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 		return nil, status.Errorf(codes.Internal, "failed to delete volume: %v", err)
 	}
 
-	// Show
 	err = d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err != nil {
 		if kubeerr.IsNotFound(err) {
@@ -778,7 +776,6 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 			"ControllerPublishVolume failed for %s: %v", req.GetVolumeId(), err)
 	}
 
-	// Show
 	drbdCluster := &srv.DRBDCluster{}
 	err = d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
 	if err != nil {
@@ -1314,7 +1311,6 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
 
 	isBlockMode := req.GetVolumeCapability().GetBlock() != nil
 
-	// Show
 	drbdCluster := &srv.DRBDCluster{}
 	err = d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster)
 	if err != nil {
