@@ -21,6 +21,7 @@ jobs:
           go-version: '1.22'
 
       - name: Run Go tests
+        # TODO remove < if [ "$dir" == "images/linstor-csi/src" ]; then > as soon as migration is done
         run: |
           basedir=$(pwd)
           failed='false'
