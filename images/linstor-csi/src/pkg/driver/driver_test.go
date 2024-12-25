@@ -11,11 +11,10 @@ import (
 
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/kubernetes-csi/csi-test/v5/pkg/sanity"
-	"github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 )
 
 var (

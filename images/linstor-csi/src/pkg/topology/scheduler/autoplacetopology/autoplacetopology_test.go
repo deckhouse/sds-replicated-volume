@@ -7,17 +7,16 @@ import (
 	linstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/client/mocks"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology/scheduler/autoplacetopology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var (

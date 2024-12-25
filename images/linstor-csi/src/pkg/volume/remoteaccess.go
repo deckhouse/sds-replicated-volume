@@ -5,9 +5,8 @@ import (
 	"sort"
 	"strconv"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
+	"gopkg.in/yaml.v3"
 )
 
 // RemoteAccessPolicy represents a policy for allowing diskless access.

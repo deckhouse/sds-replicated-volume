@@ -27,17 +27,16 @@ import (
 
 	linstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/time/rate"
-
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
 	kubutils "github.com/piraeusdatastore/linstor-csi/pkg/kubeutils"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
-	storageV1 "k8s.io/api/storage/v1"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
+	storageV1 "k8s.io/api/storage/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -156,7 +155,7 @@ func main() {
 	})
 	if err != nil {
 		log.Fatal(err)
-    }	
+	}
 
 	drv, err := driver.NewDriver(
 		driver.Assignments(linstorClient),

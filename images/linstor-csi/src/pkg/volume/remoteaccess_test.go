@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRemoteAccessPolicy(t *testing.T) {

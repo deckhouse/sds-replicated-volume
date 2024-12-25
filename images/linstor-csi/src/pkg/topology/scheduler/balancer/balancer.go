@@ -7,16 +7,15 @@ import (
 	golinstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
+	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
+	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
+	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-
-	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
-	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
-	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
-	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
 )
 
 type GetK8sClient func() (kubernetes.Interface, error)
@@ -153,7 +152,7 @@ func getNodesUtil(ctx context.Context, nClient NodeLinstorClient, selectedNodes 
 						TotalCapacity: total,
 						FreeCapacity:  free,
 						StoragePools: []*StoragePool{
-							&StoragePool{
+							{
 								Name:          spName,
 								TotalCapacity: total,
 								FreeCapacity:  free,
@@ -161,19 +160,18 @@ func getNodesUtil(ctx context.Context, nClient NodeLinstorClient, selectedNodes 
 						},
 					}
 				}
-
 			} else {
 				nodes[nodeName] = &Node{
 					Name:          nodeName,
 					TotalCapacity: total,
 					FreeCapacity:  free,
 					PrefNics: map[string]*PrefNic{
-						nicName: &PrefNic{
+						nicName: {
 							Name:          nicName,
 							TotalCapacity: total,
 							FreeCapacity:  free,
 							StoragePools: []*StoragePool{
-								&StoragePool{
+								{
 									Name:          spName,
 									TotalCapacity: total,
 									FreeCapacity:  free,
@@ -325,7 +323,7 @@ func (b BalanceScheduler) Create(ctx context.Context, volId string, params *volu
 		return fmt.Errorf("placementPolicyBalance does not support choosing StoragePool, it should be picked automatically")
 	}
 
-	// TODO: There was a check once for remote volume access. Should be reintroduces, or preferrably, this whole
+	// TODO: There was a check once for remote volume access. Should be reintroduces, or preferably, this whole
 	// scheduler should be nuked from orbit.
 
 	// For now we do not support more than one Diskfull Resources so set remainingAssignments to 1

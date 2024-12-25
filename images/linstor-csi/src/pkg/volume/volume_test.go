@@ -6,10 +6,9 @@ import (
 	lc "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/LINBIT/golinstor/devicelayerkind"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewParameters(t *testing.T) {

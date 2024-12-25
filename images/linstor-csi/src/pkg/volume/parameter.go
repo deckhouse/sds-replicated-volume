@@ -10,11 +10,10 @@ import (
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/LINBIT/golinstor/devicelayerkind"
 	"github.com/pborman/uuid"
-	log "github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
 )
 
 //go:generate go run github.com/alvaroloes/enumer@v1.1.2 -type=paramKey

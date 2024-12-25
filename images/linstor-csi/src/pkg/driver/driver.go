@@ -36,7 +36,10 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
+	"github.com/piraeusdatastore/linstor-csi/pkg/client"
+	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	hlc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
+	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -50,10 +53,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	kcl "sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/piraeusdatastore/linstor-csi/pkg/client"
-	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
-	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
 )
 
 // Version is set via ldflags configued in the Makefile.

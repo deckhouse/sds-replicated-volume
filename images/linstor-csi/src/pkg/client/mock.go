@@ -26,9 +26,8 @@ import (
 	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"google.golang.org/protobuf/types/known/timestamppb"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type MockStorage struct {

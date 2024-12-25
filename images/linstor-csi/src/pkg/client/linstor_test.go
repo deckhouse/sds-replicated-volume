@@ -29,15 +29,14 @@ import (
 	lapiconsts "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/sirupsen/logrus"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/mock"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/client/mocks"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func TestAllocationSizeKiB(t *testing.T) {
