@@ -8,15 +8,14 @@ import (
 	linstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/sirupsen/logrus"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
 	"github.com/piraeusdatastore/linstor-csi/pkg/slice"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology/scheduler"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/sirupsen/logrus"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // Scheduler places volumes according to both CSI Topology and user-provided autoplace parameters.

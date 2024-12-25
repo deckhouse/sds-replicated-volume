@@ -1,0 +1,48 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/linstor-wait-until
+    add: /
+    to: /usr/local/go/{{ $.ImageName }}
+    tag: v{{ $.Versions.LINSTOR_WAIT_UNTIL }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      beforeSetup:
+        - "**/*"
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/{{ $.ImageName }}
+    - git apply /patches/*.patch
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w"
+    - mv {{ $.ImageName }} /
+    - chmod +x /{{ $.ImageName }}
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-wait-until: {{ $.Versions.LINSTOR_WAIT_UNTIL }}

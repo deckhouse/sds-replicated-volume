@@ -3,9 +3,8 @@ package slice_test
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/slice"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestContainsString(t *testing.T) {

@@ -10,12 +10,17 @@ import (
 	"testing"
 
 	lapi "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/kubernetes-csi/csi-test/v5/pkg/sanity"
+	"github.com/piraeusdatastore/linstor-csi/pkg/client"
+	kubutils "github.com/piraeusdatastore/linstor-csi/pkg/kubeutils"
+	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
-
-	"github.com/piraeusdatastore/linstor-csi/pkg/client"
-	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
+	corev1 "k8s.io/api/core/v1"
+	storageV1 "k8s.io/api/storage/v1"
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -29,6 +34,12 @@ var (
 	rps                   = flag.Float64("sanity.linstor-api-requests-per-second", 0, "Maximum allowed number of LINSTOR API requests per second. Default: Unlimited")
 	burst                 = flag.Int("sanity.linstor-api-burst", 1, "Maximum number of API requests allowed before being limited by requests-per-second. Default: 1 (no bursting)")
 )
+
+var resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
+	srv.AddToScheme,
+	storageV1.AddToScheme,
+	corev1.AddToScheme,
+}
 
 func TestDriver(t *testing.T) {
 	logFile, err := ioutil.TempFile("", "csi-test-logs")
@@ -84,11 +95,33 @@ func TestDriver(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		kConfig, err := kubutils.KubernetesDefaultConfigCreate()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		scheme := apiruntime.NewScheme()
+		for _, f := range resourcesSchemeFuncs {
+			err := f(scheme)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		cl, err := kubecl.New(kConfig, kubecl.Options{
+			Scheme: scheme,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		// Clojures that return functions that set linstor backends on the driver.
 		_ = Storage(realStorageBackend)(driver)
 		_ = Assignments(realStorageBackend)(driver)
 		_ = Snapshots(realStorageBackend)(driver)
 		_ = Expander(realStorageBackend)(driver)
+		_ = LinstorHighClient(c)(driver)
+		_ = Kubeclient(cl)(driver)
 
 		if *mountForReal {
 			_ = Mounter(realStorageBackend)(driver)

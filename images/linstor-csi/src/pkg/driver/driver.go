@@ -34,24 +34,37 @@ import (
 
 	lc "github.com/LINBIT/golinstor"
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
+	"github.com/piraeusdatastore/linstor-csi/pkg/client"
+	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
+	hlc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
+	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	corev1 "k8s.io/api/core/v1"
+	kubeerr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-
-	"github.com/piraeusdatastore/linstor-csi/pkg/client"
-	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
-	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	kcl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Version is set via ldflags configued in the Makefile.
 var Version = "UNKNOWN"
+
+const (
+	ParameterResourceDefQuorumPolicy = "DrbdOptions/Resource/quorum"
+	ParameterCsiPvcName              = "csi.storage.k8s.io/pvc/name"
+	ParameterCsiPvcNameSpace         = "csi.storage.k8s.io/pvc/namespace"
+	ParameterCsiRspName              = "replicated.csi.storage.deckhouse.io/storagePool"
+	K8sNameLabel                     = "kubernetes.io/metadata.name"
+)
 
 // Driver fullfils CSI controller, node, and indentity server interfaces.
 type Driver struct {
@@ -66,6 +79,8 @@ type Driver struct {
 	srv           *grpc.Server
 	log           *logrus.Entry
 	version       string
+	cl            kcl.Client
+	lincl         *hlc.HighLevelClient
 	// name distingushes the driver from other drivers and is used to mark
 	// volumes so that volumes provisioned by another driver are not interfered with.
 	name string
@@ -223,6 +238,13 @@ func LogFmt(fmt logrus.Formatter) func(*Driver) error {
 	}
 }
 
+func LinstorHighClient(cl *hlc.HighLevelClient) func(*Driver) error {
+	return func(d *Driver) error {
+		d.lincl = cl
+		return nil
+	}
+}
+
 // LogLevel sets the logging intensity. Debug additionally reports the function
 // from which the logger was called.
 func LogLevel(s string) func(*Driver) error {
@@ -253,6 +275,14 @@ func ConfigureKubernetesIfAvailable() func(*Driver) error {
 		d.kubeClient, err = dynamic.NewForConfig(cfg)
 
 		return err
+	}
+}
+
+// Kubeclient configures the driver with a provided Kubernetes client
+func Kubeclient(cl kcl.Client) func(*Driver) error {
+	return func(d *Driver) error {
+		d.cl = cl
+		return nil
 	}
 }
 
@@ -518,7 +548,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 	var pvcNamespace, pvcName string
 	if params.UsePvcName {
 		pvcName = req.GetParameters()[ParameterCsiPvcName]
-		pvcNamespace = req.GetParameters()[ParameterCsiPvcNamespace]
+		pvcNamespace = req.GetParameters()[ParameterCsiPvcNameSpace]
 	}
 
 	volId := d.Storage.CompatibleVolumeId(req.GetName(), pvcNamespace, pvcName)
@@ -596,7 +626,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		}, nil
 	}
 
-	return d.createNewVolume(
+	vol, err := d.createNewVolume(
 		ctx,
 		&volume.Info{
 			ID:            volId,
@@ -608,6 +638,75 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 		&params,
 		req,
 	)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create volume: %v", err)
+	}
+
+	pvc := &corev1.PersistentVolumeClaim{}
+	if err := d.cl.Get(ctx, kcl.ObjectKey{
+		Name:      req.GetParameters()[ParameterCsiPvcName],
+		Namespace: req.GetParameters()[ParameterCsiPvcNameSpace],
+	}, pvc); err != nil {
+		d.log.Errorf("CreateVolume failed to find persistent volume claim: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "CreateVolume failed to find persistent volume claim %v", err)
+	}
+
+	storageClassName := ""
+	if pvc.Spec.StorageClassName != nil {
+		storageClassName = *pvc.Spec.StorageClassName
+	}
+	rsc := &srv.ReplicatedStorageClass{}
+	if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
+		d.log.Errorf("CreateVolume failed to find replicated storage class: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "CreateVolume failed to find replicated storage class: %v", err)
+	}
+
+	autoDiskfulDelaySec := 0
+	if rsc.Spec.VolumeAccess == "EventuallyLocal" {
+		autoDiskfulDelaySec = 30 * 60
+	}
+
+	rd, err := d.lincl.ResourceDefinitions.Get(ctx, req.GetName())
+	if err != nil {
+		d.log.Errorf("CreateVolume failed to find resource definition: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "CreateVolume failed to find resource definition: %v", err)
+	}
+
+	drbdcluster := srv.DRBDCluster{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: req.GetName(),
+		},
+		Spec: srv.DRBDClusterSpec{
+			QuorumPolicy: rd.Props[ParameterResourceDefQuorumPolicy],
+			Size:         req.GetCapacityRange().GetRequiredBytes(),
+			Replicas:     params.PlacementCount,
+			SharedSecret: rd.LayerData[0].Data.Secret,
+			Port:         rd.LayerData[0].Data.Port,
+			AutoDiskful: srv.AutoDiskful{
+				DelaySeconds: autoDiskfulDelaySec,
+			},
+			StoragePoolSelector: []metav1.LabelSelector{
+				{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      K8sNameLabel,
+							Operator: "In",
+							Values: []string{
+								req.GetParameters()[ParameterCsiRspName],
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	if err := d.cl.Create(ctx, &drbdcluster); err != nil {
+		d.log.Infof("CreateVolume failed to create a DRBD cluster: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "CreateVolume failed to create a DRBD cluster: %v", err)
+	}
+
+	return vol, nil
 }
 
 // DeleteVolume https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#deletevolume
@@ -615,8 +714,17 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 	if req.GetVolumeId() == "" {
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
+	
+	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
+	if err != nil {
+		if kubeerr.IsNotFound(err) {
+			d.log.Infof("DeleteVolume failed to find DRBD cluster %s", req.VolumeId)
+		} else {
+			return nil, status.Errorf(codes.Internal, "DeleteVolume failed to delete DRBD cluster: %v", err)
+		}
+	}
 
-	err := d.Storage.Delete(ctx, req.GetVolumeId())
+	err = d.Storage.Delete(ctx, req.GetVolumeId())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to delete volume: %v", err)
 	}
@@ -665,6 +773,29 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 			"ControllerPublishVolume failed for %s: %v", req.GetVolumeId(), err)
 	}
 
+	drbdCluster := &srv.DRBDCluster{}
+	if err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster); err != nil {
+		d.log.Infof("ControllerPublishVolume failed to get DRBD cluster: %v", err)
+		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to get DRBD cluster: %v", err)
+	}
+
+	nodeExists := false
+	for _, node := range drbdCluster.Spec.AttachmentRequested {
+		if node == req.GetNodeId() {
+			nodeExists = true
+			break
+		}
+	}
+
+	if !nodeExists {
+		drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
+
+		if err := d.cl.Update(ctx, drbdCluster); err != nil {
+			d.log.Infof("ControllerPublishVolume failed to update DRBD cluster: %v", err)
+			return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+		}
+	}
+
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
 
@@ -680,6 +811,28 @@ func (d Driver) ControllerUnpublishVolume(ctx context.Context, req *csi.Controll
 	if err := d.Assignments.Detach(ctx, req.GetVolumeId(), req.GetNodeId()); err != nil {
 		return nil, status.Errorf(codes.Internal,
 			"ControllerUnpublishVolume failed for %s: %v", req.GetVolumeId(), err)
+	}
+
+	drbdCluster := &srv.DRBDCluster{}
+	if err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster); err != nil {
+		d.log.Infof("ControllerUnpublishVolume failed to get a DRBD cluster: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "ControllerUnpublishVolume failed to get a DRBD cluster: %v", err)
+	}
+
+	nodeLen := len(drbdCluster.Spec.AttachmentRequested)
+	for i, node := range drbdCluster.Spec.AttachmentRequested {
+		if node == req.GetNodeId() {
+			// If node is found, it is replaced with the last element of the slice. Slice length is then trimmed to exclude the duplicate
+			// Note that it works correctly only if the slice contains no duplicates
+			drbdCluster.Spec.AttachmentRequested[i] = drbdCluster.Spec.AttachmentRequested[nodeLen-1]
+			drbdCluster.Spec.AttachmentRequested = drbdCluster.Spec.AttachmentRequested[:nodeLen-1]
+			break
+		}
+	}
+
+	if err := d.cl.Update(ctx, drbdCluster); err != nil {
+		d.log.Infof("ControllerUnpublishVolume failed to update DRBD cluster: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
 	}
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil
@@ -1153,6 +1306,19 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
 
 	isBlockMode := req.GetVolumeCapability().GetBlock() != nil
 
+	drbdCluster := &srv.DRBDCluster{}
+	if err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster); err != nil {
+		d.log.Errorf("ControllerExpandVolume failed to get a DRBD cluster: %s", err.Error())
+		return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to get a DRBD cluster: %v", err)
+	}
+
+	drbdCluster.Spec.Size += req.CapacityRange.GetRequiredBytes()
+
+	if err := d.cl.Update(ctx, drbdCluster); err != nil {
+		d.log.Errorf("ControllerExpandVolume failed to update a DRBD cluster: %s", err.Error())
+        return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update a DRBD cluster: %v", err)
+	}
+
 	return &csi.ControllerExpandVolumeResponse{
 		CapacityBytes: existingVolume.SizeBytes, NodeExpansionRequired: !isBlockMode,
 	}, nil
@@ -1514,8 +1680,3 @@ func fsTypeForCapabilities(caps []*csi.VolumeCapability) (string, error) {
 
 	return fsType, nil
 }
-
-const (
-	ParameterCsiPvcName      = "csi.storage.k8s.io/pvc/name"
-	ParameterCsiPvcNamespace = "csi.storage.k8s.io/pvc/namespace"
-)

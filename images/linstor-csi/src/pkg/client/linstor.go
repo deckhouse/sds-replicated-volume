@@ -38,13 +38,6 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/haySwim/data"
 	"github.com/pborman/uuid"
-	"github.com/sirupsen/logrus"
-	"golang.org/x/exp/slices"
-	"golang.org/x/sys/unix"
-	"google.golang.org/protobuf/types/known/timestamppb"
-	"k8s.io/mount-utils"
-	utilexec "k8s.io/utils/exec"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
@@ -57,6 +50,12 @@ import (
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology/scheduler/followtopology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology/scheduler/manual"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
+	"golang.org/x/sys/unix"
+	"google.golang.org/protobuf/types/known/timestamppb"
+	"k8s.io/mount-utils"
+	utilexec "k8s.io/utils/exec"
 )
 
 // Linstor is a high-level client for use with CSI.

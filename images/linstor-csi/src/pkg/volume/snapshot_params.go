@@ -5,9 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
+	log "github.com/sirupsen/logrus"
 )
 
 //go:generate go run github.com/alvaroloes/enumer@v1.1.2 -type=SnapshotType -trimprefix=SnapshotType
