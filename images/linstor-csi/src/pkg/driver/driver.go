@@ -717,19 +717,19 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 	if req.GetVolumeId() == "" {
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
-
-	err := d.Storage.Delete(ctx, req.GetVolumeId())
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to delete volume: %v", err)
-	}
-
-	err = d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
+	
+	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err != nil {
 		if kubeerr.IsNotFound(err) {
 			d.log.Infof("DeleteVolume failed to find DRBD cluster %s", req.VolumeId)
 		} else {
 			return nil, status.Errorf(codes.Internal, "DeleteVolume failed to delete DRBD cluster: %v", err)
 		}
+	}
+
+	err = d.Storage.Delete(ctx, req.GetVolumeId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete volume: %v", err)
 	}
 
 	return &csi.DeleteVolumeResponse{}, nil
