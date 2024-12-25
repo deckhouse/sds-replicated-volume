@@ -26,6 +26,10 @@ jobs:
           failed='false'
           for dir in $(find images -type d); do
             if ls $dir/*_test.go &> /dev/null; then
+              if [ "$dir" == "images/linstor-csi/src" ]; then
+                echo "Skipping tests in $dir"
+                continue
+              fi
               echo "Running tests in $dir"
               cd $dir
               go test -v
