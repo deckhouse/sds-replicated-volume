@@ -1,2 +1,3 @@
+name: sds-replicated-volume
 weight: 915
 description: "SDS Replicated Volume module"

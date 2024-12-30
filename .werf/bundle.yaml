@@ -28,4 +28,4 @@ git:
   - module.yaml
   - openapi
   - templates
-  - Chart.yaml
+  - module.yaml
