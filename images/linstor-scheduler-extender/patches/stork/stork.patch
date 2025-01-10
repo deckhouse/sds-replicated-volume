@@ -1,5 +1,5 @@
 diff --git a/pkg/extender/extender.go b/pkg/extender/extender.go
-index 73c8c307a..52c06618c 100644
+index 73c8c307a..531718a0c 100644
 --- a/pkg/extender/extender.go
 +++ b/pkg/extender/extender.go
 @@ -3,14 +3,18 @@ package extender
@@ -15,7 +15,7 @@ index 73c8c307a..52c06618c 100644
  	"strings"
  	"sync"
  	"time"
-
+ 
  	"github.com/libopenstorage/stork/drivers/volume"
 +	storkcache "github.com/libopenstorage/stork/pkg/cache"
  	storklog "github.com/libopenstorage/stork/pkg/log"
@@ -27,21 +27,27 @@ index 73c8c307a..52c06618c 100644
  	schedulerapi "k8s.io/kube-scheduler/extender/v1"
 +	"sigs.k8s.io/controller-runtime/pkg/manager"
  )
-
+ 
  const (
-@@ -77,6 +82,12 @@ var (
+@@ -77,9 +82,15 @@ var (
  type Extender struct {
  	Recorder record.EventRecorder
  	Driver   volume.Driver
+-	server   *http.Server
+-	lock     sync.Mutex
+-	started  bool
 +	// block added by flant.com
-+	CertFile string `json:"cert-file"`
-+	KeyFile  string `json:"key-file"`
++	CertFile string    `json:"cert-file"`
++	KeyFile  string    `json:"key-file"`
 +	LogLevel log.Level `json:"log-level" default:"DebugLevel"`
 +	Manager  *manager.Manager
 +	// end of flant.com block
- 	server   *http.Server
- 	lock     sync.Mutex
- 	started  bool
++	server  *http.Server
++	lock    sync.Mutex
++	started bool
+ }
+ 
+ // Start Starts the extender
 @@ -90,13 +101,53 @@ func (e *Extender) Start() error {
  	if e.started {
  		return fmt.Errorf("Extender has already been started")
@@ -95,11 +101,11 @@ index 73c8c307a..52c06618c 100644
  		}
 +		// end of flant.com block
  	}()
-
+ 
  	prometheus.MustRegister(HyperConvergedPodsCounter)
 @@ -149,6 +200,16 @@ func (e *Extender) getHostname(node *v1.Node) string {
  }
-
+ 
  func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request) {
 +	// block added by flant.com
 +	payload, err := httputil.DumpRequest(req, true)
@@ -117,7 +123,7 @@ index 73c8c307a..52c06618c 100644
 @@ -164,6 +225,14 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		return
  	}
-
+ 
 +	// block added by flant.com
 +	if err = fillNodesByNames(&args); err != nil {
 +		log.Errorf("[filter] Cannot fill nodes: %s", err.Error())
@@ -129,7 +135,7 @@ index 73c8c307a..52c06618c 100644
  	pod := args.Pod
  	if pod == nil {
  		msg := "Empty pod received in filter request"
-@@ -176,9 +245,20 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -176,9 +245,24 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		if vol.PersistentVolumeClaim == nil {
  			continue
  		}
@@ -141,10 +147,14 @@ index 73c8c307a..52c06618c 100644
 +
 +		if storkcache.Instance() != nil {
 +			pvc, err = storkcache.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
-+			msg = fmt.Sprintf("Unable to find PVC %s in informer cache, err: %s", vol.Name, err.Error())
++			if err != nil {
++				msg = fmt.Sprintf("Unable to find PVC %s in informer cache, err: %s", vol.Name, err.Error())
++			}
 +		} else {
 +			pvc, err = core.Instance().GetPersistentVolumeClaim(vol.PersistentVolumeClaim.ClaimName, pod.Namespace)
-+			msg = fmt.Sprintf("Unable to find PVC %s, err: %s", vol.Name, err.Error())
++			if err != nil {
++				msg = fmt.Sprintf("Unable to find PVC %s, err: %s", vol.Name, err.Error())
++			}
 +		}
 +
  		if err != nil {
@@ -152,19 +162,19 @@ index 73c8c307a..52c06618c 100644
  			storklog.PodLog(pod).Warnf(msg)
  			e.Recorder.Event(pod, v1.EventTypeWarning, schedulingFailureEventReason, msg)
  			http.Error(w, msg, http.StatusBadRequest)
-@@ -192,7 +272,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
+@@ -192,7 +276,7 @@ func (e *Extender) processFilterRequest(w http.ResponseWriter, req *http.Request
  		}
  	}
-
+ 
 -	storklog.PodLog(pod).Debugf("Nodes in filter request:")
 +	storklog.PodLog(pod).Debugf("[filter] Nodes in filter request")
  	for _, node := range args.Nodes.Items {
  		storklog.PodLog(pod).Debugf("%v %+v", node.Name, node.Status.Addresses)
  	}
-@@ -385,9 +465,27 @@ func (e *Extender) collectExtenderMetrics() error {
+@@ -385,9 +469,27 @@ func (e *Extender) collectExtenderMetrics() error {
  		return nil
  	}
-
+ 
 -	if err := core.Instance().WatchPods("", fn, metav1.ListOptions{}); err != nil {
 -		log.Errorf("failed to watch pods due to: %v", err)
 -		return err
@@ -192,9 +202,9 @@ index 73c8c307a..52c06618c 100644
  	}
  	return nil
  }
-@@ -461,6 +559,16 @@ type localityInfo struct {
+@@ -461,6 +563,16 @@ type localityInfo struct {
  }
-
+ 
  func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Request) {
 +	// block added by flant.com
 +	payload, err := httputil.DumpRequest(req, true)
@@ -209,10 +219,10 @@ index 73c8c307a..52c06618c 100644
  	decoder := json.NewDecoder(req.Body)
  	defer func() {
  		if err := req.Body.Close(); err != nil {
-@@ -476,6 +584,14 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+@@ -476,6 +588,14 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
  		return
  	}
-
+ 
 +	// block added by flant.com
 +	if err = fillNodesByNames(&args); err != nil {
 +		log.Errorf("[prioritize] Cannot fill nodes: %+v", err)
@@ -224,21 +234,21 @@ index 73c8c307a..52c06618c 100644
  	pod := args.Pod
  	storklog.PodLog(pod).Debugf("Nodes in prioritize request:")
  	for _, node := range args.Nodes.Items {
-@@ -495,7 +611,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
-
+@@ -495,7 +615,6 @@ func (e *Extender) processPrioritizeRequest(w http.ResponseWriter, req *http.Req
+ 
  	// Score all nodes the same if hyperconvergence is disabled
  	disableHyperconvergence := false
 -	var err error
  	if pod.Annotations != nil {
  		if value, ok := pod.Annotations[disableHyperconvergenceAnnotation]; ok {
  			if disableHyperconvergence, err = strconv.ParseBool(value); err != nil {
-@@ -632,3 +747,43 @@ sendResponse:
+@@ -632,3 +751,48 @@ sendResponse:
  		storklog.PodLog(pod).Errorf("Failed to encode response: %v", err)
  	}
  }
 +
 +// block added by flant.com
-+func fillNodesByNames(inputData *schedulerapi.ExtenderArgs) (error) {
++func fillNodesByNames(inputData *schedulerapi.ExtenderArgs) error {
 +	if inputData.Nodes != nil && len(inputData.Nodes.Items) > 0 {
 +		// nodes already presents in inputData, just return 'as is'
 +		return nil
@@ -257,11 +267,15 @@ index 73c8c307a..52c06618c 100644
 +	for _, nodeName := range *inputData.NodeNames {
 +		if storkcache.Instance() != nil {
 +			node, err = storkcache.Instance().GetNode(nodeName)
-+			if err == nil { log.Tracef("Get node %s from cache", nodeName) }
++			if err == nil {
++				log.Tracef("Get node %s from cache", nodeName)
++			}
 +			msg = fmt.Sprintf("Unable to get node info for node %s from informer cache, err: %v", nodeName, err)
 +		} else {
 +			node, err = core.Instance().GetNodeByName(nodeName)
-+			if err == nil { log.Tracef("Get node %s from API-server", nodeName) }
++			if err == nil {
++				log.Tracef("Get node %s from API-server", nodeName)
++			}
 +			msg = fmt.Sprintf("Unable to get node info for node %s, err: %v", nodeName, err)
 +		}
 +
@@ -275,4 +289,5 @@ index 73c8c307a..52c06618c 100644
 +	inputData.Nodes = nodeList
 +	return nil
 +}
++
 +// end of flant.com block
