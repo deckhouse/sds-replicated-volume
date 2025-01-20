@@ -1,6 +1,6 @@
 ---
 title: "The sds-replicated-volume module: FAQ"
-description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? LINSTOR performance and reliability notes, comparison to Ceph. How to add existing LINSTOR LVM or LVMThin pool. How to configure Prometheus to use LINSTOR for storing data. Controller's work-flow questions.
+description: LINSTOR Troubleshooting. What is difference between LVM and LVMThin? Performance and reliability notes, comparison to Ceph. How to add existing LVM or LVMThin pool. How to configure Prometheus to storing data. Controller's work-flow questions.
 ---
 
 {{< alert level="warning" >}}
@@ -30,7 +30,7 @@ There are two options:
 
   > **Caution!** *Raw* space usage in the cluster is displayed. Suppose you create a volume with two replicas. In this case, these values must be divided by two to see how many such volumes can be in your cluster.
 
-2. Using the LINSTOR command line:
+2. Using the command line:
 
   ```shell
   kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list
@@ -61,7 +61,7 @@ To increase the limit on the number of DRBD devices / change the ports through w
 {{< alert level="warning" >}}
 Changing the drbdPortRange minPort/maxPort will not affect existing DRBD resources; they will continue to operate on their original ports.
 
-After changing the drbdPortRange values, the linstor controller needs to be restarted.
+After changing the drbdPortRange values, the linstor-controller needs to be restarted.
 {{< /alert >}}
 
 ## How to properly reboot a node with DRBD resources
@@ -96,9 +96,9 @@ For greater stability of the module, it is not recommended to reboot multiple no
 
 ## How do I free some space on storage pool by moving resources to another
 
-1. Check the LINSTOR storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
+1. Check the storage pool: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor storage-pool list -n OLD_NODE`
 
-2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`
+2. Check the volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n OLD_NODE`
 
 3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
 
@@ -117,7 +117,7 @@ kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --
    ls -l /opt/deckhouse/sbin/evict.sh
   ```
 
-2. Fix all faulty LINSTOR resources in the cluster. Run the following command to filter them:
+2. Fix all faulty resources in the cluster. Run the following command to filter them:
 
   ```shell
   kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor resource list --faulty
@@ -157,7 +157,7 @@ To run the `evict.sh` script in non-interactive mode, add the `--non-interactive
 /opt/deckhouse/sbin/evict.sh --non-interactive --delete-resources-only --node-name "worker-1"
 ```
 
-> **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the LINSTOR scheduler from creating resources on this node.
+> **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
 
 2. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
@@ -179,7 +179,7 @@ linstor node list -s AutoplaceTarget
 Problems can occur at different levels of component operation.
 This cheat sheet will help you quickly navigate through the diagnosis of various problems with the LINSTOR-created volumes:
 
-![LINSTOR cheatsheet](./images/linstor-debug-cheatsheet.svg)
+![cheatsheet](./images/linstor-debug-cheatsheet.svg)
 <!--- Source: https://docs.google.com/drawings/d/19hn3nRj6jx4N_haJE0OydbGKgd-m8AUSr0IqfHfT6YA/edit --->
 
 Some common problems are described below.
@@ -201,7 +201,7 @@ journalctl -fu bashible
 
 The most likely reasons why bashible is unable to load the kernel module:
 
-- You have the in-tree version of the DRBDv8 module preloaded, whereas LINSTOR requires DRBDv9.
+- You have the in-tree version of the DRBDv8 module preloaded, whereas DRBDv9 is required.
   Verify the preloaded module version using the following command: `cat /proc/drbd`. If the file is missing, then the module is not preloaded and this is not your case.
 
 - You have Secure Boot enabled.
@@ -240,7 +240,7 @@ dmesg | grep 'Remote failed to finish a request within'
 
 If the command output is not empty (the `dmesg` output contains lines like *"Remote failed to finish a request within ... "*), most likely your disk subsystem is too slow for DRBD to run properly.
 
-## I have deleted the ReplicatedStoragePool resource, yet its associated Storage Pool in the LINSTOR backend is still there. Is it supposed to be like this?
+## I have deleted the ReplicatedStoragePool resource, yet its associated Storage Pool in the backend is still there. Is it supposed to be like this?
 
 Yes, this is the expected behavior. Currently, the `sds-replicated-volume` module does not process operations when deleting the `ReplicatedStoragePool` resource.
 
@@ -256,18 +256,18 @@ The child StorageClass is only deleted if the status of the ReplicatedStorageCla
 
 This is the expected behavior. The module will automatically retry the unsuccessful operation if the error was caused by circumstances beyond the module's control (for example, a momentary disruption in the Kubernetes API).
 
-## When running commands in the LINSTOR CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
+## When running commands in the CLI, I get the "You're not allowed to change state of linstor cluster manually. Please contact tech support" error. What to do?
 
-In the `sds-replicated-volume` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when LINSTOR doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
+In the `sds-replicated-volume` module, we have restricted the list of commands that are allowed to be run in LINSTOR, because we plan to automate all manual operations. Some of them are already automated, e.g., creating a Tie-Breaker in cases when it doesn't create them for resources with 2 replicas. Use the command below to see the list of allowed commands:
 
 ```shell
 alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
 linstor --help
 ```
 
-## How do I restore LINSTOR DB from backup?
+## How do I restore DB from backup?
 
-The backups of LINSTOR resources are stored in secrets as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
+The backups of backend resources are stored in secrets as CRD YAML files and have a segmented format. Backup occurs automatically on a schedule.
 
 An example of a correctly formatted backup looks like this:
 
@@ -418,20 +418,20 @@ If the information provided is not enough to identify the problem, refer to the 
 
 ## Migrating from the Deckhouse Kubernetes Platform [linstor](https://deckhouse.io/documentation/v1.57/modules/041-linstor/)  built-in module to sds-replicated-volume
 
-Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using the `LINSTOR` PV during the migration.
+Note that the `LINSTOR` control-plane and its CSI will be unavailable during the migration process. This will make it impossible to create/expand/delete PVs and create/delete pods using its PV during the migration.
 
-> **Please note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all `LINSTOR` volume management functionality).
+> **Please note!** User data will not be affected by the migration. Basically, the migration to a new namespace will take place. Also, new components will be added (in the future, they will take over all volume management functionality).
 
 ### Migration steps
 
-1. Make sure there are no faulty `LINSTOR` resources in the cluster. The command below should return an empty list:
+1. Make sure there are no faulty resources in the module's backend. The command below should return an empty list:
 
 ```shell
 alias linstor='kubectl -n d8-linstor exec -ti deploy/linstor-controller -- linstor'
 linstor resource list --faulty
 ```
 
-> **Caution!** You should fix all `LINSTOR` resources before migrating.
+> **Caution!** You should fix all resources before migrating.
 
 2. Disable the `linstor` module:
 
@@ -500,7 +500,7 @@ kubectl get po -n d8-sds-node-configurator
 kubectl get po -n d8-sds-replicated-volume
 ```
 
-10. Override the `linstor` command alias and check the `LINSTOR` resources:
+10. Override the `linstor` command alias and check the resources:
 
 ```shell
 alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -536,7 +536,7 @@ You can read more about working with `ReplicatedStorageClass` resources [here](.
 
 ### Migrating to ReplicatedStoragePool
 
-The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in `LINSTOR`. It is recommended to create this resource for the `Storage Pools` that already exist in LINSTOR and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
+The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
 
 ## Migrating from sds-drbd module to sds-replicated-volume
 

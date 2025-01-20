@@ -8,13 +8,11 @@ The module is only guaranteed to work if [requirements](./readme.html#system-req
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, your cluster will be automatically configured to use the `LINSTOR` backend. All that remains is to create the storage pools and StorageClass according to the instructions below.
+Once the `sds-replicated-volume` module is enabled in the Deckhouse configuration, all that remains is to create the storage pools and StorageClass according to the instructions below.
 
-## Configuring the LINSTOR backend
+## Configuring the `sds-replicated-volume` backend
 
-In `Deckhouse`, the `sds-replicated-volume-controller` handles the configuration of `LINSTOR` storage. For this, `ReplicatedStoragePool` and `ReplicatedStorageClass` [custom resources](./cr.html) are created. The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
-
-> **Caution!** The user may not configure the `LINSTOR` backend directly.
+In `Deckhouse`, the `sds-replicated-volume-controller` is configured by creating `ReplicatedStoragePool` and `ReplicatedStorageClass` [custom resources](./cr.html). The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
 
 ### Setting up LVM
 
@@ -24,7 +22,7 @@ Configuration examples can be found in the [sds-node-configurator](../../sds-nod
 
 #### Creating a `ReplicatedStoragePool` resource
 
-- To create a `Storage Pool` on specific nodes in `LINSTOR`, the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources used.
+- To create a `Storage Pool` the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources used.
 
 - An example of a resource for classic LVM volumes (Thick):
 
@@ -56,9 +54,7 @@ spec:
       thinPoolName: thin-pool
 ```
 
-Before working with `LINSTOR`, the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
-
-Invalid `Storage Pools` will not be created in `LINSTOR`.
+Before working with the backend the controller will validate the provided configuration. If an error is detected, it will report the cause of the error.
 
 For all `LVMVolumeGroup` resources in the `spec` of the `ReplicatedStoragePool` resource the following rules must be met:
  - They must reside on different nodes. You may not refer to multiple `LVMVolumeGroup` resources located on the same node.
@@ -66,13 +62,13 @@ For all `LVMVolumeGroup` resources in the `spec` of the `ReplicatedStoragePool` 
 
 Information about the controller's progress and results is available in the `status` field of the created `ReplicatedStoragePool` resource.
 
-The `sds-replicated-volume-controller` will then process the `ReplicatedStoragePool` resource defined by the user and create the corresponding `Storage Pool` in the `Linstor` backend. The name of the `Storage Pool` being created will match the name of the created `ReplicatedStoragePool` resource. The `Storage Pool` will be created on the nodes defined in the LVMVolumeGroup resources.
+The `sds-replicated-volume-controller` will then process the `ReplicatedStoragePool` resource defined by the user and create the corresponding `Storage Pool` in the backend. The name of the `Storage Pool` being created will match the name of the created `ReplicatedStoragePool` resource. The `Storage Pool` will be created on the nodes defined in the LVMVolumeGroup resources.
 
 #### Updating the `ReplicatedStoragePool` resource
 
 You can add new `LVMVolumeGroups` to the `spec.lvmVolumeGroups` list (effectively adding new nodes to the Storage Pool).
 
-The `sds-replicated-volume-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the `Linstor` backend. The results of this operation will also be reflected in the `status` field of the `ReplicatedStoragePool` resource.
+The `sds-replicated-volume-controller` will then validate the new configuration. If it is valid, the controller will update the `Storage Pool` in the backend. The results of this operation will also be reflected in the `status` field of the `ReplicatedStoragePool` resource.
 
 > Note that the `spec.type` field of the `ReplicatedStoragePool` resource is **immutable**.
 >
@@ -82,7 +78,7 @@ The `sds-replicated-volume-controller` will then validate the new configuration.
 
 Currently, the `sds-replicated-volume-controller` does not handle the deletion of `ReplicatedStoragePool` resources in any way.
 
-> Deleting a resource does not affect the `Storage Pool` created for it in the `Linstor` backend.
+> Deleting a resource does not affect the `Storage Pool` created for it in the backend.
 If the user recreates the deleted resource with the same name and configuration, the controller will detect that the corresponding `Storage Pools` are already created, so no changes will be made.
 The `status.phase` field of the created resource will be set to `Created`.
 
