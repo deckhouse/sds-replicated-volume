@@ -109,7 +109,6 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 	for _, pv := range PVs.Items {
         PVtoStruct[pv.Name] = &pv
     }
-	
 
 	ResDefToPV := make(map[string]*v1.PersistentVolume, len(resDefs.Items))
 	for _, resDef := range resDefs.Items {
@@ -182,7 +181,6 @@ func createDRBDCluster(
 		},
 	}
 
-	// iterate over resdefs
 	if err := retry.OnError(
 		wait.Backoff{
 			Duration: 2 * time.Second,

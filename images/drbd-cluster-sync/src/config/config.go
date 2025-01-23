@@ -20,15 +20,15 @@ type Options struct {
 func NewDefaultOptions() *Options {
 	var opts Options
 
-	retryCountStr := os.Getenv("RETRY_COUNT")
-	retryDelayStr := os.Getenv("RETRY_DELAY")
+	retryCount := os.Getenv("RETRY_COUNT")
+	retryDelay := os.Getenv("RETRY_DELAY")
 	numWorkers := os.Getenv("NUM_WORKERS")
 
-	if count, err := strconv.Atoi(retryCountStr); err == nil {
+	if count, err := strconv.Atoi(retryCount); err == nil {
 		opts.RetryCount = uint(count)
 	}
 
-	if delay, err := strconv.Atoi(retryDelayStr); err == nil {
+	if delay, err := strconv.Atoi(retryDelay); err == nil {
 		opts.RetryDelaySec = uint(delay)
 	}
 
