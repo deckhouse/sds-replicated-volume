@@ -20,7 +20,7 @@ require (
 	google.golang.org/protobuf v1.35.1
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.32.0
-	k8s.io/apimachinery v0.32.0
+	k8s.io/apimachinery v0.32.1
 	k8s.io/client-go v0.32.0
 	k8s.io/mount-utils v0.29.3
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738
