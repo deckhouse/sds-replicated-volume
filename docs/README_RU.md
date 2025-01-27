@@ -9,15 +9,15 @@ moduleStatus: preview
 Работоспособность модуля в других условиях возможна, но не гарантируется.
 {{< /alert >}}
 
-Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. На текущий момент в качестве control-plane используется `LINSTOR`. Модуль позволяет создавать `Storage Pool` в `LINSTOR` и `StorageClass` в `Kubernetes` через создание [пользовательских ресурсов Kubernetes](./cr.html).
+Модуль управляет реплицируемым блочным хранилищем на базе `DRBD`. В качестве control-plane/бэкенда используется `LINSTOR` (без возможности непосредственной настройки пользователем).
+
+Модуль позволяет создавать `Storage Pool` и `StorageClass` через создание [пользовательских ресурсов Kubernetes](./cr.html).
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
 > **Внимание!** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 >
-> **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
->
 > **Внимание!** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 
-После включения модуля `sds-replicated-volume` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать [пулы хранения и StorageClass'ы](./usage.html#конфигурация-бэкенда-linstor).
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
 > **Внимание!** Создание `StorageClass` для CSI-драйвера replicated.csi.storage.deckhouse.io пользователем запрещено.
 
@@ -216,7 +216,7 @@ EOF
 kubectl get rsp data -w
 ```
 
-- Проверить, что в LINSTOR создался Storage Pool `data` на узлах `worker-0`,  `worker-1` и `worker-2`:
+- Проверить, что Storage Pool `data` создался на узлах `worker-0`,  `worker-1` и `worker-2`:
 
 ```shell
 alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'

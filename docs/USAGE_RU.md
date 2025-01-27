@@ -8,13 +8,11 @@ description: "Использование и примеры работы sds-repl
 Работоспособность модуля в других условиях возможна, но не гарантируется.
 {{< /alert >}}
 
-После включения модуля `sds-replicated-volume` в конфигурации Deckhouse ваш кластер будет автоматически настроен на использование бэкенда `LINSTOR`. Останется только создать пулы хранения и StorageClass по инструкции ниже.
+После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать ReplicatedStoragePool и ReplicatedStorageClass по инструкции ниже.
 
-## Конфигурация бэкенда LINSTOR
+## Конфигурация sds-replicated-volume
 
-Конфигурация `LINSTOR` в `Deckhouse` осуществляется `sds-replicated-volume-controller'ом` посредством создания [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
-
-> **Внимание!** Непосредственная конфигурация бэкенда `LINSTOR` пользователем запрещена.
+Конфигурация осуществляется `sds-replicated-volume-controller'ом` через [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
 
 ### Настройка LVM
 
@@ -24,7 +22,7 @@ description: "Использование и примеры работы sds-repl
 
 #### Создание ресурса `ReplicatedStoragePool`
 
-- Для создания `Storage Pool` на определеных узлах в `LINSTOR` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup).
+- Для создания `Storage Pool` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup).
 
 - Пример ресурса для классических LVM-томов (Thick):
 
@@ -56,9 +54,7 @@ spec:
       thinPoolName: thin-pool
 ```
 
-Перед фактической работой с `LINSTOR` контроллер провалидирует предоставленную ему конфигурацию и в случае ошибки предоставит информацию о причинах неудачи.
-
-Невалидные `Storage Pool`'ы не будут созданы в `LINSTOR`.
+Перед работой с бэкендом контроллер провалидирует предоставленную ему конфигурацию и в случае ошибки предоставит информацию о причинах неудачи.
 
 Для всех ресурсов `LVMVolumeGroup`, указанных в `spec` ресурса `ReplicatedStoragePool` должны быть соблюдены следующие правила:
  - Они должны быть на разных узлах. Запрещено указывать несколько ресурсов `LVMVolumeGroup`, которые расположены на одном и том же узле.
@@ -66,13 +62,13 @@ spec:
 
 Информацию о ходе работы контроллера и ее результатах можно посмотреть в поле `status` созданного ресурса `ReplicatedStoragePool`.
 
-Результатом обработки ресурса `ReplicatedStoragePool` станет создание необходимого `Storage Pool` в бэкенде `LINSTOR`. Имя созданного `Storage Pool` будет соответствовать имени созданного ресурса `ReplicatedStoragePool`. Узлы, на которых будет создан `Storage Pool`, будут взяты из ресурсов LVMVolumeGroup.
+Результатом обработки ресурса `ReplicatedStoragePool` станет создание необходимого `Storage Pool` в бэкенде. Имя созданного `Storage Pool` будет соответствовать имени созданного ресурса `ReplicatedStoragePool`. Узлы, на которых будет создан `Storage Pool`, будут взяты из ресурсов LVMVolumeGroup.
 
 #### Обновление ресурса `ReplicatedStoragePool`
 
 Пользователь имеет возможность добавлять новые `LVMVolumeGroup` в список `spec.lvmVolumeGroups` (фактически добавить новые узлы в Storage Pool).
 
-После внесения изменений в ресурс, `sds-replicated-volume-controller` провалидирует новую конфигурацию и в случае валидных данных выполнит необходимые операции по обновлению `Storage Pool` в бэкенде `LINSTOR`. Результаты данной операции также будут отображены в поле `status` ресурса `ReplicatedStoragePool`.
+После внесения изменений в ресурс, `sds-replicated-volume-controller` провалидирует новую конфигурацию и в случае валидных данных выполнит необходимые операции по обновлению `Storage Pool` в бэкенде. Результаты данной операции также будут отображены в поле `status` ресурса `ReplicatedStoragePool`.
 
 > Обратите внимание, что поле `spec.type` ресурса `ReplicatedStoragePool` **неизменяемое**.
 >
@@ -82,7 +78,7 @@ spec:
 
 В настоящий момент `sds-replicated-volume-controller` никак не обрабатывает удаление ресурсов `ReplicatedStoragePool`.
 
-> Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде `LINSTOR`. Если пользователь воссоздаст удаленный ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`.
+> Удаление ресурса никаким образом не затрагивает созданные по нему `Storage Pool` в бэкенде. Если пользователь воссоздаст удаленный ресурс с тем же именем и конфигурацией, контроллер увидит, что соответствующие `Storage Pool` созданы, и оставит их без изменений, а в поле `status.phase` созданного ресурса будет отображено значение `Created`.
 
 ### Работа с ресурсами `ReplicatedStorageClass`
 
