@@ -258,7 +258,7 @@ dmesg | grep 'Remote failed to finish a request within'
 
 ## При выполнении команд в CLI, выдает ошибку "You're not allowed to change state of linstor cluster manually. Please contact tech support". Что делать?
 
-Операции, которые требуют ручного вмешательства, в модуле `sds-replicated-volume` частично или полностью автоматизированы. Поэтому модуль `sds-replicated-volume` ограничивает список разрешенных команд в LINSTOR. Например, автоматизировано создание Tie-Breaker, —  иногда он не создается для ресурсов с двумя репликами. Список разрешенных команд можно посмотреть, выполнив следующую команду:
+Операции, которые требуют ручного вмешательства, в модуле `sds-replicated-volume` частично или полностью автоматизированы. Поэтому модуль `sds-replicated-volume` ограничивает список разрешенных команд в LINSTOR. Например, автоматизировано создание Tie-Breaker, —  сам LINSTOR иногда их не создает для ресурсов с двумя репликами. Список разрешенных команд можно посмотреть, выполнив следующую команду:
 
 ```shell
 alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
