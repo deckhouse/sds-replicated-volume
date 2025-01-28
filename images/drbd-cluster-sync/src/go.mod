@@ -4,7 +4,6 @@ go 1.23.3
 
 require (
 	github.com/LINBIT/golinstor v0.52.2
-	github.com/avast/retry-go v3.0.0+incompatible
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20241225145836-3d4baa215eaf
 	k8s.io/apimachinery v0.32.1
 )

@@ -1,7 +1,5 @@
 github.com/LINBIT/golinstor v0.52.2 h1:O2+NRWUfn0WdgslVRywF1it2+qS1Zkak/RuuZZMY0vs=
 github.com/LINBIT/golinstor v0.52.2/go.mod h1:aPtOD/STz0JO0u7xrOVH3ZdzpDHwXcHzjKzczOReXu8=
-github.com/avast/retry-go v3.0.0+incompatible h1:4SOWQ7Qs+oroOTQOYnAHqelpCO0biHSxpiH9JdtuBj0=
-github.com/avast/retry-go v3.0.0+incompatible/go.mod h1:XtSnn+n/sHqQIpZ10K1qAevBhOOCWBLXXy3hyiqqBrY=
 github.com/container-storage-interface/spec v1.10.0 h1:YkzWPV39x+ZMTa6Ax2czJLLwpryrQ+dPesB34mrRMXA=
 github.com/container-storage-interface/spec v1.10.0/go.mod h1:DtUvaQszPml1YJfIK7c00mlv6/g4wNMLanLgiUbKFRI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
