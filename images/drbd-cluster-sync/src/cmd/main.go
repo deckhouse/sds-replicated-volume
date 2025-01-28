@@ -16,9 +16,7 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
-	"flag"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,29 +24,22 @@ import (
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/crd_sync"
 	"drbd-cluster-sync/pkg/kubeutils"
-
-	"golang.org/x/time/rate"
-
 	lapi "github.com/LINBIT/golinstor/client"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 )
 
 func main() {
-	var (
-		logLevel              = flag.String("log-level", "info", "Enable debug log output. Choose from: panic, fatal, error, warn, info, debug")
-		burst                 = flag.Int("linstor-api-burst", 1, "Maximum number of API requests allowed before being limited by requests-per-second. Default: 1 (no bursting)")
-		rps                   = flag.Float64("linstor-api-requests-per-second", 0, "Maximum allowed number of LINSTOR API requests per second. Default: Unlimited")
-		lsEndpoint            = flag.String("linstor-endpoint", "", "Controller API endpoint for LINSTOR")
-		lsSkipTLSVerification = flag.Bool("linstor-skip-tls-verification", false, "If true, do not verify tls")
-		bearerTokenFile       = flag.String("bearer-token", "", "Read the bearer token from the given file and use it for authentication.")
-	)
+	ctx := signals.SetupSignalHandler()
+	opts := config.NewDefaultOptions()
 
 	resourcesSchemeFuncs := []func(*apiruntime.Scheme) error{
 		srv.AddToScheme,
@@ -63,7 +54,7 @@ func main() {
 	log.SetOutput(logOut)
 
 	logger := log.NewEntry(log.New())
-	level, err := log.ParseLevel(*logLevel)
+	level, err := log.ParseLevel(opts.LogLevel)
 	if err != nil {
 		os.Exit(1)
 	}
@@ -87,7 +78,7 @@ func main() {
 		}
 	}
 
-	cl, err := kubecl.New(kConfig, kubecl.Options{
+	kc, err := kubecl.New(kConfig, kubecl.Options{
 		Scheme: scheme,
 	})
 	if err != nil {
@@ -95,19 +86,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	r := rate.Limit(*rps)
+	r := rate.Limit(opts.RPS)
 	if r <= 0 {
 		r = rate.Inf
 	}
 
 	linstorOpts := []lapi.Option{
-		lapi.Limit(r, *burst),
+		lapi.Limit(r, opts.Burst),
 		lapi.UserAgent("linstor-csi/" + driver.Version),
 		lapi.Log(logger),
 	}
 
-	if *lsEndpoint != "" {
-		u, err := url.Parse(*lsEndpoint)
+	if opts.LSEndpoint != "" {
+		u, err := url.Parse(opts.LSEndpoint)
 		if err != nil {
 			log.Errorf("Failed to parse endpoint: %v", err)
 			os.Exit(1)
@@ -116,7 +107,7 @@ func main() {
 		linstorOpts = append(linstorOpts, lapi.BaseURL(u))
 	}
 
-	if *lsSkipTLSVerification {
+	if opts.LSSkipTLSVerification {
 		linstorOpts = append(linstorOpts, lapi.HTTPClient(&http.Client{
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -124,8 +115,8 @@ func main() {
 		}))
 	}
 
-	if *bearerTokenFile != "" {
-		token, err := os.ReadFile(*bearerTokenFile)
+	if opts.BearerTokenFile != "" {
+		token, err := os.ReadFile(opts.BearerTokenFile)
 		if err != nil {
 			log.Errorf("failed to read bearer token file: %v", err)
 			os.Exit(1)
@@ -140,9 +131,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := config.NewDefaultOptions()
-
-	if err = crd_sync.NewDRBDClusterSyncer(cl, lc, logger, opts).Sync(context.Background()); err != nil {
+	if err = crd_sync.NewDRBDClusterSyncer(kc, lc, logger, opts).Sync(ctx); err != nil {
 		log.Infof("failed to sync DRBD clusters: %v", err)
 		os.Exit(1)
 	}

@@ -2,22 +2,22 @@ package crd_sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"drbd-cluster-sync/config"
-
-	"k8s.io/client-go/util/retry"
-
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	log "github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
+	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -39,89 +39,110 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 	// Step 1 - get entities from k8s etcd
-	DRBDClusters := &srv.DRBDClusterList{}
-	if err := r.kc.List(ctx, DRBDClusters); err != nil {
-		return fmt.Errorf("failed to get resource definitions: %s", err.Error())
+	drbdClusters := &srv.DRBDClusterList{}
+	if err := r.kc.List(ctx, drbdClusters); err != nil {
+		return fmt.Errorf("failed to get resource definitions: %w", err)
 	}
 
-	PVs := &v1.PersistentVolumeList{}
-	if err := r.kc.List(ctx, PVs); err != nil {
-		return fmt.Errorf("failed to get persistent volumes: %s", err.Error())
+	pvs := &v1.PersistentVolumeList{}
+	if err := r.kc.List(ctx, pvs); err != nil {
+		return fmt.Errorf("failed to get persistent volumes: %w", err)
 	}
 
 	resDefs := &lsrv.ResourceDefinitionsList{}
 	if err := r.kc.List(ctx, resDefs); err != nil {
-		return fmt.Errorf("failed to get resource definitions: %s", err.Error())
+		return fmt.Errorf("failed to get resource definitions: %w", err)
 	}
 
 	volDefs := &lsrv.VolumeDefinitionsList{}
 	if err := r.kc.List(ctx, volDefs); err != nil {
-		return fmt.Errorf("failed to get volume definitions: %s", err.Error())
+		return fmt.Errorf("failed to get volume definitions: %w", err)
 	}
 
 	resGroups := &lsrv.ResourceGroupsList{}
 	if err := r.kc.List(ctx, resGroups); err != nil {
-		return fmt.Errorf("failed to get resource groups: %s", err.Error())
+		return fmt.Errorf("failed to get resource groups: %w", err)
 	}
 
 	rscList := &srv.ReplicatedStorageClassList{}
 	if err := r.kc.List(ctx, rscList); err != nil {
-		return fmt.Errorf("failed to get replicated storage class: %s", err.Error())
+		return fmt.Errorf("failed to get replicated storage class: %w", err)
 	}
 
 	layerDRBDResDefList := &lsrv.LayerDrbdResourceDefinitionsList{}
 	if err := r.kc.List(ctx, layerDRBDResDefList); err != nil {
-		return fmt.Errorf("failed to get layer drbd resource definitions: %s", err.Error())
+		return fmt.Errorf("failed to get layer drbd resource definitions: %w", err)
 	}
 
-	// Step 2: Joins and aggregations
+	// Step 2: Filtering resource definitions
+	drbdClusterFilter := make(map[string]struct{}, len(drbdClusters.Items))
+	for _, cluster := range drbdClusters.Items {
+		drbdClusterFilter[strings.ToLower(cluster.Name)] = struct{}{}
+	}
+
+	filteredResDefs := resDefs.Items[:0]
+	for _, resDef := range resDefs.Items {
+		_, clusterExists := drbdClusterFilter[strings.ToLower(resDef.Spec.ResourceName)]
+
+		if !clusterExists {
+			filteredResDefs = append(filteredResDefs, resDef)
+		}
+	}
+
+	// Step 3: Joins and aggregations
 	pvToLayerDRBDResDef := make(map[string]*lsrv.LayerDrbdResourceDefinitions, len(layerDRBDResDefList.Items))
 	for _, resDef := range layerDRBDResDefList.Items {
 		pvToLayerDRBDResDef[strings.ToLower(resDef.Spec.ResourceName)] = &resDef
 	}
 
-	PVToRSC := make(map[string]*srv.ReplicatedStorageClass, len(PVs.Items))
+	pvToRSC := make(map[string]*srv.ReplicatedStorageClass, len(pvs.Items))
 	for _, rsc := range rscList.Items {
-		PVToRSC[rsc.Name] = &rsc
+		pvToRSC[strings.ToLower(rsc.Name)] = &rsc
 	}
 
-	PVToVolumeDef := make(map[string]*lsrv.VolumeDefinitions, len(volDefs.Items))
+	pvToVolumeDef := make(map[string]*lsrv.VolumeDefinitions, len(volDefs.Items))
 	for _, volDef := range volDefs.Items {
-		PVToVolumeDef[strings.ToLower(volDef.Spec.ResourceName)] = &volDef
+		pvToVolumeDef[strings.ToLower(volDef.Spec.ResourceName)] = &volDef
 	}
 
-	ResGrNameToStruct := make(map[string]*lsrv.ResourceGroups, len(resGroups.Items))
+	resGrNameToStruct := make(map[string]*lsrv.ResourceGroups, len(resGroups.Items))
 	for _, resGroup := range resGroups.Items {
-		ResGrNameToStruct[resGroup.Spec.ResourceGroupName] = &resGroup
+		resGrNameToStruct[strings.ToLower(resGroup.Spec.ResourceGroupName)] = &resGroup
 	}
 
-	RSCNameToStruct := make(map[string]*srv.ReplicatedStorageClass, len(rscList.Items))
+	rscNameToStruct := make(map[string]*srv.ReplicatedStorageClass, len(rscList.Items))
 	for _, rsc := range rscList.Items {
-		RSCNameToStruct[rsc.Name] = &rsc
+		rscNameToStruct[strings.ToLower(rsc.Name)] = &rsc
 	}
 
-	PVToResGroup := make(map[string]*lsrv.ResourceGroups, len(resDefs.Items))
-	for _, resDef := range resDefs.Items {
-		PVToResGroup[strings.ToLower(resDef.Spec.ResourceName)] = ResGrNameToStruct[resDef.Spec.ResourceGroupName]
+	pvToResGroup := make(map[string]*lsrv.ResourceGroups, len(filteredResDefs))
+	for _, resDef := range filteredResDefs {
+		pvToResGroup[strings.ToLower(resDef.Spec.ResourceName)] = resGrNameToStruct[strings.ToLower(resDef.Spec.ResourceGroupName)]
 	}
 
-	PVtoStruct := make(map[string]*v1.PersistentVolume, len(PVs.Items))
-	for _, pv := range PVs.Items {
-        PVtoStruct[pv.Name] = &pv
-    }
+	pvtoStruct := make(map[string]*v1.PersistentVolume, len(pvs.Items))
+	for _, pv := range pvs.Items {
+		pvtoStruct[strings.ToLower(pv.Name)] = &pv
+	}
 
-	ResDefToPV := make(map[string]*v1.PersistentVolume, len(resDefs.Items))
-	for _, resDef := range resDefs.Items {
-        ResDefToPV[resDef.Name] = PVtoStruct[strings.ToLower(resDef.Spec.ResourceName)]
-    }
+	resDefToPV := make(map[string]*v1.PersistentVolume, len(filteredResDefs))
+	for _, resDef := range filteredResDefs {
+		resDefToPV[strings.ToLower(resDef.Name)] = pvtoStruct[strings.ToLower(resDef.Spec.ResourceName)]
+	}
 
-	// Step 3: Create DRBDCluster
+	// Step 4: Create DRBDCluster
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, r.opts.NumWorkers)
-	for _, resDef := range resDefs.Items {
+	for _, resDef := range filteredResDefs {
 		semaphore <- struct{}{}
 		wg.Add(1)
-		go createDRBDCluster(ctx, ResDefToPV[resDef.Name], PVToRSC, PVToResGroup, PVToVolumeDef, pvToLayerDRBDResDef, r.log, r.kc, &wg, semaphore, r.opts)
+		go func() {
+			defer func() {
+				<-semaphore
+				wg.Done()
+			}()
+			createDRBDCluster(ctx, resDefToPV[resDef.Name], pvToRSC, pvToResGroup, pvToVolumeDef, pvToLayerDRBDResDef, r.log, r.kc, r.opts)
+		}()
 	}
 
 	wg.Wait()
@@ -132,23 +153,16 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 func createDRBDCluster(
 	ctx context.Context,
 	pv *v1.PersistentVolume,
-	RSCToStruct map[string]*srv.ReplicatedStorageClass,
-	PvToResGroup map[string]*lsrv.ResourceGroups,
-	PVToVolumeDef map[string]*lsrv.VolumeDefinitions,
+	rscToStruct map[string]*srv.ReplicatedStorageClass,
+	pvToResGroup map[string]*lsrv.ResourceGroups,
+	pvToVolumeDef map[string]*lsrv.VolumeDefinitions,
 	pvToLayerDRBDResDef map[string]*lsrv.LayerDrbdResourceDefinitions,
 	log *log.Entry,
 	kc kubecl.Client,
-	wg *sync.WaitGroup,
-	semaphore <-chan struct{},
 	opts *config.Options,
 ) {
-	defer func() {
-		<-semaphore
-	}()
-	defer wg.Done()
-
 	autoDiskfulDelaySec := 0
-	if RSCToStruct[pv.Spec.StorageClassName].Spec.VolumeAccess == "EventuallyLocal" {
+	if rscToStruct[pv.Spec.StorageClassName].Spec.VolumeAccess == "EventuallyLocal" {
 		autoDiskfulDelaySec = 30 * 60
 	}
 
@@ -157,9 +171,9 @@ func createDRBDCluster(
 			Name: pv.Name,
 		},
 		Spec: srv.DRBDClusterSpec{
-			Replicas:     int32(PvToResGroup[pv.Name].Spec.ReplicaCount),
+			Replicas:     int32(pvToResGroup[pv.Name].Spec.ReplicaCount),
 			QuorumPolicy: "majority",
-			Size:         int64(PVToVolumeDef[pv.Name].Spec.VlmSize),
+			Size:         int64(pvToVolumeDef[pv.Name].Spec.VlmSize),
 			SharedSecret: pvToLayerDRBDResDef[pv.Name].Spec.Secret,
 			Port:         int32(pvToLayerDRBDResDef[pv.Name].Spec.TCPPort),
 			AutoDiskful: srv.AutoDiskful{
@@ -172,7 +186,7 @@ func createDRBDCluster(
 							Key:      K8sNameLabel,
 							Operator: "In",
 							Values: []string{
-								RSCToStruct[pv.Spec.StorageClassName].Spec.StoragePool,
+								rscToStruct[pv.Spec.StorageClassName].Spec.StoragePool,
 							},
 						},
 					},
@@ -182,17 +196,43 @@ func createDRBDCluster(
 	}
 
 	if err := retry.OnError(
+		// backoff settings
 		wait.Backoff{
-			Duration: 2 * time.Second,
-			Factor:   1.0,
-			Steps:    int(opts.RetryCount),
-			Cap:      time.Duration(opts.RetryDelaySec),
+			Duration: 2 * time.Second,                   // initial delay before first retry
+			Factor:   1.0,                               // Cap is multiplied by this value each retry
+			Steps:    int(opts.RetryCount),              // amount of retries
+			Cap:      time.Duration(opts.RetryDelaySec), // delay between retries
 		},
-		func(err error) bool { return true },
-		func() error { return kc.Create(ctx, drbdCluster) },
+		// this function takes an error returned by kc.Create and decides whether to make a retry or not
+		func(err error) bool {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+				log.Errorf("drbd cluster retry context err: %v", err)
+				return false
+			}
+
+			if statusError, ok := err.(*k8sErr.StatusError); ok {
+				switch statusError.ErrStatus.Reason {
+				case
+					metav1.StatusReasonForbidden,
+					metav1.StatusReasonAlreadyExists,
+					metav1.StatusReasonInvalid,
+					metav1.StatusReasonConflict,
+					metav1.StatusReasonBadRequest:
+					log.Errorf("drbd cluster retry creation err: %s", statusError.ErrStatus.Reason)
+					return false
+				}
+			}
+			return true
+		},
+		func() error {
+			err := kc.Create(ctx, drbdCluster)
+			if err == nil {
+				log.Infof("DRBD cluster %s successfully created", drbdCluster.Name)
+			}
+			return err
+		},
 	); err != nil {
 		log.Errorf("failed to create a DRBD cluster %s: %s", pv.Name, err.Error())
+		return
 	}
-
-	log.Infof("DRBD cluster %s successfully created", drbdCluster.ObjectMeta.Name)
 }
