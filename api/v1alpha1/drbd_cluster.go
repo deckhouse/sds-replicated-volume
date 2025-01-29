@@ -101,3 +101,12 @@ type DRBDCluster struct {
 	Spec   DRBDClusterSpec   `json:"spec"`
 	Status DRBDClusterStatus `json:"status,omitempty"`
 }
+
+// DRBDClusterList is the list of DRBDClusters
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type DRBDClusterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []DRBDCluster `json:"items"`
+}
