@@ -9,10 +9,16 @@ The module is only guaranteed to work if the [system requirements](./readme.html
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-The module manages replicated block storage based on DRBD, using LINSTOR as the control plane.  
-It allows the creation of a Storage Pool in LINSTOR and a StorageClass in Kubernetes through the creation of [Kubernetes custom resources](./cr.html).
+This module manages replicated block storage based on `DRBD`. Currently, `LINSTOR` is used as a control-plane/backend (without the possibility of direct user configuration). 
+The module allows you to create a `Storage Pool` as well as a `StorageClass` by creating [Kubernetes custom resources](./cr.html). 
+To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/stable/) module.
+> **Caution!** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
+>
+> **Caution!** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
 
-## Steps to configure the module
+After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [storage pools and StorageClasses](./usage.html#configuring-the-linstor-backend).
+
+> **Caution!** The user is not allowed to create a `StorageClass` for the replicated.csi.storage.deckhouse.io CSI driver.
 
 To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
 
@@ -99,191 +105,185 @@ The example below launches the module with default settings, which will result i
 
 ### Configuring storage on nodes
 
-You need to create LVM volume groups on the nodes using LVMVolumeGroup custom resources. As part of this quickstart guide, we will create a regular `Thick` storage. See [usage examples](./usage.html) to learn more about custom resources.
+You need to create `LVM` volume groups on the nodes using `LVMVolumeGroup` custom resources. As part of this quickstart guide, we will create a regular `Thick` storage. See [usage examples](./usage.html) to learn more about custom resources.
 
-#### Configuration steps
+To configure the storage:
 
-1. Retrieve all [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice) resources available in your cluster:
+- List all the [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice) resources available in your cluster:
 
-   ```shell
-   kubectl get bd
-   ```
+```shell
+kubectl get bd
 
-   Example output:
+NAME                                           NODE       CONSUMABLE   SIZE      PATH
+dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
+dev-457ab28d75c6e9c0dfd50febaac785c838f9bf97   worker-0   false        20Gi      /dev/vde
+dev-49ff548dfacba65d951d2886c6ffc25d345bb548   worker-1   true         35Gi      /dev/vde
+dev-75d455a9c59858cf2b571d196ffd9883f1349d2e   worker-2   true         35Gi      /dev/vdd
+dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi       /dev/vdb
+```
 
-   ```console
-   NAME                                           NODE       CONSUMABLE   SIZE      PATH
-   dev-0a29d20f9640f3098934bca7325f3080d9b6ef74   worker-0   true         30Gi      /dev/vdd
-   dev-457ab28d75c6e9c0dfd50febaac785c838f9bf97   worker-0   false        20Gi      /dev/vde
-   dev-49ff548dfacba65d951d2886c6ffc25d345bb548   worker-1   true         35Gi      /dev/vde
-   dev-75d455a9c59858cf2b571d196ffd9883f1349d2e   worker-2   true         35Gi      /dev/vdd
-   dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi       /dev/vdb
-   ```
 
-1. Create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `worker-0` node:
+- Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-0`:
 
-   ```yaml
-   kubectl apply -f - <<EOF
-   apiVersion: storage.deckhouse.io/v1alpha1
-   kind: LVMVolumeGroup
-   metadata:
-     name: "vg-1-on-worker-0" # The name can be any appropriate name for Kubernetes resource names. This name will later be used to create the ReplicatedStoragePool.
-   spec:
-     type: Local
-     local:
-       nodeName: "worker-0"
-     blockDeviceSelector:
-       matchExpressions:
-         - key: kubernetes.io/metadata.name
-           operator: In
-           values:
-             - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
-             - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
-     actualVGNameOnTheNode: "vg-1" # Name of the LVM VG that will be created on the node from the specified block devices.
-   EOF
-   ```
+```yaml
+kubectl apply -f - <<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: "vg-1-on-worker-0" # The name can be any fully qualified resource name in Kubernetes. This LVMVolumeGroup resource name will be used to create ReplicatedStoragePool in the future
+spec:
+  type: Local
+  local:
+    nodeName: "worker-0"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-0a29d20f9640f3098934bca7325f3080d9b6ef74
+          - dev-ecf886f85638ee6af563e5f848d2878abae1dcfd
+  actualVGNameOnTheNode: "vg-1" # the name of the LVM VG to be created from the above block devices on the node 
+EOF
+```
 
-1. Wait for the created LVMVolumeGroup resource to become `Ready`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
-   ```shell
-   kubectl get lvg vg-1-on-worker-0 -w
-   ```
+```shell
+kubectl get lvg vg-1-on-worker-0 -w
+```
 
-The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
 
-1. Create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `worker-1` node:
+- Next, create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-1`:
 
-   ```yaml
-   kubectl apply -f - <<EOF
-   apiVersion: storage.deckhouse.io/v1alpha1
-   kind: LVMVolumeGroup
-   metadata:
-     name: "vg-1-on-worker-1"
-   spec:
-     type: Local
-     local:
-       nodeName: "worker-1"
-     blockDeviceSelector:
-       matchExpressions:
-         - key: kubernetes.io/metadata.name
-           operator: In
-           values:
-             - dev-49ff548dfacba65d951d2886c6ffc25d345bb548
-     actualVGNameOnTheNode: "vg-1"
-   EOF
-   ```
+```shell
+kubectl apply -f - <<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: "vg-1-on-worker-1"
+spec:
+  type: Local
+  local:
+    nodeName: "worker-1"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-49ff548dfacba65d951d2886c6ffc25d345bb548
+  actualVGNameOnTheNode: "vg-1"
+EOF
+```
 
-1. Wait for the created LVMVolumeGroup resource to become `Ready`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
-   ```shell
-   kubectl get lvg vg-1-on-worker-1 -w
-   ```
+```shell
+kubectl get lvg vg-1-on-worker-1 -w
+```
 
-The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
 
-1. Create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `worker-2` node:
+- Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-2`:
 
-   ```yaml
-   kubectl apply -f - <<EOF
-   apiVersion: storage.deckhouse.io/v1alpha1
-   kind: LVMVolumeGroup
-   metadata:
-     name: "vg-1-on-worker-2"
-   spec:
-     type: Local
-     local:
-       nodeName: "worker-2"
-     blockDeviceSelector:
-       matchExpressions:
-         - key: kubernetes.io/metadata.name
-           operator: In
-           values:
-             - dev-75d455a9c59858cf2b571d196ffd9883f1349d2e
-     actualVGNameOnTheNode: "vg-1"
-   EOF
-   ```
+```shell
+kubectl apply -f - <<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: LVMVolumeGroup
+metadata:
+  name: "vg-1-on-worker-2"
+spec:
+  type: Local
+  local:
+    nodeName: "worker-2"
+  blockDeviceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: In
+        values:
+          - dev-75d455a9c59858cf2b571d196ffd9883f1349d2e
+  actualVGNameOnTheNode: "vg-1"
+EOF
+```
 
-1. Wait for the created LVMVolumeGroup resource to become `Ready`:
+- Wait for the created `LVMVolumeGroup` resource to become `Ready`:
 
-   ```shell
-   kubectl get lvg vg-1-on-worker-2 -w
-   ```
+```shell
+kubectl get lvg vg-1-on-worker-2 -w
+```
 
-The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
+- The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` block device has been created on the `worker-2` node.
 
-1. Create the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource:
+- Now that we have all the LVM VGs created on the nodes, create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) out of those VGs:
 
-   ```yaml
-   kubectl apply -f -<<EOF
-   apiVersion: storage.deckhouse.io/v1alpha1
-   kind: ReplicatedStoragePool
-   metadata:
-     name: data
-   spec:
-     type: LVM
-     lvmVolumeGroups: # Here, specify the names of the LVMVolumeGroup resources we created earlier.
-       - name: vg-1-on-worker-0
-       - name: vg-1-on-worker-1
-       - name: vg-1-on-worker-2
-   EOF
-   ```
+```yaml
+kubectl apply -f -<<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStoragePool
+metadata:
+  name: data
+spec:
+  type: LVM
+  lvmVolumeGroups: # Here, specify the names of the LVMVolumeGroup resources you created earlier
+    - name: vg-1-on-worker-0
+    - name: vg-1-on-worker-1
+    - name: vg-1-on-worker-2
+EOF
 
-1. Wait for the created ReplicatedStoragePool resource to become `Completed`:
+```
 
-   ```shell
-   kubectl get rsp data -w
-   ```
+- Wait for the created `ReplicatedStoragePool` resource to become `Completed`:
 
-1. Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2` in LINSTOR:
+```shell
+kubectl get rsp data -w
+```
 
-   ```shell
-   alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
-   linstor sp l
-   ```
+- Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2`:
 
-   Example output:
+```shell
+alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
+linstor sp l
 
-   ```shell
-   ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-   ┊ StoragePool          ┊ Node     ┊ Driver   ┊ PoolName ┊ FreeCapacity ┊ TotalCapacity ┊ CanSnapshots ┊ State ┊ SharedName                    ┊
-   ╞═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
-   ┊ DfltDisklessStorPool ┊ worker-0 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-0;DfltDisklessStorPool ┊
-   ┊ DfltDisklessStorPool ┊ worker-1 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-1;DfltDisklessStorPool ┊
-   ┊ DfltDisklessStorPool ┊ worker-2 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-2;DfltDisklessStorPool ┊
-   ┊ data                 ┊ worker-0 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-0;data                 ┊
-   ┊ data                 ┊ worker-1 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-1;data                 ┊
-   ┊ data                 ┊ worker-2 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-2;data                 ┊
-   ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-   ```
+╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+┊ StoragePool          ┊ Node     ┊ Driver   ┊ PoolName ┊ FreeCapacity ┊ TotalCapacity ┊ CanSnapshots ┊ State ┊ SharedName                    ┊
+╞═════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╡
+┊ DfltDisklessStorPool ┊ worker-0 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-0;DfltDisklessStorPool ┊
+┊ DfltDisklessStorPool ┊ worker-1 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-1;DfltDisklessStorPool ┊
+┊ DfltDisklessStorPool ┊ worker-2 ┊ DISKLESS ┊          ┊              ┊               ┊ False        ┊ Ok    ┊ worker-2;DfltDisklessStorPool ┊
+┊ data                 ┊ worker-0 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-0;data                 ┊
+┊ data                 ┊ worker-1 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-1;data                 ┊
+┊ data                 ┊ worker-2 ┊ LVM      ┊ vg-1     ┊    35.00 GiB ┊     35.00 GiB ┊ False        ┊ Ok    ┊ worker-2;data                 ┊
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+```
 
-1. Create a [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal ReplicatedStorageClasses work):
+- Create a [ReplicatedStorageClass](./cr.html#replicatedstorageclass) resource for a zone-free cluster (see [use cases](./layouts.html) for details on how zonal ReplicatedStorageClasses work):
 
-   ```yaml
-   kubectl apply -f -<<EOF
-   apiVersion: storage.deckhouse.io/v1alpha1
-   kind: ReplicatedStorageClass
-   metadata:
-     name: replicated-storage-class
-   spec:
-     storagePool: data # Here, specify the name of the ReplicatedStoragePool you created earlier
-     reclaimPolicy: Delete
-     topology: Ignored # - note that setting "ignored" means there should be no zones (nodes labeled topology.kubernetes.io/zone) in the cluster
-   EOF
-   ```
+```yaml
+kubectl apply -f -<<EOF
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageClass
+metadata:
+  name: replicated-storage-class
+spec:
+  storagePool: data # Here, specify the name of the ReplicatedStoragePool you created earlier
+  reclaimPolicy: Delete
+  topology: Ignored # - note that setting "ignored" means there should be no zones (nodes labeled topology.kubernetes.io/zone) in the cluster
+EOF
+```
 
-1. Wait for the created ReplicatedStorageClass resource to become `Created`:
+- Wait for the created `ReplicatedStorageClass` resource to become `Created`:
 
-   ```shell
-   kubectl get rsc replicated-storage-class -w
-   ```
+```shell
+kubectl get rsc replicated-storage-class -w
+```
 
-1. Confirm that the corresponding StorageClass has been created:
+- Confirm that the corresponding `StorageClass` has been created:
 
-   ```shell
-   kubectl get sc replicated-storage-class
-   ```
+```shell
+kubectl get sc replicated-storage-class
+```
 
-- If StorageClass with the name `replicated-storage-class` is shown, then the configuration of the `sds-replicated-volume` module is complete. Now users can create PVs by specifying StorageClass with the name `replicated-storage-class`. Given the above settings, a volume will be created with 3 replicas on different nodes.
+- If `StorageClass` with the name `replicated-storage-class` is shown, then the configuration of the `sds-replicated-volume` module is complete. Now users can create PVs by specifying `StorageClass` with the name `replicated-storage-class`. Given the above settings, a volume will be created with 3 replicas on different nodes.
 
 ## System requirements and recommendations
 
