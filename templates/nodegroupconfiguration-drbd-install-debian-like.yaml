@@ -45,7 +45,7 @@ spec:
     SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
     MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
-    {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
+    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registry.scheme }}"
     {{- else }}
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
@@ -56,7 +56,7 @@ spec:
 
     is_master=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"node-role.kubernetes.io/control-plane": ""})')
     if [ $is_master == "true" ]; then
-      {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
       bb-rp-from-module-image-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
@@ -116,7 +116,7 @@ spec:
         rmmod drbd || true
       fi
 
-      {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
       bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
@@ -146,7 +146,7 @@ spec:
       exit 0
     fi
 
-    {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
     bb-package-module-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
     {{- else }}
     bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
