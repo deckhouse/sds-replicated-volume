@@ -178,6 +178,10 @@ linstor_check_advise() {
     if (( $(linstor advise r | tee /dev/tty | grep  "[a-zA-Z0-9]" | wc -l) > 1)); then
       echo "Advise found."
       echo "It is recommended to perform the advised actions manually."
+      if [[ "${IGNORE_ADVISE}" == "true" ]]; then
+        echo "Ignoring advise. Continuing with the script."
+        return
+      fi
       if get_user_confirmation "Exit the script? If not, the script will continue and recheck for advise." "y" "n"; then
         exit_function
       else
@@ -1067,6 +1071,10 @@ process_args() {
         CREATE_DB_BACKUP=false
         shift
         ;;
+      --ignore-advise)
+        IGNORE_ADVISE=true
+        shift
+        ;;
       --delete-resources-only)
         DELETE_RESOURCES=true
         DELETE_MODE="resources-only"
@@ -1109,6 +1117,7 @@ process_args() {
 #####################################
 NON_INTERACTIVE=false
 CREATE_DB_BACKUP=true
+IGNORE_ADVISE=false
 DELETE_MODE=""
 
 echo "The script for evicting LINSTOR resources has been launched. Performing necessary checks before starting."

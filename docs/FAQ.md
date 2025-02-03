@@ -51,7 +51,7 @@ Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorage
 
    This VG will be automatically discovered and a corresponding LVMVolumeGroup resource will be created in the cluster for it.
 
-1. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
+2. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
 ## How to increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other?
 
@@ -75,10 +75,10 @@ For greater stability of the module, it is not recommended to reboot multiple no
    kubectl drain test-node-1 --ignore-daemonsets --delete-emptydir-data
    ```
 
-1. Check that there are no problematic resources in DRBD / resources in SyncTarget. If there are any, wait for synchronization / take measures to restore normal operation.
+2. Check that there are no problematic resources in DRBD / resources in SyncTarget. If there are any, wait for synchronization / take measures to restore normal operation.
 
    ```shell
-   # kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
+   kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
    Defaulted container "linstor-controller" out of: linstor-controller, kube-rbac-proxy
    +----------------------------------------------------------------+
    | ResourceName | Node | Port | Usage | Conns | State | CreatedOn |
@@ -86,10 +86,10 @@ For greater stability of the module, it is not recommended to reboot multiple no
    +----------------------------------------------------------------+
    ```
 
-1. Reboot the node and wait for the synchronization of all DRBD resources. Then uncordon the node. If another node needs to be rebooted, repeat the algorithm.
+3. Reboot the node and wait for the synchronization of all DRBD resources. Then uncordon the node. If another node needs to be rebooted, repeat the algorithm.
 
    ```shell
-   # kubectl uncordon test-node-1
+   kubectl uncordon test-node-1
    node/test-node-1 uncordoned
    ```
 
@@ -173,7 +173,7 @@ Example:
 
 > **Caution!** After the script finishes its job, the node will still be in the Kubernetes cluster albeit in *SchedulingDisabled* status. In LINSTOR, the *AutoplaceTarget=false* property will be set for this node, preventing the its scheduler from creating resources on this node.
 
-1. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
+2. Run the following command to allow DRBD resources and pods to be scheduled on the node again:
 
    ```shell
    alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -181,7 +181,7 @@ Example:
    kubectl uncordon "worker-1"
    ```
 
-1. Run the following command to check the `AutoplaceTarget` property for all nodes (the AutoplaceTarget field will be empty for nodes that are allowed to host LINSTOR resources):
+3. Run the following command to check the `AutoplaceTarget` property for all nodes (the AutoplaceTarget field will be empty for nodes that are allowed to host LINSTOR resources):
 
    ```shell
    alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -206,7 +206,7 @@ Some common problems are described below.
    kubectl get pod -n d8-sds-replicated-volume -l app=linstor-node
    ```
 
-1. If some of those pods got stuck in `Init` state, check the DRBD version as well as the bashible logs on the node:
+2. If some of those pods got stuck in `Init` state, check the DRBD version as well as the bashible logs on the node:
 
    ```shell
    cat /proc/drbd
@@ -580,19 +580,19 @@ Note that the module control-plane and its CSI will be unavailable during the mi
 
    > **Caution.** You should fix all DRBD resources before migrating.
 
-1. Disable the `sds-drbd` module:
+2. Disable the `sds-drbd` module:
 
    ```shell
    kubectl patch moduleconfig sds-drbd --type=merge -p '{"spec": {"enabled": false}}'
    ```
 
-1. Wait for the `d8-sds-drbd` namespace to be deleted.
+3. Wait for the `d8-sds-drbd` namespace to be deleted.
 
    ```shell
    kubectl get namespace d8-sds-drbd
    ```
 
-1. Create a ModuleConfig resource for `sds-replicated-volume`.
+4. Create a ModuleConfig resource for `sds-replicated-volume`.
 
    > **Caution.** Failing to specify the `settings.dataNodes.nodeSelector` parameter in the `sds-replicated-volume` module settings would result in the value for this parameter to be derived from the `sds-drbd` module when installing the `sds-replicated-volume` module. If this parameter is not defined there as well, it will remain empty and all the nodes in the cluster will be treated as storage nodes.
 
@@ -608,25 +608,25 @@ Note that the module control-plane and its CSI will be unavailable during the mi
    EOF
    ```
 
-1. Wait for the `sds-replicated-volume` module to become `Ready`.
+5. Wait for the `sds-replicated-volume` module to become `Ready`.
 
    ```shell
    kubectl get moduleconfig sds-replicated-volume
    ``
 
-1. Check the `sds-replicated-volume` module settings.
+6. Check the `sds-replicated-volume` module settings.
 
    ```shell
    kubectl get moduleconfig sds-replicated-volume -oyaml
    ```
 
-1. Wait for all pods in the `d8-sds-replicated-volume` namespaces to become `Ready` or `Completed`.
+7. Wait for all pods in the `d8-sds-replicated-volume` namespaces to become `Ready` or `Completed`.
 
    ```shell
    kubectl get po -n d8-sds-replicated-volume
    ```
 
-1. Override the `linstor` command alias and check the DRBD resources:
+8. Override the `linstor` command alias and check the DRBD resources:
 
    ```shell
    alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -642,7 +642,7 @@ If there are no faulty resources, then the migration was successful.
 DRBD with a replica count greater than 1 provides de facto network RAID. Using RAID locally may be inefficient because:
 
 - Redundant RAID dramatically increases the overhead in terms of space utilization.
-  Here is an example: Suppose, a DBRDStorageClass is used with `replication` set to `ConsistencyAndAvailability`. With this setting, DRBD will store data in three replicas (one replica per three different hosts). If RAID1 is used on these hosts, a total of 6 GB of disk space will be required to store 1 GB of data. Redundant RAID is worth using for easier server maintenance when the storage costs are irrelevant. RAID1 in this case will allow you to change disks on servers without having to move data replicas from the "problem" disk.
+  Here is an example: Suppose, a ReplicatedStorageClass is used with `replication` set to `ConsistencyAndAvailability`. With this setting, DRBD will store data in three replicas (one replica per three different hosts). If RAID1 is used on these hosts, a total of 6 GB of disk space will be required to store 1 GB of data. Redundant RAID is worth using for easier server maintenance when the storage costs are irrelevant. RAID1 in this case will allow you to change disks on servers without having to move data replicas from the "problem" disk.
 
 - As for RAID0, the performance gain will be unnoticeable, since data replication will be performed over the network and the network is likely to be the bottleneck. On top of that, decreased storage reliability on the host will potentially lead to data unavailability given that in DRBD, switching from a faulty replica to a healthy one is not instantaneous.
 
