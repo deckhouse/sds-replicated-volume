@@ -119,7 +119,20 @@ For greater stability of the module, it is not recommended to reboot multiple no
    kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
    ```
 
-## How do I evict DRBD resources from a node?
+### How to evict DRBD resources from a node?
+
+Eviction of DRBD resources from a node is performed using the `evict.sh` script. It can operate in two modes:
+
+- **Node Deletion Mode** – in this mode, the following actions are executed:
+  - Additional replicas are created for each resource hosted on the specified node;
+  - The node is removed from `LINSTOR`;
+  - The node is removed from `Kubernetes`;
+
+- **Resource Deletion Mode** – in this mode, the following actions are executed:
+  - Additional replicas are created for each resource hosted on the specified node;
+  - The resources hosted on the specified node are removed from `LINSTOR`;
+
+Before proceeding with the eviction, the following steps must be performed:
 
 1. Check existence of `evict.sh` script on any master node:
 
@@ -139,7 +152,7 @@ For greater stability of the module, it is not recommended to reboot multiple no
    kubectl -n d8-sds-replicated-volume get pods | grep -v Running
    ```
 
-## How to remove DRBD resources from a node, including removal from LINSTOR and Kubernetes?
+### Example of removing a node from LINSTOR and Kubernetes.
 
 Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
 
@@ -155,7 +168,7 @@ Example invocation:
 /opt/deckhouse/sbin/evict.sh --non-interactive --delete-node --node-name "worker-1"
 ```
 
-## How do I evict DRBD resources from a node without deleting it from LINSTOR and Kubernetes
+### Example of removing resources from a node without removing the node itself.
 
 1. Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
 
@@ -187,6 +200,17 @@ Example:
    alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
    linstor node list -s AutoplaceTarget
    ```
+
+### Description of the `evict.sh` script parameters
+
+- `--delete-node` — Removes the node from LINSTOR and Kubernetes after first creating additional replicas for all resources hosted on that node.
+- `--delete-resources-only` — Removes the resources from the node without deleting the node from LINSTOR and Kubernetes, after first creating additional replicas for all resources hosted on that node.
+- `--non-interactive` — Runs the script in non-interactive mode.
+- `--node-name` — Specifies the name of the node from which resources should be evicted. This parameter is mandatory when using non-interactive mode.
+- `--skip-db-backup` — Skips creating a backup of the LINSTOR database before executing the operations.
+- `--ignore-advise` — Proceeds with the operations despite warnings from the `linstor advise resource` command.
+- `--exclude-resources-from-check` — Excludes from checks the resources listed using the `|` (vertical bar) as a separator.
+
 
 ## Troubleshooting
 
