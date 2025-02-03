@@ -14,7 +14,7 @@ The module allows you to create a `Storage Pool` as well as a `StorageClass` by 
 To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/stable/) module.
 > **Caution!** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 >
-> **Caution!** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+> **Caution.** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
 
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [storage pools and StorageClasses](./usage.html#configuring-the-linstor-backend).
 

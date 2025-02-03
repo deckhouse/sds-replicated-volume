@@ -13,9 +13,9 @@ moduleStatus: preview
 
 Модуль позволяет создавать `Storage Pool` и `StorageClass` через создание [пользовательских ресурсов Kubernetes](./cr.html).
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
-> **Внимание!** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
+> **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 >
-> **Внимание!** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
+> **Внимание.** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
