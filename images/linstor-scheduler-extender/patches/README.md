@@ -2,4 +2,4 @@
 
 ### Scheduler extender
 
- Extend scheduler with HTTPS support and our own logic.
+Extend scheduler with HTTPS support and our own logic.
