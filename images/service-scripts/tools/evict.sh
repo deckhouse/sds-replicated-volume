@@ -904,6 +904,16 @@ linstor_backup_database() {
     break
   done
 
+  if [[ $sds_replicated_volume_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+    sds_replicated_volume_controller_current_replicas=2
+  fi
+
+  if [[ $linstor_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for LINSTOR controller is 0. The number of replicas will be set to 2."
+    linstor_controller_current_replicas=2
+  fi
+
   echo "Scale down sds-replicated-volume-controller and LINSTOR controller"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
   echo "Waiting for sds-replicated-volume-controller to scale down"
