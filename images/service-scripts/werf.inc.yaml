@@ -4,35 +4,31 @@ from: {{ $.Root.BASE_ALPINE_DEV }}
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}
-    to: /
-    excludePaths:
-    - werf.inc.yaml
-    includePaths:
-    - scripts/install
-    - scripts/uninstall
-    - tools/evict.sh
-    - tools/replicas_manager.sh
+  - add: /
+    to: /repo
+    # excludePaths:
+    # - werf.inc.yaml
+    # includePaths:
+    # - scripts/install
+    # - scripts/uninstall
+    # - tools/evict.sh
+    # - tools/replicas_manager.sh
 
 shell:
   setup:
-    - chmod a+x scripts/*
-    - mv scripts/* /
-    - chmod a+x tools/*
-    - mv tools/* /
+    - mkdir /relocate
+    - chmod a+x /repo/images/service-scripts/scripts/*
+    - mv /repo/images/service-scripts/scripts/* /relocate/
+    - chmod a+x /repo/images/service-scripts/tools/*
+    - mv /repo/images/service-scripts/tools/* /relocate/
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-artifact
-    add: /
+    add: /relocate/
     to: /
-    includePaths:
-      - evict.sh
-      - replicas_manager.sh
-      - install
-      - uninstall
     before: setup
 docker:
   LABEL:
