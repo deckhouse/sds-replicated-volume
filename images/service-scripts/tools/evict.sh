@@ -178,6 +178,10 @@ linstor_check_advise() {
     if (( $(linstor advise r | tee /dev/tty | grep  "[a-zA-Z0-9]" | wc -l) > 1)); then
       echo "Advise found."
       echo "It is recommended to perform the advised actions manually."
+      if [[ "${IGNORE_ADVISE}" == "true" ]]; then
+        echo "Ignoring advise. Continuing with the script."
+        return
+      fi
       if get_user_confirmation "Exit the script? If not, the script will continue and recheck for advise." "y" "n"; then
         exit_function
       else
@@ -900,6 +904,16 @@ linstor_backup_database() {
     break
   done
 
+  if [[ $sds_replicated_volume_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+    sds_replicated_volume_controller_current_replicas=2
+  fi
+
+  if [[ $linstor_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for LINSTOR controller is 0. The number of replicas will be set to 2."
+    linstor_controller_current_replicas=2
+  fi
+
   echo "Scale down sds-replicated-volume-controller and LINSTOR controller"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
   echo "Waiting for sds-replicated-volume-controller to scale down"
@@ -1067,6 +1081,10 @@ process_args() {
         CREATE_DB_BACKUP=false
         shift
         ;;
+      --ignore-advise)
+        IGNORE_ADVISE=true
+        shift
+        ;;
       --delete-resources-only)
         DELETE_RESOURCES=true
         DELETE_MODE="resources-only"
@@ -1109,6 +1127,7 @@ process_args() {
 #####################################
 NON_INTERACTIVE=false
 CREATE_DB_BACKUP=true
+IGNORE_ADVISE=false
 DELETE_MODE=""
 
 echo "The script for evicting LINSTOR resources has been launched. Performing necessary checks before starting."
@@ -1180,6 +1199,10 @@ while true; do
         exit_function
       fi
     else
+      if [[ "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" -eq 0 ]]; then
+        echo "The number of replicas for the sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+        SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=2
+      fi
       break
     fi
   done

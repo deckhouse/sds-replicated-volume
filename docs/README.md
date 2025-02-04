@@ -67,7 +67,7 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-1. Wait for the `sds-node-configurator` module to reach the `Ready` state. At this stage, there is no need to check pods in the `d8-sds-node-configurator` namespace.
+2. Wait for the `sds-node-configurator` module to reach the `Ready` state. At this stage, there is no need to check pods in the `d8-sds-node-configurator` namespace.
 
    ```shell
    kubectl get module sds-node-configurator -w
@@ -75,7 +75,7 @@ Enabling the `sds-node-configurator` module:
 
 Enabling the `sds-replicated-volume` module:
 
-1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).  
+3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).  
 The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
@@ -90,16 +90,16 @@ The example below launches the module with default settings, which will result i
    EOF
    ```
 
-1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
+4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
+5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
    ```shell
-   kubectl -n d8-sds-replicated-volume get pod -owide -w
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
    kubectl -n d8-sds-node-configurator get pod -o wide -w
    ```
 

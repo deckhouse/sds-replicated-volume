@@ -8,6 +8,10 @@ git:
     to: /
     excludePaths:
     - werf.inc.yaml
+    stageDependencies:
+      setup:
+        - images/{{ $.ImageName }}/scripts
+        - images/{{ $.ImageName }}/tools
 
 shell:
   setup:
@@ -15,6 +19,7 @@ shell:
     - mv scripts/* /
     - chmod a+x tools/*
     - mv tools/* /
+
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}

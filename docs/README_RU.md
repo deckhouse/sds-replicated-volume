@@ -269,16 +269,16 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь состояния модуля `Ready`.
+2. Дождитесь состояния модуля `Ready`.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+3. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
-   kubectl -n d8-sds-replicated-volume get pod -owide -w
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
    kubectl -n d8-sds-node-configurator get pod -o wide -w
    ```
 
@@ -305,7 +305,7 @@ kubectl get sc replicated-storage-class
    dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi       /dev/vdb
    ```
 
-1. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-0`:
+2. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-0`:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -328,7 +328,7 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
+3. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
 
    ```shell
    kubectl get lvg vg-1-on-worker-0 -w
@@ -336,7 +336,7 @@ kubectl get sc replicated-storage-class
 
 Если ресурс перешел в состояние `Ready`, это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
-1. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
+4. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -358,7 +358,7 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
+5. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
 
    ```shell
    kubectl get lvg vg-1-on-worker-1 -w
@@ -366,7 +366,7 @@ kubectl get sc replicated-storage-class
 
 Если ресурс перешел в состояние `Ready`, это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
-1. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
+6. Создайте ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -388,7 +388,7 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
+7. Дождитесь, когда созданный ресурс LVMVolumeGroup перейдет в состояние `Ready`:
 
    ```shell
    kubectl get lvg vg-1-on-worker-2 -w
@@ -396,7 +396,7 @@ kubectl get sc replicated-storage-class
 
 Если ресурс перешел в состояние `Ready`, это значит, что на узле `worker-2` из блочного устройства `/dev/vdd` была создана LVM VG с именем `vg-1`.
 
-1. Создайте ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
+8. Создайте ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool):
 
    ```yaml
    kubectl apply -f -<<EOF
@@ -413,13 +413,13 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Created`:
+9. Дождитесь, когда созданный ресурс `ReplicatedStoragePool` перейдет в состояние `Created`:
 
    ```shell
    kubectl get rsp data -w
    ```
 
-1. Проверьте, что в LINSTOR создался Storage Pool `data` на узлах `worker-0`,  `worker-1` и `worker-2`:
+10. Проверьте, что в LINSTOR создался Storage Pool `data` на узлах `worker-0`,  `worker-1` и `worker-2`:
 
    ```shell
    alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -441,7 +441,7 @@ kubectl get sc replicated-storage-class
    ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
    ```
 
-1. Создайте ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) для кластера, не разделенного на зоны (подробности о работе зональных ReplicatedStorageClass представлены в разделе [сценарии использования](./layouts.html)):
+11. Создайте ресурс [ReplicatedStorageClass](./cr.html#replicatedstorageclass) для кластера, не разделенного на зоны (подробности о работе зональных ReplicatedStorageClass представлены в разделе [сценарии использования](./layouts.html)):
 
    ```yaml
    kubectl apply -f -<<EOF
@@ -456,13 +456,13 @@ kubectl get sc replicated-storage-class
    EOF
    ```
 
-1. Дождитесь, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
+12. Дождитесь, когда созданный ресурс `ReplicatedStorageClass` перейдет в состояние `Created`:
 
    ```shell
    kubectl get rsc replicated-storage-class -w
    ```
 
-1. Проверьте, что соответствующий StorageClass создался:
+13. Проверьте, что соответствующий StorageClass создался:
 
    ```shell
    kubectl get sc replicated-storage-class
