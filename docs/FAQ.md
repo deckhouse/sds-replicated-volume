@@ -154,7 +154,7 @@ Before proceeding with the eviction, the following steps must be performed:
 
 ### Example of removing a node from LINSTOR and Kubernetes.
 
-Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
+Run the `evict.sh` script on any master node in interactive mode by specifying the delete mode `--delete-node`:
 
 ```shell
 /opt/deckhouse/sbin/evict.sh --delete-node
@@ -170,7 +170,7 @@ Example invocation:
 
 ### Example of removing resources from a node without removing the node itself.
 
-1. Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
+1. Run the `evict.sh` script on any master node in interactive mode (`--delete-resources-only`):
 
    ```shell
    /opt/deckhouse/sbin/evict.sh --delete-resources-only
