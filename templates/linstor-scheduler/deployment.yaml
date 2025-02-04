@@ -167,7 +167,7 @@ spec:
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "linstor_scheduler_extender_resources" . | nindent 14 }}
               {{- end }}
-          {{- if or (eq "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+          {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
           ports:
            - containerPort: 8099
              protocol: TCP
