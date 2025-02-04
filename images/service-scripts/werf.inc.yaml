@@ -4,23 +4,22 @@ from: {{ $.Root.BASE_ALPINE_DEV }}
 final: false
 
 git:
-  - add: /
-    to: /repo
-    # excludePaths:
-    # - werf.inc.yaml
-    # includePaths:
-    # - scripts/install
-    # - scripts/uninstall
-    # - tools/evict.sh
-    # - tools/replicas_manager.sh
+  - add: /images/{{ $.ImageName }}
+    to: /
+    excludePaths:
+    - werf.inc.yaml
+    stageDependencies:
+      setup:
+        - /images/{{ $.ImageName }}/scripts
+        - /images/{{ $.ImageName }}/tools
 
 shell:
   setup:
-    - mkdir /relocate
-    - chmod a+x /repo/images/service-scripts/scripts/*
-    - mv /repo/images/service-scripts/scripts/* /relocate/
-    - chmod a+x /repo/images/service-scripts/tools/*
-    - mv /repo/images/service-scripts/tools/* /relocate/
+    - chmod a+x scripts/*
+    - mv scripts/* /
+    - chmod a+x tools/*
+    - mv tools/* /
+
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}
