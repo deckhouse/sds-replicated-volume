@@ -1189,6 +1189,10 @@ while true; do
         exit_function
       fi
     else
+      if [[ "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" -eq 0 ]]; then
+        echo "The number of replicas for the sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+        SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=2
+      fi
       break
     fi
   done
