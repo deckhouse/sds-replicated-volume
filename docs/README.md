@@ -5,24 +5,45 @@ moduleStatus: preview
 ---
 
 {{< alert level="warning" >}}
-The module is only guaranteed to work if [requirements](./readme.html#system-requirements-and-recommendations) are met.
+The module is only guaranteed to work if the [system requirements](./readme.html#system-requirements-and-recommendations) are met.
 As for any other configurations, the module may work, but its smooth operation is not guaranteed.
 {{< /alert >}}
 
-This module manages replicated block storage based on `DRBD`. Currently, `LINSTOR` is used as a control-plane. The module allows you to create a `Storage Pool` in `LINSTOR` as well as a `StorageClass` in `Kubernetes` by creating [Kubernetes custom resources](./cr.html). 
+This module manages replicated block storage based on `DRBD`. Currently, `LINSTOR` is used as a control-plane/backend (without the possibility of direct user configuration). 
+The module allows you to create a `Storage Pool` as well as a `StorageClass` by creating [Kubernetes custom resources](./cr.html). 
 To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/stable/) module.
 > **Caution!** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
-> 
-> **Caution!** The user is not allowed to configure the `LINSTOR` backend directly.
 >
-> **Caution!** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+> **Caution.** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
 
-After you enable the `sds-replicated-volume` module in the Deckhouse configuration, your cluster will be automatically set to use the `LINSTOR` backend. You will only have to create [storage pools and StorageClasses](./usage.html#configuring-the-linstor-backend).
+After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [storage pools and StorageClasses](./usage.html#configuring-the-linstor-backend).
 
 > **Caution!** The user is not allowed to create a `StorageClass` for the replicated.csi.storage.deckhouse.io CSI driver.
 
-Two modes are supported: LVM and LVMThin.
-Each mode has its advantages and disadvantages. Read [FAQ](./faq.html#what-is-difference-between-lvm-and-lvmthin) to learn more and compare them.
+To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
+
+- Configure LVMVolumeGroup.
+  Before creating a StorageClass, create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
+
+- Enable the [sds-node-configurator](../../sds-node-configurator/stable/) module.  
+  Ensure that the `sds-node-configurator` module is enabled **before** enabling the `sds-replicated-volume` module.
+
+{{< alert level="warning" >}}
+Direct configuration of the LINSTOR backend by the user is prohibited.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
+{{< /alert >}}
+
+- Create Storage Pools and Corresponding StorageClasses.
+
+  Users are **prohibited** from creating StorageClasses for the `replicated.csi.storage.deckhouse.io` CSI driver.  
+
+  After the `sds-replicated-volume` module is activated in the Deckhouse configuration, the cluster will automatically be set up to work with the LINSTOR backend. You only need to create the [storage pools and StorageClasses](./usage.html#configuring-the-linstor-backend).
+
+The module supports two operating modes: LVM and LVMThin.  
+Each mode has its own characteristics, advantages, and limitations. Learn more about the differences [in the FAQ](./faq.html#what-is-difference-between-lvm-and-lvmthin).
 
 ## Quickstart guide
 
@@ -30,56 +51,57 @@ Note that all commands must be run on a machine that has administrator access to
 
 ### Enabling modules
 
-- Enable the sds-node-configurator module
+Enabling the `sds-node-configurator` module:
 
-```shell
-kubectl apply -f - <<EOF
-apiVersion: deckhouse.io/v1alpha1
-kind: ModuleConfig
-metadata:
-  name: sds-node-configurator
-spec:
-  enabled: true
-  version: 1
-EOF
+1. Create a ModuleConfig resource to enable the module:
 
-```
+   ```yaml
+   kubectl apply -f - <<EOF
+   apiVersion: deckhouse.io/v1alpha1
+   kind: ModuleConfig
+   metadata:
+     name: sds-node-configurator
+   spec:
+     enabled: true
+     version: 1
+   EOF
+   ```
 
-- Wait for it to become `Ready`. At this stage, you do NOT need to check the pods in the `d8-sds-node-configurator` namespace.
+2. Wait for the `sds-node-configurator` module to reach the `Ready` state. At this stage, there is no need to check pods in the `d8-sds-node-configurator` namespace.
 
-```shell
-kubectl get module sds-node-configurator -w
-```
+   ```shell
+   kubectl get module sds-node-configurator -w
+   ```
 
-- Enable the `sds-replicated-volume` module. Refer to the [configuration](./configuration.html) to learn more about module settings. In the example below, the module is launched with the default settings. This will result in the following actions across all cluster nodes:
-  - installation of the `DRBD` kernel module;
-  - registration of the CSI driver;
-  - launch of service pods for the `sds-replicated-volume` components.
+Enabling the `sds-replicated-volume` module:
 
-```shell
-kubectl apply -f - <<EOF
-apiVersion: deckhouse.io/v1alpha1
-kind: ModuleConfig
-metadata:
-  name: sds-replicated-volume
-spec:
-  enabled: true
-  version: 1
-EOF
-```
+3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).  
+The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
-- Wait for the module to become `Ready`.
+   ```yaml
+   kubectl apply -f - <<EOF
+   apiVersion: deckhouse.io/v1alpha1
+   kind: ModuleConfig
+   metadata:
+     name: sds-replicated-volume
+   spec:
+     enabled: true
+     version: 1
+   EOF
+   ```
 
-```shell
-kubectl get module sds-replicated-volume -w
-```
+4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
-- Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where `DRBD` resources are intended to be used.
+   ```shell
+   kubectl get module sds-replicated-volume -w
+   ```
+
+5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
-```shell
-kubectl -n d8-sds-replicated-volume get pod -owide -w
-kubectl -n d8-sds-node-configurator get pod -o wide -w
-```
+   ```shell
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
+   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   ```
 
 ### Configuring storage on nodes
 
@@ -216,7 +238,7 @@ EOF
 kubectl get rsp data -w
 ```
 
-- Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2` in LINSTOR:
+- Confirm that the `data` Storage Pool has been created on nodes `worker-0`, `worker-1` and `worker-2`:
 
 ```shell
 alias linstor='kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor'
@@ -266,12 +288,18 @@ kubectl get sc replicated-storage-class
 ## System requirements and recommendations
 
 ### Requirements
-- Stock kernels shipped with the [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
-- High-speed 10Gbps network.
-- Do not use another SDS (Software defined storage) to provide disks to our SDS.
+
+{{< alert level="info" >}}
+Applicable to both single-zone clusters and clusters using multiple availability zones.
+{{< /alert >}}
+
+- Use stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
+- A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
+- To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms.
+- Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
 
 ### Recommendations
 
-- Avoid using RAID. The reasons are detailed in the [FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
-
-- Use local physical disks. The reasons are detailed in the [FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
+- Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
+- Use local physical disks. The reasons are detailed [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
+- In order for cluster to be operational, but with performance degradation, network latency should not be higher than 20ms between nodes
