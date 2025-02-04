@@ -141,7 +141,7 @@ For greater stability of the module, it is not recommended to reboot multiple no
 
 ## How to remove DRBD resources from a node, including removal from LINSTOR and Kubernetes?
 
-Run the `evict.sh` script in interactive mode by specifying the delete mode `--delete-node`:
+Run the `evict.sh` script on any master node in interactive mode by specifying the delete mode `--delete-node`:
 
 ```shell
 /opt/deckhouse/sbin/evict.sh --delete-node
@@ -157,7 +157,7 @@ Example invocation:
 
 ## How do I evict DRBD resources from a node without deleting it from LINSTOR and Kubernetes
 
-1. Run the `evict.sh` script in interactive mode (`--delete-resources-only`):
+1. Run the `evict.sh` script on any master node in interactive mode (`--delete-resources-only`):
 
    ```shell
    /opt/deckhouse/sbin/evict.sh --delete-resources-only
