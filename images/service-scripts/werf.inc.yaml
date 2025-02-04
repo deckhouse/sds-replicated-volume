@@ -8,6 +8,11 @@ git:
     to: /
     excludePaths:
     - werf.inc.yaml
+    includePaths:
+    - scripts/install
+    - scripts/uninstall
+    - tools/evict.sh
+    - tools/replicas_manager.sh
 
 shell:
   setup:
