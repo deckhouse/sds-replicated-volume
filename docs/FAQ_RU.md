@@ -81,7 +81,7 @@ description: Диагностика проблем LINSTOR. Когда след�
 2. Проверьте, что в DRBD нет проблемных ресурсов или ресурсов в `SyncTarget`. Если они есть, дождитесь синхронизации или примите меры для восстановления нормальной работоспособности.
 
    ```shell
-   kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
+   $ kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
    ```
 
    Пример вывода:
