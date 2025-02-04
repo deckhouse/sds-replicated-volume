@@ -26,8 +26,13 @@ from: {{ $.Root.BASE_SCRATCH }}
 
 import:
   - image: {{ $.ImageName }}-artifact
-    add: /relocate/
+    add: /
     to: /
+    includePaths:
+      - evict.sh
+      - replicas_manager.sh
+      - install
+      - uninstall
     before: setup
 docker:
   LABEL:
