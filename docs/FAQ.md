@@ -77,7 +77,7 @@ For greater stability of the module, it is not recommended to reboot multiple no
 
 2. Check that there are no problematic resources in DRBD / resources in SyncTarget. If there are any, wait for synchronization / take measures to restore normal operation.
 
-   ```shell
+   ```console
    kubectl -n d8-sds-replicated-volume exec -t deploy/linstor-controller -- linstor r l --faulty
    Defaulted container "linstor-controller" out of: linstor-controller, kube-rbac-proxy
    +----------------------------------------------------------------+
