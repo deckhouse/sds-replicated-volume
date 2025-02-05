@@ -50,7 +50,7 @@ properties:
           If parameter is omitted, Linstor nodes will be placed on all nodes.
 
           **Caution!** Changing this parameter does not result in data redistribution. If node with data no longer matches the `nodeSelector`, data on that node will become inaccessible.
-  backup_daily:
+  backup:
     type: object
     description: Module backup settings
     properties:
@@ -66,19 +66,4 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
-  backup_weekly:
-    type: object
-    description: Module backup settings
-    properties:
-      enabled:
-        type: boolean
-        default: true
-        description: Module backup state
-      retentionCount:
-        type: integer
-        default: 4
-        description: Number of backups to keep
-      schedule:
-        type: string
-        default: "0 4 * * 2,4"
         description: Backup schedule
