@@ -59,8 +59,10 @@ func mainExecution(log *logger.Logger, filePath string, fileContent string, wait
 		// Open the file for reading
 		file, err := os.Open(filePath)
 		if err != nil {
-			log.Error(err, fmt.Sprintf("opening file %s", filePath))
-			return 2
+			log.Warning(err, fmt.Sprintf("opening file %s", filePath))
+			log.Info(waitingMsg)
+			time.Sleep(time.Duration(sleepSec) * time.Second)
+			continue
 		}
 		defer file.Close()
 
