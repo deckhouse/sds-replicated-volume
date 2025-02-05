@@ -3,7 +3,7 @@ image: {{ $.ImageName }}-golang-artifact
 from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 git:
-  - url: {{ env "SOURCE_REPO" }}/LINBIT/saas
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/saas
     add: /
     to: /usr/local/go/{{ $.ImageName }}
     tag: {{ $.Versions.SPAAS }}

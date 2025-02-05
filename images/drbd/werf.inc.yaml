@@ -3,7 +3,7 @@ image: {{ $.ImageName }}-artifact
 from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 git:
-  - url: {{ env "SOURCE_REPO" }}/LINBIT/drbd/
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd/
     add: /
     to: /drbd
     tag: drbd-{{ $.Versions.DRBD }}
