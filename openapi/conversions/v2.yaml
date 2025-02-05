@@ -1,3 +1,0 @@
-version: 2
-conversions:
-  - if .sdsReplicatedVolume.backup and .sdsReplicatedVolume.backup_daily == null then .sdsReplicatedVolume.backup_daily = .sdsReplicatedVolume.backup end
