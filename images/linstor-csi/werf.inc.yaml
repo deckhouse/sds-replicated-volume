@@ -1,0 +1,85 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
+
+git:
+  - url: https://github.com/linbit/linstor-csi
+    add: /
+    to: /usr/local/go/linstor-csi
+    commit: {{ $.Versions.LINSTOR_CSI }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /usr/local/go/linstor-csi
+    - git apply /patches/*.patch
+    - cd cmd/linstor-csi
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v{{ $.Versions.LINSTOR_CSI }}"
+    - mv linstor-csi /
+    - chmod +x /linstor-csi
+
+---
+image: {{ $.ImageName }}-packages-artifact
+from: {{ $.Root.BASE_UBUNTU }}
+final: false
+git:
+  - add: /images/scripts
+    to: /
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    # install packages required by deb2distroless script
+    # https://salsa.debian.org/apt-team/apt-file
+    - |
+      apt-get update \
+      && apt-get -y install --no-install-recommends binutils zstd apt-file \
+      && apt-file update -a amd64 \
+      && apt-get clean
+  setup:
+    # util-linux need for blockdev command to work which is required when Linstor mounts it's volume
+    - |
+      /deb2distroless.sh -e /relocate -d /downloaded-cache mount
+      /deb2distroless.sh -e /relocate -d /downloaded-cache xfsprogs
+      /deb2distroless.sh -e /relocate -d /downloaded-cache e2fsprogs
+      /deb2distroless.sh -e /relocate -d /downloaded-cache util-linux
+      # now install (post-process) all downloaded depends
+      /deb2distroless.sh -e /relocate -d /downloaded-cache --post-process
+    - ln -sf /proc/mounts /relocate/etc/mtab
+    # cleanup
+    - rm -rf /var/lib/apt/lists/*
+    - echo "Relocate dir content:" && ls -la /relocate
+
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /linstor-csi
+    to: /linstor-csi
+    before: setup
+
+  - image: {{ $.ImageName }}-packages-artifact
+    add: /relocate
+    to: /
+    before: setup
+docker:
+  ENTRYPOINT: ["/linstor-csi"]
+  LABEL:
+    distro: all
+    version: all
+    linstor-csi: {{ $.Versions.LINSTOR_CSI }}

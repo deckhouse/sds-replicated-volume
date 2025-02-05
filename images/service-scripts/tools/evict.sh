@@ -178,6 +178,10 @@ linstor_check_advise() {
     if (( $(linstor advise r | tee /dev/tty | grep  "[a-zA-Z0-9]" | wc -l) > 1)); then
       echo "Advise found."
       echo "It is recommended to perform the advised actions manually."
+      if [[ "${IGNORE_ADVISE}" == "true" ]]; then
+        echo "Ignoring advise. Continuing with the script."
+        return
+      fi
       if get_user_confirmation "Exit the script? If not, the script will continue and recheck for advise." "y" "n"; then
         exit_function
       else
@@ -422,7 +426,7 @@ linstor_change_replicas_count() {
     sleep 2
     if (( ${current_diskful_replicas_count} < ${desired_diskful_replicas_count} )); then
       difference=$((desired_diskful_replicas_count - current_diskful_replicas_count))
-      eval "$(get_sorted_free_nodes "$RESOURCE_NODES" "$ALL_STORAGE_POOLS_NODES" "${diskful_storage_pool_name}")"
+      eval "$(get_sorted_free_nodes "$RESOURCE_NODES" "$FILTERED_STORAGE_POOLS_NODES" "${diskful_storage_pool_name}")"
 
       echo "The total number of diskfull replicas for resource ${resource_name} (${current_diskful_replicas_count}) less then the desired number of replicas(${desired_diskful_replicas_count}). Adding ${difference} diskfull replicas for this resource"
       for ((i=0; i<difference; i++)); do
@@ -432,7 +436,7 @@ linstor_change_replicas_count() {
           echo "i=${i}"
           echo free nodes count=${#sorted_free_nodes[@]}
           echo RESOURCE_NODES=${RESOURCE_NODES}
-          echo ALL_STORAGE_POOLS_NODES=${ALL_STORAGE_POOLS_NODES}
+          echo FILTERED_STORAGE_POOLS_NODES=${FILTERED_STORAGE_POOLS_NODES}
           echo diskful_storage_pool_name=${diskful_storage_pool_name}
           exit_function
           break
@@ -455,7 +459,7 @@ linstor_change_replicas_count() {
         echo "Creating new replica on node \"${node_name_for_new_replica}\" for resource \"${resource_name}\""
         exec_linstor_with_exit_code_check resource create ${node_name_for_new_replica} ${resource_name} --storage-pool ${diskful_storage_pool_name}
         
-        ALL_STORAGE_POOLS_NODES=$(echo $ALL_STORAGE_POOLS_NODES | jq --arg node_name "${node_name_for_new_replica}" --arg diskfulStoragePoolName "${diskful_storage_pool_name}" --argjson resource_allocated_size_kib "${resource_allocated_size_kib}" '
+        FILTERED_STORAGE_POOLS_NODES=$(echo $FILTERED_STORAGE_POOLS_NODES | jq --arg node_name "${node_name_for_new_replica}" --arg diskfulStoragePoolName "${diskful_storage_pool_name}" --argjson resource_allocated_size_kib "${resource_allocated_size_kib}" '
           map(if .node_name == $node_name and .storage_pool_name == $diskfulStoragePoolName then .free_capacity -= $resource_allocated_size_kib else . end)
         ')
 
@@ -523,13 +527,13 @@ linstor_change_replicas_count() {
 
 get_sorted_free_nodes() {
   local resource_nodes=$1
-  local all_storage_pools_nodes=$2
+  local filtered_storage_pools_nodes=$2
   local storage_pool_name=$3
 
   resource_all_nodes=($(echo $resource_nodes | jq -r '.[].node_name'))
   # resource_diskful_nodes=($(echo $resource_nodes | jq -r --arg disklessStorPoolName "${DISKLESS_STORAGE_POOL}" '.[] | select(.storage_pool != $disklessStorPoolName) | .node_name'))
-  nodes_for_storage_pool=($(echo $all_storage_pools_nodes | jq -r --arg storagePoolName "${storage_pool_name}" '.[] | select(.storage_pool_name == $storagePoolName) | .node_name'))
-  free_capacities=($(echo $all_storage_pools_nodes | jq -r --arg storagePoolName "${storage_pool_name}" '.[] | select(.storage_pool_name == $storagePoolName) | .free_capacity'))
+  nodes_for_storage_pool=($(echo $filtered_storage_pools_nodes | jq -r --arg storagePoolName "${storage_pool_name}" '.[] | select(.storage_pool_name == $storagePoolName) | .node_name'))
+  free_capacities=($(echo $filtered_storage_pools_nodes | jq -r --arg storagePoolName "${storage_pool_name}" '.[] | select(.storage_pool_name == $storagePoolName) | .free_capacity'))
 
   free_nodes=()
 
@@ -550,7 +554,7 @@ get_sorted_free_nodes() {
 
 create_tiebreaker() {
   local resource_name=$1
-  local all_storage_pools_nodes=$2
+  local filtered_storage_pools_nodes=$2
 
   while true; do
     count=0
@@ -604,7 +608,7 @@ create_tiebreaker() {
   if (( ${diskless_replicas_count} < 1 && ${diskful_replicas_count} == 2)); then
     echo "The count of diskless replicas is ${diskless_replicas_count} and count of diskful replicas is ${diskful_replicas_count}. Creating a TieBreaker for resource ${resource_name}"
 
-    eval "$(get_sorted_free_nodes "$RESOURCE_NODES" "$ALL_STORAGE_POOLS_NODES" "${DISKLESS_STORAGE_POOL}")"
+    eval "$(get_sorted_free_nodes "$RESOURCE_NODES" "$FILTERED_STORAGE_POOLS_NODES" "${DISKLESS_STORAGE_POOL}")"
     free_node_count=${#sorted_free_nodes[@]}
     if [ 0 -ge ${free_node_count} ]; then
       echo "Error: Not enough free nodes for create tiebreaker"
@@ -900,6 +904,16 @@ linstor_backup_database() {
     break
   done
 
+  if [[ $sds_replicated_volume_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+    sds_replicated_volume_controller_current_replicas=2
+  fi
+
+  if [[ $linstor_controller_current_replicas -eq 0 ]]; then
+    echo "The number of replicas for LINSTOR controller is 0. The number of replicas will be set to 2."
+    linstor_controller_current_replicas=2
+  fi
+
   echo "Scale down sds-replicated-volume-controller and LINSTOR controller"
   execute_command "kubectl -n ${LINSTOR_NAMESPACE} scale deployment sds-replicated-volume-controller --replicas=0"
   echo "Waiting for sds-replicated-volume-controller to scale down"
@@ -1067,6 +1081,10 @@ process_args() {
         CREATE_DB_BACKUP=false
         shift
         ;;
+      --ignore-advise)
+        IGNORE_ADVISE=true
+        shift
+        ;;
       --delete-resources-only)
         DELETE_RESOURCES=true
         DELETE_MODE="resources-only"
@@ -1109,6 +1127,7 @@ process_args() {
 #####################################
 NON_INTERACTIVE=false
 CREATE_DB_BACKUP=true
+IGNORE_ADVISE=false
 DELETE_MODE=""
 
 echo "The script for evicting LINSTOR resources has been launched. Performing necessary checks before starting."
@@ -1180,6 +1199,10 @@ while true; do
         exit_function
       fi
     else
+      if [[ "${SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS}" -eq 0 ]]; then
+        echo "The number of replicas for the sds-replicated-volume-controller is 0. The number of replicas will be set to 2."
+        SDS_REPLICATED_VOLUME_CONTROLLER_CURRENT_REPLICAS=2
+      fi
       break
     fi
   done
@@ -1207,7 +1230,19 @@ exec_linstor_with_exit_code_check node set-property ${NODE_FOR_EVICT} AutoplaceT
 
 RESOURCE_AND_GROUP_NAMES=$(linstor -m --output-version=v1 resource-definition list -r ${DISKFUL_RESOURCES_TO_EVICT} | jq -r '.[][] | {resource: .name, resource_group: .resource_group_name}')
 RESOURCE_GROUPS=$(linstor -m --output-version=v1 resource-group list | jq -r '.[][] | {resource_group: .name, place_count: .select_filter.place_count}')
+
 ALL_STORAGE_POOLS_NODES=$(linstor -m --output-version=v1 storage-pool list | jq  '[.[][] | {storage_pool_name: .storage_pool_name, node_name: .node_name, free_capacity: .free_capacity}]')
+UNSUITABLE_NODES=$(linstor -m --output-version=v1 node list | jq -r '[.[][] | select(.props.AutoplaceTarget == "false") | .name]')
+UNSUITABLE_NODES_ARRAY=($(echo $UNSUITABLE_NODES | jq -r '.[]'))
+FILTERED_STORAGE_POOLS_NODES=$(echo $ALL_STORAGE_POOLS_NODES | jq --argjson unsuitable_nodes "$(echo $UNSUITABLE_NODES)" '
+    . | map(select(.node_name as $node_name | $unsuitable_nodes | index($node_name) | not))
+')
+
+for UNSUITABLE_NODE in "${UNSUITABLE_NODES_ARRAY[@]}"; do
+  echo "Node ${UNSUITABLE_NODE} is excluded from the LINSTOR scheduler. So the resources will not be placed on this node."
+done
+echo "List of nodes and storage pools available for placement: FILTERED_STORAGE_POOLS_NODES=${FILTERED_STORAGE_POOLS_NODES}"
+
 
 echo "List of resources to be evicted from node ${NODE_FOR_EVICT}:"
 exec_linstor_with_exit_code_check resource list-volumes -r ${DISKFUL_RESOURCES_TO_EVICT}

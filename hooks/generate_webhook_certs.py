@@ -38,7 +38,9 @@ def main():
             sansGenerator=default_sans([
                 "webhooks",
                 f"webhooks.{common.NAMESPACE}",
-                f"webhooks.{common.NAMESPACE}.svc"]),
+                f"webhooks.{common.NAMESPACE}.svc",
+                f"%CLUSTER_DOMAIN%://webhooks.{common.NAMESPACE}.svc",
+                ]),
             values_path_prefix=f"{common.MODULE_NAME}.internal.customWebhookCert"
             ),
         cn="linstor-scheduler-admission",
