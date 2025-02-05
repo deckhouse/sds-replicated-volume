@@ -3,13 +3,6 @@ image: {{ $.ImageName }}-artifact
 from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 git:
-  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd/
-    add: /
-    to: /drbd
-    tag: drbd-{{ $.Versions.DRBD }}
-    stageDependencies:
-      setup:
-        - "**/*"
   - add: /images/{{ $.ImageName }}/scripts
     to: /scripts
     stageDependencies:
@@ -25,6 +18,8 @@ shell:
       && update-ca-trust \
       && apt-get clean \
       && rm -rf /var/lib/apt/lists/*
+    - git config --global user.email "builder@deckhouse.io"
+    - git config --global user.name "deckhouse"
   install:
     {{- $ctx := dict }}
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
@@ -33,14 +28,15 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
+    - git clone --depth 1 --branch drbd-{{ $.Versions.DRBD }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git  /drbd
     - cd /drbd
     - git submodule update --init --recursive
-      # disable use of local spatch (see /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh)
-    - rm -rf .git
-    - echo 'GIT-hash:123456' > /drbd/drbd/.drbd_git_revision
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
+    - git commit -am 'd8-curl'
       # tarball required by spaas image
     - make tarball
+      # disable use of local spatch (see /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh)
+    - rm -rf .git
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}
