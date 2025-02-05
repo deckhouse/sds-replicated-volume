@@ -29,12 +29,12 @@
 {{- $_ := set $versions "LINSTOR_SERVER_PIRAEUS" "20e96f83f52631dc06d011b7f96293d4026236a1" }}
 {{- $_ := set $versions "LINSTOR_WAIT_UNTIL" "0.2.1" }}
 {{- $_ := set $versions "SEMVER_TOOL" "3.4.0" }}
-{{- $_ := set $versions "SPAAS" "7bef2e7976a455550bce2533487c635f20390ccf" }}
+{{- $_ := set $versions "SPAAS" "v0.1.5" }}
 {{- $_ := set $versions "THIN_SEND_RECV" "1.0.1" }}
 
 {{- $_ := set $ "VERSIONS" $versions }}
 
 
 # custom constants
-{{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git" }}
+{{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
 

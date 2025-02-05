@@ -2,31 +2,20 @@
 image: {{ $.ImageName }}-golang-artifact
 from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
-
 git:
-  - url: https://github.com/LINBIT/saas
+  - url: {{ env "SOURCE_REPO" }}/LINBIT/saas
     add: /
     to: /usr/local/go/{{ $.ImageName }}
-    commit: {{ $.Versions.SPAAS }}
+    tag: {{ $.Versions.SPAAS }}
     stageDependencies:
       setup:
         - "**/*"
-
-  - add: /images/{{ $.ImageName }}/patches
-    to: /patches
-    stageDependencies:
-      beforeSetup:
-        - "**/*"
-      setup:
-        - "**/*"
-
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 shell:
   setup:
     - cd /usr/local/go/{{ $.ImageName }}
-    - git apply /patches/*.patch
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 ---
@@ -42,7 +31,7 @@ import:
 
   - image: drbd-artifact
     add: /drbd/drbd-{{ $.Versions.DRBD }}.tar.gz
-    to: /var/cache/spaas/tarballs
+    to: /var/cache/spaas/tarballs/drbd-{{ $.Versions.DRBD }}.tar.gz
     before: setup
 
 shell:
