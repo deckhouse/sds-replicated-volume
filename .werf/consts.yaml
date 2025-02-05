@@ -6,6 +6,7 @@
 {{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
 {{- $_ := set $ "BASE_UBUNTU"      "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
 
+{{- $_ := set $ "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
 
 # component versions
 {{- $versions := dict }}
@@ -37,4 +38,3 @@
 
 # custom constants
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
-
