@@ -78,7 +78,7 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
-{{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
+{{- if and (not (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion))) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
         - name: kube-scheduler
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
           command:
@@ -178,7 +178,7 @@ spec:
       - name: scheduler-extender-certs
         secret:
             secretName: linstor-scheduler-extender-https-certs
-      {{- if and (not (eq "dev" .Values.global.deckhouseVersion)) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
+      {{- if and (not (or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion))) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
       - configMap:
           defaultMode: 420
           name: linstor-scheduler
