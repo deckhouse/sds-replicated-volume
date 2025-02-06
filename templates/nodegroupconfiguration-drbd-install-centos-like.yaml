@@ -94,7 +94,7 @@ spec:
     #   kernel-modules-core   --> kernel-devel
     #   kernel-lt             --> kernel-lt-devel
     #   kernel-lt-core        --> kernel-lt-devel
-    package_name="$(rpm -qf --qf "%{NAME}" "/lib/modules/${kernel_version_in_use}" | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
+    package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
     bb-yum-install "${package_name}-${kernel_version_in_use}"
 
     # Remove unused kernel-headers
