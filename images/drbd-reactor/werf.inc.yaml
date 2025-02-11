@@ -141,12 +141,6 @@ shell:
 # main almost distroless image
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_ALT_P11 }}
-# git:
-#   - add: /images/scripts
-#     to: /
-#     stageDependencies:
-#       setup:
-#         - "**/*"
 import:
   - image: {{ $.ImageName }}-utils-artifact
     add: /
@@ -167,14 +161,6 @@ import:
 shell:
   install:
     - export DEBIAN_FRONTEND=noninteractive
-    # install packages required by deb2distroless script
-    # https://salsa.debian.org/apt-team/apt-file
-    # - |
-    #   apt-get update \
-    #   && apt-get -y install --no-install-recommends binutils zstd apt-file \
-    #   && apt-file update -a amd64 \
-    #   && apt-get clean
-    # install required depends
     - |
       apt-get update \
       && apt-get -y install libkeyutils kmod sysklogd \

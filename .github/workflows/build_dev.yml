@@ -9,10 +9,17 @@ env:
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
 
 on:
-  pull_request:
+  #pull_request:
+  # call from trivy_image_check.yaml, which in turn call from pull_request
+  # https://stackoverflow.com/a/71489231
+  workflow_call:
   push:
     branches:
       - main
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   dev_setup_build:
@@ -24,12 +31,10 @@ jobs:
         run: |
           MODULES_MODULE_TAG="$(echo pr${{ github.ref_name }} | sed 's/\/.*//g')"
           echo "MODULES_MODULE_TAG=$MODULES_MODULE_TAG" >> "$GITHUB_ENV"
-        shell: bash
       - name: Set vars for main
         if: ${{ github.ref_name == 'main' }}
         run: |
           echo "MODULES_MODULE_TAG=${{ github.ref_name }}" >> "$GITHUB_ENV"
-        shell: bash
       - name: Print vars
         run: |
           echo MODULES_REGISTRY=$MODULES_REGISTRY

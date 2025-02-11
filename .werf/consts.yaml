@@ -4,7 +4,6 @@
 {{- $_ := set $ "BASE_GOLANG_1_22" "registry.deckhouse.io/base_images/golang:1.22.7-bullseye@sha256:e5dc67bf84590c008338a0e30f56a6ed2092a38e0d2895c797dd501db73a2330" }}
 {{- $_ := set $ "BASE_PYTHON"      "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
 {{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
-{{- $_ := set $ "BASE_UBUNTU"      "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
 
 {{- $_ := set $ "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
 
@@ -38,3 +37,5 @@
 
 # custom constants
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
+{{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
+{{- $_ := set $ "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}
