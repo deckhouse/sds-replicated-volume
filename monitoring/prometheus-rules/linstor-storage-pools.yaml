@@ -39,7 +39,7 @@
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
           4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
-             ```
+             ```shell
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
@@ -65,7 +65,7 @@
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
           4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
-             ```
+             ```shell
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
@@ -91,7 +91,7 @@
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
           4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
-             ```
+             ```shell
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
@@ -117,7 +117,7 @@
           2. Check the LINSTOR volumes: `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor volume list -n {{ $labels.node }} -s {{ $labels.storage_pool }}`
           3. Search for replicas you want to move `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource list-volumes`
           4. Move this replicas to other nodes (only 1-2 replicas sync simultaneously):
-             ```
+             ```shell
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NEW_NODE RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor resource-definition wait-sync RESOURCE_NAME
              kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
