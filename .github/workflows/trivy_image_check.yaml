@@ -12,9 +12,13 @@ on:
   pull_request:
 
 jobs:
+  build_dev:
+    uses: ./.github/workflows/build_dev.yml
+    secrets: inherit
   test:
     name: Trivy images check
     runs-on: [self-hosted, regular]
+    needs: [build_dev]
 
     steps:
       - uses: actions/checkout@v4
