@@ -15,9 +15,8 @@ shell:
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} \
       && apt-get -y install ca-certificates \
-      && update-ca-trust \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
     - git config --global user.email "builder@deckhouse.io"
     - git config --global user.name "deckhouse"
   install:
