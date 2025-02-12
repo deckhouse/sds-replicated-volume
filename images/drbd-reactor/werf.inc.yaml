@@ -5,7 +5,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: https://github.com/LINBIT/drbd-utils
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
     add: /
     to: /drbd-utils
     tag: v{{ $.Versions.DRBD_UTILS }}
@@ -13,7 +13,7 @@ git:
       setup:
         - "**/*"
 
-  - url: https://github.com/LINBIT/thin-send-recv
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
     tag: v{{ $.Versions.THIN_SEND_RECV }}
@@ -40,7 +40,7 @@ shell:
   setup:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-utils" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_UTILS) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
@@ -63,7 +63,7 @@ shell:
 
     # clone thin-send-recv git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/thin-send-recv" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/thin-send-recv" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.THIN_SEND_RECV) }}
     {{- $_ := set $ctx "folder" "/thin-send-recv" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
@@ -90,7 +90,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: https://github.com/LINBIT/drbd-reactor
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-reactor
     add: /
     to: /drbd-reactor
     tag: v{{ $.Versions.DRBD_REACTOR }}
@@ -115,7 +115,7 @@ shell:
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
   setup:
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-reactor" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-reactor" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_REACTOR) }}
     {{- $_ := set $ctx "folder" "/drbd-reactor" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
