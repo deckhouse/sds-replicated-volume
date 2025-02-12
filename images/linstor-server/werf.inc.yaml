@@ -44,9 +44,8 @@ shell:
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} java-11-openjdk-devel python3 wget unzip \
       && apt-get -y install ca-certificates \
-      && update-ca-trust \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     {{- $ctx := dict }}
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
@@ -86,7 +85,6 @@ shell:
     # linstor-common-1.24.2-1.noarch.rpm
     # linstor-controller-1.24.2-1.noarch.rpm
     # linstor-satellite-1.24.2-1.noarch.rpm
-# TODO: server артефакт вроде сбилдил, теперь нужно сбилдить все остальные
 ---
 image: {{ $.ImageName }}-client-artifact
 from: {{ $.Root.BASE_ALT_P11 }}
@@ -121,9 +119,8 @@ shell:
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
       && apt-get -y install ca-certificates \
-      && update-ca-trust \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     {{- $ctx := dict }}
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
@@ -362,8 +359,8 @@ shell:
       #    udev-rules-sgutils: Depends: /lib/udev/rules.d
       #    zfs-utils: Depends: /lib/udev/rules.d
       #               Depends: udev
-      apt-get clean
-      rm -rf /var/lib/apt/lists/* /packages
+      rm -rf /packages
+    - {{ $.Root.ALT_CLEANUP_CMD }}
 
 docker:
   # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
