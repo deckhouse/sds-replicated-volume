@@ -8,10 +8,10 @@ memory: 25Mi
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: metadata-scheduled-backup-daily
+  name: metadata-scheduled-backup-weekly
   namespace: d8-{{ .Chart.Name }}
 spec:
-  schedule: {{ dig "backup" "schedule" "0 3 * * *" .Values.sdsReplicatedVolume }}
+  schedule: "0 4 * * 2,4"
   concurrencyPolicy: Forbid
   failedJobsHistoryLimit: 1
   jobTemplate:
@@ -20,7 +20,7 @@ spec:
         metadata:
           namespace: d8-{{ .Chart.Name }}
           labels:
-            app: metadata-backup-daily
+            app: metadata-backup-weekly
         spec:
           restartPolicy: OnFailure
           {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 10 }}
@@ -36,13 +36,13 @@ spec:
             {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 12 }}
             image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
             env:
-              - name: BACKUP_TYPE
-                value: "daily-backup"
+            - name: BACKUP_TYPE
+              value: "weekly-backup"
             imagePullPolicy: IfNotPresent
             command:
               - /backup.py
               - --retentionCount
-              - {{ dig "backup" "retentionCount" 7 .Values.sdsReplicatedVolume | quote }}
+              - {{ dig "backup" "retentionCount" 4 .Values.sdsReplicatedVolume | quote }}
             volumeMounts:
               - name: tmp
                 mountPath: /tmp

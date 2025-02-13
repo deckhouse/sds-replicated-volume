@@ -60,9 +60,10 @@ properties:
         description: Module backup state
       retentionCount:
         type: integer
-        default: 3
+        default: 7
         description: Number of backups to keep
       schedule:
         type: string
         default: "0 3 * * *"
+        description: Backup schedule
         description: Backup schedule
