@@ -53,8 +53,19 @@
         description: |
           Persistent volumes in the cluster has less then 2 replicas (set of UpToDate resources)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
     - alert: ReplicatedPVIncorrectReplicasCountErrorS4
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas=~"error|fatal"}) > 0
       for: 30m
@@ -70,8 +81,19 @@
         description: |
           Persistent volumes in the cluster has not enough replicas for quorum for 30min (set of UpToDate resources)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
     - alert: ReplicatedPVIncorrectReplicasCountWarningS4
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas=~"warning|error|fatal"}) > 0
       for: 24h
@@ -87,8 +109,19 @@
         description: |
           Persistent volumes in the cluster has not enough replicas for long time (set of UpToDate resources less than minimal count)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
     - alert: ReplicatedPVIncorrectReplicasCountErrorS5
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas=~"error|fatal"}) > 0
       for: 15m
@@ -104,8 +137,19 @@
         description: |
           Persistent volumes in the cluster has not enough replicas for quorum for 15min (set of UpToDate resources)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
     - alert: ReplicatedPVIncorrectReplicasCountWarningS5
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas=~"warning|error|fatal"}) > 0
       for: 30m
@@ -121,8 +165,19 @@
         description: |
           Persistent volumes in the cluster has not enough replicas for 30min (set of UpToDate resources less than minimal count)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
     - alert: ReplicatedPVIncorrectReplicasCountWarningS6
       expr: count(kube_persistentvolume_labels{label_storage_deckhouse_io_pv_not_enough_replicas=~"warning|error|fatal"}) > 0
       for: 15m
@@ -138,5 +193,16 @@
         description: |
           Persistent volumes in the cluster has not enough replicas (set of UpToDate resources less than minimal count)
           
-          You can get minimal limit for StorageClass with command `kubectl get sc -o yaml | grep -E "(\sname|placementCount)"`
-          And view all Resource States with `linstor r l`
+          You can recognize necessary replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+
+          And recognize current replicas count by command:
+          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+
+          placementCount must be equal to UpToDate diskful replicas count
+
+          You can fix replicas number by commands:
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource create NODE RESOURCE_NAME`
+          `kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete NODE RESOURCE_NAME`
+
+          !Be careful with what you do, this can cause data loss!
