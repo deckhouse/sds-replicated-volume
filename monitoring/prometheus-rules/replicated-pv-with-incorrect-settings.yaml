@@ -54,10 +54,10 @@
           Persistent volumes in the cluster has less then 2 replicas (set of UpToDate resources)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=fatal | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=fatal | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
@@ -82,10 +82,10 @@
           Persistent volumes in the cluster has not enough replicas for quorum for 30min (set of UpToDate resources)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=error | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=error | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
@@ -110,10 +110,10 @@
           Persistent volumes in the cluster has not enough replicas for long time (set of UpToDate resources less than minimal count)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
@@ -138,10 +138,10 @@
           Persistent volumes in the cluster has not enough replicas for quorum for 15min (set of UpToDate resources)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=error | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=error | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
@@ -166,10 +166,10 @@
           Persistent volumes in the cluster has not enough replicas for 30min (set of UpToDate resources less than minimal count)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
@@ -194,10 +194,10 @@
           Persistent volumes in the cluster has not enough replicas (set of UpToDate resources less than minimal count)
           
           You can recognize necessary replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "echo "$1"; kubectl get sc "$7" -oyaml | grep placementCount" }' | bash`
 
           And recognize current replicas count by command:
-          `kubectl get pv --show-labels | grep pv-not-enough-replicas | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
+          `kubectl get pv -l storage.deckhouse.io/pv-not-enough-replicas=warning | awk '{ print "kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor r l -r "$1 }' | bash`
 
           placementCount must be equal to UpToDate diskful replicas count
 
