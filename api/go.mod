@@ -4,7 +4,7 @@ go 1.23.0
 
 toolchain go1.23.3
 
-require k8s.io/apimachinery v0.32.1
+require k8s.io/apimachinery v0.32.2
 
 require (
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
@@ -22,7 +22,7 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/tools v0.26.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
-	k8s.io/code-generator v0.32.1 // indirect
+	k8s.io/code-generator v0.32.2 // indirect
 	k8s.io/gengo/v2 v2.0.0-20240911193312-2b36238f13e9 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/utils v0.0.0-20241104100929-3ea5e8cea738 // indirect

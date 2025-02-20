@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  annotations:
+    pv.kubernetes.io/provisioned-by: replicated.csi.storage.deckhouse.io
+    volume.kubernetes.io/provisioner-deletion-secret-name: ""
+    volume.kubernetes.io/provisioner-deletion-secret-namespace: ""
+  creationTimestamp: "2025-01-16T08:28:39Z"
+  finalizers:
+    - kubernetes.io/pv-protection
+    - external-attacher/replicated-csi-storage-deckhouse-io
+  name: pvc-e222c006-1860-48e4-a3ca-8f4117296eab
+  resourceVersion: "32628973"
+  uid: 609a6f99-bccc-47bd-8213-9bca317c3475
+spec:
+  accessModes:
+    - ReadWriteOnce
+  capacity:
+    storage: 3Gi
+  claimRef:
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    name: pvc-test-1
+    namespace: default
+    resourceVersion: "1424015"
+    uid: e222c006-1860-48e4-a3ca-8f4117296eab
+  csi:
+    driver: replicated.csi.storage.deckhouse.io
+    fsType: ext4
+    volumeAttributes:
+      replicated.csi.storage.deckhouse.io/mount-options: ""
+      replicated.csi.storage.deckhouse.io/post-mount-xfs-opts: ""
+      replicated.csi.storage.deckhouse.io/remote-access-policy: |
+        - fromSame:
+            - topology.kubernetes.io/zone
+      replicated.csi.storage.deckhouse.io/uses-volume-context: "true"
+      storage.kubernetes.io/csiProvisionerIdentity: 1736947439504-9086-replicated.csi.storage.deckhouse.io
+    volumeHandle: pvc-e222c006-1860-48e4-a3ca-8f4117296eab
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: rsc-test
+  volumeMode: Filesystem
+status:
+  lastPhaseTransitionTime: "2025-01-16T08:28:39Z"
+  phase: Bound

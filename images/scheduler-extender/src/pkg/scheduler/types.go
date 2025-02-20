@@ -31,3 +31,20 @@ type ExtenderArgs struct {
 	// populated only if ExtenderConfig.NodeCacheCapable == true
 	NodeNames *[]string `json:"nodenames,omitempty"`
 }
+
+// ExtenderFilterResult is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#ExtenderFilterResult
+type ExtenderFilterResult struct {
+	// Filtered set of nodes where the pod can be scheduled; to be populated
+	// only if ExtenderConfig.NodeCacheCapable == false
+	Nodes *apiv1.NodeList `json:"nodes,omitempty"`
+	// Filtered set of nodes where the pod can be scheduled; to be populated
+	// only if ExtenderConfig.NodeCacheCapable == true
+	NodeNames *[]string `json:"nodenames,omitempty"`
+	// Filtered out nodes where the pod can't be scheduled and the failure messages
+	FailedNodes FailedNodesMap `json:"failedNodes,omitempty"`
+	// Error message indicating failure
+	Error string `json:"error,omitempty"`
+}
+
+// FailedNodesMap is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#FailedNodesMap
+type FailedNodesMap map[string]string

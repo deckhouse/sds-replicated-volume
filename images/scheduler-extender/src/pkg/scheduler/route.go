@@ -13,13 +13,14 @@ type scheduler struct {
 	log            logger.Logger
 	client         client.Client
 	ctx            context.Context
-	// cache          *cache.Cache
 	requestCount int
 }
 
 func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
-		
+	case "/filter":
+		s.filter(w, r)
+	case "/prioritize":
+		s.prioritize(w, r)
 	}
 }
-

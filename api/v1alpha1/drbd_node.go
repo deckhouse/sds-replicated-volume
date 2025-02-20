@@ -47,3 +47,12 @@ type DRBDNode struct {
 	Spec              DRBDNodeSpec   `json:"spec,omitempty"`
 	Status            DRBDNodeStatus `json:"status,omitempty"`
 }
+
+// DRBDNodeList is the list of DRBDNodes
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+type DRBDNodeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []DRBDNode `json:"items"`
+}
