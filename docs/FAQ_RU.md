@@ -39,7 +39,18 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 ## Как назначить StorageClass по умолчанию?
 
-В соответствующем пользовательском ресурсе [ReplicatedStorageClass](./cr.html#replicatedstorageclass) в поле `spec.isDefault` указать `true`.  
+Добавить в имя соответствующего StorageClass в поле `spec.settings.defaultClusterStorageClass` для конфигурации `ModuleConfig/global`.
+
+```shell
+   apiVersion: deckhouse.io/v1alpha1
+   kind: ModuleConfig
+   metadata:
+      name: global
+   spec:
+      version: 2
+      settings:
+         defaultClusterStorageClass: 'default-fast'
+```
 
 ## Как добавить существующую LVM Volume Group или LVMThin-пул?
 
@@ -303,7 +314,7 @@ dmesg | grep 'Remote failed to finish a request within'
 
 ## Я не могу обновить поля в spec у ресурса ReplicatedStorageClass. Это ожидаемое поведение?
 
-Да, поведение ожидаемое. В `spec` можно изменять только поле `isDefault`. Остальные поля в `spec` ресурса сделаны неизменяемыми.
+Да, поведение ожидаемое. Все поля 'spec' ReplicatedStorageClass неизменяемы.
 
 ## При удалении ресурса ReplicatedStorageClass не удаляется его дочерний StorageClass в Kubernetes. Что делать?
 

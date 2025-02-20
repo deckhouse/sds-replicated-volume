@@ -131,13 +131,13 @@ More examples with different usage scenarios and layouts [can be found here](./l
 
 The `sds-replicated-volume-controller` will then analyze the user's ReplicatedStorageClass resource and create the corresponding Storage Class in Kubernetes.
 
-> Please note that all fields of `spec` section of the ReplicatedStorageClass resource are **immutable** except for the `spec.isDefault` field.
+> Please note that all fields of `spec` section of the ReplicatedStorageClass resource are **immutable**.
 
 The `sds-replicated-volume-controller` will automatically keep the `status` field up to date to reflect the results of the ongoing operations.
 
 #### Updating the ReplicatedStorageClass resource
 
-Currently, the `sds-replicated-volume-controller` only supports changing the `isDefault` field. It is **not possible** to change other configuration parameters of the StorageClass created via the ReplicatedStorageClass resource.
+It is currently **not possible** to change configuration parameters of the StorageClass created via the ReplicatedStorageClass resource.
 
 #### Deleting the ReplicatedStorageClass resource
 

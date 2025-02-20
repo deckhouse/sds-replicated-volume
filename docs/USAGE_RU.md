@@ -126,14 +126,13 @@ spec:
 
 Результатом обработки ресурса ReplicatedStorageClass станет создание необходимого StorageClass в Kubernetes.
 
-> Обратите внимание, что все поля, кроме поля `isDefault` в поле `spec` ресурса ReplicatedStorageClass, являются **неизменяемыми**.
+> Обратите внимание, что все поля в `spec` ресурса ReplicatedStorageClass, являются **неизменяемыми**.
 
 Поле `status` будет обновляться `sds-replicated-volume-controller'ом` для отображения информации о результатах проводимых операций.
 
 #### Обновление ресурса ReplicatedStorageClass
 
-`sds-replicated-volume-controller` в настоящий момент поддерживает только изменение поля `isDefault`. Поменять остальные параметры
-StorageClass, созданного через ресурс ReplicatedStorageClass, на данный момент **невозможно**.
+Поменять параметры StorageClass, созданного через ресурс ReplicatedStorageClass, на данный момент **невозможно**.
 
 #### Удаление ресурса ReplicatedStorageClass
 
