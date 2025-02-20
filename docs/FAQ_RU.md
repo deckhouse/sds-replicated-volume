@@ -39,7 +39,11 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 ## Как назначить StorageClass по умолчанию?
 
-Добавить [ReplicatedStorageClass](./cr.html#replicatedstorageclass) следующую аннотацию `storageclass.kubernetes.io/is-default-class: "true"`.  
+Добавить [ReplicatedStorageClass](./cr.html#replicatedstorageclass) следующую аннотацию `storageclass.kubernetes.io/is-default-class: "true"`.
+
+```shell
+kubectl annotate replicatedstorageclasses.storage.deckhouse.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
+```
 
 ## Как добавить существующую LVM Volume Group или LVMThin-пул?
 

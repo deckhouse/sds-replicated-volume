@@ -41,6 +41,10 @@ There are two options:
 
 Add annotation `storageclass.kubernetes.io/is-default-class: "true"` to [ReplicatedStorageClass](./cr.html#replicatedstorageclass).
 
+```shell
+kubectl annotate replicatedstorageclasses.storage.deckhouse.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
+```
+
 ## How do I add the existing LVM Volume Group or LVMThin pool?
 
 1. Manually add the `storage.deckhouse.io/enabled=true` LVM tag to the Volume Group:
