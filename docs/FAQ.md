@@ -39,10 +39,10 @@ There are two options:
 
 ## How do I set the default StorageClass?
 
-Add annotation `storageclass.kubernetes.io/is-default-class: "true"` to [ReplicatedStorageClass](./cr.html#replicatedstorageclass).
+Add annotation `storageclass.kubernetes.io/is-default-class: "true"` to corresponding StorageClass.
 
 ```shell
-kubectl annotate replicatedstorageclasses.storage.deckhouse.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
+kubectl annotate storageclasses.storage.k8s.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
 ```
 
 ## How do I add the existing LVM Volume Group or LVMThin pool?
