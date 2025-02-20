@@ -39,7 +39,7 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 ## Как назначить StorageClass по умолчанию?
 
-Добавить в имя соответствующего StorageClass в поле `spec.settings.defaultClusterStorageClass` для конфигурации ModuleConfig/global.
+Добавить в имя соответствующего StorageClass в поле `spec.settings.defaultClusterStorageClass` для конфигурации `ModuleConfig/global`.
 
 ```shell
    apiVersion: deckhouse.io/v1alpha1
