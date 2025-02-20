@@ -39,7 +39,7 @@ There are two options:
 
 ## How do I set the default StorageClass?
 
-Set the `spec.IsDefault` field to `true` in the corresponding [ReplicatedStorageClass](./cr.html#replicatedstorageclass) custom resource.
+Add annotation `storageclass.kubernetes.io/is-default-class: "true"` to [ReplicatedStorageClass](./cr.html#replicatedstorageclass).
 
 ## How do I add the existing LVM Volume Group or LVMThin pool?
 
@@ -284,7 +284,7 @@ Yes, this is the expected behavior. Currently, the `sds-replicated-volume` modul
 
 ## I am unable to update the fields in the ReplicatedStorageClass resource spec. Is this the expected behavior?  
 
-Yes, this is the expected behavior. Only the `isDefault` field is editable in the `spec`. All the other fields in the resource `spec` are made immutable.
+Yes, this is the expected behavior. All `spec` fields of the resource made immutable.
 
 ## When you delete a ReplicatedStorageClass resource, its child StorageClass in Kubernetes is not deleted. What can I do in this case?
 
