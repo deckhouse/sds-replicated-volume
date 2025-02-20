@@ -39,10 +39,17 @@ There are two options:
 
 ## How do I set the default StorageClass?
 
-Add annotation `storageclass.kubernetes.io/is-default-class: "true"` to corresponding StorageClass.
+Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass` of `ModuleConfig/global` config.
 
 ```shell
-kubectl annotate storageclasses.storage.k8s.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
+   apiVersion: deckhouse.io/v1alpha1
+   kind: ModuleConfig
+   metadata:
+      name: global
+   spec:
+      version: 2
+      settings:
+         defaultClusterStorageClass: 'default-fast'
 ```
 
 ## How do I add the existing LVM Volume Group or LVMThin pool?

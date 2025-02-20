@@ -39,10 +39,17 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 ## Как назначить StorageClass по умолчанию?
 
-Добавить в соответствующий StorageClass следующую аннотацию: `storageclass.kubernetes.io/is-default-class: "true"`.
+Добавить в имя соответствующего StorageClass в поле `spec.settings.defaultClusterStorageClass` для конфигурации ModuleConfig/global.
 
 ```shell
-kubectl annotate storageclasses.storage.k8s.io <storageClassName> storageclass.kubernetes.io/is-default-class=true
+   apiVersion: deckhouse.io/v1alpha1
+   kind: ModuleConfig
+   metadata:
+      name: global
+   spec:
+      version: 2
+      settings:
+         defaultClusterStorageClass: 'default-fast'
 ```
 
 ## Как добавить существующую LVM Volume Group или LVMThin-пул?
