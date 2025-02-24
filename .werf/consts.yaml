@@ -9,9 +9,9 @@
 
 # component versions
 {{- $versions := dict }}
-{{- $_ := set $versions "DRBD" "9.2.10" }}
-{{- $_ := set $versions "DRBD_REACTOR" "1.4.0" }}
-{{- $_ := set $versions "DRBD_UTILS" "9.28.0" }}
+{{- $_ := set $versions "DRBD" "9.2.12" }}
+{{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
+{{- $_ := set $versions "DRBD_UTILS" "9.30.0" }}
 {{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
 {{- $_ := set $versions "LINSTOR_API_PY" "1.19.0" }}
 {{- $_ := set $versions "LINSTOR_CLIENT" "1.19.0" }}
@@ -30,7 +30,7 @@
 {{- $_ := set $versions "LINSTOR_WAIT_UNTIL" "0.2.1" }}
 {{- $_ := set $versions "SEMVER_TOOL" "3.4.0" }}
 {{- $_ := set $versions "SPAAS" "v0.1.5" }}
-{{- $_ := set $versions "THIN_SEND_RECV" "1.0.1" }}
+{{- $_ := set $versions "THIN_SEND_RECV" "1.1.3" }}
 
 {{- $_ := set $ "VERSIONS" $versions }}
 

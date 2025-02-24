@@ -5,7 +5,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: https://github.com/LINBIT/drbd-utils
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
     add: /
     to: /drbd-utils
     tag: v{{ $.Versions.DRBD_UTILS }}
@@ -13,7 +13,7 @@ git:
       setup:
         - "**/*"
 
-  - url: https://github.com/LINBIT/thin-send-recv
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
     add: /
     to: /thin-send-recv
     tag: v{{ $.Versions.THIN_SEND_RECV }}
@@ -28,9 +28,8 @@ shell:
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} flex clitest xsltproc locales libxml2 po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-devel \
       && apt-get -y install ca-certificates \
-      && update-ca-trust \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     {{- $ctx := dict }}
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
@@ -40,7 +39,7 @@ shell:
   setup:
     # clone drbd-utils git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-utils" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_UTILS) }}
     {{- $_ := set $ctx "folder" "/drbd-utils" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
@@ -63,7 +62,7 @@ shell:
 
     # clone thin-send-recv git repo
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/thin-send-recv" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/thin-send-recv" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.THIN_SEND_RECV) }}
     {{- $_ := set $ctx "folder" "/thin-send-recv" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
@@ -77,11 +76,9 @@ shell:
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-9.28.0-1.x86_64.rpm
-    # drbd-utils-9.28.0-1.x86_64.rpm
-    # drbd-utils-debuginfo-9.28.0-1.x86_64.rpm
-    # thin-send-recv-1.0.1-1.x86_64.rpm
-    # thin-send-recv-debuginfo-1.0.1-1.x86_64.rpm
+    # drbd-9.30.0-1.x86_64.rpm
+    # drbd-utils-9.30.0-1.x86_64.rpm
+    # thin-send-recv-1.1.3-1.x86_64.rpm
 
 ---
 # build drbd-reactor .rpm packages
@@ -90,7 +87,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - url: https://github.com/LINBIT/drbd-reactor
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-reactor
     add: /
     to: /drbd-reactor
     tag: v{{ $.Versions.DRBD_REACTOR }}
@@ -107,15 +104,19 @@ shell:
       apt-get update \
       && apt-get -y install {{ $.Root.BUILD_PACKAGES }} rust-cargo bash-completion \
       && apt-get -y install ca-certificates \
-      && update-ca-trust \
-      && apt-get clean \
-      && rm -rf /var/lib/apt/lists/*
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+    - |
+      cargo install cargo-sbom \
+      && cargo sbom -V \
+      && mv ~/.cargo/bin/cargo-sbom /usr/local/bin/ \
+      && rm -rf ~/.cargo
   install:
     {{- $ctx := dict }}
     {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
   setup:
     {{- $ctx := dict }}
-    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/drbd-reactor" }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-reactor" $.Root.SOURCE_REPO) }}
     {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_REACTOR) }}
     {{- $_ := set $ctx "folder" "/drbd-reactor" }}
     {{- include "utils:checkout-git" $ctx | nindent 2 }}
@@ -134,8 +135,7 @@ shell:
     {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
 
     - ls -la /
-    # drbd-reactor-1.4.0-1.x86_64.rpm
-    # drbd-reactor-debuginfo-1.4.0-1.x86_64.rpm
+    # drbd-reactor-1.8.0-1.x86_64.rpm
 
 ---
 # main almost distroless image
@@ -163,8 +163,8 @@ shell:
     - export DEBIAN_FRONTEND=noninteractive
     - |
       apt-get update \
-      && apt-get -y install libkeyutils kmod sysklogd \
-      && apt-get clean
+      && apt-get -y install libkeyutils kmod sysklogd
+    - {{ $.Root.ALT_CLEANUP_CMD }}
   setup:
     - ls -la /packages
     - |
@@ -172,10 +172,7 @@ shell:
         echo "Install ${f}"
         rpm -ihv --nodeps --noscripts $f
       done
-
     - sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf
-    # cleanup
-    - rm -rf /var/lib/apt/lists/*
 
 docker:
   ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
