@@ -41,5 +41,6 @@ func (s *Scheduler) Create(ctx context.Context, volId string, _ *volume.Paramete
 }
 
 func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
+	print("==== 4 =====\n") 
 	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy)
 }

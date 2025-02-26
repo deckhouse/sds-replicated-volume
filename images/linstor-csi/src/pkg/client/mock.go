@@ -94,6 +94,7 @@ func (s *MockStorage) Delete(ctx context.Context, volId string) error {
 }
 
 func (s *MockStorage) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters) ([]*csi.Topology, error) {
+	print("==== 2 =====\n")
 	return nil, nil
 }
 
