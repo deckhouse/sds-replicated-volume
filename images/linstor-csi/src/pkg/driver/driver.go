@@ -1523,9 +1523,9 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 	}
 
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
-	logger.Info("================================\n")
+	logger.Info("=================================\n")
 	logger.Infof("topos: %v\n", topos)
-	logger.Info("================================\n")
+	logger.Info("=================================\n")
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
