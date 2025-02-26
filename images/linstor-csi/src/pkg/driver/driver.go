@@ -714,7 +714,7 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 	if req.GetVolumeId() == "" {
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
-	
+
 	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err != nil {
 		if kubeerr.IsNotFound(err) {
@@ -773,28 +773,28 @@ func (d Driver) ControllerPublishVolume(ctx context.Context, req *csi.Controller
 			"ControllerPublishVolume failed for %s: %v", req.GetVolumeId(), err)
 	}
 
-	drbdCluster := &srv.DRBDCluster{}
-	if err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster); err != nil {
-		d.log.Infof("ControllerPublishVolume failed to get DRBD cluster: %v", err)
-		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to get DRBD cluster: %v", err)
-	}
+	// drbdCluster := &srv.DRBDCluster{}
+	// if err := d.cl.Get(ctx, types.NamespacedName{Name: req.VolumeId}, drbdCluster); err != nil {
+	// 	d.log.Infof("ControllerPublishVolume failed to get DRBD cluster: %v", err)
+	// 	return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to get DRBD cluster: %v", err)
+	// }
 
-	nodeExists := false
-	for _, node := range drbdCluster.Spec.AttachmentRequested {
-		if node == req.GetNodeId() {
-			nodeExists = true
-			break
-		}
-	}
+	// nodeExists := false
+	// for _, node := range drbdCluster.Spec.AttachmentRequested {
+	// 	if node == req.GetNodeId() {
+	// 		nodeExists = true
+	// 		break
+	// 	}
+	// }
 
-	if !nodeExists {
-		drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
+	// if !nodeExists {
+	// 	drbdCluster.Spec.AttachmentRequested = append(drbdCluster.Spec.AttachmentRequested, req.GetNodeId())
 
-		if err := d.cl.Update(ctx, drbdCluster); err != nil {
-			d.log.Infof("ControllerPublishVolume failed to update DRBD cluster: %v", err)
-			return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
-		}
-	}
+	// 	if err := d.cl.Update(ctx, drbdCluster); err != nil {
+	// 		d.log.Infof("ControllerPublishVolume failed to update DRBD cluster: %v", err)
+	// 		return nil, status.Errorf(codes.Internal, "ControllerPublishVolume failed to update DRBD cluster: %v", err)
+	// 	}
+	// }
 
 	return &csi.ControllerPublishVolumeResponse{}, nil
 }
@@ -1316,7 +1316,7 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
 
 	if err := d.cl.Update(ctx, drbdCluster); err != nil {
 		d.log.Errorf("ControllerExpandVolume failed to update a DRBD cluster: %s", err.Error())
-        return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update a DRBD cluster: %v", err)
+		return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update a DRBD cluster: %v", err)
 	}
 
 	return &csi.ControllerExpandVolumeResponse{
