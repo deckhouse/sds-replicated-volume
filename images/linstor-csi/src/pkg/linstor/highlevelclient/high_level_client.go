@@ -62,7 +62,8 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
 func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
-	print("==== 3 =====\n") 
+	print("==== 3 =====\n")
+	fmt.Printf("remoteAccessPolicy: +#%v\n", remoteAccessPolicy)
 	// Get all nodes where the resource is physically located.
 	r, err := c.Resources.GetAll(ctx, volId)
 	if err != nil {
@@ -88,7 +89,10 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 			}
 		}
 
+		fmt.Printf("segs: +#%v\n", segs)
+
 		for _, m := range remoteAccessPolicy.AccessibleSegments(segs) {
+			fmt.Printf("m: +#%v\n", m)
 			if len(m) == 0 {
 				// Empty segment -> access allowed from everywhere.
 				// This is special cased, otherwise CSI chokes on an empty segment map.
