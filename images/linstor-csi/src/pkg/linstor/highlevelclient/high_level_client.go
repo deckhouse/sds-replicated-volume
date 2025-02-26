@@ -78,6 +78,8 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to fetch diskful nodes: %w", err)
 	}
 
+	fmt.Printf("nodes: %#+v", nodes)
+
 	var topos []*csi.Topology
 
 	for i := range nodes {
