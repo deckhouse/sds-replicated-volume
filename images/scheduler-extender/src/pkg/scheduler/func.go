@@ -268,13 +268,8 @@ func filterNodes(
 	drbdResourceMap map[string]*srv.DRBDResource,
 	drbdNodesMap map[string]*srv.DRBDNode,
 ) (*ExtenderFilterResult, error) {
-	// Param "pvcRequests" is a total amount of the pvcRequests space (both Thick and Thin) for Pod (i.e. from every PVC)
-	if len(pvcRequests) == 0 {
-		return &ExtenderFilterResult{
-			NodeNames: nodeNames,
-		}, nil
-	}
-
+	// TODO: 1) implement cache
+	// 2) measure speed rate
 	log.Debug(fmt.Sprintf("[filterNodes] starts to get LVMVolumeGroups for Storage Classes for a Pod %s/%s", pod.Namespace, pod.Name))
 
 	result := &ExtenderFilterResult{}
@@ -290,7 +285,7 @@ func filterNodes(
 
 	type ResultWithError struct {
 		nodeName string
-		err     error
+		err      error
 	}
 
 	resCh := make(chan ResultWithError, len(*nodeNames))
@@ -305,130 +300,124 @@ func filterNodes(
 			defer wg.Done()
 
 			nodeLvgs := nodesWithLvgs[nodeName]
-	
+
 			for _, pvc := range pvcs {
 				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 				replicatedStorageClass := rscMap[*pvc.Spec.StorageClassName]
 				commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
-	
+
 				switch replicatedStorageClass.Spec.VolumeAccess {
 				case "Local":
 					if pvc.Spec.VolumeName == "" {
 						if commonLVG == nil {
 							resCh <- ResultWithError{
 								nodeName: nodeName,
-                                err:     fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
 							}
 							return
 						}
 
-						hasEnoughSpace := nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx)
-						if !hasEnoughSpace {
+						if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx){
 							resCh <- ResultWithError{
 								nodeName: nodeName,
-                                err:     fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
 							}
 							return
 						}
+						// TODO: skip here is there is no NAME
 					}
-	
+
 					if !isDrbdDiskfulNode(drbdResourceMap, pvc.Spec.VolumeName, nodeName) {
 						resCh <- ResultWithError{
 							nodeName: nodeName,
-							err:     fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
+							err:      fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
 						}
 						return
 					}
-					if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx) {
-						resCh <- ResultWithError{
-							nodeName: nodeName,
-							err:     fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-						}
-						return
-					}
-	
-				case "PreferablyLocal":
+
+				case "EventuallyLocal":
 					if pvc.Spec.VolumeName == "" {
 						if commonLVG == nil {
 							resCh <- ResultWithError{
 								nodeName: nodeName,
-								err:     fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
 							}
 							return
 						}
-						if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx){
+						if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx) {
 							resCh <- ResultWithError{
 								nodeName: nodeName,
-                                err:     fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
 							}
 							return
 						}
+						// TODO: skip here is there is no NAME
 					}
-	
-					if !isDrbdDiskfulNode(drbdResourceMap, pvc.Spec.VolumeName, nodeName){
+
+					if isDrbdDiskfulNode(drbdResourceMap, pvc.Spec.VolumeName, nodeName) {
 						resCh <- ResultWithError{
 							nodeName: nodeName,
-							err:     fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
+							err:      nil,
 						}
 						return
 					}
 					if commonLVG == nil {
 						resCh <- ResultWithError{
 							nodeName: nodeName,
-							err:     fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
+							err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
 						}
 						return
 					}
 					if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx) {
 						resCh <- ResultWithError{
 							nodeName: nodeName,
-							err:     fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
 						}
 						return
 					}
-	
-				case "EventuallyLocal":
-					if !isDrbdNode(nodeName, drbdNodesMap) {
-						resCh <- ResultWithError{
-							nodeName: nodeName,
-							err:     fmt.Errorf("node %s is not a drbd node", nodeName),
+
+				case "PreferablyLocal":
+					if pvc.Spec.VolumeName == "" {
+						if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx) {
+							resCh <- ResultWithError{
+								nodeName: nodeName,
+								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
+							}
+							return
 						}
-						return
-					}
-					if !nodeHasEnoughSpace(pvcRequests, lvgsThickFree, lvgsThinFree, commonLVG, pvc, lvgMap, &thickMapMtx, &thinMapMtx){
-						resCh <- ResultWithError{
-							nodeName: nodeName,
-							err:     fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
-						}
-						return
 					}
 				}
 			}
-	
+
 			if !isDrbdNode(nodeName, drbdNodesMap) {
 				resCh <- ResultWithError{
 					nodeName: nodeName,
-					err:     fmt.Errorf("node %s is not a drbd node", nodeName),
+					err:      fmt.Errorf("node %s is not a drbd node", nodeName),
 				}
 				return
 			}
-			if !isOnline(nodeName) {
+			if !isOkNode(nodeName) {
 				resCh <- ResultWithError{
 					nodeName: nodeName,
-					err:     fmt.Errorf("node %s is offline", nodeName),
+					err:      fmt.Errorf("node %s is offline", nodeName),
 				}
 				return
 			}
-			
+
+			resCh <- ResultWithError{
+				nodeName: nodeName,
+				err:      nil,
+			}
 		}(nodeName)
 	}
-	
+
 	wg.Wait()
 	close(resCh)
 
 	for res := range resCh {
 		if res.err == nil {
 			*result.NodeNames = append(*result.NodeNames, res.nodeName)
+			continue
 		}
 		result.FailedNodes[res.nodeName] = res.err.Error()
 	}
@@ -450,7 +439,7 @@ func isDrbdDiskfulNode(drbdResourceMap map[string]*srv.DRBDResource, pvName stri
 	return false
 }
 
-func isOnline(_ string) bool {
+func isOkNode(_ string) bool {
 	// TODO implement node online check
 	return true
 }
