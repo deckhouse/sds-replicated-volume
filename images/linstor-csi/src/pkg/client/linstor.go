@@ -410,7 +410,7 @@ func (s *Linstor) Delete(ctx context.Context, volId string) error {
 func (s *Linstor) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters) ([]*csi.Topology, error) {
 	print("==== 1 =====\n")
 	fmt.Printf("PlacementPolicy: %s\n", params.PlacementPolicy)
-	fmt.Printf("params: +#%v\n", params)
+	fmt.Printf("params: %#v\n", params)
 	print("==== 1 =====\n")
 	volumeScheduler, err := s.schedulerByPlacementPolicy(params.PlacementPolicy)
 	if err != nil {
