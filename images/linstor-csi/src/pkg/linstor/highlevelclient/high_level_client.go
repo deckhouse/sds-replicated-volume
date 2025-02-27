@@ -20,6 +20,7 @@ package highlevelclient
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -62,8 +63,9 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
 func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
-	print("==== 3 =====\n")
-	fmt.Printf("remoteAccessPolicy: +#%v\n", remoteAccessPolicy)
+	ra, _ := json.MarshalIndent(remoteAccessPolicy, "", "  ")
+	fmt.Printf("== [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
+
 	// Get all nodes where the resource is physically located.
 	r, err := c.Resources.GetAll(ctx, volId)
 	if err != nil {
@@ -78,7 +80,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to fetch diskful nodes: %w", err)
 	}
 
-	fmt.Printf("nodes: %#+v", nodes)
+	fmt.Printf("== [GenericAccessibleTopologies] nodes: %#+v\n", nodes)
 
 	var topos []*csi.Topology
 
@@ -91,10 +93,12 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 			}
 		}
 
-		fmt.Printf("segs: +#%v\n", segs)
+		s, _ := json.MarshalIndent(segs, "", "  ")
+		fmt.Printf("== [GenericAccessibleTopologies] segs: %s\n", s)
 
 		for _, m := range remoteAccessPolicy.AccessibleSegments(segs) {
-			fmt.Printf("m: +#%v\n", m)
+			mm, _ := json.MarshalIndent(segs, "", "  ")
+			fmt.Printf("== [GenericAccessibleTopologies] m: %s\n", mm)
 			if len(m) == 0 {
 				// Empty segment -> access allowed from everywhere.
 				// This is special cased, otherwise CSI chokes on an empty segment map.
