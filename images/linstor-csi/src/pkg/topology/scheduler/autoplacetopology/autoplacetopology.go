@@ -16,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	kapi "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Scheduler places volumes according to both CSI Topology and user-provided autoplace parameters.
@@ -28,6 +29,7 @@ import (
 //	https://github.com/container-storage-interface/spec/blob/v1.4.0/csi.proto#L523
 type Scheduler struct {
 	*lc.HighLevelClient
+	kcl *kapi.Client
 	log *logrus.Entry
 }
 
@@ -250,7 +252,7 @@ func (s *Scheduler) GetCurrentDiskfulNodes(ctx context.Context, volId string) ([
 }
 
 func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
-	print("==== 5 =====\n") 
+	print("==== 5 =====\n")
 	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy)
 }
 

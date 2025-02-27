@@ -28,20 +28,25 @@ import (
 
 	lc "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	kapi "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // HighLevelClient is a golinstor client with convience functions.
 type HighLevelClient struct {
 	*lapi.Client
+	kcl kapi.Client
 	PropertyNamespace string
 }
 
 // NewHighLevelClient returns a pointer to a golinstor client with convience.
-func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
+func NewHighLevelClient(kcl kapi.Client, options ...lapi.Option) (*HighLevelClient, error) {
 	c, err := lapi.NewClient(options...)
 	if err != nil {
 		return nil, err
@@ -57,7 +62,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 		timeout:          1 * time.Minute,
 	}
 
-	return &HighLevelClient{Client: c}, nil
+	return &HighLevelClient{Client: c, kcl: kcl}, nil
 }
 
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
@@ -76,6 +81,20 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
+	
+	pv := &v1.PersistentVolume{}
+	err = c.kcl.Get(ctx, types.NamespacedName{Name: volId}, pv)
+	if err != nil {
+        return nil, fmt.Errorf("failed to get persistent volume: %w", err)
+    }
+
+	rsc := &srv.ReplicatedStorageClass{}
+	if err := c.kcl.Get(ctx, types.NamespacedName{Name: pv.Spec.StorageClassName}, rsc); err != nil {
+        return nil, fmt.Errorf("failed to get replicated storage class: %w", err)
+    }
+
+	rscm, _ := json.MarshalIndent(rsc, "", "  ")
+	fmt.Printf("==2 [GenericAccessibleTopologies] rsc: %s\n", rscm)
 
 	// Volume is definitely accessible on the nodes it's deployed on.
 	nodeNames := util.DeployedDiskfullyNodes(r)

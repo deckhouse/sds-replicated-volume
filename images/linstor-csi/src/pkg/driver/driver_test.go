@@ -77,6 +77,7 @@ func TestDriver(t *testing.T) {
 		logger.Logger.SetOutput(logFile)
 		logger.Logger.SetFormatter(&logrus.TextFormatter{})
 		c, err := lc.NewHighLevelClient(
+			nil,
 			lapi.BaseURL(u),
 			lapi.BasicAuth(&lapi.BasicAuthCfg{Username: os.Getenv("LS_USERNAME"), Password: os.Getenv("LS_PASSWORD")}),
 			lapi.HTTPClient(&http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: *lsSkipTLSVerification}}}),
