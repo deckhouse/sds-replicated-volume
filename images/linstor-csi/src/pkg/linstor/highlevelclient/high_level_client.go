@@ -121,7 +121,10 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("failed to get replicated storage class: %w", err)
 	}
 
-	rscm, _ := json.MarshalIndent(*rsc, "", "  ")
+	rscm, err := json.MarshalIndent(*rsc, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("= failed to marshal replicated storage class: %w", err)
+	}
 	fmt.Printf("==2 [GenericAccessibleTopologies] rsc: %s\n", rscm)
 
 	// Volume is definitely accessible on the nodes it's deployed on.
