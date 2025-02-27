@@ -67,6 +67,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 
 	resourcesSchemeFuncs := []func(*apiruntime.Scheme) error{
 		srv.AddToScheme,
+		v1.AddToScheme,
 	}
 
 	scheme := apiruntime.NewScheme()
