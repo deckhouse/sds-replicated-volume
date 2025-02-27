@@ -68,6 +68,10 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 
 	// Get all nodes where the resource is physically located.
 	r, err := c.Resources.GetAll(ctx, volId)
+	
+	rr, _ := json.MarshalIndent(r, "", " ")
+	fmt.Printf("==2 [GenericAccessibleTopologies] resources: %s\n", rr)
+
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
