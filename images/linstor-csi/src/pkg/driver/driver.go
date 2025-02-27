@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	lc "github.com/LINBIT/golinstor"
+	"github.com/clarketm/json"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
@@ -64,6 +65,7 @@ const (
 	ParameterCsiPvcNameSpace         = "csi.storage.k8s.io/pvc/namespace"
 	ParameterCsiRspName              = "replicated.csi.storage.deckhouse.io/storagePool"
 	K8sNameLabel                     = "kubernetes.io/metadata.name"
+	storageClassAuxPrefix            = "Aux/class.storage.deckhouse.io/"
 )
 
 // Driver fullfils CSI controller, node, and indentity server interfaces.
@@ -1523,8 +1525,9 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 	}
 
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
+	tt, _ := json.MarshalIndent(topos, "", "  ")
 	logger.Info("=================================\n")
-	logger.Infof("topos: %v\n", topos)
+	logger.Infof("topos: %v\n", tt)
 	logger.Info("=================================\n")
 	if err != nil {
 		return nil, status.Errorf(

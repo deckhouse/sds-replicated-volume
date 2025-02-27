@@ -22,7 +22,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"time"
@@ -30,21 +29,14 @@ import (
 	lc "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/piraeusdatastore/linstor-csi/pkg/client/kubeutils"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
 	"github.com/piraeusdatastore/linstor-csi/pkg/topology"
 	"github.com/piraeusdatastore/linstor-csi/pkg/volume"
-	v1 "k8s.io/api/core/v1"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	kcl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // HighLevelClient is a golinstor client with convience functions.
 type HighLevelClient struct {
 	*lapi.Client
-	kcl               kcl.Client
 	PropertyNamespace string
 }
 
@@ -65,33 +57,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 		timeout:          1 * time.Minute,
 	}
 
-	resourcesSchemeFuncs := []func(*apiruntime.Scheme) error{
-		srv.AddToScheme,
-		v1.AddToScheme,
-	}
-
-	scheme := apiruntime.NewScheme()
-	for _, f := range resourcesSchemeFuncs {
-		err := f(scheme)
-		if err != nil {
-			fmt.Printf("failed to add to scheme: %s\n", err.Error())
-			os.Exit(1)
-		}
-	}
-	kConfig, err := kubeutils.KubernetesDefaultConfigCreate()
-	if err != nil {
-		fmt.Print("failed to create Kubernetes default config")
-		os.Exit(1)
-	}
-	kcl, err := kcl.New(kConfig, kcl.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		fmt.Printf("failed to init kube client: %s\n", err.Error())
-		return nil, err
-	}
-
-	return &HighLevelClient{Client: c, kcl: kcl}, nil
+	return &HighLevelClient{Client: c}, nil
 }
 
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
@@ -110,23 +76,6 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
-
-	pv := &v1.PersistentVolume{}
-	err = c.kcl.Get(ctx, types.NamespacedName{Name: volId}, pv)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get persistent volume: %w", err)
-	}
-
-	rsc := &srv.ReplicatedStorageClass{}
-	if err := c.kcl.Get(ctx, types.NamespacedName{Name: pv.Spec.StorageClassName}, rsc); err != nil {
-		return nil, fmt.Errorf("failed to get replicated storage class: %w", err)
-	}
-
-	rscm, err := json.MarshalIndent(*rsc, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("= failed to marshal replicated storage class: %w", err)
-	}
-	fmt.Printf("==2 [GenericAccessibleTopologies] rsc: %s\n", rscm)
 
 	// Volume is definitely accessible on the nodes it's deployed on.
 	nodeNames := util.DeployedDiskfullyNodes(r)
