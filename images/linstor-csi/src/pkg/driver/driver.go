@@ -20,6 +20,7 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -33,7 +34,6 @@ import (
 	"strings"
 
 	lc "github.com/LINBIT/golinstor"
-	"github.com/clarketm/json"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
