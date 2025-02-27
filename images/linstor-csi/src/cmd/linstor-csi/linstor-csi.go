@@ -120,7 +120,7 @@ func main() {
 		linstorOpts = append(linstorOpts, lapi.BearerToken(string(token)))
 	}
 
-	c, err := lc.NewHighLevelClient(nil, linstorOpts...)
+	c, err := lc.NewHighLevelClient(linstorOpts...)
 	if err != nil {
 		log.Fatal(err)
 	}

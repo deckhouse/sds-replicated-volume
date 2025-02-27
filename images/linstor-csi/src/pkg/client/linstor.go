@@ -36,10 +36,8 @@ import (
 	lapi "github.com/LINBIT/golinstor/client"
 	"github.com/LINBIT/golinstor/devicelayerkind"
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/haySwim/data"
 	"github.com/pborman/uuid"
-	"github.com/piraeusdatastore/linstor-csi/pkg/client/kubeutils"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	"github.com/piraeusdatastore/linstor-csi/pkg/linstor/util"
@@ -56,10 +54,8 @@ import (
 	"golang.org/x/exp/slices"
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/mount-utils"
 	utilexec "k8s.io/utils/exec"
-	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Linstor is a high-level client for use with CSI.
@@ -74,33 +70,8 @@ type Linstor struct {
 // NewLinstor returns a high-level linstor client for CSI applications to interact with
 // By default, it will try to connect with localhost:3370.
 func NewLinstor(options ...func(*Linstor) error) (*Linstor, error) {
-	resourcesSchemeFuncs := []func(*apiruntime.Scheme) error{
-		srv.AddToScheme,
-	}
-
-	scheme := apiruntime.NewScheme()
-	for _, f := range resourcesSchemeFuncs {
-		err := f(scheme)
-		if err != nil {
-			fmt.Printf("failed to add to scheme: %s\n", err.Error())
-			os.Exit(1)
-		}
-	}
-	kConfig, err := kubeutils.KubernetesDefaultConfigCreate()
-	if err != nil {
-		fmt.Print("failed to create Kubernetes default config")
-		os.Exit(1)
-	}
-	kc, err := kubecl.New(kConfig, kubecl.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		fmt.Printf("failed to init kube client: %s\n", err.Error())
-		return nil, err
-	}
-
 	// Set up zero values.
-	c, err := lc.NewHighLevelClient(kc)
+	c, err := lc.NewHighLevelClient()
 	if err != nil {
 		return nil, err
 	}
