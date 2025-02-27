@@ -21,8 +21,7 @@ type RemoteAccessPolicyRule struct {
 func (r RemoteAccessPolicy) AccessibleSegments(segments map[string]string) []map[string]string {
 	var result []map[string]string
 
-	print("=========\n")
-	fmt.Printf("rules: +#%v\n", r)
+	fmt.Printf("[AccessibleSegments] rules: %v\n", r)
 
 	for _, rule := range r {
 		m := make(map[string]string)

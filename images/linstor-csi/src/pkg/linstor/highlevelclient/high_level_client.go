@@ -64,7 +64,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 // and whether a resource is allowed to be accessed over the network.
 func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
 	ra, _ := json.MarshalIndent(remoteAccessPolicy, "", "  ")
-	fmt.Printf("== [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
+	fmt.Printf("==2 [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
 
 	// Get all nodes where the resource is physically located.
 	r, err := c.Resources.GetAll(ctx, volId)
@@ -94,11 +94,11 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		}
 
 		s, _ := json.MarshalIndent(segs, "", "  ")
-		fmt.Printf("== [GenericAccessibleTopologies] segs: %s\n", s)
+		fmt.Printf("==2 [GenericAccessibleTopologies] segs: %s\n", s)
 
 		for _, m := range remoteAccessPolicy.AccessibleSegments(segs) {
 			mm, _ := json.MarshalIndent(segs, "", "  ")
-			fmt.Printf("== [GenericAccessibleTopologies] m: %s\n", mm)
+			fmt.Printf("==2 [GenericAccessibleTopologies] m: %s\n", mm)
 			if len(m) == 0 {
 				// Empty segment -> access allowed from everywhere.
 				// This is special cased, otherwise CSI chokes on an empty segment map.

@@ -409,11 +409,11 @@ func (s *Linstor) Delete(ctx context.Context, volId string) error {
 // volume is reachable, based on the localStoragePolicy reported by the volume.
 func (s *Linstor) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters) ([]*csi.Topology, error) {
 	pp, _ := json.MarshalIndent(params.PlacementPolicy, "", " ")
-	fmt.Printf("== [AccessibleTopologies] PlacementPolicy: %s\n", pp)
+	fmt.Printf("==1 [AccessibleTopologies] PlacementPolicy: %s\n", pp)
 
 	p, _ := json.MarshalIndent(params, "", " ")
-	fmt.Printf("== [AccessibleTopologies] params: %s\n", p)
-	
+	fmt.Printf("==1 [AccessibleTopologies] params: %s\n", p)
+
 	volumeScheduler, err := s.schedulerByPlacementPolicy(params.PlacementPolicy)
 	if err != nil {
 		return nil, err
