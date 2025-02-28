@@ -605,7 +605,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			}
 		}
 
-		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params)
+		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params, nil) //TODO: check 
 		if err != nil {
 			return nil, status.Errorf(
 				codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
@@ -1524,7 +1524,18 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 		}
 	}
 
-	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
+	storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
+
+	rsc := &srv.ReplicatedStorageClass{}
+	err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc)
+	if err != nil {
+        return nil, status.Errorf(codes.NotFound,
+            "CreateVolume failed for %s: replicated storage class not found: %v", info.ID, err)
+    }
+
+	topologiesParams := &volume.AccessibleTopologiesParams{StorageClassVolumeAccess: rsc.Spec.VolumeAccess}
+
+	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params, topologiesParams)
 	tt, _ := json.MarshalIndent(topos, "", "  ")
 	logger.Info("=================================\n")
 	logger.Infof("topos: %v\n", tt)

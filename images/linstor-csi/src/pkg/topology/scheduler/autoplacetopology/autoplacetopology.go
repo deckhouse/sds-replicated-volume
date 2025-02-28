@@ -251,9 +251,9 @@ func (s *Scheduler) GetCurrentDiskfulNodes(ctx context.Context, volId string) ([
 	return util.DeployedDiskfullyNodes(existingRes), nil
 }
 
-func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
+func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, p *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
 	print("==== 5 =====\n")
-	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy)
+	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy, p)
 }
 
 func NewScheduler(c *lc.HighLevelClient, l *logrus.Entry) *Scheduler {

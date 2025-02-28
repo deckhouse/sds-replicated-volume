@@ -62,7 +62,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
-func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
+func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, params *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
 	ra, _ := json.MarshalIndent(remoteAccessPolicy, "", "  ")
 	fmt.Printf("==2 [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
 
@@ -77,8 +77,19 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
 
-	// Volume is definitely accessible on the nodes it's deployed on.
-	nodeNames := util.DeployedDiskfullyNodes(r)
+	var volumeAccessMode string
+	if params != nil {
+		volumeAccessMode = params.StorageClassVolumeAccess
+	}
+
+	var nodeNames []string
+	switch volumeAccessMode {
+	case "Local":
+		// Volume is definitely accessible on the nodes it's deployed on.
+		nodeNames = util.DeployedDiskfullyNodes(r)
+	case "EventuallyLocal", "PreferablyLocal":
+		nodeNames = util.DeployedNodesOfAllType(r)
+	}
 
 	nodes, err := c.Nodes.GetAll(ctx, &lapi.ListOpts{Node: nodeNames})
 	if err != nil {
