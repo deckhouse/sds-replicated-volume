@@ -1,35 +1,86 @@
 ---
-image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
   - add: /
-    to: /
+    to: /src
     includePaths:
       - api
-      - images/sds-replicated-volume-controller/src
+      - images/{{ $.ImageName }}
     stageDependencies:
-      setup:
-        - "**/*"
+      install:
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_23 }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
+
 shell:
   setup:
-    - cd /images/sds-replicated-volume-controller/src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /sds-replicated-volume-controller
-    - chmod +x /sds-replicated-volume-controller
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+
+---
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.Root.BASE_ALT }}
+final: false
+shell:
+  beforeInstall:
+    - apt-get update
+    - apt-get install -y {{ $.Root.ALT_BASE_PACKAGES }}
+    - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+  install:
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/var/lib/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /etc/netconfig /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr /var/lib/ssl/cert.pem /relocate/var/lib/ssl
+    - cp -pr /var/lib/ssl/certs /relocate/var/lib/ssl
+    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:64535:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.Root.BASE_SCRATCH }}
+final: false
+import:
+  - image: {{ $.ImageName }}-distroless-artifact
+    add: /relocate
+    to: /
+    before: setup
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+fromImage: {{ $.ImageName }}-distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /sds-replicated-volume-controller
-    to: /sds-replicated-volume-controller
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
     before: setup
 
 docker:
-  ENTRYPOINT: ["/sds-replicated-volume-controller"]
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse

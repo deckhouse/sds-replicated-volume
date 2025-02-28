@@ -6,9 +6,16 @@ import (
 	"strings"
 	"time"
 
+<<<<<<< HEAD
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	v1 "k8s.io/api/core/v1"
+=======
+	v1 "k8s.io/api/core/v1"
+
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/certificate"
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 func AnyCertIsExpiringSoon(

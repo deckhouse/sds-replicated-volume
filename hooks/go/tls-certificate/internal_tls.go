@@ -29,12 +29,20 @@ import (
 
 	"github.com/cloudflare/cfssl/config"
 	"github.com/cloudflare/cfssl/csr"
+<<<<<<< HEAD
+=======
+	certificatesv1 "k8s.io/api/certificates/v1"
+
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+<<<<<<< HEAD
 	certificatesv1 "k8s.io/api/certificates/v1"
+=======
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 const year = (24 * time.Hour) * 365
@@ -281,7 +289,11 @@ func GenSelfSignedTLS(conf GenSelfSignedTLSHookConf) func(ctx context.Context, i
 			}
 		}
 
+<<<<<<< HEAD
 		cert := &certificate.Certificate{}
+=======
+		var cert *certificate.Certificate
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 
 		certs, err := objectpatch.UnmarshalToStruct[certificate.Certificate](input.Snapshots, InternalTLSSnapshotKey)
 		if err != nil {
@@ -301,7 +313,11 @@ func GenSelfSignedTLS(conf GenSelfSignedTLSHookConf) func(ctx context.Context, i
 }
 
 // New self-signed certificate will be generated when any of below is true:
+<<<<<<< HEAD
 //   - len(currentCert.Cert) == 0
+=======
+//   - currentCert is nil
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 //   - conf.CommonCAValuesPath is not empty and it's CA is not found in values,
 //     outdated, or doesn't match currentCert.CA
 //   - currentCert.Cert is outdated, or doesn't match important values from
@@ -351,7 +367,11 @@ func GenerateSelfSignedTLSIfNeeded(
 	}
 
 	// if no certificate - regenerate
+<<<<<<< HEAD
 	if len(currentCert.Cert) == 0 {
+=======
+	if currentCert == nil {
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 		mustGenerate = true
 	} else {
 		// update certificate if less than 6 month left. We create certificate for 10 years, so it looks acceptable
@@ -363,7 +383,11 @@ func GenerateSelfSignedTLSIfNeeded(
 
 		// if common ca and cert ca are not equal - regenerate cert
 		if useCommonCA && !slices.Equal(auth.Cert, currentCert.CA) {
+<<<<<<< HEAD
 			input.Logger.Info("common ca is not equal cert ca")
+=======
+			input.Logger.Warn("common ca is not equal cert ca")
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 
 			caOutdated = true
 		}

@@ -1,6 +1,10 @@
 - name: kubernetes.certs.expiring_soon_check
   rules:
+<<<<<<< HEAD
     - alert: D8LinstorCertificateExpiringIn30d
+=======
+    - alert: CertificateExpiringIn30d
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
       expr: count(kube_secret_labels{label_storage_deckhouse_io_sds_replicated_volume_cert_expire_in_30d="true"}) > 0
       for: 5m
       labels:
@@ -11,12 +15,23 @@
         plk_protocol_version: "1"
         plk_create_group_if_not_exists__cluster_has_expiring_certificates: ClusterCertificatesExpiringIn30d,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes
         plk_grouped_by__cluster_has_expiring_certificates: ClusterCertificatesExpiringIn30d,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes
+<<<<<<< HEAD
         summary: LINSTOR certificates expiring within 30 days detected
         description: |
           One or more Kubernetes Secrets contain certificates that are due to expire in under 30 days.
           Please check the certificate details and either renew or rotate them.
+=======
+        summary: Certificates expiring within 30 days detected
+        description: |
+          One or more Kubernetes Secrets contain certificates that are due to expire in under 30 days.
+          Please check the certificate details and renew or rotate them.
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
           
           Use the following to list them:
           `kubectl get secrets -n d8-sds-replicated-volume -l storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d=true`
           
+<<<<<<< HEAD
           Check "FAQ: How to manually trigger the certificate renewal process?" in documentation for the manual certificate renewal guide.
+=======
+          Check "FAQ: How to renew certificates manually?" in documentation for the manual certificate renewal guide.
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)

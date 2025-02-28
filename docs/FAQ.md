@@ -674,11 +674,17 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
 
 
+<<<<<<< HEAD
 ## How to manually trigger the certificate renewal process?
 
 Although the certificate renewal process is automated, manual renewal might still be necessary because it can be performed during a convenient maintenance window when it is acceptable to restart the module's objects. The automated renewal does not restart any objects.
 
 To manually trigger the certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
+=======
+## How to renew certificates manually?
+
+To trigger the manual certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 
 ```yaml
 apiVersion: v1
@@ -688,6 +694,7 @@ metadata:
   namespace: d8-sds-replicated-volume
 ```
 
+<<<<<<< HEAD
 The system will stop all necessary module objects, update the certificates, and then restart them.
 
 You can check the operation status using the following command:
@@ -707,3 +714,18 @@ To repeat the operation, simply remove the label from the trigger using the foll
 ```shell
 kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
 ```
+=======
+The system will stop all necessary module workloads, renew the certificates, and then start the workloads again.
+
+The status of the operation can be inferred from the trigger’s `data.step` property:
+ 
+ - `Prepared` - Health checks have passed, and downtime has begun.
+ - `TurnedOffAndRenewedCerts` - The system has been stopped and certificates renewed.
+ - `TurnedOn` - The system is back online.
+ - `Done` - The operation has been finalized and is ready to be repeated.
+
+Certificates are issued for one year and are marked as outdated 30 days before their expiration date.
+
+To repeat the operation, remove the `storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed` label from the trigger.
+
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)

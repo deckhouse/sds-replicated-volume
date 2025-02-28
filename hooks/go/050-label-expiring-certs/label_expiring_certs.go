@@ -6,12 +6,21 @@ import (
 	"fmt"
 	"time"
 
+<<<<<<< HEAD
+=======
+	v1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
+<<<<<<< HEAD
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+=======
+>>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 const (
