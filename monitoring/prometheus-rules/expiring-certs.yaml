@@ -4,7 +4,7 @@
       expr: count(kube_secret_labels{label_storage_deckhouse_io_sds-replicated-volume-cert-expire-in-30d="true"}) > 0
       for: 5m
       labels:
-        severity: warning
+        severity_level: "4"
         tier: cluster
       annotations:
         plk_markup_format: "markdown"
