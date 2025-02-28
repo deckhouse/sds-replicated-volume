@@ -91,6 +91,8 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		nodeNames = util.DeployedNodesOfAllType(r)
 	}
 
+	fmt.Printf("== nodeNames: %s\n", nodeNames)
+
 	nodes, err := c.Nodes.GetAll(ctx, &lapi.ListOpts{Node: nodeNames})
 	if err != nil {
 		return nil, fmt.Errorf("unable to fetch diskful nodes: %w", err)

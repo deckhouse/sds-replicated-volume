@@ -36,7 +36,7 @@ func DeployedDiskfullyNodes(res []lapi.Resource) []string {
 	return nodes
 }
 
-// DeployedDiskfully lists all nodes of both deskful- and diskless types
+// DeployedNodesOfAllType lists all nodes of both deskful- and diskless types
 func DeployedNodesOfAllType(res []lapi.Resource) []string {
 	nodes := make([]string, 0)
 
