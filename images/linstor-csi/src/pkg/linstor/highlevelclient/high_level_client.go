@@ -71,7 +71,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 
 	rr, _ := json.MarshalIndent(r, "", " ")
 	fmt.Printf("==2 [GenericAccessibleTopologies] resources: %s\n", rr)
-	fmt.Printf("== 2VOLID: %s\n", volId)
+	// fmt.Printf("== 2VOLID: %s\n", volId)
 
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
@@ -96,7 +96,8 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to fetch diskful nodes: %w", err)
 	}
 
-	fmt.Printf("== [GenericAccessibleTopologies] nodes: %#+v\n", nodes)
+	nn, _ := json.MarshalIndent(nodes, "", "  ")
+	fmt.Printf("== [GenericAccessibleTopologies] nodes: %s\n", nn)
 
 	var topos []*csi.Topology
 

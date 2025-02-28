@@ -1,7 +1,6 @@
 package volume
 
 import (
-	"fmt"
 	"reflect"
 	"sort"
 	"strconv"
@@ -21,7 +20,7 @@ type RemoteAccessPolicyRule struct {
 func (r RemoteAccessPolicy) AccessibleSegments(segments map[string]string) []map[string]string {
 	var result []map[string]string
 
-	fmt.Printf("[AccessibleSegments] rules: %v\n", r)
+	// fmt.Printf("[AccessibleSegments] rules: %v\n", r)
 
 	for _, rule := range r {
 		m := make(map[string]string)
