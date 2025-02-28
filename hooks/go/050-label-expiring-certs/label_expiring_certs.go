@@ -15,20 +15,14 @@ import (
 )
 
 const (
-	SecretSnapshotName       = "sdsreplsecret"
-	SecretCertExpire30dLabel = "storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d"
-
-	// TODO
-	// SecretExpirationThreshold = time.Hour * 24 * 30
-	SecretExpirationThreshold = time.Hour * 24 * 370
+	SecretCertExpire30dLabel  = "storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d"
+	SecretExpirationThreshold = time.Hour * 24 * 30
 )
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Schedule: []pkg.ScheduleConfig{
-			// TODO
-			// {Name: "daily", Crontab: "16 16 * * *"},
-			{Name: "daily", Crontab: "*/5 * * * *"},
+			{Name: "daily", Crontab: "16 16 * * *"},
 		},
 		Queue: fmt.Sprintf("modules/%s", consts.ModuleName),
 	},
