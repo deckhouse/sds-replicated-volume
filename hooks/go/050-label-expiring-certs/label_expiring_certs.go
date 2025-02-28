@@ -16,7 +16,7 @@ import (
 
 const (
 	SecretSnapshotName       = "sdsreplsecret"
-	SecretCertExpire30dLabel = "storage.deckhouse.io/sds-replicated-volume/cert-expire-in-30d"
+	SecretCertExpire30dLabel = "storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d"
 
 	// TODO
 	// SecretExpirationThreshold = time.Hour * 24 * 30
