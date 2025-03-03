@@ -36,6 +36,19 @@ func DeployedDiskfullyNodes(res []lapi.Resource) []string {
 	return nodes
 }
 
+// DeployedNodesOfAllType lists all nodes of both deskful- and diskless types
+func DeployedNodesOfAllType(res []lapi.Resource) []string {
+	nodes := make([]string, 0)
+
+	for _, r := range res {
+		if deployed(r) && healthy(r) {
+			nodes = append(nodes, r.NodeName)
+		}
+	}
+
+	return nodes
+}
+
 // DeployedDiskfully returns true if the resource has volumes that are physically
 // present and the resource state is healthy.
 func DeployedDiskfully(res lapi.Resource) bool {

@@ -20,6 +20,7 @@ package highlevelclient
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -61,20 +62,52 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
-func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
+func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, params *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
+	fmt.Printf("== [AccessibleTopologies] p 3: %#+v\n", *params)
+	ra, _ := json.MarshalIndent(remoteAccessPolicy, "", "  ")
+	fmt.Printf("==2 [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
+
 	// Get all nodes where the resource is physically located.
 	r, err := c.Resources.GetAll(ctx, volId)
+
+	rr, _ := json.MarshalIndent(r, "", " ")
+	fmt.Printf("==2 [GenericAccessibleTopologies] resources: %s\n", rr)
+	fmt.Printf("==2 [GenericAccessibleTopologies] resources len: %d\n", len(r))
+	// fmt.Printf("== 2VOLID: %s\n", volId)
+
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
 
-	// Volume is definitely accessible on the nodes it's deployed on.
-	nodeNames := util.DeployedDiskfullyNodes(r)
+	fmt.Printf("== params: %#+v\n", params)
+	var volumeAccessMode string
+	if params != nil {
+		volumeAccessMode = params.StorageClassVolumeAccess
+	}
+
+	var nodeNames []string
+	switch volumeAccessMode {
+	case "Local":
+		// Volume is definitely accessible on the nodes it's deployed on.
+		nodeNames = util.DeployedDiskfullyNodes(r)
+	case "EventuallyLocal", "PreferablyLocal":
+		nodeNames = util.DeployedNodesOfAllType(r)
+	}
+
+	// nodeNames := util.DeployedDiskfullyNodes(r)
+
+	fmt.Printf("== volumeAccessMode: %s\n", volumeAccessMode)
+	fmt.Printf("== nodeNames: %s\n", nodeNames)
+	fmt.Printf("== nodeNames len: %d\n", len(nodeNames))
 
 	nodes, err := c.Nodes.GetAll(ctx, &lapi.ListOpts{Node: nodeNames})
 	if err != nil {
 		return nil, fmt.Errorf("unable to fetch diskful nodes: %w", err)
 	}
+
+	nn, _ := json.MarshalIndent(nodes, "", "  ")
+	fmt.Printf("== [GenericAccessibleTopologies] nodes: %s\n", nn)
+	fmt.Printf("== [GenericAccessibleTopologies] nodes len: %d\n", len(nodes))
 
 	var topos []*csi.Topology
 
@@ -87,7 +120,12 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 			}
 		}
 
+		// s, _ := json.MarshalIndent(segs, "", "  ")
+		// fmt.Printf("==2 [GenericAccessibleTopologies] segs: %s\n", s)
+
 		for _, m := range remoteAccessPolicy.AccessibleSegments(segs) {
+			// mm, _ := json.MarshalIndent(segs, "", "  ")
+			// fmt.Printf("==2 [GenericAccessibleTopologies] m: %s\n", mm)
 			if len(m) == 0 {
 				// Empty segment -> access allowed from everywhere.
 				// This is special cased, otherwise CSI chokes on an empty segment map.

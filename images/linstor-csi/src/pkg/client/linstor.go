@@ -407,13 +407,19 @@ func (s *Linstor) Delete(ctx context.Context, volId string) error {
 
 // AccessibleTopologies returns a list of pointers to csi.Topology from where the
 // volume is reachable, based on the localStoragePolicy reported by the volume.
-func (s *Linstor) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters) ([]*csi.Topology, error) {
+func (s *Linstor) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters, p *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
+	// pp, _ := json.MarshalIndent(params.PlacementPolicy, "", " ")
+	// fmt.Printf("== [AccessibleTopologies] PlacementPolicy: %s\n", pp)
+
+	// pa, _ := json.MarshalIndent(params, "", " ")
+	// fmt.Printf("== [AccessibleTopologies] params: %s\n", pa)
+	fmt.Printf("== [AccessibleTopologies params] p: %#+v\n", *p)
 	volumeScheduler, err := s.schedulerByPlacementPolicy(params.PlacementPolicy)
 	if err != nil {
 		return nil, err
 	}
 
-	return volumeScheduler.AccessibleTopologies(ctx, volId, params.AllowRemoteVolumeAccess)
+	return volumeScheduler.AccessibleTopologies(ctx, volId, params.AllowRemoteVolumeAccess, p)
 }
 
 func (s *Linstor) schedulerByPlacementPolicy(policy topology.PlacementPolicy) (scheduler.Interface, error) {
