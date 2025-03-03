@@ -253,6 +253,7 @@ func (s *Scheduler) GetCurrentDiskfulNodes(ctx context.Context, volId string) ([
 
 func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, p *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
 	print("==== 5 =====\n")
+	fmt.Printf("== [AccessibleTopologies] p 2: %#+v\n", *p)
 	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy, p)
 }
 

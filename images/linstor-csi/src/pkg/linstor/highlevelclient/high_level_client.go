@@ -63,6 +63,7 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
 func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, params *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
+	fmt.Printf("== [AccessibleTopologies] p 3: %#+v\n", *params)
 	ra, _ := json.MarshalIndent(remoteAccessPolicy, "", "  ")
 	fmt.Printf("==2 [GenericAccessibleTopologies] remoteAccessPolicy: %s\n", ra)
 
