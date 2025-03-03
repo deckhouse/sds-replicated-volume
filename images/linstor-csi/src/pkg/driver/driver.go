@@ -1530,6 +1530,7 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 
 	storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
 
+	fmt.Printf("== sc name: %#+v\n", storageClassName)
 	rsc := &srv.ReplicatedStorageClass{}
 	err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc)
 	if err != nil {
@@ -1537,6 +1538,7 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 			"CreateVolume failed for %s: replicated storage class not found: %v", info.ID, err)
 	}
 
+	fmt.Printf("== rsc volume access: %#+v\n", rsc.Spec.VolumeAccess)
 	topologiesParams := &volume.AccessibleTopologiesParams{StorageClassVolumeAccess: rsc.Spec.VolumeAccess}
 
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params, topologiesParams)

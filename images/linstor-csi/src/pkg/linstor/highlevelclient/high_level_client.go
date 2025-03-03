@@ -78,6 +78,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
 
+	fmt.Printf("== params: %#+v\n", params)
 	var volumeAccessMode string
 	if params != nil {
 		volumeAccessMode = params.StorageClassVolumeAccess
