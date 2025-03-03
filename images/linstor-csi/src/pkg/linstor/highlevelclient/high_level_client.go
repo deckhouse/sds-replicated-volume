@@ -71,6 +71,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 
 	rr, _ := json.MarshalIndent(r, "", " ")
 	fmt.Printf("==2 [GenericAccessibleTopologies] resources: %s\n", rr)
+	fmt.Printf("==2 [GenericAccessibleTopologies] resources len: %d\n", len(r))
 	// fmt.Printf("== 2VOLID: %s\n", volId)
 
 	if err != nil {
@@ -92,6 +93,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 	}
 
 	fmt.Printf("== nodeNames: %s\n", nodeNames)
+	fmt.Printf("== nodeNames len: %d\n", len(nodeNames))
 
 	nodes, err := c.Nodes.GetAll(ctx, &lapi.ListOpts{Node: nodeNames})
 	if err != nil {
@@ -100,6 +102,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 
 	nn, _ := json.MarshalIndent(nodes, "", "  ")
 	fmt.Printf("== [GenericAccessibleTopologies] nodes: %s\n", nn)
+	fmt.Printf("== [GenericAccessibleTopologies] nodes len: %d\n", len(nodes))
 
 	var topos []*csi.Topology
 
@@ -112,12 +115,12 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 			}
 		}
 
-		s, _ := json.MarshalIndent(segs, "", "  ")
-		fmt.Printf("==2 [GenericAccessibleTopologies] segs: %s\n", s)
+		// s, _ := json.MarshalIndent(segs, "", "  ")
+		// fmt.Printf("==2 [GenericAccessibleTopologies] segs: %s\n", s)
 
 		for _, m := range remoteAccessPolicy.AccessibleSegments(segs) {
-			mm, _ := json.MarshalIndent(segs, "", "  ")
-			fmt.Printf("==2 [GenericAccessibleTopologies] m: %s\n", mm)
+			// mm, _ := json.MarshalIndent(segs, "", "  ")
+			// fmt.Printf("==2 [GenericAccessibleTopologies] m: %s\n", mm)
 			if len(m) == 0 {
 				// Empty segment -> access allowed from everywhere.
 				// This is special cased, otherwise CSI chokes on an empty segment map.
