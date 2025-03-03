@@ -706,7 +706,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 
 	if err := d.cl.Create(ctx, &drbdcluster); err != nil {
 		d.log.Infof("CreateVolume failed to create a DRBD cluster: %s", err.Error())
-		return nil, nil
+		return vol, nil
 		return nil, status.Errorf(codes.Internal, "CreateVolume failed to create a DRBD cluster: %v", err)
 	}
 
