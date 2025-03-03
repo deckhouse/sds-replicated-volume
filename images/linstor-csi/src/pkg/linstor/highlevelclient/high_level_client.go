@@ -78,21 +78,19 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
 
-	// var volumeAccessMode string
-	// if params != nil {
-	// 	volumeAccessMode = params.StorageClassVolumeAccess
-	// }
+	var volumeAccessMode string
+	if params != nil {
+		volumeAccessMode = params.StorageClassVolumeAccess
+	}
 
-	// var nodeNames []string
-	// switch volumeAccessMode {
-	// case "Local":
-	// 	// Volume is definitely accessible on the nodes it's deployed on.
-	// 	nodeNames = util.DeployedDiskfullyNodes(r)
-	// case "EventuallyLocal", "PreferablyLocal":
-	// 	nodeNames = util.DeployedNodesOfAllType(r)
-	// }
-
-	nodeNames := util.DeployedDiskfullyNodes(r)
+	var nodeNames []string
+	switch volumeAccessMode {
+	case "Local":
+		// Volume is definitely accessible on the nodes it's deployed on.
+		nodeNames = util.DeployedDiskfullyNodes(r)
+	case "EventuallyLocal", "PreferablyLocal":
+		nodeNames = util.DeployedNodesOfAllType(r)
+	}
 
 	fmt.Printf("== nodeNames: %s\n", nodeNames)
 	fmt.Printf("== nodeNames len: %d\n", len(nodeNames))
