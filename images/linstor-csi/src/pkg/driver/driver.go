@@ -679,7 +679,8 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			Name: req.GetName(),
 		},
 		Spec: srv.DRBDClusterSpec{
-			QuorumPolicy: rd.Props[ParameterResourceDefQuorumPolicy],
+			// QuorumPolicy: rd.Props[ParameterResourceDefQuorumPolicy],
+			QuorumPolicy: "majority",
 			Size:         req.GetCapacityRange().GetRequiredBytes(),
 			Replicas:     params.PlacementCount,
 			SharedSecret: rd.LayerData[0].Data.Secret,
