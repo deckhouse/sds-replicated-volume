@@ -17,6 +17,7 @@ docker:
     distro: all
     version: all
     drbd: {{ $version }}
+
 ---
 artifact: {{ $.ImageName }}-artifact
 from: "registry.deckhouse.io/base_images/alpine:3.16.3@sha256:5548e9172c24a1b0ca9afdd2bf534e265c94b12b36b3e0c0302f5853eaf00abb"
