@@ -94,6 +94,7 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 
 	// nodeNames := util.DeployedDiskfullyNodes(r)
 
+	fmt.Printf("== volumeAccessMode: %s\n", volumeAccessMode)
 	fmt.Printf("== nodeNames: %s\n", nodeNames)
 	fmt.Printf("== nodeNames len: %d\n", len(nodeNames))
 
