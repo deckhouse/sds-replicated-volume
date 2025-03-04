@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/module-sdk/pkg/registry"
@@ -32,7 +34,7 @@ var _ = registry.RegisterFunc(
 func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	cl := input.DC.MustGetK8sClient()
 
-	var err error
+	var resultErr error
 
 	secrets := &v1.SecretList{}
 	if err := cl.List(ctx, secrets, client.InNamespace(consts.ModuleNamespace)); err != nil {
@@ -46,27 +48,49 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 			continue
 		}
 
-		certData := secret.Data["tls.crt"]
-		if len(certData) == 0 {
-			log.Info("not a certificate, skip")
-			continue
-		}
-
-		if expiring, err := certificate.IsCertificateExpiringSoon(certData, SecretExpirationThreshold); err != nil {
-			err = errors.Join(err, fmt.Errorf("error parsing certificate: %w", err))
-			log.Error("error parsing certificate", "err", err)
+		if expiring, err := anyCertIsExpiringSoon(log, secret.Data); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("error checking certificates: %w", err))
+			log.Error("error checking certificates", "err", err)
 			continue
 		} else if !expiring {
-			log.Info("certificate is OK")
+			log.Info("no expiring certs found")
 			continue
 		}
 
 		secret.Labels[SecretCertExpire30dLabel] = "true"
 		if err := cl.Update(ctx, &secret); err != nil {
-			err = errors.Join(err, fmt.Errorf("error adding label to secret: %w", err))
+			resultErr = errors.Join(resultErr, fmt.Errorf("error adding label to secret: %w", err))
 			log.Error("error adding label to secret", "err", err)
 		}
 	}
 
-	return err
+	return resultErr
+}
+
+func anyCertIsExpiringSoon(log *log.Logger, data map[string][]byte) (bool, error) {
+	var resultErr error
+
+	for key, val := range data {
+		keyLog := log.With("key", key)
+
+		if !strings.HasSuffix(strings.ToLower(key), ".crt") {
+			keyLog.Info("not a certificate, skip")
+			continue
+		}
+
+		if len(val) == 0 {
+			keyLog.Info("empty certificate, skip")
+			continue
+		}
+
+		if expiring, err := certificate.IsCertificateExpiringSoon(val, SecretExpirationThreshold); err != nil {
+			keyLog.Error("error parsing certificate", "err", err)
+			resultErr = errors.Join(resultErr, fmt.Errorf("error parsing certificate: %w", err))
+		} else if expiring {
+			// drop errors as not relevant anymore
+			return true, nil
+		}
+	}
+
+	return false, resultErr
 }
