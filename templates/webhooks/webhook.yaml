@@ -2,6 +2,29 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
 metadata:
+  name: "d8-sds-replicated-volume-rsp-validation"
+webhooks:
+  - name: "d8-sds-replicated-volume-rsp-validation.storage.deckhouse.io"
+    rules:
+      - apiGroups: ["storage.deckhouse.io"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["replicatedstoragepools"]
+        scope: "Cluster"
+    clientConfig:
+      service:
+        namespace: "d8-{{ .Chart.Name }}"
+        name: "webhooks"
+        path: "/rsp-validate"
+      caBundle: |
+        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 5
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
   name: "d8-sds-replicated-volume-rsc-validation"
 webhooks:
   - name: "d8-sds-replicated-volume-rsc-validation.storage.deckhouse.io"
@@ -39,29 +62,6 @@ webhooks:
         namespace: "d8-{{ .Chart.Name }}"
         name: "webhooks"
         path: "/sc-validate"
-      caBundle: |
-        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
-    admissionReviewVersions: ["v1", "v1beta1"]
-    sideEffects: None
-    timeoutSeconds: 5
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingWebhookConfiguration
-metadata:
-  name: "d8-sds-replicated-volume-mc-validation"
-webhooks:
-  - name: "d8-sds-replicated-volume-mc-validation.storage.deckhouse.io"
-    rules:
-      - apiGroups: ["deckhouse.io"]
-        apiVersions: ["v1alpha1"]
-        operations: ["CREATE", "UPDATE"]
-        resources: ["moduleconfigs"]
-        scope: "Cluster"
-    clientConfig:
-      service:
-        namespace: "d8-{{ .Chart.Name }}"
-        name: "webhooks"
-        path: "/mc-validate"
       caBundle: |
         {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
     admissionReviewVersions: ["v1", "v1beta1"]

@@ -1,0 +1,44 @@
+name: Go linter for images
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Go linter for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.59.1
+
+      - name: Run Go lint
+        run: |
+          basedir=$(pwd)
+          failed='false'
+          for dir in $(find images -type d); do
+            if ls $dir/go.mod &> /dev/null; then
+              echo "Running linter in $dir"
+              cd $dir
+              golangci-lint run
+              if [ $? -ne 0 ]; then
+                echo "Linter failed in $dir"
+                failed='true'
+              fi
+            cd $basedir
+            fi
+          done
+          if [ $failed == 'true' ]; then
+            exit 1
+          fi

@@ -3,6 +3,8 @@ cpu: 20m
 memory: 50Mi
 {{- end }}
 
+{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
+{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
@@ -73,6 +75,7 @@ spec:
         args:
         - -tls-cert-file=/etc/webhook/certs/tls.crt
         - -tls-key-file=/etc/webhook/certs/tls.key
+        - -driver=replicated.csi.storage.deckhouse.io
         image: {{ include "helm_lib_module_image" (list . "linstorSchedulerAdmission") }}
         imagePullPolicy: IfNotPresent
         ports:
@@ -92,3 +95,4 @@ spec:
         - name: linstor-scheduler-admission-certs
           secret:
             secretName: linstor-scheduler-admission-certs
+{{- end }}

@@ -30,6 +30,104 @@
   "liveNow": false,
   "panels": [
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "P0D6E4079E36703EB"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto",
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 57,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "8.5.13",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "P0D6E4079E36703EB"
+          },
+          "editorMode": "code",
+          "exemplar": false,
+          "expr": "drbd_version",
+          "format": "table",
+          "instant": true,
+          "range": false,
+          "refId": "A"
+        }
+      ],
+      "title": "DRBD versions",
+      "transformations": [
+        {
+          "id": "filterFieldsByName",
+          "options": {
+            "include": {
+              "names": [
+                "kmod",
+                "node",
+                "utils"
+              ]
+            }
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "kmod": 1,
+              "node": 0,
+              "utils": 2
+            },
+            "renameByName": {
+              "kmod": "DRBD version",
+              "node": "Node",
+              "utils": "DRBD utils version"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
       "collapsed": false,
       "datasource": {
         "type": "prometheus",
@@ -39,7 +137,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 0
+        "y": 8
       },
       "id": 33,
       "panels": [],
@@ -73,7 +171,7 @@
         "h": 3,
         "w": 3,
         "x": 0,
-        "y": 1
+        "y": 9
       },
       "id": 36,
       "options": {
@@ -130,7 +228,7 @@
         "h": 3,
         "w": 3,
         "x": 3,
-        "y": 1
+        "y": 9
       },
       "id": 38,
       "options": {
@@ -187,7 +285,7 @@
         "h": 3,
         "w": 3,
         "x": 6,
-        "y": 1
+        "y": 9
       },
       "id": 35,
       "options": {
@@ -244,7 +342,7 @@
         "h": 3,
         "w": 3,
         "x": 9,
-        "y": 1
+        "y": 9
       },
       "id": 37,
       "options": {
@@ -306,7 +404,7 @@
         "h": 9,
         "w": 6,
         "x": 12,
-        "y": 1
+        "y": 9
       },
       "id": 41,
       "options": {
@@ -362,7 +460,7 @@
         "h": 3,
         "w": 6,
         "x": 18,
-        "y": 1
+        "y": 9
       },
       "id": 43,
       "options": {
@@ -424,7 +522,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 4
+        "y": 12
       },
       "id": 51,
       "options": {
@@ -485,7 +583,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 4
+        "y": 12
       },
       "id": 50,
       "options": {
@@ -547,7 +645,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 4
+        "y": 12
       },
       "id": 49,
       "options": {
@@ -609,7 +707,7 @@
         "h": 3,
         "w": 6,
         "x": 18,
-        "y": 4
+        "y": 12
       },
       "id": 44,
       "options": {
@@ -679,7 +777,7 @@
         "h": 3,
         "w": 12,
         "x": 0,
-        "y": 7
+        "y": 15
       },
       "id": 52,
       "options": {
@@ -738,7 +836,7 @@
         "h": 3,
         "w": 6,
         "x": 18,
-        "y": 7
+        "y": 15
       },
       "id": 42,
       "options": {
@@ -824,7 +922,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 10
+        "y": 18
       },
       "id": 40,
       "options": {
@@ -976,7 +1074,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 26
       },
       "id": 54,
       "options": {
@@ -1126,7 +1224,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 26
       },
       "id": 55,
       "options": {
@@ -1195,7 +1293,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 34
       },
       "id": 46,
       "panels": [],
@@ -1222,7 +1320,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 27
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 24,
@@ -1311,7 +1409,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 27
+        "y": 35
       },
       "hiddenSeries": false,
       "id": 25,
@@ -1389,7 +1487,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 43
       },
       "id": 8,
       "panels": [],
@@ -1417,7 +1515,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "hiddenSeries": false,
       "id": 27,
@@ -1518,7 +1616,7 @@
         "h": 13,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 52
       },
       "id": 6,
       "links": [],
@@ -1592,7 +1690,7 @@
         "h": 3,
         "w": 4,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "id": 14,
       "options": {
@@ -1663,7 +1761,7 @@
         "h": 3,
         "w": 4,
         "x": 4,
-        "y": 57
+        "y": 65
       },
       "id": 20,
       "options": {
@@ -1734,7 +1832,7 @@
         "h": 3,
         "w": 4,
         "x": 8,
-        "y": 57
+        "y": 65
       },
       "id": 4,
       "options": {
@@ -1796,7 +1894,7 @@
         "h": 3,
         "w": 4,
         "x": 12,
-        "y": 57
+        "y": 65
       },
       "id": 29,
       "options": {
@@ -1858,7 +1956,7 @@
         "h": 3,
         "w": 8,
         "x": 16,
-        "y": 57
+        "y": 65
       },
       "id": 12,
       "options": {
@@ -1933,7 +2031,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 60
+        "y": 68
       },
       "id": 22,
       "options": {
@@ -2081,7 +2179,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 60
+        "y": 68
       },
       "id": 16,
       "options": {
@@ -2195,7 +2293,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 68
+        "y": 76
       },
       "id": 31,
       "options": {
@@ -2291,7 +2389,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 68
+        "y": 76
       },
       "id": 30,
       "options": {
@@ -2417,7 +2515,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "LINSTOR / DRBD",
+  "title": "SDS-REPLICATED-VOLUME / DRBD",
   "uid": "f_tZtVlMz",
   "version": 21,
   "weekStart": ""

@@ -5,6 +5,7 @@ metadata:
   labels:
     heritage: deckhouse
     module: storage
+    backup.deckhouse.io/cluster-config: "true"
 spec:
   group: storage.deckhouse.io
   scope: Cluster
@@ -47,11 +48,6 @@ spec:
                 - reclaimPolicy
                 - topology
               properties:
-                isDefault:
-                  type: boolean
-                  default: false
-                  description: |
-                    Should this Storage class be used as default.
                 storagePool:
                   type: string
                   x-kubernetes-validations:
@@ -168,9 +164,6 @@ spec:
         - jsonPath: .status.phase
           name: Phase
           type: string
-        - jsonPath: .spec.isDefault
-          name: isDefault
-          type: boolean
         - jsonPath: .status.reason
           name: Reason
           type: string

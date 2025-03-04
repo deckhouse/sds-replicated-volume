@@ -9,5 +9,5 @@ data:
   prometheus.toml: |2
 
     [[prometheus]]
-    address = "127.0.0.1:9942"
+    address = "127.0.0.1:4215"
     enums = true

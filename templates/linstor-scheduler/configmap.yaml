@@ -1,3 +1,5 @@
+{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
+{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -16,10 +18,13 @@ data:
     profiles:
       - schedulerName: linstor
     extenders:
-      - urlPrefix: http://localhost:8099
+      - urlPrefix: https://localhost:8099
         filterVerb: filter
         prioritizeVerb: prioritize
         weight: 5
-        enableHTTPS: false
-        httpTimeout: 300000s
-        nodeCacheCapable: false
+        enableHTTPS: true
+        httpTimeout: 300s
+        nodeCacheCapable: true
+        tlsConfig:
+          caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca }}
+{{- end }}

@@ -1,0 +1,41 @@
+run:
+  timeout: 10m
+
+issues:
+  exclude:
+    - ST1005.*
+    - "should not use dot imports"
+    - "don't use an underscore in package name"
+    - "exported: .*"
+
+linters-settings:
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(sds-replicated-volume-controller)
+      - prefix(webhooks)
+  errcheck:
+    ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
+
+linters:
+  disable-all: true
+  enable:
+  - dogsled
+  - errcheck
+  - gci
+  - gocritic
+  - gofmt
+#  - goimports
+  - gosimple
+  - govet
+  - ineffassign
+  - misspell
+  - revive
+  - staticcheck
+#  - structcheck
+  - typecheck
+  - unconvert
+  - unparam
+  - whitespace
+  - copyloopvar

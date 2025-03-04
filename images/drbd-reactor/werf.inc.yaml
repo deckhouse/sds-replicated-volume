@@ -1,0 +1,183 @@
+---
+# build drbd-utils .deb packages
+image: {{ $.ImageName }}-utils-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils
+    add: /
+    to: /drbd-utils
+    tag: v{{ $.Versions.DRBD_UTILS }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/thin-send-recv
+    add: /
+    to: /thin-send-recv
+    tag: v{{ $.Versions.THIN_SEND_RECV }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} flex clitest xsltproc locales libxml2 po4a bash-completion docbook-xsl udev asciidoctor libkeyutils-devel \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+  beforeSetup:
+    - sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && locale-gen
+    - export LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
+  setup:
+    # clone drbd-utils git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-utils" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_UTILS) }}
+    {{- $_ := set $ctx "folder" "/drbd-utils" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    - install /dev/null /usr/local/bin/lbvers.py
+    - ./autogen.sh && ./configure --without-manual && ./configure --enable-spec --without-manual
+    # substitute ubuntu packages with ALTLinux's ones
+    - sed -i -e 's/keyutils-libs-devel/libkeyutils-devel/g' drbd.spec
+
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "drbd-utils" }}
+    {{- $_ := set $ctx "version" $.Versions.DRBD_UTILS }}
+    {{- $_ := set $ctx "spec" "drbd.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    # set initscripttype explicitly for workaround errors like 'No such file or directory: /tmp/.private/rpmbuilder/drbd-buildroot/usr/lib/systemd/system/drbd@.service'
+    # PS. ./configure --with-initscripttype=sysv does not work for some reason
+    {{- $_ := set $ctx "rpmbuild_args" "--without=manual --define \\'initscripttype sysv\\'" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    # clone thin-send-recv git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/thin-send-recv" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.THIN_SEND_RECV) }}
+    {{- $_ := set $ctx "folder" "/thin-send-recv" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "thin-send-recv" }}
+    {{- $_ := set $ctx "version" $.Versions.THIN_SEND_RECV }}
+    {{- $_ := set $ctx "spec" "thin_send_recv.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    - ls -la /
+    # drbd-9.30.0-1.x86_64.rpm
+    # drbd-utils-9.30.0-1.x86_64.rpm
+    # thin-send-recv-1.1.3-1.x86_64.rpm
+
+---
+# build drbd-reactor .rpm packages
+image: {{ $.ImageName }}-reactor-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - url: {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-reactor
+    add: /
+    to: /drbd-reactor
+    tag: v{{ $.Versions.DRBD_REACTOR }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} rust-cargo bash-completion \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+    - |
+      cargo install cargo-sbom \
+      && cargo sbom -V \
+      && mv ~/.cargo/bin/cargo-sbom /usr/local/bin/ \
+      && rm -rf ~/.cargo
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+  setup:
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" (printf "%s/LINBIT/drbd-reactor" $.Root.SOURCE_REPO) }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.DRBD_REACTOR) }}
+    {{- $_ := set $ctx "folder" "/drbd-reactor" }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    # apply git patches to upstream's code
+    - git apply /patches/*.patch && git commit -am "Auto-commit patched files"
+    - git tag -f v{{ $.Versions.DRBD_REACTOR }}
+
+    - install /dev/null /usr/local/bin/lbvers.py
+
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "drbd-reactor" }}
+    {{- $_ := set $ctx "version" $.Versions.DRBD_REACTOR }}
+    {{- $_ := set $ctx "spec" "drbd-reactor.spec" }}
+    {{- $_ := set $ctx "arch" "x86_64" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    - ls -la /
+    # drbd-reactor-1.8.0-1.x86_64.rpm
+
+---
+# main almost distroless image
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_ALT_P11 }}
+import:
+  - image: {{ $.ImageName }}-utils-artifact
+    add: /
+    to: /packages
+    includePaths:
+      # - python-linstor-*.rpm
+      - drbd-utils-*.rpm
+      - thin-send-recv-*.rpm
+    before: setup
+
+  - image: {{ $.ImageName }}-reactor-artifact
+    add: /
+    to: /packages
+    includePaths:
+      - drbd-reactor-*.rpm
+    before: setup
+
+shell:
+  install:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install libkeyutils kmod sysklogd
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  setup:
+    - ls -la /packages
+    - |
+      for f in /packages/*.rpm; do
+        echo "Install ${f}"
+        rpm -ihv --nodeps --noscripts $f
+      done
+    - sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf
+
+docker:
+  ENTRYPOINT: ["/usr/sbin/drbd-reactor"]
+  LABEL:
+    distro: ALTLinux
+    version: all
+    drbd-utils: {{ $.Versions.DRBD_UTILS }}
+    drbd-reactor: {{ $.Versions.DRBD_REACTOR }}

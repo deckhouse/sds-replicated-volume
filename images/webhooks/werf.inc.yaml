@@ -1,16 +1,35 @@
 ---
-image: webhooks
-from: "registry.deckhouse.io/base_images/golang:1.21.4-alpine3.18@sha256:cf84f3d6882c49ea04b6478ac514a2582c8922d7e5848b43d2918fff8329f6e6"
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
 
 git:
-  - add: /images/webhooks/src
-    to: /src
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/webhooks/src
     stageDependencies:
       setup:
         - "**/*"
-
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
 shell:
   setup:
-    - cd /src
+    - cd /images/webhooks/src
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o webhooks
     - mv webhooks /webhooks
+    - chmod +x /webhooks
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /webhooks
+    to: /webhooks
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/webhooks"]

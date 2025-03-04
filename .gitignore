@@ -35,4 +35,5 @@ __pycache__/
 
 # dev
 images/sds-replicated-volume-controller/dev/Dockerfile-dev
-images/sds-replicated-volume-controller/Makefile
+images/sds-replicated-volume-controller/src/Makefile
+hack.sh

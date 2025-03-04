@@ -1,0 +1,41 @@
+# base images
+{{- $_ := set $ "BASE_ALPINE_DEV"  "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
+{{- $_ := set $ "BASE_ALT_P11"     "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
+{{- $_ := set $ "BASE_GOLANG_1_22" "registry.deckhouse.io/base_images/golang:1.22.7-bullseye@sha256:e5dc67bf84590c008338a0e30f56a6ed2092a38e0d2895c797dd501db73a2330" }}
+{{- $_ := set $ "BASE_PYTHON"      "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
+{{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
+
+{{- $_ := set $ "SOURCE_REPO" (env "SOURCE_REPO" "https://github.com") }}
+
+# component versions
+{{- $versions := dict }}
+{{- $_ := set $versions "DRBD" "9.2.12" }}
+{{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
+{{- $_ := set $versions "DRBD_UTILS" "9.30.0" }}
+{{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
+{{- $_ := set $versions "LINSTOR_API_PY" "1.19.0" }}
+{{- $_ := set $versions "LINSTOR_CLIENT" "1.19.0" }}
+{{- $_ := set $versions "LINSTOR_COMMON" "999c3c0793376f88b891eb7ef3dc8f8bc9aa26ec" }}
+{{- $_ := set $versions "LINSTOR_CSI" "98544cadb6d111d27a86a11ec07de91b99704b82" }}
+{{- $_ := set $versions "LINSTOR_K8S_AWAIT_ELECTION" "0.3.1" }}
+{{- $_ := set $versions "LINSTOR_SCHEDULER_EXTENDER" "0.3.2" }}
+# the closest version I found for the stork's module version v1.4.1-0.20220512171133-b99428ee1ddf which used in linstor-scheduler-extender v0.3.2
+# https://github.com/libopenstorage/stork/pull/1097/commits
+{{- $_ := set $versions "LINSTOR_SCHEDULER_STORK" "2.11.5" }}
+{{- $_ := set $versions "LINSTOR_SERVER" "1.24.2" }}
+# We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
+# Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
+{{- $_ := set $versions "LINSTOR_SERVER_GRADLE" "6.9.3" }}
+{{- $_ := set $versions "LINSTOR_SERVER_PIRAEUS" "20e96f83f52631dc06d011b7f96293d4026236a1" }}
+{{- $_ := set $versions "LINSTOR_WAIT_UNTIL" "0.2.1" }}
+{{- $_ := set $versions "SEMVER_TOOL" "3.4.0" }}
+{{- $_ := set $versions "SPAAS" "v0.1.5" }}
+{{- $_ := set $versions "THIN_SEND_RECV" "1.1.3" }}
+
+{{- $_ := set $ "VERSIONS" $versions }}
+
+
+# custom constants
+{{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
+{{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
+{{- $_ := set $ "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}

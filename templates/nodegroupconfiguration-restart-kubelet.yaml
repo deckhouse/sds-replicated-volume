@@ -1,0 +1,53 @@
+{{- if .Values.sdsReplicatedVolume.internal.csiMigrationHook.completed }}
+apiVersion: deckhouse.io/v1alpha1
+kind: NodeGroupConfiguration
+metadata:
+  name: sds-replicated-volume-migrate-csi-restart-kubelet.sh
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  weight: 101
+  nodeGroups: ["*"]
+  bundles: ["*"]
+  content: |
+    # Copyright 2024 Flant JSC
+    #
+    # Licensed under the Apache License, Version 2.0 (the "License");
+    # you may not use this file except in compliance with the License.
+    # You may obtain a copy of the License at
+    #
+    #     http://www.apache.org/licenses/LICENSE-2.0
+    #
+    # Unless required by applicable law or agreed to in writing, software
+    # distributed under the License is distributed on an "AS IS" BASIS,
+    # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    # See the License for the specific language governing permissions and
+    # limitations under the License.
+
+    # The lvmetad service should not be used by LVM on the node.
+    # So we disable the service and set the setting use_lvmetad to 0 in lvm.conf.
+
+    # affectedPVsHash: {{ .Values.sdsReplicatedVolume.internal.csiMigrationHook.affectedPVsHash }}
+    export LABEL_KEY="storage.deckhouse.io/need-kubelet-restart"
+    export kubeconfig="/etc/kubernetes/kubelet.conf"
+
+    is_kubelet_restart_needed=$(bb-kubectl --kubeconfig $kubeconfig get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"'$LABEL_KEY'": ""})')
+
+
+    echo "is_kubelet_restart_needed: $is_kubelet_restart_needed"
+
+    if [ "$is_kubelet_restart_needed" = "true" ]; then
+      echo "Kubelet restart is needed. Restarting kubelet."
+      systemctl restart kubelet
+
+      echo "Sleeping for 180 seconds before restarting kubelet again."
+      sleep 180
+
+      echo "Restarting kubelet again."
+      systemctl restart kubelet
+
+      bb-kubectl --kubeconfig $kubeconfig label node "$(hostname)" "$LABEL_KEY"-
+    else
+      echo "Kubelet restart is not needed. Exiting."
+    fi
+
+{{- end }}

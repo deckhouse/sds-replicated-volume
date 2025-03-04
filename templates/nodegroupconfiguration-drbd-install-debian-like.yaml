@@ -27,14 +27,13 @@ spec:
 
     # Unpack package from module image and run install script
     # bb-rp-from-module-image-install package:digest registry_auth scheme registry_address registry_path
-    # TODO: Get rid of this in favour of standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
     bb-rp-from-module-image-install() {
       local MODULE_PACKAGE=$1
       local REGISTRY_AUTH=$2
       local SCHEME=$3
       local REGISTRY_ADDRESS=$4
       local REGISTRY_PATH=$5
-    
+
       bb-rp-install $MODULE_PACKAGE
     }
 
@@ -42,7 +41,29 @@ spec:
 
     kernel_version_in_use="$(uname -r)"
 
-    is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname -s)" -o json | jq -c '.metadata.labels | contains({"storage.deckhouse.io/sds-replicated-volume-node":""})')
+    CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
+    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
+
+    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
+    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
+    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registry.scheme }}"
+    {{- else }}
+    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
+    {{- end }}
+    MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
+    MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
+    MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
+
+    is_master=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"node-role.kubernetes.io/control-plane": ""})')
+    if [ $is_master == "true" ]; then
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
+      bb-rp-from-module-image-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
+    fi
+
+    is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"storage.deckhouse.io/sds-replicated-volume-node":""})')
 
     bb-log-info "we need drbd on node: "$is_linstor_data_node
 
@@ -79,14 +100,6 @@ spec:
       bb-apt-remove $packages_to_remove
     fi
 
-    CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
-    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
-
-    MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
-    MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
-    MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
-    MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
-
     if [ -e "/proc/drbd" ]; then
       # DRBD check version
 
@@ -103,8 +116,11 @@ spec:
         rmmod drbd || true
       fi
 
-      # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+      {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+      bb-package-module-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      {{- else }}
       bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      {{- end }}
 
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
@@ -121,15 +137,20 @@ spec:
       fi
     fi
 
-    bb-apt-install make gcc bind9-host patch mokutil
+    # Check, if we need gcc version 12
+    gccVersion="$(cat /proc/version | grep -q x86_64-linux-gnu-gcc-12 && echo gcc-12 || echo gcc)"
+    bb-apt-install make bind9-host patch mokutil $gccVersion
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
       bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
       exit 0
     fi
-    
-    # TODO: Change this to standard bb-rp-module-install when there will be Deckhouse 1.58 release on RockSolid channel
+
+    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
+    bb-package-module-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    {{- else }}
     bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+    {{- end }}
 
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
@@ -167,8 +188,6 @@ spec:
     make clean || true
     make
     make install
-    cd drbd
-    cp *.ko /lib/modules/$kernel_version_in_use/kernel/drivers/
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
         sed -i '/^drbd$/d' /etc/modules

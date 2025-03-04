@@ -1,0 +1,18 @@
+{{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
+apiVersion: deckhouse.io/v1alpha1
+kind: KubeSchedulerWebhookConfiguration
+metadata:
+  name: d8-{{ .Chart.Name }}
+webhooks:
+- weight: 5
+  failurePolicy: Ignore
+  clientConfig:
+    service:
+      name: linstor-scheduler-extender
+      namespace: d8-{{ .Chart.Name }}
+      port: 8099
+      path: /
+    caBundle: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca }}
+  timeoutSeconds: 5
+
+{{- end }}

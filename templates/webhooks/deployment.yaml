@@ -52,12 +52,29 @@ spec:
       - name: webhooks
         command:
           - /webhooks
+          - -tls-cert-file=/etc/webhook/certs/tls.crt
+          - -tls-key-file=/etc/webhook/certs/tls.key
         image: {{ include "helm_lib_module_image" (list . "webhooks") }}
         imagePullPolicy: IfNotPresent
         volumeMounts:
-          - name: certs
-            mountPath: "/etc/certs"
+          - name: webhook-certs
+            mountPath: /etc/webhook/certs
             readOnly: true
+        readinessProbe:
+          httpGet:
+            path: /healthz
+            port: 8443
+            scheme: HTTPS
+          initialDelaySeconds: 5
+          failureThreshold: 2
+          periodSeconds: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8443
+            scheme: HTTPS
+          periodSeconds: 1
+          failureThreshold: 3
         ports:
           - name: http
             containerPort: 8443
@@ -73,6 +90,6 @@ spec:
       serviceAccount: webhooks
       serviceAccountName: webhooks
       volumes:
-        - name: certs
+        - name: webhook-certs
           secret:
             secretName: webhooks-https-certs

@@ -1,0 +1,56 @@
+{{- define "metadata_backup_resources" }}
+cpu: 10m
+memory: 25Mi
+{{- end }}
+
+{{- if dig "backup" "enabled" true .Values.sdsReplicatedVolume }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: metadata-scheduled-backup-weekly
+  namespace: d8-{{ .Chart.Name }}
+spec:
+  schedule: "0 4 * * 2,4"
+  concurrencyPolicy: Forbid
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          namespace: d8-{{ .Chart.Name }}
+          labels:
+            app: metadata-backup-weekly
+        spec:
+          restartPolicy: OnFailure
+          {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 10 }}
+          {{- include "helm_lib_node_selector" (tuple . "system") | nindent 10 }}
+          {{- include "helm_lib_tolerations" (tuple . "system") | nindent 10 }}
+          {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 10 }}
+          imagePullSecrets:
+            - name: {{ .Chart.Name }}-module-registry
+          serviceAccount: metadata-backup
+          serviceAccountName: metadata-backup
+          containers:
+          - name: metadata-backup
+            {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 12 }}
+            image: {{ include "helm_lib_module_image" (list . "metadataBackup") }}
+            env:
+            - name: BACKUP_TYPE
+              value: "weekly-backup"
+            imagePullPolicy: IfNotPresent
+            command:
+              - /backup.py
+              - --retentionCount
+              - {{ dig "backup" "retentionCount" 4 .Values.sdsReplicatedVolume | quote }}
+            volumeMounts:
+              - name: tmp
+                mountPath: /tmp
+            resources:
+              requests:
+                {{- include "helm_lib_module_ephemeral_storage_logs_with_extra" 10 | nindent 16 }}
+                {{- include "metadata_backup_resources" . | nindent 16 }}
+          volumes:
+            - name: tmp
+              emptyDir: {}
+{{- end }}

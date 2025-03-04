@@ -1,9 +1,8 @@
 type: object
 properties:
-  # TODO: Set the option below to deprecated when the PR https://github.com/deckhouse/deckhouse/pull/7263 will reach RockSolid channel
   registryScheme:
     type: string
-    description: Change this parameter to "http" if the module registry does not support TLS.
+    description: Deprecated parameter. Remove it from ModuleConfig for Deckhouse with version greater than 1.57.
     default: https
   logLevel:
     type: string
@@ -30,6 +29,10 @@ properties:
         default: 7999
         description: |
           DRBD ports range end
+  enableThinProvisioning:
+    type: boolean
+    default: false
+    description: Allow thin LVM volumes usage
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data
@@ -57,9 +60,10 @@ properties:
         description: Module backup state
       retentionCount:
         type: integer
-        default: 3
+        default: 7
         description: Number of backups to keep
       schedule:
         type: string
         default: "0 3 * * *"
+        description: Backup schedule
         description: Backup schedule

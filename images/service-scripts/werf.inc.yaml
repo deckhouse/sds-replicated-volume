@@ -1,0 +1,40 @@
+---
+image: {{ $.ImageName }}-artifact
+from: {{ $.Root.BASE_ALPINE_DEV }}
+final: false
+
+git:
+  - add: /images/{{ $.ImageName }}
+    to: /
+    excludePaths:
+    - werf.inc.yaml
+    stageDependencies:
+      setup:
+        - images/{{ $.ImageName }}/scripts
+        - images/{{ $.ImageName }}/tools
+
+shell:
+  setup:
+    - chmod a+x scripts/*
+    - mv scripts/* /
+    - chmod a+x tools/*
+    - mv tools/* /
+
+---
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_SCRATCH }}
+
+import:
+  - image: {{ $.ImageName }}-artifact
+    add: /
+    to: /
+    includePaths:
+      - evict.sh
+      - replicas_manager.sh
+      - install
+      - uninstall
+    before: setup
+docker:
+  LABEL:
+    distro: all
+    version: all

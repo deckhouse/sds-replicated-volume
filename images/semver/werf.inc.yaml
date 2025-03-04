@@ -1,10 +1,24 @@
-{{- $version := "3.4.0" }}
+---
+image: {{ $.ImageName }}-artifact
+from: {{ $.Root.BASE_ALPINE_DEV }}
+final: false
+
+git:
+  - add: /images/{{ $.ImageName }}/scripts
+    to: /
+
+shell:
+  setup:
+    - apk add wget tar
+    - wget https://github.com/fsaintjacques/semver-tool/archive/refs/tags/{{ $.Versions.SEMVER_TOOL }}.tar.gz
+    - tar -xvf {{ $.Versions.SEMVER_TOOL }}.tar.gz
+    - mv semver-tool-{{ $.Versions.SEMVER_TOOL }}/src/semver /d8-semver
 ---
 image: {{ $.ImageName }}
-from: "registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc"
+from: {{ $.Root.BASE_SCRATCH }}
 
 import:
-  - artifact: {{ $.ImageName }}-artifact
+  - image: {{ $.ImageName }}-artifact
     add: /
     to: /
     includePaths:
@@ -16,18 +30,4 @@ docker:
   LABEL:
     distro: all
     version: all
-    semver: {{ $version }}
----
-artifact: {{ $.ImageName }}-artifact
-from: "registry.deckhouse.io/base_images/alpine:3.16.3@sha256:5548e9172c24a1b0ca9afdd2bf534e265c94b12b36b3e0c0302f5853eaf00abb"
-
-git:
-  - add: /images/{{ $.ImageName }}/scripts
-    to: /
-
-shell:
-  setup:
-    - apk add wget tar
-    - wget https://github.com/fsaintjacques/semver-tool/archive/refs/tags/{{ $version }}.tar.gz
-    - tar -xvf {{ $version }}.tar.gz
-    - mv semver-tool-{{ $version }}/src/semver /d8-semver
+    semver: {{ $.Versions.SEMVER_TOOL }}

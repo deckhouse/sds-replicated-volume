@@ -5,6 +5,7 @@ metadata:
   labels:
     heritage: deckhouse
     module: storage
+    backup.deckhouse.io/cluster-config: "true"
 spec:
   group: storage.deckhouse.io
   scope: Cluster
@@ -30,6 +31,9 @@ spec:
               type: object
               description: |
                 Defines desired rules for Linstor's Storage-pools.
+              required:
+                - type
+                - lvmVolumeGroups
               properties:
                 type:
                   type: string
@@ -53,11 +57,15 @@ spec:
                     as it is in current resource's 'Spec.Type' field.
                   items:
                     type: object
+                    required:
+                      - name
                     properties:
                       name:
                         type: string
                         description: |
                           Selected LVMVolumeGroup resource's name.
+                        minLength: 1
+                        pattern: '^[a-z0-9]([a-z0-9-.]{0,251}[a-z0-9])?$'
                       thinPoolName:
                         type: string
                         description: |

@@ -1,0 +1,379 @@
+# just a list with AltLinux's packages replaces Ubuntu's ones
+
+# Ubuntu package       | AltLinux package
+#########################################
+# default-jre-headless | java-11-openjdk-headless
+# dh-python            | ? rpm-build-python3
+# dnsutils             | bind-utils
+# gradle               | javapackages-tools
+# iputils-ping         | iputils
+# libkeyutils-dev      | libkeyutils
+# libxml2-utils        | libxml2
+# nvme-cli             | nvme
+# python3-all          | python3
+# python3-<MODULENAME> | python3-module-<MODULENAME>
+# zfsutils-linux       | zfs-utils
+
+---
+# build linstor-server packages
+image: {{ $.ImageName }}-server-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/linstor-server
+    add: /
+    to: /linstor-server
+    tag: v{{ $.Versions.LINSTOR_SERVER }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    # in Alt Linux there is no '--no-install-recommends' apt-get option
+    # in Alt Linux there is no '--reinstall' apt-get option (apt-get -y install --reinstall ca-certificates)
+    # in Alt Linux 'update-ca-certificates' replaced? with update-ca-trust
+    - |
+      apt-get update \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} java-11-openjdk-devel python3 wget unzip \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+  # We are using Gradle version 6.9.3 because building Linstor Controller with version 7+ completes unsuccesfully with error:
+  # Could not set unknown property 'release' for object of type org.gradle.api.tasks.compile.CompileOptions.
+  beforeSetup:
+    - mkdir /opt/gradle
+    - cd /opt/gradle
+    - wget -q https://services.gradle.org/distributions/gradle-{{ $.Versions.LINSTOR_SERVER_GRADLE }}-bin.zip
+    - unzip gradle-{{ $.Versions.LINSTOR_SERVER_GRADLE }}-bin.zip
+    - rm gradle-{{ $.Versions.LINSTOR_SERVER_GRADLE }}-bin.zip
+    - ln -sf /opt/gradle/gradle-{{ $.Versions.LINSTOR_SERVER_GRADLE }}/bin/gradle /usr/local/bin/gradle
+  setup:
+    # clone linstor-server git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-server" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.LINSTOR_SERVER) }}
+    {{- $_ := set $ctx "folder" "/linstor-server" }}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $.Versions.LINSTOR_COMMON) }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+    # apply git patches to upstream's code
+    - git apply /patches/*.patch && git commit -am "Auto-commit patched files"
+    - git tag -f v{{ $.Versions.LINSTOR_SERVER }}
+
+    # make .rpm package
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "linstor-server" }}
+    {{- $_ := set $ctx "version" $.Versions.LINSTOR_SERVER }}
+    {{- $_ := set $ctx "spec" "linstor.spec" }}
+    {{- $_ := set $ctx "tarball_cmd" "make tarball" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+    # some cleanup
+    - rm -rf /root/.gradle/caches/
+    - ls -la /
+    # linstor-common-1.24.2-1.noarch.rpm
+    # linstor-controller-1.24.2-1.noarch.rpm
+    # linstor-satellite-1.24.2-1.noarch.rpm
+---
+image: {{ $.ImageName }}-client-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/linstor-api-py
+    add: /
+    to: /linstor-api-py
+    tag: v{{ $.Versions.LINSTOR_API_PY }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - url: https://github.com/LINBIT/linstor-client
+    add: /
+    to: /linstor-client
+    tag: v{{ $.Versions.LINSTOR_CLIENT }}
+    stageDependencies:
+      setup:
+        - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+    - |
+      apt-get update \
+      && apt-get -y install {{ $.Root.BUILD_PACKAGES }} python3 wget unzip python3-module-setuptools help2man bash-completion docbook-xsl xsltproc \
+      && apt-get -y install ca-certificates \
+      && update-ca-trust
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    {{- $ctx := dict }}
+    {{- include "utils:prepare-rpm-build" $ctx | nindent 2 }}
+  setup:
+    # clone linstor-api-py git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-api-py" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.LINSTOR_API_PY) }}
+    {{- $_ := set $ctx "folder" "/linstor-api-py" }}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- $_ := set $ctx "submodules" (printf "linstor-common=%s" $.Versions.LINSTOR_COMMON) }}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    # patch sdist to do not replace - with _ or RPM build will fail
+    # - sed -i "s/canonicalize_name(name).replace('-', '_')/canonicalize_name(name)/g" /usr/lib64/python3/site-packages/setuptools/_distutils/dist.py
+    - sed -i "s/canonicalize_name(self.get_name()).replace('-', '_')/canonicalize_name(self.get_name())/g" /usr/lib64/python3/site-packages/setuptools/_core_metadata.py
+
+    # make .rpm package
+    # make only spec before building RPM
+    - python3 setup.py bdist_rpm --spec-only
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "python-linstor" }}
+    {{- $_ := set $ctx "version" $.Versions.LINSTOR_API_PY }}
+    {{- $_ := set $ctx "spec" "dist/python-linstor.spec" }}
+    {{- $_ := set $ctx "gen_path" "./dist" }}
+    # fix error: python3(distutils.version) < 0 is needed by python-linstor-1.19.0-1.noarch when installing this package
+    {{- $_ := set $ctx "rpmbuild_args" "--define \\'_python3_req_skip distutils.version\\'" }}
+    {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' python-linstor.spec" }}
+
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    # clone linstor-client git repo
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "repo" "https://github.com/LINBIT/linstor-client" }}
+    {{- $_ := set $ctx "branch" (printf "v%s" $.Versions.LINSTOR_CLIENT) }}
+    {{- $_ := set $ctx "folder" "/linstor-client" }}
+    {{- /* .submodules is a string like "submodule1-name=submodule1-branch submodule2-name=" */}}
+    {{- /* If branch is not set then using branch from .git-submodules file */}}
+    {{- /* $_ := set $ctx "submodules" (printf "linstor-common=%s" $common_submodule_version) */}}
+    {{- include "utils:checkout-git" $ctx | nindent 2 }}
+
+    # copy RPM spec-file
+    #- cp /patches/linstor-client.spec /linstor-client/
+    # substitute version in .spec-file
+    #- sed -i -e 's/<VERSION>/{{ $.Versions.LINSTOR_CLIENT }}/g' linstor-client.spec
+    # install python-linstor because it's required for linstor-client
+    - rpm -ihv /python-linstor-{{ $.Versions.LINSTOR_API_PY }}-1.noarch.rpm
+
+    # make .rpm package
+    # make only spec before building RPM
+    - python3 setup.py bdist_rpm --spec-only
+    {{- $ctx := dict }}
+    {{- $_ := set $ctx "name" "linstor-client" }}
+    {{- $_ := set $ctx "version" $.Versions.LINSTOR_CLIENT }}
+    {{- $_ := set $ctx "spec" "dist/linstor-client.spec" }}
+    {{- $_ := set $ctx "gen_path" "./dist" }}
+    {{- $_ := set $ctx "spec_patch" "sed -i 's/python3-setuptools/python3-module-setuptools/g' linstor-client.spec" }}
+    # make release-no-doc because doc generation fail in some reasons
+    {{- $_ := set $ctx "tarball_cmd" "make release-no-doc" }}
+    {{- include "utils:build-rpm-pkg" $ctx | nindent 2 }}
+
+    - ls -la /
+
+---
+image: {{ $.ImageName }}-k8s-await-election-artifact
+from: {{ $.Root.BASE_GOLANG_1_22 }}
+final: false
+
+git:
+  - url: https://github.com/LINBIT/k8s-await-election
+    add: /
+    to: /usr/local/go/k8s-await-election
+    tag: v{{ $.Versions.LINSTOR_K8S_AWAIT_ELECTION }}
+    stageDependencies:
+      setup:
+        - "**/*"
+shell:
+  setup:
+    - cd /usr/local/go/k8s-await-election
+    - make
+    - mv ./out/k8s-await-election-amd64 /k8s-await-election
+
+---
+# main image based on AltLinux for now because we need bash and other tools
+image: {{ $.ImageName }}
+from: {{ $.Root.BASE_ALT_P11 }}
+git:
+  - add: /images/{{ $.ImageName }}
+    to: /utils
+    stageDependencies:
+      install:
+        - "**/*"
+
+import:
+  - image: {{ $.ImageName }}-server-artifact
+    add: /
+    to: /packages
+    includePaths:
+      - linstor-common-*.rpm
+      - linstor-controller-*.rpm
+      - linstor-satellite-*.rpm
+    before: setup
+
+  - image: {{ $.ImageName }}-client-artifact
+    add: /
+    to: /packages
+    includePaths:
+      - python-linstor-*.rpm
+      - linstor-client-*.rpm
+    before: setup
+
+  - image: drbd-reactor-utils-artifact
+    add: /
+    # to: /drbd-utils instead of /packages because of Conflict between imports! (with linstor-server-client-artifact) in Werf :-(
+    to: /drbd-utils
+    includePaths:
+      # - python-linstor-*.rpm
+      - drbd-utils-*.rpm
+      - thin-send-recv-*.rpm
+    before: setup
+
+  - image: {{ $.ImageName }}-k8s-await-election-artifact
+    add: /
+    to: /usr/bin
+    includePaths:
+      - k8s-await-election
+    before: setup
+
+shell:
+  # add some scripts to image to be able to use them
+  install:
+    # Add liveness probe scripts
+    - cp /utils/liveness.sh /liveness.sh && cp /utils/liveness-satellite.sh /liveness-satellite.sh
+    - chmod 755 /liveness.sh /liveness-satellite.sh
+
+    # Add wrapper for linstor client with only allowed commands
+    - cp /utils/client-wrapper.sh /usr/local/bin/linstor && chmod 755 /usr/local/bin/linstor
+
+    # Script for cleaner sidecar
+    - cp /utils/cleaner.py /cleaner.py && chmod 755 /cleaner.py
+
+  setup:
+    - mv /drbd-utils/* /packages/
+    # Source https://github.com/piraeusdatastore/piraeus/blob/master/dockerfiles/piraeus-server/Dockerfile
+    - |
+      { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus
+    # Enable contrib repos for zfsutils
+    - sed -r -i 's/^deb(.*)$/deb\1 contrib/' /etc/apt/sources.list
+    - echo "Update packages list..." && apt-get update
+
+    # install our own RPM packages first
+    - |
+      # install some required packages
+      echo "Install required packages..."
+
+      # cryptsetup: luks layer
+      # e2fsprogs: LINSTOR can create file systems
+      # lsscsi: exos layer
+      # lvm2: manage lvm storage pools
+      # multipath-tools: exos layer
+      # nvme-cli: nvme layer
+      # procps: used by LINSTOR to find orphaned send/receive processes
+      # socat: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      # xfsprogs: LINSTOR can create file systems; xfs deps
+      # zfsutils-linux: for zfs storage pools
+      # zstd: used with thin-send-recv to send snapshots to another LINSTOR cluster
+      DRBD_UTILS_DEPS="chkconfig sysklogd udev libkeyutils openssh lsb-core"
+      LINSTOR_COMMON_DEPS="java-11-openjdk-headless openssl"
+      LINSTOR_SATELLITE_DEPS="lvm2 libudev-devel"
+      LINSTOR_PYTHON_DEPS="python3 python3-module-natsort python3-module-distutils-extra"
+      THIN_SEND_RECV_DEPS="thin-provisioning-tools socat zstd jq net-tools iputils iproute2 bind-utils netcat sysstat curl util-linux multipath-tools nvme zfs-utils"
+
+      # glibc-locales: fix 'bash: warning: setlocale: LC_ALL: cannot change locale (C.UTF-8)'
+      # bash-completion: use bash completion for linstor's commands
+      OPTIONAL_DEPS="glibc-locales bash-completion"
+
+      apt-get install -y ${DRBD_UTILS_DEPS} ${LINSTOR_COMMON_DEPS} ${LINSTOR_SATELLITE_DEPS} ${LINSTOR_PYTHON_DEPS} ${THIN_SEND_RECV_DEPS} ${OPTIONAL_DEPS}
+
+      # rename our packages to install it on specified order
+      rename 'drbd-utils' '001-drbd-utils' /packages/drbd-utils-*.rpm
+      rename 'linstor-common' '002-linstor-common' /packages/linstor-common-*.rpm
+      rename 'python-linstor' '003-python-linstor' /packages/python-linstor-*.rpm
+      # install thin-send-recv in last position
+      rename 'thin-send-recv' 'z-thin-send-recv' /packages/thin-send-recv-*.rpm
+
+      echo "Install our own RPM packages..."
+      for package in /packages/*.rpm; do
+        echo "    => ${package}"
+        rpm -ihv "$package"
+      done
+
+# The following packages have unmet dependencies:
+# │ │ linstor-server/setup    drbd-utils: Depends: /usr/lib/lsb/init-functions but it is not installable
+# │ │ linstor-server/setup    python_linstor: Depends: python3(distutils.version) (< 0) but it is not installable
+# │ │ linstor-server/setup  E: Unmet dependencies. Try 'apt-get --fix-broken install' with no packages (or specify a        ↵
+# solution).
+
+    - |
+      echo "Patch some files..."
+      ln -sf /proc/mounts /etc/mtab
+      sed -i --regexp-extended 's/(#)? udev_rules.*=.*/udev_rules=0/ ; s/(#)? udev_sync.*=.*/udev_sync=0/ ; s/(#)? obtain_device_list_from_udev.*=.*/obtain_device_list_from_udev=0/' /etc/lvm/lvm.conf
+      sed -i '/^devices {/a global_filter = [ "r|^/dev/drbd|", "r|^/dev/loop[0-9]+|" ]' /etc/lvm/lvm.conf
+      sed -i 's/usage-count yes;/usage-count no;/' /etc/drbd.d/global_common.conf
+
+    # Log directory need to be group writable. OpenShift assigns random UID and GID, without extra RBAC changes we can only influence the GID.
+    - |
+      echo "Create log directory..."
+      mkdir /var/log/linstor-controller &&
+      chown 0:1000 /var/log/linstor-controller &&
+      chmod -R 0775 /var/log/linstor-controller &&
+      # Ensure we log to files in containers, otherwise SOS reports won't show any logs at all
+      sed -i 's#<!-- <appender-ref ref="FILE" /> -->#<appender-ref ref="FILE" />#' /usr/share/linstor-server/lib/conf/logback.xml
+
+    # install piraeus-entry
+    - |
+      echo "Install piraeus-entry..."
+      curl -Lfo /usr/bin/piraeus-entry.sh https://github.com/piraeusdatastore/piraeus/raw/{{ $.Versions.LINSTOR_SERVER_PIRAEUS }}/dockerfiles/piraeus-server/entry.sh
+      chmod +x /usr/bin/piraeus-entry.sh
+
+    - mv /usr/bin/linstor /usr/bin/originallinstor
+
+    # cleanup phase
+    - |
+      # remove udev, no need for it in the container
+      # apt-get remove -y udev
+      # do not remove because of bunch of errors:
+      #  The following packages have unmet dependencies:
+      #  You might want to run `apt-get --fix-broken install' to correct these:
+      #    dmsetup: Depends: udev (>= 150-alt4)
+      #             Depends: /lib/udev/rules.d
+      #    drbd-utils: Depends: /usr/lib/lsb/init-functions but it is not installable
+      #                Depends: udev
+      #    linstor-client: Depends: /bin/python3 but it is not installable
+      #    systemd: Depends: udev (= 1:255.11-alt1:p11+356646.300.27.1)
+      #    udev-rules-sgutils: Depends: /lib/udev/rules.d
+      #    zfs-utils: Depends: /lib/udev/rules.d
+      #               Depends: udev
+      rm -rf /packages
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+
+docker:
+  # controller: 3376/tcp 3377/tcp 3370/tcp 3371/tcp
+  # satellite: 3366/tcp 3367/tcp
+  EXPOSE: ["3376/tcp", "3377/tcp", "3370/tcp", "3371/tcp", "3366/tcp", "3367/tcp"]
+  ENTRYPOINT: ["/usr/bin/k8s-await-election", "/usr/bin/piraeus-entry.sh"]
+  CMD: ["startSatellite"]
+  LABEL:
+    distro: ALTLinux
+    version: all
+    linstor-server: {{ $.Versions.LINSTOR_SERVER }}
+    linstor-api-py: {{ $.Versions.LINSTOR_API_PY }}
+    linstor-client: {{ $.Versions.LINSTOR_CLIENT }}
+    linstor-common: {{ $.Versions.LINSTOR_COMMON }}
+    k8s-await-election: {{ $.Versions.LINSTOR_K8S_AWAIT_ELECTION }}
+    piraeus-entry: {{ $.Versions.LINSTOR_SERVER_PIRAEUS }}

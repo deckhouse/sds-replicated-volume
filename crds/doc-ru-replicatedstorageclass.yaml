@@ -8,9 +8,6 @@ spec:
           properties:
             spec:
               properties:
-                isDefault:
-                  description: |
-                    Назначить ли дочерний StorageClass классом по умолчанию.
                 storagePool:
                   description: |
                     Имя Storage Pool в бэкенде LINSTOR.
