@@ -24,7 +24,7 @@ const (
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Schedule: []pkg.ScheduleConfig{
-			{Name: "daily", Crontab: "30 12 * * *"},
+			{Name: "daily", Crontab: "40 12 * * *"},
 		},
 		Queue: fmt.Sprintf("modules/%s", consts.ModuleName),
 	},
