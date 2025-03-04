@@ -34,18 +34,17 @@ var _ = registry.RegisterFunc(
 func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	cl := input.DC.MustGetK8sClient()
 
-	var resultErr error
-
 	secrets := &v1.SecretList{}
 	if err := cl.List(ctx, secrets, client.InNamespace(consts.ModuleNamespace)); err != nil {
 		return fmt.Errorf("listing secrets: %w", err)
 	}
 
+	var resultErr error
 	for _, secret := range secrets.Items {
 		log := input.Logger.With("name", secret.Name)
 
 		if expiring, err := anyCertIsExpiringSoon(log, secret.Data); err != nil {
-			resultErr = errors.Join(resultErr, fmt.Errorf("error checking certificates: %w", err))
+			// do not retry certificate errors, probably just a format problem
 			log.Error("error checking certificates", "err", err)
 			continue
 		} else if !expiring {
