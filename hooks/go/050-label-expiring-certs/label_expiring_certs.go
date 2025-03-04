@@ -43,10 +43,6 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 
 	for _, secret := range secrets.Items {
 		log := input.Logger.With("name", secret.Name)
-		if secret.Labels[SecretCertExpire30dLabel] != "" {
-			log.Info("cert already have label, skip")
-			continue
-		}
 
 		if expiring, err := anyCertIsExpiringSoon(log, secret.Data); err != nil {
 			resultErr = errors.Join(resultErr, fmt.Errorf("error checking certificates: %w", err))
@@ -54,6 +50,24 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 			continue
 		} else if !expiring {
 			log.Info("no expiring certs found")
+
+			if secret.Labels[SecretCertExpire30dLabel] == "" {
+				continue
+			}
+
+			log.Info("secret have obsolete label, remove")
+
+			delete(secret.Labels, SecretCertExpire30dLabel)
+			if err := cl.Update(ctx, &secret); err != nil {
+				resultErr = errors.Join(resultErr, fmt.Errorf("error removing label from secret: %w", err))
+				log.Error("error removing label from secret", "err", err)
+			}
+
+			continue
+		}
+
+		if secret.Labels[SecretCertExpire30dLabel] != "" {
+			log.Info("cert already have label, skip")
 			continue
 		}
 
