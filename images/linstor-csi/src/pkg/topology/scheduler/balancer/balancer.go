@@ -375,7 +375,7 @@ func (b BalanceScheduler) Create(ctx context.Context, volId string, params *volu
 	return nil
 }
 
-func (b BalanceScheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
+func (b BalanceScheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, _ *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
 	r, err := b.Resources.GetAll(ctx, volId)
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)

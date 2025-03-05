@@ -24,6 +24,7 @@ import (
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/crd_sync"
 	"drbd-cluster-sync/pkg/kubeutils"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"

@@ -93,7 +93,7 @@ func prepareFakeClient(t *testing.T) *client.Linstor {
 		t.FailNow()
 	}
 
-	compatLinstorClient, err := hlc.NewHighLevelClient(lapi.HTTPClient(httpMock.Client()), lapi.BaseURL(baseURL))
+	compatLinstorClient, err := hlc.NewHighLevelClient(nil, lapi.HTTPClient(httpMock.Client()), lapi.BaseURL(baseURL))
 
 	compatClient, err := client.NewLinstor(client.APIClient(compatLinstorClient))
 	if !assert.NoError(t, err) {
