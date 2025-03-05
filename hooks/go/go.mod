@@ -3,8 +3,10 @@ module github.com/deckhouse/sds-replicated-volume/hooks/go
 go 1.23.5
 
 require (
+	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20241205040953-7b376bae249c
 	github.com/deckhouse/module-sdk v0.1.1-0.20250225114715-86f38bb419fe
 	k8s.io/api v0.29.8
+	k8s.io/apimachinery v0.29.8
 	sigs.k8s.io/controller-runtime v0.17.0
 )
 
@@ -16,7 +18,6 @@ require (
 	github.com/cloudflare/cfssl v1.6.5 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20241205040953-7b376bae249c // indirect
 	github.com/docker/cli v27.1.1+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
@@ -85,7 +86,6 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.29.8 // indirect
-	k8s.io/apimachinery v0.29.8 // indirect
 	k8s.io/client-go v0.29.8 // indirect
 	k8s.io/component-base v0.29.8 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
