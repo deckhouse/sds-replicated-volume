@@ -6,6 +6,7 @@ import (
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -19,8 +20,10 @@ var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Kubernetes: []pkg.KubernetesConfig{
 			{
-				Name: snapshotName,
-				Kind: "ConfigMap",
+				Name:                         snapshotName,
+				Kind:                         "ConfigMap",
+				ExecuteHookOnEvents:          ptr.Bool(false),
+				ExecuteHookOnSynchronization: ptr.Bool(false),
 				NamespaceSelector: &pkg.NamespaceSelector{
 					NameSelector: &pkg.NameSelector{
 						MatchNames: []string{consts.ModuleNamespace},
@@ -47,7 +50,7 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) error {
 	snapshots := input.Snapshots.Get(snapshotName)
 
 	fmt.Printf("Snapshots: %d\n", len(snapshots))
-	input.Logger.Info("I see %d snapshots", len(snapshots))
+	input.Logger.Info("I see 'n' snapshots", "n", len(snapshots))
 
 	return nil
 }
