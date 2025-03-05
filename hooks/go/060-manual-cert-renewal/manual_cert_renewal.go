@@ -18,6 +18,7 @@ const (
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
+		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
 		Kubernetes: []pkg.KubernetesConfig{
 			{
 				Name:                         snapshotName,
