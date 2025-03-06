@@ -23,7 +23,7 @@ var _ = registry.RegisterFunc(
 			{
 				Name:                         snapshotName,
 				Kind:                         "ConfigMap",
-				JqFilter:                     ".",
+				JqFilter:                     ".metadata.labels",
 				ExecuteHookOnEvents:          ptr.Bool(false),
 				ExecuteHookOnSynchronization: ptr.Bool(false),
 				NamespaceSelector: &pkg.NamespaceSelector{
