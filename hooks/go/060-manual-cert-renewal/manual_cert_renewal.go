@@ -18,24 +18,23 @@ const (
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
-		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
 		Kubernetes: []pkg.KubernetesConfig{
 			{
 				Name:                         snapshotName,
 				Kind:                         "ConfigMap",
-				JqFilter:                     ".metadata.labels",
+				JqFilter:                     ".",
 				ExecuteHookOnEvents:          ptr.Bool(false),
 				ExecuteHookOnSynchronization: ptr.Bool(false),
 				NamespaceSelector: &pkg.NamespaceSelector{
 					NameSelector: &pkg.NameSelector{
 						MatchNames: []string{consts.ModuleNamespace},
 					},
-					LabelSelector: &metav1.LabelSelector{
-						MatchExpressions: []metav1.LabelSelectorRequirement{
-							{
-								Key:      ConfigMapManualCertRenewalTrigger,
-								Operator: metav1.LabelSelectorOpExists,
-							},
+				},
+				LabelSelector: &metav1.LabelSelector{
+					MatchExpressions: []metav1.LabelSelectorRequirement{
+						{
+							Key:      ConfigMapManualCertRenewalTrigger,
+							Operator: metav1.LabelSelectorOpExists,
 						},
 					},
 				},
@@ -53,6 +52,10 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) error {
 
 	fmt.Printf("Snapshots: %d\n", len(snapshots))
 	input.Logger.Info("I see 'n' snapshots", "n", len(snapshots))
+	for _, s := range snapshots {
+		input.Logger.Info("here it is", "s", s.String())
+
+	}
 
 	return nil
 }
