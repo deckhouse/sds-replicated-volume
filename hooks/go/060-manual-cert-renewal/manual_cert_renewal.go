@@ -8,7 +8,6 @@ import (
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -22,7 +21,7 @@ var _ = registry.RegisterFunc(
 			{
 				Name:                         snapshotName,
 				Kind:                         "ConfigMap",
-				JqFilter:                     ".",
+				JqFilter:                     ".metadata.labels",
 				ExecuteHookOnEvents:          ptr.Bool(false),
 				ExecuteHookOnSynchronization: ptr.Bool(false),
 				NamespaceSelector: &pkg.NamespaceSelector{
@@ -30,14 +29,17 @@ var _ = registry.RegisterFunc(
 						MatchNames: []string{consts.ModuleNamespace},
 					},
 				},
-				LabelSelector: &metav1.LabelSelector{
-					MatchExpressions: []metav1.LabelSelectorRequirement{
-						{
-							Key:      ConfigMapManualCertRenewalTrigger,
-							Operator: metav1.LabelSelectorOpExists,
-						},
-					},
+				NameSelector: &pkg.NameSelector{
+					MatchNames: []string{"cert-renewal-trigger"},
 				},
+				// LabelSelector: &metav1.LabelSelector{
+				// 	MatchExpressions: []metav1.LabelSelectorRequirement{
+				// 		{
+				// 			Key:      ConfigMapManualCertRenewalTrigger,
+				// 			Operator: metav1.LabelSelectorOpExists,
+				// 		},
+				// 	},
+				// },
 			},
 		},
 		Queue: fmt.Sprintf("modules/%s", consts.ModuleName),
