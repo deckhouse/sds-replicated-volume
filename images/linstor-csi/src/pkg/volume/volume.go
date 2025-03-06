@@ -50,8 +50,9 @@ type Snapshot struct {
 }
 
 type AccessibleTopologiesParams struct {
-	VolumeAccess string
-	Zones        []string
+	SCVolumeAccess string
+	SCZones        []string
+	SCTopology     string
 }
 
 // CreateDeleter handles the creation and deletion of volumes.

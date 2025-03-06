@@ -62,32 +62,36 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
 func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, params *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
-	var zones []string
-	var volumeAccess string
+	var zones, nodeNames []string
+	var volumeAccess, topology string
 
-	// If params is not nil, it means that the storage class's spec.VolumeAccess value is other than "Local"
 	if params != nil {
-		zones = params.Zones
-		volumeAccess = params.VolumeAccess
+		zones = params.SCZones
+		volumeAccess = params.SCVolumeAccess
+		topology = params.SCTopology
 	}
 
-	var nodeNames []string
+	r, err := c.Resources.GetAll(ctx, volId)
+	if err != nil {
+		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
+	}
+
 	switch volumeAccess {
 	case "PreferablyLocal", "EventuallyLocal", "Any":
-		if len(zones) == 0 {
-			return nil, fmt.Errorf("no zones specified for volume access policy: %s", volumeAccess)
+		if topology == "TransZonal" {
+			res := make([]*csi.Topology, len(zones))
+			for i, zone := range zones {
+				res[i] = &csi.Topology{Segments: map[string]string{"topology.kubernetes.io/zone": zone}}
+			}
+			return res, nil
 		}
-
-		res := make([]*csi.Topology, len(zones))
-		for i, zone := range zones {
-			res[i] = &csi.Topology{Segments: map[string]string{"topology.kubernetes.io/zone": zone}}
+		if topology == "Zonal" {
+			nodeNames = util.DeployedDiskfullyNodes(r)
 		}
-		return res, nil
+		if topology == "Ignored" {
+			return []*csi.Topology{}, nil
+		}
 	case "Local":
-		r, err := c.Resources.GetAll(ctx, volId)
-		if err != nil {
-			return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
-		}
 		nodeNames = util.DeployedDiskfullyNodes(r)
 	default:
 		return nil, fmt.Errorf("invalid volume access policy: %s", volumeAccess)

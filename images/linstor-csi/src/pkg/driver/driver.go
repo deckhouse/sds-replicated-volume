@@ -611,11 +611,10 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 				"CreateVolume failed for %s: unable to find storage class: %v", volId, err)
 		}
 
-		var topologiesParams *volume.AccessibleTopologiesParams
-		if rsc.Spec.VolumeAccess != "Local" {
-			topologiesParams = &volume.AccessibleTopologiesParams{
-				Zones: rsc.Spec.Zones,
-			}
+		topologiesParams := &volume.AccessibleTopologiesParams{
+			SCZones:        rsc.Spec.Zones,
+			SCVolumeAccess: rsc.Spec.VolumeAccess,
+			SCTopology:     rsc.Spec.Topology,
 		}
 
 		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params, topologiesParams)
@@ -692,7 +691,7 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			Name: req.GetName(),
 		},
 		Spec: srv.DRBDClusterSpec{
-			QuorumPolicy: "majority",
+			QuorumPolicy: rd.Props[ParameterResourceDefQuorumPolicy],
 			Size:         req.GetCapacityRange().GetRequiredBytes(),
 			Replicas:     params.PlacementCount,
 			SharedSecret: rd.LayerData[0].Data.Secret,
@@ -1546,8 +1545,9 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 	}
 
 	topologiesParams := &volume.AccessibleTopologiesParams{
-		VolumeAccess: rsc.Spec.VolumeAccess,
-		Zones: rsc.Spec.Zones,
+		SCVolumeAccess: rsc.Spec.VolumeAccess,
+		SCZones:        rsc.Spec.Zones,
+		SCTopology:     rsc.Spec.Topology,
 	}
 
 	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params, topologiesParams)
