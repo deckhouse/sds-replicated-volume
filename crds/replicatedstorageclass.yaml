@@ -41,7 +41,7 @@ spec:
               type: object
               description: |
                 Defines a Kubernetes Storage class configuration.
-                
+
                 > Note that this field is in read-only mode.
               required:
                 - storagePool
@@ -77,13 +77,13 @@ spec:
                     - None (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1')
                     - Availability (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '2')
                     - ConsistencyAndAvailability (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '3')
-                    
+
                     > Note that default Replication mode is 'ConsistencyAndAvailability'.
                   enum:
                     - None
                     - Availability
                     - ConsistencyAndAvailability
-                  default: 'ConsistencyAndAvailability'
+                  default: "ConsistencyAndAvailability"
                 volumeAccess:
                   type: string
                   x-kubernetes-validations:
@@ -103,14 +103,14 @@ spec:
                     - Any (in this mode the Storage class's 'allowRemoteVolumeAccess' param 
                     equals '- fromSame:\n  - topology.kubernetes.io/zone',
                     and Volume Binding mode equals 'Immediate')
-                    
+
                     > Note that the default Volume Access mode is 'PreferablyLocal'.
                   enum:
                     - Local
                     - EventuallyLocal
                     - PreferablyLocal
                     - Any
-                  default: 'PreferablyLocal'
+                  default: "PreferablyLocal"
                 topology:
                   type: string
                   x-kubernetes-validations:
@@ -125,6 +125,8 @@ spec:
                     The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
 
                     > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+
+                    > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
                   enum:
                     - TransZonal
                     - Zonal
@@ -137,7 +139,7 @@ spec:
                   description: |
                     Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
                     the Storage class's name on the nodes which be actual used by the Storage class.
-                 
+
                     > Note that for Replication mode 'Availability' and 'ConsistencyAndAvailability' you have to select 
                     exactly 1 or 3 zones.
                   items:
