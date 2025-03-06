@@ -19,10 +19,10 @@ var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
 		Kubernetes: []pkg.KubernetesConfig{
 			{
-				Name:                         snapshotName,
-				Kind:                         "ConfigMap",
-				JqFilter:                     ".metadata.labels",
-				ExecuteHookOnEvents:          ptr.Bool(false),
+				Name:     snapshotName,
+				Kind:     "ConfigMap",
+				JqFilter: ".metadata.labels",
+				// ExecuteHookOnEvents:          ptr.Bool(false),
 				ExecuteHookOnSynchronization: ptr.Bool(false),
 				NamespaceSelector: &pkg.NamespaceSelector{
 					NameSelector: &pkg.NameSelector{
