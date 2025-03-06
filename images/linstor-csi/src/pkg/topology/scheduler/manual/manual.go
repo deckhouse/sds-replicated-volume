@@ -50,6 +50,6 @@ func (s *Scheduler) Create(ctx context.Context, volId string, params *volume.Par
 	return nil
 }
 
-func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
-	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy)
+func (s *Scheduler) AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, p *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
+	return s.GenericAccessibleTopologies(ctx, volId, remoteAccessPolicy, p)
 }

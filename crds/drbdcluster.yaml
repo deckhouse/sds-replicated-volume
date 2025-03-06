@@ -35,7 +35,7 @@ spec:
                 quorumPolicy:
                   type: string
                   enum:
-                    - off
+                    - "off"
                     - none
                     - majority
                     - all
