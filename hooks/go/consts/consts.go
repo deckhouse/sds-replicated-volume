@@ -1,7 +1,9 @@
 package consts
 
 const (
-	ModuleName               string = "sdsReplicatedVolume"
-	ModuleNamespace          string = "d8-sds-replicated-volume"
-	SecretCertExpire30dLabel        = "storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d"
+	ModuleUri                = "storage.deckhouse.io/sds-replicated-volume"
+	ModuleName               = "sdsReplicatedVolume"
+	ModuleLabelValue         = "sds-replicated-volume"
+	ModuleNamespace          = "d8-sds-replicated-volume"
+	SecretCertExpire30dLabel = ModuleUri + "-cert-expire-in-30d"
 )
