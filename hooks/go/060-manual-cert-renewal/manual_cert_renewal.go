@@ -36,7 +36,8 @@ var _ = registry.RegisterFunc(
 				Name:                         snapshotName,
 				Kind:                         "ConfigMap",
 				JqFilter:                     ".",
-				ExecuteHookOnSynchronization: ptr.Bool(false),
+				ExecuteHookOnSynchronization: ptr.Bool(false), // may be turn on?
+				ExecuteHookOnEvents:          ptr.Bool(true),
 				NamespaceSelector: &pkg.NamespaceSelector{
 					NameSelector: &pkg.NameSelector{
 						MatchNames: []string{consts.ModuleNamespace},
@@ -61,6 +62,8 @@ var _ = registry.RegisterFunc(
 )
 
 func manualCertRenewal(ctx context.Context, input *pkg.HookInput) error {
+
+	// TODO 5min timeout
 	input.Logger.Info("hook invoked")
 
 	cl := mustGetClient(input)

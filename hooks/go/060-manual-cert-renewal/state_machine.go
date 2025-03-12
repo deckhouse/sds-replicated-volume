@@ -1,9 +1,17 @@
 package manualcertrenewal
 
+// TODO
+// step 0: init & backup
+// step 1: everything off + renew certs
+// step 2: everything on
+// step 3: done
+
+// TODO
+// also update secrets before turning on
+
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -15,7 +23,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	"github.com/tidwall/gjson"
 	appsv1 "k8s.io/api/apps/v1"
-	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -92,7 +99,7 @@ func newStateMachine(
 		},
 		{
 			Name: "TurnedOffCsiNode",
-			Doc:  `TODO: terminating pods`,
+			Doc:  ``,
 			Execute: func() error {
 				return s.turnOffDaemonSetAndWait(DaemonSetNameCsiNode)
 			},
@@ -252,11 +259,6 @@ func (s *stateMachine) initialize() error {
 		return fmt.Errorf("checking resources: %w", err)
 	}
 
-	// checkPermissions
-	if err := s.checkPermissions(); err != nil {
-		return fmt.Errorf("checking permissions: %w", err)
-	}
-
 	// add finalizer
 	s.trigger.SetFinalizers([]string{PackageUri})
 
@@ -304,47 +306,6 @@ func (s *stateMachine) checkResourcesHealth() error {
 	return nil
 }
 
-func (s *stateMachine) checkPermissions() error {
-	var err error
-	err = errors.Join(err, s.checkPermission("get", "DaemonSet", "apps"))
-	err = errors.Join(err, s.checkPermission("list", "DaemonSet", "apps"))
-	err = errors.Join(err, s.checkPermission("update", "DaemonSet", "apps"))
-	err = errors.Join(err, s.checkPermission("watch", "DaemonSet", "apps"))
-	err = errors.Join(err, s.checkPermission("get", "Deployment", "apps"))
-	err = errors.Join(err, s.checkPermission("list", "Deployment", "apps"))
-	err = errors.Join(err, s.checkPermission("update", "Deployment", "apps"))
-	err = errors.Join(err, s.checkPermission("watch", "Deployment", "apps"))
-	err = errors.Join(err, s.checkPermission("get", "Pod", ""))
-	err = errors.Join(err, s.checkPermission("list", "Pod", ""))
-	err = errors.Join(err, s.checkPermission("watch", "Pod", ""))
-	return err
-}
-
-func (s *stateMachine) checkPermission(verb, resource, group string) error {
-	sar := &authv1.SelfSubjectAccessReview{
-		Spec: authv1.SelfSubjectAccessReviewSpec{
-			ResourceAttributes: &authv1.ResourceAttributes{
-				Namespace: consts.ModuleNamespace,
-				Verb:      verb,
-				Group:     group,
-				Resource:  resource,
-			},
-		},
-	}
-
-	if err := s.cl.Create(s.ctx, sar); err != nil {
-		return fmt.Errorf("failed to check permission for %s on %s/%s: %w", verb, group, resource, err)
-	}
-
-	if !sar.Status.Allowed {
-		return fmt.Errorf("permission denied: cannot %s %s/%s in namespace %s: %s",
-			verb, group, resource, consts.ModuleNamespace, sar.Status.Reason)
-	}
-
-	s.log.Debug("permission granted", "verb", verb, "resource", resource, "group", group)
-	return nil
-}
-
 func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 	ds, err := s.getDaemonSet(name, false)
 	if err != nil {
@@ -355,6 +316,7 @@ func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 	if affinityJson, err := json.Marshal(ds.Spec.Template.Spec.Affinity); err != nil {
 		return fmt.Errorf("marshalling daemonset.template.spec.affinity for backup: %w", err)
 	} else {
+		// TODO force update
 		utils.MapEnsureAndSet(
 			&s.trigger.Data,
 			TriggerKeyBackupDaemonSetAffinity+name,
