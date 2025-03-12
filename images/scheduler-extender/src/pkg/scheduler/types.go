@@ -48,3 +48,11 @@ type ExtenderFilterResult struct {
 
 // FailedNodesMap is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#FailedNodesMap
 type FailedNodesMap map[string]string
+
+// HostPriority is copied from https://godoc.org/k8s.io/kubernetes/pkg/scheduler/api/v1#HostPriority
+type HostPriority struct {
+	// Name of the host
+	Host string `json:"host"`
+	// Score associated with the host
+	Score int `json:"score"`
+}
