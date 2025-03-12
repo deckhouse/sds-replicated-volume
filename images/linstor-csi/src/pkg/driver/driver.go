@@ -64,6 +64,7 @@ const (
 	ParameterCsiPvcNameSpace         = "csi.storage.k8s.io/pvc/namespace"
 	ParameterCsiRspName              = "replicated.csi.storage.deckhouse.io/storagePool"
 	K8sNameLabel                     = "kubernetes.io/metadata.name"
+	storageClassAuxPrefix            = "Aux/class.storage.deckhouse.io/"
 )
 
 // Driver fullfils CSI controller, node, and indentity server interfaces.
@@ -603,7 +604,20 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			}
 		}
 
-		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params)
+		storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
+		rsc := &srv.ReplicatedStorageClass{}
+		if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
+			return nil, status.Errorf(codes.NotFound,
+				"CreateVolume failed for %s: unable to find storage class: %v", volId, err)
+		}
+
+		topologiesParams := &volume.AccessibleTopologiesParams{
+			SCZones:        rsc.Spec.Zones,
+			SCVolumeAccess: rsc.Spec.VolumeAccess,
+			SCTopology:     rsc.Spec.Topology,
+		}
+
+		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params, topologiesParams)
 		if err != nil {
 			return nil, status.Errorf(
 				codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
@@ -714,7 +728,7 @@ func (d Driver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) 
 	if req.GetVolumeId() == "" {
 		return nil, missingAttr("DeleteVolume", req.GetVolumeId(), "VolumeId")
 	}
-	
+
 	err := d.cl.Delete(ctx, &srv.DRBDCluster{ObjectMeta: metav1.ObjectMeta{Name: req.VolumeId}})
 	if err != nil {
 		if kubeerr.IsNotFound(err) {
@@ -1316,7 +1330,7 @@ func (d Driver) ControllerExpandVolume(ctx context.Context, req *csi.ControllerE
 
 	if err := d.cl.Update(ctx, drbdCluster); err != nil {
 		d.log.Errorf("ControllerExpandVolume failed to update a DRBD cluster: %s", err.Error())
-        return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update a DRBD cluster: %v", err)
+		return nil, status.Errorf(codes.Internal, "ControllerExpandVolume failed to update a DRBD cluster: %v", err)
 	}
 
 	return &csi.ControllerExpandVolumeResponse{
@@ -1522,7 +1536,21 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 		}
 	}
 
-	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
+	storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
+
+	rsc := &srv.ReplicatedStorageClass{}
+	if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
+		return nil, status.Errorf(codes.NotFound,
+			"CreateVolume failed for %s: replicated storage class not found: %v", info.ID, err)
+	}
+
+	topologiesParams := &volume.AccessibleTopologiesParams{
+		SCVolumeAccess: rsc.Spec.VolumeAccess,
+		SCZones:        rsc.Spec.Zones,
+		SCTopology:     rsc.Spec.Topology,
+	}
+
+	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params, topologiesParams)
 	if err != nil {
 		return nil, status.Errorf(
 			codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",

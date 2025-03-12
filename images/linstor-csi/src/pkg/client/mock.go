@@ -93,7 +93,7 @@ func (s *MockStorage) Delete(ctx context.Context, volId string) error {
 	return nil
 }
 
-func (s *MockStorage) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters) ([]*csi.Topology, error) {
+func (s *MockStorage) AccessibleTopologies(ctx context.Context, volId string, params *volume.Parameters, _ *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
 	return nil, nil
 }
 
