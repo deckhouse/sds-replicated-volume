@@ -2,6 +2,7 @@
 {{- $_ := set $ "BASE_ALPINE_DEV"  "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
 {{- $_ := set $ "BASE_ALT_P11"     "registry.deckhouse.io/base_images/alt:p11@sha256:c396cd7348a48f9236413e2ef5569223c15e554c0a3ca37f9d92fb787d4f1893" }}
 {{- $_ := set $ "BASE_GOLANG_1_22" "registry.deckhouse.io/base_images/golang:1.22.7-bullseye@sha256:e5dc67bf84590c008338a0e30f56a6ed2092a38e0d2895c797dd501db73a2330" }}
+{{- $_ := set . "BASE_GOLANG_1_23" "registry.deckhouse.io/base_images/golang:1.23.6-bookworm@sha256:ca569d98545ab5a090449da29d637fb3f5a273d3a002554af328be9873777cef" }}
 {{- $_ := set $ "BASE_PYTHON"      "registry.deckhouse.io/base_images/python:3.7.16-alpine3.16@sha256:054c898ee5eacb0b3d85bdb603d6229b93619964cc01be5274acdf3e451e5ef8" }}
 {{- $_ := set $ "BASE_SCRATCH"     "registry.deckhouse.io/base_images/scratch@sha256:653ae76965c98c8cd1c8c9ff7725316d2983986f896655b30e0f44d2f8b2dd7e" }}
 
