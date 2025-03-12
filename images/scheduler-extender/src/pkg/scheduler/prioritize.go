@@ -167,17 +167,19 @@ func scoreNodes(
 	result := make([]HostPriority, 0, len(*nodeNames))
 	for _, nodeName := range *nodeNames {
 		lvgsFromNode := nodeLVGs[nodeName]
-		var totalFreeSpaceLeft int64
+		var totalFreeSpaceLeftPercent int64
 
 		for _, pvc := range pvcs {
 			pvcReq := pvcRequests[pvc.Name]
 			lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 			commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 			if commonLVG == nil {
-				err = fmt.Errorf("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+				log.Warning("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+				continue
 			}
 			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
 
+			// TODO put in a separate func
 			var freeSpace resource.Quantity
 			lvg := lvgs[commonLVG.Name]
 			switch pvcReq.DeviceType {
@@ -203,11 +205,13 @@ func scoreNodes(
 				freeSpace = thinPool.AvailableSpace
 			}
 
+			//TODO if PrefLocal handle negative freespace
+			// TODO if preflocal and all replicas are on teh same node, score it at hightest
 			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
-			totalFreeSpaceLeft += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+			totalFreeSpaceLeftPercent += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 		}
 
-		averageFreeSpace := totalFreeSpaceLeft / int64(len(pvcs))
+		averageFreeSpace := totalFreeSpaceLeftPercent / int64(len(pvcs))
 		log.Trace(fmt.Sprintf("[scoreNodes] average free space left for the node: %s", nodeName))
 		score := getNodeScore(averageFreeSpace, divisor)
 		log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left (after all PVC bounded), percent %d", nodeName, score, averageFreeSpace))
