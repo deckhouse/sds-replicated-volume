@@ -41,6 +41,7 @@ const (
 	resourcegroup
 	usepvcname
 	overprovision
+	replicatedstorageclassname
 )
 
 // Parameters configuration for linstor volumes.
@@ -96,6 +97,8 @@ type Parameters struct {
 	// If set, free capacity is calculated by (TotalCapacity * OverProvision) - ReservedCapacity.
 	// If not set, the free capacity is taken directly from LINSTOR.
 	OverProvision *float64
+	// ReplicatedStorageClassName is the name of the replicated storage class
+	ReplicatedStorageClassName string
 }
 
 const DefaultDisklessStoragePoolName = "DfltDisklessStorPool"
@@ -241,6 +244,8 @@ func NewParameters(params map[string]string, topologyPrefix string) (Parameters,
 			}
 
 			p.OverProvision = &f
+		case replicatedstorageclassname:
+			p.ReplicatedStorageClassName = v
 		}
 	}
 

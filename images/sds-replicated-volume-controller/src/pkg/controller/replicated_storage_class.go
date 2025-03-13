@@ -81,7 +81,7 @@ const (
 	StorageClassParamReplicasOnSameKey            = "replicated.csi.storage.deckhouse.io/replicasOnSame"
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
-	StorageClassParamNameKey                       = "replicated.csi.storage.deckhouse.io/storageClassName"
+	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -477,7 +477,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnNoQuorumKey:                 SuspendIo,
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
-		StorageClassParamNameKey:                       replicatedSC.Name,
+		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
 	}
 
 	switch replicatedSC.Spec.Replication {
