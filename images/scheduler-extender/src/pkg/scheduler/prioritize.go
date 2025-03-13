@@ -10,6 +10,8 @@ import (
 	"scheduler-extender/pkg/consts"
 	"scheduler-extender/pkg/logger"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -145,6 +147,7 @@ func scoreNodes(
 	scs map[string]*v1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
+	replicatedSCmap map[string]*srv.ReplicatedStorageClass,
 ) ([]HostPriority, error) {
 	lvgs := schedulerCache.GetAllLVG()
 	scLVGs, err := GetSortedLVGsFromSC(scs)
@@ -168,41 +171,46 @@ func scoreNodes(
 	for _, nodeName := range *nodeNames {
 		lvgsFromNode := nodeLVGs[nodeName]
 		var totalFreeSpaceLeftPercent int64
+		replicaCountOnNode := 0
 
 		for _, pvc := range pvcs {
 			pvcReq := pvcRequests[pvc.Name]
 			lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
+
+			// rsc, found := replicatedSCmap[*pvc.Spec.StorageClassName]
+			// if !found {
+			// 	log.Warning("unable to find replicated SC for Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+			// 	continue
+			// }
+
+			// volumeAccess := rsc.Spec.VolumeAccess
+			// isLvgsOnSameNode := isOnSameNode(lvgsFromNode, lvgsFromSC)
+
+			// if volumeAccess == "PreferablyLocal" && isLvgsOnSameNode {
+			// 	result = append(result, HostPriority{
+			// 		Host:  nodeName,
+			// 		Score: 10,
+			// 	})
+			// }
+
 			commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 			if commonLVG == nil {
 				log.Warning("unable to match Storage Class's LVMVolumeGroup with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
 				continue
 			}
-			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s is common for storage class %s and node %s", commonLVG.Name, *pvc.Spec.StorageClassName, nodeName))
-
-			// TODO put in a separate func
-			var freeSpace resource.Quantity
+			replicaCountOnNode += 1
 			lvg := lvgs[commonLVG.Name]
-			switch pvcReq.DeviceType {
-			case consts.Thick:
-				freeSpace = lvg.Status.VGFree
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space before PVC reservation: %s", lvg.Name, freeSpace.String()))
-				reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
-				if err != nil {
-					log.Error(err, fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
-					continue
-				}
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
-				spaceWithReserved := freeSpace.Value() - reserved
-				freeSpace = *resource.NewQuantity(spaceWithReserved, resource.BinarySI)
-				log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space after PVC reservation: %s", lvg.Name, freeSpace.String()))
-			case consts.Thin:
-				thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
-				if thinPool == nil {
-					err = fmt.Errorf("unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-					log.Error(err, "[scoreNodes] an error occurs while searching for target LVMVolumeGroup")
-				}
 
-				freeSpace = thinPool.AvailableSpace
+			freeSpace, err := calculateFreeSpace(lvg, schedulerCache, &pvcReq, commonLVG, log, pvc, nodeName)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[scoreNodes] unable to calculate free space for LVMVolumeGroup %s, PVC: %s, node: %s, reason: %s", lvg.Name, pvc.Name, nodeName, err.Error()))
+				continue
+			}
+
+			rsc, found := replicatedSCmap[*pvc.Spec.StorageClassName]
+			if !found {
+				log.Warning("unable to find replicated SC for Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
+				continue
 			}
 
 			//TODO if PrefLocal handle negative freespace
@@ -223,6 +231,41 @@ func scoreNodes(
 	}
 
 	return result, nil
+}
+
+func calculateFreeSpace(
+	lvg *snc.LVMVolumeGroup,
+	schedulerCache *cache.Cache,
+	pvcReq *PVCRequest,
+	commonLVG *LVMVolumeGroup,
+	log logger.Logger,
+	pvc *corev1.PersistentVolumeClaim,
+	nodeName string,
+) (resource.Quantity, error) {
+	var freeSpace resource.Quantity
+
+	switch pvcReq.DeviceType {
+	case consts.Thick:
+		freeSpace = lvg.Status.VGFree
+		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space before PVC reservation: %s", lvg.Name, freeSpace.String()))
+		reserved, err := schedulerCache.GetLVGThickReservedSpace(lvg.Name)
+		if err != nil {
+			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
+		}
+		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
+		spaceWithReserved := freeSpace.Value() - reserved
+		freeSpace = *resource.NewQuantity(spaceWithReserved, resource.BinarySI)
+		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space after PVC reservation: %s", lvg.Name, freeSpace.String()))
+	case consts.Thin:
+		thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
+		if thinPool == nil {
+			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to match Storage Class's ThinPools with the node's one, Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName))
+		}
+
+		freeSpace = thinPool.AvailableSpace
+	}
+
+	return freeSpace, nil
 }
 
 func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {

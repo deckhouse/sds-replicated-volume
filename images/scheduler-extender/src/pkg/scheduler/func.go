@@ -1090,6 +1090,21 @@ func SortLVGsByNodeName(lvgs map[string]*snc.LVMVolumeGroup) map[string][]*snc.L
 	return sorted
 }
 
+func isOnSameNode(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) bool {
+	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
+	for _, lvg := range nodeLVGs {
+		nodeLVGNames[lvg.Name] = struct{}{}
+	}
+
+	for _, lvg := range scLVGs {
+		if _, found := nodeLVGNames[lvg.Name]; !found {
+			return false
+		}
+	}
+
+	return true
+}
+
 func findMatchedLVGs(nodeLVGs []*snc.LVMVolumeGroup, scLVGs LVMVolumeGroups) *LVMVolumeGroup {
 	nodeLVGNames := make(map[string]struct{}, len(nodeLVGs))
 	for _, lvg := range nodeLVGs {
