@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovision"
+const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovisionstorageclassname"
 
 var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273}
 
@@ -41,6 +41,7 @@ var _paramKeyNameToValueMap = map[string]paramKey{
 	_paramKeyName[237:250]: 18,
 	_paramKeyName[250:260]: 19,
 	_paramKeyName[260:273]: 20,
+	_paramKeyName[273:288]: 21,
 }
 
 // paramKeyString retrieves an enum value from the enum constants string name.
