@@ -32,6 +32,8 @@ import (
 	"strconv"
 	"strings"
 
+	"encoding/json"
+
 	lc "github.com/LINBIT/golinstor"
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -604,6 +606,8 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) 
 			}
 		}
 
+		pp, _ := json.MarshalIndent(params, "", "  ")
+		fmt.Printf("==1 params: %s", pp)
 		storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
 		rsc := &srv.ReplicatedStorageClass{}
 		if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
@@ -1537,6 +1541,8 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
 	}
 
 	storageClassName := strings.Replace(params.ReplicasOnSame[0], storageClassAuxPrefix, "", 1)
+	pp, _ := json.MarshalIndent(params, "", "  ")
+	fmt.Printf("==2 params: %s", pp)
 
 	rsc := &srv.ReplicatedStorageClass{}
 	if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
