@@ -61,15 +61,38 @@ func NewHighLevelClient(options ...lapi.Option) (*HighLevelClient, error) {
 
 // GenericAccessibleTopologies returns topologies based on linstor storage pools
 // and whether a resource is allowed to be accessed over the network.
-func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error) {
-	// Get all nodes where the resource is physically located.
+func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, params *volume.AccessibleTopologiesParams) ([]*csi.Topology, error) {
+	if params == nil {
+		return nil, fmt.Errorf("params must not be nil")
+	}
+
 	r, err := c.Resources.GetAll(ctx, volId)
 	if err != nil {
 		return nil, fmt.Errorf("unable to determine AccessibleTopologies: %v", err)
 	}
-
-	// Volume is definitely accessible on the nodes it's deployed on.
-	nodeNames := util.DeployedDiskfullyNodes(r)
+	
+	var nodeNames []string
+	switch params.SCVolumeAccess {
+	case "PreferablyLocal", "EventuallyLocal", "Any":
+		switch params.SCTopology {
+		case "TransZonal":
+			res := make([]*csi.Topology, len(params.SCZones))
+			for i, zone := range params.SCZones {
+				res[i] = &csi.Topology{Segments: map[string]string{"topology.kubernetes.io/zone": zone}}
+			}
+			return res, nil
+		case "Zonal":
+			nodeNames = util.DeployedDiskfullyNodes(r)
+		case "Ignored":
+			return []*csi.Topology{}, nil
+		default:
+			return nil, fmt.Errorf("invalid topology: %s", params.SCTopology)
+		}
+	case "Local":
+		nodeNames = util.DeployedDiskfullyNodes(r)
+	default:
+		return nil, fmt.Errorf("invalid volume access policy: %s", params.SCVolumeAccess)
+	}
 
 	nodes, err := c.Nodes.GetAll(ctx, &lapi.ListOpts{Node: nodeNames})
 	if err != nil {
@@ -77,7 +100,6 @@ func (c *HighLevelClient) GenericAccessibleTopologies(ctx context.Context, volId
 	}
 
 	var topos []*csi.Topology
-
 	for i := range nodes {
 		segs := make(map[string]string)
 

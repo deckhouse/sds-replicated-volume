@@ -49,6 +49,12 @@ type Snapshot struct {
 	Remote string
 }
 
+type AccessibleTopologiesParams struct {
+	SCVolumeAccess string
+	SCZones        []string
+	SCTopology     string
+}
+
 // CreateDeleter handles the creation and deletion of volumes.
 type CreateDeleter interface {
 	Querier
@@ -58,7 +64,7 @@ type CreateDeleter interface {
 
 	// AccessibleTopologies returns the list of key value pairs volume topologies
 	// for the volume or nil if not applicable.
-	AccessibleTopologies(ctx context.Context, volId string, params *Parameters) ([]*csi.Topology, error)
+	AccessibleTopologies(ctx context.Context, volId string, params *Parameters, p *AccessibleTopologiesParams) ([]*csi.Topology, error)
 
 	// GetLegacyVolumeContext tries to fetch the volume context from legacy properties.
 	GetLegacyVolumeParameters(ctx context.Context, volId string) (*Parameters, error)

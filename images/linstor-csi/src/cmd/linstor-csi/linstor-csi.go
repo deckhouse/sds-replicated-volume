@@ -27,6 +27,7 @@ import (
 
 	linstor "github.com/LINBIT/golinstor"
 	lapi "github.com/LINBIT/golinstor/client"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/piraeusdatastore/linstor-csi/pkg/client"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
@@ -44,6 +45,7 @@ import (
 func main() {
 	var resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		srv.AddToScheme,
+		snc.AddToScheme,
 		storageV1.AddToScheme,
 		corev1.AddToScheme,
 	}
