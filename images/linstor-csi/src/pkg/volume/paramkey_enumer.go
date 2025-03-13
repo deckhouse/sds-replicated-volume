@@ -48,9 +48,6 @@ var _paramKeyNameToValueMap = map[string]paramKey{
 // paramKeyString retrieves an enum value from the enum constants string name.
 // Throws an error if the param is not part of the enum.
 func paramKeyString(s string) (paramKey, error) {
-	ll, _ := json.MarshalIndent(_paramKeyNameToValueMap, "", " ")
-	fmt.Printf("_paramKeyNameToValueMap: %s\n", ll)
-	fmt.Printf("== s: %s\n", s)
 	if val, ok := _paramKeyNameToValueMap[s]; ok {
 		return val, nil
 	}
