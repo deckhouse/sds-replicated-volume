@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
@@ -24,6 +25,7 @@ const (
 	ConfigMapCertRenewalCompletedLabel = PackageUri + "-completed"
 	CertRenewalTriggerName             = PackageName + "-trigger"
 	snapshotName                       = PackageName + "-snapshot"
+	HookTimeout                        = 5 * time.Minute
 )
 
 // means running locally
@@ -62,8 +64,9 @@ var _ = registry.RegisterFunc(
 )
 
 func manualCertRenewal(ctx context.Context, input *pkg.HookInput) error {
+	ctx, cancel := context.WithTimeout(ctx, HookTimeout)
+	defer cancel()
 
-	// TODO 5min timeout
 	input.Logger.Info("hook invoked")
 
 	cl := mustGetClient(input)

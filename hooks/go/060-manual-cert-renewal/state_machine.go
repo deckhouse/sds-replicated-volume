@@ -90,115 +90,27 @@ func newStateMachine(
 	trigger *v1.ConfigMap,
 ) (*stateMachine, error) {
 	s := &stateMachine{}
-	// change sequence of steps here
+
+	// step 0: init & backup
+	// step 1: everything off + renew certs
+	// step 2: everything on
+	// step 3: done
+
 	steps := []step{
 		{
-			Name:    "Initialized",
+			Name:    "Prepared",
 			Doc:     ``,
-			Execute: s.initialize,
+			Execute: s.prepare,
 		},
 		{
-			Name: "TurnedOffCsiNode",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDaemonSetAndWait(DaemonSetNameCsiNode)
-			},
-		},
-		{
-			Name: "TurnedOffCsiController",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDeploymentAndWait(DeploymentNameCsiController)
-			},
-		},
-		{
-			Name: "TurnedOffSchedulerExtender",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDeploymentAndWait(DeploymentNameSchedulerExtender)
-			},
-		},
-		{
-			Name: "TurnedOffSpaas",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDeploymentAndWait(DeploymentNameSpaas)
-			},
-		},
-		{
-			Name: "TurnedOffWebhooks",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDeploymentAndWait(DeploymentNameWebhooks)
-			},
-		},
-		{
-			Name: "TurnedOffNode",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDaemonSetAndWait(DaemonSetNameNode)
-			},
-		},
-		{
-			Name: "TurnedOffController",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOffDeploymentAndWait(DeploymentNameController)
-			},
-		},
-		{
-			Name:    "RenewedCerts",
+			Name:    "TurnedOffAndRenewedCerts",
 			Doc:     ``,
-			Execute: s.renewCerts, // TODO
+			Execute: s.turnOffAndRenewCerts,
 		},
 		{
-			Name: "TurnedOnController",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDeploymentAndWait(DeploymentNameController)
-			},
-		},
-		{
-			Name: "TurnedOnNode",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDaemonSetAndWait(DaemonSetNameNode)
-			},
-		},
-		{
-			Name: "TurnedOnWebhooks",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDeploymentAndWait(DeploymentNameWebhooks)
-			},
-		},
-		{
-			Name: "TurnedOnSpaas",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDeploymentAndWait(DeploymentNameSpaas)
-			},
-		},
-		{
-			Name: "TurnedOnSchedulerExtender",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDeploymentAndWait(DeploymentNameSchedulerExtender)
-			},
-		},
-		{
-			Name: "TurnedOnCsiController",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDeploymentAndWait(DeploymentNameCsiController)
-			},
-		},
-		{
-			Name: "TurnedOnCsiNode",
-			Doc:  ``,
-			Execute: func() error {
-				return s.turnOnDaemonSetAndWait(DaemonSetNameCsiNode)
-			},
+			Name:    "TurnedOn",
+			Doc:     ``,
+			Execute: s.turnOn,
 		},
 		{
 			Name: "Done",
@@ -254,7 +166,7 @@ func (s *stateMachine) updateTrigger(step step) error {
 	return s.cl.Update(s.ctx, s.trigger)
 }
 
-func (s *stateMachine) initialize() error {
+func (s *stateMachine) prepare() error {
 	if err := s.checkResourcesHealth(); err != nil {
 		return fmt.Errorf("checking resources: %w", err)
 	}
@@ -287,6 +199,19 @@ This resource triggered certificate renewal process, which consist of the follow
 			``,
 	)
 
+	// backup
+	for _, name := range DaemonSetNameList {
+		if err := s.backupDaemonSet(name); err != nil {
+			return fmt.Errorf("creating backup for daemonset %s: %w", name, err)
+		}
+	}
+
+	for _, name := range DeploymentNameList {
+		if err := s.backupDeployment(name); err != nil {
+			return fmt.Errorf("creating backup for deployment %s: %w", name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -306,22 +231,87 @@ func (s *stateMachine) checkResourcesHealth() error {
 	return nil
 }
 
-func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
-	ds, err := s.getDaemonSet(name, false)
+func (s *stateMachine) backupDeployment(name string) error {
+	depl, err := s.getDeployment(name, false)
 	if err != nil {
 		return err
 	}
 
 	// backup
+	if replicasJson, err := json.Marshal(depl.Spec.Replicas); err != nil {
+		return fmt.Errorf("marshalling deployment.spec.replicas for backup: %w", err)
+	} else {
+		utils.MapEnsureAndSet(
+			&s.trigger.Data,
+			TriggerKeyBackupDeploymentReplicas+name,
+			string(replicasJson),
+		)
+	}
+
+	return nil
+}
+
+func (s *stateMachine) backupDaemonSet(name string) error {
+	// TODO
+	ds, err := s.getDaemonSet(name, false)
+	if err != nil {
+		return err
+	}
+
 	if affinityJson, err := json.Marshal(ds.Spec.Template.Spec.Affinity); err != nil {
 		return fmt.Errorf("marshalling daemonset.template.spec.affinity for backup: %w", err)
 	} else {
-		// TODO force update
 		utils.MapEnsureAndSet(
 			&s.trigger.Data,
 			TriggerKeyBackupDaemonSetAffinity+name,
 			string(affinityJson),
 		)
+	}
+
+	return nil
+}
+
+func (s *stateMachine) turnOffAndRenewCerts() error {
+	// order of shutdown is important
+	if err := s.turnOffDaemonSetAndWait(DaemonSetNameCsiNode); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameCsiController); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameSchedulerExtender); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameSpaas); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameWebhooks); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDaemonSetAndWait(DaemonSetNameNode); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameController); err != nil {
+		return err
+	}
+
+	if err := s.renewCerts(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
+	ds, err := s.getDaemonSet(name, false)
+	if err != nil {
+		return err
 	}
 
 	// turn off
@@ -382,6 +372,38 @@ func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
 			name,
 			err,
 		)
+	}
+
+	return nil
+}
+
+func (s *stateMachine) turnOn() error {
+	if err := s.turnOnDeploymentAndWait(DeploymentNameController); err != nil {
+		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+	}
+
+	if err := s.turnOnDaemonSetAndWait(DaemonSetNameNode); err != nil {
+		return fmt.Errorf("turnOnDaemonSetAndWait: %w", err)
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameWebhooks); err != nil {
+		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameSpaas); err != nil {
+		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameSchedulerExtender); err != nil {
+		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameCsiController); err != nil {
+		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+	}
+
+	if err := s.turnOnDaemonSetAndWait(DaemonSetNameCsiNode); err != nil {
+		return fmt.Errorf("turnOnDaemonSetAndWait: %w", err)
 	}
 
 	return nil
@@ -595,6 +617,11 @@ func (s *stateMachine) renewCertIfNeeded(path string, value gjson.Result, ext st
 	}
 
 	// TODO
+
+	// caCert, tlsCert, err := certificate.ParseCertificatesFromPEM(nil, nil, nil)
+
+	// certificate.GenerateSelfSignedCert()
+
 	s.log.Info("TODO: cert is going to be renewed", "path", path, "ext", ext)
 	// s.values.Set(fmt.Sprintf("%s.%s", path, ext), "TODO")
 	return nil
