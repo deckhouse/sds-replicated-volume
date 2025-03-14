@@ -71,6 +71,8 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 	defer func() {
 		if err != nil {
 			input.Logger.Error("hook failed", "err", err)
+			// to avoid panics
+			err = nil
 		}
 	}()
 
