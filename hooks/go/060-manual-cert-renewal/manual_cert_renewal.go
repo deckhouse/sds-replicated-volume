@@ -63,26 +63,32 @@ var _ = registry.RegisterFunc(
 	manualCertRenewal,
 )
 
-func manualCertRenewal(ctx context.Context, input *pkg.HookInput) error {
+func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, HookTimeout)
 	defer cancel()
 
 	input.Logger.Info("hook invoked")
+	defer func() {
+		if err != nil {
+			input.Logger.Error("hook failed", "err", err)
+		}
+	}()
 
 	cl := mustGetClient(input)
 
 	trigger := getTrigger(ctx, cl, input)
 	if trigger == nil {
-		// trigger was deleted, ignore
+		input.Logger.Info("trigger was deleted, ignore")
 		return nil
 	}
 
-	s, err := newStateMachine(ctx, cl, input.Logger, trigger)
-	if err != nil {
-		return err
+	if s, err := newStateMachine(ctx, cl, input.Logger, trigger); err != nil {
+		return fmt.Errorf("newStateMachine: %w", err)
+	} else if err := s.run(); err != nil {
+		return fmt.Errorf("run: %w", err)
 	}
 
-	return s.run()
+	return nil
 }
 
 func mustGetClient(input *pkg.HookInput) client.Client {

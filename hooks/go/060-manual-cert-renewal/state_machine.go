@@ -176,12 +176,7 @@ func (s *stateMachine) prepare() error {
 	utils.MapEnsureAndSet(
 		&s.trigger.Data,
 		"help",
-		`
-Manual Certificate Renewal.
-
-This resource triggered certificate renewal process, which consist of the following steps:
-
-`+
+		`TODO link`+
 			strings.Join(
 				slices.Collect(
 					utils.IterMap(
@@ -339,6 +334,8 @@ func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 }
 
 func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
+	s.log.Info("turning off deployment", "name", name)
+
 	depl, err := s.getDeployment(name, false)
 	if err != nil {
 		return err
@@ -407,6 +404,8 @@ func (s *stateMachine) turnOn() error {
 }
 
 func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
+	s.log.Info("turnOnDaemonSetAndWait", "name", name)
+
 	ds, err := s.getDaemonSet(name, false)
 	if err != nil {
 		return err
@@ -437,6 +436,8 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 }
 
 func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
+	s.log.Info("turnOnDeploymentAndWait", "name", name)
+
 	depl, err := s.getDeployment(name, false)
 	if err != nil {
 		return err
@@ -467,6 +468,8 @@ func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
 }
 
 func (s *stateMachine) waitForDaemonSetReady(name string) error {
+	s.log.Info("waitForDaemonSetReady", "name", name)
+
 	return wait.PollUntilContextCancel(
 		s.ctx,
 		WaitForResourcesPollInterval,
@@ -499,6 +502,8 @@ func (s *stateMachine) waitForDaemonSetReady(name string) error {
 }
 
 func (s *stateMachine) waitForDeploymentReady(name string) error {
+	s.log.Info("waitForDeploymentReady", "name", name)
+
 	return wait.PollUntilContextCancel(
 		s.ctx,
 		WaitForResourcesPollInterval,
@@ -532,6 +537,8 @@ func (s *stateMachine) waitForDeploymentReady(name string) error {
 }
 
 func (s *stateMachine) waitForAppPodsDeleted(name string) error {
+	s.log.Info("waitForAppPodsDeleted", "name", name)
+
 	return wait.PollUntilContextCancel(
 		s.ctx,
 		WaitForResourcesPollInterval,
@@ -561,6 +568,8 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 }
 
 func (s *stateMachine) renewCerts() error {
+	s.log.Info("renewCerts")
+
 	internal := s.values.Get(consts.ModuleName + ".internal")
 	if !internal.Exists() {
 		s.log.Warn(consts.ModuleName + ".internal not found in values, nothing to renew")
