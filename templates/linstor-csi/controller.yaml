@@ -368,8 +368,8 @@ spec:
         terminationMessagePolicy: File
       restartPolicy: Always
       schedulerName: default-scheduler
-      serviceAccount: default
-      serviceAccountName: default
+      serviceAccount: linstor-csi-node
+      serviceAccountName: linstor-csi-node
       terminationGracePeriodSeconds: 30
       volumes:
         - hostPath:
