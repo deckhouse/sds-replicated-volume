@@ -38,7 +38,7 @@ var _ = registry.RegisterFunc(
 				Name:                         snapshotName,
 				Kind:                         "ConfigMap",
 				JqFilter:                     ".",
-				ExecuteHookOnSynchronization: ptr.Bool(false), // may be turn on?
+				ExecuteHookOnSynchronization: ptr.Bool(true), // may be turn on?
 				ExecuteHookOnEvents:          ptr.Bool(true),
 				NamespaceSelector: &pkg.NamespaceSelector{
 					NameSelector: &pkg.NameSelector{
