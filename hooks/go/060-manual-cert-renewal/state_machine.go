@@ -127,9 +127,6 @@ Remove label '%s' to restart.`,
 		steps,
 		func(s step) bool { return s.Name == stepName },
 	)
-	if currentStepIdx < 0 {
-		return nil, fmt.Errorf("unknown step name: %s", stepName)
-	}
 
 	s.ctx = ctx
 	s.cl = cl
