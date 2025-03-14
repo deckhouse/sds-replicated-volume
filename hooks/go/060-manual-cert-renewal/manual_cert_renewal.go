@@ -71,8 +71,6 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 	defer func() {
 		if err != nil {
 			input.Logger.Error("hook failed", "err", err)
-			// to avoid panics
-			err = nil
 		}
 	}()
 
@@ -84,7 +82,7 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 		return nil
 	}
 
-	if s, err := newStateMachine(ctx, cl, input.Logger, trigger); err != nil {
+	if s, err := newStateMachine(ctx, cl, input.Logger, trigger, input.Values); err != nil {
 		return fmt.Errorf("newStateMachine: %w", err)
 	} else if err := s.run(); err != nil {
 		return fmt.Errorf("run: %w", err)

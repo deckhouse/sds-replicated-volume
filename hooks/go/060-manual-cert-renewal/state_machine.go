@@ -88,6 +88,7 @@ func newStateMachine(
 	cl client.Client,
 	log pkg.Logger,
 	trigger *v1.ConfigMap,
+	values pkg.PatchableValuesCollector,
 ) (*stateMachine, error) {
 	s := &stateMachine{}
 
@@ -134,6 +135,7 @@ Remove label '%s' to restart.`,
 	s.trigger = trigger
 	s.currentStepIdx = currentStepIdx
 	s.steps = steps
+	s.values = values
 
 	return s, nil
 }
