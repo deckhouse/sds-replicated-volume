@@ -413,7 +413,7 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 		return err
 	}
 
-	originalAffinityJson := s.trigger.Data[TriggerKeyBackupDaemonSetAffinity]
+	originalAffinityJson := s.trigger.Data[TriggerKeyBackupDaemonSetAffinity+name]
 
 	originalAffinity := &corev1.Affinity{}
 	if err := json.Unmarshal([]byte(originalAffinityJson), originalAffinity); err != nil {
@@ -446,7 +446,7 @@ func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
 	}
 
 	// restore original value
-	replicasJson := s.trigger.Data[TriggerKeyBackupDeploymentReplicas]
+	replicasJson := s.trigger.Data[TriggerKeyBackupDeploymentReplicas+name]
 
 	var originalReplicas = new(int32)
 	if err := json.Unmarshal([]byte(replicasJson), originalReplicas); err != nil {

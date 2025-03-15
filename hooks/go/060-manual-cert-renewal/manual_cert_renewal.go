@@ -64,6 +64,12 @@ var _ = registry.RegisterFunc(
 )
 
 func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			input.Logger.Error("hook panicked", "r", r, "err", err)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(ctx, HookTimeout)
 	defer cancel()
 
