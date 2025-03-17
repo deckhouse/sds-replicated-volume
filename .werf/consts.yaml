@@ -9,8 +9,9 @@
 
 # component versions
 {{- $versions := dict }}
-# if build from main then "DRBD" "major.minor.abbreviated commit hash"
-{{- $_ := set $versions "DRBD" "9.2.288704a" }}
+# if build from main then "DRBD" "X.Y.Z-abbreviated commit hash"
+# see: echo $(sed -ne '/^\#define REL_VERSION/{s/^[^"]*"\([^ "]*\).*/\1/;p;q;}' DRBD_SRC/drbd/linux/drbd_config.h)
+{{- $_ := set $versions "DRBD" "9.3.0-288704a" }}
 {{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
 {{- $_ := set $versions "DRBD_UTILS" "9.30.0" }}
 {{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}

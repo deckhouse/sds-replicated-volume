@@ -34,7 +34,8 @@ shell:
         # build from main
         abbreviated_commit_hash=$(grep -oP '\w{7}$' <<< {{ $.Versions.DRBD }})
         git reset --hard $abbreviated_commit_hash
-        for i in $(grep -lrP '9\.2\.12' | grep -v ^.git);do sed -i "s/9.2.12/{{ $.Versions.DRBD }}/g" $i ;done
+        last_tag=$(git describe --tags --abbrev=0 | grep -oP '\d+\.\d+\.\d+')
+        for i in $(grep -lrP "$last_tag" | grep -v ^.git);do sed -i "s/$last_tag/{{ $.Versions.DRBD }}/g" $i ;done
         sed -i "s|^\#define REL_VERSION .*|\#define REL_VERSION \"{{ $.Versions.DRBD }}\"|" drbd/linux/drbd_config.h
         git commit -am 'bump drbd version'
       else
