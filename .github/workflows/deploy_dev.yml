@@ -36,7 +36,7 @@ on:
 
 jobs:
   deploy-dev:
-    runs-on: [self-hosted, regular, selectel]
+    runs-on: [self-hosted, large]
     name: Deploy dev
     steps:
       - name: PRINT VARS
