@@ -1,14 +1,5 @@
 package manualcertrenewal
 
-// TODO
-// step 0: init & backup
-// step 1: everything off + renew certs
-// step 2: everything on
-// step 3: done
-
-// TODO
-// also update secrets before turning on
-
 import (
 	"context"
 	"encoding/json"
@@ -44,7 +35,7 @@ const (
 	DeploymentNameController        = "linstor-controller"
 	DeploymentNameCsiController     = "linstor-csi-controller"
 
-	WaitForResourcesPollInterval = time.Second
+	WaitForResourcesPollInterval = 2 * time.Second
 	CertExpirationThreshold      = time.Hour * 24 * 30 // 30d
 )
 
@@ -91,11 +82,6 @@ func newStateMachine(
 	values pkg.PatchableValuesCollector,
 ) (*stateMachine, error) {
 	s := &stateMachine{}
-
-	// step 0: init & backup
-	// step 1: everything off + renew certs
-	// step 2: everything on
-	// step 3: done
 
 	steps := []step{
 		{
@@ -336,6 +322,7 @@ func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 	}
 
 	// turn off
+	patch := client.MergeFrom(ds.DeepCopy())
 	ds.Spec.Template.Spec.Affinity = &v1.Affinity{
 		NodeAffinity: &v1.NodeAffinity{
 			RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
@@ -345,9 +332,8 @@ func (s *stateMachine) turnOffDaemonSetAndWait(name string) error {
 			},
 		},
 	}
-
-	if err := s.cl.Update(s.ctx, ds); err != nil {
-		return fmt.Errorf("updating daemonset %s: %w", name, err)
+	if err := s.cl.Patch(s.ctx, ds, patch); err != nil {
+		return fmt.Errorf("patching daemonset %s: %w", name, err)
 	}
 
 	// wait
@@ -382,10 +368,12 @@ func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
 	}
 
 	// turn off
+	patch := client.MergeFrom(depl.DeepCopy())
+
 	depl.Spec.Replicas = new(int32)
 
-	if err := s.cl.Update(s.ctx, depl); err != nil {
-		return fmt.Errorf("updating deployment %s: %w", name, err)
+	if err := s.cl.Patch(s.ctx, depl, patch); err != nil {
+		return fmt.Errorf("patching deployment %s: %w", name, err)
 	}
 
 	// wait
@@ -447,9 +435,12 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 		return fmt.Errorf("unmarshalling original affinity to restore %s: %w", name, err)
 	}
 
+	patch := client.MergeFrom(ds.DeepCopy())
+
 	ds.Spec.Template.Spec.Affinity = originalAffinity
-	if err := s.cl.Update(s.ctx, ds); err != nil {
-		return fmt.Errorf("updating daemonset %s: %w", name, err)
+
+	if err := s.cl.Patch(s.ctx, ds, patch); err != nil {
+		return fmt.Errorf("patching daemonset %s: %w", name, err)
 	}
 
 	// wait
@@ -480,9 +471,12 @@ func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
 		return fmt.Errorf("unmarshalling original replicas to restore %s: %w", name, err)
 	}
 
+	patch := client.MergeFrom(depl.DeepCopy())
+
 	depl.Spec.Replicas = originalReplicas
-	if err := s.cl.Update(s.ctx, depl); err != nil {
-		return fmt.Errorf("updating deployment %s: %w", name, err)
+
+	if err := s.cl.Patch(s.ctx, depl, patch); err != nil {
+		return fmt.Errorf("patching deployment %s: %w", name, err)
 	}
 
 	// wait
