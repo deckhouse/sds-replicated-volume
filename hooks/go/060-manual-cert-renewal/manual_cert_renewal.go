@@ -70,13 +70,15 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 		}
 	}()
 
-	ctx, cancel := context.WithTimeout(ctx, HookTimeout)
+	ctx, cancel := context.WithTimeout(ctx, hookTimeout())
 	defer cancel()
 
 	input.Logger.Info("hook invoked")
 	defer func() {
 		if err != nil {
 			input.Logger.Error("hook failed", "err", err)
+		} else {
+			input.Logger.Info("hook succeeded")
 		}
 	}()
 
@@ -84,7 +86,7 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 
 	trigger := getTrigger(ctx, cl, input)
 	if trigger == nil {
-		input.Logger.Info("trigger was deleted, ignore")
+		input.Logger.Info("trigger not found in snapshots (deleted or filtered-out), ignoring")
 		return nil
 	}
 
@@ -95,6 +97,13 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 	}
 
 	return nil
+}
+
+func hookTimeout() time.Duration {
+	if devMode {
+		return time.Hour * 24
+	}
+	return HookTimeout
 }
 
 func mustGetClient(input *pkg.HookInput) client.Client {

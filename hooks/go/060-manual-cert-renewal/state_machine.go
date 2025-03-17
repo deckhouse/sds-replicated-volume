@@ -140,24 +140,51 @@ Remove label '%s' to restart.`,
 	return s, nil
 }
 
-func (sm *stateMachine) run() error {
-	for nextStep, ok := sm.nextStep(); ok; sm.currentStepIdx++ {
+func (s *stateMachine) run() error {
+	for {
+		nextStep, ok := s.nextStep()
+		if !ok {
+			if _, hasLabel := s.trigger.Labels[ConfigMapCertRenewalCompletedLabel]; hasLabel {
+				// stay in Done
+				break
+			}
+			// reset to start
+			if err := s.reset(); err != nil {
+				return fmt.Errorf("resetting trigger: %w", err)
+			}
+			continue
+		}
+
+		s.log.Info("executing step", "step", nextStep.Name)
+
 		if err := nextStep.Execute(); err != nil {
 			return fmt.Errorf("executing step %s: %w", nextStep, err)
 		}
 
-		if err := sm.updateTrigger(nextStep); err != nil {
-			return fmt.Errorf("updating trigger %s: %w", nextStep, err)
+		if err := s.updateTrigger(nextStep); err != nil {
+			return fmt.Errorf("updating trigger to '%s': %w", nextStep, err)
 		}
+
+		s.currentStepIdx++
 	}
+
+	s.log.Info("no more steps to execute")
 	return nil
 }
 
 func (s *stateMachine) nextStep() (step, bool) {
 	if s.currentStepIdx < len(s.steps)-1 {
+		// go to next step
 		return s.steps[s.currentStepIdx+1], true
 	}
+	// stay on the same step, and report we're done
 	return s.steps[s.currentStepIdx], false
+}
+
+func (s *stateMachine) reset() error {
+	s.currentStepIdx = -1
+	clear(s.trigger.Data)
+	return s.cl.Update(s.ctx, s.trigger)
 }
 
 func (s *stateMachine) updateTrigger(step step) error {
