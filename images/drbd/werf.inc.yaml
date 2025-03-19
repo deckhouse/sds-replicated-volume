@@ -27,8 +27,37 @@ shell:
     - chmod +x /install
     - chmod +x /uninstall
   setup:
-    - git clone --depth 1 --branch drbd-{{ $.Versions.DRBD }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git  /drbd
+    - git clone {{ $.Root.SOURCE_REPO }}/LINBIT/drbd.git /drbd
     - cd /drbd
+    - |
+      drbd_commit_hash=1234567
+      if grep -qP '^\w{40}$' <<< {{ $.Versions.DRBD_COMMIT_REF }} ;then
+        # build from main
+        drbd_commit_hash={{ $.Versions.DRBD_COMMIT_REF }}
+        git reset --hard $drbd_commit_hash
+        
+        ### see "check check_changelogs_up2date:" in Makefile
+        dver={{ $.Versions.DRBD }}
+        packagever=$(sed 's/-/~/' <<< {{ $.Versions.DRBD }})
+        for f in drbd-kernel.spec; do
+          sed -i "s/^Version: .*/Version: $packagever/" $f
+          echo "- $packagever" >> $f
+        done
+        #
+        last_actual_version=$(git describe --tags --abbrev=0 | sed 's/drbd-//')
+        sed -i "s/$last_actual_version/{{ $.Versions.DRBD }}/g" ChangeLog
+        #
+        for df in 7 8 9; do
+          sed -i "s/^ENV DRBD_VERSION .*/ENV DRBD_VERSION $dver/" docker/Dockerfile.rhel${df}
+        done
+        #
+        echo "drbd ($packagever)" >> debian/changelog
+        
+        sed -i "s|^\#define REL_VERSION .*|\#define REL_VERSION \"{{ $.Versions.DRBD }}\"|" drbd/linux/drbd_config.h
+        git commit -am 'bump drbd version'
+      else
+        git reset --hard drbd-{{ $.Versions.DRBD }}
+      fi
     - git submodule update --init --recursive
     - sed -e "s/\<curl\>/d8-curl -k/g" -i /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh
     - git commit -am 'd8-curl'
@@ -36,6 +65,8 @@ shell:
     - make tarball
       # disable use of local spatch (see /drbd/drbd/drbd-kernel-compat/gen_compat_patch.sh)
     - rm -rf .git
+      # save actual commit
+    - echo "GIT-hash:$drbd_commit_hash" > drbd/.drbd_git_revision
 ---
 image: {{ $.ImageName }}
 from: {{ $.Root.BASE_SCRATCH }}
