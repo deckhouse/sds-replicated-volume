@@ -121,6 +121,18 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Debug(fmt.Sprintf("[prioritize] successfully extracted the pvcRequests size for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
+	storagePoolList := &srv.ReplicatedStoragePoolList{}
+    err = s.client.List(s.ctx, storagePoolList)
+	if err != nil {
+        s.log.Error(err, "[prioritize] unable to list replicated storage pools")
+        http.Error(w, "internal server error", http.StatusInternalServerError)
+        return
+    }
+	storagePoolMap := make(map[string]*srv.ReplicatedStoragePool, len(storagePoolList.Items))
+	for _, storagePool := range storagePoolList.Items {
+        storagePoolMap[storagePool.Name] = &storagePool
+    }
+
 	s.log.Debug(fmt.Sprintf("[prioritize] starts to score the nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 	result, err := scoreNodes(s.log, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
 	if err != nil {
@@ -147,8 +159,9 @@ func scoreNodes(
 	scs map[string]*v1.StorageClass,
 	pvcRequests map[string]PVCRequest,
 	divisor float64,
-	replicatedSCmap map[string]*srv.ReplicatedStorageClass,
 ) ([]HostPriority, error) {
+	multiplier := 1 / divisor
+
 	lvgs := schedulerCache.GetAllLVG()
 	scLVGs, err := GetSortedLVGsFromSC(scs)
 	if err != nil {
@@ -171,27 +184,11 @@ func scoreNodes(
 	for _, nodeName := range *nodeNames {
 		lvgsFromNode := nodeLVGs[nodeName]
 		var totalFreeSpaceLeftPercent int64
-		replicaCountOnNode := 0
+		var replicaCountOnNode int
 
 		for _, pvc := range pvcs {
 			pvcReq := pvcRequests[pvc.Name]
 			lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
-
-			// rsc, found := replicatedSCmap[*pvc.Spec.StorageClassName]
-			// if !found {
-			// 	log.Warning("unable to find replicated SC for Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-			// 	continue
-			// }
-
-			// volumeAccess := rsc.Spec.VolumeAccess
-			// isLvgsOnSameNode := isOnSameNode(lvgsFromNode, lvgsFromSC)
-
-			// if volumeAccess == "PreferablyLocal" && isLvgsOnSameNode {
-			// 	result = append(result, HostPriority{
-			// 		Host:  nodeName,
-			// 		Score: 10,
-			// 	})
-			// }
 
 			commonLVG := findMatchedLVGs(lvgsFromNode, lvgsFromSC)
 			if commonLVG == nil {
@@ -207,26 +204,22 @@ func scoreNodes(
 				continue
 			}
 
-			rsc, found := replicatedSCmap[*pvc.Spec.StorageClassName]
-			if !found {
-				log.Warning("unable to find replicated SC for Storage Class: %s, node: %s", *pvc.Spec.StorageClassName, nodeName)
-				continue
-			}
-
-			//TODO if PrefLocal handle negative freespace
-			// TODO if preflocal and all replicas are on teh same node, score it at hightest
 			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
 			totalFreeSpaceLeftPercent += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 		}
 
+		// TODO make tests (+corner cases)
+        // TODO describe changes in doc
+		nodeScore := 0
+		nodeScore += replicaCountOnNode
 		averageFreeSpace := totalFreeSpaceLeftPercent / int64(len(pvcs))
 		log.Trace(fmt.Sprintf("[scoreNodes] average free space left for the node: %s", nodeName))
-		score := getNodeScore(averageFreeSpace, divisor)
-		log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left (after all PVC bounded), percent %d", nodeName, score, averageFreeSpace))
+		nodeScore += getNodeScore(averageFreeSpace, multiplier)
+		log.Trace(fmt.Sprintf("[scoreNodes] node %s has score %d with average free space left (after all PVC bounded), percent %d", nodeName, nodeScore, averageFreeSpace))
 
 		result = append(result, HostPriority{
 			Host:  nodeName,
-			Score: score,
+			Score: nodeScore,
 		})
 	}
 
@@ -253,8 +246,8 @@ func calculateFreeSpace(
 			return freeSpace, errors.New(fmt.Sprintf("[scoreNodes] unable to count reserved space for the LVMVolumeGroup %s", lvg.Name))
 		}
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s PVC Space reservation: %s", lvg.Name, resource.NewQuantity(reserved, resource.BinarySI)))
-		spaceWithReserved := freeSpace.Value() - reserved
-		freeSpace = *resource.NewQuantity(spaceWithReserved, resource.BinarySI)
+
+		freeSpace = *resource.NewQuantity(freeSpace.Value()-reserved, resource.BinarySI)
 		log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s free Thick space after PVC reservation: %s", lvg.Name, freeSpace.String()))
 	case consts.Thin:
 		thinPool := findMatchedThinPool(lvg.Status.ThinPools, commonLVG.Thin.PoolName)
@@ -268,15 +261,17 @@ func calculateFreeSpace(
 	return freeSpace, nil
 }
 
-func getFreeSpaceLeftPercent(freeSize, requestedSpace, totalSize int64) int64 {
-	leftFreeSize := freeSize - requestedSpace
-	fraction := float64(leftFreeSize) / float64(totalSize)
+// TODO pick better naming to freeSize and method name
+func getFreeSpaceLeftPercent(freeSpaceBytes, requestedSpace, totalSpace int64) int64 {
+	freeSpaceLeft := freeSpaceBytes - requestedSpace
+	fraction := float64(freeSpaceLeft) / float64(totalSpace)
 	percent := fraction * 100
 	return int64(percent)
 }
 
-func getNodeScore(freeSpace int64, divisor float64) int {
-	converted := int(math.Round(math.Log2(float64(freeSpace) / divisor)))
+// TODO change divisor to multiplier 
+func getNodeScore(freeSpace int64, multiplier float64) int {
+	converted := int(math.Round(math.Log2(float64(freeSpace) * multiplier)))
 	switch {
 	case converted < 1:
 		return 1
