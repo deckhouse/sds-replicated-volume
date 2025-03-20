@@ -17,20 +17,36 @@ var (
 	storageClassNameTwo string = "storage-class-2"
 )
 
+const (
+	node1 string = "node-1"
+	node2 string = "node-2"
+	node3 string = "node-3"
+)
+
 func TestScoreNodes(t *testing.T) {
 	log := logger.Logger{}
-	nodeNames := []string{"node1", "node2", "node3"}
+	nodeNames := []string{node1, node2, node3}
 
 	cache := c.Cache{}
 	lvgCache := []*c.LvgCache{
 		{
 			Lvg: &snc.LVMVolumeGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{
+						NodeName: node1,
+					},
+				},
 			},
 		},
 		{
 			Lvg: &snc.LVMVolumeGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "lvg-2"},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{
+						NodeName: node2,
+					},
+				},
 			},
 		},
 	}

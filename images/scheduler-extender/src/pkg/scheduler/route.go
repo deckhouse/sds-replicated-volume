@@ -26,3 +26,13 @@ func (s *scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.prioritize(w, r)
 	}
 }
+
+func NewHandler(ctx context.Context, cl client.Client, log logger.Logger, lvgCache *cache.Cache, defaultDiv float64) (http.Handler, error) {
+	return &scheduler{
+		defaultDivisor: defaultDiv,
+		log:            log,
+		client:         cl,
+		ctx:            ctx,
+		cache:          lvgCache,
+	}, nil
+}
