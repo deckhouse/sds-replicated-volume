@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/deckhouse/module-sdk/pkg"
@@ -51,7 +50,6 @@ var (
 
 type step struct {
 	Name    string
-	Doc     string
 	Execute func() error
 }
 
@@ -66,6 +64,7 @@ type stateMachine struct {
 	currentStepIdx int
 	steps          []step
 
+	cachedSecrets     map[string]*v1.Secret
 	cachedDaemonSets  map[string]*appsv1.DaemonSet
 	cachedDeployments map[string]*appsv1.Deployment
 
@@ -78,30 +77,24 @@ func newStateMachine(
 	log pkg.Logger,
 	trigger *v1.ConfigMap,
 	values pkg.PatchableValuesCollector,
-) (*stateMachine, error) {
+) *stateMachine {
 	s := &stateMachine{}
 
 	steps := []step{
 		{
 			Name:    "Prepared",
-			Doc:     ``,
 			Execute: s.prepare,
 		},
 		{
 			Name:    "TurnedOffAndRenewedCerts",
-			Doc:     ``,
 			Execute: s.turnOffAndRenewCerts,
 		},
 		{
 			Name:    "TurnedOn",
-			Doc:     ``,
 			Execute: s.turnOn,
 		},
 		{
-			Name: "Done",
-			Doc: `Renewal succeded.
-Resource can optionally be deleted.
-Remove label '%s' to restart.`,
+			Name:    "Done",
 			Execute: s.moveToDone,
 		},
 	}
@@ -121,7 +114,7 @@ Remove label '%s' to restart.`,
 	s.steps = steps
 	s.values = values
 
-	return s, nil
+	return s
 }
 
 func (s *stateMachine) run() error {
@@ -129,10 +122,11 @@ func (s *stateMachine) run() error {
 		nextStep, ok := s.nextStep()
 		if !ok {
 			if _, hasLabel := s.trigger.Labels[ConfigMapCertRenewalCompletedLabel]; hasLabel {
-				// stay in Done
+				s.log.Debug("completion label found, stay in Done")
 				break
 			}
 			// reset to start
+			s.log.Info("completion label not found, resetting")
 			if err := s.reset(); err != nil {
 				return fmt.Errorf("resetting trigger: %w", err)
 			}
@@ -152,7 +146,7 @@ func (s *stateMachine) run() error {
 		s.currentStepIdx++
 	}
 
-	s.log.Info("no more steps to execute")
+	s.log.Debug("no more steps to execute")
 	return nil
 }
 
@@ -183,26 +177,6 @@ func (s *stateMachine) prepare() error {
 
 	// add finalizer
 	s.trigger.SetFinalizers([]string{PackageUri})
-
-	// add description
-	// TODO
-	utils.MapEnsureAndSet(
-		&s.trigger.Data,
-		"help",
-		`TODO link`+
-			strings.Join(
-				slices.Collect(
-					utils.IterMap(
-						slices.Values(s.steps),
-						func(s step) string {
-							return fmt.Sprintf("\t- %s: %s", s.Name, s.Doc)
-						},
-					),
-				),
-				"\n",
-			)+
-			``,
-	)
 
 	// backup
 	for _, name := range DaemonSetNameList {
@@ -242,7 +216,6 @@ func (s *stateMachine) backupDeployment(name string) error {
 		return err
 	}
 
-	// backup
 	if replicasJson, err := json.Marshal(depl.Spec.Replicas); err != nil {
 		return fmt.Errorf("marshalling deployment.spec.replicas for backup: %w", err)
 	} else {
@@ -257,7 +230,6 @@ func (s *stateMachine) backupDeployment(name string) error {
 }
 
 func (s *stateMachine) backupDaemonSet(name string) error {
-	// TODO
 	ds, err := s.getDaemonSet(name, false)
 	if err != nil {
 		return err
@@ -277,6 +249,17 @@ func (s *stateMachine) backupDaemonSet(name string) error {
 }
 
 func (s *stateMachine) turnOffAndRenewCerts() error {
+	expiring, err := s.isExpiringAnyCerts()
+	if err != nil {
+		s.log.Error("checking certs expiration failed, treating it as expired", "err", err)
+		expiring = true
+	}
+
+	if !expiring {
+		s.log.Info("all certs are fresh, skipping step")
+		return nil
+	}
+
 	// order of shutdown is important
 	if err := s.turnOffDaemonSetAndWait(DaemonSetNameCsiNode); err != nil {
 		return err
@@ -388,31 +371,31 @@ func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
 
 func (s *stateMachine) turnOn() error {
 	if err := s.turnOnDeploymentAndWait(DeploymentNameController); err != nil {
-		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDaemonSetAndWait(DaemonSetNameNode); err != nil {
-		return fmt.Errorf("turnOnDaemonSetAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameWebhooks); err != nil {
-		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameSpaas); err != nil {
-		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameSchedulerExtender); err != nil {
-		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameCsiController); err != nil {
-		return fmt.Errorf("turnOnDeploymentAndWait: %w", err)
+		return err
 	}
 
 	if err := s.turnOnDaemonSetAndWait(DaemonSetNameCsiNode); err != nil {
-		return fmt.Errorf("turnOnDaemonSetAndWait: %w", err)
+		return err
 	}
 
 	return nil
@@ -421,7 +404,7 @@ func (s *stateMachine) turnOn() error {
 func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 	s.log.Info("turnOnDaemonSetAndWait", "name", name)
 
-	ds, err := s.getDaemonSet(name, false)
+	ds, err := s.getDaemonSet(name, true)
 	if err != nil {
 		return err
 	}
@@ -456,7 +439,7 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
 	s.log.Info("turnOnDeploymentAndWait", "name", name)
 
-	depl, err := s.getDeployment(name, false)
+	depl, err := s.getDeployment(name, true)
 	if err != nil {
 		return err
 	}

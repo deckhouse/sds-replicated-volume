@@ -11,7 +11,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 )
 
 const SecretExpirationThreshold = time.Hour * 24 * 30
@@ -19,6 +18,18 @@ const InternalCertNameLabelKey = "storage.deckhouse.io/internal-cert-name"
 
 const caExpiryDurationStr = "8760h"               // 1 year
 const certExpiryDuration = (24 * time.Hour) * 365 // 1 year
+
+const (
+	SchedulerExtenderCertSecretName = "linstor-scheduler-extender-https-certs"
+	ControllerHttpsCertSecretName   = "linstor-controller-https-cert"
+	ClientHttpsCertSecretName       = "linstor-client-https-cert"
+	ControllerSslCertSecretName     = "linstor-controller-ssl-cert"
+	NodeSslCertSecretName           = "linstor-node-ssl-cert"
+)
+
+const (
+	SchedulerExtenderCN = "linstor-scheduler-extender"
+)
 
 func (s *stateMachine) renewCerts() error {
 	s.log.Info("renewCerts")
@@ -34,45 +45,140 @@ func (s *stateMachine) renewCerts() error {
 	return nil
 }
 
+func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
+	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
+	if err != nil {
+		return false, err
+	}
+	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
+}
+
 func (s *stateMachine) renewSchedulerExtenderCerts() error {
-	name := "linstor-scheduler-extender-https-certs"
-
-	log := s.log.With("certName", name)
-
-	secret := &v1.Secret{}
-	if err := s.cl.Get(
-		s.ctx,
-		types.NamespacedName{Namespace: consts.ModuleNamespace, Name: name},
-		secret,
-	); err != nil {
-		return fmt.Errorf("getting secret %s: %w", name, err)
+	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
+	if err != nil {
+		return err
 	}
 
-	if expiring, err := utils.AnyCertIsExpiringSoon(log, secret.Data, CertExpirationThreshold); err != nil {
-		return fmt.Errorf("parsing cert %s: %w", name, err)
+	if expiring, err := s.isExpiringSchedulerExtenderCerts(); err != nil {
+		return fmt.Errorf("parsing cert %s: %w", SchedulerExtenderCertSecretName, err)
 	} else if !expiring {
-		log.Info("cert is fresh")
+		s.log.Debug("cert is fresh", "name", SchedulerExtenderCertSecretName)
 		return nil
 	}
 
-	cn := "linstor-scheduler-extender"
-
-	if err := s.generateAndSaveCert(secret, SelfSignedCertValues{
-		CN: cn,
-		SANs: []string{
-			cn,
-			strings.Join([]string{cn, consts.ModuleNamespace}, "."),
-			strings.Join([]string{cn, consts.ModuleNamespace, "svc"}, "."),
-			strings.Join([]string{"%CLUSTER_DOMAIN%://" + cn, consts.ModuleNamespace, "svc"}, "."),
+	if err := s.generateAndSaveCert(
+		secret,
+		SelfSignedCertValues{
+			CN: SchedulerExtenderCN,
+			SANs: []string{
+				SchedulerExtenderCN,
+				strings.Join([]string{SchedulerExtenderCN, consts.ModuleNamespace}, "."),
+				strings.Join([]string{SchedulerExtenderCN, consts.ModuleNamespace, "svc"}, "."),
+				strings.Join([]string{"%CLUSTER_DOMAIN%://" + SchedulerExtenderCN, consts.ModuleNamespace, "svc"}, "."),
+			},
 		},
-	}); err != nil {
+	); err != nil {
 		return err
 	}
 
 	return nil
 }
 
+func (s *stateMachine) isExpiringAnyCerts() (bool, error) {
+	var allIsExpiringChecks = []func() (bool, error){
+		s.isExpiringSchedulerExtenderCerts,
+		s.isExpiringLinstorCerts,
+		// TODO
+	}
+	for _, isExpiring := range allIsExpiringChecks {
+		if expiring, err := isExpiring(); err != nil {
+			return false, err
+		} else if expiring {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *stateMachine) isExpiringLinstorCerts() (bool, error) {
+	var controllerHttpsSecret,
+		clientHttpsSecret,
+		controllerSslSecret,
+		nodeSslSecret,
+		err = s.getLinstorCertSecrets()
+	if err != nil {
+		return false, err
+	}
+
+	allSecrets := []*v1.Secret{
+		controllerHttpsSecret, clientHttpsSecret,
+		controllerSslSecret, nodeSslSecret,
+	}
+
+	// if any cert is expiring - renew everything, since they share same CA anyway
+	var anyCertIsExpiring bool
+	var errs error
+	for _, secret := range allSecrets {
+		if expiring, err := utils.AnyCertIsExpiringSoon(
+			s.log,
+			secret,
+			CertExpirationThreshold,
+		); err != nil {
+			errs = errors.Join(errs, fmt.Errorf("parsing cert %s: %w", secret.Name, err))
+			continue
+		} else if !expiring {
+			s.log.Debug("cert is fresh", "name", secret.Name)
+			continue
+		}
+		anyCertIsExpiring = true
+	}
+	if anyCertIsExpiring {
+		if errs != nil {
+			s.log.Warn("there were problems during cert parsing, but renew is required anyway", "errs", err)
+		}
+		return true, nil
+	}
+	return false, errs
+}
+
+func (s *stateMachine) getLinstorCertSecrets() (
+	controllerHttpsSecret *v1.Secret,
+	clientHttpsSecret *v1.Secret,
+	controllerSslSecret *v1.Secret,
+	nodeSslSecret *v1.Secret,
+	err error,
+) {
+	controllerHttpsSecret, err = s.getSecret(ControllerHttpsCertSecretName, false)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	clientHttpsSecret, err = s.getSecret(ClientHttpsCertSecretName, false)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	controllerSslSecret, err = s.getSecret(ControllerSslCertSecretName, false)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	nodeSslSecret, err = s.getSecret(NodeSslCertSecretName, false)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	return
+}
+
 func (s *stateMachine) renewLinstorCerts() error {
+	if expiring, err := s.isExpiringLinstorCerts(); err != nil {
+		return fmt.Errorf("checking certs: %w", err)
+	} else if !expiring {
+		s.log.Debug("all linstor-ca certs are fresh")
+		return nil
+	}
+
 	keyUsages := []string{
 		string(certificatesv1.UsageDigitalSignature),
 		string(certificatesv1.UsageKeyEncipherment),
@@ -89,69 +195,13 @@ func (s *stateMachine) renewLinstorCerts() error {
 		"linstor." + consts.ModuleNamespace + ".svc",
 	}
 
-	controllerHttpsName := "linstor-controller-https-cert"
-	controllerHttpsSecret := &v1.Secret{}
-	if err := s.cl.Get(
-		s.ctx,
-		types.NamespacedName{Namespace: consts.ModuleNamespace, Name: controllerHttpsName},
-		controllerHttpsSecret,
-	); err != nil {
-		return fmt.Errorf("getting secret %s: %w", controllerHttpsName, err)
-	}
-
-	clientHttpsName := "linstor-client-https-cert"
-	clientHttpsSecret := &v1.Secret{}
-	if err := s.cl.Get(
-		s.ctx,
-		types.NamespacedName{Namespace: consts.ModuleNamespace, Name: clientHttpsName},
+	var controllerHttpsSecret,
 		clientHttpsSecret,
-	); err != nil {
-		return fmt.Errorf("getting secret %s: %w", clientHttpsName, err)
-	}
-
-	controllerSslName := "linstor-controller-ssl-cert"
-	controllerSslSecret := &v1.Secret{}
-	if err := s.cl.Get(
-		s.ctx,
-		types.NamespacedName{Namespace: consts.ModuleNamespace, Name: controllerSslName},
 		controllerSslSecret,
-	); err != nil {
-		return fmt.Errorf("getting secret %s: %w", controllerSslName, err)
-	}
-
-	nodeSslName := "linstor-node-ssl-cert"
-	nodeSslSecret := &v1.Secret{}
-	if err := s.cl.Get(
-		s.ctx,
-		types.NamespacedName{Namespace: consts.ModuleNamespace, Name: nodeSslName},
 		nodeSslSecret,
-	); err != nil {
-		return fmt.Errorf("getting secret %s: %w", nodeSslName, err)
-	}
-
-	allSecrets := []*v1.Secret{
-		controllerHttpsSecret, clientHttpsSecret,
-		controllerSslSecret, nodeSslSecret,
-	}
-
-	// if any cert is expiring - renew everything, since they share same CA anyway
-	var anyCertIsExpiring bool
-	var errs error
-	for _, secret := range allSecrets {
-		log := s.log.With("certName", secret.Name)
-
-		if expiring, err := utils.AnyCertIsExpiringSoon(log, secret.Data, CertExpirationThreshold); err != nil {
-			errs = errors.Join(errs, fmt.Errorf("parsing cert %s: %w", secret.Name, err))
-			continue
-		} else if !expiring {
-			log.Info("cert is fresh")
-			continue
-		}
-		anyCertIsExpiring = true
-		break
-	}
-	if !anyCertIsExpiring {
-		return errs
+		err = s.getLinstorCertSecrets()
+	if err != nil {
+		return err
 	}
 
 	// TODO: compare with values and change values, if needed

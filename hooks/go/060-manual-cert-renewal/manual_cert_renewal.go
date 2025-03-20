@@ -29,7 +29,7 @@ const (
 )
 
 // means running locally
-var devMode = os.Getenv("DEV_MODE") != ""
+var devMode = os.Getenv("MANUALCERTRENEWAL_DEV_MODE") != ""
 
 var _ = registry.RegisterFunc(
 	&pkg.HookConfig{
@@ -73,7 +73,7 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout())
 	defer cancel()
 
-	input.Logger.Info("hook invoked")
+	input.Logger.Debug("hook invoked")
 	defer func() {
 		if err != nil {
 			input.Logger.Error("hook failed", "err", err)
@@ -86,13 +86,13 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 
 	trigger := getTrigger(ctx, cl, input)
 	if trigger == nil {
-		input.Logger.Info("trigger not found in snapshots (deleted or filtered-out), ignoring")
+		input.Logger.Debug("trigger not found in snapshots (deleted or filtered-out), ignoring")
 		return nil
 	}
 
-	if s, err := newStateMachine(ctx, cl, input.Logger, trigger, input.Values); err != nil {
-		return fmt.Errorf("newStateMachine: %w", err)
-	} else if err := s.run(); err != nil {
+	s := newStateMachine(ctx, cl, input.Logger, trigger, input.Values)
+
+	if err := s.run(); err != nil {
 		return fmt.Errorf("run: %w", err)
 	}
 

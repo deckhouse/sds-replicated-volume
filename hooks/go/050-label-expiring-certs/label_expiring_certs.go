@@ -41,7 +41,7 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	for _, secret := range secrets.Items {
 		log := input.Logger.With("name", secret.Name)
 
-		if expiring, err := utils.AnyCertIsExpiringSoon(log, secret.Data, SecretExpirationThreshold); err != nil {
+		if expiring, err := utils.AnyCertIsExpiringSoon(log, &secret, SecretExpirationThreshold); err != nil {
 			// do not retry certificate errors, probably just a format problem
 			log.Error("error checking certificates", "err", err)
 			continue
