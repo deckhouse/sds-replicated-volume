@@ -3,6 +3,7 @@ package manualcertrenewal
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/module-sdk/pkg/certificate"
@@ -24,6 +25,10 @@ func (s *stateMachine) renewCerts() error {
 
 	if err := s.renewSchedulerExtenderCerts(); err != nil {
 		return fmt.Errorf("renewSchedulerExtenderCerts: %w", err)
+	}
+
+	if err := s.renewLinstorCerts(); err != nil {
+		return fmt.Errorf("renewLinstorCerts: %w", err)
 	}
 
 	return nil
@@ -50,28 +55,19 @@ func (s *stateMachine) renewSchedulerExtenderCerts() error {
 		return nil
 	}
 
-	renewedCert, err := generateNewSelfSignedTLS(SelfSignedCertValues{
-		CN: "linstor-scheduler-extender",
+	cn := "linstor-scheduler-extender"
+
+	if err := s.generateAndSaveCert(secret, SelfSignedCertValues{
+		CN: cn,
 		SANs: []string{
-			"linstor-scheduler-extender",
-			"linstor-scheduler-extender.d8-sds-replicated-volume",
-			"linstor-scheduler-extender.d8-sds-replicated-volume.svc",
-			"%CLUSTER_DOMAIN%://linstor-scheduler-extender.d8-sds-replicated-volume.svc",
+			cn,
+			strings.Join([]string{cn, consts.ModuleNamespace}, "."),
+			strings.Join([]string{cn, consts.ModuleNamespace, "svc"}, "."),
+			strings.Join([]string{"%CLUSTER_DOMAIN%://" + cn, consts.ModuleNamespace, "svc"}, "."),
 		},
-	})
-	if err != nil {
-		return fmt.Errorf("renewing cert %s: %w", name, err)
+	}); err != nil {
+		return err
 	}
-
-	secret.Data["ca.crt"] = renewedCert.CA
-	secret.Data["tls.crt"] = renewedCert.Cert
-	secret.Data["tls.key"] = renewedCert.Key
-
-	if err := s.cl.Update(s.ctx, secret); err != nil {
-		return fmt.Errorf("updating secret %s: %w", name, err)
-	}
-
-	// update internal values
 
 	return nil
 }
@@ -170,7 +166,7 @@ func (s *stateMachine) renewLinstorCerts() error {
 	}
 
 	// renew certs - linstor-controller-https-cert
-	if err := s.generateAndSaveCertToSecret(
+	if err := s.generateAndSaveCert(
 		controllerHttpsSecret,
 		SelfSignedCertValues{
 			CA:     ca,
@@ -183,7 +179,7 @@ func (s *stateMachine) renewLinstorCerts() error {
 	}
 
 	// renew certs - linstor-client-https-cert
-	if err := s.generateAndSaveCertToSecret(
+	if err := s.generateAndSaveCert(
 		clientHttpsSecret,
 		SelfSignedCertValues{
 			CA:     ca,
@@ -196,7 +192,7 @@ func (s *stateMachine) renewLinstorCerts() error {
 	}
 
 	// renew certs - linstor-controller-ssl-cert
-	if err := s.generateAndSaveCertToSecret(
+	if err := s.generateAndSaveCert(
 		controllerSslSecret,
 		SelfSignedCertValues{
 			CA:     ca,
@@ -209,7 +205,7 @@ func (s *stateMachine) renewLinstorCerts() error {
 	}
 
 	// renew certs - linstor-node-ssl-cert
-	if err := s.generateAndSaveCertToSecret(
+	if err := s.generateAndSaveCert(
 		nodeSslSecret,
 		SelfSignedCertValues{
 			CA:     ca,
@@ -224,15 +220,22 @@ func (s *stateMachine) renewLinstorCerts() error {
 	return nil
 }
 
-func (s *stateMachine) generateAndSaveCertToSecret(secret *v1.Secret, values SelfSignedCertValues) error {
+func (s *stateMachine) generateAndSaveCert(secret *v1.Secret, values SelfSignedCertValues) error {
 	cert, err := generateNewSelfSignedTLS(values)
 	if err != nil {
 		return fmt.Errorf("renewing cert %s: %w", secret.Name, err)
 	}
 
 	// update secrets
-	if err := s.saveCertToSecret(secret, cert); err != nil {
-		return err
+	if secret.Data == nil {
+		secret.Data = make(map[string][]byte, 3)
+	}
+	secret.Data["ca.crt"] = cert.CA
+	secret.Data["tls.crt"] = cert.Cert
+	secret.Data["tls.key"] = cert.Key
+
+	if err := s.cl.Update(s.ctx, secret); err != nil {
+		return fmt.Errorf("updating secret %s: %w", secret.Name, err)
 	}
 
 	// set values
@@ -248,20 +251,6 @@ func (s *stateMachine) generateAndSaveCertToSecret(secret *v1.Secret, values Sel
 		Key: string(cert.Key),
 	})
 
-	return nil
-}
-
-func (s *stateMachine) saveCertToSecret(secret *v1.Secret, cert *certificate.Certificate) error {
-	if secret.Data == nil {
-		secret.Data = make(map[string][]byte, 3)
-	}
-	secret.Data["ca.crt"] = cert.CA
-	secret.Data["tls.crt"] = cert.Cert
-	secret.Data["tls.key"] = cert.Key
-
-	if err := s.cl.Update(s.ctx, secret); err != nil {
-		return fmt.Errorf("updating secret %s: %w", secret.Name, err)
-	}
 	return nil
 }
 
