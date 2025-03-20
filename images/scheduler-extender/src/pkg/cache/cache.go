@@ -564,3 +564,94 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 
 	return nil
 }
+
+// TryGetLVG returns selected LVMVolumeGroup resource if it is stored in the cache, otherwise returns nil.
+func (c *Cache) TryGetLVG(name string) *snc.LVMVolumeGroup {
+	lvgCh, found := c.Lvgs.Load(name)
+	if !found {
+		c.log.Debug(fmt.Sprintf("[TryGetLVG] the LVMVolumeGroup %s was not found in the cache. Return nil", name))
+		return nil
+	}
+
+	return lvgCh.(*LvgCache).Lvg
+}
+
+// UpdateLVG updated selected LVMVolumeGroup resource in the cache. If such LVMVolumeGroup is not stored, returns an error.
+func (c *Cache) UpdateLVG(lvg *snc.LVMVolumeGroup) error {
+	lvgCh, found := c.Lvgs.Load(lvg.Name)
+	if !found {
+		return fmt.Errorf("the LVMVolumeGroup %s was not found in the lvgCh", lvg.Name)
+	}
+
+	lvgCh.(*LvgCache).Lvg = lvg
+
+	c.log.Trace(fmt.Sprintf("[UpdateLVG] the LVMVolumeGroup %s nodes: %v", lvg.Name, lvg.Status.Nodes))
+	for _, node := range lvg.Status.Nodes {
+		lvgsOnTheNode, _ := c.nodeLVGs.Load(node.Name)
+		if lvgsOnTheNode == nil {
+			lvgsOnTheNode = make([]string, 0, lvgsPerNodeCount)
+		}
+
+		if !slices2.Contains(lvgsOnTheNode.([]string), lvg.Name) {
+			lvgsOnTheNode = append(lvgsOnTheNode.([]string), lvg.Name)
+			c.log.Debug(fmt.Sprintf("[UpdateLVG] the LVMVolumeGroup %s has been added to the node %s", lvg.Name, node.Name))
+			c.nodeLVGs.Store(node.Name, lvgsOnTheNode)
+		} else {
+			c.log.Debug(fmt.Sprintf("[UpdateLVG] the LVMVolumeGroup %s has been already added to the node %s", lvg.Name, node.Name))
+		}
+	}
+
+	return nil
+}
+
+// AddLVG adds selected LVMVolumeGroup resource to the cache. If it is already stored, does nothing.
+func (c *Cache) AddLVG(lvg *snc.LVMVolumeGroup) {
+	_, loaded := c.Lvgs.LoadOrStore(lvg.Name, &LvgCache{
+		Lvg: lvg,
+	})
+	if loaded {
+		c.log.Debug(fmt.Sprintf("[AddLVG] the LVMVolumeGroup %s has been already added to the cache", lvg.Name))
+		return
+	}
+
+	c.log.Trace(fmt.Sprintf("[AddLVG] the LVMVolumeGroup %s nodes: %v", lvg.Name, lvg.Status.Nodes))
+	for _, node := range lvg.Status.Nodes {
+		lvgsOnTheNode, _ := c.nodeLVGs.Load(node.Name)
+		if lvgsOnTheNode == nil {
+			lvgsOnTheNode = make([]string, 0, lvgsPerNodeCount)
+		}
+
+		lvgsOnTheNode = append(lvgsOnTheNode.([]string), lvg.Name)
+		c.log.Debug(fmt.Sprintf("[AddLVG] the LVMVolumeGroup %s has been added to the node %s", lvg.Name, node.Name))
+		c.nodeLVGs.Store(node.Name, lvgsOnTheNode)
+	}
+}
+
+// DeleteLVG deletes selected LVMVolumeGroup resource from the cache.
+func (c *Cache) DeleteLVG(lvgName string) {
+	c.Lvgs.Delete(lvgName)
+
+	c.nodeLVGs.Range(func(_, lvgNames any) bool {
+		for i, lvg := range lvgNames.([]string) {
+			if lvg == lvgName {
+				//nolint:gocritic,ineffassign
+				lvgNames = append(lvgNames.([]string)[:i], lvgNames.([]string)[i+1:]...)
+				return false
+			}
+		}
+
+		return true
+	})
+
+	c.pvcLVGs.Range(func(_, lvgNames any) bool {
+		for i, lvg := range lvgNames.([]string) {
+			if lvg == lvgName {
+				//nolint:gocritic,ineffassign
+				lvgNames = append(lvgNames.([]string)[:i], lvgNames.([]string)[i+1:]...)
+				return false
+			}
+		}
+
+		return true
+	})
+}
