@@ -4,9 +4,7 @@ kind: Secret
 metadata:
   name: linstor-controller-https-cert
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict
-    "storage.deckhouse.io/internal-cert-name" "httpsControllerCert"
-  )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.httpsControllerCert }}
@@ -20,9 +18,7 @@ kind: Secret
 metadata:
   name: linstor-client-https-cert
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict
-    "storage.deckhouse.io/internal-cert-name" "httpsClientCert"
-  )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.httpsClientCert }}
@@ -36,9 +32,7 @@ kind: Secret
 metadata:
   name: linstor-controller-ssl-cert
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict
-    "storage.deckhouse.io/internal-cert-name" "sslControllerCert"
-  )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.sslControllerCert }}
@@ -52,9 +46,7 @@ kind: Secret
 metadata:
   name: linstor-node-ssl-cert
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict
-    "storage.deckhouse.io/internal-cert-name" "sslNodeCert"
-  )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.sslNodeCert }}
