@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
-	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -43,7 +41,7 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	for _, secret := range secrets.Items {
 		log := input.Logger.With("name", secret.Name)
 
-		if expiring, err := anyCertIsExpiringSoon(log, secret.Data); err != nil {
+		if expiring, err := utils.AnyCertIsExpiringSoon(log, secret.Data, SecretExpirationThreshold); err != nil {
 			// do not retry certificate errors, probably just a format problem
 			log.Error("error checking certificates", "err", err)
 			continue
@@ -78,32 +76,4 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	}
 
 	return resultErr
-}
-
-func anyCertIsExpiringSoon(log *log.Logger, data map[string][]byte) (bool, error) {
-	var resultErr error
-
-	for key, val := range data {
-		keyLog := log.With("key", key)
-
-		if !strings.HasSuffix(strings.ToLower(key), ".crt") {
-			keyLog.Info("not a certificate, skip")
-			continue
-		}
-
-		if len(val) == 0 {
-			keyLog.Info("empty certificate, skip")
-			continue
-		}
-
-		if expiring, err := certificate.IsCertificateExpiringSoon(val, SecretExpirationThreshold); err != nil {
-			keyLog.Error("error parsing certificate", "err", err)
-			resultErr = errors.Join(resultErr, fmt.Errorf("error parsing certificate: %w", err))
-		} else if expiring {
-			// drop errors as not relevant anymore
-			return true, nil
-		}
-	}
-
-	return false, resultErr
 }

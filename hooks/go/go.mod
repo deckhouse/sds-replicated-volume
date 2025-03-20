@@ -5,7 +5,6 @@ go 1.23.5
 require (
 	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20241205040953-7b376bae249c
 	github.com/deckhouse/module-sdk v0.1.1-0.20250225114715-86f38bb419fe
-	github.com/tidwall/gjson v1.14.4
 	k8s.io/api v0.29.8
 	k8s.io/apimachinery v0.29.8
 	k8s.io/client-go v0.29.8
@@ -66,6 +65,7 @@ require (
 	github.com/spf13/cobra v1.8.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/sylabs/oci-tools v0.7.0 // indirect
+	github.com/tidwall/gjson v1.14.4 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
 	github.com/vbatts/tar-split v0.11.3 // indirect

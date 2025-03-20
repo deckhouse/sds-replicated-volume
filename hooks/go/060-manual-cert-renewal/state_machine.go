@@ -9,10 +9,8 @@ import (
 	"time"
 
 	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
-	"github.com/tidwall/gjson"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
@@ -588,72 +586,6 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 			return true, nil
 		},
 	)
-}
-
-func (s *stateMachine) renewCerts() error {
-	s.log.Info("renewCerts")
-
-	internal := s.values.Get(consts.ModuleName + ".internal")
-	if !internal.Exists() {
-		s.log.Warn(consts.ModuleName + ".internal not found in values, nothing to renew")
-		return nil
-	}
-
-	// search for paths like: ".internal.{key}.[crt|ca]",
-	internal.ForEach(func(key, value gjson.Result) bool {
-		pathCrt := fmt.Sprintf("%s.internal.%s", consts.ModuleName, key.String())
-		if err := s.renewCertIfNeeded(
-			pathCrt,
-			value,
-			"crt",
-		); err != nil {
-			s.log.Error("error checking certificate", "err", err, "path", pathCrt, "ext", "crt")
-		}
-
-		pathCa := fmt.Sprintf("%s.internal.%s", consts.ModuleName, key.String())
-		if err := s.renewCertIfNeeded(
-			pathCa,
-			value,
-			"ca",
-		); err != nil {
-			s.log.Error("error checking certificate", "err", err, "path", pathCa, "ext", "ca")
-		}
-
-		return true
-	})
-	return nil
-}
-
-func (s *stateMachine) renewCertIfNeeded(path string, value gjson.Result, ext string) error {
-	if certValue := value.Get(ext); !certValue.Exists() {
-		return nil
-	}
-
-	s.log.Info("found cert value to update", "path", path, "ext", ext, "type", value.Type.String())
-
-	if value.Type != gjson.String {
-		s.log.Warn("not a string, skip", "path", path, "ext", ext, "type", value.Type.String())
-	}
-
-	if expiring, err := certificate.IsCertificateExpiringSoon(
-		[]byte(value.Str),
-		CertExpirationThreshold,
-	); err != nil {
-		return fmt.Errorf("checking cert %s.%s expiration: %w", path, ext, err)
-	} else if !expiring {
-		s.log.Info("cert is fresh", "path", path, "ext", ext)
-		return nil
-	}
-
-	// TODO
-
-	// caCert, tlsCert, err := certificate.ParseCertificatesFromPEM(nil, nil, nil)
-
-	// certificate.GenerateSelfSignedCert()
-
-	s.log.Info("TODO: cert is going to be renewed", "path", path, "ext", ext)
-	// s.values.Set(fmt.Sprintf("%s.%s", path, ext), "TODO")
-	return nil
 }
 
 func (s *stateMachine) moveToDone() error {
