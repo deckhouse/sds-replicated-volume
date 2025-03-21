@@ -19,7 +19,9 @@ import (
 )
 
 const (
-	TriggerKeyStep                     = "step"
+	TriggerKeyStep = "step"
+	// to force renewal of non-expired certs
+	TriggerKeyForce                    = "force"
 	TriggerKeyBackupDaemonSetAffinity  = "backup-daemonset-affinity-"
 	TriggerKeyBackupDeploymentReplicas = "backup-deployment-replicas-"
 
@@ -161,7 +163,12 @@ func (s *stateMachine) nextStep() (step, bool) {
 
 func (s *stateMachine) reset() error {
 	s.currentStepIdx = -1
-	clear(s.trigger.Data)
+	forceVal, forceWasSet := s.trigger.Data[TriggerKeyForce]
+	s.trigger.Data = map[string]string{}
+	if forceWasSet {
+		// keep force flag
+		s.trigger.Data[TriggerKeyForce] = forceVal
+	}
 	return s.cl.Update(s.ctx, s.trigger)
 }
 
@@ -574,5 +581,6 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 func (s *stateMachine) moveToDone() error {
 	s.trigger.SetFinalizers(nil)
 	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalCompletedLabel, "true")
+	delete(s.trigger.Data, TriggerKeyForce)
 	return nil
 }

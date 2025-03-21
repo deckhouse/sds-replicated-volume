@@ -13,7 +13,6 @@ import (
 )
 
 const SecretExpirationThreshold = time.Hour * 24 * 30
-const InternalCertNameLabelKey = "storage.deckhouse.io/internal-cert-name"
 
 const caExpiryDurationStr = "8760h"               // 1 year
 const certExpiryDuration = (24 * time.Hour) * 365 // 1 year
@@ -50,6 +49,10 @@ func (s *stateMachine) isExpiringAnyCerts() (bool, error) {
 }
 
 func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
+	if _, ok := s.trigger.Data[TriggerKeyForce]; ok {
+		return true, nil
+	}
+
 	secret, err := s.getSecret(SpaasCertSecretName, false)
 	if err != nil {
 		return false, err
@@ -58,6 +61,10 @@ func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
 }
 
 func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
+	if _, ok := s.trigger.Data[TriggerKeyForce]; ok {
+		return true, nil
+	}
+
 	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
 	if err != nil {
 		return false, err
@@ -94,6 +101,10 @@ func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
 }
 
 func (s *stateMachine) isExpiringWebhookCerts() (bool, error) {
+	if _, ok := s.trigger.Data[TriggerKeyForce]; ok {
+		return true, nil
+	}
+
 	var schedulerAdmissionSecret,
 		webhookHttpsSecret,
 		err = s.getWebhookCertSecrets()
@@ -108,6 +119,10 @@ func (s *stateMachine) isExpiringWebhookCerts() (bool, error) {
 }
 
 func (s *stateMachine) isExpiringLinstorCerts() (bool, error) {
+	if _, ok := s.trigger.Data[TriggerKeyForce]; ok {
+		return true, nil
+	}
+
 	var controllerHttpsSecret,
 		clientHttpsSecret,
 		controllerSslSecret,
