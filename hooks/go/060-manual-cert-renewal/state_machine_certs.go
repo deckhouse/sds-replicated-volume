@@ -3,7 +3,6 @@ package manualcertrenewal
 import (
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/deckhouse/module-sdk/pkg/certificate"
@@ -21,74 +20,24 @@ const certExpiryDuration = (24 * time.Hour) * 365 // 1 year
 
 const (
 	SchedulerExtenderCertSecretName = "linstor-scheduler-extender-https-certs"
-	ControllerHttpsCertSecretName   = "linstor-controller-https-cert"
-	ClientHttpsCertSecretName       = "linstor-client-https-cert"
-	ControllerSslCertSecretName     = "linstor-controller-ssl-cert"
-	NodeSslCertSecretName           = "linstor-node-ssl-cert"
+
+	ControllerHttpsCertSecretName = "linstor-controller-https-cert"
+	ClientHttpsCertSecretName     = "linstor-client-https-cert"
+	ControllerSslCertSecretName   = "linstor-controller-ssl-cert"
+	NodeSslCertSecretName         = "linstor-node-ssl-cert"
+
+	WebhookSchedulerAdmissionCertSecretName = "linstor-scheduler-admission-certs"
+	WebhookHttpsCertSecretName              = "webhooks-https-certs"
+
+	SpaasCertSecretName = "spaas-certs"
 )
-
-const (
-	SchedulerExtenderCN = "linstor-scheduler-extender"
-)
-
-func (s *stateMachine) renewCerts() error {
-	s.log.Info("renewCerts")
-
-	if err := s.renewSchedulerExtenderCerts(); err != nil {
-		return fmt.Errorf("renewSchedulerExtenderCerts: %w", err)
-	}
-
-	if err := s.renewLinstorCerts(); err != nil {
-		return fmt.Errorf("renewLinstorCerts: %w", err)
-	}
-
-	return nil
-}
-
-func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
-	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
-	if err != nil {
-		return false, err
-	}
-	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
-}
-
-func (s *stateMachine) renewSchedulerExtenderCerts() error {
-	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
-	if err != nil {
-		return err
-	}
-
-	if expiring, err := s.isExpiringSchedulerExtenderCerts(); err != nil {
-		return fmt.Errorf("parsing cert %s: %w", SchedulerExtenderCertSecretName, err)
-	} else if !expiring {
-		s.log.Debug("cert is fresh", "name", SchedulerExtenderCertSecretName)
-		return nil
-	}
-
-	if err := s.generateAndSaveCert(
-		secret,
-		SelfSignedCertValues{
-			CN: SchedulerExtenderCN,
-			SANs: []string{
-				SchedulerExtenderCN,
-				strings.Join([]string{SchedulerExtenderCN, consts.ModuleNamespace}, "."),
-				strings.Join([]string{SchedulerExtenderCN, consts.ModuleNamespace, "svc"}, "."),
-				strings.Join([]string{"%CLUSTER_DOMAIN%://" + SchedulerExtenderCN, consts.ModuleNamespace, "svc"}, "."),
-			},
-		},
-	); err != nil {
-		return err
-	}
-
-	return nil
-}
 
 func (s *stateMachine) isExpiringAnyCerts() (bool, error) {
 	var allIsExpiringChecks = []func() (bool, error){
 		s.isExpiringSchedulerExtenderCerts,
 		s.isExpiringLinstorCerts,
-		// TODO
+		s.isExpiringWebhookCerts,
+		s.isExpiringSpaasCerts,
 	}
 	for _, isExpiring := range allIsExpiringChecks {
 		if expiring, err := isExpiring(); err != nil {
@@ -100,25 +49,27 @@ func (s *stateMachine) isExpiringAnyCerts() (bool, error) {
 	return false, nil
 }
 
-func (s *stateMachine) isExpiringLinstorCerts() (bool, error) {
-	var controllerHttpsSecret,
-		clientHttpsSecret,
-		controllerSslSecret,
-		nodeSslSecret,
-		err = s.getLinstorCertSecrets()
+func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
+	secret, err := s.getSecret(SpaasCertSecretName, false)
 	if err != nil {
 		return false, err
 	}
+	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
+}
 
-	allSecrets := []*v1.Secret{
-		controllerHttpsSecret, clientHttpsSecret,
-		controllerSslSecret, nodeSslSecret,
+func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
+	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
+	if err != nil {
+		return false, err
 	}
+	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
+}
 
+func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
 	// if any cert is expiring - renew everything, since they share same CA anyway
 	var anyCertIsExpiring bool
 	var errs error
-	for _, secret := range allSecrets {
+	for _, secret := range secrets {
 		if expiring, err := utils.AnyCertIsExpiringSoon(
 			s.log,
 			secret,
@@ -134,11 +85,59 @@ func (s *stateMachine) isExpiringLinstorCerts() (bool, error) {
 	}
 	if anyCertIsExpiring {
 		if errs != nil {
-			s.log.Warn("there were problems during cert parsing, but renew is required anyway", "errs", err)
+			s.log.Warn("there were problems during cert parsing, but renew is required anyway", "errs", errs)
 		}
 		return true, nil
 	}
 	return false, errs
+
+}
+
+func (s *stateMachine) isExpiringWebhookCerts() (bool, error) {
+	var schedulerAdmissionSecret,
+		webhookHttpsSecret,
+		err = s.getWebhookCertSecrets()
+	if err != nil {
+		return false, err
+	}
+
+	return s.isExpiringCertsList([]*v1.Secret{
+		schedulerAdmissionSecret,
+		webhookHttpsSecret,
+	})
+}
+
+func (s *stateMachine) isExpiringLinstorCerts() (bool, error) {
+	var controllerHttpsSecret,
+		clientHttpsSecret,
+		controllerSslSecret,
+		nodeSslSecret,
+		err = s.getLinstorCertSecrets()
+	if err != nil {
+		return false, err
+	}
+
+	return s.isExpiringCertsList([]*v1.Secret{
+		controllerHttpsSecret, clientHttpsSecret,
+		controllerSslSecret, nodeSslSecret,
+	})
+}
+
+func (s *stateMachine) getWebhookCertSecrets() (
+	schedulerAdmissionSecret *v1.Secret,
+	webhookHttpsSecret *v1.Secret,
+	err error,
+) {
+	schedulerAdmissionSecret, err = s.getSecret(WebhookSchedulerAdmissionCertSecretName, false)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	webhookHttpsSecret, err = s.getSecret(WebhookHttpsCertSecretName, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return
 }
 
 func (s *stateMachine) getLinstorCertSecrets() (
@@ -169,6 +168,92 @@ func (s *stateMachine) getLinstorCertSecrets() (
 	}
 
 	return
+}
+
+func (s *stateMachine) renewCerts() error {
+	s.log.Info("renewCerts")
+
+	if err := s.renewSchedulerExtenderCerts(); err != nil {
+		return fmt.Errorf("renewSchedulerExtenderCerts: %w", err)
+	}
+
+	if err := s.renewLinstorCerts(); err != nil {
+		return fmt.Errorf("renewLinstorCerts: %w", err)
+	}
+
+	if err := s.renewWebhookCerts(); err != nil {
+		return fmt.Errorf("renewLinstorCerts: %w", err)
+	}
+
+	if err := s.renewSpaasCert(); err != nil {
+		return fmt.Errorf("renewSpaasCert: %w", err)
+	}
+
+	return nil
+}
+
+func (s *stateMachine) renewSpaasCert() error {
+	secret, err := s.getSecret(SpaasCertSecretName, false)
+	if err != nil {
+		return err
+	}
+
+	if expiring, err := s.isExpiringSpaasCerts(); err != nil {
+		return fmt.Errorf("parsing cert %s: %w", SpaasCertSecretName, err)
+	} else if !expiring {
+		s.log.Debug("cert is fresh", "name", SpaasCertSecretName)
+		return nil
+	}
+
+	if err := s.generateAndSaveCert(
+		secret,
+		SelfSignedCertValues{
+			CN:           "spaas",
+			CACNOverride: "spaas-ca",
+			SANs: []string{
+				"spaas",
+				"spaas." + consts.ModuleNamespace,
+				"spaas." + consts.ModuleNamespace + ".svc",
+			},
+			ValuesPath: consts.ModuleName + ".internal.spaasCert",
+		},
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *stateMachine) renewSchedulerExtenderCerts() error {
+	secret, err := s.getSecret(SchedulerExtenderCertSecretName, false)
+	if err != nil {
+		return err
+	}
+
+	if expiring, err := s.isExpiringSchedulerExtenderCerts(); err != nil {
+		return fmt.Errorf("parsing cert %s: %w", SchedulerExtenderCertSecretName, err)
+	} else if !expiring {
+		s.log.Debug("cert is fresh", "name", SchedulerExtenderCertSecretName)
+		return nil
+	}
+
+	if err := s.generateAndSaveCert(
+		secret,
+		SelfSignedCertValues{
+			CN: "linstor-scheduler-extender",
+			SANs: []string{
+				"linstor-scheduler-extender",
+				"linstor-scheduler-extender." + consts.ModuleNamespace,
+				"linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
+				"%CLUSTER_DOMAIN%://linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
+			},
+			ValuesPath: consts.ModuleName + ".internal.customSchedulerExtenderCert",
+		},
+	); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (s *stateMachine) renewLinstorCerts() error {
@@ -215,53 +300,119 @@ func (s *stateMachine) renewLinstorCerts() error {
 		return fmt.Errorf("generate ca: %w", err)
 	}
 
-	// renew certs - linstor-controller-https-cert
+	// renew cert 1
 	if err := s.generateAndSaveCert(
 		controllerHttpsSecret,
 		SelfSignedCertValues{
-			CA:     ca,
-			CN:     "linstor-controller",
-			Usages: keyUsages,
-			SANs:   sans,
+			CA:         ca,
+			CN:         "linstor-controller",
+			Usages:     keyUsages,
+			SANs:       sans,
+			ValuesPath: consts.ModuleName + ".internal.httpsControllerCert",
 		},
 	); err != nil {
 		return err
 	}
 
-	// renew certs - linstor-client-https-cert
+	// renew cert 2
 	if err := s.generateAndSaveCert(
 		clientHttpsSecret,
 		SelfSignedCertValues{
-			CA:     ca,
-			CN:     "linstor-client",
-			Usages: keyUsages,
-			SANs:   nil,
+			CA:         ca,
+			CN:         "linstor-client",
+			Usages:     keyUsages,
+			SANs:       nil,
+			ValuesPath: consts.ModuleName + ".internal.httpsClientCert",
 		},
 	); err != nil {
 		return err
 	}
 
-	// renew certs - linstor-controller-ssl-cert
+	// renew cert 3
 	if err := s.generateAndSaveCert(
 		controllerSslSecret,
 		SelfSignedCertValues{
-			CA:     ca,
-			CN:     "linstor-controller",
-			Usages: keyUsages,
-			SANs:   sans,
+			CA:         ca,
+			CN:         "linstor-controller",
+			Usages:     keyUsages,
+			SANs:       sans,
+			ValuesPath: consts.ModuleName + ".internal.sslControllerCert",
 		},
 	); err != nil {
 		return err
 	}
 
-	// renew certs - linstor-node-ssl-cert
+	// renew cert 4
 	if err := s.generateAndSaveCert(
 		nodeSslSecret,
 		SelfSignedCertValues{
-			CA:     ca,
-			CN:     "linstor-node",
-			Usages: keyUsages,
-			SANs:   nil,
+			CA:         ca,
+			CN:         "linstor-node",
+			Usages:     keyUsages,
+			SANs:       nil,
+			ValuesPath: consts.ModuleName + ".internal.sslNodeCert",
+		},
+	); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *stateMachine) renewWebhookCerts() error {
+	if expiring, err := s.isExpiringWebhookCerts(); err != nil {
+		return fmt.Errorf("checking certs: %w", err)
+	} else if !expiring {
+		s.log.Debug("all webhook certs are fresh")
+		return nil
+	}
+
+	var schedulerAdmissionSecret,
+		webhookHttpsSecret,
+		err = s.getWebhookCertSecrets()
+	if err != nil {
+		return err
+	}
+
+	// renew CA
+	ca, err := certificate.GenerateCA(
+		"linstor-scheduler-admission",
+		certificate.WithCAExpiry(caExpiryDurationStr),
+	)
+	if err != nil {
+		return fmt.Errorf("generate ca: %w", err)
+	}
+
+	// renew cert 1
+	if err := s.generateAndSaveCert(
+		schedulerAdmissionSecret,
+		SelfSignedCertValues{
+			CA: ca,
+			CN: "linstor-scheduler-admission",
+			SANs: []string{
+				"linstor-scheduler-admission",
+				"linstor-scheduler-admission." + consts.ModuleNamespace,
+				"linstor-scheduler-admission." + consts.ModuleNamespace + ".svc",
+			},
+			ValuesPath: consts.ModuleName + ".internal.webhookCert",
+		},
+	); err != nil {
+		return err
+	}
+
+	// renew cert 2
+	if err := s.generateAndSaveCert(
+		webhookHttpsSecret,
+		SelfSignedCertValues{
+			CA: ca,
+			CN: "webhooks",
+			SANs: []string{
+				"webhooks",
+				"webhooks." + consts.ModuleNamespace,
+				"webhooks." + consts.ModuleNamespace + ".svc",
+				"%CLUSTER_DOMAIN%://webhooks." + consts.ModuleNamespace + ".svc",
+			},
+			ValuesPath: consts.ModuleName + ".internal.customWebhookCert",
 		},
 	); err != nil {
 		return err
@@ -305,7 +456,9 @@ func (s *stateMachine) generateAndSaveCert(secret *v1.Secret, values SelfSignedC
 }
 
 type SelfSignedCertValues struct {
-	CA           *certificate.Authority
+	CA *certificate.Authority
+	// if CA is nil, it will be generated. Override the default CN for it, if needed
+	CACNOverride string
 	CN           string
 	KeyAlgorithm string
 	KeySize      int
@@ -334,8 +487,13 @@ func generateNewSelfSignedTLS(input SelfSignedCertValues) (*certificate.Certific
 	if input.CA == nil {
 		var err error
 
+		cacn := input.CN
+		if input.CACNOverride != "" {
+			cacn = input.CACNOverride
+		}
+
 		input.CA, err = certificate.GenerateCA(
-			input.CN,
+			cacn,
 			certificate.WithKeyAlgo(input.KeyAlgorithm),
 			certificate.WithKeySize(input.KeySize),
 			certificate.WithCAExpiry(caExpiryDurationStr))
