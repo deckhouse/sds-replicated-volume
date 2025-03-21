@@ -12,10 +12,9 @@ import (
 	v1 "k8s.io/api/core/v1"
 )
 
-const SecretExpirationThreshold = time.Hour * 24 * 30
-
-const caExpiryDurationStr = "8760h"               // 1 year
-const certExpiryDuration = (24 * time.Hour) * 365 // 1 year
+const certExpirationThreshold = time.Hour * 24 * 30 // 30d
+const caExpiryDurationStr = "8760h"                 // 1 year
+const certExpiryDuration = (24 * time.Hour) * 365   // 1 year
 
 const (
 	SchedulerExtenderCertSecretName = "linstor-scheduler-extender-https-certs"
@@ -57,7 +56,7 @@ func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
 }
 
 func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
@@ -69,7 +68,7 @@ func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return utils.AnyCertIsExpiringSoon(s.log, secret, CertExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
 }
 
 func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
@@ -80,7 +79,7 @@ func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
 		if expiring, err := utils.AnyCertIsExpiringSoon(
 			s.log,
 			secret,
-			CertExpirationThreshold,
+			certExpirationThreshold,
 		); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("parsing cert %s: %w", secret.Name, err))
 			continue

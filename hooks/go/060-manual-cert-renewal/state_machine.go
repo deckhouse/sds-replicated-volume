@@ -21,7 +21,7 @@ import (
 const (
 	TriggerKeyStep = "step"
 	// to force renewal of non-expired certs
-	TriggerKeyForce                    = "force"
+	TriggerKeyForce                    = "force" // TODO
 	TriggerKeyBackupDaemonSetAffinity  = "backup-daemonset-affinity-"
 	TriggerKeyBackupDeploymentReplicas = "backup-deployment-replicas-"
 
@@ -35,7 +35,6 @@ const (
 	DeploymentNameCsiController     = "linstor-csi-controller"
 
 	WaitForResourcesPollInterval = 2 * time.Second
-	CertExpirationThreshold      = time.Hour * 24 * 30 // 30d
 )
 
 var (
