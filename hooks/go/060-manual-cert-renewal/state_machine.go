@@ -185,6 +185,9 @@ func (s *stateMachine) prepare() error {
 	// add finalizer
 	s.trigger.SetFinalizers([]string{PackageUri})
 
+	// prevent stale events from own updates
+	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalInProgressLabel, "true")
+
 	// backup
 	for _, name := range DaemonSetNameList {
 		if err := s.backupDaemonSet(name); err != nil {
@@ -439,7 +442,6 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 			err,
 		)
 	}
-	// TODO
 	return nil
 }
 
@@ -581,6 +583,7 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 func (s *stateMachine) moveToDone() error {
 	s.trigger.SetFinalizers(nil)
 	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalCompletedLabel, "true")
+	delete(s.trigger.Labels, ConfigMapCertRenewalInProgressLabel)
 	delete(s.trigger.Data, TriggerKeyForce)
 	return nil
 }

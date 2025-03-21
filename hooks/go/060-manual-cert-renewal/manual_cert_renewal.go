@@ -20,12 +20,13 @@ import (
 )
 
 const (
-	PackageName                        = "manualcertrenewal"
-	PackageUri                         = consts.ModuleUri + "-" + PackageName
-	ConfigMapCertRenewalCompletedLabel = PackageUri + "-completed"
-	CertRenewalTriggerName             = PackageName + "-trigger"
-	snapshotName                       = PackageName + "-snapshot"
-	HookTimeout                        = 5 * time.Minute
+	PackageName                         = "manualcertrenewal"
+	PackageUri                          = consts.ModuleUri + "-" + PackageName
+	ConfigMapCertRenewalInProgressLabel = PackageUri + "-in-progress"
+	ConfigMapCertRenewalCompletedLabel  = PackageUri + "-completed"
+	CertRenewalTriggerName              = PackageName + "-trigger"
+	snapshotName                        = PackageName + "-snapshot"
+	HookTimeout                         = 5 * time.Minute
 )
 
 // means running locally
@@ -52,6 +53,10 @@ var _ = registry.RegisterFunc(
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
 							Key:      ConfigMapCertRenewalCompletedLabel,
+							Operator: metav1.LabelSelectorOpDoesNotExist,
+						},
+						{
+							Key:      ConfigMapCertRenewalInProgressLabel,
 							Operator: metav1.LabelSelectorOpDoesNotExist,
 						},
 					},
