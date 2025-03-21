@@ -258,6 +258,7 @@ func (s *stateMachine) renewSchedulerExtenderCerts() error {
 			CN: "linstor-scheduler-extender",
 			SANs: []string{
 				"linstor-scheduler-extender",
+				"test-todo-delete-me",
 				"linstor-scheduler-extender." + consts.ModuleNamespace,
 				"linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
 				"%CLUSTER_DOMAIN%://linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
@@ -303,8 +304,6 @@ func (s *stateMachine) renewLinstorCerts() error {
 	if err != nil {
 		return err
 	}
-
-	// TODO: compare with values and change values, if needed
 
 	// renew CA
 	ca, err := certificate.GenerateCA(
