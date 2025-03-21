@@ -467,6 +467,8 @@ func (s *stateMachine) generateAndSaveCert(secret *v1.Secret, values SelfSignedC
 		Key: string(cert.Key),
 	})
 
+	s.log.Info("generated and saved cert", "name", secret.Name)
+
 	return nil
 }
 
