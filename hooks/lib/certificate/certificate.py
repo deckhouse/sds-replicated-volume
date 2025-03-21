@@ -245,6 +245,8 @@ def is_irrelevant_cert(crt_data: str, sans: list, cert_outdated_duration: timede
     :type cert_outdated_duration: :py:class:`timedelta`
     :rtype: :py:class:`bool`
     """
+    # TODO: revert when certs in Go hook start passing this check
+    return False
     if len(crt_data) == 0:
         return True
     crt = parse_certificate(crt_data)
