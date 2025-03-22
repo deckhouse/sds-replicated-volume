@@ -69,7 +69,7 @@ type stateMachine struct {
 	cachedDaemonSets  map[string]*appsv1.DaemonSet
 	cachedDeployments map[string]*appsv1.Deployment
 
-	values pkg.PatchableValuesCollector
+	hookInput *pkg.HookInput
 }
 
 func newStateMachine(
@@ -77,7 +77,7 @@ func newStateMachine(
 	cl client.Client,
 	log pkg.Logger,
 	trigger *v1.ConfigMap,
-	values pkg.PatchableValuesCollector,
+	hookInput *pkg.HookInput,
 ) *stateMachine {
 	s := &stateMachine{}
 
@@ -113,7 +113,7 @@ func newStateMachine(
 	s.trigger = trigger
 	s.currentStepIdx = currentStepIdx
 	s.steps = steps
-	s.values = values
+	s.hookInput = hookInput
 
 	return s
 }

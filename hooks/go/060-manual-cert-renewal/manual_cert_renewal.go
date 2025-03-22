@@ -95,7 +95,7 @@ func manualCertRenewal(ctx context.Context, input *pkg.HookInput) (err error) {
 		return nil
 	}
 
-	s := newStateMachine(ctx, cl, input.Logger, trigger, input.Values)
+	s := newStateMachine(ctx, cl, input.Logger, trigger, input)
 
 	if err := s.run(); err != nil {
 		return fmt.Errorf("run: %w", err)

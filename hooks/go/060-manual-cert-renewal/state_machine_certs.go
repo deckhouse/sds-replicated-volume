@@ -1,10 +1,13 @@
 package manualcertrenewal
 
 import (
+	"crypto/x509/pkix"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/cloudflare/cfssl/csr"
+	tlscertificate "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
@@ -257,9 +260,9 @@ func (s *stateMachine) renewSchedulerExtenderCerts() error {
 			CN: "linstor-scheduler-extender",
 			SANs: []string{
 				"linstor-scheduler-extender",
-				"test-todo-delete-me",
 				"linstor-scheduler-extender." + consts.ModuleNamespace,
 				"linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
+
 				"%CLUSTER_DOMAIN%://linstor-scheduler-extender." + consts.ModuleNamespace + ".svc",
 			},
 			ValuesPath: consts.ModuleName + ".internal.customSchedulerExtenderCert",
@@ -435,7 +438,7 @@ func (s *stateMachine) renewWebhookCerts() error {
 }
 
 func (s *stateMachine) generateAndSaveCert(secret *v1.Secret, values SelfSignedCertValues) error {
-	cert, err := generateNewSelfSignedTLS(values)
+	cert, err := s.generateNewSelfSignedTLS(values)
 	if err != nil {
 		return fmt.Errorf("renewing cert %s: %w", secret.Name, err)
 	}
@@ -459,7 +462,7 @@ func (s *stateMachine) generateAndSaveCert(secret *v1.Secret, values SelfSignedC
 		Key string `json:"key"`
 	}
 
-	s.values.Set(values.ValuesPath, certValues{
+	s.hookInput.Values.Set(values.ValuesPath, certValues{
 		CA:  string(cert.CA),
 		Crt: string(cert.CA),
 		Key: string(cert.Key),
@@ -480,9 +483,12 @@ type SelfSignedCertValues struct {
 	SANs         []string
 	Usages       []string
 	ValuesPath   string
+	Extensions   []pkix.Extension
 }
 
-func generateNewSelfSignedTLS(input SelfSignedCertValues) (*certificate.Certificate, error) {
+func (s *stateMachine) generateNewSelfSignedTLS(
+	input SelfSignedCertValues,
+) (*certificate.Certificate, error) {
 	if len(input.KeyAlgorithm) == 0 {
 		input.KeyAlgorithm = "ecdsa"
 	}
@@ -517,18 +523,19 @@ func generateNewSelfSignedTLS(input SelfSignedCertValues) (*certificate.Certific
 		}
 	}
 
+	sans := tlscertificate.DefaultSANs(input.SANs)(s.hookInput)
+
 	cert, err := certificate.GenerateSelfSignedCert(
 		input.CN,
 		input.CA,
-		certificate.WithSANs(input.SANs...),
+		certificate.WithSANs(sans...),
 		certificate.WithKeyAlgo(input.KeyAlgorithm),
 		certificate.WithKeySize(input.KeySize),
 		certificate.WithSigningDefaultExpiry(certExpiryDuration),
 		certificate.WithSigningDefaultUsage(input.Usages),
-		// TODO: support for extended_key_usages
-		// func(request *csr.CertificateRequest) {
-		// 	request.Extensions = append(request.Extensions, pkix.Extension{})
-		// },
+		func(request *csr.CertificateRequest) {
+			request.Extensions = append(request.Extensions, input.Extensions...)
+		},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("generate ca: %w", err)
