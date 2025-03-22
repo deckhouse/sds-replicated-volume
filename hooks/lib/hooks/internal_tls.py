@@ -192,6 +192,7 @@ class GenerateCertificateHook(Hook):
             secrets_from_snaps = {}
             diff_secrets = []
             if len(ctx.snapshots.get(self.SNAPSHOT_SECRETS_NAME, [])) == 0:
+                print(f"trace regenerate_all: 1")
                 regenerate_all = True
             else:
                 for snap in ctx.snapshots[self.SNAPSHOT_SECRETS_NAME]:
@@ -202,15 +203,18 @@ class GenerateCertificateHook(Hook):
 
             if self.common_ca and not regenerate_all:
                 if len(diff_secrets) > 0:
+                    print(f"trace regenerate_all: 2")
                     regenerate_all = True
                 else:
                     for secret in self.tls_secrets:
                         data = secrets_from_snaps[secret.name]
                         if self.is_outdated_ca(utils.base64_decode(data.get("ca.crt", ""))):
+                            print(f"trace regenerate_all: 3")
                             regenerate_all = True
                             break
                         sans = secret.sansGenerator(ctx)
                         if self.is_irrelevant_cert(utils.base64_decode(data.get("tls.crt", "")), sans):
+                            print(f"trace regenerate_all: 4")
                             regenerate_all = True
                             break
                             
