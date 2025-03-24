@@ -1,7 +1,7 @@
-From c63e8005621ffff6a7f2546d7ebc1d6c4c13d058 Mon Sep 17 00:00:00 2001
+From 01c3db4aefcda6796ebb75b23ee74cc31b48fb54 Mon Sep 17 00:00:00 2001
 From: Slava V <vyacheslav.voytenok@flant.com>
-Date: Wed, 12 Mar 2025 20:40:15 +0700
-Subject: [PATCH] [linstor-csi-plugin] add new patch
+Date: Thu, 13 Mar 2025 23:52:34 +0700
+Subject: [PATCH] [csi] add new topology logic
 
 Signed-off-by: Slava V <vyacheslav.voytenok@flant.com>
 ---
@@ -11,7 +11,7 @@ Signed-off-by: Slava V <vyacheslav.voytenok@flant.com>
  pkg/client/kubeutils/kubeutils.go             |  34 ++++
  pkg/client/linstor.go                         |   4 +-
  pkg/client/mock.go                            |   2 +-
- pkg/driver/driver.go                          |  53 ++++++-
+ pkg/driver/driver.go                          |  39 ++++-
  .../highlevelclient/high_level_client.go      |  30 +++-
  pkg/topology/scheduler/autoplace/autoplace.go |   4 +-
  .../autoplacetopology/autoplacetopology.go    |   4 +-
@@ -19,8 +19,10 @@ Signed-off-by: Slava V <vyacheslav.voytenok@flant.com>
  .../followtopology/follow_topology.go         |   4 +-
  pkg/topology/scheduler/manual/manual.go       |   4 +-
  pkg/topology/scheduler/scheduler.go           |   2 +-
+ pkg/volume/parameter.go                       |   5 +
+ pkg/volume/paramkey_enumer.go                 |   7 +-
  pkg/volume/volume.go                          |   8 +-
- 15 files changed, 274 insertions(+), 123 deletions(-)
+ 17 files changed, 269 insertions(+), 126 deletions(-)
  create mode 100644 pkg/client/kubeutils/kubeutils.go
 
 diff --git a/cmd/linstor-csi/linstor-csi.go b/cmd/linstor-csi/linstor-csi.go
@@ -527,7 +529,7 @@ index dcc930a..f4d544c 100644
  }
  
 diff --git a/pkg/driver/driver.go b/pkg/driver/driver.go
-index 150172a..5ef5ca4 100644
+index 150172a..78fce3a 100644
 --- a/pkg/driver/driver.go
 +++ b/pkg/driver/driver.go
 @@ -34,6 +34,7 @@ import (
@@ -549,18 +551,7 @@ index 150172a..5ef5ca4 100644
  
  	"github.com/piraeusdatastore/linstor-csi/pkg/client"
  	"github.com/piraeusdatastore/linstor-csi/pkg/linstor"
-@@ -53,6 +56,10 @@ import (
- // Version is set via ldflags configued in the Makefile.
- var Version = "UNKNOWN"
- 
-+const (
-+	storageClassAuxPrefix = "Aux/class.storage.deckhouse.io/"
-+)
-+
- // Driver fullfils CSI controller, node, and indentity server interfaces.
- type Driver struct {
- 	Storage       volume.CreateDeleter
-@@ -66,6 +73,7 @@ type Driver struct {
+@@ -66,6 +69,7 @@ type Driver struct {
  	srv           *grpc.Server
  	log           *logrus.Entry
  	version       string
@@ -568,7 +559,7 @@ index 150172a..5ef5ca4 100644
  	// name distingushes the driver from other drivers and is used to mark
  	// volumes so that volumes provisioned by another driver are not interfered with.
  	name string
-@@ -256,6 +264,14 @@ func ConfigureKubernetesIfAvailable() func(*Driver) error {
+@@ -256,6 +260,14 @@ func ConfigureKubernetesIfAvailable() func(*Driver) error {
  	}
  }
  
@@ -583,18 +574,13 @@ index 150172a..5ef5ca4 100644
  // GetPluginInfo https://github.com/container-storage-interface/spec/blob/v1.9.0/spec.md#getplugininfo
  func (d Driver) GetPluginInfo(ctx context.Context, req *csi.GetPluginInfoRequest) (*csi.GetPluginInfoResponse, error) {
  	return &csi.GetPluginInfoResponse{
-@@ -571,7 +587,24 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
+@@ -571,7 +583,19 @@ func (d Driver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest)
  			}
  		}
  
 -		topos, err := d.Storage.AccessibleTopologies(ctx, existingVolume.ID, &params)
-+		storageClassName, found := strings.CutPrefix(params.ReplicasOnSame[0], storageClassAuxPrefix)
-+		if !found {
-+			return nil, status.Errorf(codes.Internal, "failed to extract storage class name from replica: %s", params.ReplicasOnSame[0])
-+		}
-+
 +		rsc := &srv.ReplicatedStorageClass{}
-+		if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
++		if err := d.cl.Get(ctx, types.NamespacedName{Name: params.ReplicatedStorageClassName}, rsc); err != nil {
 +			return nil, status.Errorf(codes.NotFound,
 +				"CreateVolume failed for %s: unable to find storage class: %v", volId, err)
 +		}
@@ -609,18 +595,13 @@ index 150172a..5ef5ca4 100644
  		if err != nil {
  			return nil, status.Errorf(
  				codes.Internal, "CreateVolume failed for %s: unable to determine volume topology: %v",
-@@ -1354,7 +1387,23 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
+@@ -1354,7 +1378,18 @@ func (d Driver) createNewVolume(ctx context.Context, info *volume.Info, params *
  		}
  	}
  
 -	topos, err := d.Storage.AccessibleTopologies(ctx, info.ID, params)
-+	storageClassName, found := strings.CutPrefix(params.ReplicasOnSame[0], storageClassAuxPrefix)
-+	if !found {
-+		return nil, status.Errorf(codes.InvalidArgument,
-+			"CreateVolume failed for %s: no storage class found for replicasOnSame", info.ID)
-+	}
 +	rsc := &srv.ReplicatedStorageClass{}
-+	if err := d.cl.Get(ctx, types.NamespacedName{Name: storageClassName}, rsc); err != nil {
++	if err := d.cl.Get(ctx, types.NamespacedName{Name: params.ReplicatedStorageClassName}, rsc); err != nil {
 +		return nil, status.Errorf(codes.NotFound,
 +			"CreateVolume failed for %s: replicated storage class not found: %v", info.ID, err)
 +	}
@@ -759,6 +740,69 @@ index 888e30f..573d24e 100644
 -	AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy) ([]*csi.Topology, error)
 +	AccessibleTopologies(ctx context.Context, volId string, remoteAccessPolicy volume.RemoteAccessPolicy, p *volume.AccessibleTopologiesParams) ([]*csi.Topology, error)
  }
+diff --git a/pkg/volume/parameter.go b/pkg/volume/parameter.go
+index 5875851..e84c938 100644
+--- a/pkg/volume/parameter.go
++++ b/pkg/volume/parameter.go
+@@ -42,6 +42,7 @@ const (
+ 	resourcegroup
+ 	usepvcname
+ 	overprovision
++	replicatedstorageclassname
+ )
+ 
+ // Parameters configuration for linstor volumes.
+@@ -97,6 +98,8 @@ type Parameters struct {
+ 	// If set, free capacity is calculated by (TotalCapacity * OverProvision) - ReservedCapacity.
+ 	// If not set, the free capacity is taken directly from LINSTOR.
+ 	OverProvision *float64
++	// ReplicatedStorageClassName is the name of the replicated storage class
++	ReplicatedStorageClassName string
+ }
+ 
+ const DefaultDisklessStoragePoolName = "DfltDisklessStorPool"
+@@ -242,6 +245,8 @@ func NewParameters(params map[string]string, topologyPrefix string) (Parameters,
+ 			}
+ 
+ 			p.OverProvision = &f
++		case replicatedstorageclassname:
++			p.ReplicatedStorageClassName = v
+ 		}
+ 	}
+ 
+diff --git a/pkg/volume/paramkey_enumer.go b/pkg/volume/paramkey_enumer.go
+index 856eae7..21feb74 100644
+--- a/pkg/volume/paramkey_enumer.go
++++ b/pkg/volume/paramkey_enumer.go
+@@ -6,9 +6,9 @@ import (
+ 	"fmt"
+ )
+ 
+-const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovision"
++const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovisionreplicatedstorageclassname"
+ 
+-var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273}
++var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273, 299}
+ 
+ func (i paramKey) String() string {
+ 	if i < 0 || i >= paramKey(len(_paramKeyIndex)-1) {
+@@ -17,7 +17,7 @@ func (i paramKey) String() string {
+ 	return _paramKeyName[_paramKeyIndex[i]:_paramKeyIndex[i+1]]
+ }
+ 
+-var _paramKeyValues = []paramKey{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
++var _paramKeyValues = []paramKey{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
+ 
+ var _paramKeyNameToValueMap = map[string]paramKey{
+ 	_paramKeyName[0:23]:    0,
+@@ -41,6 +41,7 @@ var _paramKeyNameToValueMap = map[string]paramKey{
+ 	_paramKeyName[237:250]: 18,
+ 	_paramKeyName[250:260]: 19,
+ 	_paramKeyName[260:273]: 20,
++	_paramKeyName[273:299]: 21,
+ }
+ 
+ // paramKeyString retrieves an enum value from the enum constants string name.
 diff --git a/pkg/volume/volume.go b/pkg/volume/volume.go
 index 52f4f38..ba7c285 100644
 --- a/pkg/volume/volume.go
