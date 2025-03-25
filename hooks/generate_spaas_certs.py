@@ -22,20 +22,20 @@ from typing import Callable
 import common
 
 def main():
-    hook = GenerateCertificateHook(
-        TlsSecret(
-            cn="spaas",
-            name="spaas-certs",
-            sansGenerator=default_sans([
-                "spaas",
-                f"spaas.{common.NAMESPACE}",
-                f"spaas.{common.NAMESPACE}.svc"]),
-            values_path_prefix=f"{common.MODULE_NAME}.internal.spaasCert"
-            ),
-        cn="spaas-ca",
-        namespace=common.NAMESPACE)
+    # hook = GenerateCertificateHook(
+    #     TlsSecret(
+    #         cn="spaas",
+    #         name="spaas-certs",
+    #         sansGenerator=default_sans([
+    #             "spaas",
+    #             f"spaas.{common.NAMESPACE}",
+    #             f"spaas.{common.NAMESPACE}.svc"]),
+    #         values_path_prefix=f"{common.MODULE_NAME}.internal.spaasCert"
+    #         ),
+    #     cn="spaas-ca",
+    #     namespace=common.NAMESPACE)
 
-    hook.run()
+    # hook.run()
 
 if __name__ == "__main__":
     main()

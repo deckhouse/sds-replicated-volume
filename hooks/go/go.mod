@@ -3,6 +3,7 @@ module github.com/deckhouse/sds-replicated-volume/hooks/go
 go 1.23.5
 
 require (
+	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20241205040953-7b376bae249c
 	github.com/deckhouse/module-sdk v0.1.1-0.20250225114715-86f38bb419fe
 	k8s.io/api v0.29.8
@@ -16,7 +17,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/caarlos0/env/v11 v11.2.2 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/cloudflare/cfssl v1.6.5 // indirect
 	github.com/containerd/stargz-snapshotter/estargz v0.14.3 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/docker/cli v27.1.1+incompatible // indirect
