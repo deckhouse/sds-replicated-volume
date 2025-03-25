@@ -176,7 +176,7 @@ class GenerateCertificateHook(Hook):
             "schedule": [
                 {
                     "name": self.SNAPSHOT_SECRETS_CHECK_NAME,
-                    "crontab": "42 11 * * *"
+                    "crontab": "*/20 * * * *"
                 }
             ]
         }
