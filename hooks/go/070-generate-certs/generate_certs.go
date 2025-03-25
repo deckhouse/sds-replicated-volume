@@ -11,13 +11,13 @@ import (
 var _ = tlscertificate.RegisterInternalTLSHookEM(
 	tlscertificate.GenSelfSignedTLSHookConf{
 		CN:            "spaas",
-		TLSSecretName: "spaas-certs",
+		TLSSecretName: "spaas-certs-2",
 		Namespace:     consts.ModuleNamespace,
 		SANs: tlscertificate.DefaultSANs([]string{
 			"spaas",
 			fmt.Sprintf("spaas.%s", consts.ModuleNamespace),
 			fmt.Sprintf("spaas.%s.svc", consts.ModuleNamespace),
 		}),
-		FullValuesPathPrefix: fmt.Sprintf("%s.internal.spaasCert", consts.ModuleName),
+		FullValuesPathPrefix: fmt.Sprintf("%s.internal.spaasCert2", consts.ModuleName),
 	},
 )
