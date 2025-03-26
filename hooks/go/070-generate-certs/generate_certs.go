@@ -11,8 +11,8 @@ import (
 var _ = tlscertificate.RegisterInternalTLSHookEM(
 	tlscertificate.GenSelfSignedTLSHookConf{
 		CN:            "spaas",
-		TLSSecretName: "spaas-certs-2",
 		Namespace:     consts.ModuleNamespace,
+		TLSSecretName: "spaas-certs-2",
 		SANs: tlscertificate.DefaultSANs([]string{
 			"spaas",
 			fmt.Sprintf("spaas.%s", consts.ModuleNamespace),
