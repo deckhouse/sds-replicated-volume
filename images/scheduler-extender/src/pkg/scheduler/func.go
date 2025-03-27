@@ -345,12 +345,16 @@ func filterNodes(
 	wg.Add(len(*nodeNames))
 
 	for _, nodeName := range *nodeNames {
-		go func(nodeName string) {
+		go func(nodeName string, log logger.Logger) {
+			log.Debug(fmt.Sprintf("[filterNodes] Node %s is being filtered now", nodeName))
+			log.Debug(fmt.Sprintf("[filterNodes]"))
 			defer wg.Done()
 
 			nodeLvgs := commonNodes[nodeName]
 
 			for _, pvc := range pvcs {
+				log.Debug(fmt.Sprintf("[filterNodes] pvc %s is being processed. node: %s", pvc.Name, nodeName))
+
 				lvgsFromSC := scLVGs[*pvc.Spec.StorageClassName]
 				replicatedStorageClass := rscMap[*pvc.Spec.StorageClassName]
 				commonLVG := findMatchedLVG(nodeLvgs, lvgsFromSC)
@@ -359,8 +363,10 @@ func filterNodes(
 
 				switch replicatedStorageClass.Spec.VolumeAccess {
 				case "Local":
+					log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
 					if pvc.Spec.VolumeName == "" {
 						if commonLVG == nil {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
 							resCh <- ResultWithError{
 								nodeName: nodeName,
 								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
@@ -369,6 +375,7 @@ func filterNodes(
 						}
 
 						if !nodeHasEnoughSpace {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
 							resCh <- ResultWithError{
 								nodeName: nodeName,
 								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
@@ -379,6 +386,7 @@ func filterNodes(
 					}
 
 					if !isDrbdDiskfulNode {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
 						resCh <- ResultWithError{
 							nodeName: nodeName,
 							err:      fmt.Errorf("node %s is not diskful for pv %s", nodeName, pvc.Spec.VolumeName),
@@ -387,8 +395,11 @@ func filterNodes(
 					}
 
 				case "EventuallyLocal":
+					log.Debug(fmt.Sprintf("[filterNodes] ReplicatedCS VolumeAccess %s, node %s, pvc %s", replicatedStorageClass.Spec.VolumeAccess, nodeName, pvc.Name))
+
 					if pvc.Spec.VolumeName == "" {
 						if commonLVG == nil {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
 							resCh <- ResultWithError{
 								nodeName: nodeName,
 								err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
@@ -396,6 +407,7 @@ func filterNodes(
 							return
 						}
 						if !nodeHasEnoughSpace {
+							log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
 							resCh <- ResultWithError{
 								nodeName: nodeName,
 								err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
@@ -406,6 +418,7 @@ func filterNodes(
 					}
 
 					if isDrbdDiskfulNode {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a diskful DRBD node. pvc %s", nodeName, pvc.Name))
 						resCh <- ResultWithError{
 							nodeName: nodeName,
 							err:      nil,
@@ -413,6 +426,7 @@ func filterNodes(
 						return
 					}
 					if commonLVG == nil {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: 0 copies of a volume storeed on it. pvc %s", nodeName, pvc.Name))
 						resCh <- ResultWithError{
 							nodeName: nodeName,
 							err:      fmt.Errorf("node %s does not contain any lvgs from storage class %s", nodeName, replicatedStorageClass.Name),
@@ -420,6 +434,7 @@ func filterNodes(
 						return
 					}
 					if !nodeHasEnoughSpace {
+						log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
 						resCh <- ResultWithError{
 							nodeName: nodeName,
 							err:      fmt.Errorf("node does not have enough space in lvg %s for pvc %s/%s", commonLVG.Name, pvc.Namespace, pvc.Name),
@@ -428,6 +443,8 @@ func filterNodes(
 					}
 
 				case "PreferablyLocal":
+					log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not enough free space. pvc %s", nodeName, pvc.Name))
+
 					if pvc.Spec.VolumeName == "" {
 						if !nodeHasEnoughSpace {
 							resCh <- ResultWithError{
@@ -441,6 +458,7 @@ func filterNodes(
 			}
 
 			if !isDrbdNode(nodeName, drbdNodesMap) {
+				log.Debug(fmt.Sprintf("[filterNodes] node %s does not meet criteria: not a DRBD node", nodeName))
 				resCh <- ResultWithError{
 					nodeName: nodeName,
 					err:      fmt.Errorf("node %s is not a drbd node", nodeName),
@@ -448,6 +466,7 @@ func filterNodes(
 				return
 			}
 			if !isOkNode(nodeName) {
+				log.Debug(fmt.Sprintf("[filterNodes] node %s has problems nad will not be selected", nodeName))
 				resCh <- ResultWithError{
 					nodeName: nodeName,
 					err:      fmt.Errorf("node %s is offline", nodeName),
@@ -455,11 +474,12 @@ func filterNodes(
 				return
 			}
 
+			log.Debug(fmt.Sprintf("[filterNodes] node %s is ok", nodeName))
 			resCh <- ResultWithError{
 				nodeName: nodeName,
 				err:      nil,
 			}
-		}(nodeName)
+		}(nodeName, log)
 	}
 
 	wg.Wait()
