@@ -40,7 +40,7 @@ type thinPoolCache struct {
 	pvcs sync.Map // map[string]*pvcCache
 }
 
-type pvcThickCache struct {
+type pvcCache struct {
 	pvc          *v1.PersistentVolumeClaim
 	selectedNode string
 }
@@ -117,14 +117,14 @@ func (c *Cache) GetAllPVCForLVG(lvgName string) ([]*v1.PersistentVolumeClaim, er
 	result := make([]*v1.PersistentVolumeClaim, 0, size)
 	// collect Thick PVC for the LVG
 	lvgCh.(*LvgCache).thickPVCs.Range(func(_, pvcCh any) bool {
-		result = append(result, pvcCh.(*pvcThickCache).pvc)
+		result = append(result, pvcCh.(*pvcCache).pvc)
 		return true
 	})
 
 	// collect Thin PVC for the LVG
 	lvgCh.(*LvgCache).thinPools.Range(func(_, tpCh any) bool {
 		tpCh.(*thinPoolCache).pvcs.Range(func(_, pvcCh any) bool {
-			result = append(result, pvcCh.(*pvcThickCache).pvc)
+			result = append(result, pvcCh.(*pvcCache).pvc)
 			return true
 		})
 		return true
@@ -159,7 +159,7 @@ func (c *Cache) GetLVGThickReservedSpace(lvgName string) (int64, error) {
 
 	var space int64
 	lvg.(*LvgCache).thickPVCs.Range(func(_, pvcCh any) bool {
-		space += pvcCh.(*pvcThickCache).pvc.Spec.Resources.Requests.Storage().Value()
+		space += pvcCh.(*pvcCache).pvc.Spec.Resources.Requests.Storage().Value()
 		return true
 	})
 
@@ -182,7 +182,7 @@ func (c *Cache) GetLVGThinReservedSpace(lvgName string, thinPoolName string) (in
 
 	var space int64
 	thinPool.(*thinPoolCache).pvcs.Range(func(_, pvcCh any) bool {
-		space += pvcCh.(*pvcThickCache).pvc.Spec.Resources.Requests.Storage().Value()
+		space += pvcCh.(*pvcCache).pvc.Spec.Resources.Requests.Storage().Value()
 		return true
 	})
 
@@ -258,8 +258,8 @@ func (c *Cache) UpdateThickPVC(lvgName string, pvc *v1.PersistentVolumeClaim) er
 		return nil
 	}
 
-	pvcCh.(*pvcThickCache).pvc = pvc
-	pvcCh.(*pvcThickCache).selectedNode = pvc.Annotations[SelectedNodeAnnotation]
+	pvcCh.(*pvcCache).pvc = pvc
+	pvcCh.(*pvcCache).selectedNode = pvc.Annotations[SelectedNodeAnnotation]
 	c.log.Debug(fmt.Sprintf("[UpdateThickPVC] successfully updated PVC %s with selected node %s in the cache for LVMVolumeGroup %s", pvcKey, pvc.Annotations[SelectedNodeAnnotation], lvgName))
 
 	return nil
@@ -303,7 +303,7 @@ func (c *Cache) AddThickPVC(lvgName string, pvc *v1.PersistentVolumeClaim) error
 
 func (c *Cache) addNewThickPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim) {
 	pvcKey := configurePVCKey(pvc)
-	lvgCh.thickPVCs.Store(pvcKey, &pvcThickCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
+	lvgCh.thickPVCs.Store(pvcKey, &pvcCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
 
 	c.addLVGToPVC(lvgCh.Lvg.Name, pvcKey)
 }
@@ -392,8 +392,8 @@ func (c *Cache) UpdateThinPVC(lvgName, thinPoolName string, pvc *v1.PersistentVo
 		return nil
 	}
 
-	pvcCh.(*pvcThickCache).pvc = pvc
-	pvcCh.(*pvcThickCache).selectedNode = pvc.Annotations[SelectedNodeAnnotation]
+	pvcCh.(*pvcCache).pvc = pvc
+	pvcCh.(*pvcCache).selectedNode = pvc.Annotations[SelectedNodeAnnotation]
 	c.log.Debug(fmt.Sprintf("[UpdateThinPVC] successfully updated THIN PVC %s with selected node %s in the cache for LVMVolumeGroup %s", pvcKey, pvc.Annotations[SelectedNodeAnnotation], lvgName))
 
 	return nil
@@ -432,7 +432,7 @@ func (c *Cache) addNewThinPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim, th
 		return err
 	}
 
-	thinPoolCh.(*thinPoolCache).pvcs.Store(pvcKey, &pvcThickCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
+	thinPoolCh.(*thinPoolCache).pvcs.Store(pvcKey, &pvcCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
 	c.log.Debug(fmt.Sprintf("[addNewThinPVC] THIN PVC %s was added to the cache to Thin Pool %s", pvcKey, thinPoolName))
 
 	c.addLVGToPVC(lvgCh.Lvg.Name, pvcKey)
@@ -447,13 +447,13 @@ func (c *Cache) PrintTheCacheLog() {
 		c.log.Cache(fmt.Sprintf("[%s]", lvgName))
 
 		lvgCh.(*LvgCache).thickPVCs.Range(func(pvcName, pvcCh any) bool {
-			c.log.Cache(fmt.Sprintf("      THICK PVC %s, selected node: %s", pvcName, pvcCh.(*pvcThickCache).selectedNode))
+			c.log.Cache(fmt.Sprintf("      THICK PVC %s, selected node: %s", pvcName, pvcCh.(*pvcCache).selectedNode))
 			return true
 		})
 
 		lvgCh.(*LvgCache).thinPools.Range(func(thinPoolName, thinPoolCh any) bool {
 			thinPoolCh.(*thinPoolCache).pvcs.Range(func(pvcName, pvcCh any) bool {
-				c.log.Cache(fmt.Sprintf("      THIN POOL %s PVC %s, selected node: %s", thinPoolName, pvcName, pvcCh.(*pvcThickCache).selectedNode))
+				c.log.Cache(fmt.Sprintf("      THIN POOL %s PVC %s, selected node: %s", thinPoolName, pvcName, pvcCh.(*pvcCache).selectedNode))
 				return true
 			})
 
@@ -519,7 +519,7 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 					return true
 				}
 
-				selectedNode := pvcCh.(*pvcThickCache).selectedNode
+				selectedNode := pvcCh.(*pvcCache).selectedNode
 				if selectedNode == "" {
 					thinPoolCh.(*thinPoolCache).pvcs.Delete(pvcKey)
 					c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] removed space reservation for PVC %s in the Thin pool %s of the LVMVolumeGroup %s due the PVC was selected to the node %s", pvcKey, thinPoolName.(string), lvgName, pvc.Annotations[SelectedNodeAnnotation]))
@@ -537,7 +537,7 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 				continue
 			}
 
-			selectedNode := pvcCh.(*pvcThickCache).selectedNode
+			selectedNode := pvcCh.(*pvcCache).selectedNode
 			if selectedNode == "" {
 				lvgCh.(*LvgCache).thickPVCs.Delete(pvcKey)
 				c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] removed space reservation for PVC %s in the LVMVolumeGroup %s due the PVC was selected to the node %s", pvcKey, lvgName, pvc.Annotations[SelectedNodeAnnotation]))
