@@ -37,6 +37,13 @@ func TestScoreNodes(t *testing.T) {
 						NodeName: node1,
 					},
 				},
+				Status: snc.LVMVolumeGroupStatus{
+					Nodes: []snc.LVMVolumeGroupNode{
+						{
+							Name: node1,
+						},
+					},
+				},
 			},
 		},
 		{
@@ -47,13 +54,22 @@ func TestScoreNodes(t *testing.T) {
 						NodeName: node2,
 					},
 				},
+				Status: snc.LVMVolumeGroupStatus{
+					Nodes: []snc.LVMVolumeGroupNode{
+						{
+							Name: node2,
+						},
+					},
+				},
 			},
 		},
 	}
 
 	for _, lvgC := range lvgCache {
-		cache.Lvgs.Store(lvgC.Lvg.Name, lvgC)
+		cache.AddLVG(lvgC.Lvg)
 	}
+	cache.AddLVGToPVC("lvg-1", "pvc-1")
+	cache.AddLVGToPVC("lvg-2", "pvc-2")
 
 	pvcRequests := map[string]PVCRequest{
 		"pvc-1": {
@@ -66,18 +82,35 @@ func TestScoreNodes(t *testing.T) {
 		},
 	}
 
+	mockLVGYamlOne := `- name: lvg-1
+  Thin:
+    poolName: pool1
+- name: lvg-2
+  Thin:
+    poolName: pool2`
+
+	mockLVGYamlTwo := `- name: lvg-3
+  Thin:
+    poolName: pool3`
+
 	scs := map[string]*storagev1.StorageClass{
 		storageClassNameOne: {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: storageClassNameOne,
 			},
 			Provisioner: "replicated.csi.storage.deckhouse.io",
+			Parameters: map[string]string{
+				consts.LVMVolumeGroupsParamKey: mockLVGYamlOne,
+			},
 		},
 		storageClassNameTwo: {
 			ObjectMeta: metav1.ObjectMeta{
 				Name: storageClassNameTwo,
 			},
 			Provisioner: "replicated.csi.storage.deckhouse.io",
+			Parameters: map[string]string{
+				consts.LVMVolumeGroupsParamKey: mockLVGYamlTwo,
+			},
 		},
 	}
 

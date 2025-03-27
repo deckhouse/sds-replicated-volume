@@ -305,10 +305,10 @@ func (c *Cache) addNewThickPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim) {
 	pvcKey := configurePVCKey(pvc)
 	lvgCh.thickPVCs.Store(pvcKey, &pvcCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
 
-	c.addLVGToPVC(lvgCh.Lvg.Name, pvcKey)
+	c.AddLVGToPVC(lvgCh.Lvg.Name, pvcKey)
 }
 
-func (c *Cache) addLVGToPVC(lvgName, pvcKey string) {
+func (c *Cache) AddLVGToPVC(lvgName, pvcKey string) {
 	lvgsForPVC, found := c.pvcLVGs.Load(pvcKey)
 	if !found || lvgsForPVC == nil {
 		lvgsForPVC = make([]string, 0, lvgsPerPVCCount)
@@ -435,7 +435,7 @@ func (c *Cache) addNewThinPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim, th
 	thinPoolCh.(*thinPoolCache).pvcs.Store(pvcKey, &pvcCache{pvc: pvc, selectedNode: pvc.Annotations[SelectedNodeAnnotation]})
 	c.log.Debug(fmt.Sprintf("[addNewThinPVC] THIN PVC %s was added to the cache to Thin Pool %s", pvcKey, thinPoolName))
 
-	c.addLVGToPVC(lvgCh.Lvg.Name, pvcKey)
+	c.AddLVGToPVC(lvgCh.Lvg.Name, pvcKey)
 	return nil
 }
 

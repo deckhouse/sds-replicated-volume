@@ -122,16 +122,16 @@ func (s *scheduler) prioritize(w http.ResponseWriter, r *http.Request) {
 	s.log.Debug(fmt.Sprintf("[prioritize] successfully extracted the pvcRequests size for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 
 	storagePoolList := &srv.ReplicatedStoragePoolList{}
-    err = s.client.List(s.ctx, storagePoolList)
+	err = s.client.List(s.ctx, storagePoolList)
 	if err != nil {
-        s.log.Error(err, "[prioritize] unable to list replicated storage pools")
-        http.Error(w, "internal server error", http.StatusInternalServerError)
-        return
-    }
+		s.log.Error(err, "[prioritize] unable to list replicated storage pools")
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
 	storagePoolMap := make(map[string]*srv.ReplicatedStoragePool, len(storagePoolList.Items))
 	for _, storagePool := range storagePoolList.Items {
-        storagePoolMap[storagePool.Name] = &storagePool
-    }
+		storagePoolMap[storagePool.Name] = &storagePool
+	}
 
 	s.log.Debug(fmt.Sprintf("[prioritize] starts to score the nodes for Pod %s/%s", inputData.Pod.Namespace, inputData.Pod.Name))
 	result, err := scoreNodes(s.log, s.cache, &nodeNames, managedPVCs, scs, pvcRequests, s.defaultDivisor)
@@ -209,7 +209,7 @@ func scoreNodes(
 		}
 
 		// TODO make tests (+corner cases)
-        // TODO describe changes in doc
+		// TODO describe changes in doc
 		nodeScore := 0
 		nodeScore += replicaCountOnNode
 		averageFreeSpace := totalFreeSpaceLeftPercent / int64(len(pvcs))
@@ -269,7 +269,7 @@ func getFreeSpaceLeftPercent(freeSpaceBytes, requestedSpace, totalSpace int64) i
 	return int64(percent)
 }
 
-// TODO change divisor to multiplier 
+// TODO change divisor to multiplier
 func getNodeScore(freeSpace int64, multiplier float64) int {
 	converted := int(math.Round(math.Log2(float64(freeSpace) * multiplier)))
 	switch {
