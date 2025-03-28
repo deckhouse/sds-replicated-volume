@@ -9,6 +9,7 @@ import (
 	"time"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	slices2 "k8s.io/utils/strings/slices"
 )
@@ -491,7 +492,7 @@ func (c *Cache) PrintTheCacheLog() {
 }
 
 // RemoveSpaceReservationForPVCWithSelectedNode removes space reservation for selected PVC for every LVMVolumeGroup resource, which is not bound to the PVC selected node.
-func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string) error {
+func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
 	pvcKey := configurePVCKey(pvc)
 	// the LVG which is used to store PVC
 	selectedLVGName := ""

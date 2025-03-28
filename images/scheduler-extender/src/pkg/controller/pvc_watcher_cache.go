@@ -10,6 +10,7 @@ import (
 	"scheduler-extender/pkg/scheduler"
 	"slices"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/client-go/util/workqueue"
@@ -116,6 +117,18 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 		return
 	}
 
+	drbrResList := &srv.DRBDResourceList{}
+	err = mgr.GetClient().List(ctx, drbrResList)
+	if err != nil {
+        log.Error(err, fmt.Sprintf("[reconcilePVC] unable to list DRBDResourceList for PVC %s/%s", pvc.Namespace, pvc.Name))
+        return
+    }
+
+	drbdResMap := make(map[string]*srv.DRBDResource, len(drbrResList.Items))
+	for _, res := range drbrResList.Items {
+        drbdResMap[res.Name] = &res
+    }
+
 	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner {
 		log.Debug(fmt.Sprintf("[reconcilePVC] Storage Class %s for PVC %s/%s is not managed by sds-local-volume-provisioner. Ends the reconciliation", sc.Name, pvc.Namespace, pvc.Name))
 		return
@@ -186,7 +199,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	log.Cache(fmt.Sprintf("[reconcilePVC] cache state BEFORE the removal space reservation for PVC %s/%s", pvc.Namespace, pvc.Name))
 	schedulerCache.PrintTheCacheLog()
 	log.Debug(fmt.Sprintf("[reconcilePVC] starts to remove space reservation for PVC %s/%s with selected node from the cache", pvc.Namespace, pvc.Name))
-	err = schedulerCache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey])
+	err = schedulerCache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], drbdResMap)
 	if err != nil {
 		log.Error(err, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
 		return

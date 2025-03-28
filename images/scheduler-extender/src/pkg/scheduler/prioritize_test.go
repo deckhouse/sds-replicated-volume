@@ -9,6 +9,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -43,6 +44,7 @@ func TestScoreNodes(t *testing.T) {
 							Name: node1,
 						},
 					},
+					VGFree: resource.MustParse("30Gi"),
 				},
 			},
 		},
@@ -60,6 +62,7 @@ func TestScoreNodes(t *testing.T) {
 							Name: node2,
 						},
 					},
+					VGFree: resource.MustParse("1Gi"),
 				},
 			},
 		},
@@ -82,6 +85,7 @@ func TestScoreNodes(t *testing.T) {
 		},
 	}
 
+	// Do not change intendation here or else these LVGs will not be parsed
 	mockLVGYamlOne := `- name: lvg-1
   Thin:
     poolName: pool1
@@ -121,6 +125,11 @@ func TestScoreNodes(t *testing.T) {
 			},
 			Spec: v1.PersistentVolumeClaimSpec{
 				StorageClassName: &storageClassNameOne,
+				Resources: v1.VolumeResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceStorage: resource.MustParse("1Gi"),
+					},
+				},
 			},
 		},
 		"pvc-2": {
@@ -129,6 +138,11 @@ func TestScoreNodes(t *testing.T) {
 			},
 			Spec: v1.PersistentVolumeClaimSpec{
 				StorageClassName: &storageClassNameTwo,
+				Resources: v1.VolumeResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceStorage: resource.MustParse("500Mi"),
+					},
+				},
 			},
 		},
 	}
