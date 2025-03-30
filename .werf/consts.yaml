@@ -9,7 +9,7 @@
 
 # component versions
 {{- $versions := dict }}
-{{- $_ := set $versions "DRBD" "9.2.12" }}
+{{- $_ := set $versions "DRBD" "9.2.13" }}
 {{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
 {{- $_ := set $versions "DRBD_UTILS" "9.30.0" }}
 {{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
