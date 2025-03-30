@@ -10,47 +10,47 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: d8:{{ .Chart.Name }}:storagepool-reader
+  name: d8:{{ .Chart.Name }}:replicated-resources-reader
   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
 rules:
   - apiGroups: ["storage.deckhouse.io"]
-    resources: ["replicatedstoragepools", "lvmvolumegroups"]
+    resources: ["replicatedstoragepools", "replicatedstorageclasses", "lvmvolumegroups"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: d8:{{ .Chart.Name }}:storagepool-reader-binding
+  name: d8:{{ .Chart.Name }}:replicated-resources-reader-binding
   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
     name: csi
-    namespace: d8-sds-replicated-volume
+    namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
-  name: d8:{{ .Chart.Name }}:storagepool-reader
+  name: d8:{{ .Chart.Name }}:replicated-resources-reader
   apiGroup: rbac.authorization.k8s.io
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: d8:{{ .Chart.Name }}:rsc-watcher
-  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
-rules:
-  - apiGroups: ["storage.deckhouse.io"]
-    resources: ["replicatedstorageclasses"]
-    verbs: ["get", "list", "watch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: d8:{{ .Chart.Name }}:rsc-read-access
-  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
-subjects:
-  - kind: ServiceAccount
-    name: csi
-    namespace: d8-sds-replicated-volume
-roleRef:
-  kind: ClusterRole
-  name: d8:{{ .Chart.Name }}:rsc-watcher
-  apiGroup: rbac.authorization.k8s.io
+# ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRole
+# metadata:
+#   name: d8:{{ .Chart.Name }}:rsc-watcher
+#   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
+# rules:
+#   - apiGroups: ["storage.deckhouse.io"]
+#     resources: ["replicatedstorageclasses"]
+#     verbs: ["get", "list", "watch"]
+# ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRoleBinding
+# metadata:
+#   name: d8:{{ .Chart.Name }}:rsc-read-access
+#   {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-csi-controller")) | nindent 2 }}
+# subjects:
+#   - kind: ServiceAccount
+#     name: csi
+#     namespace: d8-{{ .Chart.Name }}
+# roleRef:
+#   kind: ClusterRole
+#   name: d8:{{ .Chart.Name }}:rsc-watcher
+#   apiGroup: rbac.authorization.k8s.io
