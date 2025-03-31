@@ -17,7 +17,7 @@ webhooks:
         name: "webhooks"
         path: "/rsp-validate"
       caBundle: |
-        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
+        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca | b64enc }}
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5
@@ -40,7 +40,7 @@ webhooks:
         name: "webhooks"
         path: "/rsc-validate"
       caBundle: |
-        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
+        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca | b64enc }}
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5
@@ -63,7 +63,7 @@ webhooks:
         name: "webhooks"
         path: "/sc-validate"
       caBundle: |
-        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca }}
+        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca | b64enc }}
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5

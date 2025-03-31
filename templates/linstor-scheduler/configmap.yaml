@@ -26,5 +26,5 @@ data:
         httpTimeout: 300s
         nodeCacheCapable: true
         tlsConfig:
-          caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca }}
+          caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca | b64enc }}
 {{- end }}
