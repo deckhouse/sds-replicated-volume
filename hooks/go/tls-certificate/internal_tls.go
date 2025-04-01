@@ -132,8 +132,8 @@ type GenSelfSignedTLSHookConf struct {
 	// Values to store:
 	// commonCaPath.key
 	// commonCaPath.crt
-	// Data in values store as plain text
-	// In helm templates you need use `b64enc` function to encode
+	// (!) Data in values is already in base64, so
+	// in helm templates you DON'T need use `b64enc` function
 	CommonCAValuesPath string
 	// Canonical name (CN) of common CA certificate.
 	// If not specified (empty), then (if no CA cert already generated) using CN property of this struct

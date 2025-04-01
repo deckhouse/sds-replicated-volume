@@ -8,8 +8,8 @@ metadata:
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.linstorCA }}
-  tls.crt: {{ .crt | b64enc }}
-  tls.key: {{ .key | b64enc }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
   {{- end }}
 ---
 apiVersion: v1
