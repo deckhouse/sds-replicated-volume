@@ -14,7 +14,7 @@
 #   n = n + 1
 {{- $_ := set $versions "DRBD" "9.3.0-1" }}
 # empty if the assembly is not from the main
-{{- $_ := set $versions "DRBD_COMMIT_REF" "288704a4143bbb93b619cbf9bd4f533a037fa101" }}
+{{- $_ := set $versions "DRBD_COMMIT_REF" "53fe7073c53951849a997e7bf1b5f39eea1fb28f" }}
 {{- $_ := set $versions "DRBD_REACTOR" "1.8.0" }}
 {{- $_ := set $versions "DRBD_UTILS" "9.30.0" }}
 {{- $_ := set $versions "LINSTOR_AFFINITY_CONTROLLER" "0.3.0" }}
