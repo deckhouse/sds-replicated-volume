@@ -8,8 +8,8 @@ import (
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/certs"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	v1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -41,7 +41,7 @@ func labelExpiringCerts(ctx context.Context, input *pkg.HookInput) error {
 	for _, secret := range secrets.Items {
 		log := input.Logger.With("name", secret.Name)
 
-		if expiring, err := certs.AnyCertIsExpiringSoon(log, &secret, SecretExpirationThreshold); err != nil {
+		if expiring, err := utils.AnyCertIsExpiringSoon(log, &secret, SecretExpirationThreshold); err != nil {
 			// do not retry certificate errors, probably just a format problem
 			log.Error("error checking certificates", "err", err)
 			continue

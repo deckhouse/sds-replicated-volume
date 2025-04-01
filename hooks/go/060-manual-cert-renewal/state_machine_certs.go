@@ -9,8 +9,8 @@ import (
 	"github.com/cloudflare/cfssl/csr"
 	tlscertificate "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/certs"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	v1 "k8s.io/api/core/v1"
 )
@@ -59,7 +59,7 @@ func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return certs.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
 }
 
 func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
@@ -71,7 +71,7 @@ func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return certs.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
 }
 
 func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
@@ -79,7 +79,7 @@ func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
 	var anyCertIsExpiring bool
 	var errs error
 	for _, secret := range secrets {
-		if expiring, err := certs.AnyCertIsExpiringSoon(
+		if expiring, err := utils.AnyCertIsExpiringSoon(
 			s.log,
 			secret,
 			certExpirationThreshold,
