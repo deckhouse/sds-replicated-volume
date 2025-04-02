@@ -4,20 +4,23 @@ import (
 	"crypto/x509/pkix"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/cloudflare/cfssl/csr"
+	"github.com/deckhouse/deckhouse/pkg/log"
 	tlscertificate "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
+	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	tlsc "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
 	certificatesv1 "k8s.io/api/certificates/v1"
 	v1 "k8s.io/api/core/v1"
 )
 
-const certExpirationThreshold = time.Hour * 24 * 30 // 30d
-const caExpiryDurationStr = "8760h"                 // 1 year
-const certExpiryDuration = (24 * time.Hour) * 365   // 1 year
+const caExpiryDurationStr = "8760h"               // 1 year
+const certExpiryDuration = (24 * time.Hour) * 365 // 1 year
 
 const (
 	SchedulerExtenderCertSecretName = "linstor-scheduler-extender-https-certs"
@@ -50,16 +53,17 @@ func (s *stateMachine) isExpiringAnyCerts() (bool, error) {
 	return false, nil
 }
 
-func (s *stateMachine) isExpiringSpaasCerts() (bool, error) {
+func (s *stateMachine) isCertExpiring(config tlsc.GenSelfSignedTLSHookConf) (bool, error) {
 	if _, ok := s.trigger.Data[TriggerKeyForce]; ok {
 		return true, nil
 	}
 
-	secret, err := s.getSecret(SpaasCertSecretName, false)
+	secret, err := s.getSecret(config.TLSSecretName, false)
 	if err != nil {
 		return false, err
 	}
-	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, consts.DefaultCertOutdatedDuration)
+
 }
 
 func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
@@ -71,7 +75,7 @@ func (s *stateMachine) isExpiringSchedulerExtenderCerts() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return utils.AnyCertIsExpiringSoon(s.log, secret, certExpirationThreshold)
+	return utils.AnyCertIsExpiringSoon(s.log, secret, consts.DefaultCertOutdatedDuration)
 }
 
 func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
@@ -82,7 +86,7 @@ func (s *stateMachine) isExpiringCertsList(secrets []*v1.Secret) (bool, error) {
 		if expiring, err := utils.AnyCertIsExpiringSoon(
 			s.log,
 			secret,
-			certExpirationThreshold,
+			consts.DefaultCertOutdatedDuration,
 		); err != nil {
 			errs = errors.Join(errs, fmt.Errorf("parsing cert %s: %w", secret.Name, err))
 			continue
@@ -207,6 +211,142 @@ func (s *stateMachine) renewCerts() error {
 	}
 
 	return nil
+}
+
+func (s *stateMachine) renewCert(conf tlsc.GenSelfSignedTLSHookConf) error {
+	secret, err := s.getSecret(conf.TLSSecretName, false)
+	if err != nil {
+		return err
+	}
+
+	if expiring, err := s.isCertExpiring(conf); err != nil {
+		return fmt.Errorf("parsing cert %s: %w", conf.TLSSecretName, err)
+	} else if !expiring {
+		s.log.Debug("cert is fresh", "name", conf.TLSSecretName)
+		return nil
+	}
+
+	conf.ValidateAndApplyDefaults()
+
+	usageStrs := make([]string, 0, len(conf.Usages))
+	for _, usage := range conf.Usages {
+		usageStrs = append(usageStrs, string(usage))
+	}
+
+	var cert *certificate.Certificate
+
+	cn, sans := conf.CN, conf.SANs(s.hookInput)
+
+	certs, err := objectpatch.UnmarshalToStruct[certificate.Certificate](s.hookInput.Snapshots, conf.FullValuesPathPrefix)
+	if err != nil {
+		return fmt.Errorf("unmarshal to struct: %w", err)
+	}
+
+	var auth *certificate.Authority
+
+	mustGenerate := false
+
+	useCommonCA := conf.CommonCAValuesPath != ""
+
+	// 1) get and validate common ca
+	// 2) if not valid:
+	// 2.1) regenerate common ca
+	// 2.2) save new common ca in values
+	// 2.3) mark certificates to regenerate
+	if useCommonCA {
+		auth, err = tlsc.GetCommonCA(s.hookInput, conf)
+		if err != nil {
+			s.log.Debug("GetCommonCA error", log.Err(err))
+
+			commonCACanonicalName := conf.CommonCACanonicalName
+
+			if len(commonCACanonicalName) == 0 {
+				commonCACanonicalName = conf.CN
+			}
+
+			auth, err = certificate.GenerateCA(
+				commonCACanonicalName,
+				certificate.WithKeyAlgo(conf.KeyAlgorithm),
+				certificate.WithKeySize(conf.KeySize),
+				certificate.WithCAExpiry(conf.CAExpiryDuration.String()))
+			if err != nil {
+				return fmt.Errorf("GenerateCA: %w", err)
+			}
+
+			s.hookInput.Values.Set(conf.CommonCAPath(), auth)
+
+			mustGenerate = true
+		}
+	}
+
+	// if no certificate - regenerate
+	if len(certs) == 0 {
+		mustGenerate = true
+	} else {
+		// 1) take first certificate
+		// 2) check certificate ca outdated
+		// 3) if using common CA - compare cert CA and common CA (if different - mark outdated)
+		// 4) check certificate outdated
+		// 5) if CA or cert outdated - regenerate
+
+		// Certificate is in the snapshot => load it.
+		cert = &certs[0]
+
+		caOutdated, err := tlsc.IsOutdatedCA(cert.CA, conf.CertOutdatedDuration)
+		if err != nil {
+			s.log.Error("IsOutdatedCA", log.Err(err))
+		}
+
+		// if common ca and cert ca are not equal - regenerate cert
+		if useCommonCA && !slices.Equal(auth.Cert, cert.CA) {
+			s.log.Warn("common ca is not equal cert ca")
+
+			caOutdated = true
+		}
+
+		certOutdatedOrIrrelevant, err := tlsc.IsIrrelevantCert(
+			s.log,
+			cert.Cert,
+			sans,
+			conf.CertOutdatedDuration,
+			usageStrs,
+		)
+		if err != nil {
+			s.log.Error("is irrelevant cert", log.Err(err))
+		}
+
+		// In case of errors, both these flags are false to avoid regeneration loop for the
+		// certificate.
+		mustGenerate = caOutdated || certOutdatedOrIrrelevant
+	}
+
+	if mustGenerate {
+		cert, err = tlsc.GenerateNewSelfSignedTLS(tlsc.SelfSignedCertValues{
+			CA:           auth,
+			CN:           cn,
+			KeyAlgorithm: conf.KeyAlgorithm,
+			KeySize:      conf.KeySize,
+			SANs:         sans,
+			Usages:       usageStrs,
+			CAExpiry:     conf.CAExpiryDuration.String(),
+			CertExpiry:   conf.CertExpiryDuration,
+		})
+
+		if err != nil {
+			return fmt.Errorf("generate new self signed tls: %w", err)
+		}
+	}
+
+	s.hookInput.Values.Set(
+		conf.Path(), tlsc.CertValues{
+			CA:  string(cert.CA),
+			Crt: string(cert.Cert),
+			Key: string(cert.Key),
+		},
+	)
+
+	return nil
+
 }
 
 func (s *stateMachine) renewSpaasCert() error {

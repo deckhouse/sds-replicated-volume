@@ -8,6 +8,10 @@ import (
 	kcertificates "k8s.io/api/certificates/v1"
 )
 
+func RegisterSpaasCertHook() {
+	tlscertificate.RegisterInternalTLSHookEM(SpaasCert)
+}
+
 var SpaasCert = tlscertificate.GenSelfSignedTLSHookConf{
 	CN:            "spaas",
 	Namespace:     ModuleNamespace,
@@ -27,7 +31,7 @@ var SpaasCert = tlscertificate.GenSelfSignedTLSHookConf{
 		// ExtKeyUsage
 		kcertificates.UsageServerAuth,
 	},
-	CAExpiryDuration:     Dur365d,
-	CertExpiryDuration:   Dur365d,
-	CertOutdatedDuration: Dur30d,
+	CAExpiryDuration:     DefaultCertExpiredDuration,
+	CertExpiryDuration:   DefaultCertExpiredDuration,
+	CertOutdatedDuration: DefaultCertOutdatedDuration,
 }

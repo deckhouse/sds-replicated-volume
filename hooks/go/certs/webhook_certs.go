@@ -9,6 +9,12 @@ import (
 	kcertificates "k8s.io/api/certificates/v1"
 )
 
+func RegisterWebhookCertsHook() {
+	for cfg := range WebhookCertConfigs() {
+		tlscertificate.RegisterInternalTLSHookEM(cfg)
+	}
+}
+
 func WebhookCertConfigs() iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 	return webhookCertConfigsFromArgs([]webhookHookArgs{
 		{
@@ -75,9 +81,9 @@ func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertific
 						// ExtKeyUsage
 						kcertificates.UsageServerAuth,
 					},
-					CAExpiryDuration:     Dur365d,
-					CertExpiryDuration:   Dur365d,
-					CertOutdatedDuration: Dur30d,
+					CAExpiryDuration:     DefaultCertExpiredDuration,
+					CertExpiryDuration:   DefaultCertExpiredDuration,
+					CertOutdatedDuration: DefaultCertOutdatedDuration,
 				},
 			)
 		}

@@ -8,6 +8,10 @@ import (
 	kcertificates "k8s.io/api/certificates/v1"
 )
 
+func RegisterSchedulerExtenderCertHook() {
+	tlscertificate.RegisterInternalTLSHookEM(SchedulerExtenderCertConfig)
+}
+
 var SchedulerExtenderCertConfig = tlscertificate.GenSelfSignedTLSHookConf{
 	CN:            "linstor-scheduler-extender",
 	Namespace:     ModuleNamespace,
@@ -27,7 +31,7 @@ var SchedulerExtenderCertConfig = tlscertificate.GenSelfSignedTLSHookConf{
 		// ExtKeyUsage
 		kcertificates.UsageServerAuth,
 	},
-	CAExpiryDuration:     Dur365d,
-	CertExpiryDuration:   Dur365d,
-	CertOutdatedDuration: Dur30d,
+	CAExpiryDuration:     DefaultCertExpiredDuration,
+	CertExpiryDuration:   DefaultCertExpiredDuration,
+	CertOutdatedDuration: DefaultCertOutdatedDuration,
 }

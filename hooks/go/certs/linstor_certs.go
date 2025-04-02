@@ -9,6 +9,12 @@ import (
 	kcertificates "k8s.io/api/certificates/v1"
 )
 
+func RegisterLinstorCertsHook() {
+	for cfg := range LinstorCertConfigs() {
+		tlscertificate.RegisterInternalTLSHookEM(cfg)
+	}
+}
+
 func LinstorCertConfigs() iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 	return linstorCertConfigsFromArgs([]linstorHookArgs{
 		{
@@ -81,9 +87,9 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 					"%s.internal.linstorCA",
 					ModuleName,
 				),
-				CAExpiryDuration:     Dur365d,
-				CertExpiryDuration:   Dur365d,
-				CertOutdatedDuration: Dur30d,
+				CAExpiryDuration:     DefaultCertExpiredDuration,
+				CertExpiryDuration:   DefaultCertExpiredDuration,
+				CertOutdatedDuration: DefaultCertOutdatedDuration,
 			}
 
 			if !yield(conf) {

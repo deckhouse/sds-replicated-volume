@@ -11,6 +11,6 @@ const (
 )
 
 const (
-	Dur365d = time.Hour * 24 * 365
-	Dur30d  = time.Hour * 24 * 30
+	DefaultCertExpiredDuration  = time.Hour * 24 * 365
+	DefaultCertOutdatedDuration = time.Hour * 24 * 30
 )
