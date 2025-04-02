@@ -21,8 +21,6 @@ var SchedulerExtenderCertConfig = tlscertificate.GenSelfSignedTLSHookConf{
 	Namespace:     ModuleNamespace,
 	TLSSecretName: "linstor-scheduler-extender-https-certs",
 	SANs: tlscertificate.DefaultSANs([]string{
-		"localhost",
-		"127.0.0.1",
 		"linstor-scheduler-extender",
 		fmt.Sprintf("linstor-scheduler-extender.%s", ModuleNamespace),
 		fmt.Sprintf("linstor-scheduler-extender.%s.svc", ModuleNamespace),

@@ -21,8 +21,6 @@ var SpaasCertConfig = tlscertificate.GenSelfSignedTLSHookConf{
 	Namespace:     ModuleNamespace,
 	TLSSecretName: "spaas-certs",
 	SANs: tlscertificate.DefaultSANs([]string{
-		"localhost",
-		"127.0.0.1",
 		"spaas",
 		fmt.Sprintf("spaas.%s", ModuleNamespace),
 		fmt.Sprintf("spaas.%s.svc", ModuleNamespace),

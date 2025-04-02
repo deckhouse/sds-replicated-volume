@@ -55,10 +55,7 @@ type webhookHookArgs struct {
 func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 	return func(yield func(tlscertificate.GenSelfSignedTLSHookConf) bool) {
 		for _, args := range hookArgs {
-			sans := []string{
-				"localhost",
-				"127.0.0.1",
-			}
+			sans := []string{}
 			for _, san := range args.additionalSANs {
 				sans = append(sans, san)
 			}
