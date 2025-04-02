@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/deckhouse/module-sdk/pkg"
@@ -19,9 +20,7 @@ import (
 )
 
 const (
-	TriggerKeyStep = "step"
-	// to force renewal of non-expired certs
-	TriggerKeyForce                    = "force" // TODO
+	TriggerKeyStep                     = "step"
 	TriggerKeyBackupDaemonSetAffinity  = "backup-daemonset-affinity-"
 	TriggerKeyBackupDeploymentReplicas = "backup-deployment-replicas-"
 
@@ -162,12 +161,7 @@ func (s *stateMachine) nextStep() (step, bool) {
 
 func (s *stateMachine) reset() error {
 	s.currentStepIdx = -1
-	forceVal, forceWasSet := s.trigger.Data[TriggerKeyForce]
 	s.trigger.Data = map[string]string{}
-	if forceWasSet {
-		// keep force flag
-		s.trigger.Data[TriggerKeyForce] = forceVal
-	}
 	return s.cl.Update(s.ctx, s.trigger)
 }
 
@@ -182,10 +176,10 @@ func (s *stateMachine) prepare() error {
 	}
 
 	// add finalizer
-	s.trigger.SetFinalizers([]string{PackageUri})
+	s.trigger.SetFinalizers([]string{consts.ManualCertRenewalPackageUri})
 
 	// prevent stale events from own updates
-	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalInProgressLabel, "true")
+	utils.MapEnsureAndSet(&s.trigger.Labels, consts.ManualCertRenewalInProgressLabel, "true")
 
 	// backup
 	for _, name := range DaemonSetNameList {
@@ -258,17 +252,6 @@ func (s *stateMachine) backupDaemonSet(name string) error {
 }
 
 func (s *stateMachine) turnOffAndRenewCerts() error {
-	expiring, err := s.isExpiringAnyCerts()
-	if err != nil {
-		s.log.Error("checking certs expiration failed, treating it as expired", "err", err)
-		expiring = true
-	}
-
-	if !expiring {
-		s.log.Info("all certs are fresh, skipping step")
-		return nil
-	}
-
 	// order of shutdown is important
 	if err := s.turnOffDaemonSetAndWait(DaemonSetNameCsiNode); err != nil {
 		return err
@@ -571,7 +554,14 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 			}
 
 			if len(podList.Items) > 0 {
-				s.log.Info("waiting for 'n' pods to be deleted", "n", len(podList.Items))
+				podNames := make([]string, 0, len(podList.Items))
+				for _, p := range podList.Items {
+					podNames = append(podNames, p.Name)
+				}
+				s.log.Info(
+					"waiting for pods to be deleted: "+strings.Join(podNames, ", "),
+					"n", len(podList.Items),
+				)
 				return false, nil
 			}
 			return true, nil
@@ -582,7 +572,6 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 func (s *stateMachine) moveToDone() error {
 	s.trigger.SetFinalizers(nil)
 	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalCompletedLabel, "true")
-	delete(s.trigger.Labels, ConfigMapCertRenewalInProgressLabel)
-	delete(s.trigger.Data, TriggerKeyForce)
+	delete(s.trigger.Labels, consts.ManualCertRenewalInProgressLabel)
 	return nil
 }

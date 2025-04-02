@@ -14,3 +14,9 @@ const (
 	DefaultCertExpiredDuration  = time.Hour * 24 * 365
 	DefaultCertOutdatedDuration = time.Hour * 24 * 30
 )
+
+const (
+	ManualCertRenewalPackageName     = "manualcertrenewal"
+	ManualCertRenewalPackageUri      = ModuleUri + "-" + ManualCertRenewalPackageName
+	ManualCertRenewalInProgressLabel = ManualCertRenewalPackageUri + "-in-progress"
+)

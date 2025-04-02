@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/deckhouse/module-sdk/pkg/registry"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
+
 	kcertificates "k8s.io/api/certificates/v1"
 )
 
 func RegisterLinstorCertsHook() {
-	for cfg := range LinstorCertConfigs() {
-		tlscertificate.RegisterInternalTLSHookEM(cfg)
+	for conf := range LinstorCertConfigs() {
+		registry.RegisterFunc(
+			ignoreManualCertRenewalEvents(tlscertificate.GenSelfSignedTLSConfig(conf)),
+			tlscertificate.GenSelfSignedTLS(conf),
+		)
 	}
 }
 
