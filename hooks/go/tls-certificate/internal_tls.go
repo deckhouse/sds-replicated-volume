@@ -434,6 +434,10 @@ func getCommonCA(input *pkg.HookInput, conf GenSelfSignedTLSHookConf) (*certific
 		return nil, err
 	}
 
+	if len(auth.Cert) == 0 {
+		input.Logger.Info("empty auth.Cert")
+	}
+
 	outdated, err := isOutdatedCA(auth.Cert, conf.CertOutdatedDuration)
 	if err != nil {
 		input.Logger.Error("is outdated ca", log.Err(err))
