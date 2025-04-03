@@ -14,13 +14,12 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 const (
-	ConfigMapCertRenewalCompletedLabel = consts.ManualCertRenewalPackageUri + "-completed"
+	ConfigMapCertRenewalCompletedLabel = consts.ManualCertRenewalPackageURI + "-completed"
 	CertRenewalTriggerName             = consts.ManualCertRenewalPackageName + "-trigger"
 	snapshotName                       = consts.ManualCertRenewalPackageName + "-snapshot"
 	HookTimeout                        = 5 * time.Minute

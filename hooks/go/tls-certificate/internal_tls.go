@@ -147,17 +147,17 @@ type GenSelfSignedTLSHookConf struct {
 	CertExpiryDuration time.Duration
 }
 
-func (gss GenSelfSignedTLSHookConf) Path() string {
-	return strings.TrimSuffix(gss.FullValuesPathPrefix, ".")
+func (conf GenSelfSignedTLSHookConf) Path() string {
+	return strings.TrimSuffix(conf.FullValuesPathPrefix, ".")
 }
 
-func (gss GenSelfSignedTLSHookConf) CommonCAPath() string {
-	return strings.TrimSuffix(gss.CommonCAValuesPath, ".")
+func (conf GenSelfSignedTLSHookConf) CommonCAPath() string {
+	return strings.TrimSuffix(conf.CommonCAValuesPath, ".")
 }
 
-func (gss GenSelfSignedTLSHookConf) UsagesStrings() []string {
-	usageStrs := make([]string, 0, len(gss.Usages))
-	for _, usage := range gss.Usages {
+func (conf GenSelfSignedTLSHookConf) UsagesStrings() []string {
+	usageStrs := make([]string, 0, len(conf.Usages))
+	for _, usage := range conf.Usages {
 		usageStrs = append(usageStrs, string(usage))
 	}
 	return usageStrs
@@ -379,7 +379,8 @@ func GenerateSelfSignedTLSIfNeeded(
 	}
 
 	if mustGenerate {
-		if newCert, err := GenerateNewSelfSignedTLS(
+		var newCert *certificate.Certificate
+		if newCert, err = GenerateNewSelfSignedTLS(
 			SelfSignedCertValues{
 				CA:           auth,
 				CN:           conf.CN,
@@ -393,9 +394,8 @@ func GenerateSelfSignedTLSIfNeeded(
 			},
 		); err != nil {
 			return false, fmt.Errorf("generate new self signed tls: %w", err)
-		} else {
-			*currentCert = *newCert
 		}
+		*currentCert = *newCert
 	}
 
 	input.Values.Set(conf.Path(), convCertToValues(currentCert))

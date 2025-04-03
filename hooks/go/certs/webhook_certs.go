@@ -3,6 +3,7 @@ package certs
 import (
 	"fmt"
 	"iter"
+	"slices"
 
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
@@ -55,10 +56,7 @@ type webhookHookArgs struct {
 func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 	return func(yield func(tlscertificate.GenSelfSignedTLSHookConf) bool) {
 		for _, args := range hookArgs {
-			sans := []string{}
-			for _, san := range args.additionalSANs {
-				sans = append(sans, san)
-			}
+			sans := slices.Clone(args.additionalSANs)
 
 			conf := tlscertificate.GenSelfSignedTLSHookConf{
 				CN:            args.cn,

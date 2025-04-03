@@ -176,7 +176,7 @@ func (s *stateMachine) prepare() error {
 	}
 
 	// add finalizer
-	s.trigger.SetFinalizers([]string{consts.ManualCertRenewalPackageUri})
+	s.trigger.SetFinalizers([]string{consts.ManualCertRenewalPackageURI})
 
 	// prevent stale events from own updates
 	utils.MapEnsureAndSet(&s.trigger.Labels, consts.ManualCertRenewalInProgressLabel, "true")
@@ -219,15 +219,15 @@ func (s *stateMachine) backupDeployment(name string) error {
 		return err
 	}
 
-	if replicasJson, err := json.Marshal(depl.Spec.Replicas); err != nil {
+	replicasJSON, err := json.Marshal(depl.Spec.Replicas)
+	if err != nil {
 		return fmt.Errorf("marshalling deployment.spec.replicas for backup: %w", err)
-	} else {
-		utils.MapEnsureAndSet(
-			&s.trigger.Data,
-			TriggerKeyBackupDeploymentReplicas+name,
-			string(replicasJson),
-		)
 	}
+	utils.MapEnsureAndSet(
+		&s.trigger.Data,
+		TriggerKeyBackupDeploymentReplicas+name,
+		string(replicasJSON),
+	)
 
 	return nil
 }
@@ -238,15 +238,15 @@ func (s *stateMachine) backupDaemonSet(name string) error {
 		return err
 	}
 
-	if affinityJson, err := json.Marshal(ds.Spec.Template.Spec.Affinity); err != nil {
+	affinityJSON, err := json.Marshal(ds.Spec.Template.Spec.Affinity)
+	if err != nil {
 		return fmt.Errorf("marshalling daemonset.template.spec.affinity for backup: %w", err)
-	} else {
-		utils.MapEnsureAndSet(
-			&s.trigger.Data,
-			TriggerKeyBackupDaemonSetAffinity+name,
-			string(affinityJson),
-		)
 	}
+	utils.MapEnsureAndSet(
+		&s.trigger.Data,
+		TriggerKeyBackupDaemonSetAffinity+name,
+		string(affinityJSON),
+	)
 
 	return nil
 }
@@ -330,15 +330,15 @@ func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
 	}
 
 	// backup
-	if replicasJson, err := json.Marshal(depl.Spec.Replicas); err != nil {
+	replicasJSON, err := json.Marshal(depl.Spec.Replicas)
+	if err != nil {
 		return fmt.Errorf("marshalling deployment.spec.replicas for backup: %w", err)
-	} else {
-		utils.MapEnsureAndSet(
-			&s.trigger.Data,
-			TriggerKeyBackupDeploymentReplicas+name,
-			string(replicasJson),
-		)
 	}
+	utils.MapEnsureAndSet(
+		&s.trigger.Data,
+		TriggerKeyBackupDeploymentReplicas+name,
+		string(replicasJSON),
+	)
 
 	// turn off
 	patch := client.MergeFrom(depl.DeepCopy())
@@ -401,10 +401,10 @@ func (s *stateMachine) turnOnDaemonSetAndWait(name string) error {
 		return err
 	}
 
-	originalAffinityJson := s.trigger.Data[TriggerKeyBackupDaemonSetAffinity+name]
+	originalAffinityJSON := s.trigger.Data[TriggerKeyBackupDaemonSetAffinity+name]
 
 	originalAffinity := &corev1.Affinity{}
-	if err := json.Unmarshal([]byte(originalAffinityJson), originalAffinity); err != nil {
+	if err := json.Unmarshal([]byte(originalAffinityJSON), originalAffinity); err != nil {
 		return fmt.Errorf("unmarshalling original affinity to restore %s: %w", name, err)
 	}
 
@@ -436,10 +436,10 @@ func (s *stateMachine) turnOnDeploymentAndWait(name string) error {
 	}
 
 	// restore original value
-	replicasJson := s.trigger.Data[TriggerKeyBackupDeploymentReplicas+name]
+	replicasJSON := s.trigger.Data[TriggerKeyBackupDeploymentReplicas+name]
 
 	var originalReplicas = new(int32)
-	if err := json.Unmarshal([]byte(replicasJson), originalReplicas); err != nil {
+	if err := json.Unmarshal([]byte(replicasJSON), originalReplicas); err != nil {
 		return fmt.Errorf("unmarshalling original replicas to restore %s: %w", name, err)
 	}
 
@@ -469,7 +469,7 @@ func (s *stateMachine) waitForDaemonSetReady(name string) error {
 		s.ctx,
 		WaitForResourcesPollInterval,
 		true,
-		func(ctx context.Context) (bool, error) {
+		func(_ context.Context) (bool, error) {
 			ds, err := s.getDaemonSet(name, true)
 			if err != nil {
 				return false, err
@@ -493,7 +493,6 @@ func (s *stateMachine) waitForDaemonSetReady(name string) error {
 			return true, nil
 		},
 	)
-
 }
 
 func (s *stateMachine) waitForDeploymentReady(name string) error {
@@ -503,7 +502,7 @@ func (s *stateMachine) waitForDeploymentReady(name string) error {
 		s.ctx,
 		WaitForResourcesPollInterval,
 		true,
-		func(ctx context.Context) (bool, error) {
+		func(_ context.Context) (bool, error) {
 			dep, err := s.getDeployment(name, true)
 			if err != nil {
 				return false, err

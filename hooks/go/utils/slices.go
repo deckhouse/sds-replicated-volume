@@ -41,7 +41,6 @@ func SliceIndex[K comparable, V any](s []V, indexFn func(v *V) K) iter.Seq2[K, *
 			if !yield(k, &s[i]) {
 				return
 			}
-
 		}
 	}
 }

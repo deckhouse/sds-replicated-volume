@@ -3,11 +3,11 @@ package consts
 import "time"
 
 const (
-	ModuleUri                = "storage.deckhouse.io/sds-replicated-volume"
+	ModuleURI                = "storage.deckhouse.io/sds-replicated-volume"
 	ModuleName               = "sdsReplicatedVolume"
 	ModuleLabelValue         = "sds-replicated-volume"
 	ModuleNamespace          = "d8-sds-replicated-volume"
-	SecretCertExpire30dLabel = ModuleUri + "-cert-expire-in-30d"
+	SecretCertExpire30dLabel = ModuleURI + "-cert-expire-in-30d"
 )
 
 const (
@@ -17,6 +17,6 @@ const (
 
 const (
 	ManualCertRenewalPackageName     = "manualcertrenewal"
-	ManualCertRenewalPackageUri      = ModuleUri + "-" + ManualCertRenewalPackageName
-	ManualCertRenewalInProgressLabel = ManualCertRenewalPackageUri + "-in-progress"
+	ManualCertRenewalPackageURI      = ModuleURI + "-" + ManualCertRenewalPackageName
+	ManualCertRenewalInProgressLabel = ManualCertRenewalPackageURI + "-in-progress"
 )
