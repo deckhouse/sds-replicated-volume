@@ -121,7 +121,7 @@ func (s *stateMachine) run() error {
 	for {
 		nextStep, ok := s.nextStep()
 		if !ok {
-			if _, hasLabel := s.trigger.Labels[ConfigMapCertRenewalCompletedLabel]; hasLabel {
+			if _, hasLabel := s.trigger.Labels[ConfigMapCompletedLabel]; hasLabel {
 				s.log.Debug("completion label found, stay in Done")
 				break
 			}
@@ -175,11 +175,28 @@ func (s *stateMachine) prepare() error {
 		return fmt.Errorf("checking resources: %w", err)
 	}
 
+	// prevent cert hook reacting to our changes
+	for conf := range allCertsConfigs() {
+		secret, err := s.getSecret(conf.TLSSecretName, false)
+		if err != nil {
+			return err
+		}
+
+		if secret.Labels == nil {
+			secret.Labels = map[string]string{}
+		}
+		secret.Labels[consts.SecretCertHookSuppressedByLabel] = PackageName
+
+		if err := s.cl.Update(s.ctx, secret); err != nil {
+			return fmt.Errorf("updating secret %s: %w", secret.Name, err)
+		}
+	}
+
 	// add finalizer
-	s.trigger.SetFinalizers([]string{consts.ManualCertRenewalPackageURI})
+	s.trigger.SetFinalizers([]string{PackageURI})
 
 	// prevent stale events from own updates
-	utils.MapEnsureAndSet(&s.trigger.Labels, consts.ManualCertRenewalInProgressLabel, "true")
+	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapInProgressLabel, "true")
 
 	// backup
 	for _, name := range DaemonSetNameList {
@@ -569,8 +586,24 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 }
 
 func (s *stateMachine) moveToDone() error {
+	for conf := range allCertsConfigs() {
+		secret, err := s.getSecret(conf.TLSSecretName, false)
+		if err != nil {
+			return err
+		}
+
+		if secret.Labels == nil {
+			secret.Labels = map[string]string{}
+		}
+		delete(secret.Labels, consts.SecretCertHookSuppressedByLabel)
+
+		if err := s.cl.Update(s.ctx, secret); err != nil {
+			return fmt.Errorf("deleting label from secret %s: %w", secret.Name, err)
+		}
+	}
+
 	s.trigger.SetFinalizers(nil)
-	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCertRenewalCompletedLabel, "true")
-	delete(s.trigger.Labels, consts.ManualCertRenewalInProgressLabel)
+	utils.MapEnsureAndSet(&s.trigger.Labels, ConfigMapCompletedLabel, "true")
+	delete(s.trigger.Labels, ConfigMapInProgressLabel)
 	return nil
 }

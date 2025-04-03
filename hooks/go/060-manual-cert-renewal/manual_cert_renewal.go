@@ -19,10 +19,13 @@ import (
 )
 
 const (
-	ConfigMapCertRenewalCompletedLabel = consts.ManualCertRenewalPackageURI + "-completed"
-	CertRenewalTriggerName             = consts.ManualCertRenewalPackageName + "-trigger"
-	snapshotName                       = consts.ManualCertRenewalPackageName + "-snapshot"
-	HookTimeout                        = 5 * time.Minute
+	PackageName              = "manualcertrenewal"
+	PackageURI               = consts.ModuleURI + "-" + PackageName
+	ConfigMapInProgressLabel = PackageURI + "-in-progress"
+	ConfigMapCompletedLabel  = PackageURI + "-completed"
+	CertRenewalTriggerName   = PackageName + "-trigger"
+	snapshotName             = PackageName + "-snapshot"
+	HookTimeout              = 5 * time.Minute
 )
 
 // means running locally
@@ -48,11 +51,11 @@ var _ = registry.RegisterFunc(
 				LabelSelector: &metav1.LabelSelector{
 					MatchExpressions: []metav1.LabelSelectorRequirement{
 						{
-							Key:      ConfigMapCertRenewalCompletedLabel,
+							Key:      ConfigMapCompletedLabel,
 							Operator: metav1.LabelSelectorOpDoesNotExist,
 						},
 						{
-							Key:      consts.ManualCertRenewalInProgressLabel,
+							Key:      ConfigMapInProgressLabel,
 							Operator: metav1.LabelSelectorOpDoesNotExist,
 						},
 					},
@@ -157,7 +160,7 @@ func getTrigger(ctx context.Context, cl client.Client, input *pkg.HookInput) *v1
 		return nil
 	}
 
-	if _, ok := cm.Labels[ConfigMapCertRenewalCompletedLabel]; ok {
+	if _, ok := cm.Labels[ConfigMapCompletedLabel]; ok {
 		input.Logger.Error("unexpected label on trigger", "labels", cm.Labels)
 		return nil
 	}

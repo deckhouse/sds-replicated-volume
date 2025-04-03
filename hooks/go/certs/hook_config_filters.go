@@ -6,7 +6,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func ignoreManualCertRenewalEvents(cfg *pkg.HookConfig) *pkg.HookConfig {
+func ignoreSuppressedEvents(cfg *pkg.HookConfig) *pkg.HookConfig {
 	for _, kcfg := range cfg.Kubernetes {
 		if kcfg.LabelSelector == nil {
 			kcfg.LabelSelector = &v1.LabelSelector{}
@@ -14,7 +14,7 @@ func ignoreManualCertRenewalEvents(cfg *pkg.HookConfig) *pkg.HookConfig {
 		kcfg.LabelSelector.MatchExpressions = append(
 			kcfg.LabelSelector.MatchExpressions,
 			v1.LabelSelectorRequirement{
-				Key:      consts.ManualCertRenewalInProgressLabel,
+				Key:      consts.SecretCertHookSuppressedByLabel,
 				Operator: v1.LabelSelectorOpDoesNotExist,
 			},
 		)

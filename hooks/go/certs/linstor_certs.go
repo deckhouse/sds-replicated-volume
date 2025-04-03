@@ -13,7 +13,7 @@ import (
 func RegisterLinstorCertsHook() {
 	for conf := range LinstorCertConfigs() {
 		registry.RegisterFunc(
-			ignoreManualCertRenewalEvents(tlscertificate.GenSelfSignedTLSConfig(conf)),
+			ignoreSuppressedEvents(tlscertificate.GenSelfSignedTLSConfig(conf)),
 			tlscertificate.GenSelfSignedTLS(conf),
 		)
 	}

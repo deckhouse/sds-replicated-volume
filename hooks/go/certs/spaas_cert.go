@@ -11,7 +11,7 @@ import (
 
 func RegisterSpaasCertHook() {
 	registry.RegisterFunc(
-		ignoreManualCertRenewalEvents(tlscertificate.GenSelfSignedTLSConfig(SpaasCertConfig)),
+		ignoreSuppressedEvents(tlscertificate.GenSelfSignedTLSConfig(SpaasCertConfig)),
 		tlscertificate.GenSelfSignedTLS(SpaasCertConfig),
 	)
 }

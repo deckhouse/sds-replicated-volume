@@ -11,7 +11,7 @@ import (
 
 func RegisterSchedulerExtenderCertHook() {
 	registry.RegisterFunc(
-		ignoreManualCertRenewalEvents(tlscertificate.GenSelfSignedTLSConfig(SchedulerExtenderCertConfig)),
+		ignoreSuppressedEvents(tlscertificate.GenSelfSignedTLSConfig(SchedulerExtenderCertConfig)),
 		tlscertificate.GenSelfSignedTLS(SchedulerExtenderCertConfig),
 	)
 }
