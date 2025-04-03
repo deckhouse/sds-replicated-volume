@@ -17,7 +17,6 @@ limitations under the License.
 package tlscertificate
 
 import (
-	"bytes"
 	"context"
 	"crypto/x509"
 	"encoding/json"
@@ -525,8 +524,8 @@ func isIrrelevantCert(
 	}
 
 	// IPAddresses
-	ipCompare := func(a, b net.IP) int { return bytes.Compare(a, b) }
-	ipEq := func(a, b net.IP) bool { return bytes.Equal(a, b) }
+	ipCompare := func(a, b net.IP) int { return strings.Compare(a.String(), b.String()) }
+	ipEq := func(a, b net.IP) bool { return net.IP.Equal(a, b) }
 	slices.SortFunc(ipAddrs, ipCompare)
 	slices.SortFunc(cert.IPAddresses, ipCompare)
 	if !slices.EqualFunc(ipAddrs, cert.IPAddresses, ipEq) {
