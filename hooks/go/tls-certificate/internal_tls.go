@@ -333,7 +333,7 @@ func GenerateSelfSignedTLSIfNeeded(
 	if useCommonCA {
 		auth, err = getCommonCA(input, conf)
 		if err != nil {
-			input.Logger.Debug("getCommonCA error", log.Err(err))
+			input.Logger.Info("getCommonCA error", log.Err(err))
 
 			auth, err = certificate.GenerateCA(
 				conf.CommonCACanonicalName,
