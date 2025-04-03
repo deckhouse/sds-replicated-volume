@@ -30,13 +30,12 @@ import (
 
 	"github.com/cloudflare/cfssl/config"
 	"github.com/cloudflare/cfssl/csr"
-	certificatesv1 "k8s.io/api/certificates/v1"
-
 	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	certificatesv1 "k8s.io/api/certificates/v1"
 )
 
 const year = (24 * time.Hour) * 365
@@ -377,7 +376,7 @@ func GenerateSelfSignedTLSIfNeeded(
 
 		// In case of errors, both these flags are false to avoid regeneration loop for the
 		// certificate.
-		mustGenerate = caOutdated || certOutdatedOrIrrelevant
+		mustGenerate = mustGenerate || caOutdated || certOutdatedOrIrrelevant
 	}
 
 	if mustGenerate {
@@ -544,7 +543,7 @@ func isIrrelevantCert(
 
 	for _, kuStr := range conf.UsagesStrings() {
 		if ku, ok := config.KeyUsage[kuStr]; ok {
-			expectedKeyUsage &= ku
+			expectedKeyUsage |= ku
 		} else if eku, ok := config.ExtKeyUsage[kuStr]; ok {
 			expectedExtKeyUsages = append(expectedExtKeyUsages, eku)
 		}

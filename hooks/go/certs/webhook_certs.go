@@ -60,33 +60,35 @@ func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertific
 				sans = append(sans, san)
 			}
 
-			_ = tlscertificate.RegisterInternalTLSHookEM(
-				tlscertificate.GenSelfSignedTLSHookConf{
-					CN:            args.cn,
-					Namespace:     ModuleNamespace,
-					TLSSecretName: args.secretName,
-					SANs:          tlscertificate.DefaultSANs(sans),
-					FullValuesPathPrefix: fmt.Sprintf(
-						"%s.internal.%s",
-						ModuleName,
-						args.valuesPropName,
-					),
-					CommonCACanonicalName: "linstor-scheduler-admission",
-					CommonCAValuesPath: fmt.Sprintf(
-						"%s.internal.webhooksCA",
-						ModuleName,
-					),
-					Usages: []kcertificates.KeyUsage{
-						kcertificates.UsageKeyEncipherment,
-						kcertificates.UsageCertSign,
-						// ExtKeyUsage
-						kcertificates.UsageServerAuth,
-					},
-					CAExpiryDuration:     DefaultCertExpiredDuration,
-					CertExpiryDuration:   DefaultCertExpiredDuration,
-					CertOutdatedDuration: DefaultCertOutdatedDuration,
+			conf := tlscertificate.GenSelfSignedTLSHookConf{
+				CN:            args.cn,
+				Namespace:     ModuleNamespace,
+				TLSSecretName: args.secretName,
+				SANs:          tlscertificate.DefaultSANs(sans),
+				FullValuesPathPrefix: fmt.Sprintf(
+					"%s.internal.%s",
+					ModuleName,
+					args.valuesPropName,
+				),
+				CommonCACanonicalName: "linstor-scheduler-admission",
+				CommonCAValuesPath: fmt.Sprintf(
+					"%s.internal.webhooksCA",
+					ModuleName,
+				),
+				Usages: []kcertificates.KeyUsage{
+					kcertificates.UsageKeyEncipherment,
+					kcertificates.UsageCertSign,
+					// ExtKeyUsage
+					kcertificates.UsageServerAuth,
 				},
-			)
+				CAExpiryDuration:     DefaultCertExpiredDuration,
+				CertExpiryDuration:   DefaultCertExpiredDuration,
+				CertOutdatedDuration: DefaultCertOutdatedDuration,
+			}
+
+			if !yield(conf) {
+				return
+			}
 		}
 	}
 }
