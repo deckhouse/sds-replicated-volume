@@ -23,7 +23,7 @@ defaults:
 
 jobs:
   dev_setup_build:
-    runs-on: [self-hosted, regular, selectel]
+    runs-on: [self-hosted, large]
     name: Build and Push images
     steps:
       - name: Set vars for PR
