@@ -672,3 +672,30 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 ## Why do you recommend using local disks (and not NAS)?
 
 DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
+
+
+## How to renew certificates manually?
+
+To trigger the manual certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: manualcertrenewal-trigger
+  namespace: d8-sds-replicated-volume
+```
+
+The system will stop all necessary module workloads, renew the certificates, and then start the workloads again.
+
+The status of the operation can be inferred from the trigger’s `data.step` property:
+ 
+ - `Prepared` - Health checks have passed, and downtime has begun.
+ - `TurnedOffAndRenewedCerts` - The system has been stopped and certificates renewed.
+ - `TurnedOn` - The system is back online.
+ - `Done` - The operation has been finalized and is ready to be repeated.
+
+Certificates are issued for one year and are marked as outdated 30 days before their expiration date.
+
+To repeat the operation, remove the `storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed` label from the trigger.
+
