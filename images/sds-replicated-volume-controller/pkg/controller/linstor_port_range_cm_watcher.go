@@ -24,7 +24,6 @@ import (
 	"time"
 
 	lapi "github.com/LINBIT/golinstor/client"
-	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/workqueue"
@@ -36,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
+	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
 )
 

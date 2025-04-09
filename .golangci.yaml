@@ -13,29 +13,27 @@ linters-settings:
     sections:
       - standard
       - default
-      - prefix(sds-replicated-volume-controller)
-      - prefix(webhooks)
+      - prefix(github.com/deckhouse)
+
   errcheck:
     ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
 
 linters:
   disable-all: true
   enable:
-  - dogsled
-  - errcheck
-  - gci
-  - gocritic
-  - gofmt
-#  - goimports
-  - gosimple
-  - govet
-  - ineffassign
-  - misspell
-  - revive
-  - staticcheck
-#  - structcheck
-  - typecheck
-  - unconvert
-  - unparam
-  - whitespace
-  - copyloopvar
+    - dogsled
+    - errcheck
+    - gci
+    - gocritic
+    - gofmt
+    - gosimple
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - typecheck
+    - unconvert
+    - unparam
+    - whitespace
+    - copyloopvar

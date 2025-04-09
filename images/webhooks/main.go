@@ -22,12 +22,12 @@ import (
 	"net/http"
 	"os"
 
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/sds-replicated-volume/images/webhooks/handlers"
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
 	storagev1 "k8s.io/api/storage/v1"
 
-	"github.com/sds-replicated-volume/images/webhooks/handlers"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type config struct {

@@ -21,8 +21,8 @@ import (
 	"net/http"
 	"os"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/go-logr/logr"
+	mc "github.com/sds-replicated-volume/images/webhooks/api"
 	kwhhttp "github.com/slok/kubewebhook/v2/pkg/http"
 	"github.com/slok/kubewebhook/v2/pkg/log"
 	"github.com/slok/kubewebhook/v2/pkg/model"
@@ -40,7 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
-	mc "github.com/sds-replicated-volume/images/webhooks/api"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 func NewKubeClient(kubeconfigPath string) (client.Client, error) {
