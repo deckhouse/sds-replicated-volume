@@ -1,5 +1,17 @@
 project: sds-replicated-volume
 configVersion: 1
+build:
+  imageSpec:
+    author: "Deckhouse Kubernetes Platform <contact@deckhouse.io>"
+    clearHistory: true
+    config:
+      clearWerfLabels: true
+      removeLabels:
+        - /.*/
+gitWorktree:
+  forceShallowClone: true
+cleanup:
+  disableGitHistoryBasedPolicy: {{ env "WERF_DISABLE_META_TAGS" "false" }}
 ---
 {{ tpl (.Files.Get ".werf/consts.yaml") $ }}
 {{ tpl (.Files.Get ".werf/utils.yaml") $ }}
