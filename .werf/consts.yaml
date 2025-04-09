@@ -40,3 +40,4 @@
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
 {{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
 {{- $_ := set $ "ALT_CLEANUP_CMD" "rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial" }}
+{{- $_ := set $ "ALT_BASE_PACKAGES" "openssl libtirpc tzdata" }}
