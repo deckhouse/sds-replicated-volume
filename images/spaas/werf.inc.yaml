@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 git:
   - url: {{ $.Root.SOURCE_REPO }}/LINBIT/saas
