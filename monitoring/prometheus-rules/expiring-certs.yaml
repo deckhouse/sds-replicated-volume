@@ -14,7 +14,7 @@
         summary: LINSTOR certificates expiring within 30 days detected
         description: |
           One or more Kubernetes Secrets contain certificates that are due to expire in under 30 days.
-          Please check the certificate details and renew or rotate them.
+          Please check the certificate details and either renew or rotate them.
           
           Use the following to list them:
           `kubectl get secrets -n d8-sds-replicated-volume -l storage.deckhouse.io/sds-replicated-volume-cert-expire-in-30d=true`
