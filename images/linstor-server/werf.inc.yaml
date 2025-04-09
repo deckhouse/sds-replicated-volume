@@ -187,7 +187,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-k8s-await-election-artifact
-from: {{ $.Root.BASE_GOLANG_1_23 }}
+from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
 
 git:
@@ -200,8 +200,6 @@ git:
         - "**/*"
 shell:
   setup:
-    - apk update
-    - apk install make
     - cd /usr/local/go/k8s-await-election
     - make
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
