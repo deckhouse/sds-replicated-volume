@@ -26,7 +26,7 @@ mount:
 shell:
   setup:
     - apk update
-    - apk install git
+    - apk add git
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w"
