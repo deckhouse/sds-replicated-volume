@@ -68,7 +68,7 @@ webhooks:
       name: "linstor-scheduler-admission"
       path: "/mutate"
       port: 4443
-    caBundle: {{ .Values.sdsReplicatedVolume.internal.webhookCert.ca }}
+    caBundle: {{ .Values.sdsReplicatedVolume.internal.webhookCert.ca | b64enc }}
   admissionReviewVersions: ["v1", "v1beta1"]
   sideEffects: None
   failurePolicy: Ignore

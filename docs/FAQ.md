@@ -672,3 +672,38 @@ DRBD with a replica count greater than 1 provides de facto network RAID. Using R
 ## Why do you recommend using local disks (and not NAS)?
 
 DRBD uses the network for data replication. When using NAS, network load will increase significantly because nodes will synchronize data not only with NAS but also between each other. Similarly, read/write latency will also increase. NAS typically involves using RAID on its side, which also adds overhead.
+
+
+## How to manually trigger the certificate renewal process?
+
+Although the certificate renewal process is automated, manual renewal might still be necessary because it can be performed during a convenient maintenance window when it is acceptable to restart the module's objects. The automated renewal does not restart any objects.
+
+To manually trigger the certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: manualcertrenewal-trigger
+  namespace: d8-sds-replicated-volume
+```
+
+The system will stop all necessary module objects, update the certificates, and then restart them.
+
+You can check the operation status using the following command:
+
+```shell
+kubectl -n d8-sds-replicated-volume get cm manualcertrenewal-trigger -ojsonpath='{.data.step}'
+```
+  - `Prepared` — health checks have passed successfully, and the downtime window has started.
+  - `TurnedOffAndRenewedCerts` — the system has been stopped and certificates have been renewed.
+  - `TurnedOn` — the system has been restarted.
+  - `Done` — the operation is complete and ready to be repeated.
+
+Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `D8LinstorCertificateExpiringIn30d` alert).
+
+To repeat the operation, simply remove the label from the trigger using the following command:
+
+```shell
+kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
+```
