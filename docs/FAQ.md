@@ -678,7 +678,7 @@ DRBD uses the network for data replication. When using NAS, network load will in
 
 Although the certificate renewal process is automated, manual renewal might still be necessary because it can be performed during a convenient maintenance window when it is acceptable to restart the module's objects. The automated renewal does not restart any objects.
 
-To manually trigger the certificate renewal process, create a ConfigMap named manualcertrenewal-trigger:
+To manually trigger the certificate renewal process, create a `ConfigMap` named `manualcertrenewal-trigger`:
 
 ```yaml
 apiVersion: v1
@@ -700,7 +700,7 @@ kubectl -n d8-sds-replicated-volume get cm manualcertrenewal-trigger -ojsonpath=
   - `TurnedOn` — the system has been restarted.
   - `Done` — the operation is complete and ready to be repeated.
 
-Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `CertificateExpiringIn30d` alert).
+Certificates are issued for a period of one year and are marked as expiring 30 days before their expiration date. The monitoring system alerts about expiring certificates (see the `D8LinstorCertificateExpiringIn30d` alert).
 
 To repeat the operation, simply remove the label from the trigger using the following command:
 
