@@ -20,6 +20,8 @@ mount:
     to: /go/pkg
 shell:
   setup:
+    - apk update
+    - apkl add git
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi
