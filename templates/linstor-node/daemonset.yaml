@@ -88,12 +88,12 @@ spec:
             - /linstor-drbd-wait
           env:
             - name: FILE_CONTENT
-              value: "version: 9.2"
+              value: "version: 9.3"
             - name: WAITING_MSG
-              value: "Waiting for DRBD version 9.2.x on host"
+              value: "Waiting for DRBD version 9.3.x on host"
           image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
           imagePullPolicy: IfNotPresent
-          name: wait-drbd-ver-9-2
+          name: wait-drbd-ver-9-3
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
