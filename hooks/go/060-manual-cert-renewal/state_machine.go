@@ -8,25 +8,16 @@ import (
 	"strings"
 	"time"
 
-<<<<<<< HEAD
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
-=======
->>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-<<<<<<< HEAD
-=======
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
->>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 const (

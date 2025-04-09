@@ -3,20 +3,12 @@ package manualcertrenewal
 import (
 	"fmt"
 
-<<<<<<< HEAD
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
-	appsv1 "k8s.io/api/apps/v1"
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-=======
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/utils"
->>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 func (s *stateMachine) getDeployment(name string, forceReload bool) (*appsv1.Deployment, error) {

@@ -6,27 +6,17 @@ import (
 	"os"
 	"time"
 
-<<<<<<< HEAD
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-=======
->>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
-<<<<<<< HEAD
-=======
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
->>>>>>> e37389c ([internal] fixes in CI, switch to werf v2)
 )
 
 const (
