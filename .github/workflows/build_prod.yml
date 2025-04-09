@@ -15,7 +15,7 @@ env:
 on:
   push:
     tags:
-      - '**'
+      - "**"
 
 jobs:
   prod_ce_setup_build:
@@ -24,7 +24,7 @@ jobs:
     steps:
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ce/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ce/modules" >> "$GITHUB_ENV"
       - run: |
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
@@ -57,7 +57,7 @@ jobs:
     steps:
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ee/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/ee/modules" >> "$GITHUB_ENV"
       - run: |
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
@@ -90,7 +90,7 @@ jobs:
     steps:
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/fe/modules" >> "$GITHUB_ENV"
       - run: |
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
@@ -123,7 +123,7 @@ jobs:
     steps:
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se/modules" >> "$GITHUB_ENV"
       - run: |
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
@@ -156,7 +156,7 @@ jobs:
     steps:
       - name: SET VAR
         run: |
-           echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se-plus/modules" >> "$GITHUB_ENV"
+          echo "MODULES_MODULE_SOURCE=$MODULES_REGISTRY/$MODULE_SOURCE_NAME/se-plus/modules" >> "$GITHUB_ENV"
       - run: |
           echo $MODULES_REGISTRY
           echo $MODULES_MODULE_NAME
