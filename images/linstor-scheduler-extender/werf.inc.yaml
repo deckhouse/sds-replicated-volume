@@ -35,6 +35,8 @@ mount:
     to: /go/pkg
 shell:
   beforeSetup:
+    - apk update
+    - apk add git
     - cd /usr/local/go/stork
     - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
     - git apply /patches/stork/*.patch
