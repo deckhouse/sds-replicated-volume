@@ -68,4 +68,5 @@ def main():
     hook.run()
 
 if __name__ == "__main__":
+    print("PY HOOK")
     main()
