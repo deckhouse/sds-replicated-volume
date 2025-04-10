@@ -5,10 +5,11 @@ import (
 	"iter"
 	"slices"
 
+	kcertificates "k8s.io/api/certificates/v1"
+
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
-	kcertificates "k8s.io/api/certificates/v1"
 )
 
 func RegisterWebhookCertsHook() {

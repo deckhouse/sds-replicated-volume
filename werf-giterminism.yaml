@@ -1,7 +1,14 @@
 giterminismConfigVersion: 1
 config:
-  goTemplateRendering:	# The rules for the Go-template functions to be able to pass build context to the release
-    allowEnvVariables: [ /CI_.+/, MODULES_MODULE_TAG, GOLANG_VERSION, GOPROXY, SOURCE_REPO_TAG, SOURCE_REPO ]
+  goTemplateRendering: # The rules for the Go-template functions to be able to pass build context to the release
+    allowEnvVariables:
+      - /CI_.+/
+      - MODULES_MODULE_TAG
+      - WERF_DISABLE_META_TAGS
+      - GOLANG_VERSION
+      - GOPROXY
+      - SOURCE_REPO
+      - SOURCE_REPO_TAG
   stapel:
     mount:
       allowBuildDir: true

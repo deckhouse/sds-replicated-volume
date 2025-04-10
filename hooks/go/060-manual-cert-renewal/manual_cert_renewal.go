@@ -6,16 +6,17 @@ import (
 	"os"
 	"time"
 
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/module-sdk/pkg/utils/ptr"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 )
 
 const (

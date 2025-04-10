@@ -29,12 +29,13 @@ import (
 
 	"github.com/cloudflare/cfssl/config"
 	"github.com/cloudflare/cfssl/csr"
+	certificatesv1 "k8s.io/api/certificates/v1"
+
 	"github.com/deckhouse/deckhouse/pkg/log"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	certificatesv1 "k8s.io/api/certificates/v1"
 )
 
 const year = (24 * time.Hour) * 365
