@@ -1,9 +1,10 @@
 package certs
 
 import (
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func ignoreSuppressedEvents(cfg *pkg.HookConfig) *pkg.HookConfig {
