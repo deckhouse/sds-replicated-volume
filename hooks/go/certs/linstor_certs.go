@@ -87,10 +87,6 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 					kcertificates.UsageServerAuth,
 					kcertificates.UsageClientAuth,
 				},
-				CommonCAValuesPath: fmt.Sprintf(
-					"%s.internal.linstorCA",
-					ModuleName,
-				),
 				CAExpiryDuration:     DefaultCertExpiredDuration,
 				CertExpiryDuration:   DefaultCertExpiredDuration,
 				CertOutdatedDuration: DefaultCertOutdatedDuration,
