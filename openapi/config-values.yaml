@@ -66,3 +66,4 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
+        description: Backup schedule

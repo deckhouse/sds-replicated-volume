@@ -2,28 +2,15 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: linstor-ca
-  namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
-type: kubernetes.io/tls
-data:
-  {{- with .Values.sdsReplicatedVolume.internal.linstorCA }}
-  tls.crt: {{ .crt }}
-  tls.key: {{ .key }}
-  {{- end }}
----
-apiVersion: v1
-kind: Secret
-metadata:
   name: linstor-controller-https-cert
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.httpsControllerCert }}
-  tls.crt: {{ .crt | b64enc }}
-  tls.key: {{ .key | b64enc }}
-  ca.crt: {{ .ca | b64enc }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
   {{- end }}
 ---
 apiVersion: v1
@@ -35,9 +22,9 @@ metadata:
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.httpsClientCert }}
-  tls.crt: {{ .crt | b64enc }}
-  tls.key: {{ .key | b64enc }}
-  ca.crt: {{ .ca | b64enc }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
   {{- end }}
 ---
 apiVersion: v1
@@ -49,9 +36,9 @@ metadata:
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.sslControllerCert }}
-  tls.crt: {{ .crt | b64enc }}
-  tls.key: {{ .key | b64enc }}
-  ca.crt: {{ .ca | b64enc }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
   {{- end }}
 ---
 apiVersion: v1
@@ -63,7 +50,7 @@ metadata:
 type: kubernetes.io/tls
 data:
   {{- with .Values.sdsReplicatedVolume.internal.sslNodeCert }}
-  tls.crt: {{ .crt | b64enc }}
-  tls.key: {{ .key | b64enc }}
-  ca.crt: {{ .ca | b64enc }}
+  tls.crt: {{ .crt }}
+  tls.key: {{ .key }}
+  ca.crt: {{ .ca }}
   {{- end }}
