@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"iter"
 
+	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
@@ -13,9 +14,31 @@ import (
 func RegisterLinstorCertsHook() {
 	for conf := range LinstorCertConfigs() {
 		registry.RegisterFunc(
-			ignoreSuppressedEvents(tlscertificate.GenSelfSignedTLSConfig(conf)),
+			ignoreSuppressedEvents(GenSelfSignedTLSConfigNoSchedule(conf)),
 			tlscertificate.GenSelfSignedTLS(conf),
 		)
+	}
+}
+
+func GenSelfSignedTLSConfigNoSchedule(conf tlscertificate.GenSelfSignedTLSHookConf) *pkg.HookConfig {
+	return &pkg.HookConfig{
+		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
+		Kubernetes: []pkg.KubernetesConfig{
+			{
+				Name:       tlscertificate.InternalTLSSnapshotKey,
+				APIVersion: "v1",
+				Kind:       "Secret",
+				NamespaceSelector: &pkg.NamespaceSelector{
+					NameSelector: &pkg.NameSelector{
+						MatchNames: []string{conf.Namespace},
+					},
+				},
+				NameSelector: &pkg.NameSelector{
+					MatchNames: []string{conf.TLSSecretName},
+				},
+				JqFilter: tlscertificate.JQFilterTLS,
+			},
+		},
 	}
 }
 
