@@ -33,19 +33,6 @@ properties:
             default: ""
             description: |
               Hash of affected PVs. Used to determine if bashible migration step should be forced to run.
-      linstorCA:
-        type: object
-        default: {}
-        x-required-for-helm:
-        - crt
-        - key
-        properties:
-          crt:
-            type: string
-            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
-          key:
-            type: string
-            x-examples: ["YjY0ZW5jX3N0cmluZwo="]
       httpsClientCert:
         type: object
         default: {}
