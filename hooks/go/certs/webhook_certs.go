@@ -70,10 +70,6 @@ func webhookCertConfigsFromArgs(hookArgs []webhookHookArgs) iter.Seq[tlscertific
 					args.valuesPropName,
 				),
 				CommonCACanonicalName: "linstor-scheduler-admission",
-				CommonCAValuesPath: fmt.Sprintf(
-					"%s.internal.webhooksCA",
-					ModuleName,
-				),
 				Usages: []kcertificates.KeyUsage{
 					kcertificates.UsageKeyEncipherment,
 					kcertificates.UsageCertSign,
