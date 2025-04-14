@@ -6,7 +6,6 @@ import (
 
 	kcertificates "k8s.io/api/certificates/v1"
 
-	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 	. "github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
@@ -15,31 +14,9 @@ import (
 func RegisterLinstorCertsHook() {
 	for conf := range LinstorCertConfigs() {
 		registry.RegisterFunc(
-			ignoreSuppressedEvents(GenSelfSignedTLSConfigNoSchedule(conf)),
+			ignoreSuppressedEvents(tlscertificate.GenSelfSignedTLSConfig(conf)),
 			tlscertificate.GenSelfSignedTLS(conf),
 		)
-	}
-}
-
-func GenSelfSignedTLSConfigNoSchedule(conf tlscertificate.GenSelfSignedTLSHookConf) *pkg.HookConfig {
-	return &pkg.HookConfig{
-		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
-		Kubernetes: []pkg.KubernetesConfig{
-			{
-				Name:       tlscertificate.InternalTLSSnapshotKey,
-				APIVersion: "v1",
-				Kind:       "Secret",
-				NamespaceSelector: &pkg.NamespaceSelector{
-					NameSelector: &pkg.NameSelector{
-						MatchNames: []string{conf.Namespace},
-					},
-				},
-				NameSelector: &pkg.NameSelector{
-					MatchNames: []string{conf.TLSSecretName},
-				},
-				JqFilter: tlscertificate.JQFilterTLS,
-			},
-		},
 	}
 }
 
@@ -111,6 +88,10 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 					kcertificates.UsageServerAuth,
 					kcertificates.UsageClientAuth,
 				},
+				CommonCAValuesPath: fmt.Sprintf(
+					"%s.internal.linstorCA",
+					ModuleName,
+				),
 				CAExpiryDuration:     DefaultCertExpiredDuration,
 				CertExpiryDuration:   DefaultCertExpiredDuration,
 				CertOutdatedDuration: DefaultCertOutdatedDuration,
