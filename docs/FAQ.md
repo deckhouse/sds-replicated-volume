@@ -130,6 +130,34 @@ For greater stability of the module, it is not recommended to reboot multiple no
    kubectl exec -n d8-sds-replicated-volume deploy/linstor-controller -- linstor --yes-i-am-sane-and-i-understand-what-i-am-doing resource delete OLD_NODE RESOURCE_NAME
    ```
 
+### Can I automate the management of replicas and monitoring of LINSTOR state?
+Replica management and state monitoring are automated in the `replicas_manager.sh` script. 
+It checks the availability of the LINSTOR controller, identifies faulty or corrupted resources, creates database backups, and manages disk replicas, including configuring TieBreaker for quorum.
+
+To check the existence of the `replicas_manager.sh` script, run the following command on any master node:
+
+   ```shell
+   ls -l /opt/deckhouse/sbin/replicas_manager.sh
+   ```
+
+Upon execution, the script performs the following actions:
+- Verifies the availability of the controller and connectivity to satellites
+- Identifies faulty or corrupted resources
+- Creates a backup of the database
+- Manages the number of disk replicas, adding new ones as needed
+- Configures TieBreaker for resources with two replicas
+- Logs all actions to a file named linstor_replicas_manager_<date_time>.log
+- Provides recommendations for resolving issues, such as stuck replicas
+
+Configuration variables for `replicas_manager.sh`:
+- NON_INTERACTIVE — enables non-interactive mode
+- TIMEOUT_SEC — timeout between attempts, in seconds (default: 10)
+- EXCLUDED_RESOURCES_FROM_CHECK — regular expression to exclude resources from checks
+- CHUNK_SIZE — chunk size for processing resources (default: 10)
+- NODE_FOR_EVICT — name of the node excluded from creating replicas
+- LINSTOR_NAMESPACE — Kubernetes namespace (default: d8-sds-replicated-volume)
+- DISKLESS_STORAGE_POOL — pool for diskless replicas (default: DfltDisklessStorPool)
+
 ### How to evict DRBD resources from a node?
 
 Eviction of DRBD resources from a node is performed using the `evict.sh` script. It can operate in two modes:
