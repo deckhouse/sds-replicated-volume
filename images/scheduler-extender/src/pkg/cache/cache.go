@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"scheduler-extender/pkg/consts"
 	"scheduler-extender/pkg/logger"
+	"slices"
 	"sync"
 	"time"
 
@@ -495,7 +496,7 @@ func (c *Cache) PrintTheCacheLog() {
 func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
 	pvcKey := configurePVCKey(pvc)
 	// the LVG which is used to store PVC
-	selectedLVGName := ""
+	selectedLVGsNames := make([]string, 3);
 
 	lvgNamesForPVC, found := c.pvcLVGs.Load(pvcKey)
 	if !found {
@@ -506,6 +507,7 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 	for _, lvgName := range lvgNamesForPVC.([]string) {
 		lvgCh, found := c.Lvgs.Load(lvgName)
 		if !found || lvgCh == nil {
+			// TODO нужно ли возвращать ошибку? или просто идти дальше
 			err := fmt.Errorf("no cache found for the LVMVolumeGroup %s", lvgName)
 			c.log.Error(err, fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] an error occurred while trying to remove space reservation for PVC %s", pvcKey))
 			return err
@@ -525,7 +527,8 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 					thinPoolCh.(*thinPoolCache).pvcs.Delete(pvcKey)
 					c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] removed space reservation for PVC %s in the Thin pool %s of the LVMVolumeGroup %s due the PVC was selected to the node %s", pvcKey, thinPoolName.(string), lvgName, pvc.Annotations[SelectedNodeAnnotation]))
 				} else {
-					selectedLVGName = lvgName
+					// TODO найти все лвг, хрянящие копии тома
+					selectedLVGsNames = append(selectedLVGsNames, lvgName)
 					c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] PVC %s was selected to the node %s. It should not be revomed from the LVMVolumeGroup %s", pvcKey, pvc.Annotations[SelectedNodeAnnotation], lvgName))
 				}
 
@@ -543,7 +546,8 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 				lvgCh.(*LvgCache).thickPVCs.Delete(pvcKey)
 				c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] removed space reservation for PVC %s in the LVMVolumeGroup %s due the PVC was selected to the node %s", pvcKey, lvgName, pvc.Annotations[SelectedNodeAnnotation]))
 			} else {
-				selectedLVGName = lvgName
+				// TODO найти все лвг, хрянящие копии тома
+				selectedLVGsNames = append(selectedLVGsNames, lvgName)
 				c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] PVC %s was selected to the node %s. It should not be revomed from the LVMVolumeGroup %s", pvcKey, pvc.Annotations[SelectedNodeAnnotation], lvgName))
 			}
 		}
@@ -552,14 +556,18 @@ func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentV
 
 	c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] cache for PVC %s will be wiped from unused LVMVolumeGroups", pvcKey))
 	cleared := make([]string, 0, len(lvgNamesForPVC.([]string)))
+
+
 	for _, lvgName := range lvgNamesForPVC.([]string) {
-		if lvgName == selectedLVGName {
+		if slices.Contains(selectedLVGsNames, lvgName) {
 			c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] the LVMVolumeGroup %s will be saved for PVC %s cache as used", lvgName, pvcKey))
 			cleared = append(cleared, lvgName)
 		} else {
 			c.log.Debug(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] the LVMVolumeGroup %s will be removed from PVC %s cache as not used", lvgName, pvcKey))
 		}
 	}
+
+	
 	c.log.Trace(fmt.Sprintf("[RemoveSpaceReservationForPVCWithSelectedNode] cleared LVMVolumeGroups for PVC %s: %v", pvcKey, cleared))
 	c.pvcLVGs.Store(pvcKey, cleared)
 

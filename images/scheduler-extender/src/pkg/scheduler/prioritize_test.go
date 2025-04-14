@@ -24,47 +24,52 @@ const (
 	node3 string = "node-3"
 )
 
+func mockLVG(lvgName, nodeName, lvgFreeSize string) *snc.LVMVolumeGroup {
+	return &snc.LVMVolumeGroup{
+		ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+		Spec: snc.LVMVolumeGroupSpec{
+			Local: snc.LVMVolumeGroupLocalSpec{
+				NodeName: nodeName,
+			},
+		},
+		Status: snc.LVMVolumeGroupStatus{
+			Nodes: []snc.LVMVolumeGroupNode{
+				{
+					Name: nodeName,
+				},
+			},
+			VGFree: resource.MustParse(lvgFreeSize),
+		},
+	}
+}
+
+func mockPVC(pvcName, requestedSize string) *v1.PersistentVolumeClaim {
+	return &v1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: pvcName},
+		Spec: v1.PersistentVolumeClaimSpec{
+			StorageClassName: &storageClassNameOne,
+			Resources: v1.VolumeResourceRequirements{
+				Requests: v1.ResourceList{
+					v1.ResourceStorage: resource.MustParse(requestedSize),
+				},
+			},
+		},
+	}
+}
+
 func TestScoreNodes(t *testing.T) {
 	log := logger.Logger{}
-	nodeNames := []string{node1, node2, node3}
 
 	cache := c.Cache{}
 	lvgCache := []*c.LvgCache{
 		{
-			Lvg: &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: "lvg-1"},
-				Spec: snc.LVMVolumeGroupSpec{
-					Local: snc.LVMVolumeGroupLocalSpec{
-						NodeName: node1,
-					},
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{
-							Name: node1,
-						},
-					},
-					VGFree: resource.MustParse("30Gi"),
-				},
-			},
+			Lvg: mockLVG("lvg-1", node1, "2Gi"),
 		},
 		{
-			Lvg: &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: "lvg-2"},
-				Spec: snc.LVMVolumeGroupSpec{
-					Local: snc.LVMVolumeGroupLocalSpec{
-						NodeName: node2,
-					},
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{
-							Name: node2,
-						},
-					},
-					VGFree: resource.MustParse("1Gi"),
-				},
-			},
+			Lvg: mockLVG("lvg-2", node2, "1Gi"),
+		},
+		{
+			Lvg: mockLVG("lvg-3", node2, "1Gi"),
 		},
 	}
 
@@ -151,21 +156,35 @@ func TestScoreNodes(t *testing.T) {
 		testName  string
 		nodeNames []string
 		pvcs      map[string]*v1.PersistentVolumeClaim
+		expect    map[string]int
 	}{
 		{
 			testName:  "Test Case #1",
-			nodeNames: nodeNames,
+			nodeNames: []string{node1},
 			pvcs:      pvcs,
+			expect:    map[string]int{node1: 11},
+		},
+		{
+			testName:  "Test Case #2",
+			nodeNames: []string{node2},
+			pvcs:      pvcs,
+			expect:    map[string]int{node2: 3},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.testName, func(t *testing.T) {
-			score, err := scoreNodes(log, &cache, &nodeNames, pvcs, scs, pvcRequests, 1)
+			score, err := scoreNodes(log, &cache, &tt.nodeNames, tt.pvcs, scs, pvcRequests, 1)
 			if err != nil {
 				t.Error(err)
 			}
 			t.Logf("Node score: %v", score)
+
+			for _, res := range score {
+				if tt.expect[res.Host] != res.Score {
+					t.Errorf("Expected score for node %s to be %d, got %d", res.Host, tt.expect[res.Host], res.Score)
+				}
+			}
 		})
 	}
 }

@@ -205,11 +205,11 @@ func scoreNodes(
 			}
 
 			log.Trace(fmt.Sprintf("[scoreNodes] LVMVolumeGroup %s total size: %s", lvg.Name, lvg.Status.VGSize.String()))
-			totalFreeSpaceLeftPercent += getFreeSpaceLeftPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
+			totalFreeSpaceLeftPercent += getFreeSpaceLeftAsPercent(freeSpace.Value(), pvcReq.RequestedSize, lvg.Status.VGSize.Value())
 		}
 
 		// TODO make tests (+corner cases)
-		// TODO describe changes in doc
+		// TODO describe changes in doc +++
 		nodeScore := 0
 		nodeScore += replicaCountOnNode
 		averageFreeSpace := totalFreeSpaceLeftPercent / int64(len(pvcs))
@@ -261,15 +261,15 @@ func calculateFreeSpace(
 	return freeSpace, nil
 }
 
-// TODO pick better naming to freeSize and method name
-func getFreeSpaceLeftPercent(freeSpaceBytes, requestedSpace, totalSpace int64) int64 {
+// TODO pick better naming to freeSize and method name +++
+func getFreeSpaceLeftAsPercent(freeSpaceBytes, requestedSpace, totalSpace int64) int64 {
 	freeSpaceLeft := freeSpaceBytes - requestedSpace
 	fraction := float64(freeSpaceLeft) / float64(totalSpace)
 	percent := fraction * 100
 	return int64(percent)
 }
 
-// TODO change divisor to multiplier
+// TODO change divisor to multiplier +++ 
 func getNodeScore(freeSpace int64, multiplier float64) int {
 	converted := int(math.Round(math.Log2(float64(freeSpace) * multiplier)))
 	switch {

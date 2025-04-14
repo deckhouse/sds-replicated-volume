@@ -1,11 +1,15 @@
 # SDS-Replicated-Volume Cache Control
 
-Cache это in-memory хранилище для информации о PVC и LVG кластера. Данные в Cache помещает и актуализирует контроллер.
+// TODO описать разные кейсы работы с кешем
+
+Cache это in-memory хранилище об LVG в кластере. Его цель - резервировать место в LVG для новых PVC, пока те не перейдут в состояние "Bound"
+Данные в Cache помещает и актуализирует контроллер.
 
 Визуализация кэша с данными:
 ```go
 Cache{
 	Lvgs: sync.Map{
+		// TODO убрать нэймспейс
 		"namespace-1/lvg-1": LvgCache{
 			Lvg:       &snc.LVMVolumeGroup{Name: "lvg-1"},
             thickPVCs: sync.Map{
@@ -20,6 +24,8 @@ Cache{
 			},
             thinPools: sync.Map{
 				"pool-1": &thinPoolCache{
+					// TODO убрать поле (? возможно нужно оставить из-за синкмапы)
+					// TODO исследовать возможность впилить мьютекс
 					pvcs: sync.Map{
                         "namespace-1/pvc-2": &pvcCache{
                             pvc:          &v1.PersistentVolumeClaim{Name: "pvc-2"},
@@ -29,7 +35,6 @@ Cache{
 							pvc:          &v1.PersistentVolumeClaim{Name: "pvc-3"},
                             selectedNode: "node-3",
                         },
-						}
                     },
 				}
 			},

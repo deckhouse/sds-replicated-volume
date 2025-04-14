@@ -122,34 +122,6 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// replicatedSP, err := getReplicatedStoragePools(s.ctx, s.client)
-	// if err != nil {
-	// 	s.log.Error(err, "[filter] unable to get replicated storage pools")
-	// 	http.Error(w, "internal server error", http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// replicatedSC, err := getReplicatedStorageClasses(s.ctx, s.client)
-	// if err != nil {
-	// 	s.log.Error(err, "[filter] unable to get replicated storage classes")
-	// 	http.Error(w, "internal server error", http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// lvgGroups, err := getlvmVolumeGroups(s.ctx, s.client)
-	// if err != nil {
-	// 	s.log.Error(err, "[filter] unable to get LVM volume groups")
-	// 	http.Error(w, "internal server error", http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// nodesToLvgsMap, err := getNodeWithLvmVgsMap(s.ctx, s.client)
-	// if err != nil {
-	// 	s.log.Error(err, "[filter] unable to get nodes with LVM volume groups map")
-	// 	http.Error(w, "internal server error", http.StatusInternalServerError)
-	// 	return
-	// }
-
 	drbdResourceMap, err := getDRBDResourceMap(s.ctx, s.client)
 	if err != nil {
 		s.log.Error(err, "[filter] unable to get DRBD resource map")
@@ -177,21 +149,7 @@ func (s *scheduler) filter(w http.ResponseWriter, r *http.Request) {
 		drbdResourceMap,
 		drbdNodesMap,
 	)
-	// filteredNodes, err := filterNodes(
-	// 	s.log,
-	// 	&nodeNames,
-	// 	inputData.Pod,
-	// 	managedPVCs,
-	// 	replicatedSP,
-	// 	pvcReplicatedSCs,
-	// 	replicatedSC,
-	// 	pvcRequests,
-	// 	lvgGroups,
-	// 	nodesToLvgsMap,
-	// 	drbdResourceMap,
-	// 	drbdNodesMap,
-	// 	nil, // TODO put cache here
-	// )
+
 	if err != nil {
 		s.log.Error(err, "[filter] unable to filter the nodes")
 		http.Error(w, "bad request", http.StatusBadRequest)
