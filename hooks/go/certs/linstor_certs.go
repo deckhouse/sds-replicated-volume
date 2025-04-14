@@ -49,7 +49,6 @@ func LinstorCertConfigs() iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 			cn:             "linstor-controller",
 			secretName:     "linstor-controller-https-cert",
 			valuesPropName: "httpsControllerCert",
-			addLinstorSANs: true,
 		},
 		{
 			cn:             "linstor-client",
@@ -60,7 +59,6 @@ func LinstorCertConfigs() iter.Seq[tlscertificate.GenSelfSignedTLSHookConf] {
 			cn:             "linstor-controller",
 			secretName:     "linstor-controller-ssl-cert",
 			valuesPropName: "sslControllerCert",
-			addLinstorSANs: true,
 		},
 		{
 			cn:             "linstor-node",
@@ -83,14 +81,9 @@ func linstorCertConfigsFromArgs(hookArgs []linstorHookArgs) iter.Seq[tlscertific
 			sans := []string{
 				"localhost",
 				"127.0.0.1",
-			}
-			if args.addLinstorSANs {
-				sans = append(
-					sans,
-					"linstor",
-					fmt.Sprintf("linstor.%s", ModuleNamespace),
-					fmt.Sprintf("linstor.%s.svc", ModuleNamespace),
-				)
+				"linstor",
+				fmt.Sprintf("linstor.%s", ModuleNamespace),
+				fmt.Sprintf("linstor.%s.svc", ModuleNamespace),
 			}
 
 			conf := tlscertificate.GenSelfSignedTLSHookConf{
