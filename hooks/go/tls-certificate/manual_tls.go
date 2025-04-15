@@ -20,9 +20,13 @@ import (
 	"context"
 	"fmt"
 
+	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type GenSelfSignedTLSGroupHookConf []GenSelfSignedTLSHookConf
@@ -79,16 +83,46 @@ func RegisterManualTLSHookEM(confs GenSelfSignedTLSGroupHookConf) bool {
 	)
 }
 
-func GenManualSelfSignedTLS(confs GenSelfSignedTLSGroupHookConf) func(ctx context.Context, input *pkg.HookInput) error {
-	return func(_ context.Context, input *pkg.HookInput) error {
+func GenManualSelfSignedTLS(confs GenSelfSignedTLSGroupHookConf) func(context.Context, *pkg.HookInput) error {
+	return func(ctx context.Context, input *pkg.HookInput) error {
+		k, err := input.DC.GetK8sClient()
+		if err != nil {
+			return fmt.Errorf("getting kclient: %w", err)
+		}
+
 		regenerate := false
 		for _, conf := range confs {
-			if input.Values.Exists(conf.Path()) {
-				continue
+			secret := &v1.Secret{}
+			err := k.Get(
+				ctx,
+				types.NamespacedName{
+					Namespace: conf.Namespace,
+					Name:      conf.TLSSecretName,
+				},
+				secret,
+			)
+			if err != nil {
+				if client.IgnoreNotFound(err) != nil {
+					return fmt.Errorf("getting secret %s: %w", conf.TLSSecretName, err)
+				}
+				input.Logger.Info("secret not found, regenerate", "secretName", conf.TLSSecretName)
+				regenerate = true
+				break
 			}
-			regenerate = true
-			input.Logger.Info("path not found in values, regenerate", "path", conf.Path())
-			break
+
+			values := chcrt.CertValues{
+				CA:  string(secret.Data["tls.key"]),
+				Crt: string(secret.Data["tls.crt"]),
+				Key: string(secret.Data["ca.crt"]),
+			}
+
+			if values.CA == "" || values.Crt == "" || values.Key == "" {
+				input.Logger.Info("secret empty, regenerate", "secretName", conf.TLSSecretName)
+				regenerate = true
+				break
+			}
+
+			input.Values.Set(conf.Path(), values)
 		}
 
 		if !regenerate {
@@ -99,7 +133,7 @@ func GenManualSelfSignedTLS(confs GenSelfSignedTLSGroupHookConf) func(ctx contex
 			return nil
 		}
 
-		_, err := GenerateNewSelfSignedTLSGroup(input, confs)
+		_, err = GenerateNewSelfSignedTLSGroup(input, confs)
 		return err
 	}
 }
