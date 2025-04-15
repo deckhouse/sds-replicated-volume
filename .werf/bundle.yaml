@@ -14,16 +14,9 @@ import:
   add: /lib/python/dist
   to: /lib/python/dist
   after: setup
-# Rendering .werf/go-hooks.yaml is required!
-- image: go-hooks-artifact
-  add: /usr/local/bin/go-hooks
-  to: /hooks/go-hooks
-  after: setup  
 git:
 - add: /
   to: /
-  excludePaths:
-    - hooks/go  
   includePaths:
   - .helmignore
   - charts
