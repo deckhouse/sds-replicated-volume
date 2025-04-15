@@ -127,9 +127,6 @@ func GenManualSelfSignedTLS(confs GenSelfSignedTLSGroupHookConf) func(context.Co
 
 		if !regenerate {
 			input.Logger.Info("certs already initialized")
-			for _, conf := range confs {
-				input.Values.Set(conf.Path(), input.Values.Get(conf.Path()).Value())
-			}
 			return nil
 		}
 
