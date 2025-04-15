@@ -176,8 +176,8 @@ func (s *stateMachine) prepare() error {
 		return fmt.Errorf("checking resources: %w", err)
 	}
 
-	// prevent cert hook reacting to our changes
-	for conf := range allCertsConfigs() {
+	// prevent hooks from reacting to our changes
+	for conf := range allCertConfigs() {
 		secret, err := s.getSecret(conf.TLSSecretName, false)
 		if err != nil {
 			return err
@@ -587,7 +587,7 @@ func (s *stateMachine) waitForAppPodsDeleted(name string) error {
 }
 
 func (s *stateMachine) moveToDone() error {
-	for conf := range allCertsConfigs() {
+	for conf := range allCertConfigs() {
 		secret, err := s.getSecret(conf.TLSSecretName, false)
 		if err != nil {
 			return err

@@ -17,25 +17,18 @@ limitations under the License.
 package tlscertificate
 
 import (
-	"context"
 	"crypto/x509"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
-	"slices"
 	"strings"
 	"time"
 
-	"github.com/cloudflare/cfssl/config"
 	"github.com/cloudflare/cfssl/csr"
 	certificatesv1 "k8s.io/api/certificates/v1"
 
-	"github.com/deckhouse/deckhouse/pkg/log"
+	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
-	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
-	"github.com/deckhouse/module-sdk/pkg/registry"
 )
 
 const year = (24 * time.Hour) * 365
@@ -44,13 +37,11 @@ const (
 	DefaultCAExpiryDuration     = year * 10 // ~10 years
 	DefaultCertExpiryDuration   = year * 10 // ~10 years
 	DefaultCertOutdatedDuration = year / 2  // ~6 month, just enough to renew certificate
-
-	InternalTLSSnapshotKey = "secret"
 )
 
 type GenSelfSignedTLSHookConf struct {
 	// SANs function which returns list of domain to include into cert. Use DefaultSANs helper
-	SANs SANsGenerator
+	SANs chcrt.SANsGenerator
 
 	// CN - Certificate common Name
 	// often it is module name
@@ -164,58 +155,6 @@ func (conf GenSelfSignedTLSHookConf) UsagesStrings() []string {
 	return usageStrs
 }
 
-// SANsGenerator function for generating sans
-type SANsGenerator func(input *pkg.HookInput) []string
-
-var JQFilterTLS = `{
-    "key": .data."tls.key",
-    "crt": .data."tls.crt",
-    "ca": .data."ca.crt"
-}`
-
-// RegisterInternalTLSHookEM must be used for external modules
-//
-// Register hook which save tls cert in values from secret.
-// If secret is not created hook generate CA with long expired time
-// and generate tls cert for passed domains signed with generated CA.
-// That CA cert and TLS cert and private key MUST save in secret with helm.
-// Otherwise, every d8 restart will generate new tls cert.
-// Tls cert also has long expired time same as CA 87600h == 10 years.
-// Therese tls cert often use for in cluster https communication
-// with service which order tls
-// Clients need to use CA cert for verify connection
-func RegisterInternalTLSHookEM(conf GenSelfSignedTLSHookConf) bool {
-	return registry.RegisterFunc(GenSelfSignedTLSConfig(conf), GenSelfSignedTLS(conf))
-}
-
-func GenSelfSignedTLSConfig(conf GenSelfSignedTLSHookConf) *pkg.HookConfig {
-	return &pkg.HookConfig{
-		OnBeforeHelm: &pkg.OrderedConfig{Order: 5},
-		Kubernetes: []pkg.KubernetesConfig{
-			{
-				Name:       InternalTLSSnapshotKey,
-				APIVersion: "v1",
-				Kind:       "Secret",
-				NamespaceSelector: &pkg.NamespaceSelector{
-					NameSelector: &pkg.NameSelector{
-						MatchNames: []string{conf.Namespace},
-					},
-				},
-				NameSelector: &pkg.NameSelector{
-					MatchNames: []string{conf.TLSSecretName},
-				},
-				JqFilter: JQFilterTLS,
-			},
-		},
-		Schedule: []pkg.ScheduleConfig{
-			{
-				Name:    "internalTLSSchedule",
-				Crontab: "42 4 * * *",
-			},
-		},
-	}
-}
-
 type SelfSignedCertValues struct {
 	CA           *certificate.Authority
 	CN           string
@@ -272,184 +211,12 @@ func (conf *GenSelfSignedTLSHookConf) validateAndApplyDefaults() {
 		conf.CommonCACanonicalName = conf.CN
 	}
 }
-
-func GenSelfSignedTLS(conf GenSelfSignedTLSHookConf) func(ctx context.Context, input *pkg.HookInput) error {
-	return func(_ context.Context, input *pkg.HookInput) error {
-		if conf.BeforeHookCheck != nil {
-			passed := conf.BeforeHookCheck(input)
-			if !passed {
-				return nil
-			}
-		}
-
-		cert := &certificate.Certificate{}
-
-		certs, err := objectpatch.UnmarshalToStruct[certificate.Certificate](input.Snapshots, InternalTLSSnapshotKey)
-		if err != nil {
-			return fmt.Errorf("unmarshal to struct: %w", err)
-		}
-
-		if len(certs) > 0 {
-			cert = &certs[0]
-		}
-
-		if _, err := GenerateSelfSignedTLSIfNeeded(conf, input, cert, false); err != nil {
-			return err
-		}
-
-		return nil
-	}
-}
-
-// New self-signed certificate will be generated when any of below is true:
-//   - len(currentCert.Cert) == 0
-//   - conf.CommonCAValuesPath is not empty and it's CA is not found in values,
-//     outdated, or doesn't match currentCert.CA
-//   - currentCert.Cert is outdated, or doesn't match important values from
-//     conf - "irrelevant"
-//   - forceGenerate is true
-//
-// Generated certificate will be written to currentCert, set to
-// input.Values, and true will be returned.
-func GenerateSelfSignedTLSIfNeeded(
-	conf GenSelfSignedTLSHookConf,
-	input *pkg.HookInput,
-	currentCert *certificate.Certificate,
-	forceGenerate bool,
-) (bool, error) {
-	conf.validateAndApplyDefaults()
-
-	var auth *certificate.Authority
-	var err error
-
-	mustGenerate := forceGenerate
-
-	useCommonCA := conf.CommonCAValuesPath != ""
-
-	// 1) get and validate common ca
-	// 2) if not valid:
-	// 2.1) regenerate common ca
-	// 2.2) save new common ca in values
-	// 2.3) mark certificates to regenerate
-	if useCommonCA {
-		auth, err = getCommonCA(input, conf)
-		if err != nil {
-			input.Logger.Info("getCommonCA error", log.Err(err))
-
-			auth, err = certificate.GenerateCA(
-				conf.CommonCACanonicalName,
-				certificate.WithKeyAlgo(conf.KeyAlgorithm),
-				certificate.WithKeySize(conf.KeySize),
-				certificate.WithCAExpiry(conf.CAExpiryDuration.String()))
-			if err != nil {
-				return false, fmt.Errorf("generate ca: %w", err)
-			}
-
-			input.Values.Set(conf.CommonCAPath(), auth)
-
-			mustGenerate = true
-		}
-	}
-
-	// if no certificate - regenerate
-	if len(currentCert.Cert) == 0 {
-		mustGenerate = true
-	} else {
-		// update certificate if less than 6 month left. We create certificate for 10 years, so it looks acceptable
-		// and we don't need to create Crontab schedule
-		caOutdated, err := isOutdatedCA(currentCert.CA, conf.CertOutdatedDuration)
-		if err != nil {
-			input.Logger.Error("is outdated ca", log.Err(err))
-		}
-
-		// if common ca and cert ca are not equal - regenerate cert
-		if useCommonCA && !slices.Equal(auth.Cert, currentCert.CA) {
-			input.Logger.Info("common ca is not equal cert ca")
-
-			caOutdated = true
-		}
-
-		certOutdatedOrIrrelevant, err := isIrrelevantCert(currentCert.Cert, input, conf)
-		if err != nil {
-			input.Logger.Error("is irrelevant cert", log.Err(err))
-		}
-
-		// In case of errors, both these flags are false to avoid regeneration loop for the
-		// certificate.
-		mustGenerate = mustGenerate || caOutdated || certOutdatedOrIrrelevant
-	}
-
-	if mustGenerate {
-		var newCert *certificate.Certificate
-		if newCert, err = GenerateNewSelfSignedTLS(
-			SelfSignedCertValues{
-				CA:           auth,
-				CN:           conf.CN,
-				CACN:         conf.CommonCACanonicalName,
-				KeyAlgorithm: conf.KeyAlgorithm,
-				KeySize:      conf.KeySize,
-				SANs:         conf.SANs(input),
-				Usages:       conf.UsagesStrings(),
-				CAExpiry:     conf.CAExpiryDuration.String(),
-				CertExpiry:   conf.CertExpiryDuration,
-			},
-		); err != nil {
-			return false, fmt.Errorf("generate new self signed tls: %w", err)
-		}
-		*currentCert = *newCert
-	}
-
-	input.Values.Set(conf.Path(), convCertToValues(currentCert))
-	return mustGenerate, nil
-}
-
-type CertValues struct {
-	CA  string `json:"ca"`
-	Crt string `json:"crt"`
-	Key string `json:"key"`
-}
-
-// The certificate mapping "cert" -> "crt". We are migrating to "crt" naming for certificates
-// in values.
-func convCertToValues(cert *certificate.Certificate) CertValues {
-	return CertValues{
+func convCertToValues(cert *certificate.Certificate) chcrt.CertValues {
+	return chcrt.CertValues{
 		CA:  string(cert.CA),
 		Crt: string(cert.Cert),
 		Key: string(cert.Key),
 	}
-}
-
-var ErrCertificateIsNotFound = errors.New("certificate is not found")
-var ErrCAIsInvalidOrOutdated = errors.New("ca is invalid or outdated")
-
-func getCommonCA(input *pkg.HookInput, conf GenSelfSignedTLSHookConf) (*certificate.Authority, error) {
-	auth := new(certificate.Authority)
-
-	ca, ok := input.Values.GetOk(conf.CommonCAPath())
-	if !ok {
-		return nil, ErrCertificateIsNotFound
-	}
-
-	err := json.Unmarshal([]byte(ca.String()), auth)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(auth.Cert) == 0 {
-		input.Logger.Info("empty auth.Cert", "ca", ca, "caString", ca.String(), "path", conf.CommonCAPath())
-	}
-
-	outdated, err := isOutdatedCA(auth.Cert, conf.CertOutdatedDuration)
-	if err != nil {
-		input.Logger.Error("is outdated ca", log.Err(err))
-		return nil, err
-	}
-
-	if !outdated {
-		return auth, nil
-	}
-
-	return nil, ErrCAIsInvalidOrOutdated
 }
 
 // GenerateNewSelfSignedTLS
@@ -480,143 +247,8 @@ func GenerateNewSelfSignedTLS(input SelfSignedCertValues) (*certificate.Certific
 		certificate.WithSigningDefaultUsage(input.Usages),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("generate ca: %w", err)
+		return nil, fmt.Errorf("generate cert: %w", err)
 	}
 
 	return cert, nil
-}
-
-// check certificate duration and SANs list
-func isIrrelevantCert(
-	certData []byte,
-	input *pkg.HookInput,
-	conf GenSelfSignedTLSHookConf,
-) (bool, error) {
-	cert, err := certificate.ParseCertificate(certData)
-	if err != nil {
-		return false, fmt.Errorf("parse certificate: %w", err)
-	}
-
-	// expiration
-	if time.Until(cert.NotAfter) < conf.CertOutdatedDuration {
-		input.Logger.Info("cert not relevant: expiring soon",
-			"expectedAtLeast", conf.CertOutdatedDuration,
-			"got", time.Until(cert.NotAfter),
-		)
-		return true, nil
-	}
-
-	// SANs = cert.DNSNames + cert.IPAddresses
-	var dnsNames []string
-	var ipAddrs []net.IP
-	for _, san := range conf.SANs(input) {
-		if ip := net.ParseIP(san); ip != nil {
-			ipAddrs = append(ipAddrs, ip)
-		} else {
-			dnsNames = append(dnsNames, san)
-		}
-	}
-
-	// DNSNames
-	slices.Sort(dnsNames)
-	slices.Sort(cert.DNSNames)
-	if !slices.Equal(dnsNames, cert.DNSNames) {
-		input.Logger.Info("cert not relevant: DNS name mismatch",
-			"expected", dnsNames,
-			"got", cert.DNSNames,
-		)
-		return true, nil
-	}
-
-	// IPAddresses
-	ipCompare := func(a, b net.IP) int { return strings.Compare(a.String(), b.String()) }
-	ipEq := func(a, b net.IP) bool { return net.IP.Equal(a, b) }
-	slices.SortFunc(ipAddrs, ipCompare)
-	slices.SortFunc(cert.IPAddresses, ipCompare)
-	if !slices.EqualFunc(ipAddrs, cert.IPAddresses, ipEq) {
-		input.Logger.Info("cert not relevant: IPs mismatch",
-			"expected", ipAddrs,
-			"got", cert.IPAddresses,
-		)
-		return true, nil
-	}
-
-	// KeyUsages = cert.KeyUsage + cert.ExtKeyUsage
-	var expectedKeyUsage x509.KeyUsage
-	var expectedExtKeyUsages []x509.ExtKeyUsage
-
-	for _, kuStr := range conf.UsagesStrings() {
-		if ku, ok := config.KeyUsage[kuStr]; ok {
-			expectedKeyUsage |= ku
-		} else if eku, ok := config.ExtKeyUsage[kuStr]; ok {
-			expectedExtKeyUsages = append(expectedExtKeyUsages, eku)
-		}
-	}
-
-	if expectedKeyUsage != cert.KeyUsage {
-		input.Logger.Info("cert not relevant: KeyUsage mismatch",
-			"expected", expectedKeyUsage,
-			"got", cert.KeyUsage,
-		)
-		return true, nil
-	}
-
-	slices.Sort(cert.ExtKeyUsage)
-	slices.Sort(expectedExtKeyUsages)
-	if !slices.Equal(expectedExtKeyUsages, cert.ExtKeyUsage) {
-		input.Logger.Info("cert not relevant: ExtKeyUsage mismatch",
-			"expected", expectedExtKeyUsages,
-			"got", cert.ExtKeyUsage,
-		)
-		return true, nil
-	}
-
-	return false, nil
-}
-
-func isOutdatedCA(ca []byte, certOutdatedDuration time.Duration) (bool, error) {
-	// Issue a new certificate if there is no CA in the secret.
-	// Without CA it is not possible to validate the certificate.
-	if len(ca) == 0 {
-		return true, nil
-	}
-
-	cert, err := certificate.ParseCertificate(ca)
-	if err != nil {
-		return false, fmt.Errorf("parse certificate: %w", err)
-	}
-
-	if time.Until(cert.NotAfter) < certOutdatedDuration {
-		return true, nil
-	}
-
-	return false, nil
-}
-
-// DefaultSANs helper to generate list of sans for certificate
-// you can also use helpers:
-//
-//	ClusterDomainSAN(value) to generate sans with respect of cluster domain (e.g.: "app.default.svc" with "cluster.local" value will give: app.default.svc.cluster.local
-//	PublicDomainSAN(value)
-func DefaultSANs(sans []string) SANsGenerator {
-	return func(input *pkg.HookInput) []string {
-		res := make([]string, 0, len(sans))
-
-		clusterDomain := input.Values.Get("global.discovery.clusterDomain").String()
-		publicDomainTemplate := input.Values.Get("global.modules.publicDomainTemplate").String()
-
-		for _, san := range sans {
-			switch {
-			case strings.HasPrefix(san, publicDomainPrefix) && publicDomainTemplate != "":
-				san = getPublicDomainSAN(publicDomainTemplate, san)
-
-			case strings.HasPrefix(san, clusterDomainPrefix) && clusterDomain != "":
-				san = getClusterDomainSAN(clusterDomain, san)
-			}
-
-			res = append(res, san)
-		}
-
-		return res
-	}
 }
