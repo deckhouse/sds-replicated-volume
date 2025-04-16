@@ -111,9 +111,9 @@ func GenManualSelfSignedTLS(confs GenSelfSignedTLSGroupHookConf) func(context.Co
 			}
 
 			values := chcrt.CertValues{
-				CA:  string(secret.Data["tls.key"]),
+				CA:  string(secret.Data["ca.crt"]),
 				Crt: string(secret.Data["tls.crt"]),
-				Key: string(secret.Data["ca.crt"]),
+				Key: string(secret.Data["tls.key"]),
 			}
 
 			if values.CA == "" || values.Crt == "" || values.Key == "" {
