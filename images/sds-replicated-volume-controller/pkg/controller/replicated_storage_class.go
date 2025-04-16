@@ -94,6 +94,7 @@ const (
 	SuspendIo                                      = "suspend-io"
 	StorageClassParamAutoAddQuorumTieBreakerKey    = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/auto-add-quorum-tiebreaker"
 	StorageClassParamOnNoQuorumKey                 = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-quorum"
+	StorageClassParamQuorumKey                     = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum"
 	StorageClassParamOnNoDataAccessibleKey         = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-no-data-accessible"
 	StorageClassParamOnSuspendedPrimaryOutdatedKey = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/on-suspended-primary-outdated"
 	PrimaryOutdatedForceSecondary                  = "force-secondary"
@@ -476,6 +477,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnNoQuorumKey:                 SuspendIo,
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
+		StorageClassParamQuorumKey:                     "", // Make empty by default then we are going to track this field and set to `majority`
 	}
 
 	switch replicatedSC.Spec.Replication {
