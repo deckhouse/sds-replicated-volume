@@ -668,7 +668,7 @@ func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, 
 		rdPropQuorum == "off" {
 		log.Info(fmt.Sprintf("[setQuorumIfNeeded] Resource Definition %s quorum value will be set to 'majority'", rd.Name))
 
-		err = lc.ResourceDefinitions.Modify(ctx, rd.Name, lapi.GenericPropsModify{
+		err := lc.ResourceDefinitions.Modify(ctx, rd.Name, lapi.GenericPropsModify{
 			OverrideProps: map[string]string{
 				quorumWithPrefixRDKey: "majority",
 			},
