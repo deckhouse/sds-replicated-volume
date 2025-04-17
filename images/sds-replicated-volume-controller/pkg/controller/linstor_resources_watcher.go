@@ -43,6 +43,8 @@ const (
 	PVCSIDriver                             = "replicated.csi.storage.deckhouse.io"
 	replicasOnSameRGKey                     = "replicas_on_same"
 	replicasOnDifferentRGKey                = "replicas_on_different"
+	SCCSIProvisioner                        = "replicated.csi.storage.deckhouse.io"
+	quorumWithPrefixRDKey                   = "DrbdOptions/Resource/quorum"
 	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
 	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
 	QuorumMinimumRedundancyWithPrefixSCKey  = "property.replicated.csi.storage.deckhouse.io/DrbdOptions/Resource/quorum-minimum-redundancy"
@@ -176,7 +178,8 @@ func ReconcileParams(
 
 	for _, pv := range pvs {
 		sc := scs[pv.Spec.StorageClassName]
-		RGName := rds[pv.Name].ResourceGroupName
+		rd := rds[pv.Name]
+		RGName := rd.ResourceGroupName
 		rg := rgs[RGName]
 		log.Debug(fmt.Sprintf("[ReconcileParams] PV: %s, SC: %s, RG: %s", pv.Name, sc.Name, rg.Name))
 
@@ -214,6 +217,8 @@ func ReconcileParams(
 			log.Info(fmt.Sprintf("[ReconcileParams] the Kubernetes Storage Class %s and the Linstor Resource Group %s have equal params", sc.Name, rg.Name))
 			setLabelsIfNeeded(ctx, log, cl, pv, nil)
 		}
+
+		setQuorumIfNeeded(ctx, log, lc, sc, rd)
 	}
 
 	log.Info("[ReconcileParams] ends work")
@@ -652,6 +657,24 @@ func setLabelsIfNeeded(
 
 		if err := cl.Update(ctx, pv); err != nil {
 			log.Error(err, fmt.Sprintf("[ReconcileParams] unable to update the PV, name: %s", pv.Name))
+		}
+	}
+}
+
+func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, sc v1.StorageClass, rd lapi.ResourceDefinitionWithVolumeDefinition) {
+	rdPropQuorum := rd.Props[quorumWithPrefixRDKey]
+	if sc.Provisioner == SCCSIProvisioner &&
+		sc.Parameters[StorageClassPlacementCountKey] != "1" &&
+		rdPropQuorum == "off" {
+		log.Info(fmt.Sprintf("[setQuorumIfNeeded] Resource Definition %s quorum value will be set to 'majority'", rd.Name))
+
+		err = lc.ResourceDefinitions.Modify(ctx, rd.Name, lapi.GenericPropsModify{
+			OverrideProps: map[string]string{
+				quorumWithPrefixRDKey: "majority",
+			},
+		})
+		if err != nil {
+			log.Error(err, fmt.Sprintf("[setQuorumIfNeeded] unable to set the quorum value for Resource Definition %s", rd.Name))
 		}
 	}
 }
