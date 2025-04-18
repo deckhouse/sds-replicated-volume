@@ -43,7 +43,7 @@ const (
 	PVCSIDriver                             = "replicated.csi.storage.deckhouse.io"
 	replicasOnSameRGKey                     = "replicas_on_same"
 	replicasOnDifferentRGKey                = "replicas_on_different"
-	SCCSIProvisioner                        = "replicated.csi.storage.deckhouse.io"
+	ReplicatedCSIProvisioner                = "replicated.csi.storage.deckhouse.io"
 	quorumWithPrefixRDKey                   = "DrbdOptions/Resource/quorum"
 	quorumMinimumRedundancyWithoutPrefixKey = "quorum-minimum-redundancy"
 	quorumMinimumRedundancyWithPrefixRGKey  = "DrbdOptions/Resource/quorum-minimum-redundancy"
@@ -663,9 +663,9 @@ func setLabelsIfNeeded(
 
 func setQuorumIfNeeded(ctx context.Context, log logger.Logger, lc *lapi.Client, sc v1.StorageClass, rd lapi.ResourceDefinitionWithVolumeDefinition) {
 	rdPropQuorum := rd.Props[quorumWithPrefixRDKey]
-	if sc.Provisioner == SCCSIProvisioner &&
+	if sc.Provisioner == ReplicatedCSIProvisioner &&
 		sc.Parameters[StorageClassPlacementCountKey] != "1" &&
-		rdPropQuorum == "off" {
+		slices.Contains([]string{"off", "1", ""}, rdPropQuorum) {
 		log.Info(fmt.Sprintf("[setQuorumIfNeeded] Resource Definition %s quorum value will be set to 'majority'", rd.Name))
 
 		err := lc.ResourceDefinitions.Modify(ctx, rd.Name, lapi.GenericPropsModify{
