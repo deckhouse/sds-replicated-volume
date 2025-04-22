@@ -26,7 +26,7 @@ const (
 func RunLVGWatcherCacheController(
 	mgr manager.Manager,
 	log logger.Logger,
-	cache *cache.Cache,
+	cacheMgr *cache.CacheManager,
 ) (controller.Controller, error) {
 	log.Info("[RunLVGWatcherCacheController] starts the work")
 
@@ -51,10 +51,10 @@ func RunLVGWatcherCacheController(
 			}
 
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] tries to get the LVMVolumeGroup %s from the cache", lvg.Name))
-			existedLVG := cache.TryGetLVG(lvg.Name)
+			existedLVG := cacheMgr.TryGetLVG(lvg.Name)
 			if existedLVG != nil {
 				log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s was found in the cache. It will be updated", lvg.Name))
-				err := cache.UpdateLVG(lvg)
+				err := cacheMgr.UpdateLVG(lvg)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to update the LVMVolumeGroup %s in the cache", lvg.Name))
 				} else {
@@ -62,12 +62,12 @@ func RunLVGWatcherCacheController(
 				}
 			} else {
 				log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s was not found. It will be added to the cache", lvg.Name))
-				cache.AddLVG(lvg)
+				cacheMgr.AddLVG(lvg)
 				log.Info(fmt.Sprintf("[RunLVGWatcherCacheController] cache was added for the LVMVolumeGroup %s", lvg.Name))
 			}
 
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] starts to clear the cache for the LVMVolumeGroup %s", lvg.Name))
-			pvcs, err := cache.GetAllPVCForLVG(lvg.Name)
+			pvcs, err := cacheMgr.GetAllPVCForLVG(lvg.Name)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to get all PVC for the LVMVolumeGroup %s", lvg.Name))
 				return
@@ -78,7 +78,7 @@ func RunLVGWatcherCacheController(
 				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s has status phase %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
 				if pvc.Status.Phase == v1.ClaimBound {
 					log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] cached PVC %s/%s has Status.Phase Bound. It will be removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvg.Name))
-					cache.RemovePVCFromTheCache(pvc)
+					cacheMgr.RemovePVCFromTheCache(pvc)
 
 					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s was removed from the cache for LVMVolumeGroup %s", pvc.Namespace, pvc.Name, lvg.Name))
 				}
@@ -90,7 +90,7 @@ func RunLVGWatcherCacheController(
 			log.Info(fmt.Sprintf("[RunCacheWatcherController] UpdateFunc starts the cache reconciliation for the LVMVolumeGroup %s", e.ObjectNew.GetName()))
 			oldLvg := e.ObjectOld
 			newLvg := e.ObjectNew
-			err := cache.UpdateLVG(newLvg)
+			err := cacheMgr.UpdateLVG(newLvg)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to update the LVMVolumeGroup %s cache", newLvg.Name))
 				return
@@ -107,7 +107,7 @@ func RunLVGWatcherCacheController(
 			}
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] the LVMVolumeGroup %s should be reconciled by Update Func", newLvg.Name))
 
-			cachedPVCs, err := cache.GetAllPVCForLVG(newLvg.Name)
+			cachedPVCs, err := cacheMgr.GetAllPVCForLVG(newLvg.Name)
 			if err != nil {
 				log.Error(err, fmt.Sprintf("[RunLVGWatcherCacheController] unable to get all PVC for the LVMVolumeGroup %s", newLvg.Name))
 				return
@@ -118,7 +118,7 @@ func RunLVGWatcherCacheController(
 				log.Trace(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s has status phase %s", pvc.Namespace, pvc.Name, pvc.Status.Phase))
 				if pvc.Status.Phase == v1.ClaimBound {
 					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s from the cache has Status.Phase Bound. It will be removed from the reserved space in the LVMVolumeGroup %s", pvc.Namespace, pvc.Name, newLvg.Name))
-					cache.RemovePVCFromTheCache(pvc)
+					cacheMgr.RemovePVCFromTheCache(pvc)
 					log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] PVC %s/%s was removed from the LVMVolumeGroup %s in the cache", pvc.Namespace, pvc.Name, newLvg.Name))
 				}
 			}
@@ -128,7 +128,7 @@ func RunLVGWatcherCacheController(
 		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[*snc.LVMVolumeGroup], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
 			log.Info(fmt.Sprintf("[RunCacheWatcherController] DeleteFunc starts the cache reconciliation for the LVMVolumeGroup %s", e.Object.GetName()))
 			lvg := e.Object
-			cache.DeleteLVG(lvg.Name)
+			cacheMgr.DeleteLVG(lvg.Name)
 			log.Debug(fmt.Sprintf("[RunLVGWatcherCacheController] LVMVolumeGroup %s was deleted from the cache", lvg.Name))
 		},
 	},

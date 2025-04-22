@@ -30,11 +30,11 @@ const (
 func RunPVCWatcherCacheController(
 	mgr manager.Manager,
 	log logger.Logger,
-	schedulerCache *cache.Cache,
+	cacheMgr *cache.CacheManager,
 ) error {
 	log.Info("[RunPVCWatcherCacheController] starts the work")
 
-	c, err := controller.New("test-pvc-watcher", mgr, controller.Options{
+	c, err := controller.New("pvc-watcher-cache-controller", mgr, controller.Options{
 		Reconciler: reconcile.Func(func(_ context.Context, _ reconcile.Request) (reconcile.Result, error) {
 			return reconcile.Result{}, nil
 		}),
@@ -63,9 +63,7 @@ func RunPVCWatcherCacheController(
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s has selected node annotation, it will be reconciled in CreateFunc", pvc.Namespace, pvc.Name))
 			log.Trace(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s has been selected to the node %s", pvc.Namespace, pvc.Name, selectedNodeName))
 
-			// TODO помещать pvc в очередь
-
-			reconcilePVC(ctx, mgr, log, schedulerCache, pvc, selectedNodeName)
+			reconcilePVC(ctx, mgr, log, cacheMgr, pvc, selectedNodeName)
 			log.Info("[RunPVCWatcherCacheController] CreateFunc reconciliation ends")
 		},
 		UpdateFunc: func(ctx context.Context, e event.TypedUpdateEvent[*v1.PersistentVolumeClaim], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
@@ -86,7 +84,7 @@ func RunPVCWatcherCacheController(
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s has selected node annotation, it will be reconciled in UpdateFunc", pvc.Namespace, pvc.Name))
 			log.Trace(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s has been selected to the node %s", pvc.Namespace, pvc.Name, selectedNodeName))
 
-			reconcilePVC(ctx, mgr, log, schedulerCache, pvc, selectedNodeName)
+			reconcilePVC(ctx, mgr, log, cacheMgr, pvc, selectedNodeName)
 			log.Info("[RunPVCWatcherCacheController] Update Func reconciliation ends")
 		},
 		DeleteFunc: func(_ context.Context, e event.TypedDeleteEvent[*v1.PersistentVolumeClaim], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
@@ -95,7 +93,7 @@ func RunPVCWatcherCacheController(
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] DeleteFunc starts the reconciliation for the PVC %s/%s", pvc.Namespace, pvc.Name))
 
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] PVC %s/%s was removed from the cluster. It will be fully removed from the cache", pvc.Namespace, pvc.Name))
-			schedulerCache.RemovePVCFromTheCache(pvc)
+			cacheMgr.RemovePVCFromTheCache(pvc)
 			log.Debug(fmt.Sprintf("[RunPVCWatcherCacheController] successfully fully removed PVC %s/%s from the cache", pvc.Namespace, pvc.Name))
 		},
 	},
@@ -109,7 +107,7 @@ func RunPVCWatcherCacheController(
 	return nil
 }
 
-func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, schedulerCache *cache.Cache, pvc *v1.PersistentVolumeClaim, selectedNodeName string) {
+func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, cacheMgr *cache.CacheManager, pvc *v1.PersistentVolumeClaim, selectedNodeName string) {
 	sc := &storagev1.StorageClass{}
 	err := mgr.GetClient().Get(ctx, client.ObjectKey{
 		Name: *pvc.Spec.StorageClassName,
@@ -118,18 +116,6 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 		log.Error(err, fmt.Sprintf("[reconcilePVC] unable to get Storage Class %s for PVC %s/%s", *pvc.Spec.StorageClassName, pvc.Namespace, pvc.Name))
 		return
 	}
-
-	// drbrResList := &srv.DRBDResourceList{}
-	// err = mgr.GetClient().List(ctx, drbrResList)
-	// if err != nil {
-	// 	log.Error(err, fmt.Sprintf("[reconcilePVC] unable to list DRBDResourceList for PVC %s/%s", pvc.Namespace, pvc.Name))
-	// 	return
-	// }
-
-	// drbdResMap := make(map[string]*srv.DRBDResource, len(drbrResList.Items))
-	// for _, res := range drbrResList.Items {
-	// 	drbdResMap[res.Name] = &res
-	// }
 
 	if sc.Provisioner != consts.SdsReplicatedVolumeProvisioner {
 		log.Debug(fmt.Sprintf("[reconcilePVC] Storage Class %s for PVC %s/%s is not managed by sds-replicated-volume-provisioner. Ends the reconciliation", sc.Name, pvc.Namespace, pvc.Name))
@@ -143,7 +129,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	}
 	log.Debug(fmt.Sprintf("[reconcilePVC] successfully extracted LVGs from the Storage Class %s for PVC %s/%s", sc.Name, pvc.Namespace, pvc.Name))
 
-	lvgsForPVC := schedulerCache.GetLVGNamesForPVC(pvc)
+	lvgsForPVC := cacheMgr.GetLVGNamesForPVC(pvc)
 	if len(lvgsForPVC) == 0 {
 		log.Debug(fmt.Sprintf("[reconcilePVC] no LVMVolumeGroups were found in the cache for PVC %s/%s. Use Storage Class %s instead", pvc.Namespace, pvc.Name, *pvc.Spec.StorageClassName))
 
@@ -156,7 +142,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	}
 
 	log.Debug(fmt.Sprintf("[reconcilePVC] starts to find common LVMVolumeGroup for the selected node %s and PVC %s/%s", selectedNodeName, pvc.Namespace, pvc.Name))
-	lvgsOnTheNode := schedulerCache.GetLVGNamesByNodeName(selectedNodeName)
+	lvgsOnTheNode := cacheMgr.GetLVGNamesByNodeName(selectedNodeName)
 	for _, lvgName := range lvgsOnTheNode {
 		log.Trace(fmt.Sprintf("[reconcilePVC] LVMVolumeGroup %s belongs to the node %s", lvgName, selectedNodeName))
 	}
@@ -179,7 +165,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	log.Trace(fmt.Sprintf("[reconcilePVC] %s PVC %s/%s has status phase: %s", sc.Parameters[consts.LvmTypeParamKey], pvc.Namespace, pvc.Name, pvc.Status.Phase))
 	switch sc.Parameters[consts.LvmTypeParamKey] {
 	case consts.Thick:
-		err = schedulerCache.UpdateThickPVC(commonLVGName, pvc)
+		err = cacheMgr.UpdateThickPVC(commonLVGName, pvc, sc.Provisioner)
 		if err != nil {
 			log.Error(err, fmt.Sprintf("[reconcilePVC] unable to update Thick PVC %s/%s in the cache", pvc.Namespace, pvc.Name))
 			return
@@ -187,7 +173,7 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	case consts.Thin:
 		for _, lvg := range lvgsFromSc {
 			if lvg.Name == commonLVGName {
-				err = schedulerCache.UpdateThinPVC(commonLVGName, lvg.Thin.PoolName, pvc)
+				err = cacheMgr.UpdateThinPVC(commonLVGName, lvg.Thin.PoolName, pvc, sc.Provisioner)
 				if err != nil {
 					log.Error(err, fmt.Sprintf("[reconcilePVC] unable to update Thin PVC %s/%s in the cache", pvc.Namespace, pvc.Name))
 					return
@@ -199,15 +185,17 @@ func reconcilePVC(ctx context.Context, mgr manager.Manager, log logger.Logger, s
 	log.Debug(fmt.Sprintf("[reconcilePVC] successfully updated %s PVC %s/%s in the cache", sc.Parameters[consts.LvmTypeParamKey], pvc.Namespace, pvc.Name))
 
 	log.Cache(fmt.Sprintf("[reconcilePVC] cache state BEFORE the removal space reservation for PVC %s/%s", pvc.Namespace, pvc.Name))
-	schedulerCache.PrintTheCacheLog()
+	cacheMgr.PrintTheCacheLog()
 	log.Debug(fmt.Sprintf("[reconcilePVC] starts to remove space reservation for PVC %s/%s with selected node from the cache", pvc.Namespace, pvc.Name))
-	err = schedulerCache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], nil)
-	if err != nil {
-		log.Error(err, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
-		return
-	}
+
+	// Space reservation removal when node is selected now happens in sds-local-volume-only
+	// err = schedulerCache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, sc.Parameters[consts.LvmTypeParamKey], nil)
+	// if err != nil {
+	// 	log.Error(err, fmt.Sprintf("[reconcilePVC] unable to remove PVC %s/%s space reservation in the cache", pvc.Namespace, pvc.Name))
+	// 	return
+	// }
 	log.Debug(fmt.Sprintf("[reconcilePVC] successfully removed space reservation for PVC %s/%s with selected node", pvc.Namespace, pvc.Name))
 
 	log.Cache(fmt.Sprintf("[reconcilePVC] cache state AFTER the removal space reservation for PVC %s/%s", pvc.Namespace, pvc.Name))
-	schedulerCache.PrintTheCacheLog()
+	cacheMgr.PrintTheCacheLog()
 }

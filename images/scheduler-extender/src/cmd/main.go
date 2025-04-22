@@ -31,22 +31,30 @@ import (
 )
 
 const (
-	defaultDivisor    = 1
-	defaultListenAddr = ":8000"
-	defaultCacheSize  = 10
-	defaultcertFile   = "/etc/sds-local-volume-scheduler-extender/certs/tls.crt"
-	defaultkeyFile    = "/etc/sds-local-volume-scheduler-extender/certs/tls.key"
+	defaultDivisor                = 1
+	defaultListenAddr             = ":8000"
+	defaultCacheSize              = 10
+	defaultcertFile               = "/etc/sds-local-volume-scheduler-extender/certs/tls.crt"
+	defaultkeyFile                = "/etc/sds-local-volume-scheduler-extender/certs/tls.key"
+	defaultConfigMapUpdateTimeout = 5
+	defaultCacheCheckInterval     = 1
+	defaultCachePVCTTL            = 3600
+	defaultCachePVCCheckInterval  = 3600
+	defaultLogLevel               = "2"
 )
 
 type Config struct {
-	ListenAddr             string  `json:"listen"`
 	DefaultDivisor         float64 `json:"default-divisor"`
+	ListenAddr             string  `json:"listen"`
 	LogLevel               string  `json:"log-level"`
-	CacheSize              int     `json:"cache-size"`
 	HealthProbeBindAddress string  `json:"health-probe-bind-address"`
 	CertFile               string  `json:"cert-file"`
 	KeyFile                string  `json:"key-file"`
-	PVCExpiredDurationSec  int     `json:"pvc-expired-duration-sec"`
+	CacheSize              int     `json:"cache-size"`
+	PVCTTL                 int     `json:"pvc-ttl"`
+	CfgMapUpdateTimeout    int     `json:"configmap-update-timeout"`
+	CacheCheckInterval     int     `json:"cache-check-interval"`
+	CachePVCCheckInterval  int     `json:"cache-pvc-check-interval"`
 }
 
 var cfgFilePath string
@@ -61,11 +69,14 @@ var resourcesSchemeFuncs = []func(*runtime.Scheme) error{
 var config = &Config{
 	ListenAddr:            defaultListenAddr,
 	DefaultDivisor:        defaultDivisor,
-	LogLevel:              "2",
+	LogLevel:              defaultLogLevel,
 	CacheSize:             defaultCacheSize,
 	CertFile:              defaultcertFile,
 	KeyFile:               defaultkeyFile,
-	PVCExpiredDurationSec: cache.DefaultPVCExpiredDurationSec,
+	PVCTTL:                defaultCachePVCTTL,
+	CfgMapUpdateTimeout:   defaultConfigMapUpdateTimeout,
+	CacheCheckInterval:    defaultCacheCheckInterval,
+	CachePVCCheckInterval: defaultCachePVCCheckInterval,
 }
 
 var rootCmd = &cobra.Command{
@@ -154,17 +165,24 @@ func subMain(ctx context.Context) error {
 		return err
 	}
 
-	schedulerCache := cache.NewCache(*log, config.PVCExpiredDurationSec)
-	log.Info("[subMain] scheduler cache was initialized")
+	сache := cache.NewCache(log)
+	cacheMrg := cache.NewCacheManager(сache, &sync.Mutex{}, log)
+	log.Info("[subMain] scheduler cache manager initialized")
 
-	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, schedulerCache, config.DefaultDivisor)
+	go cacheMrg.RunCleaner(ctx, time.Duration(config.CachePVCCheckInterval))
+	log.Info("[subMain] scheduler cleanup process started")
+
+	go cacheMrg.RunSaver(ctx, time.Duration(config.CacheCheckInterval), time.Duration(config.CfgMapUpdateTimeout))
+	log.Info("[subMain] scheduler cache saver started")
+
+	h, err := scheduler.NewHandler(ctx, mgr.GetClient(), *log, сache, config.DefaultDivisor)
 	if err != nil {
 		log.Error(err, "[subMain] unable to create http.Handler of the scheduler extender")
 		return err
 	}
 	log.Info("[subMain] scheduler handler initialized")
 
-	if err = controller.RunPVCWatcherCacheController(mgr, *log, schedulerCache); err != nil {
+	if err = controller.RunPVCWatcherCacheController(mgr, *log, cacheMrg); err != nil {
 		log.Error(err, fmt.Sprintf("[subMain] unable to run %s controller", controller.PVCWatcherCacheCtrlName))
 		return err
 	}
