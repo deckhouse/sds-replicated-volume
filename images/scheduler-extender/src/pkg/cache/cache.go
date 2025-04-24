@@ -405,7 +405,7 @@ func (c *Cache) addNewThinPVC(lvgCh *LvgCache, pvc *v1.PersistentVolumeClaim, th
 	return nil
 }
 
-func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
+func (c *Cache) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string) error {
 	pvcKey := configurePVCKey(pvc)
 	// the LVG which is used to store PVC
 	selectedLVGsNames := make([]string, 0, 3)

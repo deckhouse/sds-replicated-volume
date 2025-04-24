@@ -9,7 +9,6 @@ import (
 	"time"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -79,6 +78,7 @@ func (cm *CacheManager) RunSaver(ctx context.Context, cacheCheckInterval, config
 			}
 
 			cwt, cancel := context.WithTimeout(ctx, configMapUpdateTimeout*time.Second)
+			defer cancel()
 			err := cm.SaveOrUpdate(cwt, cm.mrg, cacheStr)
 			if err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
@@ -87,7 +87,7 @@ func (cm *CacheManager) RunSaver(ctx context.Context, cacheCheckInterval, config
 					cm.log.Error(err, "[CacheManager] cache saving process failed")
 				}
 			}
-			cancel()
+			cm.isUpdated = false
 		}
 	}
 }
@@ -276,12 +276,12 @@ func (cm *CacheManager) GetAllPVCForLVG(lvgName string) ([]*v1.PersistentVolumeC
 	return cm.cache.GetAllPVCForLVG(lvgName)
 }
 
-func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string, drbdResourceMap map[string]*srv.DRBDResource) error {
+func (cm *CacheManager) RemoveSpaceReservationForPVCWithSelectedNode(pvc *v1.PersistentVolumeClaim, deviceType string) error {
 	cm.mu.Lock()
 	defer func() {
 		cm.isUpdated = true
 		cm.mu.Unlock()
 	}()
 
-	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType, drbdResourceMap)
+	return cm.cache.RemoveSpaceReservationForPVCWithSelectedNode(pvc, deviceType)
 }
