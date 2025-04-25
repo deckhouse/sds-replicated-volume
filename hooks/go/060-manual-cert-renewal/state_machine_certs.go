@@ -18,9 +18,6 @@ func makeAllCertGroupsConfigs() iter.Seq[tlsc.GenSelfSignedTLSGroupHookConf] {
 		if !yield(certs.WebhookCertConfigs()) {
 			return
 		}
-		if !yield(certs.SchedulerExtenderCertConfig) {
-			return
-		}
 		if !yield(certs.SpaasCertConfig) {
 			return
 		}
