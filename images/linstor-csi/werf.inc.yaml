@@ -2,7 +2,7 @@
 image: {{ $.ImageName }}-golang-artifact
 from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
-fromCacheVersion: 20250504182938
+fromCacheVersion: 20250504182940
 git:
   - url: {{ $.Root.SOURCE_REPO }}/linbit/linstor-csi
     add: /
@@ -35,6 +35,7 @@ shell:
 image: {{ $.ImageName }}-binaries-artifact
 from: {{ $.Root.BASE_ALT_P11 }}
 final: false
+fromCacheVersion: 20250504182940
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
     to: /binary_replace.sh
@@ -59,6 +60,7 @@ shell:
 image: {{ $.ImageName }}-distroless-artifact
 from: {{ $.Root.BASE_ALT_P11 }}
 final: false
+fromCacheVersion: 20250504182940
 shell:
   beforeInstall:
     - apt-get update
@@ -79,6 +81,7 @@ shell:
 image: {{ $.ImageName }}-distroless
 from: {{ $.Root.BASE_SCRATCH }}
 final: false
+fromCacheVersion: 20250504182940
 import:
   - image: {{ $.ImageName }}-distroless-artifact
     add: /relocate
