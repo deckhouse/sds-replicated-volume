@@ -2,6 +2,7 @@
 image: {{ $.ImageName }}-golang-artifact
 from: {{ $.Root.BASE_GOLANG_1_22 }}
 final: false
+fromCacheVersion: 20250504182938
 git:
   - url: {{ $.Root.SOURCE_REPO }}/linbit/linstor-csi
     add: /
