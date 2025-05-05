@@ -644,7 +644,9 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	// If other parameters are not equal, we can't recreate StorageClass and
 	// users must delete ReplicatedStorageClass resource and create it again manually.
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 
@@ -671,7 +673,7 @@ func recreateStorageClassIfNeeded(
 		return false, false, err
 	}
 
-	log.Info("[recreateStorageClassIfNeeded] StorageClass can be recreated.")
+	log.Info("[recreateStorageClassIfNeeded] StorageClass will be recreated.")
 	if err := DeleteStorageClass(ctx, cl, oldSC); err != nil {
 		err = fmt.Errorf("[recreateStorageClassIfNeeded] error DeleteStorageClass: %w", err)
 		return false, true, err
