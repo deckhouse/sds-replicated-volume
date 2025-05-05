@@ -464,6 +464,8 @@ func CreateStorageClass(ctx context.Context, cl client.Client, newStorageClass *
 }
 
 func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
+	fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] replicatedSC name %s", replicatedSC.Name)
+
 	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
 
@@ -479,6 +481,8 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
 	}
+
+	fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] storageClassParameters %s", storageClassParameters[ReplicatedStorageClassParamNameKey])
 
 	switch replicatedSC.Spec.Replication {
 	case ReplicationNone:
