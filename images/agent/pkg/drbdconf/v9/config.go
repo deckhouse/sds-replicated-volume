@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"iter"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/drbdconf"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
 type Config struct {
