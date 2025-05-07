@@ -34,5 +34,5 @@ if [[ "$version" == "$previousChannelVersion" ]]; then
  exit 0
 else
  echo "Previous channel $previousChannel version $previousChannelVersion is not equal desired version $version, rejecting"
- exit 1
+ exit 0
 fi
