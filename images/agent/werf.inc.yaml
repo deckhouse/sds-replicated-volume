@@ -1,0 +1,123 @@
+{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2" }}
+
+# Do not remove. It's used in external tests.
+---
+image: {{ $.ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+
+git:
+  - add: /
+    to: /src
+    includePaths:
+      - api
+      - lib/go
+      - images/{{ $.ImageName }}
+    stageDependencies:
+      install:
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
+
+shell:
+  install:
+    - apt-get update
+    - apt-get -y install git
+    - git config --global advice.detachedHead false
+    - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ env "SOURCE_REPO" }}/util-linux/util-linux.git /src/util-linux
+    - rm -rf /src/util-linux/.git
+    - rm -rf /src/.git
+
+---
+image: {{ $.ImageName }}-binaries-artifact
+fromImage: builder/alt
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+git:
+  - add: /tools/dev_images/additional_tools/binary_replace.sh
+    to: /binary_replace.sh
+    stageDependencies:
+      install:
+        - "**/*"
+
+shell:
+  install:
+  - apt-get update
+  - |
+    apt-get install -y \
+    build-essential \
+    pkg-config \
+    gettext \
+    autoconf \
+    bison \
+    libtool \
+    libudev-devel \
+    libblkid-devel-static \
+    libsmartcols-devel-static \
+    libmount-devel-static \
+    automake \
+    gettext \
+    flex \
+    glibc-core \
+    cross-glibc-x86_64
+  - cd /src/util-linux
+  - ./autogen.sh
+  - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
+  - make install-strip
+  - ./configure --prefix /opt/deckhouse/sds --with-udev
+  - make install-strip
+  - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
+  - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
+  - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
+  - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
+  - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
+  # There is no more such file in P11 with glibc-core that it was a part of. Now it's /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2
+  #- cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
+  - cp /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
+  - chmod +x /binary_replace.sh
+  - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+
+---
+image: {{ $.ImageName }}-golang-artifact
+fromImage: builder/golang-alpine
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+
+shell:
+  setup:
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -tags {{ $.Root.MODULE_EDITION }} -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
+
+---
+image: {{ $.ImageName }}
+fromImage: base/distroless
+import:
+  - image: {{ $.ImageName }}-binaries-artifact
+    add: /relocate
+    to: /
+    before: setup
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  USER: deckhouse:deckhouse
