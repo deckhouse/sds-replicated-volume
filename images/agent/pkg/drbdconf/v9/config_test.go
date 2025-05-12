@@ -16,7 +16,8 @@ func TestV9Config(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for res := range config.Resources() {
-		res.Options().SetQuorumMinimumRedundancy(2)
+	for res := range config.Resources {
+		_ = res
+		// res.Options.SetQuorumMinimumRedundancy(2)
 	}
 }

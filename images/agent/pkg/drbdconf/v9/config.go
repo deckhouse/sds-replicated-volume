@@ -1,15 +1,22 @@
+// Missing resources:
+//   - require-drbd-module-version-{eq,ne,gt,ge,lt,le}
+//   - stacked-on-top-of
+//
+// Missing resource parameters:
+//   - net.transport
 package v9
 
 import (
 	"fmt"
 	"io/fs"
-	"iter"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
 type Config struct {
-	store *drbdconf.Config
+	Common    *Common
+	Global    *Global
+	Resources []*Resource
 }
 
 func OpenConfig(f fs.FS, name string) (*Config, error) {
@@ -20,61 +27,7 @@ func OpenConfig(f fs.FS, name string) (*Config, error) {
 
 	// TODO validate
 
-	return &Config{
-		store: root,
-	}, nil
-}
+	_ = root
 
-func (c *Config) Common() *Common {
-	panic("todo")
-}
-
-func (c *Config) Global() *Global {
-	panic("todo")
-}
-
-func (c *Config) Resources() iter.Seq[*Resource] {
-	panic("todo")
-}
-
-type Common struct {
-}
-
-func (c *Common) Disk() *Disk {
-	panic("todo")
-}
-
-func (c *Common) Handlers() *Handlers {
-	panic("todo")
-}
-
-type Global struct {
-}
-
-type Resource struct {
-}
-
-func (r *Resource) Options() *Options {
-	panic("todo")
-}
-
-type Net struct {
-}
-
-type Disk struct {
-	ResyncRate string
-}
-
-type Handlers struct {
-}
-
-type Options struct {
-}
-
-func (o *Options) SetQuorumMinimumRedundancy(val int) {
-	// quorum-minimum-redundancy
-	panic("todo")
-}
-
-type Startup struct {
+	return &Config{}, nil
 }
