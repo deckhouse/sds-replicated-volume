@@ -20,7 +20,7 @@ func Parse(fsys fs.FS, name string) (*Root, error) {
 }
 
 type fileParser struct {
-	included map[string]struct{}
+	included map[string]*Root
 	fsys     fs.FS
 
 	data []byte
@@ -29,7 +29,7 @@ type fileParser struct {
 	root *Root
 
 	// for error reporting only, zero-based
-	lnIdx, colIdx int
+	loc Location
 }
 
 // [Word] or [trivia]
@@ -50,24 +50,20 @@ const (
 )
 
 func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
-	if _, ok := p.included[name]; ok {
-		return nil
-	}
-
 	data, err := fs.ReadFile(fsys, name)
 	if err != nil {
 		return fmt.Errorf("reading file %s: %w", name, err)
 	}
 
 	p.fsys = fsys
-	if p.included == nil {
-		p.included = map[string]struct{}{}
-	}
-	p.included[name] = struct{}{}
 	p.data = data
 	p.root = &Root{
 		Filename: name,
 	}
+	if p.included == nil {
+		p.included = map[string]*Root{}
+	}
+	p.included[name] = p.root
 
 	// since comments are checked only on position advance,
 	// we have to do an early check before the first advance happens
@@ -94,7 +90,10 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 				if len(words) == 0 {
 					return p.report(errors.New("unexpected character '{'"))
 				}
-				s := &Section{Key: words}
+				s := &Section{
+					Key:      words,
+					Location: words[0].Location,
+				}
 				words = nil
 				if s.Elements, err = p.parseSectionElements(); err != nil {
 					return err
@@ -130,14 +129,18 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 						inclName = filepath.Join(filepath.Dir(name), inclName)
 					}
 
-					includedParser := &fileParser{
-						included: p.included,
-					}
-					if err := includedParser.parseFile(fsys, inclName); err != nil {
-						return err
+					inclRoot := p.included[inclName]
+					if inclRoot == nil {
+						includedParser := &fileParser{
+							included: p.included,
+						}
+						if err := includedParser.parseFile(fsys, inclName); err != nil {
+							return err
+						}
+						inclRoot = includedParser.root
 					}
 
-					incl.Configs = append(incl.Configs, includedParser.root)
+					incl.Files = append(incl.Files, inclRoot)
 				}
 
 				p.root.Elements = append(p.root.Elements, incl)
@@ -183,7 +186,10 @@ func (p *fileParser) parseSectionElements() (elements []SectionElement, err erro
 				if len(words) == 0 {
 					return nil, p.report(errors.New("unexpected character '{'"))
 				}
-				s := &Section{Key: words}
+				s := &Section{
+					Key:      words,
+					Location: words[0].Location,
+				}
 				words = nil
 				if s.Elements, err = p.parseSectionElements(); err != nil {
 					return nil, err
@@ -235,6 +241,7 @@ func (p *fileParser) parseToken() (token, error) {
 	}
 
 	var word []byte
+	loc := p.loc
 
 	for ; !p.eof() && !isWordTerminatorChar(p.ch()); p.advance(true) {
 		if !isTokenChar(p.ch()) {
@@ -247,11 +254,12 @@ func (p *fileParser) parseToken() (token, error) {
 		word = append(word, p.ch())
 	}
 
-	return &Word{Value: string(word)}, nil
+	return &Word{Value: string(word), Location: loc}, nil
 }
 
 func (p *fileParser) parseQuotedWord() (*Word, error) {
 	var word []byte
+	loc := p.loc
 
 	var escaping bool
 	for ; ; p.advance(false) {
@@ -280,7 +288,11 @@ func (p *fileParser) parseQuotedWord() (*Word, error) {
 			case '"':
 				// success
 				p.advance(true)
-				return &Word{IsQuoted: true, Value: string(word)}, nil
+				return &Word{
+					IsQuoted: true,
+					Value:    string(word),
+					Location: loc,
+				}, nil
 			default:
 				word = append(word, p.ch())
 			}
@@ -302,10 +314,9 @@ func (p *fileParser) advance(skipComment bool) {
 
 func (p *fileParser) advanceAndCountPosition() {
 	if p.ch() == '\n' {
-		p.lnIdx++
-		p.colIdx = 0
+		p.loc = p.loc.NextLine()
 	} else {
-		p.colIdx++
+		p.loc = p.loc.NextCol()
 	}
 
 	p.idx++
@@ -331,10 +342,7 @@ func (p *fileParser) skipWhitespace() {
 }
 
 func (p *fileParser) report(err error) error {
-	return fmt.Errorf(
-		"%s: parsing error: %w [Ln %d, Col %d]",
-		p.root.Filename, err, p.lnIdx+1, p.colIdx+1,
-	)
+	return fmt.Errorf("%s: parsing error: %w %s", p.root.Filename, err, p.loc)
 }
 
 func newTrivia(ch byte) (*trivia, bool) {

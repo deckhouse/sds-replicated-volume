@@ -12,7 +12,7 @@ var _ io.WriterTo = &Root{}
 func (c *Root) WalkConfigs(accept func(conf *Root) error) error {
 	for _, el := range c.Elements {
 		if incl, ok := el.(*Include); ok {
-			for _, childConf := range incl.Configs {
+			for _, childConf := range incl.Files {
 				if err := childConf.WalkConfigs(accept); err != nil {
 					return fmt.Errorf("callback error: %w", err)
 				}

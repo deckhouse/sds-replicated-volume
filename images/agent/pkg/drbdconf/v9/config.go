@@ -25,9 +25,38 @@ func OpenConfig(f fs.FS, name string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	// TODO validate
+	// validate
 
-	_ = root
+	var common *Common
+	var commonRoot *drbdconf.Root   // for error text only
+	var commonSec *drbdconf.Section // for error text only
 
-	return &Config{}, nil
+	var global *Global
+	var resources []*Resource
+
+	for secRoot, sec := range root.TopLevelSections() {
+		commonTmp := &Common{}
+		if ok, err := commonTmp.Read(sec); ok && common != nil {
+			return nil,
+				fmt.Errorf(
+					"duplicate section 'common': '%s' %s, '%s' %s",
+					commonRoot.Filename, commonSec.Location,
+					secRoot.Filename, sec.Location,
+				)
+		} else if err != nil {
+			// validation error
+			return nil,
+				fmt.Errorf(
+					"invalid section 'common' at '%s' %s: %w",
+					secRoot.Filename, sec.Location, err,
+				)
+		} else if ok {
+			// success
+			common = commonTmp
+			commonRoot = secRoot
+			commonSec = sec
+		}
+	}
+
+	return &Config{Common: common, Global: global, Resources: resources}, nil
 }
