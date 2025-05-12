@@ -17,7 +17,7 @@ func TestConf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = cfg.WalkConfigs(func(conf *Config) error {
+	err = cfg.WalkConfigs(func(conf *Root) error {
 		filename := "./testdata/out/" + conf.Filename
 		file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
 		if err != nil {

@@ -1,42 +1,40 @@
 package drbdconf
 
-type Config struct {
+type Root struct {
 	Filename string
-	Elements []ConfigElement
+	Elements []RootElement
 }
 
 // [Section] or [Include]
-type ConfigElement interface {
-	isConfigElement()
+type RootElement interface {
+	_configElement()
 }
 
 type Include struct {
-	ConfigElement
 	Glob    string
-	Configs []*Config
+	Configs []*Root
 }
 
-func (*Include) isConfigElement() {}
+func (*Include) _configElement() {}
 
 type Section struct {
-	ConfigElement
 	Key      []Word
 	Elements []SectionElement
 }
 
 // [Section] or [Parameter]
 type SectionElement interface {
-	isSectionElement()
+	_sectionElement()
 }
 
-func (*Section) isConfigElement()  {}
-func (*Section) isSectionElement() {}
+func (*Section) _configElement()  {}
+func (*Section) _sectionElement() {}
 
 type Parameter struct {
 	Key []Word
 }
 
-func (*Parameter) isSectionElement() {}
+func (*Parameter) _sectionElement() {}
 
 type Word struct {
 	// means that token is definetely not a keyword, but a value
@@ -45,4 +43,4 @@ type Word struct {
 	Value string
 }
 
-func (*Word) isToken() {}
+func (*Word) _token() {}

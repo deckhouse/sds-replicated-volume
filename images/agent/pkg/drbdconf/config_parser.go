@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 )
 
-func Parse(fsys fs.FS, name string) (*Config, error) {
+func Parse(fsys fs.FS, name string) (*Root, error) {
 	parser := &fileParser{}
 	if err := parser.parseFile(fsys, name); err != nil {
 		return nil, err
 	}
 
-	return parser.config, nil
+	return parser.root, nil
 }
 
 type fileParser struct {
@@ -26,7 +26,7 @@ type fileParser struct {
 	data []byte
 	idx  int
 
-	config *Config
+	root *Root
 
 	// for error reporting only, zero-based
 	lnIdx, colIdx int
@@ -34,14 +34,14 @@ type fileParser struct {
 
 // [Word] or [trivia]
 type token interface {
-	isToken()
+	_token()
 }
 
 const TokenMaxLen = 255
 
 type trivia byte
 
-func (*trivia) isToken() {}
+func (*trivia) _token() {}
 
 const (
 	triviaOpenBrace  trivia = '{'
@@ -65,7 +65,7 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 	}
 	p.included[name] = struct{}{}
 	p.data = data
-	p.config = &Config{
+	p.root = &Root{
 		Filename: name,
 	}
 
@@ -99,7 +99,7 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 				if s.Elements, err = p.parseSectionElements(); err != nil {
 					return err
 				}
-				p.config.Elements = append(p.config.Elements, s)
+				p.root.Elements = append(p.root.Elements, s)
 			case triviaCloseBrace:
 				return p.report(errors.New("unexpected character '}'"))
 			case triviaSemicolon:
@@ -137,10 +137,10 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 						return err
 					}
 
-					incl.Configs = append(incl.Configs, includedParser.config)
+					incl.Configs = append(incl.Configs, includedParser.root)
 				}
 
-				p.config.Elements = append(p.config.Elements, incl)
+				p.root.Elements = append(p.root.Elements, incl)
 			default:
 				panic("unexpected trivia type")
 			}
@@ -333,7 +333,7 @@ func (p *fileParser) skipWhitespace() {
 func (p *fileParser) report(err error) error {
 	return fmt.Errorf(
 		"%s: parsing error: %w [Ln %d, Col %d]",
-		p.config.Filename, err, p.lnIdx+1, p.colIdx+1,
+		p.root.Filename, err, p.lnIdx+1, p.colIdx+1,
 	)
 }
 

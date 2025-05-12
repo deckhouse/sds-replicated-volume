@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-var _ io.WriterTo = &Config{}
+var _ io.WriterTo = &Root{}
 
-func (c *Config) WalkConfigs(accept func(conf *Config) error) error {
+func (c *Root) WalkConfigs(accept func(conf *Root) error) error {
 	for _, el := range c.Elements {
 		if incl, ok := el.(*Include); ok {
 			for _, childConf := range incl.Configs {
@@ -25,7 +25,7 @@ func (c *Config) WalkConfigs(accept func(conf *Config) error) error {
 	return nil
 }
 
-func (c *Config) WriteTo(w io.Writer) (n int64, err error) {
+func (c *Root) WriteTo(w io.Writer) (n int64, err error) {
 	// TODO streaming
 	sb := &strings.Builder{}
 
