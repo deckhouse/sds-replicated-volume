@@ -7,7 +7,7 @@ type Root struct {
 
 // [Section] or [Include]
 type RootElement interface {
-	_configElement()
+	_rootElement()
 }
 
 type Include struct {
@@ -15,7 +15,7 @@ type Include struct {
 	Configs []*Root
 }
 
-func (*Include) _configElement() {}
+func (*Include) _rootElement() {}
 
 type Section struct {
 	Key      []Word
@@ -27,7 +27,7 @@ type SectionElement interface {
 	_sectionElement()
 }
 
-func (*Section) _configElement()  {}
+func (*Section) _rootElement()    {}
 func (*Section) _sectionElement() {}
 
 type Parameter struct {
