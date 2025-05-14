@@ -93,6 +93,12 @@ type Word struct {
 
 func (*Word) _token() {}
 
+func (w *Word) LocationEnd() Location {
+	loc := w.Location
+	loc.ColIndex += len(w.Value)
+	return loc
+}
+
 type Location struct {
 	// for error reporting only, zero-based
 	LineIndex, ColIndex int

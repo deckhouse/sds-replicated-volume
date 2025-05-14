@@ -37,19 +37,19 @@ func OpenConfig(f fs.FS, name string) (*Config, error) {
 			if global != nil {
 				return nil, errDuplicateSection[Global](sec.Location())
 			}
-			if err = global.Read(sec); err != nil {
+			if err = global.UnmarshalFromSection(sec); err != nil {
 				return nil, err
 			}
 		case Keyword[Common]():
 			if common != nil {
 				return nil, errDuplicateSection[Common](sec.Location())
 			}
-			if err = common.Read(sec); err != nil {
+			if err = common.UnmarshalFromSection(sec); err != nil {
 				return nil, err
 			}
 		case Keyword[Resource]():
 			r := new(Resource)
-			if err = r.Read(sec); err != nil {
+			if err = r.UnmarshalFromSection(sec); err != nil {
 				return nil, err
 			}
 			if _, ok := resourceNames[r.Name]; ok {

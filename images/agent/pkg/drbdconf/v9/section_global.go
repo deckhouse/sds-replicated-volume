@@ -15,12 +15,12 @@ type Global struct {
 	// init script shows the remaining waiting time. The dialog-refresh defines
 	// the number of seconds between updates of that countdown. The default
 	// value is 1; a value of 0 turns off the countdown.
-	DialogRefresh *int
+	DialogRefresh *int `drbd:"dialog-refresh"`
 
 	// Normally, DRBD verifies that the IP addresses in the configuration match
 	// the host names. Use the disable-ip-verification parameter to disable
 	// these checks.
-	DisableIPVerification bool
+	DisableIPVerification bool `drbd:"disable-ip-verification"`
 
 	// A explained on DRBD's Online Usage Counter[2] web page, DRBD includes a
 	// mechanism for anonymously counting how many installations are using which
@@ -33,7 +33,7 @@ type Global struct {
 	//
 	// We would like to ask users to participate in the online usage counter as
 	// this provides us valuable feedback for steering the development of DRBD.
-	UsageCount *UsageCountValue
+	UsageCount UsageCountValue `drbd:"usage-count"`
 
 	// When udev asks drbdadm for a list of device related symlinks, drbdadm
 	// would suggest symlinks with differing naming conventions, depending on
@@ -52,36 +52,39 @@ type Global struct {
 	// was implicit or explicit.
 	// For legacy backward compatibility, this is off by default, but we do
 	// recommend to enable it.
-	UdevAlwaysUseVNR bool
+	UdevAlwaysUseVNR bool `drbd:"udev-always-use-vnr"`
 }
 
 var _ Section = &Global{}
 
-func (g *Global) Keyword() string { return "global" }
+func (g *Global) SectionKeyword() string { return "global" }
+func (g *Global) Keyword() string        { return "global" }
 
-func (g *Global) Read(sec *drbdconf.Section) error {
+func (g *Global) UnmarshalFromSection(sec *drbdconf.Section) error {
 	for _, par := range sec.Parameters() {
 		switch par.Key[0].Value {
 		case "dialog-refresh":
-			err := readValueFromWord(
+			if err := ensureLen(par.Key, 2); err != nil {
+				return err
+			}
+			if err := readValueToPtr(
 				&g.DialogRefresh,
-				par.Key, 1,
+				par.Key[1],
 				strconv.Atoi,
-				par.Key[0].Location,
-			)
-			if err != nil {
+			); err != nil {
 				return err
 			}
 		case "disable-ip-verification":
 			g.DisableIPVerification = true
 		case "usage-count":
-			err := readValueFromWord(
+			if err := ensureLen(par.Key, 2); err != nil {
+				return err
+			}
+			if err := readValue(
 				&g.UsageCount,
-				par.Key, 1,
+				par.Key[1],
 				NewUsageCountValue,
-				par.Key[0].Location,
-			)
-			if err != nil {
+			); err != nil {
 				return err
 			}
 		case "udev-always-use-vnr":
@@ -90,6 +93,10 @@ func (g *Global) Read(sec *drbdconf.Section) error {
 	}
 
 	return nil
+}
+
+func (g *Global) MarshalToSection() *drbdconf.Section {
+	panic("unimplemented")
 }
 
 type UsageCountValue string
@@ -103,6 +110,8 @@ const (
 func NewUsageCountValue(s string) (UsageCountValue, error) {
 	v := UsageCountValue(s)
 	switch v {
+	case "":
+		fallthrough
 	case UsageCountValueYes:
 		fallthrough
 	case UsageCountValueNo:

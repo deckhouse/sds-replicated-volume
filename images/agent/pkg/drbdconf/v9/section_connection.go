@@ -16,4 +16,10 @@ type Connection struct {
 	Hosts *Endpoint
 
 	Paths []*Path
+
+	Net *Net
+
+	Volume *Volume
+
+	PeerDeviceOptions *PeerDeviceOptions
 }

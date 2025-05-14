@@ -12,7 +12,7 @@ package v9
 // A normal configuration file contains two or more [On] sections for each
 // resource. Also see the [Floating] section.
 type On struct {
-	HostNames []string
+	HostNames []string `drbd:""`
 
 	// Defines the address family, address, and port of a connection endpoint.
 	//

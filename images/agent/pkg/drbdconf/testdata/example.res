@@ -28,7 +28,7 @@ resource r0 {
         }
 }
 
-skip resource "pvc-65bee3d7-ae9a-435c-980f-1c84c7621d27"
+resource "pvc-65bee3d7-ae9a-435c-980f-1c84c7621d27"
 {
     
     options
@@ -64,7 +64,7 @@ skip resource "pvc-65bee3d7-ae9a-435c-980f-1c84c7621d27"
         node-id    0;
     }
     
-    on "a-stefurishin-worker-1"
+    on "a-stefurishin-worker-1" "a-stefurishin-worker-1"
     {
         volume 0
         {
@@ -73,10 +73,7 @@ skip resource "pvc-65bee3d7-ae9a-435c-980f-1c84c7621d27"
             {
                 discard-zeroes-if-aligned no;
             }
-            meta-disk  
-            
-            
-             internal;
+            meta-disk   internal;
             device      minor 1000;
         }
         node-id    1;

@@ -5,25 +5,16 @@ import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 // Define a resource. Usually contains at least two [On] sections and at least
 // one [Connection] section.
 type Resource struct {
-	Name string
-
-	Connection *Connection
-
+	Name           string `drbd:""`
+	Connection     *Connection
 	ConnectionMesh *ConnectionMesh
-
-	Disk *DiskOptions
-
-	Floating *Floating
-
-	Handlers *Handlers
-
-	Net *Net
-
-	On *On
-
-	Options *Options
-
-	Startup *Startup
+	Disk           *DiskOptions
+	Floating       *Floating
+	Handlers       *Handlers
+	Net            *Net
+	On             *On
+	Options        *Options
+	Startup        *Startup
 }
 
 var _ Section = &Resource{}
@@ -36,7 +27,11 @@ func (r *Resource) Keyword() string {
 	return dname
 }
 
-// Read implements Section.
-func (r *Resource) Read(sec *drbdconf.Section) error {
+// UnmarshalFromSection implements Section.
+func (r *Resource) UnmarshalFromSection(sec *drbdconf.Section) error {
 	return nil
+}
+
+func (r *Resource) MarshalToSection() *drbdconf.Section {
+	panic("unimplemented")
 }

@@ -9,8 +9,8 @@ import (
 
 var _ io.WriterTo = &Root{}
 
-func (c *Root) WalkConfigs(accept func(conf *Root) error) error {
-	for _, el := range c.Elements {
+func (r *Root) WalkConfigs(accept func(conf *Root) error) error {
+	for _, el := range r.Elements {
 		if incl, ok := el.(*Include); ok {
 			for _, childConf := range incl.Files {
 				if err := childConf.WalkConfigs(accept); err != nil {
@@ -19,17 +19,17 @@ func (c *Root) WalkConfigs(accept func(conf *Root) error) error {
 			}
 		}
 	}
-	if err := accept(c); err != nil {
+	if err := accept(r); err != nil {
 		return fmt.Errorf("callback error: %w", err)
 	}
 	return nil
 }
 
-func (c *Root) WriteTo(w io.Writer) (n int64, err error) {
+func (r *Root) WriteTo(w io.Writer) (n int64, err error) {
 	// TODO streaming
 	sb := &strings.Builder{}
 
-	for _, el := range c.Elements {
+	for _, el := range r.Elements {
 		switch tEl := el.(type) {
 		case *Include:
 			sb.WriteString("include ")

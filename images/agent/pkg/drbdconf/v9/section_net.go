@@ -1,5 +1,7 @@
 package v9
 
+import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+
 // Define parameters for a connection. All parameters in this section are
 // optional.
 type Net struct {
@@ -36,7 +38,7 @@ type Net struct {
 	AlwaysASBP bool
 
 	// As soon as a connection between two nodes is configured with drbdsetup connect, DRBD immediately tries to establish the connection. If this fails, DRBD waits for connect-int seconds and then repeats. The default value of connect-int is 10 seconds.
-	ConnectInt int
+	ConnectInt *int
 
 	// Configure the hash-based message authentication code (HMAC) or secure hash algorithm to use for peer authentication. The kernel supports a number of different algorithms, some of which may be loadable as kernel modules. See the shash algorithms listed in /proc/crypto. By default, cram-hmac-alg is unset. Peer authentication also requires a shared-secret to be configured.
 	CRAMHMACAlg string
@@ -150,6 +152,18 @@ type Net struct {
 	//
 	// The allow-remote-read parameter is available since DRBD 9.0.19, and defaults to yes.
 	AllowRemoteRead AllowRemoteReadValue
+}
+
+var _ Section = &Net{}
+
+func (*Net) Keyword() string { return "net" }
+
+func (n *Net) UnmarshalFromSection(sec *drbdconf.Section) error {
+	panic("unimplemented")
+}
+
+func (n *Net) MarshalToSection() *drbdconf.Section {
+	panic("unimplemented")
 }
 
 type AfterSB0PriPolicy string

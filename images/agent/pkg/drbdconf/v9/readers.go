@@ -6,23 +6,44 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
-func readValueFromWord[T any, PT *T](
-	val *PT,
-	words []drbdconf.Word,
-	wordIdx int,
-	ctor func(string) (T, error),
-	loc drbdconf.Location,
-) error {
-	if len(words) <= wordIdx {
-		return fmt.Errorf("missing value after %s", loc)
+func ensureLen(words []drbdconf.Word, lenAtLeast int) error {
+	if len(words) < lenAtLeast {
+		var loc drbdconf.Location
+		if len(words) > 0 {
+			loc = words[len(words)-1].LocationEnd()
+		}
+		return fmt.Errorf("%s: missing value", loc)
 	}
-	s := words[wordIdx].Value
 
-	res, err := ctor(s)
+	return nil
+}
+
+func readValue[T any](
+	val *T,
+	word drbdconf.Word,
+	ctor func(string) (T, error),
+) error {
+	res, err := ctor(word.Value)
+	if err != nil {
+		return fmt.Errorf("%s: %w", word.Location, err)
+	}
+	*val = res
+	return nil
+
+}
+
+func readValueToPtr[T any](
+	valPtr **T,
+	word drbdconf.Word,
+	ctor func(string) (T, error),
+) error {
+	tmp := new(T)
+
+	err := readValue(tmp, word, ctor)
 	if err != nil {
 		return err
 	}
 
-	*val = &res
+	*valPtr = tmp
 	return nil
 }

@@ -18,6 +18,14 @@ func (*Common) Keyword() string {
 	return "common"
 }
 
-func (c *Common) Read(sec *drbdconf.Section) error {
+func (c *Common) UnmarshalFromSection(sec *drbdconf.Section) error {
 	return nil
+}
+
+func (c *Common) MarshalToSection() *drbdconf.Section {
+	sec := &drbdconf.Section{
+		Key: []drbdconf.Word{drbdconf.Word{}},
+	}
+	_ = sec
+	panic("unimplemented")
 }
