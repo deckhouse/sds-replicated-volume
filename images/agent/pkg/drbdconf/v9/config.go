@@ -25,36 +25,42 @@ func OpenConfig(f fs.FS, name string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	// validate
-
-	var common *Common
-	var commonRoot *drbdconf.Root   // for error text only
-	var commonSec *drbdconf.Section // for error text only
-
 	var global *Global
-	var resources []*Resource
+	var common *Common
 
-	for secRoot, sec := range root.TopLevelSections() {
-		commonTmp := &Common{}
-		if ok, err := commonTmp.Read(sec); ok && common != nil {
-			return nil,
-				fmt.Errorf(
-					"duplicate section 'common': '%s' %s, '%s' %s",
-					commonRoot.Filename, commonSec.Location,
-					secRoot.Filename, sec.Location,
+	var resources []*Resource
+	resourceNames := map[string]struct{}{}
+
+	for _, sec := range root.TopLevelSections() {
+		switch sec.Key[0].Value {
+		case Keyword[Global]():
+			if global != nil {
+				return nil, errDuplicateSection[Global](sec.Location())
+			}
+			if err = global.Read(sec); err != nil {
+				return nil, err
+			}
+		case Keyword[Common]():
+			if common != nil {
+				return nil, errDuplicateSection[Common](sec.Location())
+			}
+			if err = common.Read(sec); err != nil {
+				return nil, err
+			}
+		case Keyword[Resource]():
+			r := new(Resource)
+			if err = r.Read(sec); err != nil {
+				return nil, err
+			}
+			if _, ok := resourceNames[r.Name]; ok {
+				return nil, fmt.Errorf(
+					"%s: duplicate resource name: '%s'",
+					sec.Location(),
+					r.Name,
 				)
-		} else if err != nil {
-			// validation error
-			return nil,
-				fmt.Errorf(
-					"invalid section 'common' at '%s' %s: %w",
-					secRoot.Filename, sec.Location, err,
-				)
-		} else if ok {
-			// success
-			common = commonTmp
-			commonRoot = secRoot
-			commonSec = sec
+			}
+			resourceNames[r.Name] = struct{}{}
+			resources = append(resources, r)
 		}
 	}
 

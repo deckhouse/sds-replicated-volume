@@ -12,18 +12,12 @@ type Common struct {
 	Startup  *Startup
 }
 
-func (c *Common) Read(sec *drbdconf.Section) (bool, error) {
-	if sec.Key[0].Value != "common" {
-		return false, nil
-	}
+var _ Section = &Common{}
 
-	return true, nil
+func (*Common) Keyword() string {
+	return "common"
 }
 
-func (c *Common) validate() error {
-	return nil
-}
-
-func (c *Common) Write() error {
+func (c *Common) Read(sec *drbdconf.Section) error {
 	return nil
 }

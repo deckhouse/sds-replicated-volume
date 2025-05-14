@@ -52,7 +52,6 @@ func (*Include) _rootElement() {}
 type Section struct {
 	Key      []Word
 	Elements []SectionElement
-	Location Location
 }
 
 // [Section] or [Parameter]
@@ -63,12 +62,26 @@ type SectionElement interface {
 func (*Section) _rootElement()    {}
 func (*Section) _sectionElement() {}
 
-type Parameter struct {
-	Key      []Word
-	Location Location
+func (s *Section) Location() Location { return s.Key[0].Location }
+
+func (s *Section) Parameters() iter.Seq2[int, *Parameter] {
+	return func(yield func(int, *Parameter) bool) {
+		for idx, el := range s.Elements {
+			if par, ok := el.(*Parameter); ok {
+				if !yield(idx, par) {
+					return
+				}
+			}
+		}
+	}
 }
 
-func (*Parameter) _sectionElement() {}
+type Parameter struct {
+	Key []Word
+}
+
+func (*Parameter) _sectionElement()     {}
+func (p *Parameter) Location() Location { return p.Key[0].Location }
 
 type Word struct {
 	// means that token is definetely not a keyword, but a value
@@ -83,16 +96,17 @@ func (*Word) _token() {}
 type Location struct {
 	// for error reporting only, zero-based
 	LineIndex, ColIndex int
+	Filename            string
 }
 
 func (l Location) NextLine() Location {
-	return Location{l.LineIndex + 1, 0}
+	return Location{l.LineIndex + 1, 0, l.Filename}
 }
 
 func (l Location) NextCol() Location {
-	return Location{l.LineIndex, l.ColIndex + 1}
+	return Location{l.LineIndex, l.ColIndex + 1, l.Filename}
 }
 
 func (l Location) String() string {
-	return fmt.Sprintf("[Ln %d, Col %d]", l.LineIndex+1, l.ColIndex+1)
+	return fmt.Sprintf("%s [Ln %d, Col %d]", l.Filename, l.LineIndex+1, l.ColIndex+1)
 }

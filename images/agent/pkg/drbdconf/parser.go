@@ -60,6 +60,7 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 	p.root = &Root{
 		Filename: name,
 	}
+	p.loc = Location{Filename: name}
 	if p.included == nil {
 		p.included = map[string]*Root{}
 	}
@@ -91,8 +92,7 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 					return p.report(errors.New("unexpected character '{'"))
 				}
 				s := &Section{
-					Key:      words,
-					Location: words[0].Location,
+					Key: words,
 				}
 				words = nil
 				if s.Elements, err = p.parseSectionElements(); err != nil {
@@ -187,8 +187,7 @@ func (p *fileParser) parseSectionElements() (elements []SectionElement, err erro
 					return nil, p.report(errors.New("unexpected character '{'"))
 				}
 				s := &Section{
-					Key:      words,
-					Location: words[0].Location,
+					Key: words,
 				}
 				words = nil
 				if s.Elements, err = p.parseSectionElements(); err != nil {
@@ -342,7 +341,7 @@ func (p *fileParser) skipWhitespace() {
 }
 
 func (p *fileParser) report(err error) error {
-	return fmt.Errorf("%s: parsing error: %w %s", p.root.Filename, err, p.loc)
+	return fmt.Errorf("%s: parsing error: %w", p.loc, err)
 }
 
 func newTrivia(ch byte) (*trivia, bool) {
