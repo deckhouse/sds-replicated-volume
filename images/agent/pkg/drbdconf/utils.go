@@ -13,3 +13,7 @@ func ensureLen(words []Word, lenAtLeast int) error {
 
 	return nil
 }
+
+func SectionKeyword[T any, TP SectionPtr[T]]() string {
+	return TP(nil).SectionKeyword()
+}

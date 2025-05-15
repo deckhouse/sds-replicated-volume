@@ -358,6 +358,15 @@ func newTrivia(ch byte) (*trivia, bool) {
 	}
 }
 
+func isTokenStr(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if !isTokenChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
 func isTokenChar(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') ||
 		(ch >= 'A' && ch <= 'Z') ||

@@ -91,6 +91,21 @@ type Word struct {
 	Location Location
 }
 
+func NewWord(word string) Word {
+	return Word{
+		Value:    word,
+		IsQuoted: !isTokenStr(word),
+	}
+}
+
+func NewWords(wordStrs []string) []Word {
+	words := make([]Word, len(wordStrs))
+	for i, s := range wordStrs {
+		words[i] = NewWord(s)
+	}
+	return words
+}
+
 func (*Word) _token() {}
 
 func (w *Word) LocationEnd() Location {

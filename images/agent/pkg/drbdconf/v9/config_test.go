@@ -26,7 +26,12 @@ func TestV9Config(t *testing.T) {
 }
 
 func TestMarshal(t *testing.T) {
-	cfg := &Config{}
+	cfg := &Config{
+		Global: &Global{
+			DialogRefresh:         &[]int{42}[0],
+			DisableIPVerification: true,
+		},
+	}
 
 	sections, err := drbdconf.Marshal(cfg)
 	if err != nil {
@@ -45,5 +50,5 @@ func TestMarshal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Log(sb.String())
+	t.Log("\n", sb.String())
 }
