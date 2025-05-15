@@ -17,3 +17,5 @@ func ensureLen(words []Word, lenAtLeast int) error {
 func SectionKeyword[T any, TP SectionPtr[T]]() string {
 	return TP(nil).SectionKeyword()
 }
+
+func ptr[T any](v T) *T { return &v }

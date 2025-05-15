@@ -3,6 +3,7 @@ package drbdconf
 import (
 	"fmt"
 	"reflect"
+	"strings"
 )
 
 /*
@@ -26,6 +27,9 @@ Supported primitive types:
   - [SectionKeyworder] and slices of such types SHOULD NOT be tagged, their name
     is always taken from [SectionKeyworder]
   - subsections should always be represented with struct pointers
+  - `drbd:"parname1,parname2"` tag value form allows specifying alternative
+    parameter names, which will be tried during unmarshaling. Marshaling will
+    always use the first name.
 */
 func Marshal[T any, TP Ptr[T]](v TP) ([]*Section, error) {
 	s, err := marshalSection(reflect.ValueOf(v), true)
@@ -41,6 +45,15 @@ func Marshal[T any, TP Ptr[T]](v TP) ([]*Section, error) {
 	}
 
 	return sections, nil
+}
+func isZeroValue(v reflect.Value) bool {
+	if v.IsZero() {
+		return true
+	}
+	if v.Kind() == reflect.Slice && v.Len() == 0 {
+		return true
+	}
+	return false
 }
 
 func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
@@ -70,9 +83,12 @@ func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
 
 		fieldVal := val.Field(i)
 
-		tagValue, tagValueFound := field.Tag.Lookup("drbd")
+		parNames, err := getDRBDParameterNames(field)
+		if err != nil {
+			return nil, err
+		}
 
-		if tagValueFound {
+		if len(parNames) > 0 {
 			if root {
 				return nil,
 					fmt.Errorf(
@@ -82,8 +98,8 @@ func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
 					)
 			}
 
-			if fieldVal.IsZero() {
-				// zero values always mean a missing parameter
+			// zero values always mean a missing parameter
+			if isZeroValue(fieldVal) {
 				continue
 			}
 
@@ -96,13 +112,13 @@ func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
 					)
 			}
 
-			if tagValue == "" {
+			if parNames[0] == "" {
 				// current section key
 				sec.Key = append(sec.Key, words...)
 			} else {
 				// new parameter
 				par := &Parameter{}
-				par.Key = append(par.Key, NewWord(tagValue))
+				par.Key = append(par.Key, NewWord(parNames[0]))
 				par.Key = append(par.Key, words...)
 				sec.Elements = append(sec.Elements, par)
 			}
@@ -113,13 +129,38 @@ func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
 					fmt.Errorf("marshaling field %s: %w", field.Name, err)
 			}
 			sec.Elements = append(sec.Elements, subsec)
-		} else {
-			// skip field
-			continue
 		}
+		// skip field
 	}
 
 	return sec, nil
+}
+
+func getDRBDParameterNames(field reflect.StructField) ([]string, error) {
+	tagValue, ok := field.Tag.Lookup("drbd")
+	if !ok {
+		return nil, nil
+	}
+
+	tagValue = strings.TrimSpace(tagValue)
+
+	if tagValue == "" {
+		return []string{""}, nil
+	}
+
+	names := strings.Split(tagValue, ",")
+	for i, n := range names {
+		n = strings.TrimSpace(n)
+		if len(n) == 0 || !isTokenStr(n) {
+			return nil,
+				fmt.Errorf(
+					"field %s tag `drbd` value: invalid format",
+					field.Name,
+				)
+		}
+		names[i] = n
+	}
+	return names, nil
 }
 
 func isNonNilStructPtr(v reflect.Value) bool {
@@ -137,13 +178,13 @@ func marshalParameter(
 	field reflect.StructField,
 	fieldVal reflect.Value,
 ) ([]Word, error) {
-
 	if field.Type.Kind() == reflect.Slice {
 		wordStrs := make([]string, fieldVal.Len())
 		for i := range fieldVal.Len() {
-			item := fieldVal.Index(i).Interface()
-
-			itemWordStrs, err := marshalParameterValue(item, field.Type.Elem())
+			itemWordStrs, err := marshalParameterValue(
+				fieldVal.Index(i),
+				field.Type.Elem(),
+			)
 			if err != nil {
 				return nil,
 					fmt.Errorf(
@@ -166,7 +207,7 @@ func marshalParameter(
 		return NewWords(wordStrs), nil
 	}
 
-	wordStrs, err := marshalParameterValue(fieldVal.Interface(), field.Type)
+	wordStrs, err := marshalParameterValue(fieldVal, field.Type)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling field %s: %w", field.Name, err)
 	}
@@ -174,13 +215,17 @@ func marshalParameter(
 	return NewWords(wordStrs), nil
 }
 
-func marshalParameterValue(v any, vtype reflect.Type) ([]string, error) {
+func marshalParameterValue(v reflect.Value, vtype reflect.Type) ([]string, error) {
 	if typeCodec := ParameterTypeCodecs[vtype]; typeCodec != nil {
-		return typeCodec.MarshalParameter(v)
+		return typeCodec.MarshalParameter(v.Interface())
 	}
 
-	if codec, ok := v.(ParameterCodec); ok {
-		return codec.MarshalParameter()
+	if m, ok := v.Interface().(ParameterMarshaler); ok {
+		return m.MarshalParameter()
+	}
+
+	if m, ok := v.Addr().Interface().(ParameterMarshaler); ok {
+		return m.MarshalParameter()
 	}
 
 	return nil, fmt.Errorf("unsupported field type '%s'", vtype.Name())

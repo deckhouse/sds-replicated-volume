@@ -1,9 +1,6 @@
 package v9
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
@@ -55,49 +52,9 @@ type Global struct {
 	UdevAlwaysUseVNR bool `drbd:"udev-always-use-vnr"`
 }
 
-var _ Section = &Global{}
+var _ drbdconf.SectionKeyworder = &Global{}
 
 func (g *Global) SectionKeyword() string { return "global" }
-func (g *Global) Keyword() string        { return "global" }
-
-func (g *Global) UnmarshalFromSection(sec *drbdconf.Section) error {
-	for _, par := range sec.Parameters() {
-		switch par.Key[0].Value {
-		case "dialog-refresh":
-			if err := ensureLen(par.Key, 2); err != nil {
-				return err
-			}
-			if err := readValueToPtr(
-				&g.DialogRefresh,
-				par.Key[1],
-				strconv.Atoi,
-			); err != nil {
-				return err
-			}
-		case "disable-ip-verification":
-			g.DisableIPVerification = true
-		case "usage-count":
-			if err := ensureLen(par.Key, 2); err != nil {
-				return err
-			}
-			if err := readValue(
-				&g.UsageCount,
-				par.Key[1],
-				NewUsageCountValue,
-			); err != nil {
-				return err
-			}
-		case "udev-always-use-vnr":
-			g.UdevAlwaysUseVNR = true
-		}
-	}
-
-	return nil
-}
-
-func (g *Global) MarshalToSection() *drbdconf.Section {
-	panic("unimplemented")
-}
 
 type UsageCountValue string
 
@@ -107,18 +64,12 @@ const (
 	UsageCountValueAsk UsageCountValue = "ask"
 )
 
-func NewUsageCountValue(s string) (UsageCountValue, error) {
-	v := UsageCountValue(s)
-	switch v {
-	case "":
-		fallthrough
-	case UsageCountValueYes:
-		fallthrough
-	case UsageCountValueNo:
-		fallthrough
-	case UsageCountValueAsk:
-		return v, nil
-	default:
-		return "", fmt.Errorf("unrecognized value: %s", s)
-	}
+var _ drbdconf.ParameterCodec = ptr(UsageCountValue(""))
+
+func (u *UsageCountValue) MarshalParameter() ([]string, error) {
+	return []string{string(*u)}, nil
+}
+
+func (u *UsageCountValue) UnmarshalParameter(p drbdconf.Parameter) error {
+	panic("unimplemented")
 }

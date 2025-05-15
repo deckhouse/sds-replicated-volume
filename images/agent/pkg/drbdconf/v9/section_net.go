@@ -148,22 +148,24 @@ type Net struct {
 
 	// Allows or disallows DRBD to read from a peer node.
 	//
-	//	When the disk of a primary node is detached, DRBD will try to continue reading and writing from another node in the cluster. For this purpose, it searches for nodes with up-to-date data, and uses any found node to resume operations. In some cases it may not be desirable to read back data from a peer node, because the node should only be used as a replication target. In this case, the allow-remote-read parameter can be set to no, which would prohibit this node from reading data from the peer node.
+	// When the disk of a primary node is detached, DRBD will try to continue
+	// reading and writing from another node in the cluster. For this purpose,
+	// it searches for nodes with up-to-date data, and uses any found node to
+	// resume operations. In some cases it may not be desirable to read back
+	// data from a peer node, because the node should only be used as a
+	// replication target. In this case, the allow-remote-read parameter can be
+	// set to no, which would prohibit this node from reading data from the peer
+	// node.
 	//
-	// The allow-remote-read parameter is available since DRBD 9.0.19, and defaults to yes.
-	AllowRemoteRead AllowRemoteReadValue
+	// The allow-remote-read parameter is available since DRBD 9.0.19, and
+	// defaults to yes.
+	AllowRemoteRead *bool
 }
 
-var _ Section = &Net{}
+var _ drbdconf.SectionKeyworder = &Net{}
 
-func (*Net) Keyword() string { return "net" }
-
-func (n *Net) UnmarshalFromSection(sec *drbdconf.Section) error {
-	panic("unimplemented")
-}
-
-func (n *Net) MarshalToSection() *drbdconf.Section {
-	panic("unimplemented")
+func (*Net) SectionKeyword() string {
+	return "net"
 }
 
 type AfterSB0PriPolicy string
@@ -246,11 +248,14 @@ const (
 type Protocol string
 
 const (
-	// Writes to the DRBD device complete as soon as they have reached the local disk and the TCP/IP send buffer.
+	// Writes to the DRBD device complete as soon as they have reached the local
+	// disk and the TCP/IP send buffer.
 	ProtocolA Protocol = "A"
-	// Writes to the DRBD device complete as soon as they have reached the local disk, and all peers have acknowledged the receipt of the write requests.
+	// Writes to the DRBD device complete as soon as they have reached the local
+	// disk, and all peers have acknowledged the receipt of the write requests.
 	ProtocolB Protocol = "B"
-	// Writes to the DRBD device complete as soon as they have reached the local and all remote disks.
+	// Writes to the DRBD device complete as soon as they have reached the local
+	// and all remote disks.
 	ProtocolC Protocol = "C"
 )
 
@@ -261,17 +266,21 @@ const (
 	RRConflictPolicyDisconnect RRConflictPolicy = "disconnect"
 	// Disconnect now, and retry to connect immediatly afterwards.
 	RRConflictPolicyRetryConnect RRConflictPolicy = "retry-connect"
-	// Resync to the primary node is allowed, violating the assumption that data on a block device are stable for one of the nodes. Do not use this option, it is dangerous.
+	// Resync to the primary node is allowed, violating the assumption that data
+	// on a block device are stable for one of the nodes. Do not use this
+	// option, it is dangerous.
 	RRConflictPolicyViolently RRConflictPolicy = "violently"
-	// Call the pri-lost handler on one of the machines. The handler is expected to reboot the machine, which puts it into secondary role.
+	// Call the pri-lost handler on one of the machines. The handler is expected
+	// to reboot the machine, which puts it into secondary role.
 	RRConflictPolicyCallPriLost RRConflictPolicy = "call-pri-lost"
-	// Auto-discard reverses the resync direction, so that DRBD resyncs the current primary to the current secondary. Auto-discard only applies when protocol A is in use and the resync decision is based on the principle that a crashed primary should be the source of a resync. When a primary node crashes, it might have written some last updates to its disk, which were not received by a protocol A secondary. By promoting the secondary in the meantime the user accepted that those last updates have been lost. By using auto-discard you consent that the last updates (before the crash of the primary) should be rolled back automatically.
+	// Auto-discard reverses the resync direction, so that DRBD resyncs the
+	// current primary to the current secondary. Auto-discard only applies when
+	// protocol A is in use and the resync decision is based on the principle
+	// that a crashed primary should be the source of a resync. When a primary
+	// node crashes, it might have written some last updates to its disk, which
+	// were not received by a protocol A secondary. By promoting the secondary
+	// in the meantime the user accepted that those last updates have been lost.
+	// By using auto-discard you consent that the last updates (before the crash
+	// of the primary) should be rolled back automatically.
 	RRConflictPolicyAutoDiscard RRConflictPolicy = "auto-discard"
-)
-
-type AllowRemoteReadValue string
-
-const (
-	AllowRemoteReadValueYes AllowRemoteReadValue = "yes"
-	AllowRemoteReadValueNo  AllowRemoteReadValue = "no"
 )

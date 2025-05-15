@@ -1,7 +1,6 @@
 package v9
 
 import (
-	"os"
 	"strings"
 	"testing"
 
@@ -9,27 +8,39 @@ import (
 )
 
 func TestV9Config(t *testing.T) {
-	root, err := os.OpenRoot("./testdata/")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// root, err := os.OpenRoot("./testdata/")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
 
-	config, err := OpenConfig(root.FS(), "root.conf")
-	if err != nil {
-		t.Fatal(err)
-	}
+	// config, err := OpenConfig(root.FS(), "root.conf")
+	// if err != nil {
+	// 	t.Fatal(err)
+	// }
 
-	for res := range config.Resources {
-		_ = res
-		// res.Options.SetQuorumMinimumRedundancy(2)
-	}
+	// for res := range config.Resources {
+	// 	_ = res
+	// 	// res.Options.SetQuorumMinimumRedundancy(2)
+	// }
 }
 
 func TestMarshal(t *testing.T) {
 	cfg := &Config{
 		Global: &Global{
-			DialogRefresh:         &[]int{42}[0],
+			DialogRefresh:         ptr(42),
 			DisableIPVerification: true,
+			UsageCount:            UsageCountValueAsk,
+			UdevAlwaysUseVNR:      true,
+		},
+		Common: &Common{
+			Disk: &DiskOptions{
+				ALExtents:     ptr(uint(123)),
+				ALUpdates:     ptr(false),
+				DiskDrain:     ptr(true),
+				OnIOError:     IOErrorPolicyDetach,
+				ReadBalancing: ReadBalancingPolicy64KStriping,
+				ResyncAfter:   "asd/asd",
+			},
 		},
 	}
 

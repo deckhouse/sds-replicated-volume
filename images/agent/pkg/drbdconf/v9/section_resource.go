@@ -17,21 +17,12 @@ type Resource struct {
 	Startup        *Startup
 }
 
-var _ Section = &Resource{}
+var _ drbdconf.SectionKeyworder = &Resource{}
 
-func (r *Resource) Keyword() string {
+func (r *Resource) SectionKeyword() string {
 	dname := "resource"
 	if r != nil && r.Name != "" {
 		dname += " " + r.Name
 	}
 	return dname
-}
-
-// UnmarshalFromSection implements Section.
-func (r *Resource) UnmarshalFromSection(sec *drbdconf.Section) error {
-	return nil
-}
-
-func (r *Resource) MarshalToSection() *drbdconf.Section {
-	panic("unimplemented")
 }

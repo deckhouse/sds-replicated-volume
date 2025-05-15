@@ -12,20 +12,8 @@ type Common struct {
 	Startup  *Startup
 }
 
-var _ Section = &Common{}
+var _ drbdconf.SectionKeyworder = &Common{}
 
-func (*Common) Keyword() string {
+func (*Common) SectionKeyword() string {
 	return "common"
-}
-
-func (c *Common) UnmarshalFromSection(sec *drbdconf.Section) error {
-	return nil
-}
-
-func (c *Common) MarshalToSection() *drbdconf.Section {
-	sec := &drbdconf.Section{
-		Key: []drbdconf.Word{drbdconf.Word{}},
-	}
-	_ = sec
-	panic("unimplemented")
 }

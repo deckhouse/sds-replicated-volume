@@ -94,7 +94,7 @@ type Word struct {
 func NewWord(word string) Word {
 	return Word{
 		Value:    word,
-		IsQuoted: !isTokenStr(word),
+		IsQuoted: len(word) == 0 || !isTokenStr(word),
 	}
 }
 
