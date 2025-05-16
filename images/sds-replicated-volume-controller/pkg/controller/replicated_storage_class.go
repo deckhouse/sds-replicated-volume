@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -82,6 +83,7 @@ const (
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
 	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+	LVMVolumeGroupsParamKey                       = "replicated.csi.storage.deckhouse.io/lvm-volume-groups"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -266,7 +268,7 @@ func ReconcileReplicatedStorageClass(
 			"to Local and virtualization module is %t", virtualizationEnabled))
 	}
 
-	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled)
+	newSC := GetNewStorageClass(ctx, cl, replicatedSC, virtualizationEnabled)
 
 	if oldSC == nil {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " +
@@ -463,11 +465,42 @@ func CreateStorageClass(ctx context.Context, cl client.Client, newStorageClass *
 	return nil
 }
 
-func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
+func GenerateStorageClassFromReplicatedStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
+	//TODO remove log
 	fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] replicatedSC name %s", replicatedSC.Name)
 
 	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
+
+	type ThinPool struct {
+		PoolName string `yaml:"poolName"`
+	}
+	type LVMVolumeGroup struct {
+		Name string   `yaml:"name"`
+		Thin ThinPool `yaml:"Thin"`
+	}
+
+	cwt, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	rsp := &srv.ReplicatedStoragePool{}
+	err := cl.Get(cwt, client.ObjectKey{Name: replicatedSC.Spec.StoragePool, Namespace: replicatedSC.Namespace}, rsp)
+	if err != nil {
+		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to get ReplicatedStoragePools %s", replicatedSC.Spec.StoragePool)
+	}
+
+	rscLVGs := make([]LVMVolumeGroup, len(rsp.Spec.LVMVolumeGroups))
+	for _, val := range rsp.Spec.LVMVolumeGroups {
+		rscLVGs = append(rscLVGs, LVMVolumeGroup{
+			Name: val.Name,
+			Thin: ThinPool{PoolName: val.ThinPoolName},
+		})
+	}
+
+	rscLVGsStr, err := json.Marshal(rscLVGs)
+	if err != nil {
+		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to marshal LVMVolumeGroups: %s", err.Error())
+	}
 
 	storageClassParameters := map[string]string{
 		StorageClassParamFSTypeKey:                     FsTypeExt4,
@@ -480,6 +513,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
+		LVMVolumeGroupsParamKey:                        string(rscLVGsStr),
 	}
 
 	fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] storageClassParameters %s", storageClassParameters[ReplicatedStorageClassParamNameKey])
@@ -692,8 +726,8 @@ func recreateStorageClassIfNeeded(
 	return true, false, nil
 }
 
-func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
-	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
+func GetNewStorageClass(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
+	newSC := GenerateStorageClassFromReplicatedStorageClass(ctx, cl, replicatedSC)
 	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
 		if newSC.Annotations == nil {
 			newSC.Annotations = make(map[string]string, 1)
@@ -795,4 +829,5 @@ func updateMap(dst, src map[string]string) {
 			dst[k] = v
 		}
 	}
+
 }
