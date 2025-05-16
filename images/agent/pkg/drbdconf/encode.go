@@ -31,21 +31,57 @@ Supported primitive types:
     parameter names, which will be tried during unmarshaling. Marshaling will
     always use the first name.
 */
-func Marshal[T any, TP Ptr[T]](v TP) ([]*Section, error) {
-	s, err := marshalSection(reflect.ValueOf(v), true)
-	if err != nil {
-		return nil, err
-	}
-
-	sections := make([]*Section, 0, len(s.Elements))
-	for _, el := range s.Elements {
-		if sec, ok := el.(*Section); ok {
-			sections = append(sections, sec)
-		}
-	}
-
-	return sections, nil
+func Marshal[T any, TP Ptr[T]](src TP, dst *Section) error {
+	return marshalSection(reflect.ValueOf(src), dst)
 }
+
+func marshalSection(srcPtrVal reflect.Value, dst *Section) error {
+	err := visitStructFields(
+		srcPtrVal,
+		func(f *visitedField) error {
+			if len(f.ParameterNames) > 0 {
+				// zero values always mean a missing parameter
+				if isZeroValue(f.FieldVal) {
+					return nil
+				}
+
+				words, err := marshalParameter(f.Field, f.FieldVal)
+				if err != nil {
+					return err
+				}
+
+				if f.ParameterNames[0] == "" {
+					// current section key
+					dst.Key = append(dst.Key, words...)
+				} else {
+					// new parameter
+					par := &Parameter{}
+					par.Key = append(par.Key, NewWord(f.ParameterNames[0]))
+					par.Key = append(par.Key, words...)
+					dst.Elements = append(dst.Elements, par)
+				}
+			} else if ok, kw := isStructPtrAndSectionKeyworder(f.FieldVal); ok {
+				subsec := &Section{Key: []Word{NewWord(kw)}}
+				err := marshalSection(f.FieldVal, subsec)
+				if err != nil {
+					return fmt.Errorf(
+						"marshaling field %s: %w",
+						f.Field.Name, err,
+					)
+				}
+				dst.Elements = append(dst.Elements, subsec)
+			}
+			return nil
+		},
+	)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func isZeroValue(v reflect.Value) bool {
 	if v.IsZero() {
 		return true
@@ -54,86 +90,6 @@ func isZeroValue(v reflect.Value) bool {
 		return true
 	}
 	return false
-}
-
-func marshalSection(ptrVal reflect.Value, root bool) (*Section, error) {
-	if !isNonNilStructPtr(ptrVal) {
-		return nil, fmt.Errorf("expected non-nil pointer to a struct")
-	}
-
-	val := ptrVal.Elem()
-
-	valType := val.Type()
-
-	sec := &Section{}
-	if !root {
-		sec.Key = append(
-			sec.Key,
-			NewWord(ptrVal.Interface().(SectionKeyworder).SectionKeyword()),
-		)
-	}
-
-	for i := range valType.NumField() {
-		field := valType.Field(i)
-
-		// skip unexported fields
-		if field.PkgPath != "" {
-			continue
-		}
-
-		fieldVal := val.Field(i)
-
-		parNames, err := getDRBDParameterNames(field)
-		if err != nil {
-			return nil, err
-		}
-
-		if len(parNames) > 0 {
-			if root {
-				return nil,
-					fmt.Errorf(
-						"expected root section not to have parameters, but "+
-							"`drbd` tag found on field %s",
-						field.Name,
-					)
-			}
-
-			// zero values always mean a missing parameter
-			if isZeroValue(fieldVal) {
-				continue
-			}
-
-			words, err := marshalParameter(field, fieldVal)
-			if err != nil {
-				return nil,
-					fmt.Errorf(
-						"marshaling struct %s: %w",
-						valType.Name(), err,
-					)
-			}
-
-			if parNames[0] == "" {
-				// current section key
-				sec.Key = append(sec.Key, words...)
-			} else {
-				// new parameter
-				par := &Parameter{}
-				par.Key = append(par.Key, NewWord(parNames[0]))
-				par.Key = append(par.Key, words...)
-				sec.Elements = append(sec.Elements, par)
-			}
-		} else if isStructPtrImplementingSectionKeyworder(fieldVal) {
-			subsec, err := marshalSection(fieldVal, false)
-			if err != nil {
-				return nil,
-					fmt.Errorf("marshaling field %s: %w", field.Name, err)
-			}
-			sec.Elements = append(sec.Elements, subsec)
-		}
-		// skip field
-	}
-
-	return sec, nil
 }
 
 func getDRBDParameterNames(field reflect.StructField) ([]string, error) {
@@ -169,9 +125,17 @@ func isNonNilStructPtr(v reflect.Value) bool {
 		v.Elem().Kind() == reflect.Struct
 }
 
-func isStructPtrImplementingSectionKeyworder(v reflect.Value) bool {
-	return isNonNilStructPtr(v) &&
+func isSectionKeyworder(v reflect.Value) bool {
+	return v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
+}
+
+func isStructPtrAndSectionKeyworder(v reflect.Value) (ok bool, kw string) {
+	ok = isNonNilStructPtr(v) &&
 		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
+	if ok {
+		kw = v.Interface().(SectionKeyworder).SectionKeyword()
+	}
+	return
 }
 
 func marshalParameter(
@@ -215,7 +179,10 @@ func marshalParameter(
 	return NewWords(wordStrs), nil
 }
 
-func marshalParameterValue(v reflect.Value, vtype reflect.Type) ([]string, error) {
+func marshalParameterValue(
+	v reflect.Value,
+	vtype reflect.Type,
+) ([]string, error) {
 	if typeCodec := ParameterTypeCodecs[vtype]; typeCodec != nil {
 		return typeCodec.MarshalParameter(v.Interface())
 	}
@@ -230,8 +197,4 @@ func marshalParameterValue(v reflect.Value, vtype reflect.Type) ([]string, error
 
 	return nil, fmt.Errorf("unsupported field type '%s'", vtype.Name())
 
-}
-
-func Unmarshal[T any, PT Ptr[T]](sections []*Section, v PT) error {
-	return nil
 }

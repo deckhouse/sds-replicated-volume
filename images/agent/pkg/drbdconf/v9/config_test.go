@@ -44,14 +44,16 @@ func TestMarshal(t *testing.T) {
 		},
 	}
 
-	sections, err := drbdconf.Marshal(cfg)
+	rootSec := &drbdconf.Section{}
+
+	err := drbdconf.Marshal(cfg, rootSec)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	root := &drbdconf.Root{}
-	for _, sec := range sections {
-		root.Elements = append(root.Elements, sec)
+	for _, sec := range rootSec.Elements {
+		root.Elements = append(root.Elements, sec.(*drbdconf.Section))
 	}
 
 	sb := &strings.Builder{}

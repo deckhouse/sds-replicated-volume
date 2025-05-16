@@ -2,6 +2,12 @@ package drbdconf
 
 import "fmt"
 
+func SectionKeyword[T any, TP SectionPtr[T]]() string {
+	return TP(nil).SectionKeyword()
+}
+
+func ptr[T any](v T) *T { return &v }
+
 func ensureLen(words []Word, lenAtLeast int) error {
 	if len(words) < lenAtLeast {
 		var loc Location
@@ -13,9 +19,3 @@ func ensureLen(words []Word, lenAtLeast int) error {
 
 	return nil
 }
-
-func SectionKeyword[T any, TP SectionPtr[T]]() string {
-	return TP(nil).SectionKeyword()
-}
-
-func ptr[T any](v T) *T { return &v }
