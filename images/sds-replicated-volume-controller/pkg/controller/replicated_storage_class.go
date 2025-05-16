@@ -132,7 +132,7 @@ func NewReplicatedStorageClass(
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(cfg.ScanInterval) * time.Second}, nil
 			}
 
-			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler. No need to reconcile it again.", request.Name))
+			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler. No need to reconcile it again. ", request.Name))
 			return reconcile.Result{}, nil
 		}),
 	})
