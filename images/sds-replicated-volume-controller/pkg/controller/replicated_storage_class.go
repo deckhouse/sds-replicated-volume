@@ -489,7 +489,7 @@ func GenerateStorageClassFromReplicatedStorageClass(ctx context.Context, cl clie
 		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to get ReplicatedStoragePools %s", replicatedSC.Spec.StoragePool)
 	}
 
-	rscLVGs := make([]LVMVolumeGroup, len(rsp.Spec.LVMVolumeGroups))
+	rscLVGs := make([]LVMVolumeGroup, 0, len(rsp.Spec.LVMVolumeGroups))
 	for _, val := range rsp.Spec.LVMVolumeGroups {
 		rscLVGs = append(rscLVGs, LVMVolumeGroup{
 			Name: val.Name,
