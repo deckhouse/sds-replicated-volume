@@ -795,7 +795,7 @@ index 856eae7..21feb74 100644
  
  var _paramKeyNameToValueMap = map[string]paramKey{
  	_paramKeyName[0:23]:    0,
-@@ -41,6 +41,7 @@ var _paramKeyNameToValueMap = map[string]paramKey{
+@@ -41,6 +41,8 @@ var _paramKeyNameToValueMap = map[string]paramKey{
  	_paramKeyName[237:250]: 18,
  	_paramKeyName[250:260]: 19,
  	_paramKeyName[260:273]: 20,

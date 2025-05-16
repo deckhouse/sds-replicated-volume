@@ -486,7 +486,7 @@ func GenerateStorageClassFromReplicatedStorageClass(ctx context.Context, cl clie
 	rsp := &srv.ReplicatedStoragePool{}
 	err := cl.Get(cwt, client.ObjectKey{Name: replicatedSC.Spec.StoragePool, Namespace: replicatedSC.Namespace}, rsp) 
 	if err != nil {
-		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to get ReplicatedStoragePools %s", replicatedSC.Spec.StoragePool)
+		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to get ReplicatedStoragePools %s", replicatedSC.Spec.StoragePool) 
 	}
 
 	rscLVGs := make([]LVMVolumeGroup, 0, len(rsp.Spec.LVMVolumeGroups))
