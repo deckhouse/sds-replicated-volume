@@ -197,7 +197,7 @@ func ReconcileReplicatedStorageClassEvent(
 	}
 
 	if sc != nil && sc.Provisioner != StorageClassProvisioner {
-		return false, fmt.Errorf("Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
+		return false, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
 	}
 
 	// Handle deletion
@@ -748,7 +748,13 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 		newSC.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 	}
 	newSC.Parameters[StorageClassLVMVolumeGroupsParamKey] = replicatedStoragePoolData["LVGs"]
-	newSC.Parameters[StorageClassLVMType] = replicatedStoragePoolData["Type"]
+	LVMtype := replicatedStoragePoolData["Type"]
+	if LVMtype == "LVM" {
+		newSC.Parameters[StorageClassLVMType] = "Thick"
+	}
+	if LVMtype == "LVMThin" {
+		newSC.Parameters[StorageClassLVMType] = "Thin"
+	}
 
 	return newSC
 }
