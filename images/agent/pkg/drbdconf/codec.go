@@ -18,7 +18,7 @@ var ParameterTypeCodecs = map[reflect.Type]ParameterTypeCodec{
 
 type ParameterTypeCodec interface {
 	MarshalParameter(v any) ([]string, error)
-	UnmarshalParameter(p Parameter) (any, error)
+	UnmarshalParameter(p []Word) (any, error)
 }
 
 // ======== [string] ========
@@ -32,8 +32,8 @@ func (c *stringParameterCodec) MarshalParameter(v any) ([]string, error) {
 	return []string{v.(string)}, nil
 }
 
-func (*stringParameterCodec) UnmarshalParameter(_ Parameter) (any, error) {
-	panic("TODO")
+func (*stringParameterCodec) UnmarshalParameter(par []Word) (any, error) {
+	return par[1].Value, nil
 }
 
 // ======== [bool] ========
@@ -47,7 +47,7 @@ func (*boolParameterCodec) MarshalParameter(_ any) ([]string, error) {
 	return nil, nil
 }
 
-func (*boolParameterCodec) UnmarshalParameter(_ Parameter) (any, error) {
+func (*boolParameterCodec) UnmarshalParameter(_ []Word) (any, error) {
 	return true, nil
 }
 
@@ -66,16 +66,16 @@ func (*boolPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 	}
 }
 
-func (*boolPtrParameterCodec) UnmarshalParameter(par Parameter) (any, error) {
-	if strings.HasPrefix(par.Key[0].Value, "no-") && len(par.Key) == 1 {
+func (*boolPtrParameterCodec) UnmarshalParameter(par []Word) (any, error) {
+	if strings.HasPrefix(par[0].Value, "no-") && len(par) == 1 {
 		return ptr(false), nil
 	}
 
-	if len(par.Key) == 1 || par.Key[1].Value == "yes" {
+	if len(par) == 1 || par[1].Value == "yes" {
 		return ptr(true), nil
 	}
 
-	if par.Key[1].Value == "no" {
+	if par[1].Value == "no" {
 		return ptr(false), nil
 	}
 
@@ -93,18 +93,18 @@ func (*intPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 	return []string{strconv.Itoa(*(v.(*int)))}, nil
 }
 
-func (*intPtrParameterCodec) UnmarshalParameter(p Parameter) (any, error) {
-	if err := ensureLen(p.Key, 2); err != nil {
+func (*intPtrParameterCodec) UnmarshalParameter(p []Word) (any, error) {
+	if err := ensureLen(p, 2); err != nil {
 		return nil,
-			fmt.Errorf("unmarshaling '%s' to *int: %w", p.Key[0].Value, err)
+			fmt.Errorf("unmarshaling '%s' to *int: %w", p[0].Value, err)
 	}
 
-	i, err := strconv.Atoi(p.Key[1].Value)
+	i, err := strconv.Atoi(p[1].Value)
 	if err != nil {
 		return nil,
 			fmt.Errorf(
 				"unmarshaling '%s' value to *int: %w",
-				p.Key[0].Value, err,
+				p[0].Value, err,
 			)
 	}
 
@@ -122,18 +122,18 @@ func (*uintPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 	return []string{strconv.FormatUint(uint64(*(v.(*uint))), 10)}, nil
 }
 
-func (*uintPtrParameterCodec) UnmarshalParameter(p Parameter) (any, error) {
-	if err := ensureLen(p.Key, 2); err != nil {
+func (*uintPtrParameterCodec) UnmarshalParameter(p []Word) (any, error) {
+	if err := ensureLen(p, 2); err != nil {
 		return nil,
-			fmt.Errorf("unmarshaling '%s' to *uint: %w", p.Key[0].Value, err)
+			fmt.Errorf("unmarshaling '%s' to *uint: %w", p[0].Value, err)
 	}
 
-	i64, err := strconv.ParseUint(p.Key[1].Value, 10, 0)
+	i64, err := strconv.ParseUint(p[1].Value, 10, 0)
 	if err != nil {
 		return nil,
 			fmt.Errorf(
 				"unmarshaling '%s' value to *int: %w",
-				p.Key[0].Value, err,
+				p[0].Value, err,
 			)
 	}
 

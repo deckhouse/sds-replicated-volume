@@ -42,6 +42,15 @@ func TestMarshal(t *testing.T) {
 				ResyncAfter:   "asd/asd",
 			},
 		},
+		Resources: []*Resource{
+			{
+				Name: "r1",
+				Disk: &DiskOptions{
+					MDFlushes: ptr(true),
+				},
+			},
+			{Name: "r2"},
+		},
 	}
 
 	rootSec := &drbdconf.Section{}

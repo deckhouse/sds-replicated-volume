@@ -70,6 +70,6 @@ func (u *UsageCountValue) MarshalParameter() ([]string, error) {
 	return []string{string(*u)}, nil
 }
 
-func (u *UsageCountValue) UnmarshalParameter(p drbdconf.Parameter) error {
+func (u *UsageCountValue) UnmarshalParameter(p []drbdconf.Word) error {
 	panic("unimplemented")
 }

@@ -14,7 +14,7 @@ type ParameterMarshaler interface {
 }
 
 type ParameterUnmarshaler interface {
-	UnmarshalParameter(p Parameter) error
+	UnmarshalParameter(p []Word) error
 }
 
 // # Type constraints

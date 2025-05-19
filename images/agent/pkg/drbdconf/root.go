@@ -10,6 +10,16 @@ type Root struct {
 	Elements []RootElement
 }
 
+func (root *Root) AsSection() *Section {
+	sec := &Section{}
+
+	for _, subSec := range root.TopLevelSections() {
+		sec.Elements = append(sec.Elements, subSec)
+	}
+
+	return sec
+}
+
 func (root *Root) TopLevelSections() iter.Seq2[*Root, *Section] {
 	return func(yield func(*Root, *Section) bool) {
 		visited := map[*Root]struct{}{root: {}}
@@ -19,6 +29,7 @@ func (root *Root) TopLevelSections() iter.Seq2[*Root, *Section] {
 				if !yield(root, sec) {
 					return
 				}
+				continue
 			}
 			incl := el.(*Include)
 			for _, subRoot := range incl.Files {
@@ -64,11 +75,47 @@ func (*Section) _sectionElement() {}
 
 func (s *Section) Location() Location { return s.Key[0].Location }
 
-func (s *Section) Parameters() iter.Seq2[int, *Parameter] {
-	return func(yield func(int, *Parameter) bool) {
-		for idx, el := range s.Elements {
+func (s *Section) ParametersByKey(name string) iter.Seq[*Parameter] {
+	return func(yield func(*Parameter) bool) {
+		for par := range s.Parameters() {
+			if par.Key[0].Value == name {
+				if !yield(par) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Section) Parameters() iter.Seq[*Parameter] {
+	return func(yield func(*Parameter) bool) {
+		for _, el := range s.Elements {
 			if par, ok := el.(*Parameter); ok {
-				if !yield(idx, par) {
+				if !yield(par) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Section) SectionsByKey(name string) iter.Seq[*Section] {
+	return func(yield func(*Section) bool) {
+		for par := range s.Sections() {
+			if par.Key[0].Value == name {
+				if !yield(par) {
+					return
+				}
+			}
+		}
+	}
+}
+
+func (s *Section) Sections() iter.Seq[*Section] {
+	return func(yield func(*Section) bool) {
+		for _, el := range s.Elements {
+			if par, ok := el.(*Section); ok {
+				if !yield(par) {
 					return
 				}
 			}

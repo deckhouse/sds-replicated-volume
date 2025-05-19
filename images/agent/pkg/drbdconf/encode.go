@@ -60,6 +60,22 @@ func marshalSection(srcPtrVal reflect.Value, dst *Section) error {
 					par.Key = append(par.Key, words...)
 					dst.Elements = append(dst.Elements, par)
 				}
+			} else if ok, _, kw := isSliceOfStructPtrsAndSectionKeyworders(
+				f.Field.Type,
+			); ok {
+				for i := range f.FieldVal.Len() {
+					elem := f.FieldVal.Index(i)
+
+					subsecItem := &Section{Key: []Word{NewWord(kw)}}
+					err := marshalSection(elem, subsecItem)
+					if err != nil {
+						return fmt.Errorf(
+							"marshaling field %s, item %d: %w",
+							f.Field.Name, i, err,
+						)
+					}
+					dst.Elements = append(dst.Elements, subsecItem)
+				}
 			} else if ok, kw := isStructPtrAndSectionKeyworder(f.FieldVal); ok {
 				subsec := &Section{Key: []Word{NewWord(kw)}}
 				err := marshalSection(f.FieldVal, subsec)
@@ -80,6 +96,95 @@ func marshalSection(srcPtrVal reflect.Value, dst *Section) error {
 	}
 
 	return nil
+}
+
+func isStructPtrAndSectionKeyworder(v reflect.Value) (ok bool, kw string) {
+	ok = isNonNilStructPtr(v) &&
+		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
+	if ok {
+		kw = v.Interface().(SectionKeyworder).SectionKeyword()
+	}
+	return
+}
+
+// TODO
+// func isSliceOfStructPtrsAndSectionKeyworders(v reflect.Value) bool {
+// 	ok = isNonNilStructPtr(v) &&
+// 		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
+// 	if ok {
+// 		kw = v.Interface().(SectionKeyworder).SectionKeyword()
+// 	}
+// 	return
+// }
+
+func marshalParameter(
+	field reflect.StructField,
+	fieldVal reflect.Value,
+) ([]Word, error) {
+	if field.Type.Kind() == reflect.Slice {
+		wordStrs := make([]string, fieldVal.Len())
+		for i := range fieldVal.Len() {
+			itemWordStrs, err := marshalParameterValue(
+				fieldVal.Index(i),
+				field.Type.Elem(),
+			)
+			if err != nil {
+				return nil,
+					fmt.Errorf(
+						"marshaling field %s item %d: %w",
+						field.Name, i, err,
+					)
+			}
+
+			if len(itemWordStrs) != 1 {
+				return nil,
+					fmt.Errorf(
+						"marshaling field %s item %d: "+
+							"marshaler is expected to produce exactly "+
+							"one word per item, got %d",
+						field.Name, i, len(itemWordStrs),
+					)
+			}
+			wordStrs[i] = itemWordStrs[0]
+		}
+		return NewWords(wordStrs), nil
+	}
+
+	wordStrs, err := marshalParameterValue(fieldVal, field.Type)
+	if err != nil {
+		return nil, fmt.Errorf("marshaling field %s: %w", field.Name, err)
+	}
+
+	return NewWords(wordStrs), nil
+}
+
+func marshalParameterValue(
+	srcVal reflect.Value,
+	srcType reflect.Type,
+) ([]string, error) {
+	if typeCodec := ParameterTypeCodecs[srcType]; typeCodec != nil {
+		return typeCodec.MarshalParameter(srcVal.Interface())
+	}
+
+	// value type may be different in case when srcType is slice element type
+	if srcVal.Type() != srcType {
+		if typeCodec := ParameterTypeCodecs[srcVal.Type()]; typeCodec != nil {
+			return typeCodec.MarshalParameter(srcVal.Interface())
+		}
+	}
+
+	if m, ok := srcVal.Interface().(ParameterMarshaler); ok {
+		return m.MarshalParameter()
+	}
+
+	// interface may be implemented for pointer receiver
+	if srcVal.Kind() != reflect.Pointer {
+		if m, ok := srcVal.Addr().Interface().(ParameterMarshaler); ok {
+			return m.MarshalParameter()
+		}
+	}
+
+	return nil, fmt.Errorf("unsupported field type")
 }
 
 func isZeroValue(v reflect.Value) bool {
@@ -127,74 +232,4 @@ func isNonNilStructPtr(v reflect.Value) bool {
 
 func isSectionKeyworder(v reflect.Value) bool {
 	return v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
-}
-
-func isStructPtrAndSectionKeyworder(v reflect.Value) (ok bool, kw string) {
-	ok = isNonNilStructPtr(v) &&
-		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
-	if ok {
-		kw = v.Interface().(SectionKeyworder).SectionKeyword()
-	}
-	return
-}
-
-func marshalParameter(
-	field reflect.StructField,
-	fieldVal reflect.Value,
-) ([]Word, error) {
-	if field.Type.Kind() == reflect.Slice {
-		wordStrs := make([]string, fieldVal.Len())
-		for i := range fieldVal.Len() {
-			itemWordStrs, err := marshalParameterValue(
-				fieldVal.Index(i),
-				field.Type.Elem(),
-			)
-			if err != nil {
-				return nil,
-					fmt.Errorf(
-						"marshaling field %s item %d: %w",
-						field.Name, i, err,
-					)
-			}
-
-			if len(itemWordStrs) != 1 {
-				return nil,
-					fmt.Errorf(
-						"marshaling field %s item %d: "+
-							"marshaler is expected to produce exactly "+
-							"one word per item, got %d",
-						field.Name, i, len(itemWordStrs),
-					)
-			}
-			wordStrs[i] = itemWordStrs[0]
-		}
-		return NewWords(wordStrs), nil
-	}
-
-	wordStrs, err := marshalParameterValue(fieldVal, field.Type)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling field %s: %w", field.Name, err)
-	}
-
-	return NewWords(wordStrs), nil
-}
-
-func marshalParameterValue(
-	v reflect.Value,
-	vtype reflect.Type,
-) ([]string, error) {
-	if typeCodec := ParameterTypeCodecs[vtype]; typeCodec != nil {
-		return typeCodec.MarshalParameter(v.Interface())
-	}
-
-	if m, ok := v.Interface().(ParameterMarshaler); ok {
-		return m.MarshalParameter()
-	}
-
-	if m, ok := v.Addr().Interface().(ParameterMarshaler); ok {
-		return m.MarshalParameter()
-	}
-
-	return nil, fmt.Errorf("unsupported field type '%s'", vtype.Name())
-
 }

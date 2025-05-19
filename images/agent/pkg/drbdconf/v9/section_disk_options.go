@@ -229,7 +229,7 @@ func (i *IOErrorPolicy) MarshalParameter() ([]string, error) {
 	return []string{string(*i)}, nil
 }
 
-func (i *IOErrorPolicy) UnmarshalParameter(p drbdconf.Parameter) error {
+func (i *IOErrorPolicy) UnmarshalParameter(p []drbdconf.Word) error {
 	panic("unimplemented")
 }
 
@@ -254,7 +254,7 @@ func (r *ReadBalancingPolicy) MarshalParameter() ([]string, error) {
 }
 
 // UnmarshalParameter implements drbdconf.ParameterCodec.
-func (r *ReadBalancingPolicy) UnmarshalParameter(p drbdconf.Parameter) error {
+func (r *ReadBalancingPolicy) UnmarshalParameter(p []drbdconf.Word) error {
 	panic("unimplemented")
 }
 
