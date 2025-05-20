@@ -241,11 +241,7 @@ func ReconcilePVReplicas(
 		rg := rgs[RGName]
 		log.Debug(fmt.Sprintf("[ReconcilePVReplicas] PV: %s, RG: %s", pv.Name, rg.Name))
 
-		resources, ok := res[pv.Name]
-		if !ok {
-			continue
-		}
-
+		resources := res[pv.Name]
 		replicasErrLevel, err := checkPVMinReplicasCount(ctx, log, lc, rg, resources)
 		if err != nil {
 			log.Error(err, "[ReconcilePVReplicas] unable to validate replicas count")
@@ -280,12 +276,11 @@ func checkPVMinReplicasCount(
 	resources []lapi.Resource,
 ) (string, error) {
 	placeCount := int(rg.SelectFilter.PlaceCount)
-	upVols := 0
-
 	if placeCount <= 0 {
 		return "", nil
 	}
 
+	upVols := 0
 	for _, r := range resources {
 		volList, err := lc.Resources.GetVolumes(ctx, r.Name, r.NodeName)
 		if err != nil {

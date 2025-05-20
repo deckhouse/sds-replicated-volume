@@ -28,11 +28,13 @@ const (
 	DaemonSetNameCsiNode = "linstor-csi-node"
 	DaemonSetNameNode    = "linstor-node"
 
-	DeploymentNameSchedulerExtender = "linstor-scheduler-extender"
-	DeploymentNameWebhooks          = "webhooks"
-	DeploymentNameSpaas             = "spaas"
-	DeploymentNameController        = "linstor-controller"
-	DeploymentNameCsiController     = "linstor-csi-controller"
+	DeploymentNameSchedulerExtender  = "linstor-scheduler-extender"
+	DeploymentNameWebhooks           = "webhooks"
+	DeploymentNameSpaas              = "spaas"
+	DeploymentNameController         = "linstor-controller"
+	DeploymentNameCsiController      = "linstor-csi-controller"
+	DeploymentNameAffinityController = "linstor-affinity-controller"
+	DeploymentNameSdsRVController    = "sds-replicated-volume-controller"
 
 	WaitForResourcesPollInterval = 2 * time.Second
 )
@@ -46,6 +48,8 @@ var (
 		DeploymentNameSpaas,
 		DeploymentNameController,
 		DeploymentNameCsiController,
+		DeploymentNameAffinityController,
+		DeploymentNameSdsRVController,
 	}
 )
 
@@ -275,6 +279,14 @@ func (s *stateMachine) turnOffAndRenewCerts() error {
 		return err
 	}
 
+	if err := s.turnOffDeploymentAndWait(DeploymentNameAffinityController); err != nil {
+		return err
+	}
+
+	if err := s.turnOffDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
+		return err
+	}
+
 	if err := s.turnOffDeploymentAndWait(DeploymentNameCsiController); err != nil {
 		return err
 	}
@@ -401,6 +413,14 @@ func (s *stateMachine) turnOn() error {
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameCsiController); err != nil {
+		return err
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameAffinityController); err != nil {
+		return err
+	}
+
+	if err := s.turnOnDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
 		return err
 	}
 
