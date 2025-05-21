@@ -222,7 +222,7 @@ func unmarshalParameterValue(
 	if dstVal.Kind() == reflect.Pointer {
 		if dstVal.Type().Implements(reflect.TypeFor[ParameterUnmarshaler]()) {
 			if dstVal.IsNil() {
-				dstVal.Set(reflect.New(dstVal.Type()))
+				dstVal.Set(reflect.New(dstVal.Type().Elem()))
 			}
 			return dstVal.
 				Interface().(ParameterUnmarshaler).
@@ -232,6 +232,7 @@ func unmarshalParameterValue(
 		return um.UnmarshalParameter(srcPar)
 	}
 
+	println("here")
 	return fmt.Errorf("unsupported field type")
 }
 

@@ -20,9 +20,5 @@ type Resource struct {
 var _ drbdconf.SectionKeyworder = &Resource{}
 
 func (r *Resource) SectionKeyword() string {
-	dname := "resource"
-	if r != nil && r.Name != "" {
-		dname += " " + r.Name
-	}
-	return dname
+	return "resource"
 }

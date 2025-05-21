@@ -66,10 +66,16 @@ const (
 
 var _ drbdconf.ParameterCodec = ptr(UsageCountValue(""))
 
+var knownValuesUsageCountValue = map[UsageCountValue]struct{}{
+	UsageCountValueYes: {},
+	UsageCountValueNo:  {},
+	UsageCountValueAsk: {},
+}
+
 func (u *UsageCountValue) MarshalParameter() ([]string, error) {
 	return []string{string(*u)}, nil
 }
 
 func (u *UsageCountValue) UnmarshalParameter(p []drbdconf.Word) error {
-	panic("unimplemented")
+	return drbdconf.ReadEnumAt(u, knownValuesUsageCountValue, p, 1)
 }

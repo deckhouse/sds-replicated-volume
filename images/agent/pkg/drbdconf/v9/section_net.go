@@ -70,8 +70,16 @@ type Net struct {
 	// If a secondary node fails to complete a write request in ko-count times the timeout parameter, it is excluded from the cluster. The primary node then sets the connection to this secondary node to Standalone. To disable this feature, you should explicitly set it to 0; defaults may change between versions.
 	KOCount int
 
-	// Limits the memory usage per DRBD minor device on the receiving side, or for internal buffers during resync or online-verify. Unit is PAGE_SIZE, which is 4 KiB on most systems. The minimum possible setting is hard coded to 32 (=128 KiB). These buffers are used to hold data blocks while they are written to/read from disk. To avoid possible distributed deadlocks on congestion, this setting is used as a throttle threshold rather than a hard limit. Once more than max-buffers pages are in use, further allocation from this pool is throttled. You want to increase max-buffers if you cannot saturate the IO backend on the receiving side.
-	MaxBuffers int
+	// Limits the memory usage per DRBD minor device on the receiving side, or
+	// for internal buffers during resync or online-verify. Unit is PAGE_SIZE,
+	// which is 4 KiB on most systems. The minimum possible setting is hard
+	// coded to 32 (=128 KiB). These buffers are used to hold data blocks while
+	// they are written to/read from disk. To avoid possible distributed
+	// deadlocks on congestion, this setting is used as a throttle threshold
+	// rather than a hard limit. Once more than max-buffers pages are in use,
+	// further allocation from this pool is throttled. You want to increase
+	// max-buffers if you cannot saturate the IO backend on the receiving side.
+	MaxBuffers *int `drbd:"max-buffers"`
 
 	// Define the maximum number of write requests DRBD may issue before issuing a write barrier. The default value is 2048, with a minimum of 1 and a maximum of 20000. Setting this parameter to a value below 10 is likely to decrease performance.
 	MaxEpochSize int

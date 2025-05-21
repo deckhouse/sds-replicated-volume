@@ -9,11 +9,12 @@ import (
 
 var ParameterTypeCodecs = map[reflect.Type]ParameterTypeCodec{
 	// TODO
-	reflect.TypeFor[string](): &stringParameterCodec{},
-	reflect.TypeFor[bool]():   &boolParameterCodec{},
-	reflect.TypeFor[*bool]():  &boolPtrParameterCodec{},
-	reflect.TypeFor[*int]():   &intPtrParameterCodec{},
-	reflect.TypeFor[*uint]():  &uintPtrParameterCodec{},
+	reflect.TypeFor[[]string](): &stringSliceParameterCodec{},
+	reflect.TypeFor[string]():   &stringParameterCodec{},
+	reflect.TypeFor[bool]():     &boolParameterCodec{},
+	reflect.TypeFor[*bool]():    &boolPtrParameterCodec{},
+	reflect.TypeFor[*int]():     &intPtrParameterCodec{},
+	reflect.TypeFor[*uint]():    &uintPtrParameterCodec{},
 }
 
 type ParameterTypeCodec interface {
@@ -34,6 +35,25 @@ func (c *stringParameterCodec) MarshalParameter(v any) ([]string, error) {
 
 func (*stringParameterCodec) UnmarshalParameter(par []Word) (any, error) {
 	return par[1].Value, nil
+}
+
+// ======== [[]string] ========
+
+type stringSliceParameterCodec struct {
+}
+
+var _ ParameterTypeCodec = &stringSliceParameterCodec{}
+
+func (c *stringSliceParameterCodec) MarshalParameter(v any) ([]string, error) {
+	return v.([]string), nil
+}
+
+func (*stringSliceParameterCodec) UnmarshalParameter(par []Word) (any, error) {
+	res := []string{}
+	for i := 1; i < len(par); i++ {
+		res = append(res, par[i].Value)
+	}
+	return res, nil
 }
 
 // ======== [bool] ========
@@ -94,7 +114,7 @@ func (*intPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 }
 
 func (*intPtrParameterCodec) UnmarshalParameter(p []Word) (any, error) {
-	if err := ensureLen(p, 2); err != nil {
+	if err := EnsureLen(p, 2); err != nil {
 		return nil,
 			fmt.Errorf("unmarshaling '%s' to *int: %w", p[0].Value, err)
 	}
@@ -123,7 +143,7 @@ func (*uintPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 }
 
 func (*uintPtrParameterCodec) UnmarshalParameter(p []Word) (any, error) {
-	if err := ensureLen(p, 2); err != nil {
+	if err := EnsureLen(p, 2); err != nil {
 		return nil,
 			fmt.Errorf("unmarshaling '%s' to *uint: %w", p[0].Value, err)
 	}

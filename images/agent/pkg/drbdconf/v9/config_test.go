@@ -1,31 +1,16 @@
 package v9
 
 import (
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+	"github.com/google/go-cmp/cmp"
 )
 
-func TestV9Config(t *testing.T) {
-	// root, err := os.OpenRoot("./testdata/")
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
-
-	// config, err := OpenConfig(root.FS(), "root.conf")
-	// if err != nil {
-	// 	t.Fatal(err)
-	// }
-
-	// for res := range config.Resources {
-	// 	_ = res
-	// 	// res.Options.SetQuorumMinimumRedundancy(2)
-	// }
-}
-
-func TestMarshal(t *testing.T) {
-	cfg := &Config{
+func TestMarshalUnmarshal(t *testing.T) {
+	inCfg := &Config{
 		Global: &Global{
 			DialogRefresh:         ptr(42),
 			DisableIPVerification: true,
@@ -48,6 +33,20 @@ func TestMarshal(t *testing.T) {
 				Disk: &DiskOptions{
 					MDFlushes: ptr(true),
 				},
+				Connection: &Connection{
+					Name: "con1",
+				},
+				On: &On{
+					HostNames: []string{"h1", "h2", "h3"},
+					Address: &AddressWithPort{
+						AddressFamily: "ipv4",
+						Address:       "123.123.123.123",
+						Port:          1234,
+					},
+				},
+				Net: &Net{
+					MaxBuffers: ptr(123),
+				},
 			},
 			{Name: "r2"},
 		},
@@ -55,7 +54,7 @@ func TestMarshal(t *testing.T) {
 
 	rootSec := &drbdconf.Section{}
 
-	err := drbdconf.Marshal(cfg, rootSec)
+	err := drbdconf.Marshal(inCfg, rootSec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +70,37 @@ func TestMarshal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	t.Log("\n", sb.String())
+
+	outCfg := &Config{}
+	if err := drbdconf.Unmarshal(root.AsSection(), outCfg); err != nil {
+		t.Fatal(err)
+	}
+
+	if !cmp.Equal(inCfg, outCfg) {
+		t.Error(
+			"expected inCfg to be equal to outCfg, got diff",
+			"\n",
+			cmp.Diff(inCfg, outCfg),
+		)
+	}
+
+}
+
+func TestUnmarshalReal(t *testing.T) {
+	fsRoot, err := os.OpenRoot("./../testdata/")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := drbdconf.Parse(fsRoot.FS(), "root.conf")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v9Conf := &Config{}
+
+	if err := drbdconf.Unmarshal(root.AsSection(), v9Conf); err != nil {
+		t.Fatal(err)
+	}
 }

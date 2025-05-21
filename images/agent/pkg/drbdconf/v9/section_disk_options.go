@@ -1,6 +1,8 @@
 package v9
 
-import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+import (
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+)
 
 // Define parameters for a volume. All parameters in this section are optional.
 type DiskOptions struct {
@@ -225,12 +227,18 @@ type IOErrorPolicy string
 
 var _ drbdconf.ParameterCodec = ptr(IOErrorPolicy(""))
 
+var knownValuesIOErrorPolicy = map[IOErrorPolicy]struct{}{
+	IOErrorPolicyPassOn:           {},
+	IOErrorPolicyCallLocalIOError: {},
+	IOErrorPolicyDetach:           {},
+}
+
 func (i *IOErrorPolicy) MarshalParameter() ([]string, error) {
 	return []string{string(*i)}, nil
 }
 
 func (i *IOErrorPolicy) UnmarshalParameter(p []drbdconf.Word) error {
-	panic("unimplemented")
+	return drbdconf.ReadEnumAt(i, knownValuesIOErrorPolicy, p, 1)
 }
 
 const (
@@ -246,16 +254,28 @@ const (
 
 type ReadBalancingPolicy string
 
+var knownValuesReadBalancingPolicy = map[ReadBalancingPolicy]struct{}{
+	ReadBalancingPolicyPreferLocal:         {},
+	ReadBalancingPolicyPreferRemote:        {},
+	ReadBalancingPolicyRoundRobin:          {},
+	ReadBalancingPolicyLeastPending:        {},
+	ReadBalancingPolicyWhenCongestedRemote: {},
+	ReadBalancingPolicy32KStriping:         {},
+	ReadBalancingPolicy64KStriping:         {},
+	ReadBalancingPolicy128KStriping:        {},
+	ReadBalancingPolicy256KStriping:        {},
+	ReadBalancingPolicy512KStriping:        {},
+	ReadBalancingPolicy1MStriping:          {},
+}
+
 var _ drbdconf.ParameterCodec = ptr(ReadBalancingPolicy(""))
 
-// MarshalParameter implements drbdconf.ParameterCodec.
 func (r *ReadBalancingPolicy) MarshalParameter() ([]string, error) {
 	return []string{string(*r)}, nil
 }
 
-// UnmarshalParameter implements drbdconf.ParameterCodec.
 func (r *ReadBalancingPolicy) UnmarshalParameter(p []drbdconf.Word) error {
-	panic("unimplemented")
+	return drbdconf.ReadEnumAt(r, knownValuesReadBalancingPolicy, p, 1)
 }
 
 const (
