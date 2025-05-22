@@ -733,5 +733,5 @@ Certificates are issued for a period of one year and are marked as expiring 30 d
 To repeat the operation, simply remove the label from the trigger using the following command:
 
 ```shell
-kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
+kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed=false
 ```
