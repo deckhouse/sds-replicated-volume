@@ -303,11 +303,11 @@ func (s *stateMachine) turnOffAndRenewCerts() error {
 		return err
 	}
 
-	if err := s.turnOffDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
+	if err := s.turnOffDeploymentAndWait(DeploymentNameAffinityController); err != nil {
 		return err
 	}
 
-	if err := s.turnOffDeploymentAndWait(DeploymentNameAffinityController); err != nil {
+	if err := s.turnOffDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
 		return err
 	}
 
@@ -392,11 +392,11 @@ func (s *stateMachine) turnOffDeploymentAndWait(name string) error {
 }
 
 func (s *stateMachine) turnOn() error {
-	if err := s.turnOnDeploymentAndWait(DeploymentNameAffinityController); err != nil {
+	if err := s.turnOnDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
 		return err
 	}
 
-	if err := s.turnOnDeploymentAndWait(DeploymentNameSdsRVController); err != nil {
+	if err := s.turnOnDeploymentAndWait(DeploymentNameAffinityController); err != nil {
 		return err
 	}
 
