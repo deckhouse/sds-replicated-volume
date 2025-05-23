@@ -765,5 +765,5 @@ kubectl -n d8-sds-replicated-volume get cm manualcertrenewal-trigger -ojsonpath=
 Чтобы повторить операцию, достаточно удалить метку с триггера, с помощью команды:
 
 ```shell
-kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed=false
+kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
 ```
