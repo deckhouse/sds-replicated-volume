@@ -35,6 +35,31 @@ func TestMarshalUnmarshal(t *testing.T) {
 				},
 				Connection: &Connection{
 					Name: "con1",
+					Hosts: []HostAddress{
+						{
+							Name:    "addr1",
+							Address: "123.123.124.124",
+						},
+						{
+							Name:    "addr2",
+							Address: "123.123.124.224",
+						},
+					},
+					Paths: []*Path{
+						{
+							Hosts: []HostAddress{
+								{
+									Name:    "addr1",
+									Address: "123.123.124.124",
+								},
+								{
+									Name:    "addr2",
+									Address: "123.123.124.224",
+								},
+							},
+						},
+						{},
+					},
 				},
 				On: &On{
 					HostNames: []string{"h1", "h2", "h3"},
@@ -44,8 +69,16 @@ func TestMarshalUnmarshal(t *testing.T) {
 						Port:          1234,
 					},
 				},
+				Floating: &Floating{
+					NodeId: ptr(123),
+					Address: &AddressWithPort{
+						Address: "0.0.0.0",
+						Port:    222,
+					},
+				},
 				Net: &Net{
 					MaxBuffers: ptr(123),
+					KOCount:    ptr(1234),
 				},
 			},
 			{Name: "r2"},

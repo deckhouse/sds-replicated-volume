@@ -5,16 +5,24 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-var ParameterTypeCodecs = map[reflect.Type]ParameterTypeCodec{
-	// TODO
+var parameterTypeCodecs = map[reflect.Type]ParameterTypeCodec{
 	reflect.TypeFor[[]string](): &stringSliceParameterCodec{},
 	reflect.TypeFor[string]():   &stringParameterCodec{},
 	reflect.TypeFor[bool]():     &boolParameterCodec{},
 	reflect.TypeFor[*bool]():    &boolPtrParameterCodec{},
 	reflect.TypeFor[*int]():     &intPtrParameterCodec{},
 	reflect.TypeFor[*uint]():    &uintPtrParameterCodec{},
+}
+
+var parameterTypeCodecsMu = &sync.Mutex{}
+
+func RegisterParameterTypeCodec[T any](codec ParameterTypeCodec) {
+	parameterTypeCodecsMu.Lock()
+	defer parameterTypeCodecsMu.Unlock()
+	parameterTypeCodecs[reflect.TypeFor[T]()] = codec
 }
 
 type ParameterTypeCodec interface {

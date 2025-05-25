@@ -68,7 +68,7 @@ type Net struct {
 	Fencing FencingPolicy
 
 	// If a secondary node fails to complete a write request in ko-count times the timeout parameter, it is excluded from the cluster. The primary node then sets the connection to this secondary node to Standalone. To disable this feature, you should explicitly set it to 0; defaults may change between versions.
-	KOCount int
+	KOCount *int `drbd:"ko-count"`
 
 	// Limits the memory usage per DRBD minor device on the receiving side, or
 	// for internal buffers during resync or online-verify. Unit is PAGE_SIZE,

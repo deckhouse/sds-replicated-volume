@@ -1,19 +1,21 @@
 package v9
 
+import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+
 type PeerDeviceOptions struct {
 	// The c-delay-target parameter defines the delay in the resync path that
 	// DRBD should aim for. This should be set to five times the network
 	// round-trip time or more. The default value of c-delay-target is 10, in
 	// units of 0.1 seconds.
 	// Also see CPlanAhead.
-	CDelayTarget *int
+	CDelayTarget *int `drbd:"c-delay-target"`
 
 	// The c-fill-target parameter defines the how much resync data DRBD should
 	// aim to have in-flight at all times. Common values for "normal" data paths
 	// range from 4K to 100K. The default value of c-fill-target is 100, in
 	// units of sectors
 	// Also see CPlanAhead.
-	CFillTarget *Sectors
+	CFillTarget *Unit `drbd:"c-fill-target"`
 
 	// The c-max-rate parameter limits the maximum bandwidth used by dynamically
 	// controlled resyncs. Setting this to zero removes the limitation
@@ -22,7 +24,7 @@ type PeerDeviceOptions struct {
 	// available disk bandwidth. The default value of c-max-rate is 102400, in
 	// units of KiB/s.
 	// Also see CPlanAhead.
-	CMaxRate *int
+	CMaxRate *int `drbd:"c-max-rate"`
 
 	// The c-plan-ahead parameter defines how fast DRBD adapts to changes in the
 	// resync speed. It should be set to five times the network round-trip time
@@ -32,10 +34,18 @@ type PeerDeviceOptions struct {
 	// # Dynamically control the resync speed
 	//
 	// The following modes are available:
-	//  - Dynamic control with fill target (default). Enabled when c-plan-ahead is non-zero and c-fill-target is non-zero. The goal is to fill the buffers along the data path with a defined amount of data. This mode is recommended when DRBD-proxy is used. Configured with c-plan-ahead, c-fill-target and c-max-rate.
-	//  - Dynamic control with delay target. Enabled when c-plan-ahead is non-zero (default) and c-fill-target is zero. The goal is to have a defined delay along the path. Configured with c-plan-ahead, c-delay-target and c-max-rate.
-	//  - Fixed resync rate. Enabled when c-plan-ahead is zero. DRBD will try to perform resync I/O at a fixed rate. Configured with resync-rate.
-	CPlanAhead *int
+	//  - Dynamic control with fill target (default). Enabled when c-plan-ahead
+	// is non-zero and c-fill-target is non-zero. The goal is to fill the
+	// buffers along the data path with a defined amount of data. This mode is
+	// recommended when DRBD-proxy is used. Configured with c-plan-ahead,
+	// c-fill-target and c-max-rate.
+	//  - Dynamic control with delay target. Enabled when c-plan-ahead is
+	// non-zero (default) and c-fill-target is zero. The goal is to have a
+	// defined delay along the path. Configured with c-plan-ahead,
+	// c-delay-target and c-max-rate.
+	//  - Fixed resync rate. Enabled when c-plan-ahead is zero. DRBD will try to
+	// perform resync I/O at a fixed rate. Configured with resync-rate.
+	CPlanAhead *int `drbd:"c-plan-ahead"`
 
 	// A node which is primary and sync-source has to schedule application I/O
 	// requests and resync I/O requests. The c-min-rate parameter limits how
@@ -55,4 +65,10 @@ type PeerDeviceOptions struct {
 	// allows to avoid that. Please note this is option only works when the
 	// dynamic resync controller is disabled.
 	ResyncRate *int
+}
+
+var _ drbdconf.SectionKeyworder = &PeerDeviceOptions{}
+
+func (p *PeerDeviceOptions) SectionKeyword() string {
+	return "peer-device-options"
 }

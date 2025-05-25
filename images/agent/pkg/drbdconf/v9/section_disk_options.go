@@ -225,7 +225,7 @@ func (d *DiskOptions) SectionKeyword() string {
 
 type IOErrorPolicy string
 
-var _ drbdconf.ParameterCodec = ptr(IOErrorPolicy(""))
+var _ drbdconf.ParameterCodec = new(IOErrorPolicy)
 
 var knownValuesIOErrorPolicy = map[IOErrorPolicy]struct{}{
 	IOErrorPolicyPassOn:           {},

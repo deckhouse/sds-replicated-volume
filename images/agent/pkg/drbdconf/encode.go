@@ -1,6 +1,7 @@
 package drbdconf
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -45,20 +46,29 @@ func marshalSection(srcPtrVal reflect.Value, dst *Section) error {
 					return nil
 				}
 
-				words, err := marshalParameter(f.Field, f.FieldVal)
+				pars, err := marshalParameters(f.Field, f.FieldVal)
 				if err != nil {
 					return err
 				}
 
 				if f.ParameterNames[0] == "" {
+					if len(pars) > 1 {
+						return fmt.Errorf(
+							"marshaling field %s: can not "+
+								"render more then one parameter value to key",
+							f.Field.Name,
+						)
+					}
 					// current section key
-					dst.Key = append(dst.Key, words...)
+					dst.Key = append(dst.Key, pars[0]...)
 				} else {
-					// new parameter
-					par := &Parameter{}
-					par.Key = append(par.Key, NewWord(f.ParameterNames[0]))
-					par.Key = append(par.Key, words...)
-					dst.Elements = append(dst.Elements, par)
+					for _, words := range pars {
+						// new parameter
+						par := &Parameter{}
+						par.Key = append(par.Key, NewWord(f.ParameterNames[0]))
+						par.Key = append(par.Key, words...)
+						dst.Elements = append(dst.Elements, par)
+					}
 				}
 			} else if ok, _, kw := isSliceOfStructPtrsAndSectionKeyworders(
 				f.Field.Type,
@@ -98,89 +108,81 @@ func marshalSection(srcPtrVal reflect.Value, dst *Section) error {
 	return nil
 }
 
-func isStructPtrAndSectionKeyworder(v reflect.Value) (ok bool, kw string) {
-	ok = isNonNilStructPtr(v) &&
-		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
-	if ok {
-		kw = v.Interface().(SectionKeyworder).SectionKeyword()
-	}
-	return
-}
-
-// TODO
-// func isSliceOfStructPtrsAndSectionKeyworders(v reflect.Value) bool {
-// 	ok = isNonNilStructPtr(v) &&
-// 		v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
-// 	if ok {
-// 		kw = v.Interface().(SectionKeyworder).SectionKeyword()
-// 	}
-// 	return
-// }
-
-func marshalParameter(
+func marshalParameters(
 	field reflect.StructField,
 	fieldVal reflect.Value,
-) ([]Word, error) {
-	if field.Type.Kind() == reflect.Slice {
-		wordStrs := make([]string, fieldVal.Len())
-		for i := range fieldVal.Len() {
-			itemWordStrs, err := marshalParameterValue(
-				fieldVal.Index(i),
-				field.Type.Elem(),
-			)
-			if err != nil {
-				return nil,
-					fmt.Errorf(
-						"marshaling field %s item %d: %w",
-						field.Name, i, err,
-					)
-			}
-
-			if len(itemWordStrs) != 1 {
-				return nil,
-					fmt.Errorf(
-						"marshaling field %s item %d: "+
-							"marshaler is expected to produce exactly "+
-							"one word per item, got %d",
-						field.Name, i, len(itemWordStrs),
-					)
-			}
-			wordStrs[i] = itemWordStrs[0]
-		}
-		return NewWords(wordStrs), nil
-	}
-
-	wordStrs, err := marshalParameterValue(fieldVal, field.Type)
+) ([][]Word, error) {
+	parsStrs, err := marshalParameterValue(fieldVal, field.Type)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling field %s: %w", field.Name, err)
 	}
 
-	return NewWords(wordStrs), nil
+	var pars [][]Word
+	for _, parStr := range parsStrs {
+		pars = append(pars, NewWords(parStr))
+	}
+
+	return pars, nil
 }
 
 func marshalParameterValue(
 	srcVal reflect.Value,
 	srcType reflect.Type,
-) ([]string, error) {
-	if typeCodec := ParameterTypeCodecs[srcType]; typeCodec != nil {
-		return typeCodec.MarshalParameter(srcVal.Interface())
+) ([][]string, error) {
+	if typeCodec := parameterTypeCodecs[srcType]; typeCodec != nil {
+		res, err := typeCodec.MarshalParameter(srcVal.Interface())
+		if err != nil {
+			return nil, err
+		}
+		return [][]string{res}, nil
 	}
 
 	// value type may be different in case when srcType is slice element type
 	if srcVal.Type() != srcType {
-		if typeCodec := ParameterTypeCodecs[srcVal.Type()]; typeCodec != nil {
-			return typeCodec.MarshalParameter(srcVal.Interface())
+		if typeCodec := parameterTypeCodecs[srcVal.Type()]; typeCodec != nil {
+			resItem, err := typeCodec.MarshalParameter(srcVal.Interface())
+			if err != nil {
+				return nil, err
+			}
+			return [][]string{resItem}, nil
 		}
 	}
 
+	if srcType.Kind() == reflect.Slice {
+		var res [][]string
+		for i := 0; i < srcVal.Len(); i++ {
+			elVal := srcVal.Index(i)
+
+			elRes, err := marshalParameterValue(elVal, srcType.Elem())
+			if err != nil {
+				return nil, err
+			}
+			if len(elRes) > 1 {
+				return nil, errors.New(
+					"marshaling slices of slices is not supported",
+				)
+			}
+			res = append(res, elRes[0])
+		}
+		return res, nil
+	}
+
 	if m, ok := srcVal.Interface().(ParameterMarshaler); ok {
-		return m.MarshalParameter()
+		resItem, err := m.MarshalParameter()
+		if err != nil {
+			return nil, err
+		}
+		return [][]string{resItem}, nil
 	}
 
 	// interface may be implemented for pointer receiver
 	if srcVal.Kind() != reflect.Pointer {
 		if m, ok := srcVal.Addr().Interface().(ParameterMarshaler); ok {
-			return m.MarshalParameter()
+			resItem, err := m.MarshalParameter()
+			if err != nil {
+				return nil, err
+			}
+			return [][]string{resItem}, nil
 		}
 	}
 
@@ -222,14 +224,4 @@ func getDRBDParameterNames(field reflect.StructField) ([]string, error) {
 		names[i] = n
 	}
 	return names, nil
-}
-
-func isNonNilStructPtr(v reflect.Value) bool {
-	return v.Kind() == reflect.Pointer &&
-		!v.IsNil() &&
-		v.Elem().Kind() == reflect.Struct
-}
-
-func isSectionKeyworder(v reflect.Value) bool {
-	return v.Type().Implements(reflect.TypeFor[SectionKeyworder]())
 }

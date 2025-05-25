@@ -23,32 +23,32 @@ func unmarshalSection(
 		ptrVal,
 		func(f *visitedField) error {
 			if len(f.ParameterNames) > 0 {
-				var par []Word
+				var selectedSrcPars [][]Word
 				if f.ParameterNames[0] == "" {
 					// value is in current section key
-					par = src.Key
+					selectedSrcPars = append(selectedSrcPars, src.Key)
 				} else {
 					// value is in parameters
 					for _, parName := range f.ParameterNames {
-						pars := slices.Collect(src.ParametersByKey(parName))
+						srcPars := slices.Collect(src.ParametersByKey(parName))
 
-						if len(pars) > 1 {
-							return fmt.Errorf(
-								"unable to unmarshal duplicate parameter '%s' "+
-									"into a field '%s'",
-								parName, f.Field.Name,
+						for _, srcPar := range srcPars {
+							selectedSrcPars = append(
+								selectedSrcPars,
+								srcPar.Key,
 							)
-						} else if len(pars) == 1 {
-							par = pars[0].Key
+						}
+
+						if len(srcPars) > 0 {
 							// ignore the rest of ParameterNames
 							break
 						}
 					}
 				}
 
-				if len(par) > 0 {
+				if len(selectedSrcPars) > 0 {
 					return unmarshalParameterValue(
-						par,
+						selectedSrcPars,
 						f.FieldVal,
 						f.Field.Type,
 					)
@@ -115,70 +115,18 @@ func unmarshalSection(
 	return nil
 }
 
-type visitedField struct {
-	Field          reflect.StructField
-	FieldVal       reflect.Value
-	ParameterNames []string
-	SectionName    string
-}
-
-func visitStructFields(
-	ptrVal reflect.Value,
-	visit func(f *visitedField) error,
-) error {
-	if !isNonNilStructPtr(ptrVal) {
-		return fmt.Errorf("expected non-nil pointer to a struct")
-	}
-
-	val := ptrVal.Elem()
-
-	valType := val.Type()
-	for i := range valType.NumField() {
-		field := valType.Field(i)
-		// skip unexported fields
-		if field.PkgPath != "" {
-			continue
-		}
-
-		fieldVal := val.Field(i)
-
-		parNames, err := getDRBDParameterNames(field)
-		if err != nil {
-			return err
-		}
-
-		if !isSectionKeyworder(ptrVal) && len(parNames) > 0 {
-			return fmt.Errorf(
-				"`drbd` tag found on non-section type %s",
-				valType.Name(),
-			)
-		}
-
-		_, secName := isStructPtrAndSectionKeyworder(fieldVal)
-
-		err = visit(
-			&visitedField{
-				Field:          field,
-				FieldVal:       fieldVal,
-				ParameterNames: parNames,
-				SectionName:    secName,
-			},
-		)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func unmarshalParameterValue(
-	srcPar []Word,
+	srcPars [][]Word,
 	dstVal reflect.Value,
 	dstType reflect.Type,
 ) error {
-	if typeCodec := ParameterTypeCodecs[dstType]; typeCodec != nil {
-		v, err := typeCodec.UnmarshalParameter(srcPar)
+	// parameterTypeCodecs have the highest priority
+	if typeCodec := parameterTypeCodecs[dstType]; typeCodec != nil {
+		if len(srcPars) > 1 {
+			return fmt.Errorf("can not map more then one section")
+		}
+
+		v, err := typeCodec.UnmarshalParameter(srcPars[0])
 		if err != nil {
 			return err
 		}
@@ -199,8 +147,12 @@ func unmarshalParameterValue(
 
 	// value type may be different in case when dstType is slice element type
 	if dstVal.Type() != dstType {
-		if typeCodec := ParameterTypeCodecs[dstVal.Type()]; typeCodec != nil {
-			v, err := typeCodec.UnmarshalParameter(srcPar)
+		if typeCodec := parameterTypeCodecs[dstVal.Type()]; typeCodec != nil {
+			if len(srcPars) > 1 {
+				return fmt.Errorf("can not map more then one section")
+			}
+
+			v, err := typeCodec.UnmarshalParameter(srcPars[0])
 			if err != nil {
 				return err
 			}
@@ -219,42 +171,52 @@ func unmarshalParameterValue(
 		}
 	}
 
+	if dstVal.Kind() == reflect.Slice {
+		elType := dstType.Elem()
+		elVarType := elType
+		if elType.Kind() == reflect.Pointer {
+			elVarType = elType.Elem()
+		}
+		for i, srcPar := range srcPars {
+			elVar := reflect.New(elVarType)
+			err := unmarshalParameterValue(
+				[][]Word{srcPar},
+				elVar,
+				reflect.PointerTo(elVarType),
+			)
+			if err != nil {
+				return fmt.Errorf(
+					"unmarshaling parameter at %s to slice element %d "+
+						"of type %s: %w",
+					srcPar[len(srcPar)-1].Location, i,
+					elType.Name(), err,
+				)
+			}
+			if elType.Kind() != reflect.Pointer {
+				elVar = elVar.Elem()
+			}
+			dstVal.Set(reflect.Append(dstVal, elVar))
+		}
+		return nil
+	}
+
+	if len(srcPars) > 1 {
+		return fmt.Errorf("can not map more then one section")
+	}
+
 	if dstVal.Kind() == reflect.Pointer {
 		if dstVal.Type().Implements(reflect.TypeFor[ParameterUnmarshaler]()) {
 			if dstVal.IsNil() {
-				dstVal.Set(reflect.New(dstVal.Type().Elem()))
+				newVal := reflect.New(dstVal.Type().Elem())
+				dstVal.Set(newVal)
 			}
 			return dstVal.
 				Interface().(ParameterUnmarshaler).
-				UnmarshalParameter(srcPar)
+				UnmarshalParameter(srcPars[0])
 		}
 	} else if um, ok := dstVal.Addr().Interface().(ParameterUnmarshaler); ok {
-		return um.UnmarshalParameter(srcPar)
+		return um.UnmarshalParameter(srcPars[0])
 	}
 
-	println("here")
 	return fmt.Errorf("unsupported field type")
-}
-
-func isSliceOfStructPtrsAndSectionKeyworders(
-	t reflect.Type,
-) (ok bool, elType reflect.Type, kw string) {
-	if t.Kind() != reflect.Slice {
-		return
-	}
-	elType = t.Elem()
-	ok, kw = typeIsStructPtrAndSectionKeyworder(elType)
-	return
-}
-
-func typeIsStructPtrAndSectionKeyworder(t reflect.Type) (ok bool, kw string) {
-	ok = t.Kind() == reflect.Pointer &&
-		t.Elem().Kind() == reflect.Struct &&
-		t.Implements(reflect.TypeFor[SectionKeyworder]())
-	if ok {
-		kw = reflect.Zero(t).
-			Interface().(SectionKeyworder).
-			SectionKeyword()
-	}
-	return
 }
