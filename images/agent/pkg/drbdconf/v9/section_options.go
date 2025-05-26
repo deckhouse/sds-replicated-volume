@@ -279,13 +279,19 @@ func (*QuorumMinimumRedundancyParameterTypeCodec) UnmarshalParameter(
 
 type QuorumMinimumRedundancyOff struct{}
 
+var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyOff{}
+
 func (q *QuorumMinimumRedundancyOff) _isQuorumMinimumRedundancy() {}
 
 type QuorumMinimumRedundancyMajority struct{}
 
+var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyMajority{}
+
 func (q *QuorumMinimumRedundancyMajority) _isQuorumMinimumRedundancy() {}
 
 type QuorumMinimumRedundancyAll struct{}
+
+var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyAll{}
 
 func (q *QuorumMinimumRedundancyAll) _isQuorumMinimumRedundancy() {}
 
@@ -293,33 +299,9 @@ type QuorumMinimumRedundancyNumeric struct {
 	Value int
 }
 
+var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyNumeric{}
+
 func (q *QuorumMinimumRedundancyNumeric) _isQuorumMinimumRedundancy() {}
-
-var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyOff{}
-var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyMajority{}
-var _ QuorumMinimumRedundancy = &QuorumMinimumRedundancyAll{}
-
-// const (
-// 	QuorumMinimumRedundancyValueOff      QuorumMinimumRedundancy = "off"
-// 	QuorumMinimumRedundancyValueMajority QuorumMinimumRedundancy = "majority"
-// 	QuorumMinimumRedundancyValueAll      QuorumMinimumRedundancy = "all"
-// )
-
-// var knownValuesQuorumMinimumRedundancy = map[QuorumMinimumRedundancy]struct{}{
-// 	QuorumMinimumRedundancyValueOff:      {},
-// 	QuorumMinimumRedundancyValueMajority: {},
-// 	QuorumMinimumRedundancyValueAll:      {},
-// }
-
-// var _ drbdconf.ParameterCodec = new(QuorumMinimumRedundancy)
-
-// func (q *QuorumMinimumRedundancy) MarshalParameter() ([]string, error) {
-// 	return []string{string(*q)}, nil
-// }
-
-// func (q *QuorumMinimumRedundancy) UnmarshalParameter(p []drbdconf.Word) error {
-// 	return drbdconf.ReadEnumAt(q, knownValuesQuorumMinimumRedundancy, p, 1)
-// }
 
 //
 

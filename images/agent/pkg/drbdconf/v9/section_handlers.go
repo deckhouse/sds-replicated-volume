@@ -20,10 +20,15 @@ package v9
 // All parameters in this section are optional. Only a single handler can be
 // defined for each event; if no handler is defined, nothing will happen.
 type Handlers struct {
-	// Called on a resync target when a node state changes from Inconsistent to Consistent when a resync finishes. This handler can be used for removing the snapshot created in the before-resync-target handler.
+	// Called on a resync target when a node state changes from Inconsistent to
+	// Consistent when a resync finishes. This handler can be used for removing
+	// the snapshot created in the before-resync-target handler.
 	AfterResyncTarget string
 
-	// Called on a resync target before a resync begins. This handler can be used for creating a snapshot of the lower-level device for the duration of the resync: if the resync source becomes unavailable during a resync, reverting to the snapshot can restore a consistent state.
+	// Called on a resync target before a resync begins. This handler can be
+	// used for creating a snapshot of the lower-level device for the duration
+	// of the resync: if the resync source becomes unavailable during a resync,
+	// reverting to the snapshot can restore a consistent state.
 	BeforeResyncTarget string
 
 	// Called on a resync source before a resync begins.
@@ -39,7 +44,9 @@ type Handlers struct {
 	// uses the storage on top of DRBD.
 	QuorumLost string
 
-	// Called when a node should fence a resource on a particular peer. The handler should not use the same communication path that DRBD uses for talking to the peer.
+	// Called when a node should fence a resource on a particular peer. The
+	// handler should not use the same communication path that DRBD uses for
+	// talking to the peer.
 	FencePeer string
 
 	// Called when a node should remove fencing constraints from other nodes.
@@ -53,18 +60,25 @@ type Handlers struct {
 	// Called when an I/O error occurs on a lower-level device.
 	LocalIOError string
 
-	// The local node is currently primary, but DRBD believes that it should become a sync target. The node should give up its primary role.
+	// The local node is currently primary, but DRBD believes that it should
+	// become a sync target. The node should give up its primary role.
 	PriLost string
 
-	// The local node is currently primary, but it has lost the after-split-brain auto recovery procedure. The node should be abandoned.
+	// The local node is currently primary, but it has lost the
+	// after-split-brain auto recovery procedure. The node should be abandoned.
 	PriLostAfterSB string
 
-	// The local node is primary, and neither the local lower-level device nor a lower-level device on a peer is up to date. (The primary has no device to read from or to write to.)
+	// The local node is primary, and neither the local lower-level device nor a
+	// lower-level device on a peer is up to date. (The primary has no device to
+	// read from or to write to.)
 	PriOnInconDegr string
 
-	// DRBD has detected a split-brain situation which could not be resolved automatically. Manual recovery is necessary. This handler can be used to call for administrator attention.
+	// DRBD has detected a split-brain situation which could not be resolved
+	// automatically. Manual recovery is necessary. This handler can be used to
+	// call for administrator attention.
 	SplitBrain string
 
-	// A connection to a peer went down. The handler can learn about the reason for the disconnect from the DRBD_CSTATE environment variable.
+	// A connection to a peer went down. The handler can learn about the reason
+	// for the disconnect from the DRBD_CSTATE environment variable.
 	Disconnected string
 }

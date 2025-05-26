@@ -1,8 +1,8 @@
-// Missing resources:
+// Missing sections:
 //   - require-drbd-module-version-{eq,ne,gt,ge,lt,le}
 //   - stacked-on-top-of
 //
-// Missing resource parameters:
+// Missing sections parameters:
 //   - net.transport
 package v9
 

@@ -80,6 +80,27 @@ func TestMarshalUnmarshal(t *testing.T) {
 					MaxBuffers: ptr(123),
 					KOCount:    ptr(1234),
 				},
+				Handlers: &Handlers{
+					BeforeResyncTarget: "asd",
+				},
+				Startup: &Startup{
+					OutdatedWFCTimeout: ptr(23),
+					WaitAfterSB:        true,
+				},
+				ConnectionMesh: &ConnectionMesh{
+					Hosts: []string{"g", "h", "j"},
+					Net: &Net{
+						Fencing: FencingPolicyResourceAndSTONITH,
+					},
+				},
+				Options: &Options{
+					AutoPromote: ptr(true),
+					PeerAckWindow: &Unit{
+						Value:  5,
+						Suffix: "s",
+					},
+					Quorum: QuorumMajority,
+				},
 			},
 			{Name: "r2"},
 		},

@@ -24,7 +24,7 @@ type PeerDeviceOptions struct {
 	// available disk bandwidth. The default value of c-max-rate is 102400, in
 	// units of KiB/s.
 	// Also see CPlanAhead.
-	CMaxRate *int `drbd:"c-max-rate"`
+	CMaxRate *Unit `drbd:"c-max-rate"`
 
 	// The c-plan-ahead parameter defines how fast DRBD adapts to changes in the
 	// resync speed. It should be set to five times the network round-trip time
@@ -45,7 +45,7 @@ type PeerDeviceOptions struct {
 	// c-delay-target and c-max-rate.
 	//  - Fixed resync rate. Enabled when c-plan-ahead is zero. DRBD will try to
 	// perform resync I/O at a fixed rate. Configured with resync-rate.
-	CPlanAhead *int `drbd:"c-plan-ahead"`
+	CPlanAhead *Unit `drbd:"c-plan-ahead"`
 
 	// A node which is primary and sync-source has to schedule application I/O
 	// requests and resync I/O requests. The c-min-rate parameter limits how
@@ -57,14 +57,14 @@ type PeerDeviceOptions struct {
 	// of 1 (1 KiB/s) for the lowest possible resync rate.
 	//
 	// The default value of c-min-rate is 250, in units of KiB/s.
-	CMinRate *int
+	CMinRate *Unit `drbd:"c-min-rate"`
 
 	// Define how much bandwidth DRBD may use for resynchronizing. DRBD allows
 	// "normal" application I/O even during a resync. If the resync takes up too
 	// much bandwidth, application I/O can become very slow. This parameter
 	// allows to avoid that. Please note this is option only works when the
 	// dynamic resync controller is disabled.
-	ResyncRate *int
+	ResyncRate *Unit `drbd:"resync-rate"`
 }
 
 var _ drbdconf.SectionKeyworder = &PeerDeviceOptions{}

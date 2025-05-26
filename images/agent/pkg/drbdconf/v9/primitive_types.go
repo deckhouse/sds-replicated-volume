@@ -109,7 +109,7 @@ var _ drbdconf.ParameterCodec = &HostAddress{}
 
 //
 
-// address [<address-family>] <address>:<port>
+// [<address-family>] <address>:<port>
 type AddressWithPort struct {
 	Address       string
 	AddressFamily string
@@ -119,6 +119,10 @@ type AddressWithPort struct {
 var _ drbdconf.ParameterCodec = &AddressWithPort{}
 
 func (a *AddressWithPort) UnmarshalParameter(p []drbdconf.Word) error {
+	if err := drbdconf.EnsureLen(p, 2); err != nil {
+		return err
+	}
+
 	addrIdx := 1
 	if len(p) >= 3 {
 		a.AddressFamily = p[1].Value

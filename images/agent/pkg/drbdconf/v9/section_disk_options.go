@@ -113,7 +113,7 @@ type DiskOptions struct {
 	// The default value of disk-timeout is 0, which stands for an infinite
 	// timeout. Timeouts are specified in units of 0.1 seconds. This option is
 	// available since DRBD 8.3.12.
-	DiskTimeout *uint `drbd:"disk-timeout"`
+	DiskTimeout *int `drbd:"disk-timeout"`
 
 	// Enable disk flushes and disk barriers on the meta-data device. This
 	// option is enabled by default. See the disk-flushes parameter.
