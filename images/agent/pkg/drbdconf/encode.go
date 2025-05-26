@@ -13,14 +13,6 @@ import (
 All primitive types' zero values should semantically correspond to a missing
 DRBD section parameter (even for required parameters).
 
-Supported primitive types:
-  - [string]
-  - [bool]
-  - [*int]
-  - slices of [string]
-  - Custom types, which implement [ParameterCodec]
-  - TODO (IPs, sectors, bytes, etc.).
-
 # Tags
 
   - `drbd:"parametername"` to select the name of the parameter. There can be one
@@ -31,6 +23,17 @@ Supported primitive types:
   - `drbd:"parname1,parname2"` tag value form allows specifying alternative
     parameter names, which will be tried during unmarshaling. Marshaling will
     always use the first name.
+
+# Primitive Types Support
+
+To add marshaling/unmarshaling support for another primitive type, consider the
+following options:
+  - implement [ParameterTypeCodec] and register it with
+    [RegisterParameterTypeCodec]. It will be used for every usage of that type,
+    with highest priority. It will even take precendence over built-in slice
+    support. This method is useful for fields of "marker" interface types.
+  - implement [ParameterCodec]. This marshaling method is last-effort method,
+    it is used when there's no [ParameterTypeCodec] for a type
 */
 func Marshal[T any, TP Ptr[T]](src TP, dst *Section) error {
 	return marshalSection(reflect.ValueOf(src), dst)

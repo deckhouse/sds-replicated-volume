@@ -6,6 +6,8 @@ import (
 	"slices"
 )
 
+// Unmarshals low-level src into a dst struct.
+// Also see docs for [Marshal].
 func Unmarshal[T any, PT Ptr[T]](src *Section, dst PT) error {
 	err := unmarshalSection(src, reflect.ValueOf(dst))
 	if err != nil {

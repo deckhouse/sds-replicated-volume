@@ -172,4 +172,22 @@ func TestUnmarshalReal(t *testing.T) {
 	if err := drbdconf.Unmarshal(root.AsSection(), v9Conf); err != nil {
 		t.Fatal(err)
 	}
+
+	dst := &drbdconf.Section{}
+	if err := drbdconf.Marshal(v9Conf, dst); err != nil {
+		t.Fatal(err)
+	}
+	dstRoot := &drbdconf.Root{}
+	for _, sec := range dst.Elements {
+		dstRoot.Elements = append(dstRoot.Elements, sec.(*drbdconf.Section))
+	}
+
+	sb := &strings.Builder{}
+
+	_, err = dstRoot.WriteTo(sb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("\n", sb.String())
+
 }
