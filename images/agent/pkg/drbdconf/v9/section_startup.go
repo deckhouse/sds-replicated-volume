@@ -1,5 +1,7 @@
 package v9
 
+import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
+
 // The parameters in this section determine the behavior of a resource at
 // startup time. They have no effect once the system is up and running.
 type Startup struct {
@@ -47,4 +49,10 @@ type Startup struct {
 	// which stands for an infinite timeout. Also see the degr-wfc-timeout
 	// parameter.
 	WFCTimeout *int `drbd:"wfc-timeout"`
+}
+
+var _ drbdconf.SectionKeyworder = &Startup{}
+
+func (h *Startup) SectionKeyword() string {
+	return "startup"
 }
