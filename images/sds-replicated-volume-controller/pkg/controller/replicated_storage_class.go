@@ -83,7 +83,7 @@ const (
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
 	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
-	StorageClassLVMVolumeGroupsParamKey           = "replicated.csi.storage.deckhouse.io/lvm-volume-groups"
+	StorageClassLVMVolumeGroupsParamKey           = "csi.storage.deckhouse.io/lvm-volume-groups"
 	StorageClassLVMType                           = "csi.storage.deckhouse.io/lvm-type"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
