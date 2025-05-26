@@ -33,47 +33,62 @@ func TestMarshalUnmarshal(t *testing.T) {
 				Disk: &DiskOptions{
 					MDFlushes: ptr(true),
 				},
-				Connection: &Connection{
-					Name: "con1",
-					Hosts: []HostAddress{
-						{
-							Name:    "addr1",
-							Address: "123.123.124.124",
-						},
-						{
-							Name:    "addr2",
-							Address: "123.123.124.224",
-						},
-					},
-					Paths: []*Path{
-						{
-							Hosts: []HostAddress{
-								{
-									Name:    "addr1",
-									Address: "123.123.124.124",
-								},
-								{
-									Name:    "addr2",
-									Address: "123.123.124.224",
-								},
+				Connection: []*Connection{
+					{},
+					{
+						Name: "con1",
+						Hosts: []HostAddress{
+							{
+								Name:    "addr1",
+								Address: "123.123.124.124",
+							},
+							{
+								Name:    "addr2",
+								Address: "123.123.124.224",
 							},
 						},
-						{},
+						Paths: []*Path{
+							{
+								Hosts: []HostAddress{
+									{
+										Name:    "addr1",
+										Address: "123.123.124.124",
+									},
+									{
+										Name:    "addr2",
+										Address: "123.123.124.224",
+									},
+								},
+							},
+							{},
+						},
 					},
 				},
-				On: &On{
-					HostNames: []string{"h1", "h2", "h3"},
-					Address: &AddressWithPort{
-						AddressFamily: "ipv4",
-						Address:       "123.123.123.123",
-						Port:          1234,
+				On: []*On{
+					{
+						HostNames: []string{"h1", "h2", "h3"},
+						Address: &AddressWithPort{
+							AddressFamily: "ipv4",
+							Address:       "123.123.123.123",
+							Port:          1234,
+						},
+					},
+					{
+						HostNames: []string{"h1", "h2", "h3"},
+						Address: &AddressWithPort{
+							AddressFamily: "ipv4",
+							Address:       "123.123.123.123",
+							Port:          1234,
+						},
 					},
 				},
-				Floating: &Floating{
-					NodeId: ptr(123),
-					Address: &AddressWithPort{
-						Address: "0.0.0.0",
-						Port:    222,
+				Floating: []*Floating{
+					{
+						NodeId: ptr(123),
+						Address: &AddressWithPort{
+							Address: "0.0.0.0",
+							Port:    222,
+						},
 					},
 				},
 				Net: &Net{

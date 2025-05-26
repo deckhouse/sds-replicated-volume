@@ -141,7 +141,7 @@ func (d *DiskValueParameterTypeCodec) UnmarshalParameter(
 	if p[1].Value == "none" {
 		return &VolumeDiskNone{}, nil
 	}
-	return VolumeDisk(p[1].Value), nil
+	return ptr(VolumeDisk(p[1].Value)), nil
 }
 
 type VolumeDiskNone struct{}

@@ -106,7 +106,8 @@ func (p *fileParser) parseFile(fsys fs.FS, name string) (err error) {
 					return p.report(errors.New("unexpected character ';'"))
 				}
 				if words[0].Value != "include" {
-					return p.report(errors.New("unrecognized keyword"))
+					// be tolerant to new keywords
+					continue
 				}
 				if len(words) != 2 {
 					return p.report(errors.New("expected exactly 1 argument in 'include'"))
@@ -371,7 +372,8 @@ func isTokenChar(ch byte) bool {
 	return (ch >= 'a' && ch <= 'z') ||
 		(ch >= 'A' && ch <= 'Z') ||
 		(ch >= '0' && ch <= '9') ||
-		ch == '.' || ch == '/' || ch == '_' || ch == '-' || ch == ':'
+		ch == '.' || ch == '/' || ch == '_' || ch == '-' || ch == ':' ||
+		ch == '[' || ch == ']' || ch == '%'
 }
 
 func isWordTerminatorChar(ch byte) bool {

@@ -26,7 +26,9 @@ func unmarshalSection(
 				var selectedSrcPars [][]Word
 				if f.ParameterNames[0] == "" {
 					// value is in current section key
-					selectedSrcPars = append(selectedSrcPars, src.Key)
+					if len(src.Key) > 1 {
+						selectedSrcPars = append(selectedSrcPars, src.Key)
+					}
 				} else {
 					// value is in parameters
 					for _, parName := range f.ParameterNames {
@@ -85,8 +87,11 @@ func unmarshalSection(
 				if len(subSections) > 1 {
 					return fmt.Errorf(
 						"unmarshaling field %s: "+
-							"can not map more then one section",
+							"can not map more then one section: "+
+							"%s, %s",
 						f.Field.Name,
+						subSections[0].Location(),
+						subSections[1].Location(),
 					)
 				}
 

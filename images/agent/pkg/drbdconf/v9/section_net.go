@@ -162,7 +162,7 @@ type Net struct {
 	// this mechanism of congestion control, with a maximum of 10 GiBytes.
 	//
 	// Also see OnCongestion.
-	CongestionFill *int `drbd:"congestion-fill"`
+	CongestionFill *Unit `drbd:"congestion-fill"`
 
 	// The congestion-extents parameter defines how many bitmap extents may be
 	// active before switching into ahead/behind mode, with the same default and

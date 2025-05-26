@@ -41,8 +41,11 @@ func (c *stringParameterCodec) MarshalParameter(v any) ([]string, error) {
 	return []string{v.(string)}, nil
 }
 
-func (*stringParameterCodec) UnmarshalParameter(par []Word) (any, error) {
-	return par[1].Value, nil
+func (*stringParameterCodec) UnmarshalParameter(p []Word) (any, error) {
+	if err := EnsureLen(p, 2); err != nil {
+		return nil, err
+	}
+	return p[1].Value, nil
 }
 
 // ======== [[]string] ========

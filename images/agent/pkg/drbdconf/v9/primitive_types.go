@@ -129,7 +129,13 @@ func (a *AddressWithPort) UnmarshalParameter(p []drbdconf.Word) error {
 		addrIdx++
 	}
 	addrVal := p[addrIdx].Value
-	addrParts := strings.Split(addrVal, ":")
+
+	portSepIdx := strings.LastIndexByte(addrVal, ':')
+	if portSepIdx < 0 {
+		return fmt.Errorf("invalid format: ':port' is required")
+	}
+
+	addrParts := []string{addrVal[0:portSepIdx], addrVal[portSepIdx+1:]}
 
 	a.Address = addrParts[0]
 	port, err := strconv.ParseUint(addrParts[1], 10, 64)
