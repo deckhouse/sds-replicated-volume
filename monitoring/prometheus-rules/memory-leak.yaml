@@ -1,0 +1,29 @@
+- name: kubernetes.
+  rules:
+    - alert: D8NodeHighUnknownMemoryUsage
+      expr: ((sum (
+        node_memory_MemTotal_bytes
+        - node_memory_MemFree_bytes
+        - node_memory_AnonPages_bytes
+        - node_memory_Mapped_bytes
+        - node_memory_Buffers_bytes
+        - node_memory_SReclaimable_bytes
+        - clamp_min(node_memory_Cached_bytes - node_memory_Mapped_bytes, 0)
+        - node_memory_SUnreclaim_bytes
+        - node_memory_KernelStack_bytes
+        - node_memory_PageTables_bytes
+        ) by(node) / sum(node_memory_MemTotal_bytes) by(node)) * 100 ) > 25
+      for: 5m
+      labels:
+        severity_level: "4"
+        tier: cluster
+      annotations:
+        plk_markup_format: "markdown"
+        plk_protocol_version: "1"
+        plk_create_group_if_not_exists__d8_node_high_unknown_memory_usage: "D8NodeHighUnknownMemoryUsage,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        plk_grouped_by__d8_node_high_unknown_memory_usage: "D8NodeHighUnknownMemoryUsage,tier=~tier,prometheus=deckhouse,kubernetes=~kubernetes"
+        summary: "Unaccounted memory usage is too high on {{ $labels.node }}"
+        description: |
+          Unaccounted memory usage is too high on node {{ $labels.node }}.
+          This may indicate a memory leak in the system or a misconfiguration.
+          Please contact with tech support to investigate the issue.
