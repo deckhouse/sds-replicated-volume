@@ -19,6 +19,7 @@ package thinprovisioning
 import (
 	"context"
 	"fmt"
+	"k8s.io/apimachinery/pkg/util/json"
 	"os"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,38 +79,45 @@ func init() {
 
 	thinPoolExistence := false
 	for _, item := range list.Items {
-
 		propKey, found, err := unstructured.NestedString(item.Object, "spec", "prop_key")
 		if err != nil || !found {
 			continue
 		}
-
 		if propKey == "StorDriver/internal/lvmthin/thinPoolGranularity" {
 			thinPoolExistence = true
 		}
 	}
 
 	if thinPoolExistence {
-		moduleConfigGVR := schema.GroupVersionResource{
-			Group:    "deckhouse.io",
-			Version:  "v1alpha1",
-			Resource: "moduleconfigs",
-		}
-
-		_, err := dynamicClient.Resource(moduleConfigGVR).Patch(
+		resp, err := dynamicClient.Resource(schema.GroupVersionResource{Group: "deckhouse.io", Version: "v1alpha1", Resource: "moduleconfigs"}).Patch(
 			context.Background(),
-			"sds-replicated-volume",
-			"application/merge-patch+json",
-			[]byte(fmt.Sprintf(`{"spec":{"settings":{"enableThinProvisioning":true}}}`)),
-			metav1.PatchOptions{},
+			"sds-local-volume",
+			"application/apply-patch+yaml",
+			[]byte(`apiVersion: deckhouse.io/v1alpha1
+kind: ModuleConfig
+metadata:
+  name: sds-local-volume
+spec:
+  version: 1
+  settings:
+    enableThinProvisioning: true
+`),
+			metav1.PatchOptions{FieldManager: "sds-hook"},
 		)
 		if err != nil {
-			_, err := fmt.Fprintf(os.Stderr, "Failed to patch moduleconfig: %v\n", err)
+			_, err := fmt.Fprintf(os.Stderr, "Failed to patch moduleconfigs/sds-local-volume: %v\n", err)
 			if err != nil {
 				return
 			}
 			os.Exit(1)
 		}
-		fmt.Printf("Thin pools present, switching enableThinProvisioning on\n")
+		_, err = json.Marshal(resp.Object)
+		if err != nil {
+			_, err := fmt.Fprintf(os.Stderr, "Failed to format response as YAML: %v\n", err)
+			if err != nil {
+				return
+			}
+			os.Exit(1)
+		}
 	}
 }
