@@ -2,7 +2,7 @@
   rules:
     - alert: D8NodeHighUnknownMemoryUsage
       expr: ((sum (
-          node_memory_MemTotal_bytes
+        node_memory_MemTotal_bytes
         - node_memory_MemFree_bytes
         - node_memory_AnonPages_bytes
         - node_memory_Mapped_bytes
@@ -26,3 +26,4 @@
         description: |
           Unaccounted memory usage is too high on node {{ $labels.node }}.
           This may indicate a memory leak in the system or a misconfiguration.
+          Please contact with tech support to investigate the issue.
