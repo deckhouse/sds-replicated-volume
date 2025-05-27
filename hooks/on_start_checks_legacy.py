@@ -61,5 +61,7 @@ def main(ctx: hook.Context):
             )
         print(f"Thin pools presents, switching enableThinProvisioning on ({api_response})")
 
- if __name__ == "__main__":
-     hook.run(main, config=config)
+#  disabled due to go hook
+#
+## if __name__ == "__main__":
+##     hook.run(main, config=config)
