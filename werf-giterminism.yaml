@@ -4,6 +4,7 @@ config:
     allowEnvVariables:
       - /CI_.+/
       - MODULES_MODULE_TAG
+      - MODULE_EDITION
       - WERF_DISABLE_META_TAGS
       - GOLANG_VERSION
       - GOPROXY
