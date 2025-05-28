@@ -23,6 +23,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -690,7 +691,13 @@ func recreateStorageClassIfNeeded(
 
 func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
-	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
+	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
+	// has  storageclass.deckhouse.io/ignore-local: "true".
+	ignoreLocal, _ := strconv.ParseBool(
+		replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
+	)
+
+	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled && !ignoreLocal {
 		if newSC.Annotations == nil {
 			newSC.Annotations = make(map[string]string, 1)
 		}
