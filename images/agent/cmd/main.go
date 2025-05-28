@@ -8,6 +8,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/drbdresource"
 	"github.com/go-logr/logr"
@@ -70,46 +71,46 @@ func main() {
 
 	ctrlLog := log.With("controller", "drbdresource")
 
-	err = builder.TypedControllerManagedBy[r.TypedRequest[*v1alpha1.DRBDResource]](mgr).
+	err = builder.TypedControllerManagedBy[r.TypedRequest[*v1alpha2.DRBDResourceReplica]](mgr).
 		Watches(
-			&v1alpha1.DRBDResource{},
-			&handler.TypedFuncs[client.Object, r.TypedRequest[*v1alpha1.DRBDResource]]{
+			&v1alpha2.DRBDResourceReplica{},
+			&handler.TypedFuncs[client.Object, r.TypedRequest[*v1alpha2.DRBDResourceReplica]]{
 				CreateFunc: func(
 					ctx context.Context,
 					ce event.TypedCreateEvent[client.Object],
-					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha1.DRBDResource]],
+					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha2.DRBDResourceReplica]],
 				) {
 					ctrlLog.Debug("CreateFunc", slog.Group("object", "name", ce.Object.GetName()))
-					typedObj := ce.Object.(*v1alpha1.DRBDResource)
+					typedObj := ce.Object.(*v1alpha2.DRBDResourceReplica)
 					q.Add(r.NewTypedRequestCreate(typedObj))
 				},
 				UpdateFunc: func(
 					ctx context.Context,
 					ue event.TypedUpdateEvent[client.Object],
-					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha1.DRBDResource]],
+					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha2.DRBDResourceReplica]],
 				) {
 					ctrlLog.Debug(
 						"UpdateFunc",
 						slog.Group("objectNew", "name", ue.ObjectNew.GetName()),
 						slog.Group("objectOld", "name", ue.ObjectOld.GetName()),
 					)
-					typedObjOld := ue.ObjectOld.(*v1alpha1.DRBDResource)
-					typedObjNew := ue.ObjectNew.(*v1alpha1.DRBDResource)
+					typedObjOld := ue.ObjectOld.(*v1alpha2.DRBDResourceReplica)
+					typedObjNew := ue.ObjectNew.(*v1alpha2.DRBDResourceReplica)
 					q.Add(r.NewTypedRequestUpdate(typedObjOld, typedObjNew))
 				},
 				DeleteFunc: func(
 					ctx context.Context,
 					de event.TypedDeleteEvent[client.Object],
-					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha1.DRBDResource]],
+					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha2.DRBDResourceReplica]],
 				) {
 					ctrlLog.Debug("DeleteFunc", slog.Group("object", "name", de.Object.GetName()))
-					typedObj := de.Object.(*v1alpha1.DRBDResource)
+					typedObj := de.Object.(*v1alpha2.DRBDResourceReplica)
 					q.Add(r.NewTypedRequestDelete(typedObj))
 				},
 				GenericFunc: func(
 					ctx context.Context,
 					ge event.TypedGenericEvent[client.Object],
-					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha1.DRBDResource]],
+					q workqueue.TypedRateLimitingInterface[r.TypedRequest[*v1alpha2.DRBDResourceReplica]],
 				) {
 					ctrlLog.Debug("GenericFunc - skipping", slog.Group("object", "name", ge.Object.GetName()))
 				},

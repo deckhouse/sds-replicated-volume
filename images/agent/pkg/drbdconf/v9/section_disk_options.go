@@ -214,7 +214,7 @@ type DiskOptions struct {
 	//
 	// The default value of disable-write-same is no. This option is available
 	// since 8.4.7.
-	DisableWriteSame *bool
+	DisableWriteSame *bool `drbd:"disable-write-same"`
 }
 
 var _ drbdconf.SectionKeyworder = &DiskOptions{}

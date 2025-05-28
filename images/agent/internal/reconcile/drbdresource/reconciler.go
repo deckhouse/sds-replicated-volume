@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -22,7 +22,7 @@ func NewReconciler(log *slog.Logger) *Reconciler {
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
-	req r.TypedRequest[*v1alpha1.DRBDResource],
+	req r.TypedRequest[*v1alpha2.DRBDResourceReplica],
 ) (reconcile.Result, error) {
 
 	r = r.withRequestLogging(req.RequestId(), req.Object())
