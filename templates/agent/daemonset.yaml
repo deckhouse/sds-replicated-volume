@@ -88,21 +88,21 @@ spec:
           level: s0
           type: spc_t
       initContainers:
-      - name: sds-utils-installer
-        image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
-        imagePullPolicy: IfNotPresent
-        securityContext:
-          readOnlyRootFilesystem: true        
-        volumeMounts:
-        - mountPath: /opt/deckhouse/sds
-          name: opt-deckhouse-sds
-        resources:
-          requests:
-            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "sds_utils_installer_resources" . | nindent 14 }}
-{{- end }}
-{{- if .Values.sdsReplicatedVolume.enableThinProvisioning }}
+#       - name: sds-utils-installer
+#         image: {{ include "helm_lib_module_image" (list . "sdsUtilsInstaller") }}
+#         imagePullPolicy: IfNotPresent
+#         securityContext:
+#           readOnlyRootFilesystem: true        
+#         volumeMounts:
+#         - mountPath: /opt/deckhouse/sds
+#           name: opt-deckhouse-sds
+#         resources:
+#           requests:
+#             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+# {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+#             {{- include "sds_utils_installer_resources" . | nindent 14 }}
+# {{- end }}
+# {{- if .Values.sdsReplicatedVolume.enableThinProvisioning }}
       - name: thin-volumes-enabler
         image: {{ include "helm_lib_module_image" (list . "agent") }}
         imagePullPolicy: IfNotPresent
