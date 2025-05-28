@@ -8,6 +8,8 @@ require (
 	k8s.io/apimachinery v0.32.1
 )
 
+replace github.com/deckhouse/sds-replicated-volume/api => ../../../api
+
 require (
 	github.com/container-storage-interface/spec v1.10.0 // indirect
 	github.com/donovanhide/eventsource v0.0.0-20210830082556-c59027999da0 // indirect
