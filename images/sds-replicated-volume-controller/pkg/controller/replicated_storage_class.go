@@ -692,7 +692,7 @@ func recreateStorageClassIfNeeded(
 func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
-	// has  storageclass.deckhouse.io/ignore-local: "true".
+	// has  replicatedstorageclass.storage.deckhouse.io/ignore-local: "true".
 	ignoreLocal, _ := strconv.ParseBool(
 		replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
 	)

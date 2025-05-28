@@ -32,7 +32,7 @@ import (
 const (
 	StorageClassVirtualizationAnnotationKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
 	StorageClassVirtualizationAnnotationValue = "ReadWriteOnce"
-	StorageClassIgnoreLocalAnnotationKey      = "storageclass.deckhouse.io/ignore-local"
+	StorageClassIgnoreLocalAnnotationKey      = "replicatedstorageclass.storage.deckhouse.io/ignore-local"
 )
 
 func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, log logger.Logger, request reconcile.Request) (bool, error) {
