@@ -2,8 +2,6 @@ module drbd-cluster-sync
 
 go 1.24.0
 
-toolchain go1.24.3
-
 require (
 	github.com/LINBIT/golinstor v0.52.2
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20241225145836-3d4baa215eaf
