@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"drbd-cluster-sync/config"
+
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
@@ -38,6 +39,7 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
+	return nil
 	// Step 1 - get entities from k8s etcd
 	drbdClusters := &srv.DRBDClusterList{}
 	if err := r.kc.List(ctx, drbdClusters); err != nil {
