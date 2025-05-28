@@ -40,7 +40,7 @@ import:
     before: install
 
 git:
-  - add: /tools/dev_images/additional_tools/binary_replace.sh
+  - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
     to: /binary_replace.sh
     stageDependencies:
       install:
