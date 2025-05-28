@@ -11,8 +11,7 @@ metadata:
   name: d8:{{ .Chart.Name }}:sds-replicated-volume
   {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
 rules:
-  - apiGroups:
-      - ["*"]
+  - apiGroups: ["*"]
     resources: ["*"]
     verbs:  ["*"]
 ---
