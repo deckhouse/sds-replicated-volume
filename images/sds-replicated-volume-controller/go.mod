@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller
 
-go 1.23.6
+go 1.24.2
 
 require (
 	github.com/LINBIT/golinstor v0.49.0

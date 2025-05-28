@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-src-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+fromImage: builder/alt
 final: false
 
 git:
@@ -41,39 +41,8 @@ shell:
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ $.ImageName }}-distroless-artifact
-from: {{ $.Root.BASE_ALT }}
-final: false
-shell:
-  beforeInstall:
-    - apt-get update
-    - apt-get install -y {{ $.Root.ALT_BASE_PACKAGES }}
-    - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial
-  install:
-    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/var/lib/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
-    - cp -pr /tmp /relocate
-    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /etc/netconfig /relocate/etc
-    - cp -pr /usr/share/ca-certificates /relocate/usr/share
-    - cp -pr /usr/share/zoneinfo /relocate/usr/share
-    - cp -pr /var/lib/ssl/cert.pem /relocate/var/lib/ssl
-    - cp -pr /var/lib/ssl/certs /relocate/var/lib/ssl
-    - echo "deckhouse:x:64535:64535:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
-    - echo "deckhouse:x:64535:" >> /relocate/etc/group
-    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
-
----
-image: {{ $.ImageName }}-distroless
-from: {{ $.Root.BASE_SCRATCH }}
-final: false
-import:
-  - image: {{ $.ImageName }}-distroless-artifact
-    add: /relocate
-    to: /
-    before: setup
-
----
 image: {{ $.ImageName }}
-fromImage: {{ $.ImageName }}-distroless
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact

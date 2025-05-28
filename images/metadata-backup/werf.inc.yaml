@@ -1,6 +1,6 @@
 ---
 image: metadata-backup
-from: {{ $.Root.BASE_ALT_P11 }}
+fromImage: builder/alt
 git:
   - add: /images/metadata-backup/backup.py
     to: /backup.py
