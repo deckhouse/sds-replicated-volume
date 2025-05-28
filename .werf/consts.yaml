@@ -1,3 +1,6 @@
+# Edition module settings, default ce
+{{- $_ := set . "MODULE_EDITION" (env "MODULE_EDITION" "ce") }}
+
 # base images
 {{- $_ := set $ "BASE_ALPINE_DEV"  "registry.deckhouse.io/base_images/dev-alpine:3.16.3@sha256:c706fa83cc129079e430480369a3f062b8178cac9ec89266ebab753a574aca8e" }}
 {{- $_ := set $ "BASE_ALT"         "registry.deckhouse.io/base_images/alt:p10@sha256:f105773c682498700680d7cd61a702a4315c4235aee3622757591fd510fb8b4a" }}
