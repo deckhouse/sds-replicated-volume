@@ -21,7 +21,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: builder/golang-alpine
+fromImage: builder/golang-alpine
 final: false
 
 import:
