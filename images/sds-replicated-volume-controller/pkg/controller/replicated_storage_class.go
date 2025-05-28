@@ -81,6 +81,7 @@ const (
 	StorageClassParamReplicasOnSameKey            = "replicated.csi.storage.deckhouse.io/replicasOnSame"
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
+	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -476,6 +477,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnNoQuorumKey:                 SuspendIo,
 		StorageClassParamOnNoDataAccessibleKey:         SuspendIo,
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
+		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
 	}
 
 	switch replicatedSC.Spec.Replication {
@@ -642,7 +644,9 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	// If other parameters are not equal, we can't recreate StorageClass and
 	// users must delete ReplicatedStorageClass resource and create it again manually.
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
+	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 
@@ -669,7 +673,7 @@ func recreateStorageClassIfNeeded(
 		return false, false, err
 	}
 
-	log.Info("[recreateStorageClassIfNeeded] StorageClass can be recreated.")
+	log.Info("[recreateStorageClassIfNeeded] StorageClass will be recreated.")
 	if err := DeleteStorageClass(ctx, cl, oldSC); err != nil {
 		err = fmt.Errorf("[recreateStorageClassIfNeeded] error DeleteStorageClass: %w", err)
 		return false, true, err

@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 git:
   - url: {{ $.Root.SOURCE_REPO }}/linbit/linstor-csi
@@ -20,6 +20,7 @@ mount:
     to: /go/pkg
 shell:
   setup:
+    - apk add --no-cache git
     - cd /usr/local/go/linstor-csi
     - git apply /patches/*.patch
     - cd cmd/linstor-csi

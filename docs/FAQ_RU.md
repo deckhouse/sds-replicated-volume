@@ -767,5 +767,3 @@ kubectl -n d8-sds-replicated-volume get cm manualcertrenewal-trigger -ojsonpath=
 ```shell
 kubectl -n d8-sds-replicated-volume label cm manualcertrenewal-trigger storage.deckhouse.io/sds-replicated-volume-manualcertrenewal-completed-
 ```
-
-
