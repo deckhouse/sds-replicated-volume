@@ -94,7 +94,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
-            port: 4228
+            port: 4269
             scheme: HTTP
           initialDelaySeconds: 5
           failureThreshold: 2
@@ -102,13 +102,13 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
-            port: 4228
+            port: 4269
             scheme: HTTP
           periodSeconds: 1
           failureThreshold: 3
         ports:
           - name: metrics
-            containerPort: 4202
+            containerPort: 4270
             protocol: TCP
         env:
           - name: NODE_NAME
