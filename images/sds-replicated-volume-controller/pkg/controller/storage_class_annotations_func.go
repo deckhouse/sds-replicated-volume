@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -26,12 +27,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
 )
 
 const (
 	StorageClassVirtualizationAnnotationKey   = "virtualdisk.virtualization.deckhouse.io/access-mode"
 	StorageClassVirtualizationAnnotationValue = "ReadWriteOnce"
+	StorageClassIgnoreLocalAnnotationKey      = "replicatedstorageclass.storage.deckhouse.io/ignore-local"
 )
 
 func ReconcileControllerConfigMapEvent(ctx context.Context, cl client.Client, log logger.Logger, request reconcile.Request) (bool, error) {
@@ -90,7 +93,19 @@ func getStorageClassListForAnnotationsReconcile(ctx context.Context, cl client.C
 
 			value, exists := storageClass.Annotations[StorageClassVirtualizationAnnotationKey]
 
-			if virtualizationEnabled {
+			replicatedSC := &srv.ReplicatedStorageClass{}
+			log.Debug(fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Virtualization enabled. Get replicated storage class %s for annotations reconcile", storageClass.Name))
+			err = cl.Get(ctx, client.ObjectKey{Name: storageClass.Name}, replicatedSC)
+			if err != nil {
+				log.Error(err, fmt.Sprintf("[getStorageClassForAnnotationsReconcile] Failed to get replicated storage class %s", storageClass.Name))
+				return nil, err
+			}
+
+			ignoreLocal, _ := strconv.ParseBool(
+				replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
+			)
+
+			if virtualizationEnabled && !ignoreLocal {
 				if value != StorageClassVirtualizationAnnotationValue {
 					storageClass.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 					storageClassList.Items = append(storageClassList.Items, storageClass)
