@@ -23,7 +23,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.BASE_UBUNTU }}
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
