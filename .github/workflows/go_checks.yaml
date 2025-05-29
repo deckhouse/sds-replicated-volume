@@ -1,0 +1,55 @@
+name: Go checks for images
+
+env:
+  GO_BUILD_TAGS: "ce ee se seplus csepro"
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  go_linter:
+    name: Go linter for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Run Go lint
+        uses: deckhouse/modules-actions/go_linter@v2
+
+  go_tests:
+    name: Go tests for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Run Go tests
+        uses: deckhouse/modules-actions/go_tests@v2
+
+  go_test_coverage:
+    name: Go test coverage for images
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Run Go test coverage count
+        uses: deckhouse/modules-actions/go_test_coverage@v2
+
+  go_modules_check:
+    name: Go modules version
+    runs-on: [self-hosted, regular]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Run Go modules version check
+        uses: deckhouse/modules-actions/go_modules_check@v2

@@ -1,7 +1,7 @@
 # Release image, stored in your.registry.io/modules/<module-name>/release:<semver>
 ---
 image: release-channel-version-artifact
-from: registry.deckhouse.io/base_images/alpine:3.16.3
+fromImage: builder/alpine
 final: false
 shell:
   beforeInstall:
@@ -13,7 +13,7 @@ shell:
       yq n version "{{ env "CI_COMMIT_REF_NAME" }}" | yq r - -j > version.json
 ---
 image: release-channel-version
-from: registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
+fromImage: builder/scratch
 import:
   - image: release-channel-version-artifact
     add: /

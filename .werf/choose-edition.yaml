@@ -1,0 +1,14 @@
+---
+image: choose-edition
+fromImage: builder/alt
+
+git:
+  - add: /
+    to: /
+    includePaths:
+      - openapi
+shell:
+  setup:
+    - cd /openapi
+    - if [[ {{ .MODULE_EDITION }} == "ce" ]]; then cp -v values_ce.yaml values.yaml; else cp -v values_ee.yaml values.yaml; fi
+    - rm -rf values_*.yaml

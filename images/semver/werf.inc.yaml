@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.Root.BASE_ALPINE_DEV }}
+fromImage: builder/alpine
 final: false
 
 git:
@@ -15,7 +15,7 @@ shell:
     - mv semver-tool-{{ $.Versions.SEMVER_TOOL }}/src/semver /d8-semver
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-artifact
