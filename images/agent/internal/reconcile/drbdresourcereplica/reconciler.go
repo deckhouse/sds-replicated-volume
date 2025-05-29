@@ -1,4 +1,4 @@
-package drbdresource
+package drbdresourcereplica
 
 import (
 	"context"
@@ -28,27 +28,20 @@ func (r *Reconciler) Reconcile(
 	r = r.withRequestLogging(req.RequestId(), req.Object())
 
 	var err error
-	if req.IsCreate() {
-		err = r.CreateDRBDResourceIfNeeded()
-	} else if req.IsUpdate() {
-		err = r.UpdateDRBDResourceIfNeeded()
+	if req.IsCreate() || req.IsUpdate() {
+		err = r.onCreateOrUpdate(req.Object())
 	} else {
-		err = r.DeleteDRBDResourceIfNeeded()
+		err = r.onDelete()
 	}
 
 	return reconcile.Result{}, err
 }
 
-func (r *Reconciler) CreateDRBDResourceIfNeeded() error {
-
+func (r *Reconciler) onCreateOrUpdate(resRepl *v1alpha2.DRBDResourceReplica) error {
 	return nil
 }
 
-func (r *Reconciler) UpdateDRBDResourceIfNeeded() error {
-	return nil
-}
-
-func (r *Reconciler) DeleteDRBDResourceIfNeeded() error {
+func (r *Reconciler) onDelete() error {
 	return nil
 }
 

@@ -10,7 +10,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/drbdresource"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/drbdresourcereplica"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
@@ -115,7 +115,7 @@ func main() {
 					ctrlLog.Debug("GenericFunc - skipping", slog.Group("object", "name", ge.Object.GetName()))
 				},
 			}).
-		Complete(drbdresource.NewReconciler(ctrlLog))
+		Complete(drbdresourcereplica.NewReconciler(ctrlLog))
 
 	if err != nil {
 		log.Error("starting controller", slog.Any("error", err))

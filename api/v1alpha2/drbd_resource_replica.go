@@ -12,8 +12,8 @@ type DRBDResourceReplica struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   DRBDResourceReplicaSpec   `json:"spec"`
-	Status DRBDResourceReplicaStatus `json:"status"`
+	Spec   DRBDResourceReplicaSpec    `json:"spec"`
+	Status *DRBDResourceReplicaStatus `json:"status,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

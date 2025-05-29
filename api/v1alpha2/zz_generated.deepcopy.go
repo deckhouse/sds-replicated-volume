@@ -108,7 +108,11 @@ func (in *DRBDResourceReplica) DeepCopyInto(out *DRBDResourceReplica) {
 	out.TypeMeta = in.TypeMeta
 	in.ObjectMeta.DeepCopyInto(&out.ObjectMeta)
 	in.Spec.DeepCopyInto(&out.Spec)
-	in.Status.DeepCopyInto(&out.Status)
+	if in.Status != nil {
+		in, out := &in.Status, &out.Status
+		*out = new(DRBDResourceReplicaStatus)
+		(*in).DeepCopyInto(*out)
+	}
 	return
 }
 
