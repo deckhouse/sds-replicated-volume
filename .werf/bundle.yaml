@@ -1,8 +1,7 @@
 # Bundle image, stored in your.registry.io/modules/<module-name>:<semver>
 ---
 image: bundle
-from: registry.deckhouse.io/base_images/scratch@sha256:b054705fcc9f2205777d80a558d920c0b4209efdc3163c22b5bfcb5dda1db5fc
-fromCacheVersion: "2023-11-27.1"
+fromImage: builder/scratch
 import:
 # Rendering .werf/images-digests.yaml is required!
 - image: images-digests

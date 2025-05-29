@@ -1,4 +1,9 @@
 name: sds-replicated-volume
 weight: 915
-description: "SDS Replicated Volume module"
+descriptions:
+  en: "SDS Replicated Volume module"
+requirements:
+  bootstrapped: true
+  modules:
+    sds-node-configurator: ">= 0.0.0"
 namespace: "d8-sds-replicated-volume"

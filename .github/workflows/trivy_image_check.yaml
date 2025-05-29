@@ -24,7 +24,7 @@ jobs:
     needs: [build_dev]
     steps:
       - uses: actions/checkout@v4
-      - uses: deckhouse/modules-actions/cve_scan@main
+      - uses: deckhouse/modules-actions/cve_scan@v2
         with:
           image: ${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}
           tag: pr${{ github.event.number }}
@@ -45,7 +45,7 @@ jobs:
         run: |
           echo "MODULE_IMAGE_TAG=${{ github.event.inputs.release_branch || 'main' }}" >> $GITHUB_ENV
         if: github.event_name != 'workflow_dispatch'
-      - uses: deckhouse/modules-actions/cve_scan@main
+      - uses: deckhouse/modules-actions/cve_scan@v2
         with:
           image: ${{ vars.DEV_MODULE_SOURCE }}/${{ vars.MODULE_NAME }}
           tag: ${{ env.MODULE_IMAGE_TAG || 'main' }}

@@ -18,34 +18,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Setup Go environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.5
-
       - name: Run Go lint
-        run: |
-          basedir=$(pwd)
-          failed='false'
-          for i in $(find images -type f -name go.mod);do
-            dir=$(echo $i | sed 's/go.mod$//')
-            cd $basedir/$dir
-            # check all editions
-            for edition in $GO_BUILD_TAGS ;do
-              echo "Running linter in $dir (edition: $edition)"
-              golangci-lint run --build-tags $edition
-              if [ $? -ne 0 ]; then
-                echo "Linter failed in $dir (edition: $edition)"
-                failed='true'
-              fi
-            done
-          done
-          if [ $failed == 'true' ]; then
-            exit 1
-          fi
+        uses: deckhouse/modules-actions/go_linter@v2
 
   go_tests:
     name: Go tests for images
@@ -55,31 +29,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Setup Go environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
       - name: Run Go tests
-        run: |
-          basedir=$(pwd)
-          failed='false'
-          for i in $(find images -type f -name '*_test.go');do
-            dir=$(echo $i | sed 's/[a-z_A-Z0-9-]*_test.go$//')
-            cd $basedir/$dir
-            # check all editions
-            for edition in $GO_BUILD_TAGS ;do
-              echo "Running tests in $dir (edition: $edition)"
-              go test -v -tags $edition
-              if [ $? -ne 0 ]; then
-                echo "Tests failed in $dir (edition: $edition)"
-                failed='true'
-              fi
-            done
-          done
-          if [ $failed == 'true' ]; then
-            exit 1
-          fi
+        uses: deckhouse/modules-actions/go_tests@v2
 
   go_test_coverage:
     name: Go test coverage for images
@@ -89,35 +40,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Setup Go environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
       - name: Run Go test coverage count
-        run: |
-          if [ ! -d "images" ]; then
-              echo "No images/ directory found. Please run this script from the root of the repository."
-              exit 1
-          fi
-
-          find images/ -type f -name "go.mod" | while read -r gomod; do
-              dir=$(dirname "$gomod")
-              
-              echo "Test coverage in $dir"
-              
-              cd "$dir" || continue
-              
-              for tag in $GO_BUILD_TAGS; do
-                  echo "  Build tag: $tag"
-                  
-                  go test ./... -cover -tags "$tag" 
-              done
-              
-              cd - > /dev/null
-              
-              echo "----------------------------------------"
-          done
+        uses: deckhouse/modules-actions/go_test_coverage@v2
 
   go_modules_check:
     name: Go modules version
@@ -127,83 +51,5 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
-      - name: Setup Go environment
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.24"
-
       - name: Run Go modules version check
-        run: |
-          search_dir=$(pwd)"/images"
-
-          if [ ! -d "$search_dir" ]; then
-            echo "Directory $search_dir does not exist."
-            exit 1
-          fi
-
-          temp_dir=$(mktemp -d)
-          touch "$temp_dir/incorrect_alert"
-
-          trap 'rm -rf "$temp_dir"' EXIT
-
-          find images/ -type f -name "go.mod" | while read -r gomod; do
-              dir=$(dirname "$gomod")
-              
-              echo "Checking $dir"
-              
-              cd "$dir" || continue
-              
-              go list -m all | grep deckhouse | grep -v '=>' | while IFS= read -r line; do
-                module_name=$(echo "$line" | awk '{print $1}')
-                module_version=$(echo "$line" | awk '{print $2}')
-
-                if [ -z "$module_version" ]; then
-                  echo "  Checking module name $module_name"
-                  correct_module_name="github.com"/"$GITHUB_REPOSITORY"/"$dir"
-                  if [ "$module_name" != "$correct_module_name" ]; then
-                    echo "  Incorrect module name: $module_name, expected: $correct_module_name"
-                    echo "  Incorrect module name: $module_name, expected: $correct_module_name" >> "$temp_dir/incorrect_alert"
-                  else
-                    echo "  Correct module name: $module_name"
-                  fi
-                else
-                  echo "  Checking module tag $module_name"
-                  repository=$(echo "$line" | awk '{print $1}' | awk -F'/' '{ print "https://"$1"/"$2"/"$3".git" }')
-                  pseudo_tag=$(echo "$line" | awk '{print $2}')
-
-                  echo "  Cloning repo $repository into $temp_dir"
-                  if [ ! -d "$temp_dir/$repository" ]; then
-                    git clone "$repository" "$temp_dir/$repository" >/dev/null 2>&1
-                  fi
-
-                  cd "$temp_dir/$repository" || continue
-                  
-                  commit_info=$(git log -1 --pretty=format:"%H %cd" --date=iso-strict -- api/*)
-                  short_hash=$(echo "$commit_info" | awk '{print substr($1,1,12)}')
-                  commit_date=$(echo "$commit_info" | awk '{print $2}')
-                  commit_date=$(date -u -d "$commit_date" +"%Y%m%d%H%M%S")
-                  actual_pseudo_tag="v0.0.0-"$commit_date"-"$short_hash
-                  pseudo_tag_date=$(echo $pseudo_tag | awk -F'-' '{ print $2 }')
-                  echo "  Latest pseudo tag for $repository: $pseudo_tag"
-                  echo "  Actual pseudo tag for $repository: $actual_pseudo_tag"
-
-                  if [[ "$pseudo_tag" != "$actual_pseudo_tag" ]]; then
-                    echo "  Incorrect pseudo tag for repo $repository in file "$go_mod_file" (current: "$pseudo_tag", actual:"$actual_pseudo_tag")"
-                    echo "  Incorrect pseudo tag for repo $repository in file "$go_mod_file" (current: "$pseudo_tag", actual:"$actual_pseudo_tag")" >> $temp_dir"/incorrect_alert"
-                  fi
-                  
-                  cd - >/dev/null 2>&1
-                fi
-              done   
-              
-              cd - > /dev/null
-              
-              echo "----------------------------------------"
-          done
-
-          alert_lines_count=$(cat $temp_dir"/incorrect_alert" | wc -l)
-
-          if [ $alert_lines_count != 0 ]; then
-            echo "We have non-actual pseudo-tags or modules names in repository's go.mod files"
-            exit 1
-          fi
+        uses: deckhouse/modules-actions/go_modules_check@v2
