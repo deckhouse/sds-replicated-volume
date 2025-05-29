@@ -3,7 +3,7 @@
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.BASE_GOLANG }}
+fromImage: builder/golang-alpine
 
 git:
   - add: /
