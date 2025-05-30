@@ -661,6 +661,41 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       initContainers:
         - command:
+          - /drbd-cluster-sync
+          env:
+            - name: LS_CONTROLLERS
+              value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
+            - name: LS_ROOT_CA
+              valueFrom:
+                secretKeyRef:
+                  key: ca.crt
+                  name: linstor-client-https-cert
+            - name: LS_USER_CERTIFICATE
+              valueFrom:
+                secretKeyRef:
+                  key: tls.crt
+                  name: linstor-client-https-cert
+            - name: LS_USER_KEY
+              valueFrom:
+                secretKeyRef:
+                  key: tls.key
+                  name: linstor-client-https-cert
+            - name: RETRY_COUNT
+              value: "2"
+            - name: RETRY_DELAY_SEC
+              value: "10"
+            - name: NUM_WORKERS
+              value: "3"
+          image: {{ include "helm_lib_module_image" (list . "drbdClusterSync") }}
+          imagePullPolicy: IfNotPresent
+          name: drbd-cluster-sync
+          resources:
+            requests:
+              ephemeral-storage: 50Mi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          securityContext: {}
+        - command:
             - /linstor-wait-until
             - api-online
           env:
