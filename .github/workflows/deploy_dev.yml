@@ -68,4 +68,6 @@ jobs:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ github.event.inputs.tag }}
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
       - uses: deckhouse/modules-actions/deploy@v2
