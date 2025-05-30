@@ -9,8 +9,6 @@ env:
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
-  SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
   BASE_IMAGES_VERSION: "v0.4.3"
 
 on:
@@ -128,5 +126,3 @@ jobs:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ env.MODULES_MODULE_TAG }}
-          source_repo: ${{ secrets.SOURCE_REPO }}
-          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
