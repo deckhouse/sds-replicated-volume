@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+// +kubebuilder:object:generate=true
+// +groupName=storage.deckhouse.io
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,7 +26,7 @@ import (
 
 const (
 	APIGroup   = "storage.deckhouse.io"
-	APIVersion = "v1alpha1" // v1alpha1
+	APIVersion = "v1alpha2"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -40,15 +42,10 @@ var (
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&ReplicatedStorageClass{},
-		&ReplicatedStorageClassList{},
-		&ReplicatedStoragePool{},
-		&ReplicatedStoragePoolList{},
-		&DRBDCluster{},
-		&DRBDClusterList{},
 		&DRBDResource{},
 		&DRBDResourceList{},
-		&DRBDNodeList{},
+		&DRBDResourceReplica{},
+		&DRBDResourceReplicaList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

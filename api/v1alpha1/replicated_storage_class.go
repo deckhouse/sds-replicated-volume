@@ -1,5 +1,5 @@
 /*
-Copyright 2025 Flant JSC
+Copyright 2023 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 type ReplicatedStorageClass struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -25,6 +27,8 @@ type ReplicatedStorageClass struct {
 	Status            ReplicatedStorageClassStatus `json:"status,omitempty"`
 }
 
+// +k8s:deepcopy-gen=true
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // ReplicatedStorageClassList contains a list of empty block device
 type ReplicatedStorageClassList struct {
 	metav1.TypeMeta `json:",inline"`
@@ -32,6 +36,7 @@ type ReplicatedStorageClassList struct {
 	Items           []ReplicatedStorageClass `json:"items"`
 }
 
+// +k8s:deepcopy-gen=true
 type ReplicatedStorageClassSpec struct {
 	StoragePool   string   `json:"storagePool"`
 	ReclaimPolicy string   `json:"reclaimPolicy"`
@@ -41,6 +46,7 @@ type ReplicatedStorageClassSpec struct {
 	Zones         []string `json:"zones"`
 }
 
+// +k8s:deepcopy-gen=true
 type ReplicatedStorageClassStatus struct {
 	Phase  string `json:"phase,omitempty"`
 	Reason string `json:"reason,omitempty"`
