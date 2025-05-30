@@ -9,7 +9,6 @@ env:
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   BASE_IMAGES_VERSION: "v0.4.3"
 
 on:
@@ -78,7 +77,7 @@ jobs:
       - name: Set vars
         id: set-vars
         run: |
-          # Slect edition for build, default ee
+          # Select edition for build, default ee
           if echo "${{ steps.get-labels.outputs.result }}" | grep -q "edition/ce"; then
             echo "MODULE_EDITION=ce" >> "$GITHUB_OUTPUT"
           else
@@ -112,7 +111,7 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Download base images
+      - name: Download base images and auth prepare
         run: |
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
