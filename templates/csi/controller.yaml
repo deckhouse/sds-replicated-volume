@@ -48,7 +48,7 @@
 storage.deckhouse.io/csi-hpe-node: ""
 {{- end }}
 
-{{- $csiControllerImage := include "helm_lib_module_image" (list . "csiHpe") }}
+{{- $csiControllerImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiControllerConfig := dict }}
 {{- $_ := set $csiControllerConfig "controllerImage" $csiControllerImage }}
@@ -160,7 +160,7 @@ storage.deckhouse.io/csi-hpe-node: ""
 {{- end }}
 
 
-{{- $csiNodeImage := include "helm_lib_module_image" (list . "csiHpe") }}
+{{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorServer") }}
 
 {{- $csiNodeConfig := dict }}
 {{- $_ := set $csiNodeConfig "fullname" "csi-hpe" }}
