@@ -193,7 +193,6 @@ storage.deckhouse.io/csi-hpe-node: ""
   mountPath: /etc/networks  
 {{- end }}
 
-
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorServer") }}
 
 {{- $csiNodeConfig := dict }}
