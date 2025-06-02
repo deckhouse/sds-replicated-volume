@@ -57,7 +57,7 @@ storage.deckhouse.io/csi-hpe-node: ""
 {{- $_ := set $csiControllerConfig "provisionerTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "snapshotterTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "extraCreateMetadataEnabled" true }}
-{{- $_ := set $csiControllerConfig "livenessProbePort" 4231 }}
+{{- $_ := set $csiControllerConfig "livenessProbePort" 4261 }}
 {{- $_ := set $csiControllerConfig "additionalControllerArgs" (include "csi_controller_args" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
@@ -163,10 +163,10 @@ storage.deckhouse.io/csi-hpe-node: ""
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorServer") }}
 
 {{- $csiNodeConfig := dict }}
-{{- $_ := set $csiNodeConfig "fullname" "csi-hpe" }}
+{{- $_ := set $csiNodeConfig "fullname" "sds-replicated-volume" }}
 {{- $_ := set $csiNodeConfig "nodeImage" $csiNodeImage }}
-{{- $_ := set $csiNodeConfig "driverFQDN" "csi.hpe.com" }}
-{{- $_ := set $csiNodeConfig "livenessProbePort" 4232 }}
+{{- $_ := set $csiNodeConfig "driverFQDN" "replicated.csi.storage.deckhouse.io" }}
+{{- $_ := set $csiNodeConfig "livenessProbePort" 4262 }}
 {{- $_ := set $csiNodeConfig "serviceAccount" "csi" }}
 {{- $_ := set $csiNodeConfig "additionalNodeArgs" (include "csi_node_args" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "additionalNodeEnvs" (include "csi_node_envs" . | fromYamlArray) }}
