@@ -19,15 +19,16 @@ package thinprovisioning
 import (
 	"context"
 	"fmt"
-	"k8s.io/apimachinery/pkg/util/json"
-	"os"
-
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/registry"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/json"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
+	"os"
 )
 
 const (
@@ -36,30 +37,28 @@ const (
 	crdVersion    = "v1-15-0"
 )
 
-func init() {
+var (
+	_ = registry.RegisterFunc(
+		&pkg.HookConfig{
+			Kubernetes: []pkg.KubernetesConfig{},
+			Queue:      fmt.Sprintf("modules/%s", consts.ModuleLabelValue),
+		},
+		mainHook,
+	)
+)
+
+func mainHook(ctx context.Context, input *pkg.HookInput) error {
+
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			kubeconfig = os.Getenv("HOME") + "/.kube/config"
-		}
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			_, err := fmt.Fprintf(os.Stderr, "Failed to load Kubernetes config: %v\n", err)
-			if err != nil {
-				return
-			}
-			os.Exit(1)
-		}
+		_, err := fmt.Fprintf(os.Stderr, "Failed to load Kubernetes config: %v\n", err)
+		return err
 	}
 
 	dynamicClient, err := dynamic.NewForConfig(config)
 	if err != nil {
 		_, err := fmt.Fprintf(os.Stderr, "Failed to create dynamic client: %v\n", err)
-		if err != nil {
-			return
-		}
-		os.Exit(1)
+		return err
 	}
 
 	propsContainerGVR := schema.GroupVersionResource{
@@ -71,10 +70,7 @@ func init() {
 	list, err := dynamicClient.Resource(propsContainerGVR).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		_, err := fmt.Fprintf(os.Stderr, "Failed to list custom objects: %v\n", err)
-		if err != nil {
-			return
-		}
-		os.Exit(1)
+		return err
 	}
 
 	thinPoolExistence := false
@@ -104,20 +100,17 @@ spec:
 `),
 			metav1.PatchOptions{FieldManager: "sds-hook"},
 		)
+
 		if err != nil {
 			_, err := fmt.Fprintf(os.Stderr, "Failed to patch moduleconfigs/sds-local-volume: %v\n", err)
-			if err != nil {
-				return
-			}
-			os.Exit(1)
+			return err
 		}
+
 		_, err = json.Marshal(resp.Object)
 		if err != nil {
 			_, err := fmt.Fprintf(os.Stderr, "Failed to format response as YAML: %v\n", err)
-			if err != nil {
-				return
-			}
-			os.Exit(1)
+			return err
 		}
 	}
+	return nil
 }
