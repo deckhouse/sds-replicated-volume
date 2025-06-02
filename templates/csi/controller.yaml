@@ -1,0 +1,179 @@
+###
+### controller
+###
+
+
+{{- define "csi_controller_args" }}
+- "--endpoint=$(CSI_ENDPOINT)"
+- "--flavor=kubernetes"
+- "--pod-monitor"
+- "--pod-monitor-interval=30"
+{{- end }}
+
+{{- define "csi_controller_envs" }}
+- name: PATH
+  value: /sbin:/bin:/usr/bin:/usr/sbin
+- name: CSI_ENDPOINT
+  value: unix:///csi/csi.sock
+{{- include "helm_lib_envs_for_proxy" . }}
+{{- end }}
+
+{{- define "csi_additional_controller_volumes" }}
+- name: log-dir
+  hostPath:
+    path: /var/log
+- name: k8s
+  hostPath:
+    path: /etc/kubernetes
+- name: hpeconfig
+  hostPath:
+    path: /etc/hpe-storage
+- name: root-dir
+  hostPath:
+    path: /
+{{- end }}
+
+{{- define "csi_additional_controller_volume_mounts" }}
+- name: log-dir
+  mountPath: /var/log
+- name: k8s
+  mountPath: /etc/kubernetes
+- name: hpeconfig
+  mountPath: /etc/hpe-storage
+- name: root-dir
+  mountPath: /host
+{{- end }}
+
+{{- define "csi_custom_node_selector" }}
+storage.deckhouse.io/csi-hpe-node: ""
+{{- end }}
+
+{{- $csiControllerImage := include "helm_lib_module_image" (list . "csiHpe") }}
+
+{{- $csiControllerConfig := dict }}
+{{- $_ := set $csiControllerConfig "controllerImage" $csiControllerImage }}
+{{- $_ := set $csiControllerConfig "snapshotterEnabled" true }}
+{{- $_ := set $csiControllerConfig "resizerEnabled" true }}
+{{- $_ := set $csiControllerConfig "provisionerTimeout" "1200s" }}
+{{- $_ := set $csiControllerConfig "snapshotterTimeout" "1200s" }}
+{{- $_ := set $csiControllerConfig "extraCreateMetadataEnabled" true }}
+{{- $_ := set $csiControllerConfig "livenessProbePort" 4231 }}
+{{- $_ := set $csiControllerConfig "additionalControllerArgs" (include "csi_controller_args" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalControllerVolumeMounts" (include "csi_additional_controller_volume_mounts" . | fromYamlArray) }}
+
+{{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
+
+###
+### node
+###
+
+{{- define "csi_node_args" }}
+- "--endpoint=unix:///csi/csi.sock"
+- "--node-service"
+- "--flavor=kubernetes"
+{{- end }}
+
+{{- define "csi_node_envs" }}
+- name: PATH
+  value: /sbin:/bin:/usr/bin:/usr/sbin
+- name: CSI_ENDPOINT
+  value: unix:///csi/csi.sock
+- name: LOG_LEVEL
+  value: {{ .Values.logLevel }}
+- name: NODE_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: spec.nodeName
+{{- end }}
+
+{{- define "csi_additional_node_selector_terms" }}
+{{- end }}
+
+{{- define "csi_additional_node_volumes" }}
+- name: root-dir
+  hostPath:
+    path: /
+- name: log-dir
+  hostPath:
+    path: /var/log
+- name: etc-hpe-storage-dir
+  hostPath:
+    path: /etc/hpe-storage
+- name: etc-kubernetes
+  hostPath:
+    path: /etc/kubernetes
+- name: runsystemd
+  hostPath:
+    path: /run/systemd
+- name: etcsystemd
+  hostPath:
+    path: /etc/systemd/system
+- name: sys
+  hostPath:
+    path: /sys
+- name: linux-config-file
+  configMap:
+    name: hpe-linux-config
+- name: network-scripts
+  hostPath:
+    path: /etc/sysconfig/network-scripts
+- name: network-config
+  hostPath:
+    path: /etc/sysconfig/network
+- name: iscsi
+  hostPath:
+    path: /etc/iscsi
+- name: networks
+  hostPath:
+    path: /etc/networks
+{{- end }}
+
+{{- define "csi_additional_node_volume_mounts" }}
+- name: root-dir
+  mountPath: /host
+  mountPropagation: "Bidirectional"
+- name: log-dir
+  mountPath: /var/log
+- name: etc-hpe-storage-dir
+  mountPath: /etc/hpe-storage
+- name: etc-kubernetes
+  mountPath: /etc/kubernetes
+- name: sys
+  mountPath: /sys
+- name: runsystemd
+  mountPath: /run/systemd
+- name: etcsystemd
+  mountPath: /etc/systemd/system
+- name: linux-config-file
+  mountPath: /opt/hpe-storage/nimbletune/config.json
+  subPath: config.json
+- name: network-scripts
+  mountPath: /etc/sysconfig/network-scripts
+- name: network-config
+  mountPath: /etc/sysconfig/network
+- name: iscsi
+  mountPath: /etc/iscsi
+- name: networks
+  mountPath: /etc/networks  
+{{- end }}
+
+
+{{- $csiNodeImage := include "helm_lib_module_image" (list . "csiHpe") }}
+
+{{- $csiNodeConfig := dict }}
+{{- $_ := set $csiNodeConfig "fullname" "csi-hpe" }}
+{{- $_ := set $csiNodeConfig "nodeImage" $csiNodeImage }}
+{{- $_ := set $csiNodeConfig "driverFQDN" "csi.hpe.com" }}
+{{- $_ := set $csiNodeConfig "livenessProbePort" 4232 }}
+{{- $_ := set $csiNodeConfig "serviceAccount" "csi" }}
+{{- $_ := set $csiNodeConfig "additionalNodeArgs" (include "csi_node_args" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "additionalNodeEnvs" (include "csi_node_envs" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "additionalNodeVolumes" (include "csi_additional_node_volumes" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "additionalNodeSelectorTerms" (include "csi_additional_node_selector_terms" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "additionalNodeVolumeMounts" (include "csi_additional_node_volume_mounts" . | fromYamlArray) }}
+{{- $_ := set $csiNodeConfig "customNodeSelector" (include "csi_custom_node_selector" . | fromYaml) }}
+{{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
+
+{{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}
