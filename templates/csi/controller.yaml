@@ -38,7 +38,7 @@
 {{- include "helm_lib_envs_for_proxy" . }}
 {{- end }}
 
-{{- define "csi_init_containers" }}
+{{- define "csi_controller_init_containers" }}
 - command:
   - /linstor-wait-until
   - api-online
@@ -90,7 +90,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumeMounts" (include "csi_additional_controller_volume_mounts" . | fromYamlArray) }}
-{{- $_ := set $csiControllerConfig "initContainers" (include "csi_init_containers" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "initContainers" (include "csi_controller_init_containers" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 
@@ -119,6 +119,20 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 
 {{- define "csi_additional_node_selector_terms" }}
 {{- end }}
+
+{{- define "csi_node_init_containers" }}
+- command:
+  - /linstor-drbd-wait
+  env:
+  - name: FILE_CONTENT
+    value: 'version: 9.2'
+  - name: WAITING_MSG
+    value: Waiting for DRBD version 9.2.x on host
+  image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
+  imagePullPolicy: IfNotPresent
+  name: wait-drbd-ver-9-2
+{{- end }}
+
 
 {{- define "csi_additional_node_volumes" }}
 {{- end }}
