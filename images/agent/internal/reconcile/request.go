@@ -46,7 +46,7 @@ func (req *typedRequest[T]) OldObject() T {
 }
 
 func (req *typedRequest[T]) RequestId() string {
-	panic("unimplemented")
+	return req.reqId
 }
 
 func NewTypedRequestCreate[T any](obj T) TypedRequest[T] {

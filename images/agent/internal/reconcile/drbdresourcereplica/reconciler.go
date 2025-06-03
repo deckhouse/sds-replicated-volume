@@ -28,8 +28,10 @@ func (r *Reconciler) Reconcile(
 	r = r.withRequestLogging(req.RequestId(), req.Object())
 
 	var err error
-	if req.IsCreate() || req.IsUpdate() {
-		err = r.onCreateOrUpdate(req.Object())
+	if req.IsCreate() {
+		err = r.onCreate(req.Object())
+	} else if req.IsUpdate() {
+		err = r.onUpdate(req.Object())
 	} else {
 		err = r.onDelete()
 	}
@@ -37,7 +39,17 @@ func (r *Reconciler) Reconcile(
 	return reconcile.Result{}, err
 }
 
-func (r *Reconciler) onCreateOrUpdate(resRepl *v1alpha2.DRBDResourceReplica) error {
+func (r *Reconciler) onCreate(repl *v1alpha2.DRBDResourceReplica) error {
+	// create res file, if not exist
+	// parse res file
+	// update resource
+	//
+	// drbdadm adjust, if needed
+	// drbdadm up, if needed
+	return nil
+}
+
+func (r *Reconciler) onUpdate(repl *v1alpha2.DRBDResourceReplica) error {
 	return nil
 }
 

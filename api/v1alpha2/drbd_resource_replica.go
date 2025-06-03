@@ -16,10 +16,40 @@ type DRBDResourceReplica struct {
 	Status *DRBDResourceReplicaStatus `json:"status,omitempty"`
 }
 
+func (rr *DRBDResourceReplica) ResourceName() string {
+	var resourceName string
+	for _, ownerRef := range rr.OwnerReferences {
+		if ownerRef.APIVersion == APIVersion &&
+			ownerRef.Kind == "DRBDResource" {
+			resourceName = ownerRef.Name
+			// last owner wins
+		}
+	}
+	return resourceName
+}
+
+func (rr *DRBDResourceReplica) NodeName() string {
+	return rr.Labels[NodeNameLabelKey]
+}
+
+func (rr *DRBDResourceReplica) UniqueIndexName() string {
+	return "uniqueIndex"
+}
+
+func (rr *DRBDResourceReplica) UniqueIndexKey() string {
+	rn := rr.ResourceName()
+	nn := rr.NodeName()
+	if rn == "" || nn == "" {
+		return ""
+	}
+	return rr.ResourceName() + "@" + rr.NodeName()
+}
+
 // +k8s:deepcopy-gen=true
 type DRBDResourceReplicaSpec struct {
-	// NodeName string `json:"nodeName"`
 	Peers map[string]Peer `json:"peers,omitempty"`
+
+	Diskless bool `json:"diskless,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

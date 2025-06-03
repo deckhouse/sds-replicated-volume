@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	APIGroup   = "storage.deckhouse.io"
-	APIVersion = "v1alpha2"
+	APIGroup         = "storage.deckhouse.io"
+	APIVersion       = "v1alpha2"
+	NodeNameLabelKey = APIGroup + "/node-name"
 )
 
 // SchemeGroupVersion is group version used to register these objects
