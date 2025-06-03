@@ -1,4 +1,3 @@
-x-config-version: 2
 type: object
 properties:
   registryScheme:
@@ -30,6 +29,10 @@ properties:
         default: 7999
         description: |
           DRBD ports range end
+  enableThinProvisioning:
+    type: boolean
+    default: false
+    description: Allow thin LVM volumes usage
   dataNodes:
     type: object
     description: Settings for Linstor on nodes with data
@@ -47,38 +50,6 @@ properties:
           If parameter is omitted, Linstor nodes will be placed on all nodes.
 
           **Caution!** Changing this parameter does not result in data redistribution. If node with data no longer matches the `nodeSelector`, data on that node will become inaccessible.
-  storageClassLabelIgnoredPrefixes:
-    type: array
-    default:
-      - argocd.argoproj.io/
-      - kustomize.toolkit.fluxcd.io/
-      - helm.toolkit.fluxcd.io/
-      - fleet.cattle.io/
-    items:
-      type: string
-    description: |
-      List of label-key prefixes that MUST NOT be propagated from a ReplicatedStorageClass
-      to the managed Kubernetes StorageClass.
-
-      The controller treats this list as a complement to a built-in (system) list and
-      drops any ReplicatedStorageClass label whose key starts with any prefix from either list.
-
-      Matching is literal `strings.HasPrefix` (Go semantics): an entry without a trailing
-      `/` matches by substring, NOT by full label key. For example, `team` would drop
-      every key starting with `team` (`team`, `team-id`, `team.example.com/...`).
-      To restrict matching to a specific subdomain, end the entry with `/`
-      (e.g. `argocd.argoproj.io/`). To target an exact label key, write the full key
-      and be aware it also matches keys whose name extends it
-      (e.g. `app.kubernetes.io/managed-by` also drops `app.kubernetes.io/managed-by-foo`).
-
-      Note that `kubernetes.io/` in the system list matches only labels whose key
-      literally starts with `kubernetes.io/`; reserved subdomains such as
-      `topology.kubernetes.io/zone` or `node.kubernetes.io/*` are NOT covered by
-      default — add them here explicitly if your environment requires it.
-
-      The defaults cover labels typically added by GitOps tooling (Argo CD, Flux,
-      Rancher Fleet) so that their reconcilers do not fight the storage controller
-      over labels on the managed StorageClass.
   backup:
     type: object
     description: Module backup settings

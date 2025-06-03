@@ -20,14 +20,13 @@ import (
 	"context"
 	"fmt"
 
-	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-
 	chcrt "github.com/deckhouse/module-sdk/common-hooks/tls-certificate"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/certificate"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type GenSelfSignedTLSGroupHookConf []GenSelfSignedTLSHookConf
@@ -149,8 +148,7 @@ func GenerateNewSelfSignedTLSGroup(
 		caConf.CommonCACanonicalName,
 		certificate.WithKeyAlgo(caConf.KeyAlgorithm),
 		certificate.WithKeySize(caConf.KeySize),
-		certificate.WithCAExpiry(caConf.CAExpiryDuration),
-	)
+		certificate.WithCAExpiry(caConf.CAExpiryDuration.String()))
 	if err != nil {
 		return nil, fmt.Errorf("generating ca: %w", err)
 	}
@@ -165,7 +163,7 @@ func GenerateNewSelfSignedTLSGroup(
 				KeySize:      conf.KeySize,
 				SANs:         conf.SANs(input),
 				Usages:       conf.UsagesStrings(),
-				CAExpiry:     conf.CAExpiryDuration,
+				CAExpiry:     conf.CAExpiryDuration.String(),
 				CertExpiry:   conf.CertExpiryDuration,
 			},
 		)

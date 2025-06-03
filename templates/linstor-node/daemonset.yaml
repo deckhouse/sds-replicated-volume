@@ -32,7 +32,7 @@ spec:
     kind: DaemonSet
     name: linstor-node
   updatePolicy:
-    updateMode: "Initial"
+    updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
     - containerName: linstor-satellite
@@ -84,26 +84,21 @@ spec:
         - name: {{ .Chart.Name }}-module-registry
       affinity: {}
       initContainers:
-      - command:
-          - /linstor-drbd-wait
-        env:
-          - name: MIN_VERSION
-            value: "9.2.0"
-          - name: WAITING_MSG
-            value: "Waiting for DRBD version >= 9.2.0 on host"
-        image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
-        imagePullPolicy: IfNotPresent
-        name: wait-drbd-ver-9-2
-        securityContext:
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          seccompProfile:
-            type: RuntimeDefault
-        resources:
-          requests:
-            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+        - command:
+            - /linstor-drbd-wait
+          env:
+            - name: FILE_CONTENT
+              value: "version: 9.2"
+            - name: WAITING_MSG
+              value: "Waiting for DRBD version 9.2.x on host"
+          image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
+          imagePullPolicy: IfNotPresent
+          name: wait-drbd-ver-9-2
+          resources:
+            requests:
+              {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "drbd_wait_resources" . | nindent 12 }}
+              {{- include "drbd_wait_resources" . | nindent 14 }}
 {{- end }}
       containers:
       - command:
@@ -112,11 +107,6 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
         imagePullPolicy: IfNotPresent
         name: linstor-resources-cleaner
-        securityContext:
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          seccompProfile:
-            type: RuntimeDefault
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -136,17 +126,11 @@ spec:
           - {{ .Values.sdsReplicatedVolume.logLevel }}
           - --log-level-linstor
           - {{ .Values.sdsReplicatedVolume.logLevel }}
-          - --bind-address
-          - $(NODE_IP)
         env:
           - name: SPAAS_URL
             value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
           - name: LB_SELINUX_AS
             value: modules_object_t
-          - name: NODE_IP
-            valueFrom:
-              fieldRef:
-                fieldPath: status.hostIP
         image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
         imagePullPolicy: IfNotPresent
         name: linstor-satellite
@@ -170,10 +154,6 @@ spec:
 {{- end }}
         securityContext:
           privileged: true
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: true
-          seccompProfile:
-            type: RuntimeDefault
           seLinuxOptions:
             level: s0
             type: spc_t
@@ -188,8 +168,6 @@ spec:
             name: device-dir
           - mountPath: /sys/
             name: sys-dir
-          - mountPath: /sys/fs/cgroup
-            name: sys-fs-cgroup-dir
           - mountPath: /lib/modules/
             mountPropagation: Bidirectional
             name: modules-dir
@@ -200,24 +178,11 @@ spec:
             readOnly: true
           - mountPath: /etc/linstor/client
             name: linstor-client
-          - mountPath: /tmp
-            name: tmp-dir
-          - mountPath: /run/lock
-            name: lock-dir
-          - mountPath: /var
-            name: var-dir
-          - mountPath: /etc/lvm/archive
-            name: lvm-archive
-          - mountPath: /etc/lvm/backup
-            name: lvm-backup
-          - mountPath: /run/lvm
-            name: run-lvm
       - args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4215
           - --v=2
           - --logtostderr=true
           - --stale-cache-interval=1h30m
-          - "--livez-path=/livez"
         env:
           - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
             valueFrom:
@@ -240,23 +205,13 @@ spec:
         image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
         imagePullPolicy: IfNotPresent
         name: kube-rbac-proxy
-        livenessProbe:
-          httpGet:
-            path: /livez
-            port: 4215
-            scheme: HTTPS
-        readinessProbe:
-          httpGet:
-            path: /livez
-            port: 4215
-            scheme: HTTPS
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
 {{- end }}
-        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
       - image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
@@ -283,11 +238,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "drbd_prometheus_exporter_resources" . | nindent 12 }}
 {{- end }}
-        securityContext:
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          seccompProfile:
-            type: RuntimeDefault
+        securityContext: {}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
@@ -301,18 +252,6 @@ spec:
       serviceAccountName: linstor-node
       terminationGracePeriodSeconds: 30
       volumes:
-        - name: run-lvm
-          emptyDir: {}
-        - name: lvm-archive
-          emptyDir: {}
-        - name: lvm-backup
-          emptyDir: {}
-        - name: lock-dir
-          emptyDir: {}
-        - name: var-dir
-          emptyDir: {}
-        - name: tmp-dir
-          emptyDir: {}
         - emptyDir: {}
           name: linstord
         - configMap:
@@ -327,9 +266,6 @@ spec:
             path: /sys/
             type: Directory
           name: sys-dir
-        - hostPath:
-            path: /sys/fs/cgroup
-          name: sys-fs-cgroup-dir
         - hostPath:
             path: /lib/modules/
             type: DirectoryOrCreate

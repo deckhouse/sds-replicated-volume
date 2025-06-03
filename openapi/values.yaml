@@ -15,7 +15,7 @@ properties:
     properties:
       drbdVersion:
         type: string
-        default: "9.2.16"
+        default: "9.2.13"
       dataNodesChecksum:
         type: string
         default: "default_data_nodes_checksum"
@@ -152,36 +152,6 @@ properties:
           ca:
             type: string
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
-      storageClassLabelIgnoredPrefixesSystem:
-        type: array
-        description: |
-          System list of label-key prefixes that MUST NOT be propagated from
-          a ReplicatedStorageClass to the managed Kubernetes StorageClass.
-          This list is hardcoded and cannot be changed by users.
-        default:
-          - app.kubernetes.io/managed-by
-          - app.kubernetes.io/instance
-          - kubernetes.io/
-          - k8s.io/
-          - storage.deckhouse.io/managed-by
-        items:
-          type: string
-      pvcRwxAllowedUsernames:
-        type: array
-        default: ["system:serviceaccount:d8-virtualization:d8-cdi-sa", "system:serviceaccount:d8-virtualization:cdi-sa", "system:serviceaccount:d8-virtualization:virtualization-controller", "system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller"]
-        items:
-          type: string
-        description: |
-          Allowed admission usernames that can create RWX PVCs using StorageClasses
-          with provisioner `replicated.csi.storage.deckhouse.io`.
-      pvcRwxAllowedGroups:
-        type: array
-        default: []
-        items:
-          type: string
-        description: |
-          Allowed admission groups that can create RWX PVCs using StorageClasses
-          with provisioner `replicated.csi.storage.deckhouse.io`.
       customSchedulerExtenderCert:
          type: object
          default: {}

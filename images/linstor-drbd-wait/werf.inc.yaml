@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-src-artifact
-from: {{ index $.Images "builder/golang-alt" }}
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
@@ -21,7 +21,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ index $.Images "builder/golang" }}
+from: {{ $.Root.BASE_GOLANG_1_23 }}
 final: false
 
 import:
@@ -34,20 +34,15 @@ mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 
-secrets:
-- id: GOPROXY
-  value: {{ .GOPROXY }}
-
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
-    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
 ---
 image: {{ $.ImageName }}-distroless-artifact
-from: {{ index $.Images "builder/golang-alt" }}
+from: {{ $.Root.BASE_ALT }}
 final: false
 shell:
   beforeInstall:
@@ -68,7 +63,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-distroless
-from: {{ index $.Images "builder/scratch" }}
+from: {{ $.Root.BASE_SCRATCH }}
 final: false
 import:
   - image: {{ $.ImageName }}-distroless-artifact
