@@ -24,9 +24,11 @@ import (
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/crd_sync"
 	"drbd-cluster-sync/pkg/kubeutils"
+
 	lapi "github.com/LINBIT/golinstor/client"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
 	log "github.com/sirupsen/logrus"
@@ -45,6 +47,7 @@ func main() {
 		srv.AddToScheme,
 		v1.AddToScheme,
 		lsrv.AddToScheme,
+		srv2.AddToScheme,
 	}
 
 	logOut := os.Stderr
