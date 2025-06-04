@@ -4,7 +4,7 @@ go 1.24.0
 
 require (
 	github.com/LINBIT/golinstor v0.52.2
-	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20241225145836-3d4baa215eaf
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250530134639-b540b9d2edbf
 	k8s.io/apimachinery v0.33.1
 )
 
