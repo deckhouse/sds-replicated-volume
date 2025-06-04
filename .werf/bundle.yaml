@@ -2,36 +2,40 @@
 ---
 image: bundle
 fromImage: builder/scratch
+
 import:
-# Rendering .werf/images-digests.yaml is required!
-- image: images-digests
-  add: /images_digests.json
-  to: /images_digests.json
-  after: setup
-# Rendering .werf/python-deps.yaml is required!
-- image: python-dependencies
-  add: /lib/python/dist
-  to: /lib/python/dist
-  after: setup
-# Rendering .werf/go-hooks.yaml is required!
-- image: go-hooks-artifact
-  add: /usr/local/bin/go-hooks
-  to: /hooks/go-hooks
-  after: setup  
+  # Rendering .werf/images-digests.yaml is required!
+  - image: images-digests
+    add: /images_digests.json
+    to: /images_digests.json
+    after: setup
+  # Rendering .werf/python-deps.yaml is required!
+  - image: python-dependencies
+    add: /lib/python/dist
+    to: /lib/python/dist
+    after: setup
+  # Rendering .werf/go-hooks.yaml is required!
+  - image: go-hooks-artifact
+    add: /usr/local/bin/go-hooks
+    to: /hooks/go-hooks
+    after: setup
+  # Rendering .werf/choose-edition.yaml is required!
+  - image: choose-edition
+    add: /openapi
+    to: /openapi
+    after: setup
 git:
-- add: /
-  to: /
-  excludePaths:
-    - hooks/go  
-  includePaths:
-  - .helmignore
-  - charts
-  - crds
-  - docs
-  - enabled
-  - hooks
-  - monitoring
-  - module.yaml
-  - openapi
-  - templates
-  - Chart.yaml
+  - add: /
+    to: /
+    excludePaths:
+      - hooks/go
+    includePaths:
+      - .helmignore
+      - charts
+      - crds
+      - docs
+      - hooks
+      - monitoring
+      - templates
+      - Chart.yaml
+      - module.yaml

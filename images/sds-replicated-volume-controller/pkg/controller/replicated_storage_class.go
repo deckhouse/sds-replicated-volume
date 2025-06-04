@@ -24,6 +24,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -152,7 +153,7 @@ func NewReplicatedStorageClass(
 			log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] Get UPDATE event for ReplicatedStorageClass %s. Check if it was changed.", e.ObjectNew.GetName()))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] Old ReplicatedStorageClass: %+v", e.ObjectOld))
 			log.Trace(fmt.Sprintf("[ReplicatedStorageClassReconciler] New ReplicatedStorageClass: %+v", e.ObjectNew))
-			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) {
+			if e.ObjectNew.GetDeletionTimestamp() != nil || !reflect.DeepEqual(e.ObjectNew.Spec, e.ObjectOld.Spec) || !reflect.DeepEqual(e.ObjectNew.Annotations, e.ObjectOld.Annotations) {
 				log.Debug(fmt.Sprintf("[ReplicatedStorageClassReconciler] ReplicatedStorageClass %s was changed. Add it to queue.", e.ObjectNew.GetName()))
 				request := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: e.ObjectNew.GetNamespace(), Name: e.ObjectNew.GetName()}}
 				q.Add(request)
@@ -741,7 +742,13 @@ func recreateStorageClassIfNeeded(
 
 func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool, replicatedStoragePoolData map[string]string) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
-	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled {
+	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
+	// has  replicatedstorageclass.storage.deckhouse.io/ignore-local: "true".
+	ignoreLocal, _ := strconv.ParseBool(
+		replicatedSC.Annotations[StorageClassIgnoreLocalAnnotationKey],
+	)
+
+	if replicatedSC.Spec.VolumeAccess == VolumeAccessLocal && virtualizationEnabled && !ignoreLocal {
 		if newSC.Annotations == nil {
 			newSC.Annotations = make(map[string]string, 1)
 		}
