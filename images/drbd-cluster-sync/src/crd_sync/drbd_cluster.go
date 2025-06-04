@@ -81,7 +81,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 					},
 				},
 			}
-			continue
+			continue 
 		}
 
 		peer := r.Spec.Peers[lsv.Spec.NodeName]
