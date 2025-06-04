@@ -39,13 +39,21 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
-	cwt, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
 	layerStorageVolumeList := &lsrv.LayerStorageVolumesList{}
-	err := r.kc.List(cwt, layerStorageVolumeList)
+	err := r.kc.List(ctx, layerStorageVolumeList)
 	if err != nil {
 		return fmt.Errorf("failed to list layer storage volumes: %w", err)
+	}
+
+	layerStorageResourceIDs := &lsrv.LayerResourceIdsList{}
+	err = r.kc.List(ctx, layerStorageResourceIDs)
+	if err != nil {
+		return fmt.Errorf("failed to list layer resource id: %w", err)
+	}
+
+	lriMap := make(map[int]*lsrv.LayerResourceIds, len(layerStorageResourceIDs.Items))
+	for _, lri := range layerStorageResourceIDs.Items {
+		lriMap[lri.Spec.LayerResourceID] = &lri
 	}
 
 	var wg sync.WaitGroup
@@ -58,7 +66,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 				<-semaphore
 				wg.Done()
 			}()
-			createDRBDResource(ctx, r.kc, lsv, r.opts)
+			createDRBDResource(ctx, r.kc, lsv, lriMap, r.opts)
 		}()
 	}
 
@@ -178,12 +186,15 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 	// return nil
 }
 
-func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerStorageVolumes, opts *config.Options) {
+func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerStorageVolumes, lriMap map[int]*lsrv.LayerResourceIds, opts *config.Options) {
 	isDiskless := false
 	if lsv.Spec.ProviderKind == "DISKLESS" {
 		isDiskless = true
 	}
 	drbdResourceReplica := &srv2.DRBDResourceReplica{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: lriMap[lsv.Spec.LayerResourceID].Spec.ResourceName,
+		},
 		Spec: srv2.DRBDResourceReplicaSpec{
 			Peers: map[string]srv2.Peer{
 				lsv.Spec.NodeName: srv2.Peer{

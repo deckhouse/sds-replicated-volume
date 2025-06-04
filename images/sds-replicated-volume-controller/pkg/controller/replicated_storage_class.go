@@ -761,7 +761,7 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 	}
 	if LVMtype == "LVMThin" {
 		newSC.Parameters[StorageClassLVMType] = "Thin"
-	}
+	} 
 
 	return newSC
 }
