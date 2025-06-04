@@ -56,9 +56,42 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 		lriMap[lri.Spec.LayerResourceID] = &lri
 	}
 
+	replicaMap := make(map[string]*srv2.DRBDResourceReplica)
+	for _, lsv := range layerStorageVolumeList.Items {
+		lri, found := lriMap[lsv.Spec.LayerResourceID]
+		if !found {
+			fmt.Printf("no layer resource id %s found. skipping iteration")
+		}
+
+		r, found := replicaMap[lri.Spec.ResourceName]
+		isDiskless := false
+		if lsv.Spec.ProviderKind == "DISKLESS" {
+			isDiskless = true
+		}
+		if !found {
+			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: lri.Spec.ResourceName,
+				},
+				Spec: srv2.DRBDResourceReplicaSpec{
+					Peers: map[string]srv2.Peer{
+						lsv.Spec.NodeName: srv2.Peer{
+							Diskless: isDiskless,
+						},
+					},
+				},
+			}
+			continue
+		}
+
+		peer := r.Spec.Peers[lsv.Spec.NodeName]
+		peer.Diskless = isDiskless
+		r.Spec.Peers[lsv.Spec.NodeName] = peer
+	}
+
 	var wg sync.WaitGroup
 	semaphore := make(chan struct{}, r.opts.NumWorkers)
-	for _, lsv := range layerStorageVolumeList.Items {
+	for _, replica := range replicaMap {
 		semaphore <- struct{}{}
 		wg.Add(1)
 		go func() {
@@ -66,7 +99,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 				<-semaphore
 				wg.Done()
 			}()
-			createDRBDResource(ctx, r.kc, lsv, lriMap, r.opts)
+			createDRBDResource(ctx, r.kc, replica, r.opts)
 		}()
 	}
 
@@ -186,24 +219,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 	// return nil
 }
 
-func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerStorageVolumes, lriMap map[int]*lsrv.LayerResourceIds, opts *config.Options) {
-	isDiskless := false
-	if lsv.Spec.ProviderKind == "DISKLESS" {
-		isDiskless = true
-	}
-	drbdResourceReplica := &srv2.DRBDResourceReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: lriMap[lsv.Spec.LayerResourceID].Spec.ResourceName,
-		},
-		Spec: srv2.DRBDResourceReplicaSpec{
-			Peers: map[string]srv2.Peer{
-				lsv.Spec.NodeName: srv2.Peer{
-					Diskless: isDiskless,
-				},
-			},
-		},
-	}
-
+func createDRBDResource(ctx context.Context, kc kubecl.Client, drbdResourceReplica *srv2.DRBDResourceReplica, opts *config.Options) {
 	if err := retry.OnError(
 		// backoff settings
 		wait.Backoff{
@@ -215,7 +231,7 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerSto
 		// this function takes an error returned by kc.Create and decides whether to make a retry or not
 		func(err error) bool {
 			if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-				log.Errorf("drbd cluster retry context err: %v", err)
+				log.Errorf("drbd resource replica retry context err: %v", err)
 				return false
 			}
 
@@ -227,7 +243,7 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerSto
 					metav1.StatusReasonInvalid,
 					metav1.StatusReasonConflict,
 					metav1.StatusReasonBadRequest:
-					log.Errorf("drbd cluster retry creation err: %s", statusError.ErrStatus.Reason)
+					log.Errorf("drbd resource replica retry creation err: %s", statusError.ErrStatus.Reason)
 					return false
 				}
 			}
@@ -236,12 +252,12 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, lsv lsrv.LayerSto
 		func() error {
 			err := kc.Create(ctx, drbdResourceReplica)
 			if err == nil {
-				log.Infof("DRBD cluster %s successfully created", drbdResourceReplica.Name)
+				log.Infof("DRBD resource replica %s successfully created", drbdResourceReplica.Name)
 			}
 			return err
 		},
 	); err != nil {
-		log.Errorf("failed to create a DRBD cluster %s: %s", lsv.Name, err.Error())
+		log.Errorf("failed to create a DRBD resource replica %s: %s", drbdResourceReplica.Name, err.Error())
 	}
 }
 
