@@ -6,8 +6,9 @@ require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20241205040953-7b376bae249c
 	github.com/deckhouse/module-sdk v0.1.1-0.20250225114715-86f38bb419fe
+	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250530134639-b540b9d2edbf
 	k8s.io/api v0.29.8
-	k8s.io/apimachinery v0.29.8
+	k8s.io/apimachinery v0.30.2
 	k8s.io/client-go v0.29.8
 	sigs.k8s.io/controller-runtime v0.17.0
 )
