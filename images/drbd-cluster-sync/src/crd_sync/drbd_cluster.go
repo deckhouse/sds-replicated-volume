@@ -84,7 +84,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: pvName,
-					Namespace: pvcMap[pvName].Namespace,
+					Namespace: pvcMap[pvName].Spec.ClaimRef.Namespace,
 				},
 				Spec: srv2.DRBDResourceReplicaSpec{
 					Peers: map[string]srv2.Peer{
