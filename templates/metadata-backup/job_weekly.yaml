@@ -10,6 +10,7 @@ kind: CronJob
 metadata:
   name: metadata-scheduled-backup-weekly
   namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "metadata-backup")) | nindent 2 }}
 spec:
   schedule: "0 4 * * 2,4"
   concurrencyPolicy: Forbid
