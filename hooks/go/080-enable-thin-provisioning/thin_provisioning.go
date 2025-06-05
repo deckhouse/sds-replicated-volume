@@ -21,7 +21,8 @@ import (
 	"fmt"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	v1aplha1 "github.com/deckhouse/sds-replicated-volume/api"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -31,24 +32,27 @@ import (
 	"os"
 )
 
-const (
-	crdGroup      = "internal.linstor.linbit.com"
-	crdNamePlural = "propscontainers"
-	crdVersion    = "v1-15-0"
-)
-
 var (
 	_ = registry.RegisterFunc(
 		&pkg.HookConfig{
-			Kubernetes: []pkg.KubernetesConfig{},
-			Queue:      fmt.Sprintf("modules/%s", consts.ModuleLabelValue),
+			Metadata:          pkg.HookMetadata{},
+			Schedule:          nil,
+			Kubernetes:        nil,
+			OnStartup:         nil,
+			OnBeforeHelm:      nil,
+			OnAfterHelm:       nil,
+			OnAfterDeleteHelm: nil,
+			AllowFailure:      false,
+			Queue:             "",
+			Settings:          nil,
 		},
 		mainHook,
 	)
 )
 
-func mainHook(ctx context.Context, input *pkg.HookInput) error {
+func mainHook(ctx context.Context, input *pkg.HookInput, obj metav1.Object) error {
 
+	SRVModuleConfig := *v1alpha1.
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		_, err := fmt.Fprintf(os.Stderr, "Failed to load Kubernetes config: %v\n", err)
@@ -61,13 +65,7 @@ func mainHook(ctx context.Context, input *pkg.HookInput) error {
 		return err
 	}
 
-	propsContainerGVR := schema.GroupVersionResource{
-		Group:    crdGroup,
-		Version:  crdVersion,
-		Resource: crdNamePlural,
-	}
-
-	list, err := dynamicClient.Resource(propsContainerGVR).List(context.Background(), metav1.ListOptions{})
+	list, err := dynamicClient.Resource(v1aplha1.propsContainerGVR).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		_, err := fmt.Fprintf(os.Stderr, "Failed to list custom objects: %v\n", err)
 		return err

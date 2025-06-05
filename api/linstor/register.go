@@ -23,16 +23,25 @@ import (
 )
 
 const (
-	APIGroup   = "internal.linstor.linbit.com"
-	APIVersion = "v1-15-0"
+	APIGroup      = "internal.linstor.linbit.com"
+	APIVersion    = "v1-15-0"
+	crdGroup      = "internal.linstor.linbit.com"
+	crdNamePlural = "propscontainers"
+	crdVersion    = "v1-15-0"
 )
 
 // SchemeGroupVersion is group version used to register these objects
 var (
+	SchemeGroupVersionGVR = schema.GroupVersionResource{
+		Group:    crdGroup,
+		Version:  crdVersion,
+		Resource: crdNamePlural,
+	}
 	SchemeGroupVersion = schema.GroupVersion{
 		Group:   APIGroup,
 		Version: APIVersion,
 	}
+
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
@@ -57,6 +66,7 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ResourceDefinitions{},
 		&ResourceDefinitionsList{},
 	)
+
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
 }
