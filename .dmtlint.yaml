@@ -63,3 +63,6 @@ linters-settings:
         - kind: Deployment
           name: linstor-controller
           container: kube-rbac-proxy
+        - kind: Deployment
+          name: linstor-controller
+          container: linstor-controller

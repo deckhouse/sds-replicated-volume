@@ -42,6 +42,8 @@
 - command:
   - /linstor-wait-until
   - api-online
+  securityContext:
+    readOnlyRootFilesystem: true  
   env:
   - name: LS_CONTROLLERS
     value: https://linstor.d8-sds-replicated-volume.svc:3371
@@ -142,6 +144,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
     - /linstor-wait-until
     - satellite-online
     - $(KUBE_NODE_NAME)
+  securityContext:
+    readOnlyRootFilesystem: true
   env:
     - name: KUBE_NODE_NAME
       valueFrom:
