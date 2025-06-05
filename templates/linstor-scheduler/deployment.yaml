@@ -9,6 +9,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- $kubeVersion := semver .Values.global.discovery.kubernetesVersion -}}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
@@ -27,12 +28,14 @@ spec:
     updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
+{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
     - containerName: kube-scheduler
       minAllowed:
         {{- include "kube_scheduler_resources" . | nindent 8 }}
       maxAllowed:
         memory: 60Mi
         cpu: 20m
+{{- end }}
     - containerName: linstor-scheduler-extender
       minAllowed:
         {{- include "linstor_scheduler_extender_resources" . | nindent 8 }}
@@ -78,7 +81,6 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       containers:
-{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
         - name: kube-scheduler
           {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 10 }}
