@@ -1,0 +1,327 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.18.0
+  name: distributedblockdevicereplicas.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: DistributedBlockDeviceReplica
+    listKind: DistributedBlockDeviceReplicaList
+    plural: distributedblockdevicereplicas
+    singular: distributedblockdevicereplica
+  scope: Namespaced
+  versions:
+  - name: v1alpha2
+    schema:
+      openAPIV3Schema:
+        description: "# Some important non-typed and embededd properties\n\n\tmetadata:\n\t
+          \ labels:\n\t    storage.deckhouse.io/node-name: my-hostname\n\t  name:
+          my-gitlab-?????\n\t  ownerReferences:\n\t  - apiVersion: storage.deckhouse.io/v1alpha2\n\t
+          \   blockOwnerDeletion: true\n\t    controller: true\n\t    kind: DistributedBlockDevice\n\t
+          \   name: my-gitlab\n\t    uid: 7697dab1-2382-4901-87bb-249f3562a5b4\n\t
+          \ generation: 89\n\t  finalizers:\n\t  - storage.deckhouse.io/sds-replicated-volume\n\tstatus:\n\t
+          \ conditions:\n\t  - message: resource metadata creation successful\n\t
+          \   reason: ReconcileOnCreate\n\t    status: \"True\"\n\t    type: DeviceMetadataCreated\n\t
+          \ - message: resource activation successful\n\t    reason: ReconcileOnCreate\n\t
+          \   status: \"True\"\n\t    type: DeviceIsActive"
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              diskless:
+                type: boolean
+              peers:
+                additionalProperties:
+                  properties:
+                    address:
+                      properties:
+                        ipv4:
+                          type: string
+                      required:
+                      - ipv4
+                      type: object
+                  required:
+                  - address
+                  type: object
+                type: object
+            type: object
+          status:
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              resource:
+                properties:
+                  connections:
+                    items:
+                      properties:
+                        ap-in-flight:
+                          type: integer
+                        congested:
+                          type: boolean
+                        connection-state:
+                          type: string
+                        name:
+                          type: string
+                        paths:
+                          items:
+                            properties:
+                              established:
+                                type: boolean
+                              remote_host:
+                                properties:
+                                  address:
+                                    type: string
+                                  family:
+                                    type: string
+                                  port:
+                                    type: integer
+                                required:
+                                - address
+                                - family
+                                - port
+                                type: object
+                              this_host:
+                                properties:
+                                  address:
+                                    type: string
+                                  family:
+                                    type: string
+                                  port:
+                                    type: integer
+                                required:
+                                - address
+                                - family
+                                - port
+                                type: object
+                            required:
+                            - established
+                            - remote_host
+                            - this_host
+                            type: object
+                          type: array
+                        peer-node-id:
+                          type: integer
+                        peer-role:
+                          type: string
+                        peer_devices:
+                          items:
+                            properties:
+                              has-online-verify-details:
+                                type: boolean
+                              has-sync-details:
+                                type: boolean
+                              out-of-sync:
+                                description: |-
+                                  Received               int     `json:"received"`
+                                  Sent                   int     `json:"sent"`
+                                type: integer
+                              peer-client:
+                                type: boolean
+                              peer-disk-state:
+                                type: string
+                              pending:
+                                type: integer
+                              percent-in-sync:
+                                type: string
+                              replication-state:
+                                type: string
+                              resync-suspended:
+                                type: string
+                              unacked:
+                                type: integer
+                              volume:
+                                type: integer
+                            required:
+                            - has-online-verify-details
+                            - has-sync-details
+                            - out-of-sync
+                            - peer-client
+                            - peer-disk-state
+                            - pending
+                            - percent-in-sync
+                            - replication-state
+                            - resync-suspended
+                            - unacked
+                            - volume
+                            type: object
+                          type: array
+                        rs-in-flight:
+                          type: integer
+                        tls:
+                          type: boolean
+                      required:
+                      - ap-in-flight
+                      - congested
+                      - connection-state
+                      - name
+                      - paths
+                      - peer-node-id
+                      - peer-role
+                      - peer_devices
+                      - rs-in-flight
+                      - tls
+                      type: object
+                    type: array
+                  devices:
+                    items:
+                      properties:
+                        al-writes:
+                          type: integer
+                        bm-writes:
+                          type: integer
+                        client:
+                          type: boolean
+                        disk-state:
+                          type: string
+                        lower-pending:
+                          type: integer
+                        minor:
+                          type: integer
+                        open:
+                          type: boolean
+                        quorum:
+                          type: boolean
+                        read:
+                          type: integer
+                        size:
+                          type: integer
+                        upper-pending:
+                          type: integer
+                        volume:
+                          type: integer
+                        written:
+                          type: integer
+                      required:
+                      - al-writes
+                      - bm-writes
+                      - client
+                      - disk-state
+                      - lower-pending
+                      - minor
+                      - open
+                      - quorum
+                      - read
+                      - size
+                      - upper-pending
+                      - volume
+                      - written
+                      type: object
+                    type: array
+                  force-io-failures:
+                    type: boolean
+                  name:
+                    type: string
+                  node-id:
+                    type: integer
+                  role:
+                    type: string
+                  suspended:
+                    type: boolean
+                  suspended-fencing:
+                    type: boolean
+                  suspended-no-data:
+                    type: boolean
+                  suspended-quorum:
+                    type: boolean
+                  suspended-user:
+                    type: boolean
+                  write-ordering:
+                    type: string
+                required:
+                - connections
+                - devices
+                - force-io-failures
+                - name
+                - node-id
+                - role
+                - suspended
+                - suspended-fencing
+                - suspended-no-data
+                - suspended-quorum
+                - suspended-user
+                - write-ordering
+                type: object
+            required:
+            - conditions
+            type: object
+        required:
+        - metadata
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

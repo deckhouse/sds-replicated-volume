@@ -8,28 +8,36 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-type DRBDResource struct {
+type DistributedBlockDevice struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   DRBDResourceSpec   `json:"spec"`
-	Status DRBDResourceStatus `json:"status"`
+	Spec   DistributedBlockDeviceSpec    `json:"spec"`
+	Status *DistributedBlockDeviceStatus `json:"status,omitempty"`
 }
 
+type DBD = DistributedBlockDevice
+
 // +k8s:deepcopy-gen=true
-type DRBDResourceSpec struct {
+type DistributedBlockDeviceSpec struct {
 	Size int64 `json:"size"`
 }
 
+type DBDSpec = DistributedBlockDeviceSpec
+
 // +k8s:deepcopy-gen=true
-type DRBDResourceStatus struct {
+type DistributedBlockDeviceStatus struct {
 }
+
+type DBDStatus = DistributedBlockDeviceStatus
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
-type DRBDResourceList struct {
+type DistributedBlockDeviceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []DRBDResource `json:"items"`
+	Items           []DistributedBlockDevice `json:"items"`
 }
+
+type DBDList = DistributedBlockDeviceList
