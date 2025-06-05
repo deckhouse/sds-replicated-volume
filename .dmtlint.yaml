@@ -43,5 +43,5 @@ linters-settings:
           name: sds-replicated-volume
           container: node
         - kind: DaemonSet
-          name: sds-reolicated-volume
+          name: sds-replicated-volume
           container: node-driver-registrar
