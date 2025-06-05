@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -79,13 +80,11 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			isDiskless = true
 		}
 		if !found {
-			fmt.Printf("pvcs %+v", pvcMap)
-			fmt.Printf("ResourceName %s", lri.Spec.ResourceName)
-			
+			pvName := strings.ToLower(lri.Spec.ResourceName)
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: lri.Spec.ResourceName,
-					Namespace: pvcMap[lri.Spec.ResourceName].Namespace,
+					Name: pvName,
+					Namespace: pvcMap[pvName].Namespace,
 				},
 				Spec: srv2.DRBDResourceReplicaSpec{
 					Peers: map[string]srv2.Peer{
