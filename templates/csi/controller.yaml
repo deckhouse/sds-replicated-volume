@@ -99,7 +99,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 ###
 
 {{- define "csi_node_args" }}
-- "--endpoint=unix:///csi/csi.sock"
+- "--csi-endpoint=unix://$(ADDRESS)"
 - "--node-service"
 - "--flavor=kubernetes"
 {{- end }}
@@ -107,8 +107,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- define "csi_node_envs" }}
 - name: PATH
   value: /sbin:/bin:/usr/bin:/usr/sbin
-- name: CSI_ENDPOINT
-  value: unix:///csi/csi.sock
+- name: ADDRESS
+  value: /csi/csi.sock
 - name: LOG_LEVEL
   value: {{ .Values.logLevel }}
 - name: NODE_NAME
