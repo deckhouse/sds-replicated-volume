@@ -79,13 +79,14 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 		if lsv.Spec.ProviderKind == "DISKLESS" {
 			isDiskless = true
 		}
+		
+		nodeName := strings.ToLower(lsv.Spec.NodeName)
 		if !found {
 			pvName := strings.ToLower(lri.Spec.ResourceName)
-			nodeName := strings.ToLower(lsv.Spec.NodeName)
 
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: pvName,
+					Name:      pvName,
 					Namespace: pvcMap[pvName].Spec.ClaimRef.Namespace,
 				},
 				Spec: srv2.DRBDResourceReplicaSpec{
@@ -96,12 +97,12 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 					},
 				},
 			}
-			continue 
+			continue
 		}
 
-		peer := r.Spec.Peers[lsv.Spec.NodeName]
+		peer := r.Spec.Peers[nodeName]
 		peer.Diskless = isDiskless
-		r.Spec.Peers[lsv.Spec.NodeName] = peer
+		r.Spec.Peers[nodeName] = peer
 	}
 
 	var wg sync.WaitGroup
