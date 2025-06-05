@@ -94,6 +94,8 @@ spec:
           image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
           imagePullPolicy: IfNotPresent
           name: wait-drbd-ver-9-2
+          securityContext:
+            readOnlyRootFilesystem: true
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -238,7 +240,8 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "drbd_prometheus_exporter_resources" . | nindent 12 }}
 {{- end }}
-        securityContext: {}
+        securityContext: 
+          readOnlyRootFilesystem: true
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
