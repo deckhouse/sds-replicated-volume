@@ -140,7 +140,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- define "csi_additional_node_volume_mounts" }}
 {{- end }}
 
-{{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorServer") }}
+{{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiNodeConfig := dict }}
 {{- $_ := set $csiNodeConfig "fullname" "sds-replicated-volume" }}
