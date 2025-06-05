@@ -41,7 +41,7 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 	pvcs := &v1.PersistentVolumeClaimList{}
 	if err := r.kc.List(ctx, pvcs); err != nil {
-		return fmt.Errorf("failed to get persistent volumes: %w", err)
+		return fmt.Errorf("failed to get persistent volume claims: %w", err)
 	}
 
 	pvcMap := make(map[string]*v1.PersistentVolumeClaim, len(pvcs.Items))
@@ -79,6 +79,9 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			isDiskless = true
 		}
 		if !found {
+			fmt.Printf("pvcs %+v", pvcMap)
+			fmt.Printf("ResourceName %s", lri.Spec.ResourceName)
+			
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: lri.Spec.ResourceName,
