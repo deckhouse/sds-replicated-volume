@@ -157,8 +157,10 @@ spec:
             protocol: TCP
           - containerPort: 3370
             protocol: TCP
+            name: metrics
           - containerPort: 3371
             protocol: TCP
+            name: linstor
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}

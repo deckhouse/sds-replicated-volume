@@ -172,6 +172,7 @@ spec:
           ports:
            - containerPort: 8099
              protocol: TCP
+             name: scheduler-extender
           {{- end }}
 
 {{- if semverCompare ">= 1.22" .Values.global.discovery.kubernetesVersion }}
