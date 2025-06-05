@@ -99,22 +99,39 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 ###
 
 {{- define "csi_node_args" }}
-- "--csi-endpoint=unix://$(ADDRESS)"
-- "--node-service"
-- "--flavor=kubernetes"
+- --csi-endpoint=unix://$(CSI_ENDPOINT)
+- --node=$(KUBE_NODE_NAME)
+- --linstor-endpoint=$(LS_CONTROLLERS)
+- --log-level=info
 {{- end }}
 
 {{- define "csi_node_envs" }}
-- name: PATH
-  value: /sbin:/bin:/usr/bin:/usr/sbin
-- name: ADDRESS
+- name: CSI_ENDPOINT
   value: /csi/csi.sock
-- name: LOG_LEVEL
-  value: {{ .Values.logLevel }}
-- name: NODE_NAME
+- name: DRIVER_REG_SOCK_PATH
+  value: /var/lib/kubelet/plugins/replicated.csi.storage.deckhouse.io/csi.sock
+- name: KUBE_NODE_NAME
   valueFrom:
     fieldRef:
+      apiVersion: v1
       fieldPath: spec.nodeName
+- name: LS_CONTROLLERS
+  value: https://linstor.d8-sds-replicated-volume.svc:3371
+- name: LS_ROOT_CA
+  valueFrom:
+    secretKeyRef:
+      key: ca.crt
+      name: linstor-client-https-cert
+- name: LS_USER_CERTIFICATE
+  valueFrom:
+    secretKeyRef:
+      key: tls.crt
+      name: linstor-client-https-cert
+- name: LS_USER_KEY
+  valueFrom:
+    secretKeyRef:
+      key: tls.key
+      name: linstor-client-https-cert
 {{- end }}
 
 {{- define "csi_additional_node_selector_terms" }}
