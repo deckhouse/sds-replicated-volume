@@ -81,7 +81,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "controllerImage" $csiControllerImage }}
 {{- $_ := set $csiControllerConfig "snapshotterEnabled" true }}
 {{- $_ := set $csiControllerConfig "resizerEnabled" true }}
-{{- $_ := set $csiControllerConfig "csiControllerHostNetwork" false }}
+{{- $_ := set $csiControllerConfig "csiControllerHostNetwork" "false" }}
 {{- $_ := set $csiControllerConfig "provisionerTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "snapshotterTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "extraCreateMetadataEnabled" true }}
