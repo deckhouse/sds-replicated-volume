@@ -188,7 +188,9 @@ spec:
             name: linstor-ssl-pem
             readOnly: true
           - mountPath: /tmp
-            name: tmp-dir            
+            name: tmp-dir
+          - mountPath: /var/log
+            name: log-dir
       - name: kube-rbac-proxy
         args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):3370
@@ -234,6 +236,8 @@ spec:
       serviceAccountName: linstor-controller
       terminationGracePeriodSeconds: 30
       volumes:
+        - name: log-dir
+          emptyDir: {}
         - name: tmp-dir
           emptyDir: {}
         - configMap:

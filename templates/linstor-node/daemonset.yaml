@@ -184,7 +184,9 @@ spec:
           - mountPath: /etc/linstor/client
             name: linstor-client
           - mountPath: /tmp
-            name: tmp-dir     
+            name: tmp-dir
+          - mountPath: /var/log
+            name: log-dir
       - args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4215
           - --v=2
@@ -260,6 +262,8 @@ spec:
       serviceAccountName: linstor-node
       terminationGracePeriodSeconds: 30
       volumes:
+        - name: log-dir
+          emptyDir: {}
         - name: tmp-dir
           emptyDir: {}
         - emptyDir: {}
