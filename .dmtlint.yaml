@@ -90,6 +90,5 @@ linters-settings:
         - kind: ClusterRole
           name: d8:sds-replicated-volume:linstor-controller
   images:
-    exclude-rules:
-      patches:
-        disable: true
+    patches:
+      disable: true
