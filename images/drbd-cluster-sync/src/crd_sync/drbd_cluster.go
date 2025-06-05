@@ -39,13 +39,13 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
-	pvcs := &v1.PersistentVolumeClaimList{}
-	if err := r.kc.List(ctx, pvcs); err != nil {
-		return fmt.Errorf("failed to get persistent volume claims: %w", err)
+	pvs := &v1.PersistentVolumeList{}
+	if err := r.kc.List(ctx, pvs); err != nil {
+		return fmt.Errorf("failed to get persistent volumes: %w", err)
 	}
 
-	pvcMap := make(map[string]*v1.PersistentVolumeClaim, len(pvcs.Items))
-	for _, pvc := range pvcs.Items {
+	pvcMap := make(map[string]*v1.PersistentVolume, len(pvs.Items))
+	for _, pvc := range pvs.Items {
 		pvcMap[pvc.Name] = &pvc
 	}
 
