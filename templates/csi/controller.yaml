@@ -12,7 +12,7 @@
 
 {{- define "csi_controller_envs" }}
 - name: ADDRESS
-  value: /var/lib/csi/sockets/pluginproxy/./csi.sock
+  value: /csi/csi.sock
 - name: KUBE_NODE_NAME
   valueFrom:
     fieldRef:
