@@ -79,6 +79,6 @@ linters-settings:
   rbac:
     exclude-rules:
       - kind: ClusterRole
-        name: d8:{{ .Chart.Name }}:metadata-backup
+        name: d8:sds-replicated-volume:metadata-backup
       - kind: ClusterRole
-        name: d8:{{ .Chart.Name }}:llinstor-controller
+        name: d8:sds-replicated-volume:llinstor-controller
