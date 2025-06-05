@@ -1,0 +1,47 @@
+linters-settings:
+  container:
+    exclude-rules:
+      liveness-probe:
+        - kind: Deployment
+          name: csi-controller
+          container: snapshotter
+        - kind: Deployment
+          name: csi-controller
+          container: resizer
+        - kind: Deployment
+          name: csi-controller
+          container: attacher
+        - kind: Deployment
+          name: csi-controller
+          container: provisioner
+        - kind: Deployment
+          name: csi-controller
+          container: livenessprobe
+        - kind: DaemonSet
+          name: sds-replicated-volume
+          container: node-driver-registrar
+      readiness-probe:
+        - kind: Deployment
+          name: csi-controller
+          container: snapshotter
+        - kind: Deployment
+          name: csi-controller
+          container: resizer
+        - kind: Deployment
+          name: csi-controller
+          container: attacher
+        - kind: Deployment
+          name: csi-controller
+          container: provisioner
+        - kind: Deployment
+          name: csi-controller
+          container: livenessprobe
+        - kind: Deployment
+          name: csi-controller
+          container: controller
+        - kind: DaemonSet
+          name: sds-replicated-volume
+          container: node
+        - kind: DaemonSet
+          name: sds-reolicated-volume
+          container: node-driver-registrar
