@@ -39,6 +39,16 @@ func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Ent
 }
 
 func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
+	pvcs := &v1.PersistentVolumeClaimList{}
+	if err := r.kc.List(ctx, pvcs); err != nil {
+		return fmt.Errorf("failed to get persistent volumes: %w", err)
+	}
+
+	pvcMap := make(map[string]*v1.PersistentVolumeClaim, len(pvcs.Items))
+	for _, pvc := range pvcs.Items {
+		pvcMap[pvc.Name] = &pvc
+	}
+
 	layerStorageVolumeList := &lsrv.LayerStorageVolumesList{}
 	err := r.kc.List(ctx, layerStorageVolumeList)
 	if err != nil {
@@ -72,6 +82,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: lri.Spec.ResourceName,
+					Namespace: pvcMap[lri.Spec.ResourceName].Namespace,
 				},
 				Spec: srv2.DRBDResourceReplicaSpec{
 					Peers: map[string]srv2.Peer{
