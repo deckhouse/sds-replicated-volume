@@ -20,6 +20,15 @@ linters-settings:
         - kind: DaemonSet
           name: sds-replicated-volume
           container: node-driver-registrar
+        - kind: DaemonSet
+          name: linstor-node
+          container: kube-rbac-proxy
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-resources-cleaner
+        - kind: Deployment
+          name: linstor-controller
+          container: kube-rbac-proxy
       readiness-probe:
         - kind: Deployment
           name: csi-controller
@@ -45,3 +54,12 @@ linters-settings:
         - kind: DaemonSet
           name: sds-replicated-volume
           container: node-driver-registrar
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-resources-cleaner
+        - kind: DaemonSet
+          name: linstor-node
+          container: kube-rbac-proxy
+        - kind: Deployment
+          name: linstor-controller
+          container: kube-rbac-proxy
