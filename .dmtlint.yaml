@@ -60,6 +60,12 @@ linters-settings:
         - kind: DaemonSet
           name: linstor-node
           container: kube-rbac-proxy
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-satellite
+        - kind: DaemonSet
+          name: linstor-node
+          container: drbd-prometheus-exporter
         - kind: Deployment
           name: linstor-controller
           container: kube-rbac-proxy
