@@ -72,3 +72,13 @@ linters-settings:
         - kind: Deployment
           name: linstor-controller
           container: linstor-controller
+      host-network-ports:
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-satellite
+  rbac:
+    exclude-rules:
+      - kind: ClusterRole
+        name: d8:{{ .Chart.Name }}:metadata-backup
+      - kind: ClusterRole
+        name: d8:{{ .Chart.Name }}:llinstor-controller
