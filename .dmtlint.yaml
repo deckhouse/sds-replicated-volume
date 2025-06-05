@@ -78,7 +78,8 @@ linters-settings:
           container: linstor-satellite
   rbac:
     exclude-rules:
-      - kind: ClusterRole
-        name: d8:sds-replicated-volume:metadata-backup
-      - kind: ClusterRole
-        name: d8:sds-replicated-volume:llinstor-controller
+      wildcards:
+        - kind: ClusterRole
+          name: d8:sds-replicated-volume:metadata-backup
+        - kind: ClusterRole
+          name: d8:sds-replicated-volume:llinstor-controller
