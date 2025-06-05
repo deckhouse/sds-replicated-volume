@@ -81,6 +81,8 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 		}
 		if !found {
 			pvName := strings.ToLower(lri.Spec.ResourceName)
+			nodeName := strings.ToLower(lsv.Spec.NodeName)
+
 			replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: pvName,
@@ -88,7 +90,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 				},
 				Spec: srv2.DRBDResourceReplicaSpec{
 					Peers: map[string]srv2.Peer{
-						lsv.Spec.NodeName: srv2.Peer{
+						nodeName: srv2.Peer{
 							Diskless: isDiskless,
 						},
 					},
