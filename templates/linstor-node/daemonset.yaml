@@ -185,10 +185,10 @@ spec:
             name: linstor-client
           - mountPath: /tmp
             name: tmp-dir
-          - mountPath: /var/lock
+          - mountPath: /run/lock
             name: lock-dir
           - mountPath: /var
-            name: log-dir
+            name: var-dir
       - args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4215
           - --v=2
@@ -266,7 +266,7 @@ spec:
       volumes:
         - name: lock-dir
           emptyDir: {}
-        - name: log-dir
+        - name: var-dir
           emptyDir: {}
         - name: tmp-dir
           emptyDir: {}
