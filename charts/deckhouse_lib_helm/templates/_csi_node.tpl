@@ -27,6 +27,7 @@ memory: 25Mi
   {{- $additionalNodeSelectorTerms := $config.additionalNodeSelectorTerms }}
   {{- $customNodeSelector := $config.customNodeSelector }}
   {{- $forceCsiNodeAndStaticNodesDepoloy := $config.forceCsiNodeAndStaticNodesDepoloy | default false }}
+  {{- $setSysAdminCapability := $config.setSysAdminCapability | default false }}
   {{- $additionalContainers := $config.additionalContainers }} 
   {{- $initContainers := $config.initContainers }}
   {{- $additionalPullSecrets := $config.additionalPullSecrets }}
@@ -175,6 +176,11 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+        {{- if $setSysAdminCapability }}
+          capabilities:
+            add:
+            - SYS_ADMIN
+        {{- end }}
         image: {{ $nodeImage }}
         args:
       {{- if $additionalNodeArgs }}
