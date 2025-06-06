@@ -83,7 +83,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "controllerImage" $csiControllerImage }}
 {{- $_ := set $csiControllerConfig "snapshotterEnabled" true }}
 {{- $_ := set $csiControllerConfig "resizerEnabled" true }}
-{{- $_ := set $csiControllerConfig "setSysAdminCapability" true }}
+
 {{- $_ := set $csiControllerConfig "csiControllerHostNetwork" "false" }}
 {{- $_ := set $csiControllerConfig "provisionerTimeout" "1200s" }}
 {{- $_ := set $csiControllerConfig "snapshotterTimeout" "1200s" }}
@@ -189,6 +189,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "nodeImage" $csiNodeImage }}
 {{- $_ := set $csiNodeConfig "driverFQDN" "replicated.csi.storage.deckhouse.io" }}
 {{- $_ := set $csiNodeConfig "livenessProbePort" 4262 }}
+{{- $_ := set $csiNodeConfig "setSysAdminCapability" true }}
 {{- $_ := set $csiNodeConfig "serviceAccount" "csi" }}
 {{- $_ := set $csiNodeConfig "additionalNodeArgs" (include "csi_node_args" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "additionalNodeEnvs" (include "csi_node_envs" . | fromYamlArray) }}
