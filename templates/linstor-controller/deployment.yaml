@@ -157,18 +157,22 @@ spec:
             protocol: TCP
           - containerPort: 3370
             protocol: TCP
+            name: metrics
           - containerPort: 3371
             protocol: TCP
+            name: linstor
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "linstor_controller_resources" . | nindent 12 }}
 {{- end }}
-        securityContext: {}
+        securityContext: 
+          readOnlyRootFilesystem: true
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
+
           - mountPath: /etc/linstor
             name: linstor-conf
           - mountPath: /etc/linstor/https
@@ -183,6 +187,10 @@ spec:
           - mountPath: /etc/linstor/ssl-pem
             name: linstor-ssl-pem
             readOnly: true
+          - mountPath: /tmp
+            name: tmp-dir
+          - mountPath: /var/log
+            name: log-dir
       - name: kube-rbac-proxy
         args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):3370
@@ -228,6 +236,10 @@ spec:
       serviceAccountName: linstor-controller
       terminationGracePeriodSeconds: 30
       volumes:
+        - name: log-dir
+          emptyDir: {}
+        - name: tmp-dir
+          emptyDir: {}
         - configMap:
             defaultMode: 420
             name: linstor-controller-config
