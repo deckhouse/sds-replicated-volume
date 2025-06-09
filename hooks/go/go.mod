@@ -2,7 +2,7 @@ module github.com/deckhouse/sds-replicated-volume/hooks/go
 
 go 1.23.8
 
-toolchain go1.23.10
+toolchain go1.24.3
 
 require (
 	github.com/cloudflare/cfssl v1.6.5
@@ -101,4 +101,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-replace github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605061054-1868409d1d8a => ../../api
+//replace github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605061054-1868409d1d8a => ../../api
