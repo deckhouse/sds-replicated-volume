@@ -39,16 +39,7 @@ var (
 		Version: APIVersion,
 	}
 	// ModuleConfigGVR GroupVersionResource
-	ModuleConfigGVR = schema.GroupVersionResource{
-		Group:    SchemeGroupVersion.Group,
-		Version:  SchemeGroupVersion.Version,
-		Resource: "moduleconfigs",
-	}
-	ModuleConfigGVK = schema.GroupVersionKind{
-		Group:   SchemeGroupVersion.Group,
-		Version: SchemeGroupVersion.Version,
-		Kind:    "ModuleConfig",
-	}
+
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
@@ -66,5 +57,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ModuleConfigList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+	metav1.AddToGroupVersion(scheme, SchemeGroupVersionMC)
 	return nil
 }

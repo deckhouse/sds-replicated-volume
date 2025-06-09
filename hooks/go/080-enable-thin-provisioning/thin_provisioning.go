@@ -21,93 +21,61 @@ import (
 	"fmt"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	v1aplha1 "github.com/deckhouse/sds-replicated-volume/api"
+	"github.com/deckhouse/sds-replicated-volume/api/linstor"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
-	"os"
+	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
 	_ = registry.RegisterFunc(
 		&pkg.HookConfig{
-			Metadata:          pkg.HookMetadata{},
-			Schedule:          nil,
-			Kubernetes:        nil,
-			OnStartup:         nil,
-			OnBeforeHelm:      nil,
-			OnAfterHelm:       nil,
-			OnAfterDeleteHelm: nil,
-			AllowFailure:      false,
-			Queue:             "",
-			Settings:          nil,
+			OnAfterHelm: &pkg.OrderedConfig{Order: 15},
+			Queue:       fmt.Sprintf("modules/%s", consts.ModuleName),
 		},
 		mainHook,
 	)
 )
 
-func mainHook(ctx context.Context, input *pkg.HookInput, obj metav1.Object) error {
+func mainHook(ctx context.Context, input *pkg.HookInput) error {
 
-	SRVModuleConfig := *v1alpha1.
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		_, err := fmt.Fprintf(os.Stderr, "Failed to load Kubernetes config: %v\n", err)
-		return err
-	}
-
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		_, err := fmt.Fprintf(os.Stderr, "Failed to create dynamic client: %v\n", err)
-		return err
-	}
-
-	list, err := dynamicClient.Resource(v1aplha1.propsContainerGVR).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		_, err := fmt.Fprintf(os.Stderr, "Failed to list custom objects: %v\n", err)
-		return err
-	}
+	var mc = &v1alpha1.ModuleConfig{}
+	cl := input.DC.MustGetK8sClient()
+	list := linstor.PropsContainersList{}
 
 	thinPoolExistence := false
 	for _, item := range list.Items {
-		propKey, found, err := unstructured.NestedString(item.Object, "spec", "prop_key")
-		if err != nil || !found {
-			continue
-		}
-		if propKey == "StorDriver/internal/lvmthin/thinPoolGranularity" {
+		if item.Spec.PropKey == "StorDriver/internal/lvmthin/thinPoolGranularity" {
 			thinPoolExistence = true
 		}
 	}
 
 	if thinPoolExistence {
-		resp, err := dynamicClient.Resource(schema.GroupVersionResource{Group: "deckhouse.io", Version: "v1alpha1", Resource: "moduleconfigs"}).Patch(
-			context.Background(),
-			"sds-local-volume",
-			"application/apply-patch+yaml",
-			[]byte(`apiVersion: deckhouse.io/v1alpha1
-kind: ModuleConfig
-metadata:
-  name: sds-local-volume
-spec:
-  version: 1
-  settings:
-    enableThinProvisioning: true
-`),
-			metav1.PatchOptions{FieldManager: "sds-hook"},
-		)
+		if value, exists := mc.Spec.Settings["enableThinProvisioning"]; exists && value == true {
+			klog.Info("Thin provisioning is already enabled, nothing to do here")
+			return nil
+		} else {
+			klog.Info("Enabling thin provisioning support")
+			patchBytes, err := json.Marshal(map[string]interface{}{
+				"spec": map[string]interface{}{
+					"version": 1,
+					"settings": map[string]interface{}{
+						"enableThinProvisioning": true,
+					},
+				},
+			})
 
-		if err != nil {
-			_, err := fmt.Fprintf(os.Stderr, "Failed to patch moduleconfigs/sds-local-volume: %v\n", err)
-			return err
-		}
+			if err != nil {
+				klog.Fatalf("Error marshalling patch: %s", err.Error())
+			}
 
-		_, err = json.Marshal(resp.Object)
-		if err != nil {
-			_, err := fmt.Fprintf(os.Stderr, "Failed to format response as YAML: %v\n", err)
-			return err
+			err = cl.Patch(context.TODO(), mc, client.RawPatch(types.MergePatchType, patchBytes))
+			if err != nil {
+				klog.Fatalf("Error patching object: %s", err.Error())
+			}
 		}
 	}
 	return nil

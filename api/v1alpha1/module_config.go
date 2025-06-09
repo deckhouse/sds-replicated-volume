@@ -18,7 +18,25 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
+
+var (
+	// ModuleConfigGVR GroupVersionResource
+	ModuleConfigGVR = schema.GroupVersionResource{
+		Group:    SchemeGroupVersion.Group,
+		Version:  SchemeGroupVersion.Version,
+		Resource: "moduleconfigs",
+	}
+	ModuleConfigGVK = schema.GroupVersionKind{
+		Group:   SchemeGroupVersion.Group,
+		Version: SchemeGroupVersion.Version,
+		Kind:    "ModuleConfig",
+	}
+)
+
+var _ runtime.Object = (*ModuleConfig)(nil)
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
