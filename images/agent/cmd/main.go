@@ -10,7 +10,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/dbdreplica"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/dbdr"
 
 	//lint:ignore ST1001 utils is the only exception
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
@@ -53,29 +53,10 @@ func main() {
 	)
 }
 
-func runDRBDSetupScanner(
-	ctx context.Context,
-	log *slog.Logger,
-	cl client.Client,
-) (err error) {
-	// eventsCh := make(chan drbdsetup.Events2Result)
-
-	// events2Cmd := drbdsetup.NewEvents2(ctx)
-
-	// if err := events2Cmd.Run(eventsCh); err != nil {
-
-	// }
-
-	// for er := range eventsCh {
-
-	// }
-	return
-}
-
 func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	// to be used in goroutines spawned below
 	ctx, cancel := context.WithCancelCause(ctx)
-	defer cancel(err)
+	defer func() { cancel(err) }()
 
 	// MANAGER
 	mgr, err := newManager(ctx, log)
@@ -190,8 +171,7 @@ func runController(
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
-
-	ctrlLog := log.With("controller", "drbdresourcereplica")
+	log = log.With("goroutine", "controller").With("controller", "dbdr")
 
 	type TReq = r.TypedRequest[*v1alpha2.DBDR]
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
@@ -205,7 +185,7 @@ func runController(
 					ce event.TypedCreateEvent[client.Object],
 					q TQueue,
 				) {
-					ctrlLog.Debug(
+					log.Debug(
 						"CreateFunc",
 						slog.Group("object", "name", ce.Object.GetName()),
 					)
@@ -217,7 +197,7 @@ func runController(
 					ue event.TypedUpdateEvent[client.Object],
 					q TQueue,
 				) {
-					ctrlLog.Debug(
+					log.Debug(
 						"UpdateFunc",
 						slog.Group("objectNew", "name", ue.ObjectNew.GetName()),
 						slog.Group("objectOld", "name", ue.ObjectOld.GetName()),
@@ -237,7 +217,7 @@ func runController(
 					de event.TypedDeleteEvent[client.Object],
 					q TQueue,
 				) {
-					ctrlLog.Debug(
+					log.Debug(
 						"DeleteFunc",
 						slog.Group("object", "name", de.Object.GetName()),
 					)
@@ -249,13 +229,13 @@ func runController(
 					ge event.TypedGenericEvent[client.Object],
 					q TQueue,
 				) {
-					ctrlLog.Debug(
+					log.Debug(
 						"GenericFunc - skipping",
 						slog.Group("object", "name", ge.Object.GetName()),
 					)
 				},
 			}).
-		Complete(dbdreplica.NewReconciler(ctrlLog))
+		Complete(dbdr.NewReconciler(log))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("running controller: %w", err))

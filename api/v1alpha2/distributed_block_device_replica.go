@@ -82,6 +82,8 @@ func (rr *DistributedBlockDeviceReplica) UniqueIndexKey() string {
 
 // +k8s:deepcopy-gen=true
 type DistributedBlockDeviceReplicaSpec struct {
+	BlockDeviceName string `json:"replicatedBlockDeviceName"`
+
 	Peers map[string]Peer `json:"peers,omitempty"`
 
 	Diskless bool `json:"diskless,omitempty"`

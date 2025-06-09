@@ -20,7 +20,12 @@ type DBD = DistributedBlockDevice
 
 // +k8s:deepcopy-gen=true
 type DistributedBlockDeviceSpec struct {
-	Size int64 `json:"size"`
+	Size  int64 `json:"size"`
+	Nodes DistributedBlockDeviceNode
+}
+
+// +k8s:deepcopy-gen=true
+type DistributedBlockDeviceNode struct {
 }
 
 type DBDSpec = DistributedBlockDeviceSpec
