@@ -138,8 +138,14 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Expect(err).NotTo(HaveOccurred())
 			})
 			JustAfterEach(func() {
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Name).To(Equal(storageClassResource.Name))
+				Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
+
 				// Cleanup
-				err := cl.Delete(ctx, storageClassResource)
+				err = cl.Delete(ctx, storageClassResource)
 				Expect(err).NotTo(HaveOccurred())
 
 				err = cl.Delete(ctx, replicatedStorageClassResource)
@@ -222,6 +228,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
 					})
 					foo()
+					JustAfterEach(func() {
+						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
+					})
 				})
 			} else {
 				When("local", func() {
@@ -238,6 +249,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 					})
 					foo()
+					JustAfterEach(func() {
+						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+					})
 				})
 			}
 		}
@@ -296,97 +312,68 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			})
 		}
 
-		whenConfigMapExistsIs(false, func() {
-			whenStorageClassExists(func() {
+		itHasNoAnnotations := func() {
+			It("has no annotations", func() {
+				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(shouldRequeue).To(BeFalse())
+
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Annotations).To(BeNil())
+			})
+		}
+
+		itHasOnlyDefaultStorageClassAnnotationKey := func() {
+			It("has only default storage class annotation", func() {
+				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(shouldRequeue).To(BeFalse())
+
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Annotations).NotTo(BeNil())
+				Expect(storageClass.Annotations).To(HaveLen(1))
+				Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+			})
+		}
+
+		whenStorageClassExists(func() {
+			whenConfigMapExistsIs(false, func() {
 				whenAllowRemoteVolumeAccessKeyIs(false, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
-						It("reconciles", func() {
-							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(shouldRequeue).To(BeFalse())
-
-							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-							Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-							Expect(storageClass.Annotations).To(BeNil())
-							Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-						})
+						itHasNoAnnotations()
 					})
-				})
-
-				whenAllowRemoteVolumeAccessKeyIs(false, func() {
 					whenDefaultAnnotationExistsIs(true, func() {
-						It("reconciles", func() {
-							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(shouldRequeue).To(BeFalse())
-
-							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-							Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-							Expect(storageClass.Annotations).NotTo(BeNil())
-							Expect(len(storageClass.Annotations)).To(Equal(1))
-							Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-							Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-						})
+						itHasOnlyDefaultStorageClassAnnotationKey()
 					})
 				})
 			})
-		})
-
-		whenConfigMapExistsIs(true, func() {
-			whenAllowRemoteVolumeAccessKeyIs(false, func() {
-				whenDefaultAnnotationExistsIs(false, func() {
-					whenVirtualizationIs(false, func() {
-						whenStorageClassExists(func() {
-							It("reconciles", func() {
-								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(shouldRequeue).To(BeFalse())
-
-								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(storageClass).NotTo(BeNil())
-								Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-								Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-								Expect(storageClass.Annotations).To(BeNil())
-								Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-							})
-
-						})
-					})
-				})
-			})
-
-			whenVirtualizationIs(false, func() {
-				whenStorageClassExists(func() {
+			whenConfigMapExistsIs(true, func() {
+				whenVirtualizationIs(false, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
-						It("reconciles", func() {
-							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(shouldRequeue).To(BeFalse())
-
-							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-							Expect(err).NotTo(HaveOccurred())
-							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-							Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-							Expect(storageClass.Annotations).To(BeNil())
-							Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							itHasNoAnnotations()
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasNoAnnotations()
+						})
+					})
+					whenDefaultAnnotationExistsIs(true, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
 						})
 					})
 				})
-			})
-
-			whenVirtualizationIs(true, func() {
-				whenStorageClassExists(func() {
-					whenAllowRemoteVolumeAccessKeyIs(false, func() {
-						whenDefaultAnnotationExistsIs(false, func() {
-							It("reconciles", func() {
+				whenVirtualizationIs(true, func() {
+					whenDefaultAnnotationExistsIs(false, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							It("has only access mode annotation", func() {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(shouldRequeue).To(BeFalse())
@@ -394,61 +381,18 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(storageClass).NotTo(BeNil())
-								Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-								Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
 								Expect(storageClass.Annotations).NotTo(BeNil())
-								Expect(len(storageClass.Annotations)).To(Equal(1))
-								Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
-								Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
+								Expect(storageClass.Annotations).To(HaveLen(1))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
 						})
-					})
-
-					whenAllowRemoteVolumeAccessKeyIs(false, func() {
-						whenDefaultAnnotationExistsIs(true, func() {
-							It("reconciles", func() {
-								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(shouldRequeue).To(BeFalse())
-
-								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(storageClass).NotTo(BeNil())
-								Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-								Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-								Expect(storageClass.Annotations).NotTo(BeNil())
-								Expect(len(storageClass.Annotations)).To(Equal(2))
-								Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-								Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
-								Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-							})
-						})
-					})
-
-					whenVirtualizationIs(true, func() {
 						whenAllowRemoteVolumeAccessKeyIs(true, func() {
-							whenDefaultAnnotationExistsIs(true, func() {
-								It("reconciles", func() {
-									shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-									Expect(err).NotTo(HaveOccurred())
-									Expect(shouldRequeue).To(BeFalse())
-
-									storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
-									Expect(err).NotTo(HaveOccurred())
-									Expect(storageClass).NotTo(BeNil())
-									Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-									Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-									Expect(storageClass.Annotations).To(HaveLen(1))
-									Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
-									Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
-								})
-							})
+							itHasNoAnnotations()
 						})
 					})
-
-					whenAllowRemoteVolumeAccessKeyIs(true, func() {
-						whenDefaultAnnotationExistsIs(true, func() {
-							It("reconciles", func() {
+					whenDefaultAnnotationExistsIs(true, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							It("has default storage class and access mode annotations", func() {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(shouldRequeue).To(BeFalse())
@@ -456,13 +400,14 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(storageClass).NotTo(BeNil())
-								Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-								Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
 								Expect(storageClass.Annotations).NotTo(BeNil())
-								Expect(len(storageClass.Annotations)).To(Equal(1))
-								Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-								Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("true"))
+								Expect(storageClass.Annotations).To(HaveLen(2))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
 							})
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
 						})
 					})
 
@@ -474,7 +419,10 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 							storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
 							storageClassResource.Provisioner = anotherProvisioner
 						})
-						It("reconciles", func() {
+
+						itHasOnlyDefaultStorageClassAnnotationKey()
+
+						It("parameter StorageClassParamAllowRemoteVolumeAccessKey set to false and another provisioner", func() {
 							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(shouldRequeue).To(BeFalse())
@@ -482,38 +430,8 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(storageClass).NotTo(BeNil())
-							Expect(storageClass.Name).To(Equal(storageClassResource.Name))
-							Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
-							Expect(storageClass.Annotations).NotTo(BeNil())
-							Expect(len(storageClass.Annotations)).To(Equal(1))
-							Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-							Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
+							Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 							Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
-						})
-					})
-				})
-			})
-
-			whenVirtualizationIs(false, func() {
-				whenAllowRemoteVolumeAccessKeyIs(false, func() {
-					whenStorageClassExists(func() {
-						whenDefaultAnnotationExistsIs(true, func() {
-							It("reconciles", func() {
-								Expect(replicatedStorageClassResource).ToNot(BeNil())
-								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(shouldRequeue).To(BeFalse())
-
-								storageClass, err := getSC(ctx, cl, validStorageClassResource.Name, validStorageClassResource.Namespace)
-								Expect(err).NotTo(HaveOccurred())
-								Expect(storageClass).NotTo(BeNil())
-								Expect(storageClass.Name).To(Equal(validStorageClassResource.Name))
-								Expect(storageClass.Namespace).To(Equal(validStorageClassResource.Namespace))
-								Expect(storageClass.Annotations).NotTo(BeNil())
-								Expect(len(storageClass.Annotations)).To(Equal(1))
-								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
-								Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
-							})
 						})
 					})
 				})
