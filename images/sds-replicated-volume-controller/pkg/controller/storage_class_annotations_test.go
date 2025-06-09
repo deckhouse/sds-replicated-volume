@@ -165,51 +165,51 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			}
 		})
 
-		whenConfigMapDoesNotExist := func(foo func()) {
-			When("ConfigMap does not exist", func() {
-				JustBeforeEach(func() {
-					var err error
-					configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
+		whenConfigMapExistsIs := func(value bool, foo func()) {
+			if value {
+				When("ConfigMap exists", func() {
+					BeforeEach(func() {
+						configMap = &corev1.ConfigMap{
+							ObjectMeta: metav1.ObjectMeta{
+								Namespace: request.Namespace,
+								Name:      request.Name,
+							},
+						}
+					})
+					JustBeforeEach(func() {
+						err := cl.Create(ctx, configMap)
+						Expect(err).NotTo(HaveOccurred())
+					})
+					JustAfterEach(func() {
+						err := cl.Delete(ctx, configMap)
+						Expect(err).NotTo(HaveOccurred())
 
-					Expect(err).To(HaveOccurred())
-					Expect(errors.IsNotFound(err)).To(BeTrue())
-					Expect(configMap).NotTo(BeNil())
-					Expect(configMap.Name).To(Equal(""))
+						_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
+						Expect(err).To(HaveOccurred())
+						Expect(errors.IsNotFound(err)).To(BeTrue())
+					})
 
-					virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-					Expect(err).NotTo(HaveOccurred())
-					Expect(virtualizationEnabled).To(BeFalse())
+					foo()
 				})
+			} else {
+				When("ConfigMap does not exist", func() {
+					JustBeforeEach(func() {
+						var err error
+						configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 
-				foo()
-			})
-		}
+						Expect(err).To(HaveOccurred())
+						Expect(errors.IsNotFound(err)).To(BeTrue())
+						Expect(configMap).NotTo(BeNil())
+						Expect(configMap.Name).To(Equal(""))
 
-		whenConfigMapExists := func(foo func()) {
-			When("ConfigMap exists", func() {
-				BeforeEach(func() {
-					configMap = &corev1.ConfigMap{
-						ObjectMeta: metav1.ObjectMeta{
-							Namespace: request.Namespace,
-							Name:      request.Name,
-						},
-					}
+						virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(virtualizationEnabled).To(BeFalse())
+					})
+
+					foo()
 				})
-				JustBeforeEach(func() {
-					err := cl.Create(ctx, configMap)
-					Expect(err).NotTo(HaveOccurred())
-				})
-				JustAfterEach(func() {
-					err := cl.Delete(ctx, configMap)
-					Expect(err).NotTo(HaveOccurred())
-
-					_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-					Expect(err).To(HaveOccurred())
-					Expect(errors.IsNotFound(err)).To(BeTrue())
-				})
-
-				foo()
-			})
+			}
 		}
 
 		whenAllowRemoteVolumeAccessKeyIs := func(value bool, foo func()) {
@@ -296,7 +296,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			})
 		}
 
-		whenConfigMapDoesNotExist(func() {
+		whenConfigMapExistsIs(false, func() {
 			whenStorageClassExists(func() {
 				whenAllowRemoteVolumeAccessKeyIs(false, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
@@ -338,7 +338,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			})
 		})
 
-		whenConfigMapExists(func() {
+		whenConfigMapExistsIs(true, func() {
 			whenAllowRemoteVolumeAccessKeyIs(false, func() {
 				whenDefaultAnnotationExistsIs(false, func() {
 					whenVirtualizationIs(false, func() {
