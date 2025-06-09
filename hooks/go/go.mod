@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/cloudflare/cfssl v1.6.5
-	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250424095005-9ab587d01d7a
+	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250609143757-49c67e289bca
 	github.com/deckhouse/module-sdk v0.2.2
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250606104646-f2e65d667ead
 	k8s.io/api v0.32.1
@@ -101,4 +101,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-
+replace github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250606104646-f2e65d667ead => ../../api

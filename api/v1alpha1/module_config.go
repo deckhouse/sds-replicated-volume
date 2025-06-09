@@ -18,28 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 )
-
-var (
-	// ModuleConfigGVR GroupVersionResource
-	ModuleConfigGVR = schema.GroupVersionResource{
-		Group:    SchemeGroupVersion.Group,
-		Version:  SchemeGroupVersion.Version,
-		Resource: "moduleconfigs",
-	}
-	ModuleConfigGVK = schema.GroupVersionKind{
-		Group:   SchemeGroupVersion.Group,
-		Version: SchemeGroupVersion.Version,
-		Kind:    "ModuleConfig",
-	}
-)
-
-var _ runtime.Object = (*ModuleConfig)(nil)
-
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
 // ModuleConfig is a configuration for module or for global config values.
 type ModuleConfig struct {
@@ -56,27 +35,6 @@ type ModuleConfig struct {
 
 // SettingsValues empty interface in needed to handle DeepCopy generation. DeepCopy does not work with unnamed empty interfaces
 type SettingsValues map[string]interface{}
-
-func (v *SettingsValues) DeepCopy() *SettingsValues {
-	nmap := make(map[string]interface{}, len(*v))
-
-	for key, value := range *v {
-		nmap[key] = value
-	}
-
-	vv := SettingsValues(nmap)
-
-	return &vv
-}
-
-func (v SettingsValues) DeepCopyInto(out *SettingsValues) {
-	{
-		v := &v
-		clone := v.DeepCopy()
-		*out = *clone
-		return
-	}
-}
 
 // +k8s:deepcopy-gen=true
 type ModuleConfigSpec struct {
@@ -100,4 +58,25 @@ type ModuleConfigList struct {
 	metav1.ListMeta `json:"metadata"`
 
 	Items []ModuleConfig `json:"items"`
+}
+
+func (v *SettingsValues) DeepCopy() *SettingsValues {
+	nmap := make(map[string]interface{}, len(*v))
+
+	for key, value := range *v {
+		nmap[key] = value
+	}
+
+	vv := SettingsValues(nmap)
+
+	return &vv
+}
+
+func (v SettingsValues) DeepCopyInto(out *SettingsValues) {
+	{
+		v := &v
+		clone := v.DeepCopy()
+		*out = *clone
+		return
+	}
 }
