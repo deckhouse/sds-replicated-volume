@@ -9,5 +9,6 @@ spec:
   ports:
   - name: http
     port: 2020
+    targetPort: http
   selector:
     app: spaas

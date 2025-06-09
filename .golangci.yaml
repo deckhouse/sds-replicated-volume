@@ -16,7 +16,9 @@ linters-settings:
       - prefix(github.com/deckhouse)
 
   errcheck:
-    ignore: fmt:.*,[rR]ead|[wW]rite|[cC]lose,io:Copy
+    exclude-functions:
+      - fmt:.*,[rR]ead|[wW]rite|[cC]lose
+      - io:Copy
 
 linters:
   disable-all: true

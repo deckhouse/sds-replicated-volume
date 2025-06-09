@@ -57,9 +57,9 @@ spec:
     is_master=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"node-role.kubernetes.io/control-plane": ""})')
     if [ $is_master == "true" ]; then
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
-      bb-package-module-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      bb-package-module-install "serviceScripts:{{ include "helm_lib_module_image_digest" (list . "serviceScripts" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
-      bb-rp-from-module-image-install "serviceScripts:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.serviceScripts }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      bb-rp-from-module-image-install "serviceScripts:{{ include "helm_lib_module_image_digest" (list . "serviceScripts" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
     fi
 
@@ -116,9 +116,9 @@ spec:
       fi
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
-      bb-package-module-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
-      bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
@@ -145,9 +145,9 @@ spec:
     fi
 
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
-    bb-package-module-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+    bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
     {{- else }}
-    bb-rp-from-module-image-install "drbd:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.drbd }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+    bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
     {{- end }}
 
     attempt=0
@@ -201,9 +201,9 @@ spec:
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
 
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
-      bb-package-module-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
+      bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
-      bb-rp-from-module-image-install "semver:{{ .Values.global.modulesImages.digests.sdsReplicatedVolume.semver }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
+      bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then

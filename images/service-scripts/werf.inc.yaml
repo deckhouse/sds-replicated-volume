@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.Root.BASE_ALPINE_DEV }}
+fromImage: builder/alpine
 final: false
 
 git:
@@ -22,7 +22,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-artifact

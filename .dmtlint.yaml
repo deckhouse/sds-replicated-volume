@@ -1,0 +1,94 @@
+linters-settings:
+  container:
+    exclude-rules:
+      liveness-probe:
+        - kind: Deployment
+          name: csi-controller
+          container: snapshotter
+        - kind: Deployment
+          name: csi-controller
+          container: resizer
+        - kind: Deployment
+          name: csi-controller
+          container: attacher
+        - kind: Deployment
+          name: csi-controller
+          container: provisioner
+        - kind: Deployment
+          name: csi-controller
+          container: livenessprobe
+        - kind: DaemonSet
+          name: sds-replicated-volume
+          container: node-driver-registrar
+        - kind: DaemonSet
+          name: linstor-node
+          container: kube-rbac-proxy
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-resources-cleaner
+        - kind: Deployment
+          name: linstor-controller
+          container: kube-rbac-proxy
+        - kind: Deployment
+          name: linstor-scheduler-extender
+          container: linstor-scheduler-extender
+      readiness-probe:
+        - kind: Deployment
+          name: csi-controller
+          container: snapshotter
+        - kind: Deployment
+          name: csi-controller
+          container: resizer
+        - kind: Deployment
+          name: csi-controller
+          container: attacher
+        - kind: Deployment
+          name: csi-controller
+          container: provisioner
+        - kind: Deployment
+          name: csi-controller
+          container: livenessprobe
+        - kind: Deployment
+          name: csi-controller
+          container: controller
+        - kind: DaemonSet
+          name: sds-replicated-volume
+          container: node
+        - kind: DaemonSet
+          name: sds-replicated-volume
+          container: node-driver-registrar
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-resources-cleaner
+        - kind: DaemonSet
+          name: linstor-node
+          container: kube-rbac-proxy
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-satellite
+        - kind: DaemonSet
+          name: linstor-node
+          container: drbd-prometheus-exporter
+        - kind: Deployment
+          name: linstor-controller
+          container: kube-rbac-proxy
+        - kind: Deployment
+          name: linstor-controller
+          container: linstor-controller
+        - kind: Deployment
+          name: linstor-scheduler-extender
+          container: linstor-scheduler-extender
+      host-network-ports:
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-satellite
+  rbac:
+    exclude-rules:
+      wildcards:
+        - kind: ClusterRole
+          name: d8:sds-replicated-volume:metadata-backup
+        - kind: ClusterRole
+          name: d8:sds-replicated-volume:linstor-controller
+  images:
+    patches:
+      disable: true

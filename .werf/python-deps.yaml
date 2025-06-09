@@ -1,7 +1,7 @@
 # Python deps image, required to download dependencies and put it to the final module image (bundle)
 ---
 image: python-dependencies
-from: registry.deckhouse.io/base_images/alpine:3.16.3
+fromImage: builder/alpine
 
 git:
   - add: /

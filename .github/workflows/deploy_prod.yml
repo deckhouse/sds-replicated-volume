@@ -107,7 +107,7 @@ jobs:
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
-          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}  
+          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
       - name: Check previous release
         run: |
           chmod +x .github/check_previous_channel_release.sh
@@ -136,7 +136,7 @@ jobs:
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
-          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}  
+          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
       - name: Check previous release
         run: |
           chmod +x .github/check_previous_channel_release.sh
@@ -165,7 +165,7 @@ jobs:
         with:
           registry: ${{ vars.PROD_REGISTRY }}
           registry_login: ${{ vars.PROD_MODULES_REGISTRY_LOGIN }}
-          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}  
+          registry_password: ${{ secrets.PROD_MODULES_REGISTRY_PASSWORD }}
       - name: Check previous release
         run: |
           chmod +x .github/check_previous_channel_release.sh

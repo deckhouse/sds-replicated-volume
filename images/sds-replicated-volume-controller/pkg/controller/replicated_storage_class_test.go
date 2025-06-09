@@ -85,6 +85,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			volumeBindingMode           = storagev1.VolumeBindingWaitForFirstConsumer
 			reclaimPolicy               = v1.PersistentVolumeReclaimPolicy(validSpecReplicatedSCTemplate.Spec.ReclaimPolicy)
 			storageClassParameters      = map[string]string{
+				controller.ReplicatedStorageClassParamNameKey:             testName,
 				controller.StorageClassStoragePoolKey:                     validSpecReplicatedSCTemplate.Spec.StoragePool,
 				controller.StorageClassParamFSTypeKey:                     controller.FsTypeExt4,
 				controller.StorageClassParamPlacementPolicyKey:            controller.PlacementPolicyAutoPlaceTopology,

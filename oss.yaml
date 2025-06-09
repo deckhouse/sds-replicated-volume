@@ -1,0 +1,4 @@
+- name: DRBD
+  link: https://github.com/LINBIT/drbd
+  description: DRBD, developed by LINBIT, provides networked RAID 1 functionality for GNU/Linux. It is designed for high availability clusters and software defined storage.
+  license: GPL 2.0 license

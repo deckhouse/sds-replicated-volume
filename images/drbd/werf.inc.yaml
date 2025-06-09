@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-artifact
-from: {{ $.Root.BASE_ALT_P11 }}
+fromImage: builder/alt
 final: false
 git:
   - add: /images/{{ $.ImageName }}/scripts
@@ -38,7 +38,7 @@ shell:
     - rm -rf .git
 ---
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_SCRATCH }}
+fromImage: base/distroless
 
 import:
   - image: {{ $.ImageName }}-artifact
