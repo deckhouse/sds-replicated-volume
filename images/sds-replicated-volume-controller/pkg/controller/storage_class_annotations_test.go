@@ -130,11 +130,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				// TODO: figure out correct behavior
-				// if storageClassResource.Annotations != nil {
-				// 	replicatedStorageClassResource.Annotations = make(map[string]string, len(storageClassResource.Annotations))
-				// 	maps.Copy(replicatedStorageClassResource.Annotations, storageClassResource.Annotations)
-				// }
-				// err = cl.Create(ctx, replicatedStorageClassResource)
+				if storageClassResource.Annotations != nil {
+					replicatedStorageClassResource.Annotations = make(map[string]string, len(storageClassResource.Annotations))
+					maps.Copy(replicatedStorageClassResource.Annotations, storageClassResource.Annotations)
+				}
+				err = cl.Create(ctx, replicatedStorageClassResource)
 				Expect(err).NotTo(HaveOccurred())
 			})
 			JustAfterEach(func() {
