@@ -21,6 +21,7 @@ github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250424095005-9ab587d01d7a h1:c4C
 github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250424095005-9ab587d01d7a/go.mod h1:pbAxTSDcPmwyl3wwKDcEB3qdxHnRxqTV+J0K+sha8bw=
 github.com/deckhouse/module-sdk v0.2.2 h1:IzfWxmHiA0+F+R82qPr/JGef2kWBaXBu4tO0uo0Qzxw=
 github.com/deckhouse/module-sdk v0.2.2/go.mod h1:Ps92/zmKfkRMJF79/uxCba94ldvqtsV00sUCbTFj4zw=
+github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250605061054-1868409d1d8a/go.mod h1:M4w6qypH4ak8ypHvN57ts+pbco0iJPkTFNfMIXKOE5Q=
 github.com/docker/cli v27.1.1+incompatible h1:goaZxOqs4QKxznZjjBWKONQci/MywhtRv2oNn0GkeZE=
 github.com/docker/cli v27.1.1+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
 github.com/docker/distribution v2.8.3+incompatible h1:AtKxIZ36LoNK51+Z6RpzLpddBirtxJnzDrHLEKxTAYk=
