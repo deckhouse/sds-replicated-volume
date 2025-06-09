@@ -26,7 +26,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
-	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -42,6 +41,8 @@ var (
 
 func mainHook(ctx context.Context, input *pkg.HookInput) error {
 
+	input.Logger.Info("Started thin provisioning check webhook")
+
 	var mc = &v1alpha1.ModuleConfig{}
 	cl := input.DC.MustGetK8sClient()
 	list := linstor.PropsContainersList{}
@@ -55,10 +56,10 @@ func mainHook(ctx context.Context, input *pkg.HookInput) error {
 
 	if thinPoolExistence {
 		if value, exists := mc.Spec.Settings["enableThinProvisioning"]; exists && value == true {
-			klog.Info("Thin provisioning is already enabled, nothing to do here")
+			input.Logger.Info("Thin provisioning is already enabled, nothing to do here")
 			return nil
 		} else {
-			klog.Info("Enabling thin provisioning support")
+			input.Logger.Info("Enabling thin provisioning support")
 			patchBytes, err := json.Marshal(map[string]interface{}{
 				"spec": map[string]interface{}{
 					"version": 1,
@@ -69,12 +70,12 @@ func mainHook(ctx context.Context, input *pkg.HookInput) error {
 			})
 
 			if err != nil {
-				klog.Fatalf("Error marshalling patch: %s", err.Error())
+				input.Logger.Error("Error marshalling patch: %s", err.Error())
 			}
 
 			err = cl.Patch(context.TODO(), mc, client.RawPatch(types.MergePatchType, patchBytes))
 			if err != nil {
-				klog.Fatalf("Error patching object: %s", err.Error())
+				input.Logger.Error("Error patching object: %s", err.Error())
 			}
 		}
 	}
