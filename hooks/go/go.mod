@@ -102,4 +102,4 @@ require (
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
-//replace github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250606104646-f2e65d667ead => ../../api
+replace github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250606104646-f2e65d667ead => ../../api
