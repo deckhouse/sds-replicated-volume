@@ -21,7 +21,13 @@ import (
 	"fmt"
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	_ "github.com/deckhouse/sds-replicated-volume/api/linstor"
+	_ "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/hooks/go/consts"
+	_ "k8s.io/apimachinery/pkg/types"
+	_ "k8s.io/apimachinery/pkg/util/json"
+	_ "k8s.io/klog/v2"
+	_ "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
