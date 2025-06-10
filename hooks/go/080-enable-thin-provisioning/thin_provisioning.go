@@ -32,7 +32,7 @@ import (
 var (
 	_ = registry.RegisterFunc(
 		&pkg.HookConfig{
-			OnAfterHelm: &pkg.OrderedConfig{Order: 15},
+			OnAfterHelm: &pkg.OrderedConfig{Order: 10},
 			Queue:       fmt.Sprintf("modules/%s", consts.ModuleName),
 		},
 		mainHook,
