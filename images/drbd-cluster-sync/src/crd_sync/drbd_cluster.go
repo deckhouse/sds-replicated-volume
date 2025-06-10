@@ -74,13 +74,13 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			fmt.Printf("no layer resource id %s found. skipping iteration")
 		}
 
-		r, found := replicaMap[lri.Spec.ResourceName]
 		isDiskless := false
 		if lsv.Spec.ProviderKind == "DISKLESS" {
 			isDiskless = true
 		}
-		
 		nodeName := strings.ToLower(lsv.Spec.NodeName)
+		
+		r, found := replicaMap[lri.Spec.ResourceName]
 		if !found {
 			pvName := strings.ToLower(lri.Spec.ResourceName)
 
