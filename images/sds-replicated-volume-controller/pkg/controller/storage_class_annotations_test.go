@@ -127,8 +127,6 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			JustBeforeEach(func() {
 				err := cl.Create(ctx, storageClassResource)
 				Expect(err).NotTo(HaveOccurred())
-
-				// TODO: figure out correct behavior
 				if storageClassResource.Annotations != nil {
 					replicatedStorageClassResource.Annotations = make(map[string]string, len(storageClassResource.Annotations))
 					maps.Copy(replicatedStorageClassResource.Annotations, storageClassResource.Annotations)
