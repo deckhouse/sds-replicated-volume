@@ -16,7 +16,9 @@ limitations under the License.
 
 package linstor
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 type PropsContainersSpec struct {
 	PropKey       string `json:"prop_key"`

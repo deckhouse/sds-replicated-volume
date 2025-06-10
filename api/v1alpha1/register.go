@@ -25,6 +25,7 @@ import (
 const (
 	APIGroup   = "storage.deckhouse.io"
 	APIVersion = "v1alpha1" // v1alpha1
+	APIGroupMC = "deckhouse.io"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -33,6 +34,12 @@ var (
 		Group:   APIGroup,
 		Version: APIVersion,
 	}
+	SchemeGroupVersionMC = schema.GroupVersion{
+		Group:   APIGroupMC,
+		Version: APIVersion,
+	}
+	// ModuleConfigGVR GroupVersionResource
+
 	SchemeBuilder = runtime.NewSchemeBuilder(addKnownTypes)
 	AddToScheme   = SchemeBuilder.AddToScheme
 )
@@ -45,6 +52,11 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedStoragePool{},
 		&ReplicatedStoragePoolList{},
 	)
+	scheme.AddKnownTypes(SchemeGroupVersionMC,
+		&ModuleConfig{},
+		&ModuleConfigList{},
+	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
+	metav1.AddToGroupVersion(scheme, SchemeGroupVersionMC)
 	return nil
 }
