@@ -23,7 +23,6 @@ import (
 
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/crd_sync"
-	"drbd-cluster-sync/pkg/kubeutils"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
@@ -35,8 +34,9 @@ import (
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
-	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+
+	"github.com/deckhouse/sds-common-lib/kubeclient"
 )
 
 func main() {
@@ -66,26 +66,9 @@ func main() {
 	logger.Logger.SetOutput(logOut)
 	logger.Logger.SetFormatter(logFmt)
 
-	kConfig, err := kubeutils.KubernetesDefaultConfigCreate()
+	kc, err := kubeclient.New(resourcesSchemeFuncs...)
 	if err != nil {
-		logger.Info("failed to create Kubernetes default config")
-		os.Exit(1)
-	}
-
-	scheme := apiruntime.NewScheme()
-	for _, f := range resourcesSchemeFuncs {
-		err := f(scheme)
-		if err != nil {
-			logger.Infof("failed to add to scheme: %v", err)
-			os.Exit(1)
-		}
-	}
-
-	kc, err := kubecl.New(kConfig, kubecl.Options{
-		Scheme: scheme,
-	})
-	if err != nil {
-		logger.Infof("failed to create client: %v", err)
+		logger.Errorf("failed to initialize kube client: %v", err)
 		os.Exit(1)
 	}
 
