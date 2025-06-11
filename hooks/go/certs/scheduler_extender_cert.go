@@ -26,22 +26,22 @@ import (
 	tlscertificate "github.com/deckhouse/sds-replicated-volume/hooks/go/tls-certificate"
 )
 
-func RegisterSpaasCertHook() {
-	tlscertificate.RegisterManualTLSHookEM(SpaasCertConfig)
+func RegisterSchedulerExtenderCertHook() {
+	tlscertificate.RegisterManualTLSHookEM(SchedulerExtenderCertConfig)
 }
 
-var SpaasCertConfig = tlscertificate.MustNewGenSelfSignedTLSGroupHookConf(
+var SchedulerExtenderCertConfig = tlscertificate.MustNewGenSelfSignedTLSGroupHookConf(
 	tlscertificate.GenSelfSignedTLSHookConf{
-		CN:            "spaas",
+		CN:            "linstor-scheduler-extender",
 		Namespace:     ModuleNamespace,
-		TLSSecretName: "spaas-certs",
+		TLSSecretName: "linstor-scheduler-extender-https-certs",
 		SANs: chcrt.DefaultSANs([]string{
-			"spaas",
-			fmt.Sprintf("spaas.%s", ModuleNamespace),
-			fmt.Sprintf("spaas.%s.svc", ModuleNamespace),
+			"linstor-scheduler-extender",
+			fmt.Sprintf("linstor-scheduler-extender.%s", ModuleNamespace),
+			fmt.Sprintf("linstor-scheduler-extender.%s.svc", ModuleNamespace),
+			fmt.Sprintf("%%CLUSTER_DOMAIN%%://linstor-scheduler-extender.%s.svc", ModuleNamespace),
 		}),
-		FullValuesPathPrefix:  fmt.Sprintf("%s.internal.spaasCert", ModuleName),
-		CommonCACanonicalName: "spaas-ca",
+		FullValuesPathPrefix: fmt.Sprintf("%s.internal.customSchedulerExtenderCert", ModuleName),
 		Usages: []kcertificates.KeyUsage{
 			kcertificates.UsageKeyEncipherment,
 			kcertificates.UsageCertSign,

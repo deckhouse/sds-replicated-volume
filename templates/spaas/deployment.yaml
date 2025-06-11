@@ -96,6 +96,10 @@ spec:
             path: /api/v1/hello
             port: 2020
             scheme: HTTPS
+        ports:
+        - containerPort: 2020
+          protocol: TCP
+          name: http
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_logs_with_extra" 10 | nindent 12 }}

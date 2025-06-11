@@ -1,0 +1,30 @@
+{{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
+{{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: linstor-scheduler
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "linstor-scheduler")) | nindent 2 }}
+data:
+  scheduler-config.yaml: |-
+    {{- if semverCompare ">= 1.26" .Values.global.discovery.kubernetesVersion }}
+    apiVersion: kubescheduler.config.k8s.io/v1
+    {{- else }}
+    apiVersion: kubescheduler.config.k8s.io/v1beta3
+    {{- end }}
+    kind: KubeSchedulerConfiguration
+    profiles:
+      - schedulerName: linstor
+    extenders:
+      - urlPrefix: https://localhost:8099
+        filterVerb: filter
+        prioritizeVerb: prioritize
+        weight: 5
+        enableHTTPS: true
+        httpTimeout: 300s
+        nodeCacheCapable: true
+        tlsConfig:
+          caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca | b64enc }}
+{{- end }}
