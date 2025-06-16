@@ -22,7 +22,6 @@ import (
 
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/controller"
-	"drbd-cluster-sync/crd_sync"
 	kubutils "drbd-cluster-sync/kubeutils"
 	"drbd-cluster-sync/logger"
 
@@ -81,15 +80,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = controller.RunLayerResourceIDsWatcher(mgr, log); err != nil {
+	kc, err := kubeclient.New(resourcesSchemeFuncs...)
+	if err != nil {
+		log.Error(err, "[Main] failed to initialize kube client")
+		os.Exit(1)
+	}
+
+	if err = controller.RunLayerResourceIDsWatcher(mgr, log, kc, opts); err != nil {
 		log.Error(err, fmt.Sprintf("[Main] unable to run %s controller", controller.LVGLayerResourceIDsWatcherName))
 		os.Exit(1)
 	}
 	log.Info(fmt.Sprintf("[Main] successfully ran %s controller", controller.LVGLayerResourceIDsWatcherName))
 
-	kc, err := kubeclient.New(resourcesSchemeFuncs...)
+	err = mgr.Start(ctx)
 	if err != nil {
-		log.Error(err, "[Main] failed to initialize kube client")
+		log.Error(err, "[Main] unable to mgr.Start()")
 		os.Exit(1)
 	}
 
@@ -138,9 +143,9 @@ func main() {
 	// 	os.Exit(1)
 	// }
 
-	if err = crd_sync.NewDRBDClusterSyncer(kc, log, opts).Sync(ctx); err != nil {
-		log.Info(fmt.Sprintf("[Main] failed to sync DRBD clusters: %v", err.Error()))
-	}
+	// if err = crd_sync.NewDRBDClusterSyncer(kc, log, opts).Sync(ctx); err != nil {
+	// 	log.Info(fmt.Sprintf("[Main] failed to sync DRBD clusters: %v", err.Error()))
+	// }
 
-	os.Exit(0)
+	// os.Exit(0)
 }
