@@ -1,0 +1,35 @@
+---
+image: {{ $.ImageName }}-golang-artifact
+fromImage: builder/golang-alpine
+
+git:
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/drbd-cluster-sync
+    stageDependencies:
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /images/drbd-cluster-sync/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-cluster-sync
+    - chmod +x /drbd-cluster-sync
+
+---
+image: {{ $.ImageName }}
+fromImage: base/distroless
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /drbd-cluster-sync
+    to: /drbd-cluster-sync
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/drbd-cluster-sync"]
