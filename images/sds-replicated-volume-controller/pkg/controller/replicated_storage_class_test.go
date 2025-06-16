@@ -39,6 +39,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
 )
 
+var mockMap map[string]string = map[string]string{}
+
 var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 	var (
@@ -131,7 +133,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC.Name = testName
 
 		virtualizationEnabled := false
-		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		Expect(actualSC).To(Equal(expectedSC))
 	})
 
@@ -197,7 +199,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		err := controller.CreateStorageClass(ctx, cl, sc)
 		if err == nil {
 			defer func() {
@@ -350,7 +352,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		scTemplate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		scTemplate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		err = controller.CreateStorageClass(ctx, cl, scTemplate)
 		if err == nil {
 			defer func() {
@@ -412,7 +414,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -747,7 +749,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		sc := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		err = controller.CreateStorageClass(ctx, cl, sc)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -805,7 +807,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		virtualizationEnabled := false
-		anotherSC := controller.GetNewStorageClass(&anotherReplicatedSC, virtualizationEnabled)
+		anotherSC := controller.GetNewStorageClass(&anotherReplicatedSC, virtualizationEnabled, mockMap)
 		err = controller.CreateStorageClass(ctx, cl, anotherSC)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -835,6 +837,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
 		replicatedSC.Status.Phase = controller.Created
+		// TODO add mock value
 		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
 
 		equal, _ := controller.CompareStorageClasses(storageClass, storageClass)
@@ -1516,7 +1519,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeTrue())
 
-		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		Expect(scResource).NotTo(BeNil())
 		Expect(scResource.Annotations).NotTo(BeNil())
 		Expect(scResource.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
@@ -1575,7 +1578,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 
-		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
 		Expect(scResourceAfterUpdate).NotTo(BeNil())
 		Expect(scResourceAfterUpdate.Annotations).To(BeNil())
@@ -1630,7 +1633,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 			},
 		}
 
-		storageClassResource := controller.GetNewStorageClass(&replicatedSC, false)
+		storageClassResource := controller.GetNewStorageClass(&replicatedSC, false, mockMap)
 		Expect(storageClassResource).NotTo(BeNil())
 		Expect(storageClassResource.Annotations).To(BeNil())
 		Expect(storageClassResource.Name).To(Equal(replicatedSC.Name))
@@ -1668,7 +1671,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeTrue())
 
-		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		scResource := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		controller.DoUpdateStorageClass(scResource, storageClass)
 		Expect(scResource).NotTo(BeNil())
 		Expect(scResource.Annotations).NotTo(BeNil())
@@ -1734,7 +1737,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(virtualizationEnabled).To(BeFalse())
 
-		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
+		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled, mockMap)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
 		Expect(scResourceAfterUpdate.Annotations).NotTo(BeNil())
 		Expect(len(scResourceAfterUpdate.Annotations)).To(Equal(1))

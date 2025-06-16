@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -83,6 +84,8 @@ const (
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
 	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+	StorageClassLVMVolumeGroupsParamKey           = "csi.storage.deckhouse.io/lvm-volume-groups"
+	StorageClassLVMType                           = "csi.storage.deckhouse.io/lvm-type"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -131,7 +134,7 @@ func NewReplicatedStorageClass(
 				return reconcile.Result{Requeue: true, RequeueAfter: time.Duration(cfg.ScanInterval) * time.Second}, nil
 			}
 
-			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler. No need to reconcile it again.", request.Name))
+			log.Info(fmt.Sprintf("[ReplicatedStorageClassReconciler] Finish event for ReplicatedStorageClass %s in reconciler. No need to reconcile it again. ", request.Name))
 			return reconcile.Result{}, nil
 		}),
 	})
@@ -195,7 +198,7 @@ func ReconcileReplicatedStorageClassEvent(
 	}
 
 	if sc != nil && sc.Provisioner != StorageClassProvisioner {
-		return false, fmt.Errorf("Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
+		return false, fmt.Errorf("[ReconcileReplicatedStorageClassEvent] Reconcile StorageClass with provisioner %s is not allowed", sc.Provisioner)
 	}
 
 	// Handle deletion
@@ -267,7 +270,13 @@ func ReconcileReplicatedStorageClass(
 			"to Local and virtualization module is %t", virtualizationEnabled))
 	}
 
-	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled)
+	rspData, err := GetReplicatedStoragePoolData(ctx, cl, replicatedSC)
+	if err != nil {
+		err = fmt.Errorf("[ReconcileReplicatedStorageClass] error getting replicated storage class'es LVGs: %w", err)
+		return false, err
+	}
+
+	newSC := GetNewStorageClass(replicatedSC, virtualizationEnabled, rspData)
 
 	if oldSC == nil {
 		log.Info("[ReconcileReplicatedStorageClass] StorageClass with name: " +
@@ -464,6 +473,46 @@ func CreateStorageClass(ctx context.Context, cl client.Client, newStorageClass *
 	return nil
 }
 
+func GetReplicatedStoragePoolData(ctx context.Context, cl client.Client, replicatedSC *srv.ReplicatedStorageClass) (map[string]string, error) {
+	result := map[string]string{}
+	type ThinPool struct {
+		PoolName string `yaml:"poolName"`
+	}
+	type LVMVolumeGroup struct {
+		Name string   `yaml:"name"`
+		Thin ThinPool `yaml:"Thin"`
+	}
+
+	cwt, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	rsp := &srv.ReplicatedStoragePool{}
+	err := cl.Get(cwt, client.ObjectKey{Name: replicatedSC.Spec.StoragePool, Namespace: replicatedSC.Namespace}, rsp)
+	if err != nil {
+		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to get ReplicatedStoragePools %s", replicatedSC.Spec.StoragePool)
+		return result, err
+	}
+
+	rscLVGs := make([]LVMVolumeGroup, 0, len(rsp.Spec.LVMVolumeGroups))
+	for _, val := range rsp.Spec.LVMVolumeGroups {
+		rscLVGs = append(rscLVGs, LVMVolumeGroup{
+			Name: val.Name,
+			Thin: ThinPool{PoolName: val.ThinPoolName},
+		})
+	}
+
+	rscLVGsStr, err := json.Marshal(rscLVGs)
+	if err != nil {
+		fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] failed to marshal LVMVolumeGroups: %s", err.Error())
+		return result, err
+	}
+
+	result["LVGs"] = string(rscLVGsStr)
+	result["Type"] = rsp.Spec.Type
+
+	return result, nil
+}
+
 func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.ReplicatedStorageClass) *storagev1.StorageClass {
 	allowVolumeExpansion := true
 	reclaimPolicy := v1.PersistentVolumeReclaimPolicy(replicatedSC.Spec.ReclaimPolicy)
@@ -480,6 +529,8 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		StorageClassParamOnSuspendedPrimaryOutdatedKey: PrimaryOutdatedForceSecondary,
 		ReplicatedStorageClassParamNameKey:             replicatedSC.Name,
 	}
+
+	fmt.Printf("[GenerateStorageClassFromReplicatedStorageClass] storageClassParameters %s", storageClassParameters[ReplicatedStorageClassParamNameKey])
 
 	switch replicatedSC.Spec.Replication {
 	case ReplicationNone:
@@ -689,7 +740,7 @@ func recreateStorageClassIfNeeded(
 	return true, false, nil
 }
 
-func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool) *storagev1.StorageClass {
+func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualizationEnabled bool, replicatedStoragePoolData map[string]string) *storagev1.StorageClass {
 	newSC := GenerateStorageClassFromReplicatedStorageClass(replicatedSC)
 	// Do NOT add the virtualization annotation `virtualdisk.virtualization.deckhouse.io/access-mode: ReadWriteOnce` if the source ReplicatedStorageClass
 	// has  replicatedstorageclass.storage.deckhouse.io/ignore-local: "true".
@@ -703,6 +754,15 @@ func GetNewStorageClass(replicatedSC *srv.ReplicatedStorageClass, virtualization
 		}
 		newSC.Annotations[StorageClassVirtualizationAnnotationKey] = StorageClassVirtualizationAnnotationValue
 	}
+	newSC.Parameters[StorageClassLVMVolumeGroupsParamKey] = replicatedStoragePoolData["LVGs"]
+	LVMtype := replicatedStoragePoolData["Type"]
+	if LVMtype == "LVM" {
+		newSC.Parameters[StorageClassLVMType] = "Thick"
+	}
+	if LVMtype == "LVMThin" {
+		newSC.Parameters[StorageClassLVMType] = "Thin"
+	} 
+
 	return newSC
 }
 
@@ -798,4 +858,5 @@ func updateMap(dst, src map[string]string) {
 			dst[k] = v
 		}
 	}
+
 }
