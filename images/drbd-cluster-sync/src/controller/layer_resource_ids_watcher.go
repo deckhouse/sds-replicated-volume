@@ -42,6 +42,10 @@ func RunLayerResourceIDsWatcher(
 			log.Info(fmt.Sprintf("[RunLayerResourceIDsWatcher] res id created %s", e.Object.GetName()))
 		},
 	}))
+	if err != nil {
+		log.Error(err, "[RunLayerResourceIDsWatcher] Watch error")
+		return err
+	}
 
 	return nil
 }

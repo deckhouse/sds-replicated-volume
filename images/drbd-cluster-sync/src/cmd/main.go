@@ -140,7 +140,6 @@ func main() {
 
 	if err = crd_sync.NewDRBDClusterSyncer(kc, log, opts).Sync(ctx); err != nil {
 		log.Info(fmt.Sprintf("[Main] failed to sync DRBD clusters: %v", err.Error()))
-		os.Exit(1)
 	}
 
 	os.Exit(0)
