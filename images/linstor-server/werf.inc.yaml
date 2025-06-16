@@ -270,7 +270,7 @@ shell:
       { echo 'APT::Install-Recommends "false";' ; echo 'APT::Install-Suggests "false";' ; } > /etc/apt/apt.conf.d/99_piraeus
     # Enable contrib repos for zfsutils
     - sed -r -i 's/^deb(.*)$/deb\1 contrib/' /etc/apt/sources.list
-    - echo "Update packages list..." && apt-get update && apt-get install -y strace
+    - echo "Update packages list..." && apt-get update
 
     # install our own RPM packages first
     - |
