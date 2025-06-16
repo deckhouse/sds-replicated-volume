@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"drbd-cluster-sync/config"
+	"drbd-cluster-sync/logger"
 
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -32,10 +33,10 @@ type DRBDClusterSyncer struct {
 	kc   kubecl.Client
 	lc   *lc.HighLevelClient
 	opts *config.Options
-	log  *log.Entry
+	log  *logger.Logger
 }
 
-func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *log.Entry, opts *config.Options) *DRBDClusterSyncer {
+func NewDRBDClusterSyncer(kc kubecl.Client, lc *lc.HighLevelClient, log *logger.Logger, opts *config.Options) *DRBDClusterSyncer {
 	return &DRBDClusterSyncer{kc: kc, lc: lc, log: log, opts: opts}
 }
 
@@ -79,7 +80,7 @@ func (r *DRBDClusterSyncer) Sync(ctx context.Context) error {
 			isDiskless = true
 		}
 		nodeName := strings.ToLower(lsv.Spec.NodeName)
-		
+
 		r, found := replicaMap[lri.Spec.ResourceName]
 		if !found {
 			pvName := strings.ToLower(lri.Spec.ResourceName)

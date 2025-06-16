@@ -16,13 +16,18 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/url"
 	"os"
 
 	"drbd-cluster-sync/config"
+	"drbd-cluster-sync/controller"
 	"drbd-cluster-sync/crd_sync"
+	kubutils "drbd-cluster-sync/kubeutils"
+	"drbd-cluster-sync/logger"
 
 	lapi "github.com/LINBIT/golinstor/client"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
@@ -30,10 +35,11 @@ import (
 	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
 	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
-	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
 	"github.com/deckhouse/sds-common-lib/kubeclient"
@@ -50,31 +56,48 @@ func main() {
 		srv2.AddToScheme,
 	}
 
-	logOut := os.Stderr
-	logFmt := &log.TextFormatter{}
-
-	log.SetFormatter(logFmt)
-	log.SetOutput(logOut)
-
-	logger := log.NewEntry(log.New())
-	level, err := log.ParseLevel(opts.LogLevel)
+	log, err := logger.NewLogger(logger.Verbosity("4"))
 	if err != nil {
 		os.Exit(1)
 	}
 
-	logger.Logger.SetLevel(level)
-	logger.Logger.SetOutput(logOut)
-	logger.Logger.SetFormatter(logFmt)
+	scheme := runtime.NewScheme()
+	for _, f := range resourcesSchemeFuncs {
+		if err := f(scheme); err != nil {
+			log.Error(err, "[Main] unable to add scheme to func")
+			os.Exit(1)
+		}
+	}
+	log.Info("[Main] successfully read scheme CR")
 
-	// kc, err := kubeclient.New(resourcesSchemeFuncs...)
-	// if err != nil {
-	// 	logger.Errorf("failed to initialize kube client: %v", err)
-	// 	os.Exit(1)
-	// }
+	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
+	if err != nil {
+		log.Error(err, "[Main] unable to KubernetesDefaultConfigCreate")
+		os.Exit(1)
+	}
+	log.Info("[Main] kubernetes config has been successfully created.")
+
+	managerOpts := manager.Options{
+		Scheme:      scheme,
+		Logger:      log.GetLogger(),
+		BaseContext: func() context.Context { return ctx },
+	}
+
+	mgr, err := manager.New(kConfig, managerOpts)
+	if err != nil {
+		log.Error(err, "[Main] unable to create manager for creating controllers")
+		os.Exit(1)
+	}
+
+	if err = controller.RunLayerResourceIDsWatcher(mgr, log); err != nil {
+		log.Error(err, fmt.Sprintf("[Main] unable to run %s controller", controller.LVGLayerResourceIDsWatcherName))
+		os.Exit(1)
+	}
+	log.Info(fmt.Sprintf("[Main] successfully ran %s controller", controller.LVGLayerResourceIDsWatcherName))
 
 	kc, err := kubeclient.New(resourcesSchemeFuncs...)
 	if err != nil {
-		logger.Errorf("failed to initialize kube client: %v", err)
+		log.Error(err, "[Main] failed to initialize kube client")
 		os.Exit(1)
 	}
 
@@ -86,13 +109,13 @@ func main() {
 	linstorOpts := []lapi.Option{
 		lapi.Limit(r, opts.Burst),
 		lapi.UserAgent("linstor-csi/" + driver.Version),
-		lapi.Log(logger),
+		lapi.Log(log),
 	}
 
 	if opts.LSEndpoint != "" {
 		u, err := url.Parse(opts.LSEndpoint)
 		if err != nil {
-			log.Errorf("Failed to parse endpoint: %v", err)
+			log.Error(err, "[Main] Failed to parse endpoint")
 			os.Exit(1)
 		}
 
@@ -110,7 +133,7 @@ func main() {
 	if opts.BearerTokenFile != "" {
 		token, err := os.ReadFile(opts.BearerTokenFile)
 		if err != nil {
-			log.Errorf("failed to read bearer token file: %v", err)
+			log.Error(err, "[Main] failed to read bearer token file")
 			os.Exit(1)
 		}
 
@@ -119,12 +142,12 @@ func main() {
 
 	lc, err := lc.NewHighLevelClient(linstorOpts...)
 	if err != nil {
-		log.Errorf("failed to create linstor high level client: %v", err)
+		log.Error(err, "[Main] failed to create linstor high level client")
 		os.Exit(1)
 	}
 
-	if err = crd_sync.NewDRBDClusterSyncer(kc, lc, logger, opts).Sync(ctx); err != nil {
-		log.Infof("failed to sync DRBD clusters: %v", err)
+	if err = crd_sync.NewDRBDClusterSyncer(kc, lc, log, opts).Sync(ctx); err != nil {
+		log.Info(fmt.Sprintf("[Main] failed to sync DRBD clusters: %v", err.Error()))
 		os.Exit(1)
 	}
 
