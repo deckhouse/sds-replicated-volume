@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"iter"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,9 +16,22 @@ type Events2Result interface {
 
 type Event struct {
 	Timestamp time.Time
-	Kind      string
-	Object    string
-	State     map[string]string
+	// "exists" for an existing object;
+	//
+	// "create", "destroy", and "change" if an object
+	// is created, destroyed, or changed;
+	//
+	// "call" or "response" if an event handler
+	// is called or it returns;
+	//
+	// or "rename" when the name of an object is changed
+	Kind string
+	// "resource", "device", "connection", "peer-device", "path", "helper", or
+	// a dash ("-") to indicate that the current state has been dumped
+	// completely
+	Object string
+	// Identify the object and describe the state that the object is in
+	State map[string]string
 }
 
 var _ Events2Result = &Event{}
@@ -47,33 +61,40 @@ func NewEvents2(ctx context.Context) *Events2 {
 	}
 }
 
-func (e *Events2) Run(output chan Events2Result) error {
-	defer close(output)
-
-	stderr, err := e.cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("getting stderr pipe: %w", err)
+func (e *Events2) Run(resultErr *error) iter.Seq[Events2Result] {
+	if resultErr == nil {
+		panic("resultErr is required to be non-nil pointer")
 	}
+	return func(yield func(Events2Result) bool) {
+		stderr, err := e.cmd.StderrPipe()
+		if err != nil {
+			*resultErr = fmt.Errorf("getting stderr pipe: %w", err)
+			return
+		}
 
-	if err := e.cmd.Start(); err != nil {
-		return fmt.Errorf("starting command: %w", err)
+		if err := e.cmd.Start(); err != nil {
+			*resultErr = fmt.Errorf("starting command: %w", err)
+			return
+		}
+
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !yield(parseLine(line)) {
+				return
+			}
+		}
+
+		if err := scanner.Err(); err != nil {
+			*resultErr = fmt.Errorf("error reading command output: %w", err)
+			return
+		}
+
+		if err := e.cmd.Wait(); err != nil {
+			*resultErr = fmt.Errorf("command finished with error: %w", err)
+			return
+		}
 	}
-
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		line := scanner.Text()
-		output <- parseLine(line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading command output: %w", err)
-	}
-
-	if err := e.cmd.Wait(); err != nil {
-		return fmt.Errorf("command finished with error: %w", err)
-	}
-
-	return nil
 }
 
 // parseLine parses a single line of drbdsetup events2 output

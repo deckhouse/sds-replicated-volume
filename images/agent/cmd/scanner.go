@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"iter"
 	"log/slog"
-	"sync"
+	"slices"
 	"time"
 
 	//lint:ignore ST1001 utils is the only exception
@@ -12,8 +13,11 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/cooldown"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
+
+type updatedResourceName string
 
 func runDRBDSetupScanner(
 	ctx context.Context,
@@ -25,154 +29,97 @@ func runDRBDSetupScanner(
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer func() { cancel(err) }()
 
-	eventsCh := make(chan drbdsetup.Events2Result)
+	batcher := cooldown.NewBatcher(appendUpdatedResourceNameToBatch)
 
-	// go func() {
-	// 	var err error
-	// 	err = runEventsDispatcher
-	// }()
+	//
+	go func() {
+		cd := cooldown.NewExponentialCooldown(50*time.Millisecond, time.Second)
+		for range batcher.ConsumeWithCooldown(ctx, cd) {
+
+		}
+	}()
 
 	events2Cmd := drbdsetup.NewEvents2(ctx)
 
-	if err := events2Cmd.Run(eventsCh); err != nil {
-		return LogError(log, fmt.Errorf("run events2 command: %w", err))
+	var events2CmdErr error
+	for ev := range processEvents(events2Cmd.Run(&events2CmdErr), false, log) {
+		batcher.Add(ev)
+	}
+
+	if events2CmdErr != nil {
+		return LogError(log, fmt.Errorf("run events2: %w", events2CmdErr))
 	}
 
 	return
 }
 
-func runEventsDispatcher(
+func appendUpdatedResourceNameToBatch(batch []any, newItem any) []any {
+	resName := newItem.(updatedResourceName)
+	if !slices.ContainsFunc(
+		batch,
+		func(e any) bool { return e.(updatedResourceName) == resName },
+	) {
+		return append(batch, newItem)
+	}
+
+	return batch
+}
+
+func processEvents(
+	allEvents iter.Seq[drbdsetup.Events2Result],
+	online bool,
 	log *slog.Logger,
-	srcEventsCh chan drbdsetup.Events2Result,
-) error {
-	log = log.With("goroutine", "scanner/eventsDispatcher")
+) iter.Seq[updatedResourceName] {
+	return func(yield func(updatedResourceName) bool) {
+		log = log.With("goroutine", "scanner/filterEvents")
+		for ev := range allEvents {
+			var typedEvent *drbdsetup.Event
 
-	var online bool
-
-	for ev := range srcEventsCh {
-		var typedEvent *drbdsetup.Event
-
-		switch tev := ev.(type) {
-		case *drbdsetup.Event:
-			typedEvent = tev
-		case *drbdsetup.UnparsedEvent:
-			log.Warn(
-				"unparsed event",
-				"err", tev.Err,
-				"line", tev.RawEventLine,
-			)
-			continue
-		default:
-			log.Error(
-				"unexpected event type",
-				"event", fmt.Sprintf("%v", tev),
-			)
-			continue
-		}
-
-		log.Debug("parsed event", "event", typedEvent)
-
-		if !online {
-			if typedEvent.Kind == "exists" && typedEvent.Object == "-" {
-				online = true
-				log.Debug("events online")
+			switch tev := ev.(type) {
+			case *drbdsetup.Event:
+				typedEvent = tev
+			case *drbdsetup.UnparsedEvent:
+				log.Warn(
+					"unparsed event",
+					"err", tev.Err,
+					"line", tev.RawEventLine,
+				)
+				continue
+			default:
+				log.Error(
+					"unexpected event type",
+					"event", fmt.Sprintf("%v", tev),
+				)
+				continue
 			}
-			continue
-		}
 
-		//
+			log.Debug("parsed event", "event", typedEvent)
 
-	}
+			if !online {
+				if typedEvent.Kind == "exists" && typedEvent.Object == "-" {
+					online = true
+					log.Debug("events online")
+				}
+				continue
+			}
 
-	return nil
-}
+			if resourceName, ok := typedEvent.State["name"]; !ok {
 
-type DRBDStatusUpdater struct {
-	mu              *sync.Mutex
-	cond            *sync.Cond
-	updateTriggered bool
-}
+			} else {
 
-func NewDRBDStatusUpdater() *DRBDStatusUpdater {
-	mu := &sync.Mutex{}
-	return &DRBDStatusUpdater{
-		cond: sync.NewCond(mu),
-	}
-}
+			}
 
-func (u *DRBDStatusUpdater) TriggerUpdate() {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	u.updateTriggered = true
-
-	u.cond.Signal()
-}
-
-func (u *DRBDStatusUpdater) Run(ctx context.Context) error {
-
-	// TODO awake on context cancel
-
-	cooldown := NewExponentialCooldown(100*time.Millisecond, 5*time.Second)
-
-	for {
-		if err := u.waitForTriggerIfNotAlready(ctx); err != nil {
-			return err // context cancelation
-		}
-
-		if err := cooldown.Hit(ctx); err != nil {
-			return err // context cancelation
-		}
-
-		if err := u.updateStatusIfNeeded(ctx); err != nil {
-			return fmt.Errorf("updating replica status: %w", err)
+			if !yield(typedEvent) {
+				return
+			}
 		}
 	}
 }
 
-func (u *DRBDStatusUpdater) waitForTriggerIfNotAlready(ctx context.Context) error {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-
-	defer func() {
-		u.updateTriggered = false
-	}()
-
-	// it has already been triggered, while we were not waiting
-	if u.updateTriggered {
-		return nil
-	}
-
-	// awakener is a goroutine, which will call "fake" Signal in order to stop
-	// Wait() on context cancelation
-	awakenerDone := make(chan struct{})
-	defer func() {
-		<-awakenerDone
-	}()
-
-	awakenerCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-awakenerCtx.Done():
-		}
-		u.cond.Signal()
-		awakenerDone <- struct{}{}
-	}()
-
-	u.cond.Wait()
-
-	return ctx.Err()
-}
-
-func (u *DRBDStatusUpdater) updateStatusIfNeeded(
+func updateReplicaStatusIfNeeded(
 	ctx context.Context,
+	cl client.Client,
+	log *slog.Logger,
 ) error {
 	return nil
 }
