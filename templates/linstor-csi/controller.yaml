@@ -421,6 +421,7 @@ spec:
       name: linstor-csi-controller
       namespace: d8-{{ .Chart.Name }}
     spec:
+      automountServiceAccountToken: true
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_root" . | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
