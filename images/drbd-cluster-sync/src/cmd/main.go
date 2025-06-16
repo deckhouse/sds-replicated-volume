@@ -17,10 +17,7 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 
 	"drbd-cluster-sync/config"
@@ -29,20 +26,15 @@ import (
 	kubutils "drbd-cluster-sync/kubeutils"
 	"drbd-cluster-sync/logger"
 
-	lapi "github.com/LINBIT/golinstor/client"
+	"github.com/deckhouse/sds-common-lib/kubeclient"
 	lsrv "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	srv2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/piraeusdatastore/linstor-csi/pkg/driver"
-	lc "github.com/piraeusdatastore/linstor-csi/pkg/linstor/highlevelclient"
-	"golang.org/x/time/rate"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
-
-	"github.com/deckhouse/sds-common-lib/kubeclient"
 )
 
 func main() {
@@ -101,52 +93,52 @@ func main() {
 		os.Exit(1)
 	}
 
-	r := rate.Limit(opts.RPS)
-	if r <= 0 {
-		r = rate.Inf
-	}
+	// r := rate.Limit(opts.RPS)
+	// if r <= 0 {
+	// 	r = rate.Inf
+	// }
 
-	linstorOpts := []lapi.Option{
-		lapi.Limit(r, opts.Burst),
-		lapi.UserAgent("linstor-csi/" + driver.Version),
-		lapi.Log(log),
-	}
+	// linstorOpts := []lapi.Option{
+	// 	lapi.Limit(r, opts.Burst),
+	// 	lapi.UserAgent("linstor-csi/" + driver.Version),
+	// 	lapi.Log(log),
+	// }
 
-	if opts.LSEndpoint != "" {
-		u, err := url.Parse(opts.LSEndpoint)
-		if err != nil {
-			log.Error(err, "[Main] Failed to parse endpoint")
-			os.Exit(1)
-		}
+	// if opts.LSEndpoint != "" {
+	// 	u, err := url.Parse(opts.LSEndpoint)
+	// 	if err != nil {
+	// 		log.Error(err, "[Main] Failed to parse endpoint")
+	// 		os.Exit(1)
+	// 	}
 
-		linstorOpts = append(linstorOpts, lapi.BaseURL(u))
-	}
+	// 	linstorOpts = append(linstorOpts, lapi.BaseURL(u))
+	// }
 
-	if opts.LSSkipTLSVerification {
-		linstorOpts = append(linstorOpts, lapi.HTTPClient(&http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}))
-	}
+	// if opts.LSSkipTLSVerification {
+	// 	linstorOpts = append(linstorOpts, lapi.HTTPClient(&http.Client{
+	// 		Transport: &http.Transport{
+	// 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	// 		},
+	// 	}))
+	// }
 
-	if opts.BearerTokenFile != "" {
-		token, err := os.ReadFile(opts.BearerTokenFile)
-		if err != nil {
-			log.Error(err, "[Main] failed to read bearer token file")
-			os.Exit(1)
-		}
+	// if opts.BearerTokenFile != "" {
+	// 	token, err := os.ReadFile(opts.BearerTokenFile)
+	// 	if err != nil {
+	// 		log.Error(err, "[Main] failed to read bearer token file")
+	// 		os.Exit(1)
+	// 	}
 
-		linstorOpts = append(linstorOpts, lapi.BearerToken(string(token)))
-	}
+	// 	linstorOpts = append(linstorOpts, lapi.BearerToken(string(token)))
+	// }
 
-	lc, err := lc.NewHighLevelClient(linstorOpts...)
-	if err != nil {
-		log.Error(err, "[Main] failed to create linstor high level client")
-		os.Exit(1)
-	}
+	// lc, err := lc.NewHighLevelClient(linstorOpts...)
+	// if err != nil {
+	// 	log.Error(err, "[Main] failed to create linstor high level client")
+	// 	os.Exit(1)
+	// }
 
-	if err = crd_sync.NewDRBDClusterSyncer(kc, lc, log, opts).Sync(ctx); err != nil {
+	if err = crd_sync.NewDRBDClusterSyncer(kc, log, opts).Sync(ctx); err != nil {
 		log.Info(fmt.Sprintf("[Main] failed to sync DRBD clusters: %v", err.Error()))
 		os.Exit(1)
 	}
