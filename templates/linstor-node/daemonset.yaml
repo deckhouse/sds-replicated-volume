@@ -191,6 +191,8 @@ spec:
             name: var-dir
           - mountPath: /etc/lvm/archive
             name: lvm-archive
+          - mountPath: /etc/lvm/backup
+            name: lvm-backup
           - mountPath: /run/lvm
             name: run-lvm
       - args:
@@ -271,6 +273,8 @@ spec:
         - name: run-lvm
           emptyDir: {}
         - name: lvm-archive
+          emptyDir: {}
+        - name: lvm-backup
           emptyDir: {}
         - name: lock-dir
           emptyDir: {}
