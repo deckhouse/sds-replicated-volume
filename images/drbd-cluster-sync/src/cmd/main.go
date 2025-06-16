@@ -66,6 +66,12 @@ func main() {
 	logger.Logger.SetOutput(logOut)
 	logger.Logger.SetFormatter(logFmt)
 
+	// kc, err := kubeclient.New(resourcesSchemeFuncs...)
+	// if err != nil {
+	// 	logger.Errorf("failed to initialize kube client: %v", err)
+	// 	os.Exit(1)
+	// }
+
 	kc, err := kubeclient.New(resourcesSchemeFuncs...)
 	if err != nil {
 		logger.Errorf("failed to initialize kube client: %v", err)
