@@ -39,8 +39,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 
+	mc "github.com/deckhouse/deckhouse/deckhouse-controller/pkg/apis/deckhouse.io/v1alpha1"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	mc "github.com/deckhouse/sds-replicated-volume/images/webhooks/api"
 )
 
 func NewKubeClient(kubeconfigPath string) (client.Client, error) {
