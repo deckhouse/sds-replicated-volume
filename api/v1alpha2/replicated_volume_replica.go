@@ -2,9 +2,9 @@ package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/fields"
 )
 
-// DistributedBlockDevice
 // name: my-gitlab # TODO validate length
 
 //
@@ -40,56 +40,29 @@ import (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-type DistributedBlockDeviceReplica struct {
+// +kubebuilder:resource:scope=Cluster
+type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   DistributedBlockDeviceReplicaSpec    `json:"spec"`
-	Status *DistributedBlockDeviceReplicaStatus `json:"status,omitempty"`
+	Spec   ReplicatedVolumeReplicaSpec    `json:"spec"`
+	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty"`
 }
 
-type DBDR = DistributedBlockDeviceReplica
-
-func (rr *DistributedBlockDeviceReplica) ResourceName() string {
-	var resourceName string
-	for _, ownerRef := range rr.OwnerReferences {
-		if ownerRef.APIVersion == APIVersion &&
-			ownerRef.Kind == "DRBDResource" {
-			resourceName = ownerRef.Name
-			// last owner wins
-		}
-	}
-	return resourceName
-}
-
-func (rr *DistributedBlockDeviceReplica) NodeName() string {
-	return rr.Labels[NodeNameLabelKey]
-}
-
-func (rr *DistributedBlockDeviceReplica) UniqueIndexName() string {
-	return "uniqueIndex"
-}
-
-func (rr *DistributedBlockDeviceReplica) UniqueIndexKey() string {
-	rn := rr.ResourceName()
-	nn := rr.NodeName()
-	if rn == "" || nn == "" {
-		return ""
-	}
-	return rr.ResourceName() + "@" + rr.NodeName()
+func (rvr *ReplicatedVolumeReplica) NodeNameSelector(hostname string) fields.Selector {
+	return fields.OneTermEqualSelector("spec.nodeName", hostname)
 }
 
 // +k8s:deepcopy-gen=true
-type DistributedBlockDeviceReplicaSpec struct {
-	BlockDeviceName string `json:"replicatedBlockDeviceName"`
+type ReplicatedVolumeReplicaSpec struct {
+	ReplicatedVolumeName string `json:"replicatedVolumeName"`
+	NodeName             string `json:"nodeName"`
 
 	Peers map[string]Peer `json:"peers,omitempty"`
 
 	Diskless bool `json:"diskless,omitempty"`
 }
-
-type DBDRSpec = DistributedBlockDeviceReplicaSpec
 
 // +k8s:deepcopy-gen=true
 type Peer struct {
@@ -102,25 +75,23 @@ type Address struct {
 }
 
 // +k8s:deepcopy-gen=true
-type DistributedBlockDeviceReplicaStatus struct {
+type ReplicatedVolumeReplicaStatus struct {
 	Conditions []metav1.Condition `json:"conditions"`
-	Resource   *ResourceStatus    `json:"resource,omitempty"`
+	DRBD       *DRBDStatus        `json:"drbd,omitempty"`
 }
-
-type DBDRStatus = DistributedBlockDeviceReplicaStatus
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type DistributedBlockDeviceReplicaList struct {
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
+type ReplicatedVolumeReplicaList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []DistributedBlockDeviceReplica `json:"items"`
+	Items           []ReplicatedVolumeReplica `json:"items"`
 }
 
-type DBDRList = DistributedBlockDeviceReplicaList
-
 // +k8s:deepcopy-gen=true
-type ResourceStatus struct {
+type DRBDStatus struct {
 	Name             string             `json:"name"`
 	NodeId           int                `json:"node-id"`
 	Role             string             `json:"role"`

@@ -4,15 +4,15 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: distributedblockdevicereplicas.storage.deckhouse.io
+  name: replicatedvolumereplicas.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
   names:
-    kind: DistributedBlockDeviceReplica
-    listKind: DistributedBlockDeviceReplicaList
-    plural: distributedblockdevicereplicas
-    singular: distributedblockdevicereplica
-  scope: Namespaced
+    kind: ReplicatedVolumeReplica
+    listKind: ReplicatedVolumeReplicaList
+    plural: replicatedvolumereplicas
+    singular: replicatedvolumereplica
+  scope: Cluster
   versions:
   - name: v1alpha2
     schema:
@@ -49,6 +49,8 @@ spec:
             properties:
               diskless:
                 type: boolean
+              nodeName:
+                type: string
               peers:
                 additionalProperties:
                   properties:
@@ -63,6 +65,11 @@ spec:
                   - address
                   type: object
                 type: object
+              replicatedVolumeName:
+                type: string
+            required:
+            - nodeName
+            - replicatedVolumeName
             type: object
           status:
             properties:
@@ -122,7 +129,7 @@ spec:
                   - type
                   type: object
                 type: array
-              resource:
+              drbd:
                 properties:
                   connections:
                     items:

@@ -4,15 +4,15 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: distributedblockdevices.storage.deckhouse.io
+  name: replicatedvolumes.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
   names:
-    kind: DistributedBlockDevice
-    listKind: DistributedBlockDeviceList
-    plural: distributedblockdevices
-    singular: distributedblockdevice
-  scope: Namespaced
+    kind: ReplicatedVolume
+    listKind: ReplicatedVolumeList
+    plural: replicatedvolumes
+    singular: replicatedvolume
+  scope: Cluster
   versions:
   - name: v1alpha2
     schema:

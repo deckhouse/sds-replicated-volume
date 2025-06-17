@@ -10,7 +10,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/dbdr"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/rvr"
 
 	//lint:ignore ST1001 utils is the only exception
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
@@ -18,7 +18,6 @@ import (
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -58,8 +57,14 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer func() { cancel(err) }()
 
+	hostname, err := os.Hostname()
+	if err != nil {
+		return LogError(log, fmt.Errorf("getting hostname: %w", err))
+	}
+	log = log.With("hostname", hostname)
+
 	// MANAGER
-	mgr, err := newManager(ctx, log)
+	mgr, err := newManager(ctx, log, hostname)
 	if err != nil {
 		return err
 	}
@@ -71,7 +76,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 		var err error
 		defer func() { cancel(fmt.Errorf("drbdsetup scanner: %w", err)) }()
 		defer RecoverPanicToErr(&err)
-		err = runDRBDSetupScanner(ctx, log, cl)
+		err = NewScanner(ctx, log, cl, hostname).Run()
 	}()
 
 	// CONTROLLERS
@@ -79,7 +84,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 		var err error
 		defer func() { cancel(fmt.Errorf("dbdreplica controller: %w", err)) }()
 		defer RecoverPanicToErr(&err)
-		err = runController(ctx, log, mgr)
+		err = runController(log, mgr)
 	}()
 
 	<-ctx.Done()
@@ -90,13 +95,8 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
+	hostname string,
 ) (manager.Manager, error) {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, LogError(log, fmt.Errorf("getting hostname: %w", err))
-	}
-	log = log.With("hostname", hostname)
-
 	config, err := config.GetConfig()
 	if err != nil {
 		return nil, LogError(log, fmt.Errorf("getting rest config: %w", err))
@@ -112,11 +112,10 @@ func newManager(
 		BaseContext: func() context.Context { return ctx },
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha2.DBDR{}: {
+				&v1alpha2.ReplicatedVolumeReplica{}: {
 					// only watch current node's replicas
-					Label: labels.SelectorFromSet(
-						labels.Set{v1alpha2.NodeNameLabelKey: hostname},
-					),
+					Field: (&v1alpha2.ReplicatedVolumeReplica{}).
+						NodeNameSelector(hostname),
 				},
 			},
 		},
@@ -127,23 +126,30 @@ func newManager(
 		return nil, LogError(log, fmt.Errorf("creating manager: %w", err))
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&v1alpha2.DBDR{},
-		(&v1alpha2.DBDR{}).UniqueIndexName(),
-		func(o client.Object) []string {
-			rr := o.(*v1alpha2.DBDR)
-			key := rr.UniqueIndexKey()
-			if key == "" {
-				return nil
-			}
-			return []string{key}
-		},
-	)
-	if err != nil {
-		return nil,
-			LogError(log, fmt.Errorf("indexing DRBDResourceReplica: %w", err))
-	}
+	// err = mgr.GetFieldIndexer().IndexField(
+	// 	ctx,
+	// 	&v1alpha2.ReplicatedVolumeReplica{},
+	// 	(&v1alpha2.ReplicatedVolumeReplica{}).UniqueIndexName(),
+	// 	func(o client.Object) []string {
+	// 		rr := o.(*v1alpha2.ReplicatedVolumeReplica)
+	// 		key := rr.UniqueIndexKey()
+	// 		if key == "" {
+	// 			return nil
+	// 		}
+	// 		return []string{key}
+	// 	},
+	// )
+	// if err != nil {
+	// 	return nil,
+	// 		LogError(
+	// 			log,
+	// 			fmt.Errorf(
+	// 				"indexing %s: %w",
+	// 				reflect.TypeFor[v1alpha2.ReplicatedVolumeReplica]().Name(),
+	// 				err,
+	// 			),
+	// 		)
+	// }
 
 	return mgr, nil
 }
@@ -167,18 +173,17 @@ func newScheme() (*runtime.Scheme, error) {
 }
 
 func runController(
-	ctx context.Context,
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
 	log = log.With("goroutine", "controller").With("controller", "dbdr")
 
-	type TReq = r.TypedRequest[*v1alpha2.DBDR]
+	type TReq = r.TypedRequest[*v1alpha2.ReplicatedVolumeReplica]
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
 		Watches(
-			&v1alpha2.DBDR{},
+			&v1alpha2.ReplicatedVolumeReplica{},
 			&handler.TypedFuncs[client.Object, TReq]{
 				CreateFunc: func(
 					ctx context.Context,
@@ -189,7 +194,7 @@ func runController(
 						"CreateFunc",
 						slog.Group("object", "name", ce.Object.GetName()),
 					)
-					typedObj := ce.Object.(*v1alpha2.DBDR)
+					typedObj := ce.Object.(*v1alpha2.ReplicatedVolumeReplica)
 					q.Add(r.NewTypedRequestCreate(typedObj))
 				},
 				UpdateFunc: func(
@@ -202,8 +207,8 @@ func runController(
 						slog.Group("objectNew", "name", ue.ObjectNew.GetName()),
 						slog.Group("objectOld", "name", ue.ObjectOld.GetName()),
 					)
-					typedObjOld := ue.ObjectOld.(*v1alpha2.DBDR)
-					typedObjNew := ue.ObjectNew.(*v1alpha2.DBDR)
+					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolumeReplica)
+					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolumeReplica)
 
 					// skip status and metadata updates
 					if typedObjOld.Generation == typedObjNew.Generation {
@@ -221,7 +226,7 @@ func runController(
 						"DeleteFunc",
 						slog.Group("object", "name", de.Object.GetName()),
 					)
-					typedObj := de.Object.(*v1alpha2.DBDR)
+					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
 					q.Add(r.NewTypedRequestDelete(typedObj))
 				},
 				GenericFunc: func(
@@ -235,7 +240,7 @@ func runController(
 					)
 				},
 			}).
-		Complete(dbdr.NewReconciler(log))
+		Complete(rvr.NewReconciler(log))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("running controller: %w", err))

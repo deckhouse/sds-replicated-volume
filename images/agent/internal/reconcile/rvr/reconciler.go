@@ -1,4 +1,4 @@
-package dbdr
+package rvr
 
 import (
 	"context"
@@ -22,7 +22,7 @@ func NewReconciler(log *slog.Logger) *Reconciler {
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
-	req r.TypedRequest[*v1alpha2.DBDR],
+	req r.TypedRequest[*v1alpha2.ReplicatedVolumeReplica],
 ) (reconcile.Result, error) {
 
 	r = r.withRequestLogging(req.RequestId(), req.Object())
@@ -39,7 +39,7 @@ func (r *Reconciler) Reconcile(
 	return reconcile.Result{}, err
 }
 
-func (r *Reconciler) onCreate(repl *v1alpha2.DBDR) error {
+func (r *Reconciler) onCreate(repl *v1alpha2.ReplicatedVolumeReplica) error {
 	// create res file, if not exist
 	// parse res file
 	// update resource
@@ -49,7 +49,7 @@ func (r *Reconciler) onCreate(repl *v1alpha2.DBDR) error {
 	return nil
 }
 
-func (r *Reconciler) onUpdate(repl *v1alpha2.DBDR) error {
+func (r *Reconciler) onUpdate(repl *v1alpha2.ReplicatedVolumeReplica) error {
 	return nil
 }
 
