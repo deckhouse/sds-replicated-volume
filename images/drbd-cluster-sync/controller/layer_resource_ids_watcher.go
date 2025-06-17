@@ -26,6 +26,7 @@ import (
 
 	"drbd-cluster-sync/config"
 	"drbd-cluster-sync/logger"
+
 	v1 "k8s.io/api/core/v1"
 	k8sErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -68,16 +69,17 @@ func RunLayerResourceIDsWatcher(
 
 	err = c.Watch(source.Kind(mgr.GetCache(), &lapi.LayerResourceIds{}, handler.TypedFuncs[*lapi.LayerResourceIds, reconcile.Request]{
 		CreateFunc: func(ctx context.Context, e event.TypedCreateEvent[*lapi.LayerResourceIds], _ workqueue.TypedRateLimitingInterface[reconcile.Request]) {
-			pvs := &v1.PersistentVolumeList{}
-			if err := kc.List(ctx, pvs); err != nil {
+			pvList := &v1.PersistentVolumeList{}
+			if err := kc.List(ctx, pvList); err != nil {
 				log.Error(err, "[RunLayerResourceIDsWatcher] failed to get persistent volumes")
 				return
 			}
 
-			pvcMap := make(map[string]*v1.PersistentVolume, len(pvs.Items))
-			for _, pvc := range pvs.Items {
-				pvcMap[pvc.Name] = &pvc
+			pvMap := make(map[string]*v1.PersistentVolume, len(pvList.Items))
+			for _, pv := range pvList.Items {
+				pvMap[pv.Name] = &pv
 			}
+			log.Trace("[RunLayerResourceIDsWatcher] PV map", "map", pvMap)
 
 			layerStorageVolumeList := &lapi.LayerStorageVolumesList{}
 			err := kc.List(ctx, layerStorageVolumeList)
@@ -97,6 +99,7 @@ func RunLayerResourceIDsWatcher(
 			for _, lri := range layerStorageResourceIDs.Items {
 				lriMap[lri.Spec.LayerResourceID] = &lri
 			}
+			log.Trace("[RunLayerResourceIDsWatcher] lri Map", "map", lriMap)
 
 			replicaMap := make(map[string]*srv2.DRBDResourceReplica)
 			for _, lsv := range layerStorageVolumeList.Items {
@@ -117,8 +120,9 @@ func RunLayerResourceIDsWatcher(
 
 					replicaMap[lri.Spec.ResourceName] = &srv2.DRBDResourceReplica{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      pvName,
-							Namespace: pvcMap[pvName].Spec.ClaimRef.Namespace,
+							Name: pvName,
+							// Namespace: pvMap[pvName].Spec.ClaimRef.Namespace,
+							Namespace: "default",
 						},
 						Spec: srv2.DRBDResourceReplicaSpec{
 							Peers: map[string]srv2.Peer{
