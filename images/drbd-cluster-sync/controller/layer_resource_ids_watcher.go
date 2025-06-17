@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -79,7 +80,7 @@ func RunLayerResourceIDsWatcher(
 			for _, pv := range pvList.Items {
 				pvMap[pv.Name] = &pv
 			}
-			log.Trace("[RunLayerResourceIDsWatcher] PV map", "map", pvMap)
+			log.Trace("[RunLayerResourceIDsWatcher] PV map", "map", marshalLog(pvMap))
 
 			layerStorageVolumeList := &lapi.LayerStorageVolumesList{}
 			err := kc.List(ctx, layerStorageVolumeList)
@@ -99,7 +100,7 @@ func RunLayerResourceIDsWatcher(
 			for _, lri := range layerStorageResourceIDs.Items {
 				lriMap[lri.Spec.LayerResourceID] = &lri
 			}
-			log.Trace("[RunLayerResourceIDsWatcher] lri Map", "map", lriMap)
+			log.Trace("[RunLayerResourceIDsWatcher] lri Map", "map", marshalLog(lriMap))
 
 			replicaMap := make(map[string]*srv2.DRBDResourceReplica)
 			for _, lsv := range layerStorageVolumeList.Items {
@@ -207,4 +208,9 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, drbdResourceRepli
 	); err != nil {
 		log.Error(err, fmt.Sprintf("[RunLayerResourceIDsWatcher] failed to create a DRBD resource replica %s", drbdResourceReplica.Name))
 	}
+}
+
+func marshalLog(data any) string {
+	bytes, _ := json.MarshalIndent(data, "", "   ")
+	return string(bytes)
 }
