@@ -222,6 +222,16 @@ spec:
         image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
         imagePullPolicy: IfNotPresent
         name: kube-rbac-proxy
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
+        readinessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
