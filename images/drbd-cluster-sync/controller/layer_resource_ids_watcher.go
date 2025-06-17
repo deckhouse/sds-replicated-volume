@@ -214,6 +214,7 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, drbdResourceRepli
 				return nil
 			}
 
+			drbdResourceReplica.ResourceVersion = existingResource.ResourceVersion
 			err = kc.Update(ctx, drbdResourceReplica)
 			if err == nil {
 				log.Info(fmt.Sprintf("[RunLayerResourceIDsWatcher] DRBD resource replica %s successfully updated", drbdResourceReplica.Name))
