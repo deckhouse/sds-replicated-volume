@@ -199,9 +199,24 @@ func createDRBDResource(ctx context.Context, kc kubecl.Client, drbdResourceRepli
 			return true
 		},
 		func() error {
-			err := kc.Create(ctx, drbdResourceReplica)
+			existingResource := &srv2.DRBDResourceReplica{}
+			err := kc.Get(ctx, kubecl.ObjectKey{
+				Namespace: drbdResourceReplica.Namespace,
+				Name:      drbdResourceReplica.Name,
+			}, existingResource)
+
+			if k8sErr.IsNotFound(err) {
+				err := kc.Create(ctx, drbdResourceReplica)
+				if err == nil {
+					log.Info(fmt.Sprintf("[RunLayerResourceIDsWatcher] DRBD resource replica %s successfully created", drbdResourceReplica.Name))
+					return err
+				}
+				return nil
+			}
+
+			err = kc.Update(ctx, drbdResourceReplica)
 			if err == nil {
-				log.Info(fmt.Sprintf("[RunLayerResourceIDsWatcher] DRBD resource replica %s successfully created", drbdResourceReplica.Name))
+				log.Info(fmt.Sprintf("[RunLayerResourceIDsWatcher] DRBD resource replica %s successfully updated", drbdResourceReplica.Name))
 			}
 			return err
 		},
