@@ -15,7 +15,7 @@ kind: VerticalPodAutoscaler
 metadata:
   name: sds-replicated-volume-agent
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-health-watcher-controller")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 2 }}
 spec:
   targetRef:
     apiVersion: "apps/v1"
@@ -40,11 +40,11 @@ kind: DaemonSet
 metadata:
   name: sds-replicated-volume-agent
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 2 }}
 spec:
   selector:
     matchLabels:
-      app: sds-replicated-volume
+      app: sds-replicated-volume-agent
   template:
     metadata:
       name: sds-replicated-volume-agent
