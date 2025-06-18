@@ -13,8 +13,8 @@ spec:
     - name: metrics
       port: 3370
       protocol: TCP
-      targetPort: 3370
+      targetPort: metrics
     - name: linstor
       port: 3371
       protocol: TCP
-      targetPort: 3371
+      targetPort: linstor

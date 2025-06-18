@@ -19,6 +19,7 @@ package controller_test
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,8 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
@@ -42,9 +45,9 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 	)
 
 	var (
-		ctx = context.Background()
-		cl  = newFakeClient()
-		log = logger.Logger{}
+		ctx context.Context
+		cl  client.WithWatch
+		log logger.Logger
 
 		validCFG, _ = config.NewConfig()
 
@@ -77,7 +80,6 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:            testName,
-				Namespace:       testNameSpace,
 				OwnerReferences: nil,
 				Finalizers:      nil,
 				ManagedFields:   nil,
@@ -91,676 +93,346 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 			VolumeBindingMode:    &volumeBindingMode,
 			Provisioner:          controller.StorageClassProvisioner,
 		}
+
+		storageClassResource           *storagev1.StorageClass
+		configMap                      *corev1.ConfigMap
+		replicatedStorageClassResource *srv.ReplicatedStorageClass
 	)
 
-	It("ReconcileControllerConfigMapEvent_ConfigMap_does_not_exist_StorageClass_local_without_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(""))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeFalse())
-
-		scResource := validStorageClassResource.DeepCopy()
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
+	BeforeEach(func() {
+		ctx = context.Background()
+		cl = newFakeClient()
+		log = logger.Logger{}
+		storageClassResource = nil
+		configMap = nil
+		replicatedStorageClassResource = nil
 	})
 
-	It("ReconcileControllerConfigMapEvent_ConfigMap_does_not_exist_StorageClass_local_with_default_annotation_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(""))
+	whenStorageClassExists := func(foo func()) {
+		When("StorageClass exists", func() {
+			BeforeEach(func() {
+				storageClassResource = validStorageClassResource.DeepCopy()
+				replicatedStorageClassResource = &srv.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:            testName,
+						OwnerReferences: nil,
+						Finalizers:      nil,
+						ManagedFields:   nil,
+						Labels: map[string]string{
+							"storage.deckhouse.io/managed-by": "sds-replicated-volume",
+						},
+					},
+				}
+			})
+			JustBeforeEach(func() {
+				err := cl.Create(ctx, storageClassResource)
+				Expect(err).NotTo(HaveOccurred())
+				if storageClassResource.Annotations != nil {
+					replicatedStorageClassResource.Annotations = make(map[string]string, len(storageClassResource.Annotations))
+					maps.Copy(replicatedStorageClassResource.Annotations, storageClassResource.Annotations)
+				}
+				err = cl.Create(ctx, replicatedStorageClassResource)
+				Expect(err).NotTo(HaveOccurred())
+			})
+			JustAfterEach(func() {
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Name).To(Equal(storageClassResource.Name))
+				Expect(storageClass.Namespace).To(Equal(storageClassResource.Namespace))
 
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeFalse())
+				// Cleanup
+				err = cl.Delete(ctx, storageClassResource)
+				Expect(err).NotTo(HaveOccurred())
 
-		scResource := validStorageClassResource.DeepCopy()
-		scResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
+				err = cl.Delete(ctx, replicatedStorageClassResource)
+				Expect(err).ToNot(HaveOccurred())
 
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
+				_, err = getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).To(HaveOccurred())
+				Expect(errors.IsNotFound(err)).To(BeTrue())
+			})
 
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_without_data_StorageClass_local_without_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
+			foo()
 		})
-		Expect(err).NotTo(HaveOccurred())
+	}
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).To(BeNil())
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeFalse())
-
-		scResource := validStorageClassResource.DeepCopy()
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false_StorageClass_local_without_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "false"},
+	When("ReconcileControllerConfigMapEvent", func() {
+		var request reconcile.Request
+		BeforeEach(func() {
+			request = reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Namespace: validCFG.ControllerNamespace,
+					Name:      controller.ControllerConfigMapName,
+				},
+			}
 		})
-		Expect(err).NotTo(HaveOccurred())
 
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("false"))
+		whenConfigMapExistsIs := func(value bool, foo func()) {
+			if value {
+				When("ConfigMap exists", func() {
+					BeforeEach(func() {
+						configMap = &corev1.ConfigMap{
+							ObjectMeta: metav1.ObjectMeta{
+								Namespace: request.Namespace,
+								Name:      request.Name,
+							},
+						}
+					})
+					JustBeforeEach(func() {
+						err := cl.Create(ctx, configMap)
+						Expect(err).NotTo(HaveOccurred())
+					})
+					JustAfterEach(func() {
+						err := cl.Delete(ctx, configMap)
+						Expect(err).NotTo(HaveOccurred())
 
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeFalse())
+						_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
+						Expect(err).To(HaveOccurred())
+						Expect(errors.IsNotFound(err)).To(BeTrue())
+					})
 
-		scResource := validStorageClassResource.DeepCopy()
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
+					foo()
+				})
+			} else {
+				When("ConfigMap does not exist", func() {
+					JustBeforeEach(func() {
+						var err error
+						configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
+						Expect(err).To(HaveOccurred())
+						Expect(errors.IsNotFound(err)).To(BeTrue())
+						Expect(configMap).NotTo(BeNil())
+						Expect(configMap.Name).To(Equal(""))
 
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
+						virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(virtualizationEnabled).To(BeFalse())
+					})
 
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true_StorageClass_local_without_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
+					foo()
+				})
+			}
 		}
 
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "true"},
+		whenAllowRemoteVolumeAccessKeyIs := func(value bool, foo func()) {
+			if value {
+				When("non local", func() {
+					BeforeEach(func() {
+						if storageClassResource.Parameters == nil {
+							storageClassResource.Parameters = make(map[string]string)
+						}
+						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
+					})
+					foo()
+					JustAfterEach(func() {
+						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
+					})
+				})
+			} else {
+				When("local", func() {
+					BeforeEach(func() {
+						if storageClassResource == nil {
+							return
+						}
+						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
+					})
+					JustBeforeEach(func() {
+						if storageClassResource == nil {
+							return
+						}
+						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+					})
+					foo()
+					JustAfterEach(func() {
+						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+						Expect(err).NotTo(HaveOccurred())
+						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+					})
+				})
+			}
+		}
+
+		whenDefaultAnnotationExistsIs := func(value bool, foo func()) {
+			if value {
+				When("with default annotation", func() {
+					BeforeEach(func() {
+						Expect(storageClassResource).ToNot(BeNil())
+						if storageClassResource.Annotations == nil {
+							storageClassResource.Annotations = make(map[string]string)
+						}
+						storageClassResource.Annotations[controller.DefaultStorageClassAnnotationKey] = "true"
+					})
+					JustBeforeEach(func() {
+						Expect(storageClassResource).ToNot(BeNil())
+						Expect(storageClassResource.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+					})
+					foo()
+				})
+			} else {
+				When("without default annotation", func() {
+					BeforeEach(func() {
+						if storageClassResource != nil {
+							storageClassResource.Annotations = nil
+						}
+					})
+					JustBeforeEach(func() {
+						if storageClassResource != nil {
+							Expect(storageClassResource.Annotations).To(BeNil())
+						}
+					})
+					foo()
+				})
+			}
+		}
+
+		whenVirtualizationIs := func(value bool, foo func()) {
+			When(fmt.Sprintf("with virtualization value is %v", value), func() {
+				BeforeEach(func() {
+					strValue := "false"
+					if value {
+						strValue = "true"
+					}
+					if configMap.Data == nil {
+						configMap.Data = make(map[string]string)
+					}
+					configMap.Data[controller.VirtualizationModuleEnabledKey] = strValue
+				})
+				JustBeforeEach(func() {
+					virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(virtualizationEnabled).To(BeEquivalentTo(value))
+				})
+				foo()
+			})
+		}
+
+		itHasNoAnnotations := func() {
+			It("has no annotations", func() {
+				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(shouldRequeue).To(BeFalse())
+
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Annotations).To(BeNil())
+			})
+		}
+
+		itHasOnlyDefaultStorageClassAnnotationKey := func() {
+			It("has only default storage class annotation", func() {
+				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(shouldRequeue).To(BeFalse())
+
+				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(storageClass).NotTo(BeNil())
+				Expect(storageClass.Annotations).NotTo(BeNil())
+				Expect(storageClass.Annotations).To(HaveLen(1))
+				Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+			})
+		}
+
+		whenStorageClassExists(func() {
+			whenConfigMapExistsIs(false, func() {
+				whenAllowRemoteVolumeAccessKeyIs(false, func() {
+					whenDefaultAnnotationExistsIs(false, func() {
+						itHasNoAnnotations()
+					})
+					whenDefaultAnnotationExistsIs(true, func() {
+						itHasOnlyDefaultStorageClassAnnotationKey()
+					})
+				})
+			})
+			whenConfigMapExistsIs(true, func() {
+				whenVirtualizationIs(false, func() {
+					whenDefaultAnnotationExistsIs(false, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							itHasNoAnnotations()
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasNoAnnotations()
+						})
+					})
+					whenDefaultAnnotationExistsIs(true, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
+						})
+					})
+				})
+				whenVirtualizationIs(true, func() {
+					whenDefaultAnnotationExistsIs(false, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							It("has only access mode annotation", func() {
+								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(shouldRequeue).To(BeFalse())
+
+								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(storageClass).NotTo(BeNil())
+								Expect(storageClass.Annotations).NotTo(BeNil())
+								Expect(storageClass.Annotations).To(HaveLen(1))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
+							})
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasNoAnnotations()
+						})
+					})
+					whenDefaultAnnotationExistsIs(true, func() {
+						whenAllowRemoteVolumeAccessKeyIs(false, func() {
+							It("has default storage class and access mode annotations", func() {
+								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(shouldRequeue).To(BeFalse())
+
+								storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+								Expect(err).NotTo(HaveOccurred())
+								Expect(storageClass).NotTo(BeNil())
+								Expect(storageClass.Annotations).NotTo(BeNil())
+								Expect(storageClass.Annotations).To(HaveLen(2))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.DefaultStorageClassAnnotationKey, "true"))
+								Expect(storageClass.Annotations).To(HaveKeyWithValue(controller.StorageClassVirtualizationAnnotationKey, controller.StorageClassVirtualizationAnnotationValue))
+							})
+						})
+						whenAllowRemoteVolumeAccessKeyIs(true, func() {
+							itHasOnlyDefaultStorageClassAnnotationKey()
+						})
+					})
+
+					When("not replicated but local with default provisioner", func() {
+						var anotherProvisioner string
+						BeforeEach(func() {
+							anotherProvisioner = "another.provisioner"
+							storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
+							storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
+							storageClassResource.Provisioner = anotherProvisioner
+						})
+
+						itHasOnlyDefaultStorageClassAnnotationKey()
+
+						It("parameter StorageClassParamAllowRemoteVolumeAccessKey set to false and another provisioner", func() {
+							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
+							Expect(err).NotTo(HaveOccurred())
+							Expect(shouldRequeue).To(BeFalse())
+
+							storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
+							Expect(err).NotTo(HaveOccurred())
+							Expect(storageClass).NotTo(BeNil())
+							Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
+							Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
+						})
+					})
+				})
+			})
 		})
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeTrue())
-
-		scResource := validStorageClassResource.DeepCopy()
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true_StorageClass_local_with_default_annotation_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeTrue())
-
-		scResource := validStorageClassResource.DeepCopy()
-		scResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(2))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_change_from_true_to_false_StorageClass_local_with_default_and_virtualization_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		configMap.Data[controller.VirtualizationModuleEnabledKey] = "false"
-		err = cl.Update(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("false"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeFalse())
-
-		storageClass, err := getSC(ctx, cl, validStorageClassResource.Name, validStorageClassResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(validStorageClassResource.Name))
-		Expect(storageClass.Namespace).To(Equal(validStorageClassResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(2))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, validStorageClassResource.Name, validStorageClassResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(validStorageClassResource.Name))
-		Expect(storageClass.Namespace).To(Equal(validStorageClassResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, validStorageClassResource.Name, validStorageClassResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true_StorageClass_not_local_without_annotations_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeTrue())
-
-		scResource := validStorageClassResource.DeepCopy()
-		scResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("true"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).To(BeNil())
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("true"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true_StorageClass_not_local_with_default_annotation_exist", func() {
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeTrue())
-
-		scResource := validStorageClassResource.DeepCopy()
-		scResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-		scResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("true"))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("true"))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-	})
-
-	It("ReconcileControllerConfigMapEvent_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true_StorageClass_not_replicated_but_local_with_default_annotation_exist", func() {
-		anotherProvisioner := "another.provisioner"
-
-		request := reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Namespace: validCFG.ControllerNamespace,
-				Name:      controller.ControllerConfigMapName,
-			},
-		}
-
-		err := cl.Create(ctx, &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: request.Namespace,
-				Name:      request.Name,
-			},
-			Data: map[string]string{controller.VirtualizationModuleEnabledKey: "true"},
-		})
-		Expect(err).NotTo(HaveOccurred())
-
-		configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(configMap).NotTo(BeNil())
-		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
-		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
-		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
-
-		virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(virtualizationEnabled).To(BeTrue())
-
-		scResource := validStorageClassResource.DeepCopy()
-		scResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
-		scResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "false"
-		scResource.Provisioner = anotherProvisioner
-		err = cl.Create(ctx, scResource)
-		Expect(err).NotTo(HaveOccurred())
-
-		storageClass, err := getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-		Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
-
-		shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(shouldRequeue).To(BeFalse())
-
-		storageClass, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(storageClass).NotTo(BeNil())
-		Expect(storageClass.Name).To(Equal(scResource.Name))
-		Expect(storageClass.Namespace).To(Equal(scResource.Namespace))
-		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(1))
-		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
-		Expect(storageClass.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey]).To(Equal("false"))
-		Expect(storageClass.Provisioner).To(Equal(anotherProvisioner))
-
-		// Cleanup
-		err = cl.Delete(ctx, storageClass)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getSC(ctx, cl, scResource.Name, scResource.Namespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
-
-		err = cl.Delete(ctx, configMap)
-		Expect(err).NotTo(HaveOccurred())
-
-		_, err = getConfigMap(ctx, cl, validCFG.ControllerNamespace)
-		Expect(err).To(HaveOccurred())
-		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 })

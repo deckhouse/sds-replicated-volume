@@ -10,7 +10,6 @@ env:
   MODULES_MODULE_TAG: ${{ github.ref_name }}
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
   BASE_IMAGES_VERSION: "v0.4.3"
 
 on:
@@ -38,7 +37,7 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Download base images
+      - name: Download base images and auth prepare
         run: |
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml

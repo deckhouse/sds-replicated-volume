@@ -1,12 +1,16 @@
 ---
 image: choose-edition
 fromImage: builder/alt
+fromCacheVersion: {{ div .Commit.Date.Unix (mul 60 60 24 30) }}
 
 git:
   - add: /
     to: /
     includePaths:
       - openapi
+    stageDependencies:
+      setup:
+        - openapi/values_*.yaml      
 shell:
   setup:
     - cd /openapi

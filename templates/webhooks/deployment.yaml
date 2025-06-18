@@ -22,11 +22,23 @@ spec:
     containerPolicies:
       - containerName: webhooks
         minAllowed:
-          {{- include "webhooks_resources" . | nindent 8 }}
+          {{- include "webhooks_resources" . | nindent 10 }}
         maxAllowed:
           cpu: 20m
           memory: 100Mi
 {{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: webhooks
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 2 }}
+spec:
+  minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
+  selector:
+    matchLabels:
+      app: webhooks
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,6 +48,7 @@ metadata:
   {{- include "helm_lib_module_labels" (list . (dict "app" "webhooks" )) | nindent 2 }}
 spec:
   {{- include "helm_lib_deployment_on_master_strategy_and_replicas_for_ha" . | nindent 2 }}
+  revisionHistoryLimit: 2
   selector:
     matchLabels:
       app: webhooks
@@ -50,8 +63,10 @@ spec:
       {{- include "helm_lib_tolerations" (tuple . "any-node" "with-uninitialized" "with-cloud-provider-uninitialized") | nindent 6 }}
       {{- include "helm_lib_node_selector" (tuple . "master") | nindent 6 }}
       {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "webhooks")) | nindent 6 }}
+      {{- include "helm_lib_module_pod_security_context_run_as_user_deckhouse" . | nindent 6 }}
       containers:
       - name: webhooks
+        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
         command:
           - /webhooks
           - -tls-cert-file=/etc/webhook/certs/tls.crt
@@ -87,6 +102,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "webhooks_resources" . | nindent 12 }}
 {{- end }}
+
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccount: webhooks
