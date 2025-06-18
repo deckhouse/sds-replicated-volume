@@ -44,7 +44,7 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app: sds-replicated-volume-agent
+      app: sds-replicated-volume
   template:
     metadata:
       name: sds-replicated-volume-agent
