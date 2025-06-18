@@ -1,5 +1,5 @@
 name: sds-replicated-volume
-stage: "General Availability"
+stage: "Preview"
 weight: 915
 descriptions:
   en: "SDS Replicated Volume module"
