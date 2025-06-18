@@ -82,7 +82,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	// CONTROLLERS
 	go func() {
 		var err error
-		defer func() { cancel(fmt.Errorf("dbdreplica controller: %w", err)) }()
+		defer func() { cancel(fmt.Errorf("rvr controller: %w", err)) }()
 		defer RecoverPanicToErr(&err)
 		err = runController(log, mgr)
 	}()
@@ -176,12 +176,13 @@ func runController(
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
-	log = log.With("goroutine", "controller").With("controller", "dbdr")
+	log = log.With("goroutine", "controller")
 
 	type TReq = r.TypedRequest[*v1alpha2.ReplicatedVolumeReplica]
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
+		For(&v1alpha2.ReplicatedVolumeReplica{}).
 		Watches(
 			&v1alpha2.ReplicatedVolumeReplica{},
 			&handler.TypedFuncs[client.Object, TReq]{
