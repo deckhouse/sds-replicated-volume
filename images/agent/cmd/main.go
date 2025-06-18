@@ -182,7 +182,7 @@ func runController(
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
-		For(&v1alpha2.ReplicatedVolumeReplica{}).
+		Named("replicatedVolumeReplica").
 		Watches(
 			&v1alpha2.ReplicatedVolumeReplica{},
 			&handler.TypedFuncs[client.Object, TReq]{
