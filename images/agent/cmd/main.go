@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
@@ -124,6 +125,14 @@ func newManager(
 	mgr, err := manager.New(config, mgrOpts)
 	if err != nil {
 		return nil, LogError(log, fmt.Errorf("creating manager: %w", err))
+	}
+
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return nil, LogError(log, fmt.Errorf("AddHealthzCheck: %w", err))
+	}
+
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return nil, LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
 	// err = mgr.GetFieldIndexer().IndexField(
