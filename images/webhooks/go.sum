@@ -9,8 +9,6 @@ github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSs
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/deckhouse/deckhouse v1.70.4 h1:oLK1G32vHpsdtAduWDYJJ6Xm7cTQjinLhtR/L2GI7MU=
-github.com/deckhouse/deckhouse v1.70.4/go.mod h1:u8w4rQuOoOPcDBKRPKhqw4RY2UxlDD43q3rB1PNHGug=
 github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57 h1:13GafAaD2xfKtklUnNoNkMtYhYSWwC7wOCAChB7yH1w=
 github.com/deckhouse/sds-node-configurator/api v0.0.0-20250424082358-e271071c2a57/go.mod h1:asf5aASltd0t84HVMO95dgrZlLwYO7VJbfLsrL2NjsI=
 github.com/emicklei/go-restful/v3 v3.11.0 h1:rAQeMHw1c7zTmncogyy8VvRZwtkmkZ4FxERmMY4rD+g=
