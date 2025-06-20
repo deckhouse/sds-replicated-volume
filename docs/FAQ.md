@@ -247,7 +247,7 @@ Example:
 - `--non-interactive` — Runs the script in non-interactive mode.
 - `--node-name` — Specifies the name of the node from which resources should be evicted. This parameter is mandatory when using non-interactive mode.
 - `--skip-db-backup` — Skips creating a backup of the LINSTOR database before executing the operations.
-- `--ignore-advise` — Proceeds with the operations despite warnings from the `linstor advise resource` command.
+- `--ignore-advise` — Proceeds with the operations despite warnings from the `linstor advise resource` command. Use if the script was interrupted and the number of replicas for some resources does not match the value specified in the `ReplicatedStorageClass`.
 - `--exclude-resources-from-check` — Excludes from checks the resources listed using the `|` (vertical bar) as a separator.
 
 
