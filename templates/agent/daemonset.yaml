@@ -89,7 +89,7 @@ spec:
           type: spc_t
       containers:
       - name: sds-replicated-volume-agent
-        image: {{ include "helm_lib_module_image" (list . "agent") }}
+        image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
         imagePullPolicy: IfNotPresent
         readinessProbe:
           httpGet:
