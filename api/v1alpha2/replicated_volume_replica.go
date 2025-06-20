@@ -50,8 +50,8 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty"`
 }
 
-func (rvr *ReplicatedVolumeReplica) NodeNameSelector(hostname string) fields.Selector {
-	return fields.OneTermEqualSelector("spec.nodeName", hostname)
+func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
+	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
 }
 
 // +k8s:deepcopy-gen=true

@@ -36,7 +36,9 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(slogh.Config{})
+	logHandler := slogh.NewHandler(slogh.Config{
+		Level: slogh.LevelDebug,
+	})
 	log := slog.New(logHandler)
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
@@ -44,7 +46,7 @@ func main() {
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		// errors should already be logged
+		log.Error("agent exited unexpectedly", "err", err)
 		os.Exit(1)
 	}
 	log.Info(
@@ -85,6 +87,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 
 		defer func() { cancel(fmt.Errorf("drbdsetup scanner: %w", err)) }()
 		defer RecoverPanicToErr(&err)
+
 		err = NewScanner(ctx, log, cl, envConfig).Run()
 	}()
 
