@@ -57,21 +57,16 @@ func NewScanner(
 
 func (s *scanner) Run() error {
 	// consume from batch
-	go func() {
-		var err error
-		defer func() { s.cancel(fmt.Errorf("batch consumer: %w", err)) }()
-		defer RecoverPanicToErr(&err)
-		err = s.consumeBatches()
-	}()
+	GoForever("scanner/consumer", s.cancel, s.log, s.consumeBatches)
 
-	var events2CmdErr error
+	var err error
 
-	for ev := range s.processEvents(s.events2.Run(&events2CmdErr), false) {
+	for ev := range s.processEvents(s.events2.Run(&err), false) {
 		s.batcher.Add(ev)
 	}
 
-	if events2CmdErr != nil {
-		return LogError(s.log, fmt.Errorf("run events2: %w", events2CmdErr))
+	if err != nil {
+		return LogError(s.log, fmt.Errorf("run events2: %w", err))
 	}
 
 	return nil
@@ -96,7 +91,6 @@ func (s *scanner) processEvents(
 	online bool,
 ) iter.Seq[updatedResourceName] {
 	return func(yield func(updatedResourceName) bool) {
-		log := s.log.With("goroutine", "scanner/processEvents")
 		for ev := range allEvents {
 			var typedEvent *drbdsetup.Event
 
@@ -104,14 +98,14 @@ func (s *scanner) processEvents(
 			case *drbdsetup.Event:
 				typedEvent = tev
 			case *drbdsetup.UnparsedEvent:
-				log.Warn(
+				s.log.Warn(
 					"unparsed event",
 					"err", tev.Err,
 					"line", tev.RawEventLine,
 				)
 				continue
 			default:
-				log.Error(
+				s.log.Error(
 					"unexpected event type",
 					"event", fmt.Sprintf("%v", tev),
 				)
@@ -121,16 +115,16 @@ func (s *scanner) processEvents(
 			if !online {
 				if typedEvent.Kind == "exists" && typedEvent.Object == "-" {
 					online = true
-					log.Debug("events online")
+					s.log.Debug("events online")
 				}
 				continue
 			}
 
 			if resourceName, ok := typedEvent.State["name"]; !ok {
-				log.Debug("skipping event without name")
+				s.log.Debug("skipping event without name")
 				continue
 			} else {
-				log.Debug("yielding event", "event", typedEvent)
+				s.log.Debug("yielding event", "event", typedEvent)
 				if !yield(updatedResourceName(resourceName)) {
 					return
 				}

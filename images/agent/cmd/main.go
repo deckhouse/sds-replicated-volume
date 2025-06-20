@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
@@ -39,7 +40,8 @@ func main() {
 	logHandler := slogh.NewHandler(slogh.Config{
 		Level: slogh.LevelDebug,
 	})
-	log := slog.New(logHandler)
+	log := slog.New(logHandler).
+		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
 	log.Info("agent started")
@@ -76,36 +78,12 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	cl := mgr.GetClient()
 
 	// DRBD SCANNER
-	go func() {
-		var err error
-
-		log := log.With("goroutine", "scanner")
-		log.Info("scanner started")
-		defer func() {
-			log.Info("scanner stopped", "err", err)
-		}()
-
-		defer func() { cancel(fmt.Errorf("drbdsetup scanner: %w", err)) }()
-		defer RecoverPanicToErr(&err)
-
-		err = NewScanner(ctx, log, cl, envConfig).Run()
-	}()
+	GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
 
 	// CONTROLLERS
-	go func() {
-		var err error
-
-		log := log.With("goroutine", "controller")
-		log.Info("controller started")
-		defer func() {
-			log.Info("controller stopped", "err", err)
-		}()
-
-		defer func() { cancel(fmt.Errorf("rvr controller: %w", err)) }()
-		defer RecoverPanicToErr(&err)
-
-		err = runController(log, mgr)
-	}()
+	GoForever("controller", cancel, log,
+		func() error { return runController(log, mgr) },
+	)
 
 	<-ctx.Done()
 

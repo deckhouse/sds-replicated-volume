@@ -5,6 +5,10 @@ import (
 	"fmt"
 )
 
+var ErrUnexpectedReturnWithoutError = errors.New(
+	"function unexpectedly returned without error",
+)
+
 func RecoverPanicToErr(err *error) {
 	v := recover()
 	if v == nil {
