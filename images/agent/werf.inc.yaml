@@ -107,7 +107,9 @@ shell:
 
 ---
 image: {{ $.ImageName }}
-fromImage: base/distroless
+# TODO: distroless
+# fromImage: base/distroless
+fromImage: builder/golang-alpine
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
@@ -117,6 +119,24 @@ import:
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
     before: setup
+# TODO: distroless
+shell:
+  install:
+  - apk update
+  - |
+    apk add --no-cache \
+    drbd-utils \
+    bash \
+    lvm2 \
+    coreutils \
+    util-linux \
+    openrc \
+    eudev \
+    keyutils \
+    openssh \
+    syslog-ng \
+    lsb-release \
+    e2fsprogs
 
 docker:
   ENTRYPOINT: ["/{{ $.ImageName }}"]
