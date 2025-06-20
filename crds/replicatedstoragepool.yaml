@@ -4,7 +4,7 @@ metadata:
   name: replicatedstoragepools.storage.deckhouse.io
   labels:
     heritage: deckhouse
-    module: storage
+    module: sds-replicated-volume
     backup.deckhouse.io/cluster-config: "true"
 spec:
   group: storage.deckhouse.io

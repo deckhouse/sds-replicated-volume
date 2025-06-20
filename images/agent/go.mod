@@ -2,7 +2,7 @@ module github.com/deckhouse/sds-replicated-volume/images/agent
 
 go 1.24.2
 
-require github.com/deckhouse/sds-common-lib v0.0.0-20250428090414-0c2938b30fa7
+require github.com/deckhouse/sds-common-lib v0.0.0-20250611081307-a9d174560ad3
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
@@ -37,6 +37,7 @@ require (
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
+	github.com/jinzhu/copier v0.4.0
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect

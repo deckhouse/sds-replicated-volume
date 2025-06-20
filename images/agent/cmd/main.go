@@ -1,72 +1,110 @@
 package main
 
+//lint:file-ignore ST1001 utils is the only exception
+
 import (
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/drbdresourcereplica"
 
-	//lint:ignore ST1001 utils is the only exception
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
+
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 func main() {
 	ctx := signals.SetupSignalHandler()
 
 	logHandler := slogh.NewHandler(slogh.Config{})
-	log := slog.New(logHandler)
+
+	log := slog.New(logHandler).
+		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
+
+	slogh.RunConfigFileWatcher(
+		ctx,
+		logHandler.UpdateConfigData,
+		&slogh.ConfigFileWatcherOptions{
+			OwnLogger: log.With("goroutine", "slogh"),
+		},
+	)
 
 	log.Info("agent started")
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		// errors should already be logged
+		log.Error("agent exited unexpectedly", "err", err)
 		os.Exit(1)
 	}
 	log.Info(
 		"agent gracefully shutdown",
 		// cleanup errors do not affect status code, but worth logging
-		slog.Any("err", err),
+		"err", err,
 	)
 }
 
-func runAgent(ctx context.Context, log *slog.Logger) error {
-	hostname, err := os.Hostname()
-	if err != nil {
-		return LogError(log, fmt.Errorf("getting hostname: %w", err))
-	}
-	log = log.With("hostname", hostname)
+func runAgent(ctx context.Context, log *slog.Logger) (err error) {
+	// to be used in goroutines spawned below
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer func() { cancel(err) }()
 
+	envConfig, err := GetEnvConfig()
+	if err != nil {
+		return LogError(log, fmt.Errorf("getting env config: %w", err))
+	}
+	log = log.With("nodeName", envConfig.NodeName)
+
+	// MANAGER
+	mgr, err := newManager(ctx, log, envConfig)
+	if err != nil {
+		return err
+	}
+
+	cl := mgr.GetClient()
+
+	// DRBD SCANNER
+	GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
+
+	// CONTROLLERS
+	GoForever("controller", cancel, log,
+		func() error { return runController(ctx, log, mgr) },
+	)
+
+	<-ctx.Done()
+
+	return context.Cause(ctx)
+}
+
+func newManager(
+	ctx context.Context,
+	log *slog.Logger,
+	envConfig *EnvConfig,
+) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {
-		return LogError(log, fmt.Errorf("getting rest config: %w", err))
+		return nil, LogError(log, fmt.Errorf("getting rest config: %w", err))
 	}
 
 	scheme, err := newScheme()
 	if err != nil {
-		return LogError(log, fmt.Errorf("building scheme: %w", err))
+		return nil, LogError(log, fmt.Errorf("building scheme: %w", err))
 	}
 
 	mgrOpts := manager.Options{
@@ -74,112 +112,75 @@ func runAgent(ctx context.Context, log *slog.Logger) error {
 		BaseContext: func() context.Context { return ctx },
 		Cache: cache.Options{
 			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha2.DRBDResourceReplica{}: {
+				&v1alpha2.ReplicatedVolumeReplica{}: {
 					// only watch current node's replicas
-					Label: labels.SelectorFromSet(
-						labels.Set{v1alpha2.NodeNameLabelKey: hostname},
-					),
+					Field: (&v1alpha2.ReplicatedVolumeReplica{}).
+						NodeNameSelector(envConfig.NodeName),
 				},
 			},
+		},
+		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
+		Metrics: server.Options{
+			BindAddress: envConfig.MetricsBindAddress,
 		},
 	}
 
 	mgr, err := manager.New(config, mgrOpts)
 	if err != nil {
-		return LogError(log, fmt.Errorf("creating manager: %w", err))
+		return nil, LogError(log, fmt.Errorf("creating manager: %w", err))
+	}
+
+	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+		return nil, LogError(log, fmt.Errorf("AddHealthzCheck: %w", err))
+	}
+
+	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+		return nil, LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
 	err = mgr.GetFieldIndexer().IndexField(
 		ctx,
-		&v1alpha2.DRBDResourceReplica{},
-		(&v1alpha2.DRBDResourceReplica{}).UniqueIndexName(),
-		func(o client.Object) []string {
-			rr := o.(*v1alpha2.DRBDResourceReplica)
-			key := rr.UniqueIndexKey()
-			if key == "" {
+		&v1alpha2.ReplicatedVolumeReplica{},
+		"spec.nodeName",
+		func(rawObj client.Object) []string {
+			replica := rawObj.(*v1alpha2.ReplicatedVolumeReplica)
+			if replica.Spec.NodeName == "" {
 				return nil
 			}
-			return []string{key}
+			return []string{replica.Spec.NodeName}
 		},
 	)
 	if err != nil {
-		return LogError(log, fmt.Errorf("indexing DRBDResourceReplica: %w", err))
+		return nil,
+			LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
 	}
 
-	// SCANNERS
+	// err = mgr.GetFieldIndexer().IndexField(
+	// 	ctx,
+	// 	&v1alpha2.ReplicatedVolumeReplica{},
+	// 	(&v1alpha2.ReplicatedVolumeReplica{}).UniqueIndexName(),
+	// 	func(o client.Object) []string {
+	// 		rr := o.(*v1alpha2.ReplicatedVolumeReplica)
+	// 		key := rr.UniqueIndexKey()
+	// 		if key == "" {
+	// 			return nil
+	// 		}
+	// 		return []string{key}
+	// 	},
+	// )
+	// if err != nil {
+	// 	return nil,
+	// 		LogError(
+	// 			log,
+	// 			fmt.Errorf(
+	// 				"indexing %s: %w",
+	// 				reflect.TypeFor[v1alpha2.ReplicatedVolumeReplica]().Name(),
+	// 				err,
+	// 			),
+	// 		)
+	// }
 
-	// mgr.GetClient()
-
-	// CONTROLLERS
-
-	ctrlLog := log.With("controller", "drbdresourcereplica")
-
-	type TReq = r.TypedRequest[*v1alpha2.DRBDResourceReplica]
-	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
-
-	err = builder.TypedControllerManagedBy[TReq](mgr).
-		Watches(
-			&v1alpha2.DRBDResourceReplica{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				CreateFunc: func(
-					ctx context.Context,
-					ce event.TypedCreateEvent[client.Object],
-					q TQueue,
-				) {
-					ctrlLog.Debug("CreateFunc", slog.Group("object", "name", ce.Object.GetName()))
-					typedObj := ce.Object.(*v1alpha2.DRBDResourceReplica)
-					q.Add(r.NewTypedRequestCreate(typedObj))
-				},
-				UpdateFunc: func(
-					ctx context.Context,
-					ue event.TypedUpdateEvent[client.Object],
-					q TQueue,
-				) {
-					ctrlLog.Debug(
-						"UpdateFunc",
-						slog.Group("objectNew", "name", ue.ObjectNew.GetName()),
-						slog.Group("objectOld", "name", ue.ObjectOld.GetName()),
-					)
-					typedObjOld := ue.ObjectOld.(*v1alpha2.DRBDResourceReplica)
-					typedObjNew := ue.ObjectNew.(*v1alpha2.DRBDResourceReplica)
-
-					// skip status and metadata updates
-					if typedObjOld.Generation == typedObjNew.Generation {
-						return
-					}
-
-					q.Add(r.NewTypedRequestUpdate(typedObjOld, typedObjNew))
-				},
-				DeleteFunc: func(
-					ctx context.Context,
-					de event.TypedDeleteEvent[client.Object],
-					q TQueue,
-				) {
-					ctrlLog.Debug(
-						"DeleteFunc",
-						slog.Group("object", "name", de.Object.GetName()),
-					)
-					typedObj := de.Object.(*v1alpha2.DRBDResourceReplica)
-					q.Add(r.NewTypedRequestDelete(typedObj))
-				},
-				GenericFunc: func(
-					ctx context.Context,
-					ge event.TypedGenericEvent[client.Object],
-					q TQueue,
-				) {
-					ctrlLog.Debug(
-						"GenericFunc - skipping",
-						slog.Group("object", "name", ge.Object.GetName()),
-					)
-				},
-			}).
-		Complete(drbdresourcereplica.NewReconciler(ctrlLog))
-
-	if err != nil {
-		return LogError(log, fmt.Errorf("running controller: %w", err))
-	}
-
-	return nil
+	return mgr, nil
 }
 
 func newScheme() (*runtime.Scheme, error) {

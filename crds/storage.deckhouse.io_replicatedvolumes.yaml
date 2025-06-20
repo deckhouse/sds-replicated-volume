@@ -4,15 +4,15 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.18.0
-  name: drbdresources.storage.deckhouse.io
+  name: replicatedvolumes.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
   names:
-    kind: DRBDResource
-    listKind: DRBDResourceList
-    plural: drbdresources
-    singular: drbdresource
-  scope: Namespaced
+    kind: ReplicatedVolume
+    listKind: ReplicatedVolumeList
+    plural: replicatedvolumes
+    singular: replicatedvolume
+  scope: Cluster
   versions:
   - name: v1alpha2
     schema:
@@ -48,7 +48,6 @@ spec:
         required:
         - metadata
         - spec
-        - status
         type: object
     served: true
     storage: true
