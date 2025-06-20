@@ -39,14 +39,14 @@ func NewScanner(
 	ctx context.Context,
 	log *slog.Logger,
 	cl client.Client,
-	hostname string,
+	envConfig *EnvConfig,
 ) *scanner {
 	ctx, cancel := context.WithCancelCause(ctx)
 	s := &scanner{
-		hostname: hostname,
+		hostname: envConfig.NodeName,
 		ctx:      ctx,
 		cancel:   cancel,
-		log:      log.With("goroutine", "scanner"),
+		log:      log,
 		cl:       cl,
 		batcher:  cooldown.NewBatcher(appendUpdatedResourceNameToBatch),
 		events2:  drbdsetup.NewEvents2(ctx),

@@ -30,6 +30,7 @@ import (
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 )
 
 func main() {
@@ -58,14 +59,14 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer func() { cancel(err) }()
 
-	hostname, err := os.Hostname()
+	envConfig, err := GetEnvConfig()
 	if err != nil {
-		return LogError(log, fmt.Errorf("getting hostname: %w", err))
+		return LogError(log, fmt.Errorf("getting env config: %w", err))
 	}
-	log = log.With("hostname", hostname)
+	log = log.With("nodeName", envConfig.NodeName)
 
 	// MANAGER
-	mgr, err := newManager(ctx, log, hostname)
+	mgr, err := newManager(ctx, log, envConfig)
 	if err != nil {
 		return err
 	}
@@ -75,16 +76,31 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	// DRBD SCANNER
 	go func() {
 		var err error
+
+		log := log.With("goroutine", "scanner")
+		log.Info("scanner started")
+		defer func() {
+			log.Info("scanner stopped", "err", err)
+		}()
+
 		defer func() { cancel(fmt.Errorf("drbdsetup scanner: %w", err)) }()
 		defer RecoverPanicToErr(&err)
-		err = NewScanner(ctx, log, cl, hostname).Run()
+		err = NewScanner(ctx, log, cl, envConfig).Run()
 	}()
 
 	// CONTROLLERS
 	go func() {
 		var err error
+
+		log := log.With("goroutine", "controller")
+		log.Info("controller started")
+		defer func() {
+			log.Info("controller stopped", "err", err)
+		}()
+
 		defer func() { cancel(fmt.Errorf("rvr controller: %w", err)) }()
 		defer RecoverPanicToErr(&err)
+
 		err = runController(log, mgr)
 	}()
 
@@ -96,7 +112,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
-	hostname string,
+	envConfig *EnvConfig,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {
@@ -116,9 +132,13 @@ func newManager(
 				&v1alpha2.ReplicatedVolumeReplica{}: {
 					// only watch current node's replicas
 					Field: (&v1alpha2.ReplicatedVolumeReplica{}).
-						NodeNameSelector(hostname),
+						NodeNameSelector(envConfig.NodeName),
 				},
 			},
+		},
+		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
+		Metrics: server.Options{
+			BindAddress: envConfig.MetricsBindAddress,
 		},
 	}
 
@@ -185,8 +205,6 @@ func runController(
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
-	log = log.With("goroutine", "controller")
-
 	type TReq = r.TypedRequest[*v1alpha2.ReplicatedVolumeReplica]
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
