@@ -1,0 +1,162 @@
+{{- define "sds_utils_installer_resources" }}
+cpu: 10m
+memory: 25Mi
+{{- end }}
+
+{{- define "sds_replicated_volume_agent_resources" }}
+cpu: 50m
+memory: 50Mi
+{{- end }}
+
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: sds-replicated-volume-agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: DaemonSet
+    name: sds-replicated-volume-agent
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: "sds-replicated-volume-agent"
+      minAllowed:
+        {{- include "sds_replicated_volume_agent_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 200m
+        memory: 100Mi
+{{- end }}
+
+{{- if not .Values.sdsReplicatedVolume.disableDs }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: sds-replicated-volume-agent
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 2 }}
+spec:
+  selector:
+    matchLabels:
+      app: sds-replicated-volume-agent
+  template:
+    metadata:
+      name: sds-replicated-volume-agent
+      namespace: d8-{{ .Chart.Name }}
+      {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 6 }}
+    spec:
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "any-node" "storage-problems") | nindent 6 }}
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: storage.deckhouse.io/sds-replicated-volume-node
+                    operator: In
+                    values:
+                      - ""
+              - matchExpressions:
+                  - key: storage.deckhouse.io/sds-local-volume-node
+                    operator: In
+                    values:
+                      - ""
+              - matchExpressions:
+                  - key: storage.deckhouse.io/sds-drbd-node
+                    operator: In
+                    values:
+                      - ""
+      dnsPolicy: ClusterFirstWithHostNet
+      imagePullSecrets:
+        - name: {{ .Chart.Name }}-module-registry
+      serviceAccountName: agent
+      hostPID: true
+      hostNetwork: true
+      # We need root privileges to perform LVM operations on the node.
+      securityContext:
+        runAsUser: 0
+        runAsNonRoot: false
+        runAsGroup: 0
+        readOnlyRootFilesystem: true
+        seLinuxOptions:
+          level: s0
+          type: spc_t
+      containers:
+      - name: sds-replicated-volume-agent
+        image: {{ include "helm_lib_module_image" (list . "agent") }}
+        imagePullPolicy: IfNotPresent
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 4269
+            scheme: HTTP
+          initialDelaySeconds: 5
+          failureThreshold: 2
+          periodSeconds: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 4269
+            scheme: HTTP
+          periodSeconds: 1
+          failureThreshold: 3
+        ports:
+          - name: metrics
+            containerPort: 4270
+            protocol: TCP
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: SLOGH_CONFIG_PATH
+            value: "/etc/config/slogh.cfg"
+        # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
+        securityContext:
+          privileged: true
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /dev/
+          name: host-device-dir
+        - mountPath: /sys/
+          name: host-sys-dir
+        - mountPath: /run/udev/
+          name: host-run-udev-dir
+        - mountPath: /etc/config/
+          name: config
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
+{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "sds_replicated_volume_agent_resources" . | nindent 14 }}
+{{- end }}
+      volumes:
+      - hostPath:
+          path: /opt/deckhouse/sds
+          type: DirectoryOrCreate
+        name: opt-deckhouse-sds
+      - hostPath:
+          path: /dev/
+          type: ""
+        name: host-device-dir
+      - hostPath:
+          path: /sys/
+          type: Directory
+        name: host-sys-dir
+      - hostPath:
+          path: /run/udev/
+          type: Directory
+        name: host-run-udev-dir
+      - name: config
+        configMap:
+          name: sds-replicated-volume-agent-config
+          items:
+            - key: slogh.cfg
+              path: slogh.cfg
+{{- end }}
