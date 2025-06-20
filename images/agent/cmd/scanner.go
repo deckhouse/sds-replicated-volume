@@ -1,5 +1,7 @@
 package main
 
+//lint:file-ignore ST1001 utils is the only exception
+
 import (
 	"context"
 	"fmt"
@@ -12,7 +14,6 @@ import (
 	"github.com/jinzhu/copier"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
-	//lint:ignore ST1001 utils is the only exception
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
