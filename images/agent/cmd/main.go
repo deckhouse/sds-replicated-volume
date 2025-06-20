@@ -32,9 +32,9 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(slogh.Config{
-		Level: slogh.LevelDebug,
-	})
+	logHandler := slogh.NewHandler(slogh.Config{})
+	slogh.RunConfigFileWatcher(ctx, logHandler.UpdateConfigData, nil)
+
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
