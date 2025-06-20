@@ -41,5 +41,5 @@ func GetEnvConfig() (*EnvConfig, error) {
 		cfg.MetricsBindAddress = DefaultMetricsBindAddress
 	}
 
-	return nil, nil
+	return cfg, nil
 }
