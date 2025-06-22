@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
@@ -49,12 +50,8 @@ func main() {
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		log.Error("agent exited unexpectedly", "err", err)
-		// os.Exit(1)
-		// TODO revert to os.Exit(1)
-		log.Info("ctx 1", "err", ctx.Err())
-		<-ctx.Done()
-		log.Info("ctx 2")
+		log.Error("agent exited unexpectedly", "err", err, "ctxerr", ctx.Err())
+		os.Exit(1)
 	}
 	log.Info(
 		"agent gracefully shutdown",
@@ -83,8 +80,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	cl := mgr.GetClient()
 
 	// DRBD SCANNER
-	_ = cl
-	//GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
+	GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
 
 	// CONTROLLERS
 	GoForever("controller", cancel, log,
