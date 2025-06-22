@@ -41,8 +41,8 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
-// +kubebuilder:selectablefield:JSONPath=spec.nodeName
-// +kubebuilder:selectablefield:JSONPath=spec.replicatedVolumeName
+// +kubebuilder:selectablefield:JSONPath=.spec.nodeName
+// +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
