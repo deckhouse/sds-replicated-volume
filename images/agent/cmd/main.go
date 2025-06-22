@@ -83,7 +83,8 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 	cl := mgr.GetClient()
 
 	// DRBD SCANNER
-	GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
+	_ = cl
+	//GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
 
 	// CONTROLLERS
 	GoForever("controller", cancel, log,
