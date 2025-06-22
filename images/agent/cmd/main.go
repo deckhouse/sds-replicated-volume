@@ -52,7 +52,9 @@ func main() {
 		log.Error("agent exited unexpectedly", "err", err)
 		// os.Exit(1)
 		// TODO revert to os.Exit(1)
+		log.Info("ctx 1", "err", ctx.Err())
 		<-ctx.Done()
+		log.Info("ctx 2")
 	}
 	log.Info(
 		"agent gracefully shutdown",
@@ -120,6 +122,7 @@ func newManager(
 				},
 			},
 		},
+		Logger:                 logr.FromSlogHandler(log.Handler()),
 		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress,

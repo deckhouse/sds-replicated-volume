@@ -98,5 +98,5 @@ func runController(
 		return LogError(log, fmt.Errorf("starting controller: %w", err))
 	}
 
-	return nil
+	return ctx.Err()
 }
