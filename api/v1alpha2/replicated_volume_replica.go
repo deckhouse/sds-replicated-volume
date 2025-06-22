@@ -41,6 +41,8 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:selectablefield:JSONPath=spec.nodeName
+// +kubebuilder:selectablefield:JSONPath=spec.replicatedVolumeName
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -56,12 +58,10 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
-	ReplicatedVolumeName string `json:"replicatedVolumeName"`
-	NodeName             string `json:"nodeName"`
-
-	Peers map[string]Peer `json:"peers,omitempty"`
-
-	Diskless bool `json:"diskless,omitempty"`
+	ReplicatedVolumeName string          `json:"replicatedVolumeName"`
+	NodeName             string          `json:"nodeName"`
+	Peers                map[string]Peer `json:"peers,omitempty"`
+	Diskless             bool            `json:"diskless,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

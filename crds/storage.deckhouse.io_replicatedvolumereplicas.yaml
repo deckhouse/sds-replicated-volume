@@ -328,6 +328,9 @@ spec:
         - metadata
         - spec
         type: object
+    selectableFields:
+    - jsonPath: spec.nodeName
+    - jsonPath: spec.replicatedVolumeName
     served: true
     storage: true
     subresources:
