@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
@@ -51,7 +50,9 @@ func main() {
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
 		log.Error("agent exited unexpectedly", "err", err)
-		os.Exit(1)
+		// os.Exit(1)
+		// TODO revert to os.Exit(1)
+		<-ctx.Done()
 	}
 	log.Info(
 		"agent gracefully shutdown",
@@ -138,22 +139,22 @@ func newManager(
 		return nil, LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&v1alpha2.ReplicatedVolumeReplica{},
-		"spec.nodeName",
-		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha2.ReplicatedVolumeReplica)
-			if replica.Spec.NodeName == "" {
-				return nil
-			}
-			return []string{replica.Spec.NodeName}
-		},
-	)
-	if err != nil {
-		return nil,
-			LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
-	}
+	// err = mgr.GetFieldIndexer().IndexField(
+	// 	ctx,
+	// 	&v1alpha2.ReplicatedVolumeReplica{},
+	// 	"spec.nodeName",
+	// 	func(rawObj client.Object) []string {
+	// 		replica := rawObj.(*v1alpha2.ReplicatedVolumeReplica)
+	// 		if replica.Spec.NodeName == "" {
+	// 			return nil
+	// 		}
+	// 		return []string{replica.Spec.NodeName}
+	// 	},
+	// )
+	// if err != nil {
+	// 	return nil,
+	// 		LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
+	// }
 
 	// err = mgr.GetFieldIndexer().IndexField(
 	// 	ctx,

@@ -202,7 +202,7 @@ func (s *scanner) consumeBatches() error {
 		}
 	}
 
-	return nil
+	return s.ctx.Err()
 }
 
 func (s *scanner) updateReplicaStatusIfNeeded(
