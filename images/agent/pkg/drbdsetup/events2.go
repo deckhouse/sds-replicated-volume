@@ -47,32 +47,28 @@ var _ Events2Result = &UnparsedEvent{}
 
 func (u UnparsedEvent) _isEvents2Result() {}
 
-type Events2 struct {
-	cmd *exec.Cmd
-}
-
-func NewEvents2(ctx context.Context) *Events2 {
-	return &Events2{
-		cmd: exec.CommandContext(
-			ctx,
-			DRBDSetupCommand,
-			DRBDSetupEvents2Args...,
-		),
-	}
-}
-
-func (e *Events2) Run(resultErr *error) iter.Seq[Events2Result] {
+func ExecuteEvents2(
+	ctx context.Context,
+	resultErr *error,
+) iter.Seq[Events2Result] {
 	if resultErr == nil {
 		panic("resultErr is required to be non-nil pointer")
 	}
+
 	return func(yield func(Events2Result) bool) {
-		stderr, err := e.cmd.StderrPipe()
+		cmd := exec.CommandContext(
+			ctx,
+			DRBDSetupCommand,
+			DRBDSetupEvents2Args...,
+		)
+
+		stderr, err := cmd.StdoutPipe()
 		if err != nil {
-			*resultErr = fmt.Errorf("getting stderr pipe: %w", err)
+			*resultErr = fmt.Errorf("getting stdout pipe: %w", err)
 			return
 		}
 
-		if err := e.cmd.Start(); err != nil {
+		if err := cmd.Start(); err != nil {
 			*resultErr = fmt.Errorf("starting command: %w", err)
 			return
 		}
@@ -90,7 +86,7 @@ func (e *Events2) Run(resultErr *error) iter.Seq[Events2Result] {
 			return
 		}
 
-		if err := e.cmd.Wait(); err != nil {
+		if err := cmd.Wait(); err != nil {
 			*resultErr = fmt.Errorf("command finished with error: %w", err)
 			return
 		}

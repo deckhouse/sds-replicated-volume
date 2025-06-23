@@ -82,18 +82,10 @@ type PeerDevice struct {
 	PercentInSync          float64 `json:"percent-in-sync"`
 }
 
-type Status struct {
-	cmd *exec.Cmd
-}
+func ExecuteStatus(ctx context.Context) (StatusResult, error) {
+	cmd := exec.CommandContext(ctx, DRBDSetupCommand, DRBDSetupStatusArgs...)
 
-func NewStatus(ctx context.Context) *Status {
-	return &Status{
-		cmd: exec.CommandContext(ctx, DRBDSetupCommand, DRBDSetupStatusArgs...),
-	}
-}
-
-func (s *Status) Run() (StatusResult, error) {
-	jsonBytes, err := s.cmd.CombinedOutput()
+	jsonBytes, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil,
 			fmt.Errorf(

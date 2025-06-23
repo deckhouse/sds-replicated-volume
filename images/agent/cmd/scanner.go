@@ -22,18 +22,10 @@ import (
 type scanner struct {
 	log      *slog.Logger
 	hostname string
-	// current run context
-	ctx context.Context
-	// cancels current run context
-	cancel context.CancelCauseFunc
-	// 1) react to:
-	events2 *drbdsetup.Events2
-	// 2) put events into:
-	batcher *cooldown.Batcher
-	// 3) get full status from:
-	status *drbdsetup.Status
-	// 4) update k8s resources with:
-	cl client.Client
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	batcher  *cooldown.Batcher
+	cl       client.Client
 }
 
 func NewScanner(
@@ -50,8 +42,6 @@ func NewScanner(
 		log:      log,
 		cl:       cl,
 		batcher:  cooldown.NewBatcher(appendUpdatedResourceNameToBatch),
-		events2:  drbdsetup.NewEvents2(ctx),
-		status:   drbdsetup.NewStatus(ctx),
 	}
 	return s
 }
@@ -62,7 +52,8 @@ func (s *scanner) Run() error {
 
 	var err error
 
-	for ev := range s.processEvents(s.events2.Run(&err), false) {
+	for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
+		s.log.Debug("resource updated", "resource", ev)
 		s.batcher.Add(ev)
 	}
 
@@ -70,7 +61,7 @@ func (s *scanner) Run() error {
 		return LogError(s.log, fmt.Errorf("run events2: %w", err))
 	}
 
-	return nil
+	return s.ctx.Err()
 }
 
 type updatedResourceName string
@@ -89,9 +80,9 @@ func appendUpdatedResourceNameToBatch(batch []any, newItem any) []any {
 
 func (s *scanner) processEvents(
 	allEvents iter.Seq[drbdsetup.Events2Result],
-	online bool,
 ) iter.Seq[updatedResourceName] {
 	return func(yield func(updatedResourceName) bool) {
+		var online bool
 		for ev := range allEvents {
 			var typedEvent *drbdsetup.Event
 
@@ -113,11 +104,14 @@ func (s *scanner) processEvents(
 				continue
 			}
 
+			if !online &&
+				typedEvent.Kind == "exists" &&
+				typedEvent.Object == "-" {
+				online = true
+				s.log.Debug("events online")
+			}
+
 			if !online {
-				if typedEvent.Kind == "exists" && typedEvent.Object == "-" {
-					online = true
-					s.log.Debug("events online")
-				}
 				continue
 			}
 
@@ -144,7 +138,7 @@ func (s *scanner) consumeBatches() error {
 	for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
 		log.Debug("got batch of 'n' resources", "n", len(batch))
 
-		statusResult, err := s.status.Run()
+		statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 		if err != nil {
 			return fmt.Errorf("getting statusResult: %w", err)
 		}
