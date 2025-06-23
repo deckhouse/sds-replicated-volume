@@ -106,7 +106,7 @@ func RunLayerResourceIDsWatcher(
 			for _, lsv := range layerStorageVolumeList.Items {
 				lri, found := lriMap[lsv.Spec.LayerResourceID]
 				if !found {
-					fmt.Printf("[RunLayerResourceIDsWatcher] no layer resource id %s found. skipping iteration")
+					fmt.Printf("[RunLayerResourceIDsWatcher] no layer resourceid %d found. skipping iteration", lsv.Spec.LayerResourceID)
 				}
 
 				isDiskless := false
@@ -115,7 +115,7 @@ func RunLayerResourceIDsWatcher(
 				}
 				nodeName := strings.ToLower(lsv.Spec.NodeName)
 
-				r, found := replicaMap[lri.Spec.ResourceName]
+				replica, found := replicaMap[lri.Spec.ResourceName]
 				if !found {
 					pvName := strings.ToLower(lri.Spec.ResourceName)
 
@@ -127,7 +127,7 @@ func RunLayerResourceIDsWatcher(
 						},
 						Spec: srv2.DRBDResourceReplicaSpec{
 							Peers: map[string]srv2.Peer{
-								nodeName: srv2.Peer{
+								nodeName: {
 									Diskless: isDiskless,
 								},
 							},
@@ -136,9 +136,9 @@ func RunLayerResourceIDsWatcher(
 					continue
 				}
 
-				peer := r.Spec.Peers[nodeName]
+				peer := replica.Spec.Peers[nodeName]
 				peer.Diskless = isDiskless
-				r.Spec.Peers[nodeName] = peer
+				replica.Spec.Peers[nodeName] = peer
 			}
 
 			var wg sync.WaitGroup
@@ -157,7 +157,6 @@ func RunLayerResourceIDsWatcher(
 
 			wg.Wait()
 			close(semaphore)
-			return
 		},
 	}))
 	if err != nil {

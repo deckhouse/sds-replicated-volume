@@ -41,6 +41,7 @@ type DRBDResourceReplicaSpec struct {
 // +k8s:deepcopy-gen=true
 type Peer struct {
 	Address  Address `json:"address"`
+	NodeName string  `json:"nodeName"`
 	Diskless bool    `json:"diskless"`
 }
 
