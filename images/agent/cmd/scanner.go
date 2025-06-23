@@ -209,7 +209,11 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 		rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
 	}
 
-	if err := copier.Copy(&rvr.Status.DRBD, resource); err != nil {
+	if rvr.Status.DRBD == nil {
+		rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
+	}
+
+	if err := copier.Copy(rvr.Status.DRBD, resource); err != nil {
 		return fmt.Errorf("failed to copy status fields: %w", err)
 	}
 
