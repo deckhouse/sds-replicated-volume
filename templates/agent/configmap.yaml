@@ -6,10 +6,10 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-agent")) | nindent 2 }}
 data:
-  slogh.cfg: |
-    # see https://github.com/deckhouse/sds-common-lib/tree/main/slogh
-    level=INFO
-    format=json
-    callsite=true
-    render=true
-    stringValues=true
+  # slogh.cfg: |
+  #   # see https://github.com/deckhouse/sds-common-lib/tree/main/slogh
+  #   level=INFO
+  #   format=json
+  #   callsite=true
+  #   render=true
+  #   stringValues=true
