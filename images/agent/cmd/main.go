@@ -40,7 +40,11 @@ func main() {
 
 	slogh.RunConfigFileWatcher(
 		ctx,
-		logHandler.UpdateConfigData,
+		func(data map[string]string) error {
+			err := logHandler.UpdateConfigData(data)
+			log.Info("UpdateConfigData", "data", data)
+			return err
+		},
 		&slogh.ConfigFileWatcherOptions{
 			OwnLogger: log.With("goroutine", "slogh"),
 		},
@@ -155,31 +159,6 @@ func newManager(
 		return nil,
 			LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
 	}
-
-	// err = mgr.GetFieldIndexer().IndexField(
-	// 	ctx,
-	// 	&v1alpha2.ReplicatedVolumeReplica{},
-	// 	(&v1alpha2.ReplicatedVolumeReplica{}).UniqueIndexName(),
-	// 	func(o client.Object) []string {
-	// 		rr := o.(*v1alpha2.ReplicatedVolumeReplica)
-	// 		key := rr.UniqueIndexKey()
-	// 		if key == "" {
-	// 			return nil
-	// 		}
-	// 		return []string{key}
-	// 	},
-	// )
-	// if err != nil {
-	// 	return nil,
-	// 		LogError(
-	// 			log,
-	// 			fmt.Errorf(
-	// 				"indexing %s: %w",
-	// 				reflect.TypeFor[v1alpha2.ReplicatedVolumeReplica]().Name(),
-	// 				err,
-	// 			),
-	// 		)
-	// }
 
 	return mgr, nil
 }

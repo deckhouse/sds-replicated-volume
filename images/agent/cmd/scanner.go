@@ -140,7 +140,7 @@ func (s *scanner) consumeBatches() error {
 
 		statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 		if err != nil {
-			return LogError(s.log, fmt.Errorf("getting statusResult: %w", err))
+			return LogError(log, fmt.Errorf("getting statusResult: %w", err))
 		}
 
 		log.Debug("got status for 'n' resources", "n", len(statusResult))
@@ -157,7 +157,7 @@ func (s *scanner) consumeBatches() error {
 			},
 		)
 		if err != nil {
-			return LogError(s.log, fmt.Errorf("listing rvr: %w", err))
+			return LogError(log, fmt.Errorf("listing rvr: %w", err))
 		}
 
 		for _, item := range batch {
@@ -192,7 +192,7 @@ func (s *scanner) consumeBatches() error {
 			err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 			if err != nil {
 				return LogError(
-					s.log,
+					log,
 					fmt.Errorf("updating replica status: %w", err),
 				)
 			}
