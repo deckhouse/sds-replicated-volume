@@ -1,5 +1,5 @@
 package drbdsetup
 
-var DRBDSetupCommand = "drbdsetup"
-var DRBDSetupStatusArgs = []string{"status", "--json"}
-var DRBDSetupEvents2Args = []string{"events2", "--timestamps"}
+var Command = "drbdsetup"
+var StatusArgs = []string{"status", "--json"}
+var Events2Args = []string{"events2", "--timestamps"}

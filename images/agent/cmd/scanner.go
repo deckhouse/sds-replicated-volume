@@ -10,12 +10,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/jinzhu/copier"
-
 	"github.com/deckhouse/sds-common-lib/cooldown"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/jinzhu/copier"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -140,7 +140,7 @@ func (s *scanner) consumeBatches() error {
 
 		statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 		if err != nil {
-			return fmt.Errorf("getting statusResult: %w", err)
+			return LogError(s.log, fmt.Errorf("getting statusResult: %w", err))
 		}
 
 		log.Debug("got status for 'n' resources", "n", len(statusResult))
@@ -157,7 +157,7 @@ func (s *scanner) consumeBatches() error {
 			},
 		)
 		if err != nil {
-			return fmt.Errorf("listing rvr: %w", err)
+			return LogError(s.log, fmt.Errorf("listing rvr: %w", err))
 		}
 
 		for _, item := range batch {
@@ -191,7 +191,10 @@ func (s *scanner) consumeBatches() error {
 
 			err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 			if err != nil {
-				return fmt.Errorf("updating replica status: %w", err)
+				return LogError(
+					s.log,
+					fmt.Errorf("updating replica status: %w", err),
+				)
 			}
 		}
 	}
@@ -207,6 +210,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
+		rvr.Status.Conditions = []metav1.Condition{}
 	}
 
 	if rvr.Status.DRBD == nil {

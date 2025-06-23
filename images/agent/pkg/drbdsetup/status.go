@@ -83,7 +83,7 @@ type PeerDevice struct {
 }
 
 func ExecuteStatus(ctx context.Context) (StatusResult, error) {
-	cmd := exec.CommandContext(ctx, DRBDSetupCommand, DRBDSetupStatusArgs...)
+	cmd := exec.CommandContext(ctx, Command, StatusArgs...)
 
 	jsonBytes, err := cmd.CombinedOutput()
 	if err != nil {

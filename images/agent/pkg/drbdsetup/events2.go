@@ -58,11 +58,11 @@ func ExecuteEvents2(
 	return func(yield func(Events2Result) bool) {
 		cmd := exec.CommandContext(
 			ctx,
-			DRBDSetupCommand,
-			DRBDSetupEvents2Args...,
+			Command,
+			Events2Args...,
 		)
 
-		stderr, err := cmd.StdoutPipe()
+		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			*resultErr = fmt.Errorf("getting stdout pipe: %w", err)
 			return
@@ -73,7 +73,7 @@ func ExecuteEvents2(
 			return
 		}
 
-		scanner := bufio.NewScanner(stderr)
+		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !yield(parseLine(line)) {
