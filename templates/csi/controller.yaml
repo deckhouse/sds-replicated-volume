@@ -2,6 +2,15 @@
 ### controller
 ###
 
+{{- define "additional_controller_vpa" }}
+- containerName: "drbd-cluster-sync"
+  minAllowed:
+    cpu: 10m
+    memory: 50Mi
+  maxAllowed:
+    cpu: 20m
+    memory: 100Mi
+{{- end }}
 
 {{- define "csi_controller_args" }}
 - --csi-endpoint=unix://$(ADDRESS)
@@ -77,6 +86,44 @@
 storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
+{{- define "csi_additional_containers" }}
+- command:
+  - /drbd-cluster-sync
+  env:
+    - name: LS_CONTROLLERS
+      value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
+    - name: LS_ROOT_CA
+      valueFrom:
+        secretKeyRef:
+          key: ca.crt
+          name: linstor-client-https-cert
+    - name: LS_USER_CERTIFICATE
+      valueFrom:
+        secretKeyRef:
+          key: tls.crt
+          name: linstor-client-https-cert
+    - name: LS_USER_KEY
+      valueFrom:
+        secretKeyRef:
+          key: tls.key
+          name: linstor-client-https-cert
+    - name: RETRY_COUNT
+      value: "2"
+    - name: RETRY_DELAY_SEC
+      value: "10"
+    - name: NUM_WORKERS
+      value: "3"
+  image: {{ include "helm_lib_module_image" (list . "drbdClusterSync") }}
+  imagePullPolicy: IfNotPresent
+  name: drbd-cluster-sync
+  resources:
+    requests:
+      ephemeral-storage: 50Mi
+  terminationMessagePath: /dev/termination-log
+  terminationMessagePolicy: File
+  securityContext: {}
+{{- end }}
+
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiControllerConfig := dict }}
@@ -93,7 +140,9 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "additionalControllerEnvs" (include "csi_controller_envs" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumeMounts" (include "csi_additional_controller_volume_mounts" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalControllerVPA" (include "additional_controller_vpa" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "initContainers" (include "csi_controller_init_containers" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalContainers" (include "csi_additional_containers" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 

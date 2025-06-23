@@ -44,7 +44,6 @@ const (
 	DaemonSetNameCsiNode = "linstor-csi-node"
 	DaemonSetNameNode    = "linstor-node"
 
-	DeploymentNameSchedulerExtender  = "linstor-scheduler-extender"
 	DeploymentNameWebhooks           = "webhooks"
 	DeploymentNameSpaas              = "spaas"
 	DeploymentNameController         = "linstor-controller"
@@ -59,7 +58,6 @@ var (
 	DaemonSetNameList = []string{DaemonSetNameCsiNode, DaemonSetNameNode}
 
 	DeploymentNameList = []string{
-		DeploymentNameSchedulerExtender,
 		DeploymentNameWebhooks,
 		DeploymentNameSpaas,
 		DeploymentNameAffinityController,
@@ -299,10 +297,6 @@ func (s *stateMachine) turnOffAndRenewCerts() error {
 		return err
 	}
 
-	if err := s.turnOffDeploymentAndWait(DeploymentNameSchedulerExtender); err != nil {
-		return err
-	}
-
 	if err := s.turnOffDeploymentAndWait(DeploymentNameSpaas); err != nil {
 		return err
 	}
@@ -429,10 +423,6 @@ func (s *stateMachine) turnOn() error {
 	}
 
 	if err := s.turnOnDeploymentAndWait(DeploymentNameSpaas); err != nil {
-		return err
-	}
-
-	if err := s.turnOnDeploymentAndWait(DeploymentNameSchedulerExtender); err != nil {
 		return err
 	}
 
