@@ -32,23 +32,30 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(slogh.Config{})
+	logHandler := slogh.NewHandler(
+		// TODO: fix slogh reload
+		slogh.Config{
+			Level:  slogh.LevelDebug,
+			Format: slogh.FormatText,
+		},
+	)
 
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
-	slogh.RunConfigFileWatcher(
-		ctx,
-		func(data map[string]string) error {
-			err := logHandler.UpdateConfigData(data)
-			log.Info("UpdateConfigData", "data", data)
-			return err
-		},
-		&slogh.ConfigFileWatcherOptions{
-			OwnLogger: log.With("goroutine", "slogh"),
-		},
-	)
+	// TODO: fix slogh reload
+	// slogh.RunConfigFileWatcher(
+	// 	ctx,
+	// 	func(data map[string]string) error {
+	// 		err := logHandler.UpdateConfigData(data)
+	// 		log.Info("UpdateConfigData", "data", data)
+	// 		return err
+	// 	},
+	// 	&slogh.ConfigFileWatcherOptions{
+	// 		OwnLogger: log.With("goroutine", "slogh"),
+	// 	},
+	// )
 
 	log.Info("agent started")
 
