@@ -1,104 +1,78 @@
-{{ $binaries := "/opt/deckhouse/sds/lib/libblkid.so.1 /opt/deckhouse/sds/lib/libmount.so.1 /opt/deckhouse/sds/lib/libsmartcols.so.1 /opt/deckhouse/sds/bin/nsenter.static /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2 /opt/deckhouse/sds/bin/lsblk.dynamic /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2" }}
-
-# Do not remove. It's used in external tests.
 ---
-image: {{ $.ImageName }}-src-artifact
+# do not remove this image: used in external audits (DKP CSE)
+image: {{ .ImageName }}-src-artifact
 fromImage: builder/src
 final: false
-
 git:
   - add: /
     to: /src
     includePaths:
       - api
-      - lib/go
       - images/{{ $.ImageName }}
     stageDependencies:
       install:
         - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
-
 shell:
   install:
-    - apt-get update
-    - apt-get -y install git
-    - git config --global advice.detachedHead false
-    - git clone --depth 1 --branch {{ $.Versions.UTIL_LINUX }} {{ $.Root.SOURCE_REPO }}/util-linux/util-linux.git /src/util-linux
-    - rm -rf /src/util-linux/.git
-    - rm -rf /src/.git
+    - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/drbd-utils
+    - cd /src/drbd-utils
+    - git submodule update --init --recursive
+    #- rm -rf /src/drbd-utils/.git # needed for make
 
 ---
-image: {{ $.ImageName }}-binaries-artifact
+{{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf" }}
+image: {{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
-
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ImageName }}-src-artifact
     add: /src
     to: /src
+    includePaths:
+      - drbd-utils
     before: install
-
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
     to: /binary_replace.sh
     stageDependencies:
-      install:
-        - "**/*"
-
+      beforeSetup:
+        - '**/*'
 shell:
+  beforeInstall:
+    - apt-get update
+    - apt-get install -y make automake pkg-config gcc libtool git curl rsync
+    - apt-get install -y flex libkeyutils-devel udev
+    - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
-  - apt-get update
-  - |
-    apt-get install -y \
-    build-essential \
-    pkg-config \
-    gettext \
-    autoconf \
-    bison \
-    libtool \
-    libudev-devel \
-    libblkid-devel-static \
-    libsmartcols-devel-static \
-    libmount-devel-static \
-    automake \
-    gettext \
-    flex \
-    glibc-core \
-    cross-glibc-x86_64
-  - cd /src/util-linux
-  - ./autogen.sh
-  - ./configure LDFLAGS="-static" --enable-static-programs -disable-all-programs --enable-nsenter
-  - make install-strip
-  - ./configure --prefix /opt/deckhouse/sds --with-udev
-  - make install-strip
-  - mkdir -p /opt/deckhouse/sds/lib/x86_64-linux-gnu/
-  - cp /src/util-linux/nsenter.static /opt/deckhouse/sds/bin/nsenter.static
-  - cp /lib64/libudev.so.1 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libudev.so.1
-  - cp /lib64/libc.so.6 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libc.so.6
-  - cp /lib64/libcap.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/libcap.so.2
-  # There is no more such file in P11 with glibc-core that it was a part of. Now it's /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2
-  #- cp /lib64/ld-2.32.so /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-  - cp /usr/lib/x86_64-linux-gnu/sys-root/lib64/ld-linux-x86-64.so.2 /opt/deckhouse/sds/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2
-  - cp /opt/deckhouse/sds/bin/lsblk /opt/deckhouse/sds/bin/lsblk.dynamic
-  - chmod +x /binary_replace.sh
-  - /binary_replace.sh -i "{{ $binaries }}" -o /relocate
+    - cd /src/drbd-utils
+    - ./autogen.sh
+    - ./configure --prefix=/ --sysconfdir=/etc --localstatedir=/var --without-manual
+    - make
+    - make install DESTDIR=/drbd-utils
+    - sed -i 's/usage-count\s*yes;/usage-count no;/' /drbd-utils/etc/drbd.d/global_common.conf
+  beforeSetup:
+    - chmod +x /binary_replace.sh
+    - /binary_replace.sh -i "{{ $drbdBinaries }}" -o /relocate
+  setup:
+    - rsync -avz /relocate/drbd-utils/ /relocate/
+    - rm -rf /relocate/drbd-utils/
 
 ---
-image: {{ $.ImageName }}-golang-artifact
+image: {{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
 final: false
-
 import:
-  - image: {{ $.ImageName }}-src-artifact
+  - image: {{ .ImageName }}-src-artifact
     add: /src
     to: /src
-    before: install
-
+    excludePaths:
+      - drbd-utils
+    before: setup
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
-
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
@@ -106,10 +80,8 @@ shell:
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ $.ImageName }}
-# TODO: distroless
-# fromImage: base/distroless
-fromImage: builder/golang-alpine
+image: {{ .ImageName }}
+fromImage: base/distroless
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
@@ -119,25 +91,6 @@ import:
     add: /{{ $.ImageName }}
     to: /{{ $.ImageName }}
     before: setup
-# TODO: distroless
-shell:
-  install:
-  - apk update
-  - |
-    apk add --no-cache \
-    drbd-utils \
-    bash \
-    lvm2 \
-    coreutils \
-    util-linux \
-    openrc \
-    eudev \
-    keyutils \
-    openssh \
-    syslog-ng \
-    lsb-release \
-    e2fsprogs
-
-docker:
-  ENTRYPOINT: ["/{{ $.ImageName }}"]
-  USER: deckhouse:deckhouse
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
