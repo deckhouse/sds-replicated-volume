@@ -130,6 +130,8 @@ spec:
           name: host-run-udev-dir
         - mountPath: /etc/config/
           name: config
+        - mountPath: /var/lib/sds-replicated-volume-agent.d
+          name: sds-replicated-volume-agent.d
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -159,4 +161,6 @@ spec:
           items:
             - key: slogh.cfg
               path: slogh.cfg
+      - name: sds-replicated-volume-agent.d
+        emptyDir: {}
 {{- end }}

@@ -58,6 +58,7 @@ shell:
   setup:
     - rsync -avz /relocate/drbd-utils/ /relocate/
     - rm -rf /relocate/drbd-utils/
+    - echo 'include "/var/lib/sds-replicated-volume-agent.d/*.res";' > /relocate/etc/drbd.d/sds-replicated-volume-agent.res
 
 ---
 image: {{ .ImageName }}-golang-artifact
