@@ -60,7 +60,6 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: agent
-      hostNetwork: true
       # We need root privileges to perform drbd operations on the node.
       securityContext:
         runAsUser: 0
@@ -100,7 +99,6 @@ spec:
                 fieldPath: spec.nodeName
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
-        # Privileged mode is required to use nsenter and execute host-level commands like lvm and lsblk.
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
