@@ -88,10 +88,6 @@ spec:
             scheme: HTTP
           periodSeconds: 1
           failureThreshold: 3
-        ports:
-          - name: metrics
-            containerPort: 4270
-            protocol: TCP
         env:
           - name: NODE_NAME
             valueFrom:
