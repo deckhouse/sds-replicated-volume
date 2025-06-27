@@ -53,7 +53,7 @@ func (s *scanner) Run() error {
 	var err error
 
 	for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
-		s.log.Debug("resource updated", "resource", ev)
+		s.log.Debug("added resource update event", "resource", ev)
 		s.batcher.Add(ev)
 	}
 
@@ -196,6 +196,7 @@ func (s *scanner) consumeBatches() error {
 					fmt.Errorf("updating replica status: %w", err),
 				)
 			}
+			log.Debug("updated replica status", "resourceName", resourceName)
 		}
 	}
 

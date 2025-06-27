@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	r "github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
@@ -25,7 +24,7 @@ func runController(
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
-	type TReq = r.TypedRequest[*v1alpha2.ReplicatedVolumeReplica]
+	type TReq = rvr.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
@@ -38,57 +37,45 @@ func runController(
 					ce event.TypedCreateEvent[client.Object],
 					q TQueue,
 				) {
-					log.Debug(
-						"CreateFunc",
-						slog.Group("object", "name", ce.Object.GetName()),
-					)
+					log.Debug("CreateFunc", "name", ce.Object.GetName())
 					typedObj := ce.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					q.Add(r.NewTypedRequestCreate(typedObj))
+					q.Add(rvr.ResourceReconcileRequest{Name: typedObj.Name})
 				},
 				UpdateFunc: func(
 					ctx context.Context,
 					ue event.TypedUpdateEvent[client.Object],
 					q TQueue,
 				) {
-					log.Debug(
-						"UpdateFunc",
-						slog.Group("objectNew", "name", ue.ObjectNew.GetName()),
-						slog.Group("objectOld", "name", ue.ObjectOld.GetName()),
-					)
+					log.Debug("UpdateFunc", "name", ue.ObjectNew.GetName())
 					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolumeReplica)
 					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolumeReplica)
 
 					// skip status and metadata updates
-					if typedObjOld.Generation == typedObjNew.Generation {
+					if typedObjOld.Generation >= typedObjNew.Generation {
 						return
 					}
 
-					q.Add(r.NewTypedRequestUpdate(typedObjOld, typedObjNew))
+					q.Add(rvr.ResourceReconcileRequest{Name: typedObjNew.Name})
 				},
 				DeleteFunc: func(
 					ctx context.Context,
 					de event.TypedDeleteEvent[client.Object],
 					q TQueue,
 				) {
-					log.Debug(
-						"DeleteFunc",
-						slog.Group("object", "name", de.Object.GetName()),
-					)
+					log.Debug("DeleteFunc", "name", de.Object.GetName())
 					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					q.Add(r.NewTypedRequestDelete(typedObj))
+					_ = typedObj
+					// TODO
 				},
 				GenericFunc: func(
 					ctx context.Context,
 					ge event.TypedGenericEvent[client.Object],
 					q TQueue,
 				) {
-					log.Debug(
-						"GenericFunc - skipping",
-						slog.Group("object", "name", ge.Object.GetName()),
-					)
+					log.Debug("GenericFunc", "name", ge.Object.GetName())
 				},
 			}).
-		Complete(rvr.NewReconciler(log))
+		Complete(rvr.NewReconciler(log, mgr.GetClient()))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("building controller: %w", err))
