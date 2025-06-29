@@ -32,25 +32,36 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(slogh.Config{})
+	logHandler := slogh.NewHandler(
+		// TODO: fix slogh reload
+		slogh.Config{
+			Level:  slogh.LevelDebug,
+			Format: slogh.FormatText,
+		},
+	)
 
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
-	slogh.RunConfigFileWatcher(
-		ctx,
-		logHandler.UpdateConfigData,
-		&slogh.ConfigFileWatcherOptions{
-			OwnLogger: log.With("goroutine", "slogh"),
-		},
-	)
+	// TODO: fix slogh reload
+	// slogh.RunConfigFileWatcher(
+	// 	ctx,
+	// 	func(data map[string]string) error {
+	// 		err := logHandler.UpdateConfigData(data)
+	// 		log.Info("UpdateConfigData", "data", data)
+	// 		return err
+	// 	},
+	// 	&slogh.ConfigFileWatcherOptions{
+	// 		OwnLogger: log.With("goroutine", "slogh"),
+	// 	},
+	// )
 
 	log.Info("agent started")
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		log.Error("agent exited unexpectedly", "err", err)
+		log.Error("agent exited unexpectedly", "err", err, "ctxerr", ctx.Err())
 		os.Exit(1)
 	}
 	log.Info(
@@ -84,7 +95,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 
 	// CONTROLLERS
 	GoForever("controller", cancel, log,
-		func() error { return runController(ctx, log, mgr) },
+		func() error { return runController(ctx, log, mgr, envConfig.NodeName) },
 	)
 
 	<-ctx.Done()
@@ -119,6 +130,7 @@ func newManager(
 				},
 			},
 		},
+		Logger:                 logr.FromSlogHandler(log.Handler()),
 		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress,
@@ -154,31 +166,6 @@ func newManager(
 		return nil,
 			LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
 	}
-
-	// err = mgr.GetFieldIndexer().IndexField(
-	// 	ctx,
-	// 	&v1alpha2.ReplicatedVolumeReplica{},
-	// 	(&v1alpha2.ReplicatedVolumeReplica{}).UniqueIndexName(),
-	// 	func(o client.Object) []string {
-	// 		rr := o.(*v1alpha2.ReplicatedVolumeReplica)
-	// 		key := rr.UniqueIndexKey()
-	// 		if key == "" {
-	// 			return nil
-	// 		}
-	// 		return []string{key}
-	// 	},
-	// )
-	// if err != nil {
-	// 	return nil,
-	// 		LogError(
-	// 			log,
-	// 			fmt.Errorf(
-	// 				"indexing %s: %w",
-	// 				reflect.TypeFor[v1alpha2.ReplicatedVolumeReplica]().Name(),
-	// 				err,
-	// 			),
-	// 		)
-	// }
 
 	return mgr, nil
 }
