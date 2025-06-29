@@ -47,8 +47,6 @@ spec:
             type: object
           spec:
             properties:
-              diskless:
-                type: boolean
               nodeName:
                 type: string
               peers:
@@ -58,15 +56,36 @@ spec:
                       properties:
                         ipv4:
                           type: string
+                        port:
+                          type: integer
                       required:
                       - ipv4
+                      - port
                       type: object
+                    nodeId:
+                      type: integer
                   required:
                   - address
+                  - nodeId
                   type: object
                 type: object
               replicatedVolumeName:
                 type: string
+              volumes:
+                items:
+                  properties:
+                    deviceMinorNumber:
+                      type: integer
+                    disk:
+                      type: string
+                    number:
+                      type: integer
+                  required:
+                  - deviceMinorNumber
+                  - disk
+                  - number
+                  type: object
+                type: array
             required:
             - nodeName
             - replicatedVolumeName

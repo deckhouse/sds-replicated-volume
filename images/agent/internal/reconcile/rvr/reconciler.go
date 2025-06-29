@@ -38,6 +38,7 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req Request,
 ) (reconcile.Result, error) {
+	r.log.Debug("reconciling", "type", reflect.TypeOf(req).String())
 
 	var err error
 	switch typedReq := req.(type) {

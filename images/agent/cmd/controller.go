@@ -53,6 +53,10 @@ func runController(
 
 					// skip status and metadata updates
 					if typedObjOld.Generation >= typedObjNew.Generation {
+						log.Debug(
+							"UpdateFunc - same generation, skip",
+							"name", ue.ObjectNew.GetName(),
+						)
 						return
 					}
 

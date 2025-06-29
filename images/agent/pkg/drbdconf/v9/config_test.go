@@ -139,6 +139,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 	}
 
 	root := &drbdconf.Root{}
+
 	for _, sec := range rootSec.Elements {
 		root.Elements = append(root.Elements, sec.(*drbdconf.Section))
 	}
