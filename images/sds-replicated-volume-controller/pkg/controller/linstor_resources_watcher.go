@@ -369,7 +369,7 @@ func createTieBreaker(ctx context.Context, lc *lapi.Client, resourceName, nodeNa
 			Name:        resourceName,
 			NodeName:    nodeName,
 			Flags:       disklessFlags,
-			LayerObject: lapi.ResourceLayer{},
+			LayerObject: &lapi.ResourceLayer{},
 		},
 	}
 
