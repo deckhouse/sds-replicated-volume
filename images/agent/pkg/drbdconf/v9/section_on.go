@@ -45,7 +45,7 @@ type On struct {
 	// there is no default.
 	NodeId *uint `drbd:"node-id"`
 
-	Volume *Volume
+	Volumes []*Volume
 }
 
 func (o *On) SectionKeyword() string {

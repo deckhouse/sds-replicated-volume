@@ -61,17 +61,26 @@ type ReplicatedVolumeReplicaSpec struct {
 	ReplicatedVolumeName string          `json:"replicatedVolumeName"`
 	NodeName             string          `json:"nodeName"`
 	Peers                map[string]Peer `json:"peers,omitempty"`
-	Diskless             bool            `json:"diskless,omitempty"`
+	Volumes              []Volume        `json:"volumes,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type Peer struct {
+	NodeId  uint    `json:"nodeId"`
 	Address Address `json:"address"`
+}
+
+// +k8s:deepcopy-gen=true
+type Volume struct {
+	Number            uint   `json:"number"`
+	Disk              string `json:"disk"`
+	DeviceMinorNumber uint   `json:"deviceMinorNumber"`
 }
 
 // +k8s:deepcopy-gen=true
 type Address struct {
 	IPv4 string `json:"ipv4"`
+	Port uint   `json:"port"`
 }
 
 // +k8s:deepcopy-gen=true

@@ -1,5 +1,7 @@
 package rvr
 
+//lint:file-ignore ST1001 utils is the only exception
+
 import (
 	"context"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"reflect"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -18,14 +21,16 @@ import (
 var resourcesDir = "/var/lib/sds-replicated-volume-agent.d/"
 
 type Reconciler struct {
-	log *slog.Logger
-	cl  client.Client
+	log      *slog.Logger
+	cl       client.Client
+	nodeName string
 }
 
-func NewReconciler(log *slog.Logger, cl client.Client) *Reconciler {
+func NewReconciler(log *slog.Logger, cl client.Client, nodeName string) *Reconciler {
 	return &Reconciler{
-		log: log,
-		cl:  cl,
+		log:      log,
+		cl:       cl,
+		nodeName: nodeName,
 	}
 }
 
@@ -54,7 +59,7 @@ func (r *Reconciler) handleResourceReconcile(ctx context.Context, req ResourceRe
 		return fmt.Errorf("getting rvr %s: %w", req.Name, err)
 	}
 
-	resourceCfg := createResourceConfig(rvr)
+	resourceCfg := r.createResourceConfig(rvr)
 
 	resourceSection := &drbdconf.Section{}
 
@@ -82,18 +87,11 @@ func (r *Reconciler) handleResourceReconcile(ctx context.Context, req ResourceRe
 
 	r.log.Info("successfully wrote 'n' bytes to 'file'", "n", n, "file", filepath)
 
-	// drbdconf.Unmarshal[]()
-
-	// create res file, if not exist
-	// parse res file
-	// update resource
-	//
-	// drbdadm adjust, if needed
-	// drbdadm up, if needed
+	// TODO create-md+adjust+up
 	return nil
 }
 
-func createResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
+func (r *Reconciler) createResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
 	res := &v9.Resource{
 		Name: rvr.Name,
 		Net: &v9.Net{
@@ -102,31 +100,30 @@ func createResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
 	}
 
 	for peerName, peer := range rvr.Spec.Peers {
-		res.On = append(res.On, &v9.On{
-			HostNames: []string{},
-			// NodeId: ,
-		})
+		onSection := &v9.On{
+			HostNames: []string{peerName},
+			NodeId:    Ptr(peer.NodeId),
+			Address: &v9.AddressWithPort{
+				Address:       peer.Address.IPv4,
+				Port:          peer.Address.Port,
+				AddressFamily: "ipv4",
+			},
+		}
+		res.On = append(res.On, onSection)
+
+		// add volumes for current node
+		if peerName == r.nodeName {
+			for _, volume := range rvr.Spec.Volumes {
+				vol := &v9.Volume{
+					Number:   Ptr(int(volume.Number)),
+					Device:   Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber)),
+					Disk:     Ptr(v9.VolumeDisk(volume.Disk)),
+					MetaDisk: &v9.VolumeMetaDiskInternal{},
+				}
+				onSection.Volumes = append(onSection.Volumes, vol)
+			}
+		}
 	}
 
 	return res
 }
-
-// resource test {
-//     on T14 {
-//         node-id 0;
-//         device           /dev/drbd0 minor 0;
-//         disk             /dev/loop40;
-//         meta-disk        internal;
-//         address          ipv4 127.0.0.1:7788;
-//     }
-//     on a-stefurishin-master-0 {
-//         node-id 1;
-//         device           /dev/drbd0 minor 0;
-//         disk             /dev/loop41;
-//         meta-disk        internal;
-//         address          ipv4 127.0.0.1:7789;
-//     }
-//     net {
-//         protocol           C;
-//     }
-// }

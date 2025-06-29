@@ -23,6 +23,7 @@ func runController(
 	ctx context.Context,
 	log *slog.Logger,
 	mgr manager.Manager,
+	nodeName string,
 ) error {
 	type TReq = rvr.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
@@ -75,7 +76,7 @@ func runController(
 					log.Debug("GenericFunc", "name", ge.Object.GetName())
 				},
 			}).
-		Complete(rvr.NewReconciler(log, mgr.GetClient()))
+		Complete(rvr.NewReconciler(log, mgr.GetClient(), nodeName))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("building controller: %w", err))

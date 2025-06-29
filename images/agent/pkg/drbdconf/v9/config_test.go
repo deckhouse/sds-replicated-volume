@@ -72,6 +72,16 @@ func TestMarshalUnmarshal(t *testing.T) {
 							Address:       "123.123.123.123",
 							Port:          1234,
 						},
+						Volumes: []*Volume{
+							{
+								Number: ptr(0),
+								Disk:   ptr(VolumeDisk("/dev/a")),
+							},
+							{
+								Number: ptr(1),
+								Disk:   ptr(VolumeDisk("/dev/b")),
+							},
+						},
 					},
 					{
 						HostNames: []string{"h1", "h2", "h3"},

@@ -95,7 +95,7 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 
 	// CONTROLLERS
 	GoForever("controller", cancel, log,
-		func() error { return runController(ctx, log, mgr) },
+		func() error { return runController(ctx, log, mgr, envConfig.NodeName) },
 	)
 
 	<-ctx.Done()
