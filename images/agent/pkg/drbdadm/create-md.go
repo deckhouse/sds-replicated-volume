@@ -6,8 +6,8 @@ import (
 	"os/exec"
 )
 
-func ExecuteAdjust(ctx context.Context, resource string) error {
-	cmd := exec.CommandContext(ctx, Command, AdjustArgs(resource)...)
+func ExecuteCreateMD(ctx context.Context, resource string) error {
+	cmd := exec.CommandContext(ctx, Command, CreateMDArgs(resource)...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {

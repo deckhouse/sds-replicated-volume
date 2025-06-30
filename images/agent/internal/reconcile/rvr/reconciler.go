@@ -12,6 +12,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,19 +61,59 @@ func (r *Reconciler) handleResourceReconcile(ctx context.Context, req ResourceRe
 		return fmt.Errorf("getting rvr %s: %w", req.Name, err)
 	}
 
-	resourceCfg := r.createResourceConfig(rvr)
+	if err := r.writeResourceConfig(rvr); err != nil {
+		return err
+	}
+
+	exists, err := drbdadm.ExecuteDumpMD_MetadataExists(ctx, rvr.Spec.ReplicatedVolumeName)
+	if err != nil {
+		return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
+	}
+
+	if !exists {
+		if err := drbdadm.ExecuteCreateMD(ctx, rvr.Spec.ReplicatedVolumeName); err != nil {
+			return fmt.Errorf("ExecuteCreateMD: %w", err)
+		}
+
+		r.log.Info("successfully created metadata for 'resource'", "resource", rvr.Spec.ReplicatedVolumeName)
+	}
+
+	isUp, err := drbdadm.ExecuteStatus_IsUp(ctx, rvr.Spec.ReplicatedVolumeName)
+	if err != nil {
+		return fmt.Errorf("ExecuteStatus_IsUp: %w", err)
+	}
+
+	if !isUp {
+		if err := drbdadm.ExecuteUp(ctx, rvr.Spec.ReplicatedVolumeName); err != nil {
+			return fmt.Errorf("ExecuteUp: %w", err)
+		}
+
+		r.log.Info("successfully upped 'resource'", "resource", rvr.Spec.ReplicatedVolumeName)
+	}
+
+	if err := drbdadm.ExecuteAdjust(ctx, rvr.Spec.ReplicatedVolumeName); err != nil {
+		return fmt.Errorf("ExecuteAdjust: %w", err)
+	}
+
+	r.log.Info("successfully adjusted 'resource'", "resource", rvr.Spec.ReplicatedVolumeName)
+
+	return nil
+}
+
+func (r *Reconciler) writeResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+	resourceCfg := r.generateResourceConfig(rvr)
 
 	resourceSection := &drbdconf.Section{}
 
-	if err = drbdconf.Marshal(resourceCfg, resourceSection); err != nil {
-		return fmt.Errorf("marshaling resource %s cfg: %w", req.Name, err)
+	if err := drbdconf.Marshal(resourceCfg, resourceSection); err != nil {
+		return fmt.Errorf("marshaling resource %s cfg: %w", resourceCfg.Name, err)
 	}
 
 	root := &drbdconf.Root{
 		Elements: []drbdconf.RootElement{resourceSection},
 	}
 
-	filepath := filepath.Join(resourcesDir, req.Name+".res")
+	filepath := filepath.Join(resourcesDir, rvr.Spec.ReplicatedVolumeName+".res")
 
 	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
@@ -87,14 +128,12 @@ func (r *Reconciler) handleResourceReconcile(ctx context.Context, req ResourceRe
 	}
 
 	r.log.Info("successfully wrote 'n' bytes to 'file'", "n", n, "file", filepath)
-
-	// TODO create-md+adjust+up
 	return nil
 }
 
-func (r *Reconciler) createResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
+func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
 	res := &v9.Resource{
-		Name: rvr.Name,
+		Name: rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
 			Protocol: v9.ProtocolC,
 		},
