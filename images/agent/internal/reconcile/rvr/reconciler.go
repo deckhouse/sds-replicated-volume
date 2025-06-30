@@ -151,7 +151,6 @@ func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplic
 				AddressFamily: "ipv4",
 			},
 		}
-		res.On = append(res.On, onSection)
 
 		// add volumes for current node
 		for _, volume := range rvr.Spec.Volumes {
@@ -165,6 +164,8 @@ func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplic
 			}
 			onSection.Volumes = append(onSection.Volumes, vol)
 		}
+
+		res.On = append(res.On, onSection)
 	}
 
 	return &v9.Config{
