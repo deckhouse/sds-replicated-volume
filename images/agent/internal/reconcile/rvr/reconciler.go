@@ -106,7 +106,7 @@ func (r *Reconciler) writeResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) 
 	resourceSection := &drbdconf.Section{}
 
 	if err := drbdconf.Marshal(resourceCfg, resourceSection); err != nil {
-		return fmt.Errorf("marshaling resource %s cfg: %w", resourceCfg.Name, err)
+		return fmt.Errorf("marshaling resource %s cfg: %w", rvr.Spec.ReplicatedVolumeName, err)
 	}
 
 	root := &drbdconf.Root{
@@ -131,7 +131,7 @@ func (r *Reconciler) writeResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) 
 	return nil
 }
 
-func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Resource {
+func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) *v9.Config {
 	res := &v9.Resource{
 		Name: rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
@@ -165,5 +165,7 @@ func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplic
 		}
 	}
 
-	return res
+	return &v9.Config{
+		Resources: []*v9.Resource{res},
+	}
 }
