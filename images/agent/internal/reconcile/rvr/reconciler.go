@@ -154,16 +154,16 @@ func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplic
 		res.On = append(res.On, onSection)
 
 		// add volumes for current node
-		if peerName == r.nodeName {
-			for _, volume := range rvr.Spec.Volumes {
-				vol := &v9.Volume{
-					Number:   Ptr(int(volume.Number)),
-					Device:   Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber)),
-					Disk:     Ptr(v9.VolumeDisk(volume.Disk)),
-					MetaDisk: &v9.VolumeMetaDiskInternal{},
-				}
-				onSection.Volumes = append(onSection.Volumes, vol)
+		for _, volume := range rvr.Spec.Volumes {
+			vol := &v9.Volume{
+				Number: Ptr(int(volume.Number)),
 			}
+			if peerName == r.nodeName {
+				vol.Device = Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber))
+				vol.Disk = Ptr(v9.VolumeDisk(volume.Disk))
+				vol.MetaDisk = &v9.VolumeMetaDiskInternal{}
+			}
+			onSection.Volumes = append(onSection.Volumes, vol)
 		}
 	}
 
