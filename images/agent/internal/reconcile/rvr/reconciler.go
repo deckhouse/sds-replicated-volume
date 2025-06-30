@@ -103,14 +103,16 @@ func (r *Reconciler) handleResourceReconcile(ctx context.Context, req ResourceRe
 func (r *Reconciler) writeResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 	resourceCfg := r.generateResourceConfig(rvr)
 
-	resourceSection := &drbdconf.Section{}
+	rootSection := &drbdconf.Section{}
 
-	if err := drbdconf.Marshal(resourceCfg, resourceSection); err != nil {
+	if err := drbdconf.Marshal(resourceCfg, rootSection); err != nil {
 		return fmt.Errorf("marshaling resource %s cfg: %w", rvr.Spec.ReplicatedVolumeName, err)
 	}
 
-	root := &drbdconf.Root{
-		Elements: []drbdconf.RootElement{resourceSection},
+	root := &drbdconf.Root{}
+
+	for _, sec := range rootSection.Elements {
+		root.Elements = append(root.Elements, sec.(*drbdconf.Section))
 	}
 
 	filepath := filepath.Join(resourcesDir, rvr.Spec.ReplicatedVolumeName+".res")
