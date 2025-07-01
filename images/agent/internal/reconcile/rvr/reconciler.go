@@ -154,13 +154,23 @@ func (r *Reconciler) generateResourceConfig(rvr *v1alpha2.ReplicatedVolumeReplic
 
 		// add volumes for current node
 		for _, volume := range rvr.Spec.Volumes {
+			// common values for all nodes
 			vol := &v9.Volume{
-				Number: Ptr(int(volume.Number)),
+				Number:   Ptr(int(volume.Number)),
+				Device:   Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber)),
+				MetaDisk: &v9.VolumeMetaDiskInternal{},
 			}
+
+			// some information is node-specific, so it will be skipped
 			if peerName == r.nodeName {
-				vol.Device = Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber))
 				vol.Disk = Ptr(v9.VolumeDisk(volume.Disk))
-				vol.MetaDisk = &v9.VolumeMetaDiskInternal{}
+				vol.DiskOptions = &v9.DiskOptions{
+					DiscardZeroesIfAligned: Ptr(false),
+					RsDiscardGranularity:   Ptr(uint(8192)),
+				}
+			} else {
+				vol.Disk = Ptr(v9.VolumeDisk("/not/used"))
+				vol.DiskOptions = nil
 			}
 			onSection.Volumes = append(onSection.Volumes, vol)
 		}

@@ -70,5 +70,6 @@ type PeerDeviceOptions struct {
 var _ drbdconf.SectionKeyworder = &PeerDeviceOptions{}
 
 func (p *PeerDeviceOptions) SectionKeyword() string {
-	return "peer-device-options"
+	// "Please note that you open the section with the disk keyword."
+	return "disk"
 }
