@@ -141,7 +141,7 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	for _, volume := range h.rvr.Spec.Volumes {
 		vol := &v9.Volume{
 			Number:   Ptr(int(volume.Number)),
-			Device:   Ptr(v9.DeviceMinorNumber(volume.DeviceMinorNumber)),
+			Device:   Ptr(v9.DeviceMinorNumber(volume.Device)),
 			MetaDisk: &v9.VolumeMetaDiskInternal{},
 		}
 
@@ -166,11 +166,8 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	if !isCurrentNode {
 		con := &v9.Connection{
 			Hosts: []v9.HostAddress{
-				apiAddressToV9HostAddress(h.rvr.Spec.NodeAddress),
-				apiAddressToV9HostAddress(nodeAddress),
-			},
-			Net: &v9.Net{
-				SharedSecret: peerOptions.SharedSecret,
+				apiAddressToV9HostAddress(h.nodeName, h.rvr.Spec.NodeAddress),
+				apiAddressToV9HostAddress(nodeName, nodeAddress),
 			},
 		}
 
@@ -184,8 +181,9 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	}
 }
 
-func apiAddressToV9HostAddress(address v1alpha2.Address) v9.HostAddress {
+func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.HostAddress {
 	return v9.HostAddress{
+		Name:          hostname,
 		Address:       address.IPv4,
 		AddressFamily: "ipv4",
 		Port:          Ptr(address.Port),

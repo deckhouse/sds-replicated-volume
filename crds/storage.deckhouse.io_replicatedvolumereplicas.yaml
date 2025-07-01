@@ -82,7 +82,6 @@ spec:
                       type: string
                   required:
                   - address
-                  - diskless
                   - nodeId
                   type: object
                 type: object
@@ -93,14 +92,14 @@ spec:
               volumes:
                 items:
                   properties:
-                    deviceMinorNumber:
+                    device:
                       type: integer
                     disk:
                       type: string
                     number:
                       type: integer
                   required:
-                  - deviceMinorNumber
+                  - device
                   - disk
                   - number
                   type: object

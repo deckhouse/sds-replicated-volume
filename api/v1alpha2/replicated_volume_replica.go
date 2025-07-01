@@ -71,15 +71,15 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	NodeId       uint    `json:"nodeId"`
 	Address      Address `json:"address"`
-	Diskless     bool    `json:"diskless"`
+	Diskless     bool    `json:"diskless,omitempty"`
 	SharedSecret string  `json:"sharedSecret,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type Volume struct {
-	Number            uint   `json:"number"`
-	Disk              string `json:"disk"`
-	DeviceMinorNumber uint   `json:"deviceMinorNumber"`
+	Number uint   `json:"number"`
+	Disk   string `json:"disk"`
+	Device uint   `json:"device"`
 }
 
 // +k8s:deepcopy-gen=true

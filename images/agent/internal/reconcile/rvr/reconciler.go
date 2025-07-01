@@ -44,6 +44,13 @@ func (r *Reconciler) Reconcile(
 		rvr := &v1alpha2.ReplicatedVolumeReplica{}
 		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr)
 		if err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				r.log.Warn(
+					"rvr 'name' not found, it might be deleted, ignore",
+					"name", typedReq.Name,
+				)
+				return reconcile.Result{}, nil
+			}
 			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
 		}
 
