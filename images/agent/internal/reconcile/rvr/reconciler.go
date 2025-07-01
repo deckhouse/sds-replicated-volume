@@ -60,6 +60,7 @@ func (r *Reconciler) Reconcile(
 			cl:       r.cl,
 			nodeName: r.nodeName,
 			cfg:      clusterCfg,
+			rvr:      rvr,
 		}
 
 		return reconcile.Result{}, h.Handle()
