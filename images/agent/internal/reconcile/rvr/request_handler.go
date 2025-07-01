@@ -183,9 +183,9 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 
 func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.HostAddress {
 	return v9.HostAddress{
-		Name:          hostname,
-		Address:       address.IPv4,
-		AddressFamily: "ipv4",
-		Port:          Ptr(address.Port),
+		Name:            hostname,
+		AddressWithPort: address.IPv4,
+		AddressFamily:   "ipv4",
+		Port:            Ptr(address.Port),
 	}
 }

@@ -8,24 +8,23 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
-// <name> [address [<address-family>] <address>] [port <port-number>]
+// <name> [address [<address-family>] <address>:<port-number>] [port <port-number>]
 type HostAddress struct {
-	Name          string
-	Address       string
-	AddressFamily string
-	Port          *uint
+	Name            string
+	AddressWithPort string
+	AddressFamily   string
+	Port            *uint
 }
 
 func (h *HostAddress) MarshalParameter() ([]string, error) {
 	res := []string{h.Name}
-	if h.Address != "" {
+	if h.AddressWithPort != "" {
 		res = append(res, "address")
 		if h.AddressFamily != "" {
 			res = append(res, h.AddressFamily)
 		}
-		res = append(res, h.Address)
-	}
-	if h.Port != nil {
+		res = append(res, h.AddressWithPort)
+	} else if h.Port != nil {
 		res = append(res, "port")
 		res = append(res, strconv.FormatUint(uint64(*h.Port), 10))
 	}
@@ -46,7 +45,7 @@ func (h *HostAddress) UnmarshalParameter(p []drbdconf.Word) error {
 
 	p = p[2:]
 
-	address, addressFamily, portStr, err := unmarshalHostAddress(p)
+	addressWithPort, addressFamily, portStr, err := unmarshalHostAddress(p)
 	if err != nil {
 		return err
 	}
@@ -61,7 +60,7 @@ func (h *HostAddress) UnmarshalParameter(p []drbdconf.Word) error {
 		port = ptr(uint(p))
 	}
 	h.Name = hostname
-	h.Address = address
+	h.AddressWithPort = addressWithPort
 	h.AddressFamily = addressFamily
 	h.Port = port
 
@@ -69,39 +68,27 @@ func (h *HostAddress) UnmarshalParameter(p []drbdconf.Word) error {
 }
 
 func unmarshalHostAddress(p []drbdconf.Word) (
-	address, addressFamily, portStr string,
+	addressWithPort, addressFamily, portStr string,
 	err error,
 ) {
 	if err = drbdconf.EnsureLen(p, 2); err != nil {
 		return
 	}
 
-	if p[0].Value == "address" {
-		val1 := p[1].Value
-		p = p[2:]
-
-		if len(p) == 0 || p[0].Value == "port" {
-			address = val1
-		} else {
-			addressFamily = val1
-			address = p[0].Value
-			p = p[1:]
-			if len(p) == 0 {
-				return
-			}
+	switch p[0].Value {
+	case "address":
+		if len(p) == 2 {
+			addressWithPort = p[1].Value
+		} else { // >=3
+			addressFamily = p[1].Value
+			addressWithPort = p[2].Value
 		}
+	case "port":
+		portStr = p[1].Value
+	default:
+		err = fmt.Errorf("unrecognized keyword: '%s'", p[0].Value)
 	}
 
-	if len(p) > 0 {
-		if p[0].Value == "port" {
-			if err = drbdconf.EnsureLen(p, 2); err != nil {
-				return
-			}
-			portStr = p[1].Value
-		} else {
-			err = fmt.Errorf("unrecognized keyword: '%s'", p[0].Value)
-		}
-	}
 	return
 }
 

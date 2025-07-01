@@ -39,24 +39,24 @@ func TestMarshalUnmarshal(t *testing.T) {
 						Name: "con1",
 						Hosts: []HostAddress{
 							{
-								Name:    "addr1",
-								Address: "123.123.124.124",
+								Name:            "addr1",
+								AddressWithPort: "123.123.124.124:1000",
 							},
 							{
-								Name:    "addr2",
-								Address: "123.123.124.224",
+								Name: "addr2",
+								Port: ptr[uint](1232),
 							},
 						},
 						Paths: []*Path{
 							{
 								Hosts: []HostAddress{
 									{
-										Name:    "addr1",
-										Address: "123.123.124.124",
+										Name:            "addr1",
+										AddressWithPort: "123.123.124.124:123123",
 									},
 									{
-										Name:    "addr2",
-										Address: "123.123.124.224",
+										Name:            "addr2",
+										AddressWithPort: "123.123.124.224",
 									},
 								},
 							},
