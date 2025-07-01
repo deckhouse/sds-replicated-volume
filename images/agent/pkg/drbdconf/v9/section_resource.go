@@ -6,7 +6,7 @@ import "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 // one [Connection] section.
 type Resource struct {
 	Name           string `drbd:""`
-	Connection     []*Connection
+	Connections    []*Connection
 	ConnectionMesh *ConnectionMesh
 	Disk           *DiskOptions
 	Floating       []*Floating

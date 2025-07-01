@@ -33,7 +33,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 				Disk: &DiskOptions{
 					MDFlushes: ptr(true),
 				},
-				Connection: []*Connection{
+				Connections: []*Connection{
 					{},
 					{
 						Name: "con1",

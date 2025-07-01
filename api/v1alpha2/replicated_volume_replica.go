@@ -60,14 +60,19 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 type ReplicatedVolumeReplicaSpec struct {
 	ReplicatedVolumeName string          `json:"replicatedVolumeName"`
 	NodeName             string          `json:"nodeName"`
-	Peers                map[string]Peer `json:"peers,omitempty"`
-	Volumes              []Volume        `json:"volumes,omitempty"`
+	NodeId               uint            `json:"nodeId"`
+	NodeAddress          Address         `json:"nodeAddress"`
+	Peers                map[string]Peer `json:"peers"`
+	Volumes              []Volume        `json:"volumes"`
+	SharedSecret         string          `json:"sharedSecret"`
 }
 
 // +k8s:deepcopy-gen=true
 type Peer struct {
-	NodeId  uint    `json:"nodeId"`
-	Address Address `json:"address"`
+	NodeId       uint    `json:"nodeId"`
+	Address      Address `json:"address"`
+	Diskless     bool    `json:"diskless"`
+	SharedSecret string  `json:"sharedSecret,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
