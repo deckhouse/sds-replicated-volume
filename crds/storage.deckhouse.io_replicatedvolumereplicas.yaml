@@ -47,6 +47,18 @@ spec:
             type: object
           spec:
             properties:
+              nodeAddress:
+                properties:
+                  ipv4:
+                    type: string
+                  port:
+                    type: integer
+                required:
+                - ipv4
+                - port
+                type: object
+              nodeId:
+                type: integer
               nodeName:
                 type: string
               peers:
@@ -62,14 +74,21 @@ spec:
                       - ipv4
                       - port
                       type: object
+                    diskless:
+                      type: boolean
                     nodeId:
                       type: integer
+                    sharedSecret:
+                      type: string
                   required:
                   - address
+                  - diskless
                   - nodeId
                   type: object
                 type: object
               replicatedVolumeName:
+                type: string
+              sharedSecret:
                 type: string
               volumes:
                 items:
@@ -87,8 +106,13 @@ spec:
                   type: object
                 type: array
             required:
+            - nodeAddress
+            - nodeId
             - nodeName
+            - peers
             - replicatedVolumeName
+            - sharedSecret
+            - volumes
             type: object
           status:
             properties:
