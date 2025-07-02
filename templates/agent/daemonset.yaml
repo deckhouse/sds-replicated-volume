@@ -106,7 +106,9 @@ spec:
         - mountPath: /var/lib/sds-replicated-volume-agent.d
           name: sds-replicated-volume-agent-d
         - mountPath: /var/run/drbd/
-          name: drbd
+          name: host-var-run-drbd-dir
+        - mountPath: /var/lib/drbd/
+          name: host-var-lib-drbd-dir
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -121,7 +123,11 @@ spec:
       - hostPath:
           path: /var/run/drbd/
           type: ""
-        name: drbd
+        name: host-var-run-drbd-dir
+      - hostPath:
+          path: /var/lib/drbd/
+          type: ""
+        name: host-var-lib-drbd-dir
       - name: config
         configMap:
           name: sds-replicated-volume-agent-config
