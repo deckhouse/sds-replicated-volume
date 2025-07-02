@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"syscall"
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
@@ -81,6 +82,12 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 		return LogError(log, fmt.Errorf("getting env config: %w", err))
 	}
 	log = log.With("nodeName", envConfig.NodeName)
+
+	log.Info("calling syscall.Sethostname")
+	err = syscall.Sethostname([]byte(envConfig.NodeName))
+	if err != nil {
+		return fmt.Errorf("syscall.Sethostname: %w", err)
+	}
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
