@@ -105,8 +105,8 @@ spec:
           name: config
         - mountPath: /var/lib/sds-replicated-volume-agent.d
           name: sds-replicated-volume-agent-d
-        - mountPath: /var/run/drbd/lock
-          name: drbd-lock
+        - mountPath: /var/run/drbd/
+          name: drbd
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -118,6 +118,10 @@ spec:
           path: /dev/
           type: ""
         name: host-device-dir
+      - hostPath:
+          path: /var/run/drbd/
+          type: ""
+        name: drbd
       - name: config
         configMap:
           name: sds-replicated-volume-agent-config
@@ -125,7 +129,5 @@ spec:
             - key: slogh.cfg
               path: slogh.cfg
       - name: sds-replicated-volume-agent-d
-        emptyDir: {}
-      - name: drbd-lock
         emptyDir: {}
 {{- end }}
