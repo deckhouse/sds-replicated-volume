@@ -60,6 +60,7 @@ spec:
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
       serviceAccountName: agent
+      hostNetwork: true
       # We need root privileges to perform drbd operations on the node.
       securityContext:
         runAsUser: 0
@@ -76,6 +77,7 @@ spec:
         readinessProbe:
           httpGet:
             path: /readyz
+            host: 127.0.0.1
             port: 4269
             scheme: HTTP
           initialDelaySeconds: 5
@@ -84,6 +86,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /healthz
+            host: 127.0.0.1
             port: 4269
             scheme: HTTP
           periodSeconds: 1
@@ -103,12 +106,14 @@ spec:
           name: host-device-dir
         - mountPath: /etc/config/
           name: config
-        - mountPath: /var/lib/sds-replicated-volume-agent.d
+        - mountPath: /var/lib/sds-replicated-volume-agent.d/
           name: sds-replicated-volume-agent-d
-        - mountPath: /var/run/drbd/
-          name: host-var-run-drbd-dir
         - mountPath: /var/lib/drbd/
-          name: host-var-lib-drbd-dir
+          name: var-lib-drbd
+        - mountPath: /var/run/drbd/
+          name: var-run-drbd
+        - mountPath: /var/lock/
+          name: var-lock
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
@@ -120,14 +125,6 @@ spec:
           path: /dev/
           type: ""
         name: host-device-dir
-      - hostPath:
-          path: /var/run/drbd/
-          type: ""
-        name: host-var-run-drbd-dir
-      - hostPath:
-          path: /var/lib/drbd/
-          type: ""
-        name: host-var-lib-drbd-dir
       - name: config
         configMap:
           name: sds-replicated-volume-agent-config
@@ -135,5 +132,11 @@ spec:
             - key: slogh.cfg
               path: slogh.cfg
       - name: sds-replicated-volume-agent-d
+        emptyDir: {}
+      - name: var-lib-drbd
+        emptyDir: {}
+      - name: var-run-drbd
+        emptyDir: {}
+      - name: var-lock
         emptyDir: {}
 {{- end }}
