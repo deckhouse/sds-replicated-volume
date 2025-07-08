@@ -40,7 +40,6 @@
 
 {{- $_ := set $ "VERSIONS" $versions }}
 
-
 # custom constants
 {{- $_ := set $ "BUILD_PACKAGES" "build-essential rpm-build rpm-macros-intro-conflicts sudo git jq" }}
 {{- $_ := set $ "DECKHOUSE_UID_GID" "64535" }}
