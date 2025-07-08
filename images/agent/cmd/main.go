@@ -8,12 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"syscall"
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/hotreload"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 
 	"github.com/go-logr/logr"
@@ -43,6 +43,9 @@ func main() {
 
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
+
+	hotreload.Enable(ctx, hotreload.WithLogger(log))
+
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
 	// TODO: fix slogh reload
@@ -82,12 +85,6 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 		return LogError(log, fmt.Errorf("getting env config: %w", err))
 	}
 	log = log.With("nodeName", envConfig.NodeName)
-
-	log.Info("calling syscall.Sethostname")
-	err = syscall.Sethostname([]byte(envConfig.NodeName))
-	if err != nil {
-		return fmt.Errorf("syscall.Sethostname: %w", err)
-	}
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
