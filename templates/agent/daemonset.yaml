@@ -98,7 +98,7 @@ spec:
                 fieldPath: spec.nodeName
 {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- if $dhVersionIsDev }}
-          - name: HOT_RELOAD_ENABLED
+          - name: HOTRELOAD_ENABLED
             value: "1"
 {{- end }}
           - name: SLOGH_CONFIG_PATH

@@ -31,6 +31,8 @@ import (
 )
 
 func main() {
+	hotreload.EnableCli()
+
 	ctx := signals.SetupSignalHandler()
 
 	logHandler := slogh.NewHandler(
@@ -62,6 +64,7 @@ func main() {
 	// )
 
 	log.Info("agent started")
+	log.Info("HELLO WORLD")
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {

@@ -1,8 +1,11 @@
 package hotreload
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -11,7 +14,7 @@ import (
 	"time"
 )
 
-const HotReloadEnabledEnvVar = "HOT_RELOAD_ENABLED"
+var HotReloadEnabledEnvVar = "HOTRELOAD_ENABLED"
 
 type Option func(*Options)
 
@@ -102,6 +105,41 @@ func WithCommand(createCommand func(ctx context.Context) *exec.Cmd) Option {
 	}
 }
 
+// support calling from `kubectl exec` in order to copy files into
+// distroless container
+func EnableCli() {
+	if len(os.Args) >= 1 && os.Args[1] == "hotreload-cp" {
+		if len(os.Args) == 2 {
+			fmt.Println("Usage: hotreload-cp <target_path>")
+			os.Exit(1)
+		}
+
+		gzipReader, err := gzip.NewReader(os.Stdin)
+		if err != nil {
+			fmt.Printf("creating gzip reader: %v", err)
+			os.Exit(1)
+		}
+		defer gzipReader.Close()
+
+		targetPath := os.Args[2]
+
+		file, err := os.Create(targetPath)
+		if err != nil {
+			fmt.Printf("creating file: %v", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		_, err = io.Copy(file, gzipReader)
+		if err != nil {
+			fmt.Printf("writing to file: %v", err)
+			os.Exit(1)
+		}
+
+		os.Exit(0)
+	}
+}
+
 // Uses [HotReloadEnabledEnvVar] to determine if running in a parent process,
 // which should run and then hot-reload child process. This function never
 // returns for parent process. When context is canceled, child process is killed
@@ -112,12 +150,12 @@ func WithCommand(createCommand func(ctx context.Context) *exec.Cmd) Option {
 // Default behaviour is to "fork" current process and check for modtime each
 // second for reloads.
 func Enable(ctx context.Context, opts ...Option) {
+	o := newOptions(opts...)
+
 	// child process returns immediately
 	if os.Getenv(HotReloadEnabledEnvVar) != "1" {
 		return
 	}
-
-	o := newOptions(opts...)
 
 	// initial wait to start
 	o.WaitForChanges(ctx)
