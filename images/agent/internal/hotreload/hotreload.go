@@ -108,6 +108,7 @@ func WithCommand(createCommand func(ctx context.Context) *exec.Cmd) Option {
 // support calling from `kubectl exec` in order to copy files into
 // distroless container
 func EnableCli() {
+	fmt.Println("Cli enabled")
 	if len(os.Args) >= 1 && os.Args[1] == "hotreload-cp" {
 		if len(os.Args) == 2 {
 			fmt.Println("Usage: hotreload-cp <target_path>")
@@ -116,7 +117,7 @@ func EnableCli() {
 
 		gzipReader, err := gzip.NewReader(os.Stdin)
 		if err != nil {
-			fmt.Printf("creating gzip reader: %v", err)
+			fmt.Printf("creating gzip reader: %v\n", err)
 			os.Exit(1)
 		}
 		defer gzipReader.Close()
@@ -125,14 +126,14 @@ func EnableCli() {
 
 		file, err := os.Create(targetPath)
 		if err != nil {
-			fmt.Printf("creating file: %v", err)
+			fmt.Printf("creating file: %v\n", err)
 			os.Exit(1)
 		}
 		defer file.Close()
 
 		_, err = io.Copy(file, gzipReader)
 		if err != nil {
-			fmt.Printf("writing to file: %v", err)
+			fmt.Printf("writing to file: %v\n", err)
 			os.Exit(1)
 		}
 
