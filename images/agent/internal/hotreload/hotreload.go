@@ -109,7 +109,7 @@ func WithCommand(createCommand func(ctx context.Context) *exec.Cmd) Option {
 // distroless container
 func EnableCli() {
 	fmt.Println("Cli enabled")
-	if len(os.Args) >= 1 && os.Args[1] == "hotreload-cp" {
+	if len(os.Args) >= 2 && os.Args[1] == "hotreload-cp" {
 		if len(os.Args) == 2 {
 			fmt.Println("Usage: hotreload-cp <target_path>")
 			os.Exit(1)
