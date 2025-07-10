@@ -42,6 +42,7 @@ func main() {
 
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
+
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
 	// TODO: fix slogh reload
