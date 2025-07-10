@@ -13,7 +13,6 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/hotreload"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 
 	"github.com/go-logr/logr"
@@ -31,8 +30,6 @@ import (
 )
 
 func main() {
-	hotreload.EnableCli()
-
 	ctx := signals.SetupSignalHandler()
 
 	logHandler := slogh.NewHandler(
@@ -45,15 +42,6 @@ func main() {
 
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
-
-	hotreload.Enable(
-		ctx,
-		hotreload.WithLogger(log),
-		hotreload.WithPeriodicalModtimeChecker(
-			"/var/lib/sds-replicated-volume-agent.d/agent",
-			time.Second,
-		),
-	)
 
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
@@ -71,7 +59,6 @@ func main() {
 	// )
 
 	log.Info("agent started")
-	log.Info("HELLO WORLD!!!")
 
 	err := runAgent(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
