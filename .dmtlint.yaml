@@ -22,13 +22,7 @@ linters-settings:
           container: node-driver-registrar
         - kind: DaemonSet
           name: linstor-node
-          container: kube-rbac-proxy
-        - kind: DaemonSet
-          name: linstor-node
           container: linstor-resources-cleaner
-        - kind: Deployment
-          name: linstor-controller
-          container: kube-rbac-proxy
         - kind: Deployment
           name: linstor-scheduler-extender
           container: linstor-scheduler-extender
@@ -62,16 +56,10 @@ linters-settings:
           container: linstor-resources-cleaner
         - kind: DaemonSet
           name: linstor-node
-          container: kube-rbac-proxy
-        - kind: DaemonSet
-          name: linstor-node
           container: linstor-satellite
         - kind: DaemonSet
           name: linstor-node
           container: drbd-prometheus-exporter
-        - kind: Deployment
-          name: linstor-controller
-          container: kube-rbac-proxy
         - kind: Deployment
           name: linstor-controller
           container: linstor-controller

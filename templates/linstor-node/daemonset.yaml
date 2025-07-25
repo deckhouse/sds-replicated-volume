@@ -191,11 +191,16 @@ spec:
             name: var-dir
           - mountPath: /etc/lvm/archive
             name: lvm-archive
+          - mountPath: /etc/lvm/backup
+            name: lvm-backup
+          - mountPath: /run/lvm
+            name: run-lvm
       - args:
           - --secure-listen-address=$(KUBE_RBAC_PROXY_LISTEN_ADDRESS):4215
           - --v=2
           - --logtostderr=true
           - --stale-cache-interval=1h30m
+          - "--livez-path=/livez"
         env:
           - name: KUBE_RBAC_PROXY_LISTEN_ADDRESS
             valueFrom:
@@ -218,6 +223,16 @@ spec:
         image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
         imagePullPolicy: IfNotPresent
         name: kube-rbac-proxy
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
+        readinessProbe:
+          httpGet:
+            path: /livez
+            port: 4215
+            scheme: HTTPS
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -251,7 +266,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "drbd_prometheus_exporter_resources" . | nindent 12 }}
 {{- end }}
-        securityContext: 
+        securityContext:
           readOnlyRootFilesystem: true
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
@@ -266,7 +281,11 @@ spec:
       serviceAccountName: linstor-node
       terminationGracePeriodSeconds: 30
       volumes:
+        - name: run-lvm
+          emptyDir: {}
         - name: lvm-archive
+          emptyDir: {}
+        - name: lvm-backup
           emptyDir: {}
         - name: lock-dir
           emptyDir: {}
