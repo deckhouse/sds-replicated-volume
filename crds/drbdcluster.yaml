@@ -1,0 +1,161 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: drbdclusters.storage.deckhouse.io
+  labels:
+    heritage: deckhouse
+    module: storage
+    backup.deckhouse.io/cluster-config: "true"
+spec:
+  group: storage.deckhouse.io
+  scope: Cluster
+  names:
+    kind: DRBDCluster
+    plural: drbdclusters
+    singular: drbdcluster
+    shortNames:
+      - drbdcl
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          description: |
+            DRBDCluster is a Kubernetes Custom Resource that defines a configuration for a DRBD cluster.
+          properties:
+            spec:
+              type: object
+              properties:
+                replicas:
+                  type: integer
+                  minimum: 1
+                  description: "Number of replicas."
+                quorumPolicy:
+                  type: string
+                  enum:
+                    - off
+                    - none
+                    - majority
+                    - all
+                  description: "Quorum policy for the cluster."
+                networkPoolName:
+                  type: string
+                  description: "Name of the network pool to use."
+                sharedSecret:
+                  type: string
+                  description: "Shared secret for authentication."
+                size:
+                  type: integer
+                  description: "Requested size of the DRBD device." # TODO: divice же?
+                drbdCurrentGi:
+                  type: string
+                  description: "Current DRBD generation identifier." # TODO: generation identifier же?
+                port:
+                  type: integer
+                  description: "Port for DRBD communication."
+                minor:
+                  type: integer
+                  description: "Minor number for the DRBD device."
+                attachmentRequested:
+                  type: array
+                  items:
+                    type: string
+                  description: "List of nodes where attachment is requested."
+                topologySpreadConstraints:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      maxSkew:
+                        type: integer
+                      topologyKey:
+                        type: string
+                      whenUnsatisfiable:
+                        type: string
+                  description: "Topology spread constraints for scheduling."
+                affinity:
+                  type: object
+                  properties:
+                    nodeAffinity:
+                      type: object
+                      properties:
+                        requiredDuringSchedulingIgnoredDuringExecution:
+                          type: object
+                          properties:
+                            nodeSelectorTerms:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  matchExpressions:
+                                    type: array
+                                    items:
+                                      type: object
+                                      properties:
+                                        key:
+                                          type: string
+                                        operator:
+                                          type: string
+                                        values:
+                                          type: array
+                                          items:
+                                            type: string
+                autoDiskful:
+                  type: object
+                  properties:
+                    delaySeconds:
+                      type: integer
+                      description: "Delay in seconds for auto-diskful operation."
+                autoRecovery:
+                  type: object
+                  properties:
+                    delaySeconds:
+                      type: integer
+                      description: "Delay in seconds for auto-recovery."
+                storagePoolSelector:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      matchExpressions:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            key:
+                              type: string
+                            operator:
+                              type: string
+                            values:
+                              type: array
+                              items:
+                                type: string
+            status:
+              type: object
+              properties:
+                size:
+                  type: integer
+                  description: "Actual size of the DRBD device."
+                attachmentCompleted:
+                  type: array
+                  items:
+                    type: string
+                  description: "List of nodes where attachment is completed."
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      lastTransitionTime:
+                        type: string
+                        format: date-time
+                      message:
+                        type: string
+                      reason:
+                        type: string
+                      status:
+                        type: string
+                      type:
+                        type: string

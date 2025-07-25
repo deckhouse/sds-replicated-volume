@@ -64,9 +64,7 @@ run_trigger() {
   delete_resource ${NAMESPACE} daemonset linstor-csi-node
   scale_down_pods ${NAMESPACE} linstor-csi-controller
   scale_down_pods ${NAMESPACE} linstor-affinity-controller
-  scale_down_pods ${NAMESPACE} linstor-scheduler
   scale_down_pods ${NAMESPACE} sds-replicated-volume-controller
-  scale_down_pods ${NAMESPACE} linstor-scheduler-admission
 
 
   export temp_dir=$(mktemp -d)
