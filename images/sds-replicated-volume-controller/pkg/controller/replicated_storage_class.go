@@ -106,9 +106,8 @@ const (
 	ManagedLabelKey   = "storage.deckhouse.io/managed-by"
 	ManagedLabelValue = "sds-replicated-volume"
 
-	RSCStorageClassVolumeSnapshotClassAnnotationKey = "storage.deckhouse.io/volumesnapshotclass"
+	RSCStorageClassVolumeSnapshotClassAnnotationKey   = "storage.deckhouse.io/volumesnapshotclass"
 	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
-
 
 	Created = "Created"
 	Failed  = "Failed"
