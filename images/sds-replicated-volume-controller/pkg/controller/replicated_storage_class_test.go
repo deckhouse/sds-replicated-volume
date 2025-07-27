@@ -1736,7 +1736,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
-		Expect(len(storageClass.Annotations)).To(Equal(2))
+		Expect(len(storageClass.Annotations)).To(Equal(3))
 		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
 		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
 		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
