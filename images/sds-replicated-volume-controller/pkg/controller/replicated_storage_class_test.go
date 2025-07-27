@@ -1579,6 +1579,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		storageClass := getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(storageClass.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
+		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
 		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
@@ -1652,6 +1653,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations).NotTo(BeNil())
 		Expect(len(storageClass.Annotations)).To(Equal(1))
 		Expect(storageClass.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
+		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
 		err = createConfigMap(ctx, cl, validCFG.ControllerNamespace, map[string]string{controller.VirtualizationModuleEnabledKey: "true"})
 		Expect(err).NotTo(HaveOccurred())
