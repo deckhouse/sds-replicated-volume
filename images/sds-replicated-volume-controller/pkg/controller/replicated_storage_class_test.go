@@ -1595,6 +1595,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 		storageClass = getAndValidateSC(ctx, cl, replicatedSC)
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
+		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
 		// Cleanup
 		err = cl.Delete(ctx, &replicatedSC)
@@ -1682,6 +1683,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(len(scResource.Annotations)).To(Equal(2))
 		Expect(scResource.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
 		Expect(scResource.Annotations[controller.StorageClassVirtualizationAnnotationKey]).To(Equal(controller.StorageClassVirtualizationAnnotationValue))
+		Expect(scResource.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
 		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
