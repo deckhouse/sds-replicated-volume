@@ -106,6 +106,10 @@ const (
 	ManagedLabelKey   = "storage.deckhouse.io/managed-by"
 	ManagedLabelValue = "sds-replicated-volume"
 
+	RSCStorageClassVolumeSnapshotClassAnnotationKey = "storage.deckhouse.io/volumesnapshotclass"
+	RSCStorageClassVolumeSnapshotClassAnnotationValue = "sds-replicated-volume"
+
+
 	Created = "Created"
 	Failed  = "Failed"
 
@@ -538,7 +542,7 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 			Finalizers:      []string{StorageClassFinalizerName},
 			ManagedFields:   nil,
 			Labels:          map[string]string{ManagedLabelKey: ManagedLabelValue},
-			Annotations:     nil,
+			Annotations:     map[string]string{RSCStorageClassVolumeSnapshotClassAnnotationKey: RSCStorageClassVolumeSnapshotClassAnnotationValue},
 		},
 		AllowVolumeExpansion: &allowVolumeExpansion,
 		Parameters:           storageClassParameters,
