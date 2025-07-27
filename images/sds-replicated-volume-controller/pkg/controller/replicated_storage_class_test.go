@@ -1645,7 +1645,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClassResource.Provisioner).To(Equal(controller.StorageClassProvisioner))
 
 		// add default annotation
-		storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true"}
+		storageClassResource.Annotations = map[string]string{controller.DefaultStorageClassAnnotationKey: "true", controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}
 
 		err := cl.Create(ctx, storageClassResource)
 		Expect(err).NotTo(HaveOccurred())
@@ -1715,7 +1715,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(configMap.Name).To(Equal(controller.ControllerConfigMapName))
 		Expect(configMap.Namespace).To(Equal(validCFG.ControllerNamespace))
 		Expect(configMap.Data).NotTo(BeNil())
-		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("false"))
+		Expect(configMap.Data[controller.VirtualizationModuleEnabledKey]).To(Equal("true"))
 
 		configMap.Data[controller.VirtualizationModuleEnabledKey] = "false"
 		err = cl.Update(ctx, configMap)
