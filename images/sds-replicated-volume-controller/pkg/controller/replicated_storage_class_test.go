@@ -1748,8 +1748,9 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		scResourceAfterUpdate := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
 		controller.DoUpdateStorageClass(scResourceAfterUpdate, storageClass)
 		Expect(scResourceAfterUpdate.Annotations).NotTo(BeNil())
-		Expect(len(scResourceAfterUpdate.Annotations)).To(Equal(1))
+		Expect(len(scResourceAfterUpdate.Annotations)).To(Equal(2))
 		Expect(scResourceAfterUpdate.Annotations[controller.DefaultStorageClassAnnotationKey]).To(Equal("true"))
+		Expect(scResourceAfterUpdate.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 
 		shouldRequeue, err := controller.ReconcileReplicatedStorageClassEvent(ctx, cl, log, validCFG, request)
 		Expect(err).NotTo(HaveOccurred())
