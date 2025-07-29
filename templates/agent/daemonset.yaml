@@ -125,12 +125,12 @@ spec:
           path: /dev/
           type: ""
         name: host-device-dir
-      - name: config
-        configMap:
-          name: sds-replicated-volume-agent-config
-          items:
-            - key: slogh.cfg
-              path: slogh.cfg
+      #- name: config
+      #  configMap:
+      #    name: sds-replicated-volume-agent-config
+      #    items:
+      #      - key: slogh.cfg
+      #        path: slogh.cfg
       - name: sds-replicated-volume-agent-d
         emptyDir: {}
       - name: var-lib-drbd
