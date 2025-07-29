@@ -24,7 +24,7 @@ export CI_COMMIT_REF_NAME="null"
 
 print_help() {
   echo "  Usage: $0 build|build_dev [<image_name1> [<image_name2> ...]]"
-  echo "  Possible actions: build, build_dev, enable_deckhouse, disable_deckhouse, werf_install"
+  echo "  Possible actions: build, build_dev, enable_deckhouse, disable_deckhouse, werf_install, create_secret create_script_for_patch_agent"
 }
 
 build_action() {
@@ -62,6 +62,37 @@ enable_deckhouse() {
 
 werf_install() {
   curl -sSL https://werf.io/install.sh | bash -s -- --version 2 --channel stable
+}
+
+create_secret() {
+  echo "{\"auths\":{\"${REGISTRY_PATH}\":{\"auth\":\"$(echo -n pat:${PAT_TOKEN} | base64 -w 0)\"}}}" |  base64 -w 0
+}
+
+create_script_for_patch_agent() {
+cat << EOF | tee /dev/null
+#!/bin/bash
+set -exuo pipefail
+NAMESPACE=d8-sds-replicated-volume
+
+DAEMONSET_NAME=sds-replicated-volume-agent
+DAEMONSET_CONTAINER_NAME=sds-replicated-volume-agent
+
+IMAGE=${REGISTRY_PATH}:${CUSTOM_TAG}-agent
+
+SECRET_NAME=sds-replicated-volume-module-registry
+SECRET_DATA=$(create_secret)
+
+kubectl -n d8-system scale deployment deckhouse --replicas=0
+
+kubectl -n \$NAMESPACE patch secret \$SECRET_NAME -p \
+ "{\"data\": {\".dockerconfigjson\": \"\$SECRET_DATA\"}}"
+
+kubectl -n \$NAMESPACE patch daemonset \$DAEMONSET_NAME -p \
+ "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"\$DAEMONSET_CONTAINER_NAME\", \"image\": \"\$IMAGE\"}]}}}}"
+kubectl -n \$NAMESPACE patch daemonset \$DAEMONSET_NAME -p \
+ "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"\$DAEMONSET_CONTAINER_NAME\", \"imagePullPolicy\": \"Always\"}]}}}}"
+kubectl -n \$NAMESPACE rollout restart daemonset \$DAEMONSET_NAME
+EOF
 }
 
 _base_images() {
@@ -108,6 +139,12 @@ case "$ACTION" in
     ;;
   werf_install)
     werf_install
+    ;;
+  create_secret)
+    create_secret
+    ;;
+  create_script_for_patch_agent)
+    create_script_for_patch_agent
     ;;
   *)
     echo "Unknown action: $ACTION"
