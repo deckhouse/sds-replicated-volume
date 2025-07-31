@@ -1,6 +1,16 @@
 #!/bin/bash
 
-cd ..
+# prevent the script from being sourced
+if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
+  echo "ERROR: This script must not be sourced." >&2
+  return 1
+fi
+
+REGISTRY_PATH=registry.flant.com/deckhouse/storage/localbuild
+
+# CI and werf variables
+export SOURCE_REPO="https://github.com"
+export CI_COMMIT_REF_NAME="null"
 
 # PAT TOKEN must be created here https://fox.flant.com/-/user_settings/personal_access_tokens
 # It must have api, read_api, read_repository, read_registry, write_registry scopes
@@ -8,7 +18,10 @@ cd ..
 # prefix of the custom tag
 # the final image will look like: ${REGISTRY_PATH}:${CUSTOM_TAG}-<image_name>
 #CUSTOM_TAG=username
-REGISTRY_PATH=registry.flant.com/deckhouse/storage/localbuild
+
+# you can optionally define secrets in a gitignored folder:
+source ./.secret/$(basename "$0") 2>/dev/null || true
+
 if [ -z "$PAT_TOKEN" ];then
   echo "ERR: empty PAT_TOKEN"
   exit 1
@@ -17,21 +30,26 @@ if [ -z "$CUSTOM_TAG" ];then
   echo "ERR: empty CUSTOM_TAG"
   exit 1
 fi
-
-# CI and werf variables
-export SOURCE_REPO="https://github.com"
-export CI_COMMIT_REF_NAME="null"
-
-print_help() {
-  echo "  Usage: $0 build|build_dev [<image_name1> [<image_name2> ...]]"
-  echo "  Possible actions: build, build_dev, enable_deckhouse, disable_deckhouse, werf_install, create_secret create_script_for_patch_agent"
-}
+if [ -z "$REGISTRY_PATH" ];then
+  echo "ERR: empty REGISTRY_PATH"
+  exit 1
+fi
+if ! command -v werf &> /dev/null; then
+    echo "ERR: werf is not installed or not in PATH"
+    exit 1
+fi
 
 build_action() {
-  #{ which werf | grep -qsE "^${HOME}/.trdl/"; } && werf_install
-
   echo "Get base_images.yml"
-  _base_images get
+
+  BASE_IMAGES_VERSION=$(grep -oP 'BASE_IMAGES_VERSION:\s+"v\d+\.\d+\.\d+"' ./.github/workflows/build_dev.yml | grep -oP 'v\d+\.\d+\.\d+' | head -n1)
+  if [ -z "$BASE_IMAGES_VERSION" ];then
+    echo "ERR: empty BASE_IMAGES_VERSION"
+    exit 1
+  fi
+  echo BASE_IMAGES_VERSION=$BASE_IMAGES_VERSION
+  curl -OJL https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/${BASE_IMAGES_VERSION}/base_images.yml
+
 
   echo "Start building for images:"
   if [ -z "$IMAGE_NAMES" ]; then
@@ -45,69 +63,49 @@ build_action() {
   fi
 
   echo "Delete base_images.yml"
-  _base_images delete
+  rm -rf base_images.yml
 }
 
 build_dev_action() {
   build_action --dev
 }
 
-disable_deckhouse() {
-  kubectl -n d8-system scale deployment/deckhouse --replicas 0
-}
-
-enable_deckhouse() {
-  kubectl -n d8-system scale deployment/deckhouse --replicas 1
-}
-
-werf_install() {
-  curl -sSL https://werf.io/install.sh | bash -s -- --version 2 --channel stable
-}
-
-create_secret() {
+_create_secret() {
   echo "{\"auths\":{\"${REGISTRY_PATH}\":{\"auth\":\"$(echo -n pat:${PAT_TOKEN} | base64 -w 0)\"}}}" |  base64 -w 0
 }
 
-create_script_for_patch_agent() {
-cat << EOF | tee /dev/null
-#!/bin/bash
-set -exuo pipefail
-NAMESPACE=d8-sds-replicated-volume
+patch_agent() {
+  (
+    set -exuo pipefail
 
-DAEMONSET_NAME=sds-replicated-volume-agent
-DAEMONSET_CONTAINER_NAME=sds-replicated-volume-agent
+    NAMESPACE=d8-sds-replicated-volume
 
-IMAGE=${REGISTRY_PATH}:${CUSTOM_TAG}-agent
+    DAEMONSET_NAME=sds-replicated-volume-agent
+    DAEMONSET_CONTAINER_NAME=sds-replicated-volume-agent
 
-SECRET_NAME=sds-replicated-volume-module-registry
-SECRET_DATA=$(create_secret)
+    IMAGE=${REGISTRY_PATH}:${CUSTOM_TAG}-agent
 
-kubectl -n d8-system scale deployment deckhouse --replicas=0
+    SECRET_NAME=sds-replicated-volume-module-registry
+    SECRET_DATA=$(_create_secret)
 
-kubectl -n \$NAMESPACE patch secret \$SECRET_NAME -p \
- "{\"data\": {\".dockerconfigjson\": \"\$SECRET_DATA\"}}"
+    kubectl -n d8-system scale deployment deckhouse --replicas=0
 
-kubectl -n \$NAMESPACE patch daemonset \$DAEMONSET_NAME -p \
- "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"\$DAEMONSET_CONTAINER_NAME\", \"image\": \"\$IMAGE\"}]}}}}"
-kubectl -n \$NAMESPACE patch daemonset \$DAEMONSET_NAME -p \
- "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"\$DAEMONSET_CONTAINER_NAME\", \"imagePullPolicy\": \"Always\"}]}}}}"
-kubectl -n \$NAMESPACE rollout restart daemonset \$DAEMONSET_NAME
-EOF
+    kubectl -n $NAMESPACE patch secret $SECRET_NAME -p \
+    "{\"data\": {\".dockerconfigjson\": \"$SECRET_DATA\"}}"
+
+    kubectl -n $NAMESPACE patch daemonset $DAEMONSET_NAME -p \
+    "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"$DAEMONSET_CONTAINER_NAME\", \"image\": \"$IMAGE\"}]}}}}"
+
+    kubectl -n $NAMESPACE patch daemonset $DAEMONSET_NAME -p \
+    "{\"spec\": {\"template\": {\"spec\": {\"containers\": [{\"name\": \"$DAEMONSET_CONTAINER_NAME\", \"imagePullPolicy\": \"Always\"}]}}}}"
+    
+    kubectl -n $NAMESPACE rollout restart daemonset $DAEMONSET_NAME
+  )
 }
 
-_base_images() {
-  local ACTION=$1
-  if [ "$ACTION" = 'get' ];then
-    BASE_IMAGES_VERSION=$(grep -roP 'BASE_IMAGES_VERSION:\s+"v\d+\.\d+\.\d+"' | grep -oP 'v\d+\.\d+\.\d+' | head -n1)
-    if [ -z "$BASE_IMAGES_VERSION" ];then
-      echo "ERR: empty BASE_IMAGES_VERSION"
-      exit 1
-    fi
-    echo BASE_IMAGES_VERSION=$BASE_IMAGES_VERSION
-    curl -OJL https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/${BASE_IMAGES_VERSION}/base_images.yml
-  else
-    rm -rf base_images.yml
-  fi
+print_help() {
+  echo "  Usage: $0 build|build_dev [<image_name1> [<image_name2> ...]]"
+  echo "  Possible actions: build, build_dev, patch_agent"
 }
 
 if [ $# -lt 1 ]; then
@@ -125,26 +123,17 @@ else
 fi
 
 case "$ACTION" in
+  --help)
+    print_help
+    ;;
   build)
     build_action
     ;;
   build_dev)
     build_dev_action
     ;;
-  enable_deckhouse)
-    enable_deckhouse
-    ;;
-  disable_deckhouse)
-    disable_deckhouse
-    ;;
-  werf_install)
-    werf_install
-    ;;
-  create_secret)
-    create_secret
-    ;;
-  create_script_for_patch_agent)
-    create_script_for_patch_agent
+  patch_agent)
+    patch_agent
     ;;
   *)
     echo "Unknown action: $ACTION"
