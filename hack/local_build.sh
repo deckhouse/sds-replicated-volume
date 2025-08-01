@@ -7,6 +7,9 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 fi
 
 REGISTRY_PATH=registry.flant.com/deckhouse/storage/localbuild
+NAMESPACE=d8-sds-replicated-volume
+DAEMONSET_NAME=sds-replicated-volume-agent
+SECRET_NAME=sds-replicated-volume-module-registry
 
 # CI and werf variables
 export SOURCE_REPO="https://github.com"
@@ -40,6 +43,13 @@ if ! command -v werf &> /dev/null; then
 fi
 
 build_action() {
+  if [ $# -eq 0 ]; then
+    echo "ERR: <no image names provided>"
+    exit 1
+  else
+    IMAGE_NAMES="$@"
+  fi
+
   echo "Get base_images.yml"
 
   BASE_IMAGES_VERSION=$(grep -oP 'BASE_IMAGES_VERSION:\s+"v\d+\.\d+\.\d+"' ./.github/workflows/build_dev.yml | grep -oP 'v\d+\.\d+\.\d+' | head -n1)
@@ -47,27 +57,22 @@ build_action() {
     echo "ERR: empty BASE_IMAGES_VERSION"
     exit 1
   fi
+
   echo BASE_IMAGES_VERSION=$BASE_IMAGES_VERSION
+
   curl -OJL https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/${BASE_IMAGES_VERSION}/base_images.yml
 
-
   echo "Start building for images:"
-  if [ -z "$IMAGE_NAMES" ]; then
-    echo "ERR: <no image names provided>"
-  else
-    werf cr login $REGISTRY_PATH --username='pat' --password=$PAT_TOKEN
-    for image in $IMAGE_NAMES; do
-      echo "Building image: $image"
-      werf build $image --add-custom-tag=$CUSTOM_TAG"-"$image --repo=$REGISTRY_PATH $1
-    done
-  fi
+
+  werf cr login $REGISTRY_PATH --username='pat' --password=$PAT_TOKEN
+
+  for image in $IMAGE_NAMES; do
+    echo "Building image: $image"
+    werf build $image --add-custom-tag=$CUSTOM_TAG"-"$image --repo=$REGISTRY_PATH --dev
+  done
 
   echo "Delete base_images.yml"
   rm -rf base_images.yml
-}
-
-build_dev_action() {
-  build_action --dev
 }
 
 _create_secret() {
@@ -78,14 +83,9 @@ patch_agent() {
   (
     set -exuo pipefail
 
-    NAMESPACE=d8-sds-replicated-volume
-
-    DAEMONSET_NAME=sds-replicated-volume-agent
     DAEMONSET_CONTAINER_NAME=sds-replicated-volume-agent
-
     IMAGE=${REGISTRY_PATH}:${CUSTOM_TAG}-agent
 
-    SECRET_NAME=sds-replicated-volume-module-registry
     SECRET_DATA=$(_create_secret)
 
     kubectl -n d8-system scale deployment deckhouse --replicas=0
@@ -103,9 +103,21 @@ patch_agent() {
   )
 }
 
+restore_agent() {
+  (
+    set -exuo pipefail
+
+    kubectl -n $NAMESPACE delete secret $SECRET_NAME
+
+    kubectl -n $NAMESPACE delete daemonset $DAEMONSET_NAME
+    
+    kubectl -n d8-system scale deployment deckhouse --replicas=1
+  )
+}
+
 print_help() {
-  echo "  Usage: $0 build|build_dev [<image_name1> [<image_name2> ...]]"
-  echo "  Possible actions: build, build_dev, patch_agent"
+  echo "  Usage: $0 build [<image_name1> [<image_name2> ...]]"
+  echo "  Possible actions: build, patch_agent, build_patch_agent, restore_agent"
 }
 
 if [ $# -lt 1 ]; then
@@ -116,12 +128,6 @@ ACTION=$1
 
 shift
 
-if [ $# -eq 0 ]; then
-  IMAGE_NAMES=""
-else
-  IMAGE_NAMES="$@"
-fi
-
 case "$ACTION" in
   --help)
     print_help
@@ -129,11 +135,15 @@ case "$ACTION" in
   build)
     build_action
     ;;
-  build_dev)
-    build_dev_action
-    ;;
   patch_agent)
     patch_agent
+    ;;
+  build_patch_agent)
+    build_action agent
+    patch_agent
+    ;;
+  restore_agent)
+    restore_agent
     ;;
   *)
     echo "Unknown action: $ACTION"
