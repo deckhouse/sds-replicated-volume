@@ -18,3 +18,4 @@ build:
 {{ tpl (.Files.Get ".werf/python-deps.yaml") $ }}
 {{ tpl (.Files.Get ".werf/bundle.yaml") $ }}
 {{ tpl (.Files.Get ".werf/release.yaml") $ }}
+
