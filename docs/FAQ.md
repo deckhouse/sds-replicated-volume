@@ -64,6 +64,46 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 2. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
+## How to expand ReplicatedStoragePool?
+
+To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
+
+1. Add the new Volume Group to the existing ReplicatedStoragePool by editing the resource:
+
+   ```shell
+   kubectl edit replicatedstoragepool your-pool-name
+   ```
+
+   Add the new Volume Group to the `spec.lvmVolumeGroups` section:
+
+   ```yaml
+   spec:
+     lvmVolumeGroups:
+     - name: existing-vg-name
+     - name: new-vg-name  # Add this line
+   ```
+
+1. For LVMThin pools, additionally specify the thin pool name:
+
+   ```yaml
+   spec:
+     lvmVolumeGroups:
+     - name: existing-vg-name
+       thinPoolName: existing-thin-pool
+     - name: new-vg-name
+       thinPoolName: new-thin-pool  # Add this line
+   ```
+
+1. Save the changes. The controller will automatically create a Storage Pool in LINSTOR for the new Volume Group and add it to the existing ReplicatedStoragePool.
+
+1. Check the expansion status:
+
+   ```shell
+   kubectl get replicatedstoragepool your-pool-name -o yaml
+   ```
+
+   Information about the new Volume Group should be displayed in the status.
+
 ## How to increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other?
 
 To increase the limit on the number of DRBD devices / change the ports through which DRBD clusters communicate with each other, you can use the drbdPortRange setting. By default, DRBD resources use TCP ports 7000-7999. These values can be redefined using minPort and maxPort.
