@@ -68,6 +68,8 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 Для расширения существующего ReplicatedStoragePool используйте новый LVM Volume Group. Выполните следующие шаги:
 
+1. Создайте новую LVMVolumeGroup с помощью модуля [sds-node-configurator](../../sds-node-configurator/stable/usage.html#creating-an-lvmvolumegroup-resource)
+
 1. Добавьте новую Volume Group в существующий ReplicatedStoragePool, отредактировав ресурс:
 
    ```shell

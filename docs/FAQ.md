@@ -68,6 +68,8 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
 
+1. Create new LVMVolumeGroup with [sds-node-configurator](../../sds-node-configurator/stable/usage.html#creating-an-lvmvolumegroup-resource)
+
 1. Add the new Volume Group to the existing ReplicatedStoragePool by editing the resource:
 
    ```shell
