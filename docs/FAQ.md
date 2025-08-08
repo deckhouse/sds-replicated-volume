@@ -64,7 +64,7 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 2. Specify this resource in the [ReplicatedStoragePool](./cr.html#replicatedstoragepool) parameters in the `spec.lvmVolumeGroups[].name` field (note that for the LVMThin pool, you must additionally specify its name in `spec.lvmVolumeGroups[].thinPoolName`).
 
-## How to expand ReplicatedStoragePool?
+## How to expand ReplicatedStoragePool to new cluster node?
 
 To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
 
