@@ -1,0 +1,38 @@
+{{- $_ := set . "BASE_GOLANG" "registry.deckhouse.io/base_images/golang:1.23.4-bullseye@sha256:9b3176d53704a9b1be19d307b660733cc691af02906d7e918dbe4d11427a422c" }}
+{{- $_ := set . "BASE_UBUNTU" "registry.deckhouse.io/base_images/ubuntu:jammy-20240808@sha256:e20b137325a45b9fe9f87ed718799a0728edabe05e88585f371e6864994cf0bc" }}
+
+---
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.BASE_GOLANG }}
+
+git:
+  - add: /
+    to: /
+    includePaths:
+      - api
+      - images/drbd-cluster-sync/src
+    stageDependencies:
+      setup:
+        - "**/*"
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+shell:
+  setup:
+    - cd /images/drbd-cluster-sync/src/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-X github.com/piraeusdatastore/linstor-csi/pkg/driver.Version=v98544cadb6d111d27a86a11ec07de91b99704b82" -o /drbd-cluster-sync
+    - chmod +x /drbd-cluster-sync
+
+---
+image: {{ $.ImageName }}
+from: {{ $.BASE_UBUNTU }}
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /drbd-cluster-sync
+    to: /drbd-cluster-sync
+    before: setup
+
+docker:
+  ENTRYPOINT: ["/drbd-cluster-sync"]
