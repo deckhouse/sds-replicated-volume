@@ -82,7 +82,7 @@ shell:
 
 ---
 image: {{ .ImageName }}
-fromImage: base/distroless
+fromImage: builder/src
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate

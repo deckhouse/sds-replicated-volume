@@ -11,22 +11,30 @@ spec:
     kind: ReplicatedVolumeReplica
     listKind: ReplicatedVolumeReplicaList
     plural: replicatedvolumereplicas
+    shortNames:
+    - rvr
     singular: replicatedvolumereplica
   scope: Cluster
   versions:
-  - name: v1alpha2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicatedVolumeName
+      name: Volume
+      type: string
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .spec.primary
+      name: Primary
+      type: boolean
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha2
     schema:
       openAPIV3Schema:
-        description: "# Some important non-typed and embededd properties\n\n\tmetadata:\n\t
-          \ labels:\n\t    storage.deckhouse.io/node-name: my-hostname\n\t  name:
-          my-gitlab-?????\n\t  ownerReferences:\n\t  - apiVersion: storage.deckhouse.io/v1alpha2\n\t
-          \   blockOwnerDeletion: true\n\t    controller: true\n\t    kind: DistributedBlockDevice\n\t
-          \   name: my-gitlab\n\t    uid: 7697dab1-2382-4901-87bb-249f3562a5b4\n\t
-          \ generation: 89\n\t  finalizers:\n\t  - storage.deckhouse.io/sds-replicated-volume\n\tstatus:\n\t
-          \ conditions:\n\t  - message: resource metadata creation successful\n\t
-          \   reason: ReconcileOnCreate\n\t    status: \"True\"\n\t    type: DeviceMetadataCreated\n\t
-          \ - message: resource activation successful\n\t    reason: ReconcileOnCreate\n\t
-          \   status: \"True\"\n\t    type: DeviceIsActive"
         properties:
           apiVersion:
             description: |-
@@ -52,14 +60,20 @@ spec:
                   ipv4:
                     type: string
                   port:
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                 required:
                 - ipv4
                 - port
                 type: object
               nodeId:
+                maximum: 65535
+                minimum: 0
                 type: integer
               nodeName:
+                maxLength: 253
+                minLength: 1
                 type: string
               peers:
                 additionalProperties:
@@ -69,14 +83,19 @@ spec:
                         ipv4:
                           type: string
                         port:
+                          maximum: 65535
+                          minimum: 1
                           type: integer
                       required:
                       - ipv4
                       - port
                       type: object
                     diskless:
+                      default: false
                       type: boolean
                     nodeId:
+                      maximum: 65535
+                      minimum: 0
                       type: integer
                     sharedSecret:
                       type: string
@@ -85,24 +104,39 @@ spec:
                   - nodeId
                   type: object
                 type: object
+              primary:
+                default: false
+                type: boolean
               replicatedVolumeName:
+                maxLength: 32
+                minLength: 1
+                pattern: ^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$
                 type: string
               sharedSecret:
+                minLength: 1
                 type: string
               volumes:
                 items:
                   properties:
                     device:
+                      maximum: 1048575
+                      minimum: 0
                       type: integer
                     disk:
+                      minLength: 1
+                      pattern: ^/[a-zA-Z0-9/_-]+$
                       type: string
                     number:
+                      maximum: 255
+                      minimum: 0
                       type: integer
                   required:
                   - device
                   - disk
                   - number
                   type: object
+                maxItems: 100
+                minItems: 1
                 type: array
             required:
             - nodeAddress
