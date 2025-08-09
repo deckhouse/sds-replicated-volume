@@ -82,7 +82,7 @@ shell:
 
 ---
 image: {{ .ImageName }}
-fromImage: builder/golang-bullseye-1.24
+fromImage: builder/src
 import:
   - image: {{ $.ImageName }}-binaries-artifact
     add: /relocate
