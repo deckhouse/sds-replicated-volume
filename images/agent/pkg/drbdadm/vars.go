@@ -22,4 +22,8 @@ var CreateMDArgs = func(resource string) []string {
 	return []string{"create-md", "--force", resource}
 }
 
+var DownArgs = func(resource string) []string {
+	return []string{"down", resource}
+}
+
 var Events2Args = []string{"events2", "--timestamps"}

@@ -71,6 +71,18 @@ func (r *Reconciler) Reconcile(
 		}
 
 		return reconcile.Result{}, h.Handle()
+
+	case ResourceDeleteRequest:
+		h := &resourceDeleteRequestHandler{
+			ctx:                  ctx,
+			log:                  r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
+			cl:                   r.cl,
+			nodeName:             r.nodeName,
+			replicatedVolumeName: typedReq.ReplicatedVolumeName,
+		}
+
+		return reconcile.Result{}, h.Handle()
+
 	default:
 		r.log.Error("unknown req type", "type", reqTypeName)
 		return reconcile.Result{}, nil

@@ -69,8 +69,10 @@ func runController(
 				) {
 					log.Debug("DeleteFunc", "name", de.Object.GetName())
 					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					_ = typedObj
-					// TODO
+					q.Add(rvr.ResourceDeleteRequest{
+						Name:                 typedObj.Name,
+						ReplicatedVolumeName: typedObj.Spec.ReplicatedVolumeName,
+					})
 				},
 				GenericFunc: func(
 					ctx context.Context,
