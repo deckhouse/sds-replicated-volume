@@ -5,42 +5,11 @@ import (
 	"k8s.io/apimachinery/pkg/fields"
 )
 
-// name: my-gitlab # TODO validate length
-
-//
-
-// # Some important non-typed and embededd properties
-//
-//	metadata:
-//	  labels:
-//	    storage.deckhouse.io/node-name: my-hostname
-//	  name: my-gitlab-?????
-//	  ownerReferences:
-//	  - apiVersion: storage.deckhouse.io/v1alpha2
-//	    blockOwnerDeletion: true
-//	    controller: true
-//	    kind: DistributedBlockDevice
-//	    name: my-gitlab
-//	    uid: 7697dab1-2382-4901-87bb-249f3562a5b4
-//	  generation: 89
-//	  finalizers:
-//	  - storage.deckhouse.io/sds-replicated-volume
-//	status:
-//	  conditions:
-//	  - message: resource metadata creation successful
-//	    reason: ReconcileOnCreate
-//	    status: "True"
-//	    type: DeviceMetadataCreated
-//	  - message: resource activation successful
-//	    reason: ReconcileOnCreate
-//	    status: "True"
-//	    type: DeviceIsActive
-//
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:resource:scope=Cluster,shortName=rvr
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 type ReplicatedVolumeReplica struct {

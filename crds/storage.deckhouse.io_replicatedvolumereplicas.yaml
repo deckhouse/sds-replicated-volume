@@ -11,22 +11,14 @@ spec:
     kind: ReplicatedVolumeReplica
     listKind: ReplicatedVolumeReplicaList
     plural: replicatedvolumereplicas
+    shortNames:
+    - rvr
     singular: replicatedvolumereplica
   scope: Cluster
   versions:
   - name: v1alpha2
     schema:
       openAPIV3Schema:
-        description: "# Some important non-typed and embededd properties\n\n\tmetadata:\n\t
-          \ labels:\n\t    storage.deckhouse.io/node-name: my-hostname\n\t  name:
-          my-gitlab-?????\n\t  ownerReferences:\n\t  - apiVersion: storage.deckhouse.io/v1alpha2\n\t
-          \   blockOwnerDeletion: true\n\t    controller: true\n\t    kind: DistributedBlockDevice\n\t
-          \   name: my-gitlab\n\t    uid: 7697dab1-2382-4901-87bb-249f3562a5b4\n\t
-          \ generation: 89\n\t  finalizers:\n\t  - storage.deckhouse.io/sds-replicated-volume\n\tstatus:\n\t
-          \ conditions:\n\t  - message: resource metadata creation successful\n\t
-          \   reason: ReconcileOnCreate\n\t    status: \"True\"\n\t    type: DeviceMetadataCreated\n\t
-          \ - message: resource activation successful\n\t    reason: ReconcileOnCreate\n\t
-          \   status: \"True\"\n\t    type: DeviceIsActive"
         properties:
           apiVersion:
             description: |-

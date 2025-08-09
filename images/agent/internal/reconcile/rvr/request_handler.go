@@ -8,12 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -28,16 +30,19 @@ type resourceReconcileRequestHandler struct {
 
 func (h *resourceReconcileRequestHandler) Handle() error {
 	if err := h.writeResourceConfig(); err != nil {
+		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ConfigurationFailed", err.Error())
 		return err
 	}
 
 	exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
+		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCheckFailed", err.Error())
 		return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
 	}
 
 	if !exists {
 		if err := drbdadm.ExecuteCreateMD(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCreationFailed", err.Error())
 			return fmt.Errorf("ExecuteCreateMD: %w", err)
 		}
 
@@ -46,11 +51,13 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 
 	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
+		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "StatusCheckFailed", err.Error())
 		return fmt.Errorf("ExecuteStatus_IsUp: %w", err)
 	}
 
 	if !isUp {
 		if err := drbdadm.ExecuteUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ResourceUpFailed", err.Error())
 			return fmt.Errorf("ExecuteUp: %w", err)
 		}
 
@@ -58,10 +65,20 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 
 	if err := drbdadm.ExecuteAdjust(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "AdjustmentFailed", err.Error())
 		return fmt.Errorf("ExecuteAdjust: %w", err)
 	}
 
 	h.log.Info("successfully adjusted 'resource'", "resource", h.rvr.Spec.ReplicatedVolumeName)
+
+	if err := h.setConditionIfNeeded(
+		"Ready",
+		metav1.ConditionTrue,
+		"ResourceReady",
+		"Replica is configured and operational",
+	); err != nil {
+		return fmt.Errorf("setting Ready condition: %w", err)
+	}
 
 	return nil
 }
@@ -187,4 +204,56 @@ func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.Hos
 		AddressWithPort: fmt.Sprintf("%s:%d", address.IPv4, address.Port),
 		AddressFamily:   "ipv4",
 	}
+}
+
+func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
+	conditionType string,
+	status metav1.ConditionStatus,
+	reason,
+	message string,
+) error {
+	if h.rvr.Status == nil {
+		h.rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
+		h.rvr.Status.Conditions = []metav1.Condition{}
+	}
+
+	for _, condition := range h.rvr.Status.Conditions {
+		if condition.Type == conditionType && condition.Status == status && condition.Reason == reason && condition.Message == message {
+			return nil
+		}
+	}
+
+	now := metav1.NewTime(time.Now())
+	newCondition := metav1.Condition{
+		Type:               conditionType,
+		Status:             status,
+		Reason:             reason,
+		Message:            message,
+		LastTransitionTime: now,
+	}
+
+	found := false
+	for i, condition := range h.rvr.Status.Conditions {
+		if condition.Type == conditionType {
+			// Preserve transition time when only reason/message changes
+			if condition.Status == status {
+				newCondition.LastTransitionTime = condition.LastTransitionTime
+			}
+			h.rvr.Status.Conditions[i] = newCondition
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, newCondition)
+	}
+
+	patch := client.MergeFrom(h.rvr.DeepCopy())
+	if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
+		return fmt.Errorf("patching RVR status: %w", err)
+	}
+	h.log.Info("successfully updated condition", "type", conditionType, "resource", h.rvr.Spec.ReplicatedVolumeName)
+
+	return nil
 }
