@@ -12,6 +12,10 @@ import (
 // +kubebuilder:resource:scope=Cluster,shortName=rvr
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
+// +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
+// +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -27,34 +31,75 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
-	ReplicatedVolumeName string          `json:"replicatedVolumeName"`
-	NodeName             string          `json:"nodeName"`
-	NodeId               uint            `json:"nodeId"`
-	NodeAddress          Address         `json:"nodeAddress"`
-	Peers                map[string]Peer `json:"peers"`
-	Volumes              []Volume        `json:"volumes"`
-	SharedSecret         string          `json:"sharedSecret"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=32
+	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$`
+	ReplicatedVolumeName string `json:"replicatedVolumeName"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	NodeName string `json:"nodeName"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65535
+	NodeId uint `json:"nodeId"`
+
+	// +kubebuilder:validation:Required
+	NodeAddress Address `json:"nodeAddress"`
+
+	Peers map[string]Peer `json:"peers"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
+	Volumes []Volume `json:"volumes"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SharedSecret string `json:"sharedSecret"`
 }
 
 // +k8s:deepcopy-gen=true
 type Peer struct {
-	NodeId       uint    `json:"nodeId"`
-	Address      Address `json:"address"`
-	Diskless     bool    `json:"diskless,omitempty"`
-	SharedSecret string  `json:"sharedSecret,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=65535
+	NodeId uint `json:"nodeId"`
+
+	// +kubebuilder:validation:Required
+	Address Address `json:"address"`
+
+	// +kubebuilder:default=false
+	Diskless bool `json:"diskless,omitempty"`
+
+	SharedSecret string `json:"sharedSecret,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type Volume struct {
-	Number uint   `json:"number"`
-	Disk   string `json:"disk"`
-	Device uint   `json:"device"`
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=255
+	Number uint `json:"number"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern=`^/[a-zA-Z0-9/_-]+$`
+	Disk string `json:"disk"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1048575
+	Device uint `json:"device"`
 }
 
 // +k8s:deepcopy-gen=true
 type Address struct {
+	// +kubebuilder:validation:Required
 	IPv4 string `json:"ipv4"`
-	Port uint   `json:"port"`
+
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port uint `json:"port"`
 }
 
 // +k8s:deepcopy-gen=true

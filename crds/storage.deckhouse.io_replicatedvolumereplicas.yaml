@@ -16,7 +16,20 @@ spec:
     singular: replicatedvolumereplica
   scope: Cluster
   versions:
-  - name: v1alpha2
+  - additionalPrinterColumns:
+    - jsonPath: .spec.replicatedVolumeName
+      name: Volume
+      type: string
+    - jsonPath: .spec.nodeName
+      name: Node
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha2
     schema:
       openAPIV3Schema:
         properties:
@@ -44,14 +57,20 @@ spec:
                   ipv4:
                     type: string
                   port:
+                    maximum: 65535
+                    minimum: 1
                     type: integer
                 required:
                 - ipv4
                 - port
                 type: object
               nodeId:
+                maximum: 65535
+                minimum: 0
                 type: integer
               nodeName:
+                maxLength: 253
+                minLength: 1
                 type: string
               peers:
                 additionalProperties:
@@ -61,14 +80,19 @@ spec:
                         ipv4:
                           type: string
                         port:
+                          maximum: 65535
+                          minimum: 1
                           type: integer
                       required:
                       - ipv4
                       - port
                       type: object
                     diskless:
+                      default: false
                       type: boolean
                     nodeId:
+                      maximum: 65535
+                      minimum: 0
                       type: integer
                     sharedSecret:
                       type: string
@@ -78,23 +102,35 @@ spec:
                   type: object
                 type: object
               replicatedVolumeName:
+                maxLength: 32
+                minLength: 1
+                pattern: ^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$
                 type: string
               sharedSecret:
+                minLength: 1
                 type: string
               volumes:
                 items:
                   properties:
                     device:
+                      maximum: 1048575
+                      minimum: 0
                       type: integer
                     disk:
+                      minLength: 1
+                      pattern: ^/[a-zA-Z0-9/_-]+$
                       type: string
                     number:
+                      maximum: 255
+                      minimum: 0
                       type: integer
                   required:
                   - device
                   - disk
                   - number
                   type: object
+                maxItems: 100
+                minItems: 1
                 type: array
             required:
             - nodeAddress
