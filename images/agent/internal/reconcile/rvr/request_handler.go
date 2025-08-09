@@ -223,6 +223,8 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 		}
 	}
 
+	patch := client.MergeFrom(h.rvr.DeepCopy())
+
 	now := metav1.NewTime(time.Now())
 	newCondition := metav1.Condition{
 		Type:               conditionType,
@@ -249,7 +251,6 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 		h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, newCondition)
 	}
 
-	patch := client.MergeFrom(h.rvr.DeepCopy())
 	if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching RVR status: %w", err)
 	}
