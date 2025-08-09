@@ -23,6 +23,9 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
+    - jsonPath: .spec.primary
+      name: Primary
+      type: boolean
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
@@ -101,6 +104,9 @@ spec:
                   - nodeId
                   type: object
                 type: object
+              primary:
+                default: false
+                type: boolean
               replicatedVolumeName:
                 maxLength: 32
                 minLength: 1
