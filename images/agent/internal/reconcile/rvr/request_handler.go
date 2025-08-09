@@ -32,21 +32,21 @@ type resourceReconcileRequestHandler struct {
 func (h *resourceReconcileRequestHandler) Handle() error {
 	if err := h.writeResourceConfig(); err != nil {
 		h.log.Error("failed to write resource config", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ConfigurationFailed", err.Error())
+		h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonConfigurationFailed, err.Error())
 		return err
 	}
 
 	exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		h.log.Error("failed to check metadata existence", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCheckFailed", err.Error())
+		h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCheckFailed, err.Error())
 		return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
 	}
 
 	if !exists {
 		if err := drbdadm.ExecuteCreateMD(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 			h.log.Error("failed to create metadata", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCreationFailed", err.Error())
+			h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCreationFailed, err.Error())
 			return fmt.Errorf("ExecuteCreateMD: %w", err)
 		}
 
@@ -56,14 +56,14 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		h.log.Error("failed to check resource status", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "StatusCheckFailed", err.Error())
+		h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonStatusCheckFailed, err.Error())
 		return fmt.Errorf("ExecuteStatus_IsUp: %w", err)
 	}
 
 	if !isUp {
 		if err := drbdadm.ExecuteUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 			h.log.Error("failed to bring up resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ResourceUpFailed", err.Error())
+			h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonResourceUpFailed, err.Error())
 			return fmt.Errorf("ExecuteUp: %w", err)
 		}
 
@@ -72,7 +72,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 
 	if err := drbdadm.ExecuteAdjust(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 		h.log.Error("failed to adjust resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "AdjustmentFailed", err.Error())
+		h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonAdjustmentFailed, err.Error())
 		return fmt.Errorf("ExecuteAdjust: %w", err)
 	}
 
@@ -82,7 +82,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return fmt.Errorf("handling primary/secondary: %w", err)
 	}
 
-	h.setConditionIfNeeded("Ready", metav1.ConditionTrue, "Ready", "Replica is configured and operational")
+	h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionTrue, v1alpha2.ReasonReady, "Replica is configured and operational")
 
 	return nil
 }
@@ -241,26 +241,47 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 		if h.rvr.Spec.Primary {
 			conditionStatus = metav1.ConditionTrue
 		}
-		h.setConditionIfNeeded("Primary", conditionStatus, "RoleCorrect", fmt.Sprintf("Resource is %s", currentRole))
+		h.setConditionIfNeeded(v1alpha2.ConditionTypePrimary, conditionStatus, v1alpha2.ReasonRoleCorrect, fmt.Sprintf("Resource is %s", currentRole))
 		return nil
 	}
 
 	if h.rvr.Spec.Primary {
-		if err := drbdadm.ExecutePrimary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-			h.log.Error("failed to promote to primary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-			h.setConditionIfNeeded("Primary", metav1.ConditionFalse, "PromotionFailed", err.Error())
+		// Check if this is initial synchronization
+		isInitialSync := h.isInitialSynchronization()
+
+		var err error
+		if isInitialSync {
+			h.log.Info("attempting primary promotion with --force during initial synchronization", "resource", h.rvr.Spec.ReplicatedVolumeName)
+			err = drbdadm.ExecutePrimaryForce(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+		} else {
+			err = drbdadm.ExecutePrimary(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+		}
+
+		if err != nil {
+			forceMsg := ""
+			if isInitialSync {
+				forceMsg = " (with --force)"
+			}
+			h.log.Error("failed to promote to primary"+forceMsg, "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.setConditionIfNeeded(v1alpha2.ConditionTypePrimary, metav1.ConditionFalse, v1alpha2.ReasonPromotionFailed, err.Error())
 			return fmt.Errorf("promoting to primary: %w", err)
 		}
+
 		h.log.Info("successfully promoted to primary", "resource", h.rvr.Spec.ReplicatedVolumeName)
-		h.setConditionIfNeeded("Primary", metav1.ConditionTrue, "Primary", "Resource is Primary")
+		h.setConditionIfNeeded(v1alpha2.ConditionTypePrimary, metav1.ConditionTrue, v1alpha2.ReasonPrimary, "Resource is Primary")
+
+		// Mark initial sync as completed after successful promotion
+		if isInitialSync {
+			h.setConditionIfNeeded(v1alpha2.ConditionTypeInitialSyncCompleted, metav1.ConditionTrue, v1alpha2.ReasonFirstPrimaryPromoted, "Initial synchronization completed after first successful primary promotion")
+		}
 	} else {
 		if err := drbdadm.ExecuteSecondary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 			h.log.Error("failed to demote to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-			h.setConditionIfNeeded("Primary", metav1.ConditionTrue, "DemotionFailed", err.Error())
+			h.setConditionIfNeeded(v1alpha2.ConditionTypePrimary, metav1.ConditionFalse, v1alpha2.ReasonDemotionFailed, err.Error())
 			return fmt.Errorf("demoting to secondary: %w", err)
 		}
 		h.log.Info("successfully demoted to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName)
-		h.setConditionIfNeeded("Primary", metav1.ConditionFalse, "Secondary", "Resource is Secondary")
+		h.setConditionIfNeeded(v1alpha2.ConditionTypePrimary, metav1.ConditionFalse, v1alpha2.ReasonSecondary, "Resource is Secondary")
 	}
 
 	return nil
@@ -317,4 +338,20 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 	h.log.Info("successfully updated condition", "type", conditionType, "resource", h.rvr.Spec.ReplicatedVolumeName)
 
 	return nil
+}
+
+// isInitialSynchronization checks if the resource is in initial synchronization state
+// by looking for the InitialSyncCompleted condition
+func (h *resourceReconcileRequestHandler) isInitialSynchronization() bool {
+	if h.rvr.Status == nil || h.rvr.Status.Conditions == nil {
+		return true // No status yet, assume initial sync
+	}
+
+	for _, condition := range h.rvr.Status.Conditions {
+		if condition.Type == v1alpha2.ConditionTypeInitialSyncCompleted && condition.Status == metav1.ConditionTrue {
+			return false // Initial sync already completed
+		}
+	}
+
+	return true // InitialSyncCompleted condition not found or not True
 }

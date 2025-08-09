@@ -30,6 +30,10 @@ var PrimaryArgs = func(resource string) []string {
 	return []string{"primary", resource}
 }
 
+var PrimaryForceArgs = func(resource string) []string {
+	return []string{"primary", "--force", resource}
+}
+
 var SecondaryArgs = func(resource string) []string {
 	return []string{"secondary", resource}
 }
