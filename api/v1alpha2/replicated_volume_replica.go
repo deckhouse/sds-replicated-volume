@@ -14,6 +14,7 @@ import (
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
+// +kubebuilder:printcolumn:name="Primary",type=boolean,JSONPath=".spec.primary"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 type ReplicatedVolumeReplica struct {
@@ -59,6 +60,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	SharedSecret string `json:"sharedSecret"`
+
+	// +kubebuilder:default=false
+	Primary bool `json:"primary,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

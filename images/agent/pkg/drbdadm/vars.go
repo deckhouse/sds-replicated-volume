@@ -19,11 +19,19 @@ var AdjustArgs = func(resource string) []string {
 }
 
 var CreateMDArgs = func(resource string) []string {
-	return []string{"create-md", "--force", resource}
+	return []string{"create-md", "--max-peers=6", "--force", resource}
 }
 
 var DownArgs = func(resource string) []string {
 	return []string{"down", resource}
+}
+
+var PrimaryArgs = func(resource string) []string {
+	return []string{"primary", resource}
+}
+
+var SecondaryArgs = func(resource string) []string {
+	return []string{"secondary", resource}
 }
 
 var Events2Args = []string{"events2", "--timestamps"}

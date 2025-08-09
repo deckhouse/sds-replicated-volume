@@ -15,6 +15,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -30,55 +31,58 @@ type resourceReconcileRequestHandler struct {
 
 func (h *resourceReconcileRequestHandler) Handle() error {
 	if err := h.writeResourceConfig(); err != nil {
+		h.log.Error("failed to write resource config", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ConfigurationFailed", err.Error())
 		return err
 	}
 
 	exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
+		h.log.Error("failed to check metadata existence", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCheckFailed", err.Error())
 		return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
 	}
 
 	if !exists {
 		if err := drbdadm.ExecuteCreateMD(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.log.Error("failed to create metadata", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "MetadataCreationFailed", err.Error())
 			return fmt.Errorf("ExecuteCreateMD: %w", err)
 		}
 
-		h.log.Info("successfully created metadata for 'resource'", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully created metadata", "resource", h.rvr.Spec.ReplicatedVolumeName)
 	}
 
 	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
+		h.log.Error("failed to check resource status", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "StatusCheckFailed", err.Error())
 		return fmt.Errorf("ExecuteStatus_IsUp: %w", err)
 	}
 
 	if !isUp {
 		if err := drbdadm.ExecuteUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.log.Error("failed to bring up resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 			h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "ResourceUpFailed", err.Error())
 			return fmt.Errorf("ExecuteUp: %w", err)
 		}
 
-		h.log.Info("successfully upped 'resource'", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully brought up resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
 	}
 
 	if err := drbdadm.ExecuteAdjust(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+		h.log.Error("failed to adjust resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
 		h.setConditionIfNeeded("Ready", metav1.ConditionFalse, "AdjustmentFailed", err.Error())
 		return fmt.Errorf("ExecuteAdjust: %w", err)
 	}
 
-	h.log.Info("successfully adjusted 'resource'", "resource", h.rvr.Spec.ReplicatedVolumeName)
+	h.log.Info("successfully adjusted resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
 
-	if err := h.setConditionIfNeeded(
-		"Ready",
-		metav1.ConditionTrue,
-		"ResourceReady",
-		"Replica is configured and operational",
-	); err != nil {
-		return fmt.Errorf("setting Ready condition: %w", err)
+	if err := h.handlePrimarySecondary(); err != nil {
+		return fmt.Errorf("handling primary/secondary: %w", err)
 	}
+
+	h.setConditionIfNeeded("Ready", metav1.ConditionTrue, "Ready", "Replica is configured and operational")
 
 	return nil
 }
@@ -204,6 +208,62 @@ func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.Hos
 		AddressWithPort: fmt.Sprintf("%s:%d", address.IPv4, address.Port),
 		AddressFamily:   "ipv4",
 	}
+}
+
+func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
+	statusResult, err := drbdsetup.ExecuteStatus(h.ctx)
+	if err != nil {
+		h.log.Error("failed to get DRBD status", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		return fmt.Errorf("getting DRBD status: %w", err)
+	}
+
+	var currentRole string
+	for _, resource := range statusResult {
+		if resource.Name == h.rvr.Spec.ReplicatedVolumeName {
+			currentRole = resource.Role
+			break
+		}
+	}
+
+	if currentRole == "" {
+		h.log.Error("resource not found in DRBD status", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		return fmt.Errorf("resource %s not found in DRBD status", h.rvr.Spec.ReplicatedVolumeName)
+	}
+
+	desiredRole := "Secondary"
+	if h.rvr.Spec.Primary {
+		desiredRole = "Primary"
+	}
+
+	if currentRole == desiredRole {
+		h.log.Debug("DRBD role already correct", "resource", h.rvr.Spec.ReplicatedVolumeName, "role", currentRole)
+		conditionStatus := metav1.ConditionFalse
+		if h.rvr.Spec.Primary {
+			conditionStatus = metav1.ConditionTrue
+		}
+		h.setConditionIfNeeded("Primary", conditionStatus, "RoleCorrect", fmt.Sprintf("Resource is %s", currentRole))
+		return nil
+	}
+
+	if h.rvr.Spec.Primary {
+		if err := drbdadm.ExecutePrimary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.log.Error("failed to promote to primary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.setConditionIfNeeded("Primary", metav1.ConditionFalse, "PromotionFailed", err.Error())
+			return fmt.Errorf("promoting to primary: %w", err)
+		}
+		h.log.Info("successfully promoted to primary", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.setConditionIfNeeded("Primary", metav1.ConditionTrue, "Primary", "Resource is Primary")
+	} else {
+		if err := drbdadm.ExecuteSecondary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+			h.log.Error("failed to demote to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.setConditionIfNeeded("Primary", metav1.ConditionTrue, "DemotionFailed", err.Error())
+			return fmt.Errorf("demoting to secondary: %w", err)
+		}
+		h.log.Info("successfully demoted to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.setConditionIfNeeded("Primary", metav1.ConditionFalse, "Secondary", "Resource is Secondary")
+	}
+
+	return nil
 }
 
 func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
