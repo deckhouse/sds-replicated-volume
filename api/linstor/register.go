@@ -56,6 +56,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LayerStorageVolumesList{},
 		&ResourceDefinitions{},
 		&ResourceDefinitionsList{},
+		&LayerResourceIds{},
+		&LayerResourceIdsList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
