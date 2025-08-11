@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	. "github.com/deckhouse/sds-common-lib/u"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
+	. "github.com/deckhouse/sds-common-lib/u"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	. "github.com/deckhouse/sds-replicated-volume/images/agent/internal/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/jinzhu/copier"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

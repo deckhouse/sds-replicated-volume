@@ -10,7 +10,7 @@ import (
 	. "github.com/deckhouse/sds-common-lib/u"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/rvr"
+	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/internal/reconcile/rv"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -25,7 +25,7 @@ func runController(
 	mgr manager.Manager,
 	nodeName string,
 ) error {
-	type TReq = rvr.Request
+	type TReq = rv.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
@@ -40,7 +40,7 @@ func runController(
 				) {
 					log.Debug("CreateFunc", "name", ce.Object.GetName())
 					typedObj := ce.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					q.Add(rvr.ResourceReconcileRequest{Name: typedObj.Name})
+					q.Add(rv.ResourceReconcileRequest{Name: typedObj.Name})
 				},
 				UpdateFunc: func(
 					ctx context.Context,
@@ -60,7 +60,7 @@ func runController(
 						return
 					}
 
-					q.Add(rvr.ResourceReconcileRequest{Name: typedObjNew.Name})
+					q.Add(rv.ResourceReconcileRequest{Name: typedObjNew.Name})
 				},
 				DeleteFunc: func(
 					ctx context.Context,
@@ -69,7 +69,7 @@ func runController(
 				) {
 					log.Debug("DeleteFunc", "name", de.Object.GetName())
 					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					q.Add(rvr.ResourceDeleteRequest{
+					q.Add(rv.ResourceDeleteRequest{
 						Name:                 typedObj.Name,
 						ReplicatedVolumeName: typedObj.Spec.ReplicatedVolumeName,
 					})
@@ -82,7 +82,7 @@ func runController(
 					log.Debug("GenericFunc", "name", ge.Object.GetName())
 				},
 			}).
-		Complete(rvr.NewReconciler(log, mgr.GetClient(), nodeName))
+		Complete(rv.NewReconciler(log, mgr.GetClient(), nodeName))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("building controller: %w", err))
