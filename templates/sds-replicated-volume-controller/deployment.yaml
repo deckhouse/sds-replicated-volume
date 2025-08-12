@@ -72,7 +72,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8081
+              port: 4271
               scheme: HTTP
             initialDelaySeconds: 5
             failureThreshold: 2
@@ -80,7 +80,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8081
+              port: 4271
               scheme: HTTP
             periodSeconds: 1
             failureThreshold: 3

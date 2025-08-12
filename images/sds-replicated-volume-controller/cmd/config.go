@@ -8,9 +8,9 @@ import (
 const (
 	NodeNameEnvVar                = "NODE_NAME"
 	HealthProbeBindAddressEnvVar  = "HEALTH_PROBE_BIND_ADDRESS"
-	DefaultHealthProbeBindAddress = ":4269"
+	DefaultHealthProbeBindAddress = ":4271"
 	MetricsPortEnvVar             = "METRICS_BIND_ADDRESS"
-	DefaultMetricsBindAddress     = ":4270"
+	DefaultMetricsBindAddress     = ":4272"
 )
 
 type EnvConfig struct {
