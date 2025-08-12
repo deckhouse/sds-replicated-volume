@@ -40,24 +40,17 @@ func (r *Reconciler) Reconcile(
 
 	switch typedReq := req.(type) {
 	case ResourceReconcileRequest:
-		rvr := &v1alpha2.ReplicatedVolumeReplica{}
+		rvr := &v1alpha2.ReplicatedVolume{}
 		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr)
 		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				r.log.Warn(
-					"rvr 'name' not found, it might be deleted, ignore",
+					"rv 'name' not found, it might be deleted, ignore",
 					"name", typedReq.Name,
 				)
 				return reconcile.Result{}, nil
 			}
 			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
-		}
-
-		if rvr.Spec.NodeName != r.nodeName {
-			return reconcile.Result{},
-				fmt.Errorf("expected spec.nodeName to be %s, got %s",
-					r.nodeName, rvr.Spec.NodeName,
-				)
 		}
 
 		// h := &resourceReconcileRequestHandler{

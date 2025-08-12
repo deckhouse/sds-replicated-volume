@@ -19,8 +19,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -115,17 +113,8 @@ func newManager(
 	}
 
 	mgrOpts := manager.Options{
-		Scheme:      scheme,
-		BaseContext: func() context.Context { return ctx },
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha2.ReplicatedVolumeReplica{}: {
-					// only watch current node's replicas
-					Field: (&v1alpha2.ReplicatedVolumeReplica{}).
-						NodeNameSelector(envConfig.NodeName),
-				},
-			},
-		},
+		Scheme:                 scheme,
+		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
 		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
 		Metrics: server.Options{
@@ -144,23 +133,6 @@ func newManager(
 
 	if err = mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		return nil, LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
-	}
-
-	err = mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&v1alpha2.ReplicatedVolumeReplica{},
-		"spec.nodeName",
-		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha2.ReplicatedVolumeReplica)
-			if replica.Spec.NodeName == "" {
-				return nil
-			}
-			return []string{replica.Spec.NodeName}
-		},
-	)
-	if err != nil {
-		return nil,
-			LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
 	}
 
 	return mgr, nil

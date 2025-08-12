@@ -29,9 +29,9 @@ func runController(
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
-		Named("replicatedVolumeReplica").
+		Named("replicatedVolume").
 		Watches(
-			&v1alpha2.ReplicatedVolumeReplica{},
+			&v1alpha2.ReplicatedVolume{},
 			&handler.TypedFuncs[client.Object, TReq]{
 				CreateFunc: func(
 					ctx context.Context,
@@ -39,7 +39,7 @@ func runController(
 					q TQueue,
 				) {
 					log.Debug("CreateFunc", "name", ce.Object.GetName())
-					typedObj := ce.Object.(*v1alpha2.ReplicatedVolumeReplica)
+					typedObj := ce.Object.(*v1alpha2.ReplicatedVolume)
 					q.Add(rv.ResourceReconcileRequest{Name: typedObj.Name})
 				},
 				UpdateFunc: func(
@@ -48,8 +48,8 @@ func runController(
 					q TQueue,
 				) {
 					log.Debug("UpdateFunc", "name", ue.ObjectNew.GetName())
-					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolumeReplica)
-					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolumeReplica)
+					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolume)
+					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolume)
 
 					// skip status and metadata updates
 					if typedObjOld.Generation >= typedObjNew.Generation {
@@ -68,10 +68,9 @@ func runController(
 					q TQueue,
 				) {
 					log.Debug("DeleteFunc", "name", de.Object.GetName())
-					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
+					typedObj := de.Object.(*v1alpha2.ReplicatedVolume)
 					q.Add(rv.ResourceDeleteRequest{
-						Name:                 typedObj.Name,
-						ReplicatedVolumeName: typedObj.Spec.ReplicatedVolumeName,
+						Name: typedObj.Name,
 					})
 				},
 				GenericFunc: func(
