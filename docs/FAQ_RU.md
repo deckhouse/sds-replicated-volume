@@ -64,6 +64,48 @@ description: Диагностика проблем LINSTOR. Когда след�
 
 2. Полученный ресурс укажите в параметрах [ReplicatedStoragePool](./cr.html#replicatedstoragepool) в поле `spec.lvmVolumeGroups[].name` (для LVMThin-пула необходимо дополнительно указать имя в `spec.lvmVolumeGroups[].thinPoolName`).
 
+## Как расширить ReplicatedStoragePool на новый узел кластера?
+
+Для расширения существующего ReplicatedStoragePool используйте новый LVM Volume Group. Выполните следующие шаги:
+
+1. Создайте новую LVMVolumeGroup с помощью модуля [sds-node-configurator](../../sds-node-configurator/stable/usage.html#creating-an-lvmvolumegroup-resource)
+
+1. Добавьте новую Volume Group в существующий ReplicatedStoragePool, отредактировав ресурс:
+
+   ```shell
+   kubectl edit replicatedstoragepool your-pool-name
+   ```
+
+   Добавьте новую Volume Group в секцию `spec.lvmVolumeGroups`:
+
+   ```yaml
+   spec:
+     lvmVolumeGroups:
+     - name: existing-vg-name
+     - name: new-vg-name  # Добавьте эту строку
+   ```
+
+1. Для LVMThin-пулов дополнительно укажите имя тонкого пула:
+
+   ```yaml
+   spec:
+     lvmVolumeGroups:
+     - name: existing-vg-name
+       thinPoolName: existing-thin-pool
+     - name: new-vg-name
+       thinPoolName: new-thin-pool  # Добавьте эту строку
+   ```
+
+1. Сохраните изменения. Контроллер автоматически создаст Storage Pool в LINSTOR для новой Volume Group и добавит её в существующий ReplicatedStoragePool.
+
+1. Проверьте статус расширения:
+
+   ```shell
+   kubectl get replicatedstoragepool your-pool-name -o yaml
+   ```
+
+   В статусе должна отобразиться информация о новой Volume Group.
+
 ## Как увеличить ограничение на количество DRBD-томов / изменить порты, по которым DRBD-кластера общаются между собой?
 
 Воспользуйтесь настройкой `drbdPortRange`. По умолчанию для DRBD-ресурсов используются TCP-порты 7000-7999. С помощью `minPort` и `maxPort` эти значения можно переопределить.
