@@ -44,7 +44,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	NodeName string `json:"nodeName"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:Maximum=7
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -68,7 +68,7 @@ type ReplicatedVolumeReplicaSpec struct {
 // +k8s:deepcopy-gen=true
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:Maximum=7
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -99,9 +99,10 @@ type Volume struct {
 // +k8s:deepcopy-gen=true
 type Address struct {
 	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
 	IPv4 string `json:"ipv4"`
 
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=1025
 	// +kubebuilder:validation:Maximum=65535
 	Port uint `json:"port"`
 }

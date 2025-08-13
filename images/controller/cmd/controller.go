@@ -10,7 +10,7 @@ import (
 	. "github.com/deckhouse/sds-common-lib/u"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/internal/reconcile/rv"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"

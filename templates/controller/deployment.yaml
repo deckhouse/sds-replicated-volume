@@ -8,19 +8,19 @@ memory: 25Mi
 apiVersion: autoscaling.k8s.io/v1
 kind: VerticalPodAutoscaler
 metadata:
-  name: sds-replicated-volume-controller
+  name: controller
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 spec:
   targetRef:
     apiVersion: "apps/v1"
     kind: Deployment
-    name: sds-replicated-volume-controller
+    name: controller
   updatePolicy:
     updateMode: "Auto"
   resourcePolicy:
     containerPolicies:
-    - containerName: "sds-replicated-volume-controller"
+    - containerName: "controller"
       minAllowed:
         {{- include "sds_drbd_controller_resources" . | nindent 8 }}
       maxAllowed:
@@ -31,48 +31,48 @@ spec:
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: sds-replicated-volume-controller
+  name: controller
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller" )) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller" )) | nindent 2 }}
 spec:
   minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
   selector:
     matchLabels:
-      app: sds-replicated-volume-controller
+      app: controller
 ---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: sds-replicated-volume-controller
+  name: controller
   namespace: d8-{{ .Chart.Name }}
-  {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 spec:
   revisionHistoryLimit: 2
   {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" . | nindent 2 }}
   selector:
     matchLabels:
-      app: sds-replicated-volume-controller
+      app: controller
   template:
     metadata:
       labels:
-        app: sds-replicated-volume-controller
+        app: controller
     spec:
       {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
       {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
-      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "controller")) | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
-      serviceAccountName: sds-replicated-volume-controller
+      serviceAccountName: controller
       containers:
-        - name: sds-replicated-volume-controller
+        - name: controller
           image: {{ include "helm_lib_module_image" (list . "sdsReplicatedVolumeController") }}
           imagePullPolicy: IfNotPresent
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 8081
+              port: 4271
               scheme: HTTP
             initialDelaySeconds: 5
             failureThreshold: 2
@@ -80,7 +80,7 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 8081
+              port: 4271
               scheme: HTTP
             periodSeconds: 1
             failureThreshold: 3
@@ -109,27 +109,6 @@ spec:
 {{- else if eq .Values.sdsReplicatedVolume.logLevel "TRACE" }}
               value: "4"
 {{- end }}
-            - name: LS_USER_CERTIFICATE
-              valueFrom:
-                secretKeyRef:
-                  name: linstor-client-https-cert
-                  key: tls.crt
-            - name: LS_USER_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: linstor-client-https-cert
-                  key: tls.key
-            - name: LS_ROOT_CA
-              valueFrom:
-                secretKeyRef:
-                  name: linstor-client-https-cert
-                  key: ca.crt
-            - name: LS_CONTROLLERS
-              value: https://linstor.d8-{{ .Chart.Name }}.svc:3371
-            - name: CONTROLLER_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
           volumeMounts:
             - name: host-device-dir
               mountPath: /dev/
