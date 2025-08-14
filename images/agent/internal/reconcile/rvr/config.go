@@ -8,7 +8,7 @@ import (
 
 const (
 	SecretNamespace = "d8-sds-replicated-volume"
-	SecretName      = "sds-replicated-volume-agent"
+	SecretName      = "agent"
 )
 
 type ReconcilerClusterConfig struct {
