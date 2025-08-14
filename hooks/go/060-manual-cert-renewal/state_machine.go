@@ -48,7 +48,7 @@ const (
 	DeploymentNameWebhooks           = "webhooks"
 	DeploymentNameSpaas              = "spaas"
 	DeploymentNameController         = "linstor-controller"
-	DeploymentNameCsiController      = "linstor-csi-controller"
+	DeploymentNameCsiController      = "csi-controller"
 	DeploymentNameAffinityController = "linstor-affinity-controller"
 	DeploymentNameSdsRVController    = "sds-replicated-volume-controller"
 
