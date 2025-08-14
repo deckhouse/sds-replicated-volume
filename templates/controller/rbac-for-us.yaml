@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: sds-replicated-volume-controller
+  name: controller
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
 
@@ -10,7 +10,7 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: d8:{{ .Chart.Name }}:sds-replicated-volume-controller
+  name: d8:{{ .Chart.Name }}:controller
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
 rules:
   - apiGroups: ["*"]
@@ -21,15 +21,15 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: d8:{{ .Chart.Name }}:sds-replicated-volume-controller
+  name: d8:{{ .Chart.Name }}:controller
   {{- include "helm_lib_module_labels" (list . (dict "app" "sds-replicated-volume-controller")) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
-    name: sds-replicated-volume-controller
+    name: controller
     namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
-  name: d8:{{ .Chart.Name }}:sds-replicated-volume-controller
+  name: d8:{{ .Chart.Name }}:controller
   apiGroup: rbac.authorization.k8s.io
 
 
