@@ -41,7 +41,7 @@ const (
 	TriggerKeyBackupDaemonSetAffinity  = "backup-daemonset-affinity-"
 	TriggerKeyBackupDeploymentReplicas = "backup-deployment-replicas-"
 
-	DaemonSetNameCsiNode = "linstor-csi-node"
+	DaemonSetNameCsiNode = "csi-node"
 	DaemonSetNameNode    = "linstor-node"
 
 	DeploymentNameSchedulerExtender  = "linstor-scheduler-extender"
