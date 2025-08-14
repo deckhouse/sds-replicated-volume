@@ -75,7 +75,7 @@ spec:
               port: 4271
               scheme: HTTP
             initialDelaySeconds: 5
-            failureThreshold: 2
+            failureThreshold: 3
             periodSeconds: 1
           livenessProbe:
             httpGet:
