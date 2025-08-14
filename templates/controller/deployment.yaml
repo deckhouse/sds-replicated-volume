@@ -67,7 +67,7 @@ spec:
       serviceAccountName: controller
       containers:
         - name: controller
-          image: {{ include "helm_lib_module_image" (list . "sdsReplicatedVolumeController") }}
+          image: {{ include "helm_lib_module_image" (list . "controller") }}
           imagePullPolicy: IfNotPresent
           readinessProbe:
             httpGet:
