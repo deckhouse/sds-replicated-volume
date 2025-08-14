@@ -2,7 +2,7 @@ module github.com/deckhouse/sds-replicated-volume/images/agent
 
 go 1.24.2
 
-require github.com/deckhouse/sds-common-lib v0.0.0-20250611081307-a9d174560ad3
+require github.com/deckhouse/sds-common-lib v0.5.1-0.20250811154814-87f1171f384c
 
 require (
 	github.com/beorn7/perks v1.0.1 // indirect

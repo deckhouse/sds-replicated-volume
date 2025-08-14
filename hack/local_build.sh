@@ -8,7 +8,7 @@ fi
 
 REGISTRY_PATH=registry.flant.com/deckhouse/storage/localbuild
 NAMESPACE=d8-sds-replicated-volume
-DAEMONSET_NAME=sds-replicated-volume-agent
+DAEMONSET_NAME=agent
 SECRET_NAME=sds-replicated-volume-module-registry
 
 # CI and werf variables
@@ -83,7 +83,7 @@ patch_agent() {
   (
     set -exuo pipefail
 
-    DAEMONSET_CONTAINER_NAME=sds-replicated-volume-agent
+    DAEMONSET_CONTAINER_NAME=agent
     IMAGE=${REGISTRY_PATH}:${CUSTOM_TAG}-agent
 
     SECRET_DATA=$(_create_secret)

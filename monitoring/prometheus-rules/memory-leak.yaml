@@ -1,18 +1,19 @@
 - name: kubernetes.
   rules:
     - alert: D8NodeHighUnknownMemoryUsage
-      expr: ((sum (
-        node_memory_MemTotal_bytes
-        - node_memory_MemFree_bytes
-        - node_memory_AnonPages_bytes
-        - node_memory_Mapped_bytes
-        - node_memory_Buffers_bytes
-        - node_memory_SReclaimable_bytes
-        - clamp_min(node_memory_Cached_bytes - node_memory_Mapped_bytes, 0)
-        - node_memory_SUnreclaim_bytes
-        - node_memory_KernelStack_bytes
-        - node_memory_PageTables_bytes
-        ) by(node) / sum(node_memory_MemTotal_bytes) by(node)) * 100 ) > 25
+      expr: (
+        sum(
+          node_memory_MemTotal_bytes{node!=""}
+          - node_memory_MemFree_bytes{node!=""}
+          - node_memory_AnonPages_bytes{node!=""}
+          - node_memory_Mapped_bytes{node!=""}
+          - node_memory_Buffers_bytes{node!=""}
+          - node_memory_SReclaimable_bytes{node!=""}
+          - clamp_min(node_memory_Cached_bytes{node!=""} - node_memory_Mapped_bytes{node!=""}, 0)
+          - node_memory_SUnreclaim_bytes{node!=""}
+          - node_memory_KernelStack_bytes{node!=""}
+          - node_memory_PageTables_bytes{node!=""}
+        ) by (node) / sum(node_memory_MemTotal_bytes{node!=""}) by (node)) * 100 > 25
       for: 5m
       labels:
         severity_level: "4"
