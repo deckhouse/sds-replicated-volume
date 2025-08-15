@@ -19,6 +19,38 @@ Overprovisioning in LVMThin should be used with caution, monitoring the availabi
 In case of no free space in the pool, degradation in the module's operation as a whole will be observed, and there is a real possibility of data loss!
 {{< /alert >}}
 
+## Which Replication Modes to Use and When?
+
+There are three replication modes in total:
+
+- **None** – A single data replica. Equivalent to a regular PV resource, with no fault tolerance or availability.  
+- **Availability** – Two data replicas + one diskless replica (contains no data; when used, it accesses any available "full" replica over the network). Provides a certain level of availability if one replica fails but does not guarantee data consistency (integrity).  
+- **ConsistencyAndAvailability** – Three data replicas, full fault tolerance with guaranteed data preservation in case of failures.  
+
+By default, the `ConsistencyAndAvailability` mode is used when creating a `ReplicatedStorageClass`. It can be specified as follows:  
+
+```shell
+apiVersion: storage.deckhouse.io/v1alpha1
+kind: ReplicatedStorageClass
+metadata:
+  generation: 2
+  name: test-rsc
+spec:
+  reclaimPolicy: Delete
+  replication: ConsistencyAndAvailability
+  storagePool: sample
+  topology: Ignored
+  volumeAccess: Local
+```
+
+### When and Which Modes to Use?  
+
+- **None** – Suitable for test environments or clustered applications (e.g., if you deploy a multi-node cluster of RabbitMQ/MongoDB/MySQL/etc.).  
+- **Availability** – A compromise mode that ensures availability but, in case of network connectivity issues (one of the quorum replicas is diskless, and accessing data through it happens over the network), may lead to desynchronization and, optionally, data loss.  
+  Best suited for non-critical data and applications that require some level of high availability (e.g., when nodes periodically go into maintenance) but do not have strict reliability or data integrity requirements.  
+- **ConsistencyAndAvailability** – The most reliable replication mode, recommended for mission-critical applications, vital data, and deploying virtual machines in a DVP environment.  
+
+
 ## How do I get info about the space used?
 
 There are two options:
