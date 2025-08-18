@@ -13,7 +13,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 
-	. "github.com/deckhouse/sds-common-lib/u"
+	. "github.com/deckhouse/sds-common-lib/utils"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"

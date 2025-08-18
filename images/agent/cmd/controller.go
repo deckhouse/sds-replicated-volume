@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
-	. "github.com/deckhouse/sds-common-lib/u"
+	. "github.com/deckhouse/sds-common-lib/utils"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/rvr"
@@ -50,6 +50,16 @@ func runController(
 					log.Debug("UpdateFunc", "name", ue.ObjectNew.GetName())
 					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolumeReplica)
 					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolumeReplica)
+
+					// detect signals passed with annotations
+					oldAnn := typedObjOld.GetAnnotations()
+					newAnn := typedObjNew.GetAnnotations()
+					if oldAnn[v1alpha2.AnnotationKeyPrimaryForce] == "" && newAnn[v1alpha2.AnnotationKeyPrimaryForce] != "" {
+						q.Add(rvr.ResourcePrimaryForceRequest{Name: typedObjNew.Name})
+					}
+					if oldAnn[v1alpha2.AnnotationKeyNeedResize] == "" && newAnn[v1alpha2.AnnotationKeyNeedResize] != "" {
+						q.Add(rvr.ResourceResizeRequest{Name: typedObjNew.Name})
+					}
 
 					// skip status and metadata updates
 					if typedObjOld.Generation >= typedObjNew.Generation {

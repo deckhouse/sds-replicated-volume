@@ -10,6 +10,8 @@ github.com/deckhouse/sds-common-lib v0.0.0-20250611081307-a9d174560ad3 h1:G6OcJS
 github.com/deckhouse/sds-common-lib v0.0.0-20250611081307-a9d174560ad3/go.mod h1:tAZI7ZaVeJi5/Fe5Mebw3d6NC4nTHUOOTwZFnHHzxFU=
 github.com/deckhouse/sds-common-lib v0.5.1-0.20250811154814-87f1171f384c h1:CUAEFplNTFj4I7JJ5jp39rKYZmbU4rUJIRlbQ1HQS8A=
 github.com/deckhouse/sds-common-lib v0.5.1-0.20250811154814-87f1171f384c/go.mod h1:tAZI7ZaVeJi5/Fe5Mebw3d6NC4nTHUOOTwZFnHHzxFU=
+github.com/deckhouse/sds-common-lib v0.5.1-0.20250818142842-788526b4a4b0 h1:rOxmtUSVRFTRnDXD3SS1kvWeXOpUgeDthuWb7WuFjA8=
+github.com/deckhouse/sds-common-lib v0.5.1-0.20250818142842-788526b4a4b0/go.mod h1:tAZI7ZaVeJi5/Fe5Mebw3d6NC4nTHUOOTwZFnHHzxFU=
 github.com/emicklei/go-restful/v3 v3.12.1 h1:PJMDIM/ak7btuL8Ex0iYET9hxM3CI2sjZtzpL63nKAU=
 github.com/emicklei/go-restful/v3 v3.12.1/go.mod h1:6n3XBCmQQb25CM2LCACGz8ukIrRry+4bhvbpWn3mrbc=
 github.com/evanphx/json-patch v0.5.2 h1:xVCHIVMUu1wtM/VkR9jVZ45N3FhZfYMMYGorLCR8P3k=

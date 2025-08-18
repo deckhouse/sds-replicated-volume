@@ -39,3 +39,7 @@ var SecondaryArgs = func(resource string) []string {
 }
 
 var Events2Args = []string{"events2", "--timestamps"}
+
+var ResizeArgs = func(resource string) []string {
+	return []string{"resize", resource}
+}

@@ -19,5 +19,22 @@ type ResourceDeleteRequest struct {
 
 func (r ResourceDeleteRequest) _isRequest() {}
 
+// special request: force primary when annotation is added
+type ResourcePrimaryForceRequest struct {
+	Name string
+}
+
+func (r ResourcePrimaryForceRequest) _isRequest() {}
+
 var _ Request = ResourceReconcileRequest{}
 var _ Request = ResourceDeleteRequest{}
+var _ Request = ResourcePrimaryForceRequest{}
+
+// special request: resize resource when annotation is added
+type ResourceResizeRequest struct {
+	Name string
+}
+
+func (r ResourceResizeRequest) _isRequest() {}
+
+var _ Request = ResourceResizeRequest{}

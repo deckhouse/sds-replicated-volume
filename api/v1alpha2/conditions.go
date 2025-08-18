@@ -5,11 +5,8 @@ const (
 	// ConditionTypeReady indicates whether the replica is ready and operational
 	ConditionTypeReady = "Ready"
 
-	// ConditionTypePrimary indicates the primary/secondary state of the replica
-	ConditionTypePrimary = "Primary"
-
-	// ConditionTypeInitialSyncCompleted indicates whether the initial synchronization has been completed
-	ConditionTypeInitialSyncCompleted = "InitialSyncCompleted"
+	// ConditionTypeInitialSync indicates whether the initial synchronization has been completed
+	ConditionTypeInitialSync = "InitialSync"
 )
 
 // Condition reasons for Ready condition
@@ -24,18 +21,8 @@ const (
 	ReasonReady                  = "Ready"
 )
 
-// Condition reasons for Primary condition
+// Condition reasons for InitialSync condition
 const (
-	// Primary condition reasons
-	ReasonRoleCorrect     = "RoleCorrect"
-	ReasonPromotionFailed = "PromotionFailed"
-	ReasonPrimary         = "Primary"
-	ReasonDemotionFailed  = "DemotionFailed"
-	ReasonSecondary       = "Secondary"
-)
-
-// Condition reasons for InitialSyncCompleted condition
-const (
-	// InitialSyncCompleted condition reasons
-	ReasonFirstPrimaryPromoted = "FirstPrimaryPromoted"
+	ReasonSafeForInitialSync     = "SafeForInitialSync"
+	ReasonInitialUpToDateReached = "InitialUpToDateReached"
 )
