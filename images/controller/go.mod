@@ -7,7 +7,7 @@ require (
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250528073435-da456829b64d
 	github.com/go-logr/logr v1.4.2
 	k8s.io/api v0.33.1
-	k8s.io/apimachinery v0.33.3
+	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.1
 	sigs.k8s.io/controller-runtime v0.21.0
 )
