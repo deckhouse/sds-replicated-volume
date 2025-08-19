@@ -110,9 +110,9 @@ spec:
                 default: false
                 type: boolean
               replicatedVolumeName:
-                maxLength: 32
+                maxLength: 127
                 minLength: 1
-                pattern: ^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$
+                pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
               sharedSecret:
                 minLength: 1
@@ -144,7 +144,6 @@ spec:
             - nodeAddress
             - nodeId
             - nodeName
-            - peers
             - replicatedVolumeName
             - sharedSecret
             - volumes

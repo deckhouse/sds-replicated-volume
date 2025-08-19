@@ -34,8 +34,8 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=32
-	// +kubebuilder:validation:Pattern=`^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$`
+	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
 	// +kubebuilder:validation:Required
@@ -50,7 +50,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	NodeAddress Address `json:"nodeAddress"`
 
-	Peers map[string]Peer `json:"peers"`
+	Peers map[string]Peer `json:"peers,omitempty"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
