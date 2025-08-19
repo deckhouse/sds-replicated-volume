@@ -24,9 +24,10 @@ import (
 	"fmt"
 	"sort"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
