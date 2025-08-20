@@ -9,11 +9,6 @@ import:
     add: /images_digests.json
     to: /images_digests.json
     after: setup
-  # Rendering .werf/python-deps.yaml is required!
-  - image: python-dependencies
-    add: /lib/python/dist
-    to: /lib/python/dist
-    after: setup
   # Rendering .werf/go-hooks.yaml is required!
   - image: go-hooks-artifact
     add: /usr/local/bin/go-hooks
