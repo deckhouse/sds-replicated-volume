@@ -10,7 +10,7 @@ env:
   MODULES_MODULE_TAG: ${{ github.ref_name }}
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  BASE_IMAGES_VERSION: "v0.5.8"
+  BASE_IMAGES_VERSION: "v0.5.23"
 
 on:
   push:
