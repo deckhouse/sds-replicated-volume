@@ -107,7 +107,11 @@ type Address struct {
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaStatus struct {
-	Conditions []metav1.Condition `json:"conditions"`
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type"`
 	DRBD       *DRBDStatus        `json:"drbd,omitempty"`
 }
 

@@ -204,6 +204,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               drbd:
                 properties:
                   connections:
@@ -396,8 +399,6 @@ spec:
                 - suspended-user
                 - write-ordering
                 type: object
-            required:
-            - conditions
             type: object
         required:
         - metadata
