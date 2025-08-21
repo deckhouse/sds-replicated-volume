@@ -13,9 +13,9 @@ import (
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	. "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/conditions"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/jinzhu/copier"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -224,14 +224,16 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 	}
 
 	allUpToDate := SliceFind(resource.Devices, func(d *drbdsetup.Device) bool { return d.DiskState != "UpToDate" }) == nil
-	if !conditions.IsTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) && allUpToDate {
-		rvr.Status.Conditions = conditions.Set(rvr.Status.Conditions, metav1.Condition{
-			Type:               v1alpha2.ConditionTypeInitialSync,
-			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha2.ReasonInitialUpToDateReached,
-			Message:            "All device disk states are UpToDate",
-			LastTransitionTime: metav1.Now(),
-		})
+	if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) && allUpToDate {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			metav1.Condition{
+				Type:    v1alpha2.ConditionTypeInitialSync,
+				Status:  metav1.ConditionTrue,
+				Reason:  v1alpha2.ReasonInitialUpToDateReached,
+				Message: "All device disk states were UpToDate at least once",
+			},
+		)
 	}
 
 	return s.cl.Status().Patch(s.ctx, rvr, patch)

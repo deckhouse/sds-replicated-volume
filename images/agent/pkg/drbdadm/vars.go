@@ -19,7 +19,7 @@ var AdjustArgs = func(resource string) []string {
 }
 
 var CreateMDArgs = func(resource string) []string {
-	return []string{"create-md", "--max-peers=6", "--force", resource}
+	return []string{"create-md", "--max-peers=7", "--force", resource}
 }
 
 var DownArgs = func(resource string) []string {

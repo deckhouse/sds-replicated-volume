@@ -13,11 +13,11 @@ import (
 
 	. "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/conditions"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -181,7 +181,11 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 
 		// some information is node-specific, so skip for other nodes
 		if isCurrentNode {
-			vol.Disk = Ptr(v9.VolumeDisk(volume.Disk))
+			if volume.Disk == "" {
+				vol.Disk = &v9.VolumeDiskNone{}
+			} else {
+				vol.Disk = Ptr(v9.VolumeDisk(volume.Disk))
+			}
 			vol.DiskOptions = &v9.DiskOptions{
 				DiscardZeroesIfAligned: Ptr(false),
 				RsDiscardGranularity:   Ptr(uint(8192)),
@@ -224,7 +228,7 @@ func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.Hos
 }
 
 func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
-	if !conditions.IsTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
+	if !meta.IsStatusConditionTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
 		h.log.Debug(
 			"initial synchronization has not been completed, skipping primary/secondary promotion",
 			"resource", h.rvr.Spec.ReplicatedVolumeName,

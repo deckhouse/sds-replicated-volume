@@ -125,8 +125,7 @@ spec:
                       minimum: 0
                       type: integer
                     disk:
-                      minLength: 1
-                      pattern: ^/[a-zA-Z0-9/_-]+$
+                      pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
                     number:
                       maximum: 255
@@ -134,7 +133,6 @@ spec:
                       type: integer
                   required:
                   - device
-                  - disk
                   - number
                   type: object
                 maxItems: 100

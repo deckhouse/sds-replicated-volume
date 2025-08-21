@@ -86,10 +86,8 @@ type Volume struct {
 	// +kubebuilder:validation:Maximum=255
 	Number uint `json:"number"`
 
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:Pattern=`^/[a-zA-Z0-9/_-]+$`
-	Disk string `json:"disk"`
+	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
+	Disk string `json:"disk,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
