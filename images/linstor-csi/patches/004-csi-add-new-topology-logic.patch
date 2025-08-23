@@ -779,10 +779,10 @@ index 856eae7..21feb74 100644
  )
  
 -const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovision"
-+const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovisionreplicatedstorageclassname"
++const _paramKeyName = "allowremotevolumeaccessautoplaceclientlistdisklessonremainingdisklessstoragepooldonotplacewithregexencryptionfsoptslayerlistmountoptsnodelistplacementcountplacementpolicyreplicasondifferentreplicasonsamesizekibstoragepoolpostmountxfsoptsresourcegroupusepvcnameoverprovisionreplicatedstorageclassnamelvm-volume-groups"
  
 -var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273}
-+var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273, 299}
++var _paramKeyIndex = [...]uint16{0, 23, 32, 42, 61, 80, 99, 109, 115, 124, 133, 141, 155, 170, 189, 203, 210, 221, 237, 250, 260, 273, 299, 316}
  
  func (i paramKey) String() string {
  	if i < 0 || i >= paramKey(len(_paramKeyIndex)-1) {
@@ -791,15 +791,16 @@ index 856eae7..21feb74 100644
  }
  
 -var _paramKeyValues = []paramKey{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
-+var _paramKeyValues = []paramKey{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
++var _paramKeyValues = []paramKey{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22}
  
  var _paramKeyNameToValueMap = map[string]paramKey{
  	_paramKeyName[0:23]:    0,
-@@ -41,6 +41,7 @@ var _paramKeyNameToValueMap = map[string]paramKey{
+@@ -41,6 +41,8 @@ var _paramKeyNameToValueMap = map[string]paramKey{
  	_paramKeyName[237:250]: 18,
  	_paramKeyName[250:260]: 19,
  	_paramKeyName[260:273]: 20,
 +	_paramKeyName[273:299]: 21,
++	_paramKeyName[299:316]: 22,
  }
  
  // paramKeyString retrieves an enum value from the enum constants string name.

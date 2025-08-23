@@ -14,7 +14,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package linstor
+// +kubebuilder:object:generate=true
+// +groupName=storage.deckhouse.io
+package v1alpha2
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -23,8 +25,8 @@ import (
 )
 
 const (
-	APIGroup   = "internal.linstor.linbit.com"
-	APIVersion = "v1-15-0"
+	APIGroup   = "storage.deckhouse.io"
+	APIVersion = "v1alpha2"
 )
 
 // SchemeGroupVersion is group version used to register these objects
@@ -40,24 +42,10 @@ var (
 // Adds the list of known types to Scheme.
 func addKnownTypes(scheme *runtime.Scheme) error {
 	scheme.AddKnownTypes(SchemeGroupVersion,
-		&ResourceGroups{},
-		&ResourceGroupsList{},
-		&LayerDrbdResourceDefinitions{},
-		&LayerDrbdResourceDefinitionsList{},
-		&VolumeDefinitions{},
-		&VolumeDefinitionsList{},
-		&LayerDrbdVolumeDefinitions{},
-		&LayerDrbdVolumeDefinitionsList{},
-		&PropsContainers{},
-		&PropsContainersList{},
-		&Resources{},
-		&ResourcesList{},
-		&LayerStorageVolumes{},
-		&LayerStorageVolumesList{},
-		&ResourceDefinitions{},
-		&ResourceDefinitionsList{},
-		&LayerResourceIds{},
-		&LayerResourceIdsList{},		
+		&DRBDResource{},
+		&DRBDResourceList{},
+		&DRBDResourceReplica{},
+		&DRBDResourceReplicaList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
