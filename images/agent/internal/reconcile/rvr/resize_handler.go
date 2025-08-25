@@ -26,7 +26,7 @@ func (h *resourceResizeRequestHandler) Handle() error {
 	}
 
 	if err := drbdadm.ExecuteResize(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-		h.log.Error("failed to resize DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to resize DRBD resource", "error", err)
 		return fmt.Errorf("drbdadm resize: %w", err)
 	}
 
@@ -39,6 +39,6 @@ func (h *resourceResizeRequestHandler) Handle() error {
 		return fmt.Errorf("removing need-resize annotation: %w", err)
 	}
 
-	h.log.Info("successfully resized DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
+	h.log.Info("successfully resized DRBD resource")
 	return nil
 }

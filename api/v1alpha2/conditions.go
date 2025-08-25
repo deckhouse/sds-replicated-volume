@@ -9,6 +9,12 @@ const (
 	ConditionTypeInitialSync = "InitialSync"
 )
 
+// ReplicatedVolumeReplicaConditionTypes lists all condition types used by RVR status
+var ReplicatedVolumeReplicaConditionTypes = []string{
+	ConditionTypeReady,
+	ConditionTypeInitialSync,
+}
+
 // Condition reasons for Ready condition
 const (
 	// Ready condition reasons

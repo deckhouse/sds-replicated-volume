@@ -30,14 +30,14 @@ func (h *resourcePrimaryForceRequestHandler) Handle() error {
 	}
 
 	if err := drbdadm.ExecutePrimaryForce(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-		h.log.Error("failed to force promote to primary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to force promote to primary", "error", err)
 		return fmt.Errorf("drbdadm primary --force: %w", err)
 	}
 
 	// demote back to secondary unless desired primary in spec
 	if !h.rvr.Spec.Primary {
 		if err := drbdadm.ExecuteSecondary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-			h.log.Error("failed to demote to secondary after forced promotion", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.log.Error("failed to demote to secondary after forced promotion", "error", err)
 			return fmt.Errorf("drbdadm secondary: %w", err)
 		}
 	}
@@ -52,6 +52,6 @@ func (h *resourcePrimaryForceRequestHandler) Handle() error {
 		return fmt.Errorf("removing primary-force annotation: %w", err)
 	}
 
-	h.log.Info("successfully handled primary-force request", "resource", h.rvr.Spec.ReplicatedVolumeName)
+	h.log.Info("successfully handled primary-force request")
 	return nil
 }

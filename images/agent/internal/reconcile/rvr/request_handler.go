@@ -17,8 +17,10 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -32,62 +34,76 @@ type resourceReconcileRequestHandler struct {
 }
 
 func (h *resourceReconcileRequestHandler) Handle() error {
+
+	// validate
+	var diskless bool
+	for _, v := range h.rvr.Spec.Volumes {
+		if v.Disk == "" {
+			diskless = true
+		} else if diskless {
+			// TODO: move to webhook validation?
+			return fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
+		}
+	}
+
 	if err := h.writeResourceConfig(); err != nil {
-		h.log.Error("failed to write resource config", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to write resource config", "error", err)
 		err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonConfigurationFailed, err.Error()))
 		return err
 	}
 
-	exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
-	if err != nil {
-		h.log.Error("failed to check metadata existence", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCheckFailed, err.Error()))
-		return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
-	}
-
-	if !exists {
-		if err := h.setConditionIfNeeded(
-			v1alpha2.ConditionTypeInitialSync,
-			metav1.ConditionFalse,
-			v1alpha2.ReasonSafeForInitialSync,
-			"Safe for initial synchronization",
-		); err != nil {
-			return err
+	if !diskless {
+		exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+		if err != nil {
+			h.log.Error("failed to check metadata existence", "error", err)
+			err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCheckFailed, err.Error()))
+			return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
 		}
 
-		if err := drbdadm.ExecuteCreateMD(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-			h.log.Error("failed to create metadata", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-			err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCreationFailed, err.Error()))
-			return fmt.Errorf("ExecuteCreateMD: %w", err)
-		}
+		if !exists {
+			if err := h.setConditionIfNeeded(
+				v1alpha2.ConditionTypeInitialSync,
+				metav1.ConditionFalse,
+				v1alpha2.ReasonSafeForInitialSync,
+				"Safe for initial synchronization",
+			); err != nil {
+				return err
+			}
 
-		h.log.Info("successfully created metadata", "resource", h.rvr.Spec.ReplicatedVolumeName)
+			if err := drbdadm.ExecuteCreateMD(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
+				h.log.Error("failed to create metadata", "error", err)
+				err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCreationFailed, err.Error()))
+				return fmt.Errorf("ExecuteCreateMD: %w", err)
+			}
+
+			h.log.Info("successfully created metadata")
+		}
 	}
 
 	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
-		h.log.Error("failed to check resource status", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to check resource status", "error", err)
 		err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonStatusCheckFailed, err.Error()))
 		return fmt.Errorf("ExecuteStatus_IsUp: %w", err)
 	}
 
 	if !isUp {
 		if err := drbdadm.ExecuteUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-			h.log.Error("failed to bring up resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.log.Error("failed to bring up resource", "error", err)
 			err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonResourceUpFailed, err.Error()))
 			return fmt.Errorf("ExecuteUp: %w", err)
 		}
 
-		h.log.Info("successfully brought up resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully brought up resource")
 	}
 
 	if err := drbdadm.ExecuteAdjust(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-		h.log.Error("failed to adjust resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to adjust resource", "error", err)
 		err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonAdjustmentFailed, err.Error()))
 		return fmt.Errorf("ExecuteAdjust: %w", err)
 	}
 
-	h.log.Info("successfully adjusted resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
+	h.log.Info("successfully adjusted resource")
 
 	if err := h.handlePrimarySecondary(); err != nil {
 		return fmt.Errorf("handling primary/secondary: %w", err)
@@ -231,7 +247,6 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 	if !meta.IsStatusConditionTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
 		h.log.Debug(
 			"initial synchronization has not been completed, skipping primary/secondary promotion",
-			"resource", h.rvr.Spec.ReplicatedVolumeName,
 			"conditions", h.rvr.Status.Conditions,
 		)
 		return nil
@@ -239,7 +254,7 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 
 	statusResult, err := drbdsetup.ExecuteStatus(h.ctx)
 	if err != nil {
-		h.log.Error("failed to get DRBD status", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+		h.log.Error("failed to get DRBD status", "error", err)
 		return fmt.Errorf("getting DRBD status: %w", err)
 	}
 
@@ -252,7 +267,7 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 	}
 
 	if currentRole == "" {
-		h.log.Error("resource not found in DRBD status", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Error("resource not found in DRBD status")
 		return fmt.Errorf("resource %s not found in DRBD status", h.rvr.Spec.ReplicatedVolumeName)
 	}
 
@@ -262,7 +277,7 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 	}
 
 	if currentRole == desiredRole {
-		h.log.Debug("DRBD role already correct", "resource", h.rvr.Spec.ReplicatedVolumeName, "role", currentRole)
+		h.log.Debug("DRBD role already correct", "role", currentRole)
 		return nil
 	}
 
@@ -270,20 +285,65 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 		err := drbdadm.ExecutePrimary(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 
 		if err != nil {
-			h.log.Error("failed to promote to primary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.log.Error("failed to promote to primary", "error", err)
 			return fmt.Errorf("promoting to primary: %w", err)
 		}
 
-		h.log.Info("successfully promoted to primary", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully promoted to primary")
 	} else {
 		if err := drbdadm.ExecuteSecondary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-			h.log.Error("failed to demote to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+			h.log.Error("failed to demote to secondary", "error", err)
 			return fmt.Errorf("demoting to secondary: %w", err)
 		}
-		h.log.Info("successfully demoted to secondary", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully demoted to secondary")
 	}
 
 	return nil
+}
+
+func (h *resourceReconcileRequestHandler) initStatusConditions() error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		if h.rvr.Status == nil {
+			h.rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
+		}
+
+		if h.rvr.Status.Conditions == nil {
+			h.rvr.Status.Conditions = []metav1.Condition{}
+		}
+
+		var toAdd []metav1.Condition
+		for _, t := range v1alpha2.ReplicatedVolumeReplicaConditionTypes {
+			if meta.FindStatusCondition(h.rvr.Status.Conditions, t) != nil {
+				continue
+			}
+			toAdd = append(toAdd, metav1.Condition{
+				Type:               t,
+				Status:             metav1.ConditionUnknown,
+				Reason:             "Initializing",
+				Message:            "",
+				LastTransitionTime: metav1.NewTime(time.Now()),
+			})
+		}
+
+		if len(toAdd) > 0 {
+			patch := client.MergeFromWithOptions(
+				h.rvr.DeepCopy(),
+				client.MergeFromWithOptimisticLock{},
+			)
+			h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, toAdd...)
+
+			if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
+				if kerrors.IsConflict(err) {
+					h.log.Warn("failed to initialize conditions, optimistic lock error", "error", err)
+				} else {
+					h.log.Error("failed to initialize conditions", "error", err)
+				}
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
@@ -292,9 +352,8 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 	reason,
 	message string,
 ) error {
-	if h.rvr.Status == nil {
-		h.rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
-		h.rvr.Status.Conditions = []metav1.Condition{}
+	if err := h.initStatusConditions(); err != nil {
+		return err
 	}
 
 	for _, condition := range h.rvr.Status.Conditions {
@@ -303,39 +362,45 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 		}
 	}
 
-	patch := client.MergeFrom(h.rvr.DeepCopy())
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		patch := client.MergeFrom(h.rvr.DeepCopy())
 
-	now := metav1.NewTime(time.Now())
-	newCondition := metav1.Condition{
-		Type:               conditionType,
-		Status:             status,
-		Reason:             reason,
-		Message:            message,
-		LastTransitionTime: now,
-	}
-
-	found := false
-	for i, condition := range h.rvr.Status.Conditions {
-		if condition.Type == conditionType {
-			// Preserve transition time when only reason/message changes
-			if condition.Status == status {
-				newCondition.LastTransitionTime = condition.LastTransitionTime
-			}
-			h.rvr.Status.Conditions[i] = newCondition
-			found = true
-			break
+		now := metav1.NewTime(time.Now())
+		newCondition := metav1.Condition{
+			Type:               conditionType,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			LastTransitionTime: now,
 		}
-	}
 
-	if !found {
-		h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, newCondition)
-	}
+		found := false
+		for i, condition := range h.rvr.Status.Conditions {
+			if condition.Type == conditionType {
+				// Preserve transition time when only reason/message changes
+				if condition.Status == status {
+					newCondition.LastTransitionTime = condition.LastTransitionTime
+				}
+				h.rvr.Status.Conditions[i] = newCondition
+				found = true
+				break
+			}
+		}
 
-	if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
-		h.log.Error("failed to update condition", "type", conditionType, "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
-		return fmt.Errorf("patching RVR status: %w", err)
-	}
-	h.log.Info("successfully updated condition", "type", conditionType, "resource", h.rvr.Spec.ReplicatedVolumeName)
+		if !found {
+			h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, newCondition)
+		}
 
-	return nil
+		if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
+			if kerrors.IsConflict(err) {
+				h.log.Warn("failed to initialize conditions, optimistic lock error", "error", err)
+			} else {
+				h.log.Error("failed to update condition", "type", conditionType, "error", err)
+				err = fmt.Errorf("patching RVR status condition: %w", err)
+			}
+			return err
+		}
+		h.log.Info("successfully updated condition", "type", conditionType)
+		return nil
+	})
 }
