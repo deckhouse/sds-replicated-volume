@@ -19,8 +19,8 @@ package discoverdatanodeschecksum
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
+	// "encoding/hex"
+	// "encoding/json"
 	"fmt"
 	"sort"
 
