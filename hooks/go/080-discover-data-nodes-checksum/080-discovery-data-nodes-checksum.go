@@ -28,7 +28,7 @@ import (
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
-	// objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
+	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 )
 
 const (
@@ -51,6 +51,7 @@ var _ = registry.RegisterFunc(
 						labelKey: "",
 					},
 				},
+				JqFilter: ".metadata.uid",
 			},
 		},
 	},
@@ -58,52 +59,52 @@ var _ = registry.RegisterFunc(
 )
 
 func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
-	snapshots := input.Snapshots.Get(nodeSnapshotName)
-	var uids []string
-	for _, snap := range snapshots {
-		b, err := json.Marshal(snap)
-		if err != nil {
-			continue
-		}
-		var snapMap map[string]interface{}
-		if err := json.Unmarshal(b, &snapMap); err != nil {
-			continue
-		}
-		filterResult, ok := snapMap["filterResult"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-		uid, ok := filterResult["uid"].(string)
-		if !ok {
-			continue
-		}
-		uids = append(uids, uid)
+	// snapshots := input.Snapshots.Get(nodeSnapshotName)
+	// var uids []string
+	// for _, snap := range snapshots {
+	// 	b, err := json.Marshal(snap)
+	// 	if err != nil {
+	// 		continue
+	// 	}
+	// 	var snapMap map[string]interface{}
+	// 	if err := json.Unmarshal(b, &snapMap); err != nil {
+	// 		continue
+	// 	}
+	// 	filterResult, ok := snapMap["filterResult"].(map[string]interface{})
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	uid, ok := filterResult["uid"].(string)
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	uids = append(uids, uid)
+	// }
+	// sort.Strings(uids)
+	// h := sha256.New()
+	// h.Write([]byte(fmt.Sprintf("%v", uids)))
+	// hash := hex.EncodeToString(h.Sum(nil))
+
+	// input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hash)
+	// return nil
+
+
+	uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, "nodes")
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal node UIDs: %w", err)
 	}
-	sort.Strings(uids)
-	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%v", uids)))
-	hash := hex.EncodeToString(h.Sum(nil))
 
-	input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hash)
+	sort.Strings(uidList)
+
+	uidString := fmt.Sprintf("%v", uidList)
+	hash := sha256.Sum256([]byte(uidString))
+	hashString := fmt.Sprintf("%x", hash)
+
+	input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hashString)
+
+	input.Logger.Info("computed data nodes checksum", 
+		"nodeCount", len(uidList),
+		"checksum", hashString)
+
 	return nil
-
-
-		// uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, "nodes")
-		// if err != nil {
-		// 	return fmt.Errorf("failed to unmarshal node UIDs: %w", err)
-		// }
-
-		// sort.Strings(uidList)
-	
-		// uidString := fmt.Sprintf("%v", uidList)
-		// hash := sha256.Sum256([]byte(uidString))
-		// hashString := fmt.Sprintf("%x", hash)
-	
-		// input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hashString)
-	
-		// input.Logger.Info("computed data nodes checksum", 
-		// 	"nodeCount", len(uidList),
-		// 	"checksum", hashString)
-	
-		// return nil
 }
