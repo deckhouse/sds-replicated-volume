@@ -28,6 +28,7 @@ import (
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
 )
 
 const (
@@ -86,7 +87,7 @@ func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
 	// input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hash)
 	// return nil
 
-	
+
 		uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, "nodes")
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal node UIDs: %w", err)
