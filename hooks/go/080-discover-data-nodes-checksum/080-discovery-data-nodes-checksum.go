@@ -51,7 +51,6 @@ var _ = registry.RegisterFunc(
 						labelKey: "",
 					},
 				},
-				JqFilter: ".metadata.uid",
 			},
 		},
 	},
