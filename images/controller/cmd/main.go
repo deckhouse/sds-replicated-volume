@@ -11,9 +11,11 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
+	nodecfgv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"golang.org/x/sync/errgroup"
 
-	. "github.com/deckhouse/sds-common-lib/u"
+	. "github.com/deckhouse/sds-common-lib/utils"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -30,56 +32,35 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(
-		// TODO: fix slogh reload
-		slogh.Config{
-			Level:  slogh.LevelDebug,
-			Format: slogh.FormatText,
-		},
-	)
-
+	slogh.EnableConfigReload(ctx, nil)
+	logHandler := &slogh.Handler{}
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
-
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
-	// TODO: fix slogh reload
-	// slogh.RunConfigFileWatcher(
-	// 	ctx,
-	// 	func(data map[string]string) error {
-	// 		err := logHandler.UpdateConfigData(data)
-	// 		log.Info("UpdateConfigData", "data", data)
-	// 		return err
-	// 	},
-	// 	&slogh.ConfigFileWatcherOptions{
-	// 		OwnLogger: log.With("goroutine", "slogh"),
-	// 	},
-	// )
+	log.Info("started")
 
-	log.Info("agent started")
-
-	err := runAgent(ctx, log)
+	err := run(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
-		log.Error("agent exited unexpectedly", "err", err, "ctxerr", ctx.Err())
+		log.Error("exited unexpectedly", "err", err, "ctxerr", ctx.Err())
 		os.Exit(1)
 	}
 	log.Info(
-		"agent gracefully shutdown",
+		"gracefully shutdown",
 		// cleanup errors do not affect status code, but worth logging
 		"err", err,
 	)
 }
 
-func runAgent(ctx context.Context, log *slog.Logger) (err error) {
-	// to be used in goroutines spawned below
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer func() { cancel(err) }()
+func run(ctx context.Context, log *slog.Logger) (err error) {
+	// The derived Context is canceled the first time a function passed to eg.Go
+	// returns a non-nil error or the first time Wait returns
+	eg, ctx := errgroup.WithContext(ctx)
 
 	envConfig, err := GetEnvConfig()
 	if err != nil {
 		return LogError(log, fmt.Errorf("getting env config: %w", err))
 	}
-	log = log.With("nodeName", envConfig.NodeName)
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
@@ -87,14 +68,11 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 		return err
 	}
 
-	// CONTROLLERS
-	GoForever("controller", cancel, log,
-		func() error { return runController(ctx, log, mgr, envConfig.NodeName) },
-	)
+	eg.Go(func() error {
+		return runController(ctx, log, mgr)
+	})
 
-	<-ctx.Done()
-
-	return context.Cause(ctx)
+	return eg.Wait()
 }
 
 func newManager(
@@ -145,6 +123,7 @@ func newScheme() (*runtime.Scheme, error) {
 		corev1.AddToScheme,
 		storagev1.AddToScheme,
 		v1alpha2.AddToScheme,
+		nodecfgv1alpha1.AddToScheme,
 	}
 
 	for i, f := range schemeFuncs {

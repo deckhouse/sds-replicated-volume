@@ -7,8 +7,9 @@ import (
 	"fmt"
 	"log/slog"
 
-	. "github.com/deckhouse/sds-common-lib/u"
+	. "github.com/deckhouse/sds-common-lib/utils"
 
+	nodecfgv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 	"k8s.io/client-go/util/workqueue"
@@ -23,8 +24,32 @@ func runController(
 	ctx context.Context,
 	log *slog.Logger,
 	mgr manager.Manager,
-	nodeName string,
 ) error {
+	// Field indexers for cache queries by node and volume name
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&v1alpha2.ReplicatedVolumeReplica{},
+		"spec.nodeName",
+		func(o client.Object) []string {
+			r := o.(*v1alpha2.ReplicatedVolumeReplica)
+			return []string{r.Spec.NodeName}
+		},
+	); err != nil {
+		return LogError(log, fmt.Errorf("indexing spec.nodeName: %w", err))
+	}
+
+	// Field indexer for LVG by node name
+	if err := mgr.GetFieldIndexer().IndexField(
+		ctx,
+		&nodecfgv1alpha1.LVMVolumeGroup{},
+		"spec.local.nodeName",
+		func(o client.Object) []string {
+			lvg := o.(*nodecfgv1alpha1.LVMVolumeGroup)
+			return []string{lvg.Spec.Local.NodeName}
+		},
+	); err != nil {
+		return LogError(log, fmt.Errorf("indexing LVG spec.local.nodeName: %w", err))
+	}
 	type TReq = rv.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
@@ -81,7 +106,7 @@ func runController(
 					log.Debug("GenericFunc", "name", ge.Object.GetName())
 				},
 			}).
-		Complete(rv.NewReconciler(log, mgr.GetClient(), nodeName))
+		Complete(rv.NewReconciler(log, mgr.GetClient()))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("building controller: %w", err))

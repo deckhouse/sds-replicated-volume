@@ -12,6 +12,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"golang.org/x/sync/errgroup"
 
 	. "github.com/deckhouse/sds-common-lib/utils"
 
@@ -32,31 +33,11 @@ import (
 func main() {
 	ctx := signals.SetupSignalHandler()
 
-	logHandler := slogh.NewHandler(
-		// TODO: fix slogh reload
-		slogh.Config{
-			Level:  slogh.LevelDebug,
-			Format: slogh.FormatText,
-		},
-	)
-
+	slogh.EnableConfigReload(ctx, nil)
+	logHandler := &slogh.Handler{}
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
-
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
-
-	// TODO: fix slogh reload
-	// slogh.RunConfigFileWatcher(
-	// 	ctx,
-	// 	func(data map[string]string) error {
-	// 		err := logHandler.UpdateConfigData(data)
-	// 		log.Info("UpdateConfigData", "data", data)
-	// 		return err
-	// 	},
-	// 	&slogh.ConfigFileWatcherOptions{
-	// 		OwnLogger: log.With("goroutine", "slogh"),
-	// 	},
-	// )
 
 	log.Info("agent started")
 
@@ -73,9 +54,9 @@ func main() {
 }
 
 func runAgent(ctx context.Context, log *slog.Logger) (err error) {
-	// to be used in goroutines spawned below
-	ctx, cancel := context.WithCancelCause(ctx)
-	defer func() { cancel(err) }()
+	// The derived Context is canceled the first time a function passed to eg.Go
+	// returns a non-nil error or the first time Wait returns
+	eg, ctx := errgroup.WithContext(ctx)
 
 	envConfig, err := GetEnvConfig()
 	if err != nil {
@@ -91,17 +72,27 @@ func runAgent(ctx context.Context, log *slog.Logger) (err error) {
 
 	cl := mgr.GetClient()
 
+	eg.Go(func() error {
+		return runController(
+			ctx,
+			log.With("actor", "controller"),
+			mgr,
+			envConfig.NodeName,
+		)
+	})
+
 	// DRBD SCANNER
-	GoForever("scanner", cancel, log, NewScanner(ctx, log, cl, envConfig).Run)
+	scanner := NewScanner(ctx, log.With("actor", "scanner"), cl, envConfig)
 
-	// CONTROLLERS
-	GoForever("controller", cancel, log,
-		func() error { return runController(ctx, log, mgr, envConfig.NodeName) },
-	)
+	eg.Go(func() error {
+		return scanner.Run()
+	})
 
-	<-ctx.Done()
+	eg.Go(func() error {
+		return scanner.ConsumeBatches()
+	})
 
-	return context.Cause(ctx)
+	return eg.Wait()
 }
 
 func newManager(

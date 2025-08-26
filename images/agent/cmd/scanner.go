@@ -12,6 +12,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	. "github.com/deckhouse/sds-common-lib/utils"
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/jinzhu/copier"
@@ -48,9 +49,6 @@ func NewScanner(
 }
 
 func (s *scanner) Run() error {
-	// consume from batch
-	GoForever("scanner/consumer", s.cancel, s.log, s.consumeBatches)
-
 	var err error
 
 	for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
@@ -129,7 +127,7 @@ func (s *scanner) processEvents(
 	}
 }
 
-func (s *scanner) consumeBatches() error {
+func (s *scanner) ConsumeBatches() error {
 	cd := cooldown.NewExponentialCooldown(
 		50*time.Millisecond,
 		5*time.Second,
@@ -164,7 +162,7 @@ func (s *scanner) consumeBatches() error {
 		for _, item := range batch {
 			resourceName := string(item.(updatedResourceName))
 
-			resourceStatus := SliceFind(
+			resourceStatus := uslices.Find(
 				statusResult,
 				func(res *drbdsetup.Resource) bool { return res.Name == resourceName },
 			)
@@ -176,7 +174,7 @@ func (s *scanner) consumeBatches() error {
 				continue
 			}
 
-			rvr := SliceFind(
+			rvr := uslices.Find(
 				rvrList.Items,
 				func(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 					return rvr.Spec.ReplicatedVolumeName == resourceName
@@ -223,7 +221,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 		return fmt.Errorf("failed to copy status fields: %w", err)
 	}
 
-	allUpToDate := SliceFind(resource.Devices, func(d *drbdsetup.Device) bool { return d.DiskState != "UpToDate" }) == nil
+	allUpToDate := uslices.Find(resource.Devices, func(d *drbdsetup.Device) bool { return d.DiskState != "UpToDate" }) == nil
 	if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) && allUpToDate {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,

@@ -12,16 +12,14 @@ import (
 )
 
 type Reconciler struct {
-	log      *slog.Logger
-	cl       client.Client
-	nodeName string
+	log *slog.Logger
+	cl  client.Client
 }
 
-func NewReconciler(log *slog.Logger, cl client.Client, nodeName string) *Reconciler {
+func NewReconciler(log *slog.Logger, cl client.Client) *Reconciler {
 	return &Reconciler{
-		log:      log,
-		cl:       cl,
-		nodeName: nodeName,
+		log: log,
+		cl:  cl,
 	}
 }
 
@@ -53,17 +51,15 @@ func (r *Reconciler) Reconcile(
 			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
 		}
 
-		// h := &resourceReconcileRequestHandler{
-		// 	ctx:      ctx,
-		// 	log:      r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
-		// 	cl:       r.cl,
-		// 	nodeName: r.nodeName,
-		// 	cfg:      clusterCfg,
-		// 	rvr:      rvr,
-		// }
+		h := &resourceReconcileRequestHandler{
+			ctx: ctx,
+			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
+			cl:  r.cl,
+			cfg: clusterCfg,
+			rv:  rvr,
+		}
 
-		// return reconcile.Result{}, h.Handle()
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, h.Handle()
 
 	case ResourceDeleteRequest:
 		// h := &resourceDeleteRequestHandler{
