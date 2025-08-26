@@ -6,6 +6,7 @@ require (
 	github.com/deckhouse/sds-common-lib v0.6.2-0.20250826162408-7564882bd6db
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250528073435-da456829b64d
 	github.com/go-logr/logr v1.4.2
+	golang.org/x/sync v0.16.0
 	k8s.io/api v0.33.1
 	k8s.io/apimachinery v0.33.4
 	k8s.io/client-go v0.33.1
@@ -19,7 +20,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.12.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/apiextensions-apiserver v0.33.1 // indirect
