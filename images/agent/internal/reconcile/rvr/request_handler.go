@@ -363,7 +363,10 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 	}
 
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		patch := client.MergeFrom(h.rvr.DeepCopy())
+		patch := client.MergeFromWithOptions(
+			h.rvr.DeepCopy(),
+			client.MergeFromWithOptimisticLock{},
+		)
 
 		now := metav1.NewTime(time.Now())
 		newCondition := metav1.Condition{
@@ -376,15 +379,16 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 
 		found := false
 		for i, condition := range h.rvr.Status.Conditions {
-			if condition.Type == conditionType {
-				// Preserve transition time when only reason/message changes
-				if condition.Status == status {
-					newCondition.LastTransitionTime = condition.LastTransitionTime
-				}
-				h.rvr.Status.Conditions[i] = newCondition
-				found = true
-				break
+			if condition.Type != conditionType {
+				continue
 			}
+			// Preserve transition time when only reason/message changes
+			if condition.Status == status {
+				newCondition.LastTransitionTime = condition.LastTransitionTime
+			}
+			h.rvr.Status.Conditions[i] = newCondition
+			found = true
+			break
 		}
 
 		if !found {

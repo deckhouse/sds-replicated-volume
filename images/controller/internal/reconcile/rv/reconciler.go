@@ -48,7 +48,7 @@ func (r *Reconciler) Reconcile(
 				)
 				return reconcile.Result{}, nil
 			}
-			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
+			return reconcile.Result{}, fmt.Errorf("getting rv %s: %w", typedReq.Name, err)
 		}
 
 		h := &resourceReconcileRequestHandler{
