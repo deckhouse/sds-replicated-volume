@@ -124,7 +124,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 						Value:  5,
 						Suffix: "s",
 					},
-					Quorum: QuorumMajority,
+					Quorum: &QuorumMajority{},
 				},
 			},
 			{Name: "r2"},

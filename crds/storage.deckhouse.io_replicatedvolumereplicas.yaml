@@ -55,6 +55,9 @@ spec:
             type: object
           spec:
             properties:
+              allowTwoPrimaries:
+                default: false
+                type: boolean
               nodeAddress:
                 properties:
                   ipv4:
@@ -109,6 +112,14 @@ spec:
               primary:
                 default: false
                 type: boolean
+              quorum:
+                maximum: 7
+                minimum: 0
+                type: integer
+              quorumMinimumRedundancy:
+                maximum: 7
+                minimum: 0
+                type: integer
               replicatedVolumeName:
                 maxLength: 127
                 minLength: 1

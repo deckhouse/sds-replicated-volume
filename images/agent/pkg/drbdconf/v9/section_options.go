@@ -197,29 +197,85 @@ func (o *OnNoDataAccessiblePolicy) UnmarshalParameter(p []drbdconf.Word) error {
 
 //
 
-type Quorum string
-
-const (
-	QuorumOff      Quorum = "off"
-	QuorumMajority Quorum = "majority"
-	QuorumAll      Quorum = "all"
-)
-
-var knownValuesQuorum = map[Quorum]struct{}{
-	QuorumOff:      {},
-	QuorumMajority: {},
-	QuorumAll:      {},
+type Quorum interface {
+	_isQuorum()
 }
 
-var _ drbdconf.ParameterCodec = new(Quorum)
-
-func (q *Quorum) MarshalParameter() ([]string, error) {
-	return []string{string(*q)}, nil
+func init() {
+	drbdconf.RegisterParameterTypeCodec[Quorum](
+		&QuorumParameterTypeCodec{},
+	)
 }
 
-func (q *Quorum) UnmarshalParameter(p []drbdconf.Word) error {
-	return drbdconf.ReadEnumAt(q, knownValuesQuorum, p, 1)
+type QuorumParameterTypeCodec struct {
 }
+
+func (*QuorumParameterTypeCodec) MarshalParameter(
+	v any,
+) ([]string, error) {
+	switch vt := v.(type) {
+	case *QuorumOff:
+		return []string{"off"}, nil
+	case *QuorumMajority:
+		return []string{"majority"}, nil
+	case *QuorumAll:
+		return []string{"all"}, nil
+	case *QuorumNumeric:
+		return []string{strconv.Itoa(vt.Value)}, nil
+	}
+	return nil, errors.New("unrecognized value type")
+}
+
+func (*QuorumParameterTypeCodec) UnmarshalParameter(
+	p []drbdconf.Word,
+) (any, error) {
+	if err := drbdconf.EnsureLen(p, 2); err != nil {
+		return nil, err
+	}
+
+	switch p[1].Value {
+	case "off":
+		return &QuorumOff{}, nil
+	case "majority":
+		return &QuorumMajority{}, nil
+	case "all":
+		return &QuorumAll{}, nil
+	default:
+		val, err := strconv.ParseInt(p[1].Value, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		return &QuorumNumeric{Value: int(val)}, nil
+	}
+}
+
+//
+
+type QuorumOff struct{}
+
+var _ Quorum = &QuorumOff{}
+
+func (q *QuorumOff) _isQuorum() {}
+
+type QuorumMajority struct{}
+
+var _ Quorum = &QuorumMajority{}
+
+func (q *QuorumMajority) _isQuorum() {}
+
+type QuorumAll struct{}
+
+var _ Quorum = &QuorumAll{}
+
+func (q *QuorumAll) _isQuorum() {}
+
+type QuorumNumeric struct {
+	Value int
+}
+
+var _ Quorum = &QuorumNumeric{}
+
+func (q *QuorumNumeric) _isQuorum() {}
 
 //
 

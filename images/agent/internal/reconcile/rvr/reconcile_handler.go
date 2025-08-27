@@ -152,8 +152,18 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
 	res := &v9.Resource{
 		Name: h.rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
-			Protocol:     v9.ProtocolC,
-			SharedSecret: h.rvr.Spec.SharedSecret,
+			Protocol:          v9.ProtocolC,
+			SharedSecret:      h.rvr.Spec.SharedSecret,
+			AllowTwoPrimaries: h.rvr.Spec.AllowTwoPrimaries,
+		},
+		Options: &v9.Options{
+			Quorum: &v9.QuorumNumeric{
+				Value: int(h.rvr.Spec.Quorum),
+			},
+			QuorumMinimumRedundancy: &v9.QuorumMinimumRedundancyNumeric{
+				Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
+			},
+			OnNoQuorum: v9.OnNoQuorumPolicySuspendIO,
 		},
 	}
 
@@ -367,13 +377,12 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 			client.MergeFromWithOptimisticLock{},
 		)
 
-		now := metav1.NewTime(time.Now())
 		newCondition := metav1.Condition{
 			Type:               conditionType,
 			Status:             status,
 			Reason:             reason,
 			Message:            message,
-			LastTransitionTime: now,
+			LastTransitionTime: metav1.NewTime(time.Now()),
 		}
 
 		found := false

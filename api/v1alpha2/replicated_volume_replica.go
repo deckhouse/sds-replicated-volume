@@ -63,6 +63,17 @@ type ReplicatedVolumeReplicaSpec struct {
 
 	// +kubebuilder:default=false
 	Primary bool `json:"primary,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	Quorum byte `json:"quorum,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
+
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
