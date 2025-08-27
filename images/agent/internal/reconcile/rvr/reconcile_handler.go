@@ -34,7 +34,6 @@ type resourceReconcileRequestHandler struct {
 }
 
 func (h *resourceReconcileRequestHandler) Handle() error {
-
 	// validate
 	var diskless bool
 	for _, v := range h.rvr.Spec.Volumes {

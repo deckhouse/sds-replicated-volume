@@ -1,6 +1,8 @@
 package v1alpha2
 
 import (
+	// TODO: topologySpreadConstraints+affinity
+	// corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -19,7 +21,11 @@ type ReplicatedVolume struct {
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeSpec struct {
-	Size int64 `json:"size"`
+	Size     int64 `json:"size"`
+	Replicas int64 `json:"replicas"`
+	// TODO: topologySpreadConstraints+affinity
+	// TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
+	// Affinity                  *corev1.Affinity                  `json:"affinity,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

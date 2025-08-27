@@ -9,6 +9,8 @@ type ResourceReconcileRequest struct {
 	Name string
 }
 
+var _ Request = ResourceReconcileRequest{}
+
 func (r ResourceReconcileRequest) _isRequest() {}
 
 // single resource was deleted and needs cleanup
@@ -16,6 +18,8 @@ type ResourceDeleteRequest struct {
 	Name                 string
 	ReplicatedVolumeName string
 }
+
+var _ Request = ResourceDeleteRequest{}
 
 func (r ResourceDeleteRequest) _isRequest() {}
 
@@ -26,8 +30,6 @@ type ResourcePrimaryForceRequest struct {
 
 func (r ResourcePrimaryForceRequest) _isRequest() {}
 
-var _ Request = ResourceReconcileRequest{}
-var _ Request = ResourceDeleteRequest{}
 var _ Request = ResourcePrimaryForceRequest{}
 
 // special request: resize resource when annotation is added
