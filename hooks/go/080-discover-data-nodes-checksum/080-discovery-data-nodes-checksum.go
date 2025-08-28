@@ -19,6 +19,7 @@ package discoverdatanodeschecksum
 import (
 	"context"
 	"crypto/sha256"
+
 	// "encoding/hex"
 	// "encoding/json"
 	"fmt"
@@ -27,8 +28,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
 	objectpatch "github.com/deckhouse/module-sdk/pkg/object-patch"
+	"github.com/deckhouse/module-sdk/pkg/registry"
 )
 
 const (
@@ -45,7 +46,7 @@ var _ = registry.RegisterFunc(
 				Name:       nodeSnapshotName,
 				APIVersion: "v1",
 				Kind:       "Node",
-				JqFilter:   `{\"uid\": .metadata.uid}`,
+				JqFilter:   ".metadata.uid",
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						labelKey: "",
@@ -87,7 +88,6 @@ func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
 	// input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hash)
 	// return nil
 
-
 	uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, "nodes")
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal node UIDs: %w", err)
@@ -101,7 +101,7 @@ func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
 
 	input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hashString)
 
-	input.Logger.Info("computed data nodes checksum", 
+	input.Logger.Info("computed data nodes checksum",
 		"nodeCount", len(uidList),
 		"checksum", hashString)
 
