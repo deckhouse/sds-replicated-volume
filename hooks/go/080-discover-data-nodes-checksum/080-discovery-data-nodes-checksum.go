@@ -45,8 +45,7 @@ var _ = registry.RegisterFunc(
 				Name:       nodeSnapshotName,
 				APIVersion: "v1",
 				Kind:       "Node",
-				JqFilter: ".metadata.uid",
-				//JqFilter:   `{\"uid\": .metadata.uid}`,
+				JqFilter:   `{\"uid\": .metadata.uid}`,
 				LabelSelector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						labelKey: "",
