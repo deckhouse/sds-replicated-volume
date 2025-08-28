@@ -25,7 +25,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/app"
 	"github.com/deckhouse/module-sdk/pkg/registry"
 )
 
@@ -40,22 +39,13 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	cl := input.DC.MustGetK8sClient()
 	logger := input.Logger
 
-	// Define constants
 	const (
-		crdGroup    = "internal.linstor.linbit.com"
-		crdVersion  = "v1-15-0"
-		crdKind     = "PropsContainerList"
-		moduleName  = "sds-replicated-volume"
+		crdGroup   = "internal.linstor.linbit.com"
+		crdVersion = "v1-15-0"
+		crdKind    = "PropsContainerList"
+		moduleName = "sds-replicated-volume"
 	)
 
-	// Create GVR for propscontainers
-	gvr := schema.GroupVersionResource{
-		Group:    crdGroup,
-		Version:  crdVersion,
-		Resource: "propscontainers",
-	}
-
-	// List propscontainers
 	propsList := &unstructured.UnstructuredList{}
 	propsList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   crdGroup,
@@ -86,7 +76,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		// Handle AutoEvictAllowEviction
 		if propKey == "DrbdOptions/AutoEvictAllowEviction" && propValue == "True" {
 			if err := patchPropsContainer(ctx, cl, &item, "False"); err != nil {
-				logger.Error(err, "failed to patch propscontainer", "name", item.GetName())
+				logger.Info("failed to patch propscontainer", "name", item.GetName(), "err", err)
 			} else {
 				logger.Info("patched AutoEvictAllowEviction", "name", item.GetName(), "value", "False")
 				patchedCount++
@@ -105,7 +95,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	// Handle thin provisioning setting
 	if thinPoolExistence {
 		if err := enableThinProvisioning(ctx, cl, moduleName); err != nil {
-			logger.Error(err, "failed to enable thin provisioning")
+			logger.Info("failed to enable thin provisioning", "err", err)
 		} else {
 			logger.Info("enabled thin provisioning", "module", moduleName)
 		}
@@ -123,11 +113,11 @@ func patchPropsContainer(ctx context.Context, cl client.Client, item *unstructur
 			"prop_value": newValue,
 		},
 	}
-	
+
 	patchObj := &unstructured.Unstructured{Object: patch}
 	patchObj.SetGroupVersionKind(item.GroupVersionKind())
 	patchObj.SetName(item.GetName())
-	
+
 	return cl.Patch(ctx, patchObj, client.MergeFrom(item))
 }
 
@@ -164,10 +154,10 @@ func enableThinProvisioning(ctx context.Context, cl client.Client, moduleName st
 			},
 		},
 	}
-	
+
 	patchObj := &unstructured.Unstructured{Object: patch}
 	patchObj.SetGroupVersionKind(modCfg.GroupVersionKind())
 	patchObj.SetName(moduleName)
-	
+
 	return cl.Patch(ctx, patchObj, client.MergeFrom(modCfg))
 }
