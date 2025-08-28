@@ -171,6 +171,3 @@ func enableThinProvisioning(ctx context.Context, cl client.Client, moduleName st
 	
 	return cl.Patch(ctx, patchObj, client.MergeFrom(modCfg))
 }
-
-	return nil
-}
