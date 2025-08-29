@@ -54,7 +54,8 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	}
 
 	thinPoolExistence := false
-	for _, item := range propsList.Items {
+	for i := range propsList.Items {
+		item := &propsList.Items[i]
 		spec, found, _ := unstructured.NestedMap(item.Object, "spec")
 		if !found {
 			continue
@@ -74,7 +75,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 			patchObj.SetGroupVersionKind(item.GroupVersionKind())
 			patchObj.SetName(item.GetName())
 
-			if err := cl.Patch(ctx, patchObj, client.MergeFrom(&item)); err != nil {
+			if err := cl.Patch(ctx, patchObj, client.MergeFrom(item)); err != nil {
 				input.Logger.Info("Failed to patch propscontainer", "name", item.GetName(), "err", err)
 			} else {
 				input.Logger.Info("Replaced DrbdOptions/AutoEvictAllowEviction value to False", "name", item.GetName())
@@ -89,14 +90,8 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 	// Handle thin provisioning setting
 	if thinPoolExistence {
-		patch := map[string]interface{}{
-			"spec": map[string]interface{}{
-				"settings": map[string]interface{}{
-					"enableThinProvisioning": true,
-				},
-			},
-		}
-		modCfg := &unstructured.Unstructured{Object: patch}
+		// Try to get existing ModuleConfig first
+		modCfg := &unstructured.Unstructured{}
 		modCfg.SetGroupVersionKind(schema.GroupVersionKind{
 			Group:   "deckhouse.io",
 			Version: "v1alpha1",
@@ -104,15 +99,47 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		})
 		modCfg.SetName("sds-replicated-volume")
 
-		// Use empty object as base for MergeFrom
-		base := &unstructured.Unstructured{}
-		base.SetGroupVersionKind(modCfg.GroupVersionKind())
-		base.SetName(modCfg.GetName())
+		err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
+		if err != nil {
+			// Create new ModuleConfig if it doesn't exist
+			newModCfg := &unstructured.Unstructured{}
+			newModCfg.SetGroupVersionKind(schema.GroupVersionKind{
+				Group:   "deckhouse.io",
+				Version: "v1alpha1",
+				Kind:    "ModuleConfig",
+			})
+			newModCfg.SetName("sds-replicated-volume")
+			newModCfg.SetUnstructuredContent(map[string]interface{}{
+				"spec": map[string]interface{}{
+					"settings": map[string]interface{}{
+						"enableThinProvisioning": true,
+					},
+				},
+			})
 
-		if err := cl.Patch(ctx, modCfg, client.MergeFrom(base)); err != nil {
-			input.Logger.Info("Failed to patch moduleconfig for thin provisioning", "err", err)
+			if err := cl.Create(ctx, newModCfg); err != nil {
+				input.Logger.Info("Failed to create moduleconfig for thin provisioning", "err", err)
+			} else {
+				input.Logger.Info("Created moduleconfig with thin provisioning enabled")
+			}
 		} else {
-			input.Logger.Info("Thin pools present, switching enableThinProvisioning on")
+			// Update existing ModuleConfig
+			patch := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"settings": map[string]interface{}{
+						"enableThinProvisioning": true,
+					},
+				},
+			}
+			patchObj := &unstructured.Unstructured{Object: patch}
+			patchObj.SetGroupVersionKind(modCfg.GroupVersionKind())
+			patchObj.SetName(modCfg.GetName())
+
+			if err := cl.Patch(ctx, patchObj, client.MergeFrom(modCfg)); err != nil {
+				input.Logger.Info("Failed to patch moduleconfig for thin provisioning", "err", err)
+			} else {
+				input.Logger.Info("Thin pools present, switching enableThinProvisioning on")
+			}
 		}
 	}
 
