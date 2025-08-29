@@ -34,9 +34,7 @@ import (
 
 const (
 	nodeSnapshotName = "nodes"
-	moduleName       = "sdsReplicatedVolume"
 	labelKey         = "storage.deckhouse.io/sds-replicated-volume-node"
-	queue            = "/modules/sds-replicated-volume/node-label-change"
 )
 
 var _ = registry.RegisterFunc(
