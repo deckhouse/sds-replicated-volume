@@ -39,6 +39,10 @@ Direct configuration of the LINSTOR backend by the user is prohibited.
 Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+For working with snapshots, the [snapshot-controller](../../snapshot-controller/) module must be connected.
+{{< /alert >}}
+
 - Create Storage Pools and Corresponding StorageClasses.
 
   Users are **prohibited** from creating StorageClasses for the `replicated.csi.storage.deckhouse.io` CSI driver.  
