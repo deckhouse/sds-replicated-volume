@@ -6,14 +6,17 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	. "github.com/deckhouse/sds-common-lib/utils"
+	"golang.org/x/time/rate"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/reconcile/rvr"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -28,8 +31,21 @@ func runController(
 	type TReq = rvr.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
+	// max(...)
+	rl := workqueue.NewTypedMaxOfRateLimiter(
+		// per_item retries: min(5ms*2^<num-failures>, 30s)
+		// Default was: 5*time.Millisecond, 1000*time.Second
+		workqueue.NewTypedItemExponentialFailureRateLimiter[TReq](5*time.Millisecond, 30*time.Second),
+		// overall retries: 5 qps, 30 burst size. This is only for retry speed and its only the overall factor (not per item)
+		// Default was: rate.Limit(10), 100
+		&workqueue.TypedBucketRateLimiter[TReq]{Limiter: rate.NewLimiter(rate.Limit(5), 30)},
+	)
+
 	err := builder.TypedControllerManagedBy[TReq](mgr).
 		Named("replicatedVolumeReplica").
+		WithOptions(controller.TypedOptions[TReq]{
+			RateLimiter: rl,
+		}).
 		Watches(
 			&v1alpha2.ReplicatedVolumeReplica{},
 			&handler.TypedFuncs[client.Object, TReq]{

@@ -1,6 +1,10 @@
 package v1alpha2
 
 import (
+	"fmt"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 )
@@ -28,6 +32,102 @@ type ReplicatedVolumeReplica struct {
 
 func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
 	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
+}
+
+func (rvr *ReplicatedVolumeReplica) Diskless() (bool, error) {
+	// validate
+	var hasDisk bool
+	for _, v := range rvr.Spec.Volumes {
+		if v.Disk != "" {
+			hasDisk = true
+		} else if hasDisk {
+			// TODO: move to webhook validation?
+			return false, fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
+		}
+	}
+	return !hasDisk, nil
+}
+
+func (rvr *ReplicatedVolumeReplica) StatusConditionsInitialized() bool {
+	if rvr.Status == nil {
+		return false
+	}
+
+	if rvr.Status.Conditions == nil {
+		return false
+	}
+
+	for t := range ReplicatedVolumeReplicaConditions {
+		if meta.FindStatusCondition(rvr.Status.Conditions, t) == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
+	if rvr.Status == nil {
+		rvr.Status = &ReplicatedVolumeReplicaStatus{}
+	}
+
+	if rvr.Status.Conditions == nil {
+		rvr.Status.Conditions = []metav1.Condition{}
+	}
+
+	for t, opts := range ReplicatedVolumeReplicaConditions {
+		if meta.FindStatusCondition(rvr.Status.Conditions, t) != nil {
+			continue
+		}
+		cond := metav1.Condition{
+			Type:               t,
+			Status:             metav1.ConditionUnknown,
+			Reason:             "Initializing",
+			Message:            "",
+			LastTransitionTime: metav1.NewTime(time.Now()),
+		}
+		if opts.UseObservedGeneration {
+			cond.ObservedGeneration = rvr.Generation
+		}
+		rvr.Status.Conditions = append(rvr.Status.Conditions, cond)
+	}
+}
+
+func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
+	if rvr.Status == nil {
+		return
+	}
+
+	if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			metav1.Condition{
+				Type:    ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  ReasonDevicesAreNotReady,
+				Message: "TODO",
+			},
+		)
+	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeConfigurationAdjusted) {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			metav1.Condition{
+				Type:    ConditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  ReasonAdjustmentFailed,
+				Message: "TODO",
+			},
+		)
+	} else {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			metav1.Condition{
+				Type:    ConditionTypeReady,
+				Status:  metav1.ConditionTrue,
+				Reason:  ReasonReady,
+				Message: "TODO",
+			},
+		)
+	}
 }
 
 // +k8s:deepcopy-gen=true

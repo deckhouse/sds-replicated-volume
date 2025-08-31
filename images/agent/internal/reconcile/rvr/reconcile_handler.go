@@ -35,14 +35,9 @@ type resourceReconcileRequestHandler struct {
 
 func (h *resourceReconcileRequestHandler) Handle() error {
 	// validate
-	var diskless bool
-	for _, v := range h.rvr.Spec.Volumes {
-		if v.Disk == "" {
-			diskless = true
-		} else if diskless {
-			// TODO: move to webhook validation?
-			return fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
-		}
+	diskless, err := h.rvr.Diskless()
+	if err != nil {
+		return err
 	}
 
 	if err := h.writeResourceConfig(); err != nil {
@@ -59,12 +54,13 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 			return fmt.Errorf("ExecuteDumpMD_MetadataExists: %w", err)
 		}
 
+		var transitionToSafeForInitialSync bool
 		if !exists {
 			if err := h.setConditionIfNeeded(
 				v1alpha2.ConditionTypeInitialSync,
 				metav1.ConditionFalse,
-				v1alpha2.ReasonSafeForInitialSync,
-				"Safe for initial synchronization",
+				v1alpha2.ReasonInitialSyncRequiredButNotReady,
+				"Creating metadata needed for initial sync",
 			); err != nil {
 				return err
 			}
@@ -74,8 +70,27 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 				err = errors.Join(err, h.setConditionIfNeeded(v1alpha2.ConditionTypeReady, metav1.ConditionFalse, v1alpha2.ReasonMetadataCreationFailed, err.Error()))
 				return fmt.Errorf("ExecuteCreateMD: %w", err)
 			}
-
 			h.log.Info("successfully created metadata")
+
+			transitionToSafeForInitialSync = true
+		} else {
+			initialSyncCond := meta.FindStatusCondition(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
+			if initialSyncCond != nil && initialSyncCond.Reason == v1alpha2.ReasonInitialSyncRequiredButNotReady {
+				h.log.Warn("metadata has been created, but status condition is not updated, fixing")
+				transitionToSafeForInitialSync = true
+			}
+		}
+
+		if transitionToSafeForInitialSync {
+			if err := h.setConditionIfNeeded(
+				v1alpha2.ConditionTypeInitialSync,
+				metav1.ConditionFalse,
+				v1alpha2.ReasonSafeForInitialSync,
+				"Safe for initial synchronization",
+			); err != nil {
+				return err
+			}
+			h.log.Debug("transitioned to " + v1alpha2.ReasonSafeForInitialSync)
 		}
 	}
 
@@ -312,43 +327,24 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 
 func (h *resourceReconcileRequestHandler) initStatusConditions() error {
 	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
-		if h.rvr.Status == nil {
-			h.rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
+		if h.rvr.StatusConditionsInitialized() {
+			return nil
 		}
 
-		if h.rvr.Status.Conditions == nil {
-			h.rvr.Status.Conditions = []metav1.Condition{}
-		}
+		patch := client.MergeFromWithOptions(
+			h.rvr.DeepCopy(),
+			client.MergeFromWithOptimisticLock{},
+		)
 
-		var toAdd []metav1.Condition
-		for _, t := range v1alpha2.ReplicatedVolumeReplicaConditionTypes {
-			if meta.FindStatusCondition(h.rvr.Status.Conditions, t) != nil {
-				continue
+		h.rvr.InitializeStatusConditions()
+
+		if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
+			if kerrors.IsConflict(err) {
+				h.log.Warn("failed to initialize conditions, optimistic lock error", "error", err)
+			} else {
+				h.log.Error("failed to initialize conditions", "error", err)
 			}
-			toAdd = append(toAdd, metav1.Condition{
-				Type:               t,
-				Status:             metav1.ConditionUnknown,
-				Reason:             "Initializing",
-				Message:            "",
-				LastTransitionTime: metav1.NewTime(time.Now()),
-			})
-		}
-
-		if len(toAdd) > 0 {
-			patch := client.MergeFromWithOptions(
-				h.rvr.DeepCopy(),
-				client.MergeFromWithOptimisticLock{},
-			)
-			h.rvr.Status.Conditions = append(h.rvr.Status.Conditions, toAdd...)
-
-			if err := h.cl.Status().Patch(h.ctx, h.rvr, patch); err != nil {
-				if kerrors.IsConflict(err) {
-					h.log.Warn("failed to initialize conditions, optimistic lock error", "error", err)
-				} else {
-					h.log.Error("failed to initialize conditions", "error", err)
-				}
-				return err
-			}
+			return err
 		}
 
 		return nil
@@ -365,8 +361,12 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 		return err
 	}
 
-	for _, condition := range h.rvr.Status.Conditions {
-		if condition.Type == conditionType && condition.Status == status && condition.Reason == reason && condition.Message == message {
+	for _, c := range h.rvr.Status.Conditions {
+		if c.Type == conditionType &&
+			c.Status == status &&
+			c.Reason == reason &&
+			c.Message == message &&
+			c.ObservedGeneration == h.rvr.Generation {
 			return nil
 		}
 	}
@@ -383,6 +383,7 @@ func (h *resourceReconcileRequestHandler) setConditionIfNeeded(
 			Reason:             reason,
 			Message:            message,
 			LastTransitionTime: metav1.NewTime(time.Now()),
+			ObservedGeneration: h.rvr.Generation,
 		}
 
 		found := false

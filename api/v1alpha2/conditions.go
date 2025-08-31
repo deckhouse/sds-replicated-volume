@@ -7,28 +7,46 @@ const (
 
 	// ConditionTypeInitialSync indicates whether the initial synchronization has been completed
 	ConditionTypeInitialSync = "InitialSync"
+
+	// ConditionTypeIsPrimary indicates whether the replica is primary
+	ConditionTypeIsPrimary = "Primary"
+
+	// ConditionTypeAllDevicesAreUpToDate indicates whether all the devices in UpToDate state
+	ConditionTypeDevicesReady = "DevicesReady"
+
+	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
 )
 
-// ReplicatedVolumeReplicaConditionTypes lists all condition types used by RVR status
-var ReplicatedVolumeReplicaConditionTypes = []string{
-	ConditionTypeReady,
-	ConditionTypeInitialSync,
+var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
+	ConditionTypeReady:                 {true},
+	ConditionTypeInitialSync:           {false},
+	ConditionTypeIsPrimary:             {true},
+	ConditionTypeDevicesReady:          {false},
+	ConditionTypeConfigurationAdjusted: {false},
 }
 
-// Condition reasons for Ready condition
+// Condition reasons for [ConditionTypeReady] condition
 const (
-	// Ready condition reasons
+	ReasonDevicesAreNotReady = "DevicesAreNotReady"
+	ReasonAdjustmentFailed   = "AdjustmentFailed"
+
 	ReasonConfigurationFailed    = "ConfigurationFailed"
 	ReasonMetadataCheckFailed    = "MetadataCheckFailed"
 	ReasonMetadataCreationFailed = "MetadataCreationFailed"
 	ReasonStatusCheckFailed      = "StatusCheckFailed"
 	ReasonResourceUpFailed       = "ResourceUpFailed"
-	ReasonAdjustmentFailed       = "AdjustmentFailed"
 	ReasonReady                  = "Ready"
 )
 
-// Condition reasons for InitialSync condition
+// Condition reasons for [ConditionTypeInitialSync] condition
 const (
-	ReasonSafeForInitialSync     = "SafeForInitialSync"
-	ReasonInitialUpToDateReached = "InitialUpToDateReached"
+	ReasonInitialSyncRequiredButNotReady = "InitialSyncRequiredButNotReady"
+	ReasonSafeForInitialSync             = "SafeForInitialSync"
+	ReasonInitialDeviceReadinessReached  = "InitialDeviceReadinessReached"
+)
+
+// Condition reasons for [ConditionTypeDevicesReady] condition
+const (
+	ReasonDeviceIsNotReady = "DeviceIsNotReady"
+	ReasonDeviceIsReady    = "DeviceIsReady"
 )

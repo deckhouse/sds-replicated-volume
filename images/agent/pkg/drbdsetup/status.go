@@ -94,6 +94,7 @@ func ExecuteStatus(ctx context.Context) (StatusResult, error) {
 			)
 	}
 
+	// TODO: we need all items to be sorted and not rely on sorting on DRBD side
 	var res StatusResult
 	if err := json.Unmarshal(jsonBytes, &res); err != nil {
 		return nil,

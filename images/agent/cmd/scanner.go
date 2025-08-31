@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -12,12 +13,16 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	. "github.com/deckhouse/sds-common-lib/utils"
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"github.com/jinzhu/copier"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -26,7 +31,7 @@ type scanner struct {
 	hostname string
 	ctx      context.Context
 	cancel   context.CancelCauseFunc
-	batcher  *cooldown.Batcher
+	batcher  *cooldown.BatcherTyped[updatedResourceName]
 	cl       client.Client
 }
 
@@ -48,28 +53,45 @@ func NewScanner(
 	return s
 }
 
+func (s *scanner) retryUntilCancel(fn func() error) error {
+	return retry.OnError(
+		wait.Backoff{
+			Steps:    7,
+			Duration: 50 * time.Millisecond,
+			Factor:   2.0,
+			Cap:      5 * time.Second,
+			Jitter:   0.1,
+		},
+		func(err error) bool {
+			return !errors.Is(err, context.Canceled) || s.ctx.Err() == nil
+		},
+		fn,
+	)
+}
+
 func (s *scanner) Run() error {
-	var err error
+	return s.retryUntilCancel(func() error {
+		var err error
 
-	for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
-		s.log.Debug("added resource update event", "resource", ev)
-		s.batcher.Add(ev)
-	}
+		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
+			s.log.Debug("added resource update event", "resource", ev)
+			s.batcher.Add(ev)
+		}
 
-	if err != nil {
-		return LogError(s.log, fmt.Errorf("run events2: %w", err))
-	}
+		if err != nil {
+			return LogError(s.log, fmt.Errorf("run events2: %w", err))
+		}
 
-	return s.ctx.Err()
+		return s.ctx.Err()
+	})
 }
 
 type updatedResourceName string
 
-func appendUpdatedResourceNameToBatch(batch []any, newItem any) []any {
-	resName := newItem.(updatedResourceName)
+func appendUpdatedResourceNameToBatch(batch []updatedResourceName, newItem updatedResourceName) []updatedResourceName {
 	if !slices.ContainsFunc(
 		batch,
-		func(e any) bool { return e.(updatedResourceName) == resName },
+		func(e updatedResourceName) bool { return e == newItem },
 	) {
 		return append(batch, newItem)
 	}
@@ -128,111 +150,175 @@ func (s *scanner) processEvents(
 }
 
 func (s *scanner) ConsumeBatches() error {
-	cd := cooldown.NewExponentialCooldown(
-		50*time.Millisecond,
-		5*time.Second,
-	)
-	log := s.log.With("goroutine", "scanner/consumeBatches")
-
-	for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
-		log.Debug("got batch of 'n' resources", "n", len(batch))
-
-		statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
-		if err != nil {
-			return LogError(log, fmt.Errorf("getting statusResult: %w", err))
-		}
-
-		log.Debug("got status for 'n' resources", "n", len(statusResult))
-
-		rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
-
-		// we expect this query to hit cache
-		err = s.cl.List(
-			s.ctx,
-			rvrList,
-			client.MatchingFieldsSelector{
-				Selector: (&v1alpha2.ReplicatedVolumeReplica{}).
-					NodeNameSelector(s.hostname),
-			},
+	return s.retryUntilCancel(func() error {
+		cd := cooldown.NewExponentialCooldown(
+			50*time.Millisecond,
+			5*time.Second,
 		)
-		if err != nil {
-			return LogError(log, fmt.Errorf("listing rvr: %w", err))
-		}
+		log := s.log.With("goroutine", "consumeBatches")
 
-		for _, item := range batch {
-			resourceName := string(item.(updatedResourceName))
+		for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
+			log.Debug("got batch of 'n' resources", "n", len(batch))
 
-			resourceStatus := uslices.Find(
-				statusResult,
-				func(res *drbdsetup.Resource) bool { return res.Name == resourceName },
-			)
-			if resourceStatus == nil {
-				log.Warn(
-					"got update event for resource 'resourceName', but it's missing in drbdsetup status",
-					"resourceName", resourceName,
-				)
-				continue
+			statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
+			if err != nil {
+				return LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
 
-			rvr := uslices.Find(
-				rvrList.Items,
-				func(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
-					return rvr.Spec.ReplicatedVolumeName == resourceName
+			log.Debug("got status for 'n' resources", "n", len(statusResult))
+
+			rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
+
+			// we expect this query to hit cache with index
+			err = s.cl.List(
+				s.ctx,
+				rvrList,
+				client.MatchingFieldsSelector{
+					Selector: (&v1alpha2.ReplicatedVolumeReplica{}).
+						NodeNameSelector(s.hostname),
 				},
 			)
-			if rvr == nil {
-				log.Debug(
-					"didn't find rvr with 'replicatedVolumeName'",
-					"replicatedVolumeName", resourceName,
-				)
-				continue
-			}
-
-			err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 			if err != nil {
-				return LogError(
-					log,
-					fmt.Errorf("updating replica status: %w", err),
-				)
+				return LogError(log, fmt.Errorf("listing rvr: %w", err))
 			}
-			log.Debug("updated replica status", "resourceName", resourceName)
-		}
-	}
 
-	return s.ctx.Err()
+			for _, item := range batch {
+				resourceName := string(item)
+
+				resourceStatus, ok := uiter.Find(
+					uslices.Ptrs(statusResult),
+					func(res *drbdsetup.Resource) bool { return res.Name == resourceName },
+				)
+				if !ok {
+					log.Warn(
+						"got update event for resource 'resourceName', but it's missing in drbdsetup status",
+						"resourceName", resourceName,
+					)
+					continue
+				}
+
+				rvr, ok := uiter.Find(
+					uslices.Ptrs(rvrList.Items),
+					func(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
+						return rvr.Spec.ReplicatedVolumeName == resourceName
+					},
+				)
+				if !ok {
+					log.Debug(
+						"didn't find rvr with 'replicatedVolumeName'",
+						"replicatedVolumeName", resourceName,
+					)
+					continue
+				}
+
+				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
+				if err != nil {
+					return LogError(
+						log,
+						fmt.Errorf("updating replica status: %w", err),
+					)
+				}
+				log.Debug("updated replica status", "resourceName", resourceName)
+			}
+		}
+
+		return s.ctx.Err()
+	})
 }
 
 func (s *scanner) updateReplicaStatusIfNeeded(
 	rvr *v1alpha2.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
-	patch := client.MergeFrom(rvr.DeepCopy())
+	return api.PatchStatus(
+		s.ctx,
+		s.cl,
+		rvr,
+		func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+			rvr.InitializeStatusConditions()
+			if rvr.Status.DRBD == nil {
+				rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
+			}
+			if err := copier.Copy(rvr.Status.DRBD, resource); err != nil {
+				return fmt.Errorf("failed to copy status fields: %w", err)
+			}
 
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha2.ReplicatedVolumeReplicaStatus{}
-		rvr.Status.Conditions = []metav1.Condition{}
-	}
+			diskless, err := rvr.Diskless()
+			if err != nil {
+				return err
+			}
 
-	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
-	}
+			failedDevice, foundFailed := uiter.Find(
+				uslices.Ptrs(resource.Devices),
+				func(d *drbdsetup.Device) bool {
+					if diskless {
+						return d.DiskState != "Diskless"
+					} else {
+						return d.DiskState != "UpToDate"
+					}
+				},
+			)
 
-	if err := copier.Copy(rvr.Status.DRBD, resource); err != nil {
-		return fmt.Errorf("failed to copy status fields: %w", err)
-	}
+			allReady := !foundFailed
 
-	allUpToDate := uslices.Find(resource.Devices, func(d *drbdsetup.Device) bool { return d.DiskState != "UpToDate" }) == nil
-	if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) && allUpToDate {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			metav1.Condition{
-				Type:    v1alpha2.ConditionTypeInitialSync,
-				Status:  metav1.ConditionTrue,
-				Reason:  v1alpha2.ReasonInitialUpToDateReached,
-				Message: "All device disk states were UpToDate at least once",
-			},
-		)
-	}
+			if allReady && !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
+				meta.SetStatusCondition(
+					&rvr.Status.Conditions,
+					metav1.Condition{
+						Type:    v1alpha2.ConditionTypeInitialSync,
+						Status:  metav1.ConditionTrue,
+						Reason:  v1alpha2.ReasonInitialDeviceReadinessReached,
+						Message: "All devices have been ready at least once",
+					},
+				)
+			}
 
-	return s.cl.Status().Patch(s.ctx, rvr, patch)
+			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
+
+			if !allReady && condDevicesReady.Status == metav1.ConditionTrue {
+				meta.SetStatusCondition(
+					&rvr.Status.Conditions,
+					metav1.Condition{
+						Type:   v1alpha2.ConditionTypeDevicesReady,
+						Status: metav1.ConditionFalse,
+						Reason: v1alpha2.ReasonDeviceIsNotReady,
+						Message: fmt.Sprintf(
+							"Device %d volume %d is %s",
+							failedDevice.Minor, failedDevice.Volume, failedDevice.DiskState,
+						),
+					},
+				)
+			}
+
+			if allReady && condDevicesReady.Status == metav1.ConditionFalse {
+				var message string
+				if condDevicesReady.Reason == v1alpha2.ReasonDeviceIsNotReady {
+					prec := time.Second * 5
+					message = fmt.Sprintf(
+						"Recovered from %s to %s after <%v",
+						v1alpha2.ReasonDeviceIsNotReady,
+						v1alpha2.ReasonDeviceIsReady,
+						time.Since(condDevicesReady.LastTransitionTime.Time).Truncate(prec)+prec,
+					)
+				} else {
+					message = "All devices ready"
+				}
+
+				meta.SetStatusCondition(
+					&rvr.Status.Conditions,
+					metav1.Condition{
+						Type:    v1alpha2.ConditionTypeDevicesReady,
+						Status:  metav1.ConditionTrue,
+						Reason:  v1alpha2.ReasonDeviceIsReady,
+						Message: message,
+					},
+				)
+			}
+
+			rvr.RecalculateStatusConditionReady()
+
+			return nil
+		},
+	)
+
 }
