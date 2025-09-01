@@ -41,7 +41,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	propsList := &unstructured.UnstructuredList{}
 	propsList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "internal.linstor.linbit.com",
-		Version: "v1-15-0",
+		Version: "v1-19-1",
 		Kind:    "PropsContainerList",
 	})
 
