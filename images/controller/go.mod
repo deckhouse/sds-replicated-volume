@@ -2,6 +2,10 @@ module github.com/deckhouse/sds-replicated-volume/images/controller
 
 go 1.24.5
 
+replace github.com/deckhouse/sds-replicated-volume/api => ../../api
+
+replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
+
 require (
 	github.com/deckhouse/sds-common-lib v0.6.2-0.20250826162408-7564882bd6db
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250528073435-da456829b64d
@@ -12,8 +16,6 @@ require (
 	k8s.io/client-go v0.33.1
 	sigs.k8s.io/controller-runtime v0.21.0
 )
-
-replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 require (
 	github.com/fxamacker/cbor/v2 v2.8.0 // indirect
