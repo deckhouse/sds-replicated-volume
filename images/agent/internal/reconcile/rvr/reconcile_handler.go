@@ -18,6 +18,7 @@ import (
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -208,15 +209,25 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
 			AllowTwoPrimaries: h.rvr.Spec.AllowTwoPrimaries,
 		},
 		Options: &v9.Options{
-			Quorum: &v9.QuorumNumeric{
-				Value: int(h.rvr.Spec.Quorum),
-			},
-			QuorumMinimumRedundancy: &v9.QuorumMinimumRedundancyNumeric{
-				Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
-			},
 			OnNoQuorum: v9.OnNoQuorumPolicySuspendIO,
 		},
 	}
+
+	res.Options.Quorum = If[v9.Quorum](
+		h.rvr.Spec.Quorum == 0,
+		&v9.QuorumOff{},
+		&v9.QuorumNumeric{
+			Value: int(h.rvr.Spec.Quorum),
+		},
+	)
+
+	res.Options.QuorumMinimumRedundancy = If[v9.QuorumMinimumRedundancy](
+		h.rvr.Spec.QuorumMinimumRedundancy == 0,
+		&v9.QuorumMinimumRedundancyOff{},
+		&v9.QuorumMinimumRedundancyNumeric{
+			Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
+		},
+	)
 
 	// current node
 	h.populateResourceForNode(res, h.nodeName, h.rvr.Spec.NodeId, h.rvr.Spec.NodeAddress, nil)
