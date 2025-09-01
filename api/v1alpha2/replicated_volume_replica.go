@@ -93,7 +93,7 @@ func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
 }
 
 func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
-	if rvr.Status == nil {
+	if rvr.Status == nil || rvr.Status.Conditions == nil {
 		return
 	}
 
@@ -101,30 +101,33 @@ func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			metav1.Condition{
-				Type:    ConditionTypeReady,
-				Status:  metav1.ConditionFalse,
-				Reason:  ReasonDevicesAreNotReady,
-				Message: "TODO",
+				Type:               ConditionTypeReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             ReasonDevicesAreNotReady,
+				Message:            "Devices are not ready",
+				ObservedGeneration: rvr.Generation,
 			},
 		)
 	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeConfigurationAdjusted) {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			metav1.Condition{
-				Type:    ConditionTypeReady,
-				Status:  metav1.ConditionFalse,
-				Reason:  ReasonAdjustmentFailed,
-				Message: "TODO",
+				Type:               ConditionTypeReady,
+				Status:             metav1.ConditionFalse,
+				Reason:             ReasonAdjustmentFailed,
+				Message:            "Resource adjustment failed",
+				ObservedGeneration: rvr.Generation,
 			},
 		)
 	} else {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			metav1.Condition{
-				Type:    ConditionTypeReady,
-				Status:  metav1.ConditionTrue,
-				Reason:  ReasonReady,
-				Message: "TODO",
+				Type:               ConditionTypeReady,
+				Status:             metav1.ConditionTrue,
+				Reason:             ReasonReady,
+				Message:            "Replica is configured and operational",
+				ObservedGeneration: rvr.Generation,
 			},
 		)
 	}

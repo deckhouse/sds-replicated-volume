@@ -67,6 +67,15 @@ func runController(
 					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolumeReplica)
 					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolumeReplica)
 
+					// handle deletion: when deletionTimestamp is set, enqueue delete request
+					if typedObjNew.DeletionTimestamp != nil {
+						q.Add(rvr.ResourceDeleteRequest{
+							Name:                 typedObjNew.Name,
+							ReplicatedVolumeName: typedObjNew.Spec.ReplicatedVolumeName,
+						})
+						return
+					}
+
 					// detect signals passed with annotations
 					oldAnn := typedObjOld.GetAnnotations()
 					newAnn := typedObjNew.GetAnnotations()
@@ -94,11 +103,6 @@ func runController(
 					q TQueue,
 				) {
 					log.Debug("DeleteFunc", "name", de.Object.GetName())
-					typedObj := de.Object.(*v1alpha2.ReplicatedVolumeReplica)
-					q.Add(rvr.ResourceDeleteRequest{
-						Name:                 typedObj.Name,
-						ReplicatedVolumeName: typedObj.Spec.ReplicatedVolumeName,
-					})
 				},
 				GenericFunc: func(
 					ctx context.Context,

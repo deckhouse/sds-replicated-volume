@@ -18,6 +18,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
 	"github.com/jinzhu/copier"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -230,7 +231,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 	rvr *v1alpha2.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
-	return api.PatchStatus(
+	return api.PatchStatusWithConflictRetry(
 		s.ctx,
 		s.cl,
 		rvr,
@@ -315,6 +316,27 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				)
 			}
 
+			// Role handling
+			isPrimary := resource.Role == "Primary"
+			meta.SetStatusCondition(
+				&rvr.Status.Conditions,
+				metav1.Condition{
+					Type: v1alpha2.ConditionTypeIsPrimary,
+					Status: If(
+						isPrimary,
+						metav1.ConditionTrue,
+						metav1.ConditionFalse,
+					),
+					Reason: If(
+						isPrimary,
+						v1alpha2.ReasonResourceRoleIsPrimary,
+						v1alpha2.ReasonResourceRoleIsNotPrimary,
+					),
+					Message: fmt.Sprintf("Resource is in a '%s' role", resource.Role),
+				},
+			)
+
+			// Ready handling
 			rvr.RecalculateStatusConditionReady()
 
 			return nil

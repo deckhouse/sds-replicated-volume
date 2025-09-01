@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ConflictRetryBackoff is the backoff policy used by PatchWithConflictRetry and
+// PatchStatusWithConflictRetry to retry conditional patches on transient conflicts.
 var ConflictRetryBackoff = wait.Backoff{
 	Steps:    6,
 	Duration: 1 * time.Millisecond,
@@ -21,21 +23,68 @@ var ConflictRetryBackoff = wait.Backoff{
 	Jitter:   0.25,
 }
 
-var ErrReloadDidNotHappen = errors.New("resource reload did not happen")
+var errReloadDidNotHappen = errors.New("resource reload did not happen")
 
-func PatchStatus[T client.Object](
+// PatchStatusWithConflictRetry applies a conditional, retriable merge-patch to the Status subresource.
+//
+// The patch is conditional via optimistic locking: it uses MergeFrom with
+// a resourceVersion precondition, so the update only succeeds if the current
+// resourceVersion matches. On 409 Conflict, the operation is retried using the
+// ConflictRetryBackoff policy. If a conflict is detected and reloading the
+// resource yields the same resourceVersion, the condition is treated as
+// transient and retried as well; no special error is returned for this case.
+//
+// The provided patchFn must mutate the given object. If patchFn returns an
+// error, no patch is sent and that error is returned.
+//
+// The resource must be a non-nil pointer to a struct; otherwise this function panics.
+func PatchStatusWithConflictRetry[T client.Object](
 	ctx context.Context,
 	cl client.Client,
+	resource T,
+	patchFn func(resource T) error,
+) error {
+	return patch(ctx, cl, true, resource, patchFn)
+}
+
+// PatchWithConflictRetry applies a conditional, retriable merge-patch to the main resource (spec/metadata).
+//
+// The patch is conditional via optimistic locking: it uses MergeFrom with
+// a resourceVersion precondition, so the update only succeeds if the current
+// resourceVersion matches. On 409 Conflict, the operation is retried using the
+// ConflictRetryBackoff policy. If a conflict is detected and reloading the
+// resource yields the same resourceVersion, the condition is treated as
+// transient and retried as well; no special error is returned for this case.
+//
+// The provided patchFn must mutate the given object. If patchFn returns an
+// error, no patch is sent and that error is returned.
+//
+// The resource must be a non-nil pointer to a struct; otherwise this function panics.
+func PatchWithConflictRetry[T client.Object](
+	ctx context.Context,
+	cl client.Client,
+	resource T,
+	patchFn func(resource T) error,
+) error {
+	return patch(ctx, cl, false, resource, patchFn)
+}
+
+func patch[T client.Object](
+	ctx context.Context,
+	cl client.Client,
+	status bool,
 	resource T,
 	patchFn func(resource T) error,
 ) error {
 	assertNonNilPtrToStruct(resource)
 
 	var conflictedResourceVersion string
-	var patchErr error
 
-	err := retry.RetryOnConflict(
+	return retry.OnError(
 		ConflictRetryBackoff,
+		func(err error) bool {
+			return kerrors.IsConflict(err) || err == errReloadDidNotHappen
+		},
 		func() error {
 			resourceVersion := resource.GetResourceVersion()
 
@@ -45,7 +94,7 @@ func PatchStatus[T client.Object](
 					return err
 				}
 				if resource.GetResourceVersion() == conflictedResourceVersion {
-					return ErrReloadDidNotHappen
+					return errReloadDidNotHappen
 				}
 			}
 
@@ -54,12 +103,16 @@ func PatchStatus[T client.Object](
 				client.MergeFromWithOptimisticLock{},
 			)
 
-			if patchErr = patchFn(resource); patchErr != nil {
-				return nil
+			if err := patchFn(resource); err != nil {
+				return err
 			}
 
-			err := cl.Status().Patch(ctx, resource, patch)
-
+			var err error
+			if status {
+				err = cl.Status().Patch(ctx, resource, patch)
+			} else {
+				err = cl.Patch(ctx, resource, patch)
+			}
 			if kerrors.IsConflict(err) {
 				conflictedResourceVersion = resourceVersion
 			}
@@ -67,11 +120,6 @@ func PatchStatus[T client.Object](
 			return err
 		},
 	)
-
-	if err != nil {
-		return err
-	}
-	return patchErr
 }
 
 func assertNonNilPtrToStruct[T any](obj T) {

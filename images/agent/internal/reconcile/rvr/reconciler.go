@@ -41,17 +41,9 @@ func (r *Reconciler) Reconcile(
 
 	switch typedReq := req.(type) {
 	case ResourceReconcileRequest:
-		rvr := &v1alpha2.ReplicatedVolumeReplica{}
-		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr)
+		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
 		if err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				r.log.Warn(
-					"rvr 'name' not found, it might be deleted, ignore",
-					"name", typedReq.Name,
-				)
-				return reconcile.Result{}, nil
-			}
-			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
+			return reconcile.Result{}, err
 		}
 
 		if rvr.Spec.NodeName != r.nodeName {
@@ -73,24 +65,25 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, h.Handle()
 
 	case ResourceDeleteRequest:
+		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+
 		h := &resourceDeleteRequestHandler{
-			ctx:                  ctx,
-			log:                  r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
-			cl:                   r.cl,
-			nodeName:             r.nodeName,
-			replicatedVolumeName: typedReq.ReplicatedVolumeName,
+			ctx:      ctx,
+			log:      r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
+			cl:       r.cl,
+			nodeName: r.nodeName,
+			rvr:      rvr,
 		}
 
 		return reconcile.Result{}, h.Handle()
 
 	case ResourcePrimaryForceRequest:
-		rvr := &v1alpha2.ReplicatedVolumeReplica{}
-		if err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				r.log.Warn("rvr 'name' not found, it might be deleted, ignore", "name", typedReq.Name)
-				return reconcile.Result{}, nil
-			}
-			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
+		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
+		if err != nil {
+			return reconcile.Result{}, err
 		}
 
 		h := &resourcePrimaryForceRequestHandler{
@@ -103,14 +96,11 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, h.Handle()
 
 	case ResourceResizeRequest:
-		rvr := &v1alpha2.ReplicatedVolumeReplica{}
-		if err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr); err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				r.log.Warn("rvr 'name' not found, it might be deleted, ignore", "name", typedReq.Name)
-				return reconcile.Result{}, nil
-			}
-			return reconcile.Result{}, fmt.Errorf("getting rvr %s: %w", typedReq.Name, err)
+		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
+		if err != nil {
+			return reconcile.Result{}, err
 		}
+
 		h := &resourceResizeRequestHandler{
 			ctx:      ctx,
 			log:      r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
@@ -124,4 +114,20 @@ func (r *Reconciler) Reconcile(
 		r.log.Error("unknown req type", "type", reqTypeName)
 		return reconcile.Result{}, nil
 	}
+}
+
+func (r *Reconciler) getReplicatedVolumeReplica(ctx context.Context, name string) (*v1alpha2.ReplicatedVolumeReplica, error) {
+	rvr := &v1alpha2.ReplicatedVolumeReplica{}
+	err := r.cl.Get(ctx, client.ObjectKey{Name: name}, rvr)
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Warn(
+				"rvr 'name' not found, it might be deleted, ignore",
+				"name", name,
+			)
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting rvr %s: %w", name, err)
+	}
+	return rvr, nil
 }
