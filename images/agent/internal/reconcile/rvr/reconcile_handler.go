@@ -206,10 +206,13 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
 		Net: &v9.Net{
 			Protocol:          v9.ProtocolC,
 			SharedSecret:      h.rvr.Spec.SharedSecret,
+			RRConflict:        v9.RRConflictPolicyRetryConnect,
 			AllowTwoPrimaries: h.rvr.Spec.AllowTwoPrimaries,
 		},
 		Options: &v9.Options{
-			OnNoQuorum: v9.OnNoQuorumPolicySuspendIO,
+			OnNoQuorum:                 v9.OnNoQuorumPolicySuspendIO,
+			OnNoDataAccessible:         v9.OnNoDataAccessiblePolicySuspendIO,
+			OnSuspendedPrimaryOutdated: v9.OnSuspendedPrimaryOutdatedPolicyForceSecondary,
 		},
 	}
 
