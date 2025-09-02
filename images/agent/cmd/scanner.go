@@ -291,7 +291,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				)
 			}
 
-			if allReady && condDevicesReady.Status == metav1.ConditionFalse {
+			if allReady && condDevicesReady.Status != metav1.ConditionTrue {
 				var message string
 				if condDevicesReady.Reason == v1alpha2.ReasonDeviceIsNotReady {
 					prec := time.Second * 5
