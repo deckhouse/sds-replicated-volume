@@ -42,7 +42,7 @@ func (r *Reconciler) Reconcile(
 	switch typedReq := req.(type) {
 	case ResourceReconcileRequest:
 		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
-		if err != nil {
+		if rvr == nil {
 			return reconcile.Result{}, err
 		}
 
@@ -66,7 +66,7 @@ func (r *Reconciler) Reconcile(
 
 	case ResourceDeleteRequest:
 		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
-		if err != nil {
+		if rvr == nil {
 			return reconcile.Result{}, err
 		}
 
@@ -82,7 +82,7 @@ func (r *Reconciler) Reconcile(
 
 	case ResourcePrimaryForceRequest:
 		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
-		if err != nil {
+		if rvr == nil {
 			return reconcile.Result{}, err
 		}
 
@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(
 
 	case ResourceResizeRequest:
 		rvr, err := r.getReplicatedVolumeReplica(ctx, typedReq.Name)
-		if err != nil {
+		if rvr == nil {
 			return reconcile.Result{}, err
 		}
 
