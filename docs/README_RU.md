@@ -40,6 +40,10 @@ moduleStatus: preview
 Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+Для работы с снапшотами требуется подключенный модуль [snapshot-controller](../../snapshot-controller/).
+{{< /alert >}}
+
 - Создайте пулы хранения и соответствующие StorageClass'ы.
 
   Создание StorageClass для CSI-драйвера `replicated.csi.storage.deckhouse.io` пользователем **запрещено**.
