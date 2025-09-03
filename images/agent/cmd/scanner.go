@@ -276,7 +276,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 
 			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
 
-			if !allReady && condDevicesReady.Status == metav1.ConditionTrue {
+			if !allReady && condDevicesReady.Status != metav1.ConditionFalse {
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{

@@ -35,17 +35,16 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 }
 
 func (rvr *ReplicatedVolumeReplica) Diskless() (bool, error) {
-	// validate
-	var hasDisk bool
-	for _, v := range rvr.Spec.Volumes {
-		if v.Disk != "" {
-			hasDisk = true
-		} else if hasDisk {
-			// TODO: move to webhook validation?
+	if len(rvr.Spec.Volumes) == 0 {
+		return true, nil
+	}
+	diskless := rvr.Spec.Volumes[0].Disk == ""
+	for _, v := range rvr.Spec.Volumes[1:] {
+		if diskless != (v.Disk == "") {
 			return false, fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
 		}
 	}
-	return !hasDisk, nil
+	return diskless, nil
 }
 
 func (rvr *ReplicatedVolumeReplica) StatusConditionsInitialized() bool {
