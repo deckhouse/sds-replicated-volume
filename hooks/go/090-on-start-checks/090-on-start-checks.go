@@ -18,13 +18,14 @@ package onstartchecks
 
 import (
 	"context"
-
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"encoding/json"
 
 	"github.com/deckhouse/module-sdk/pkg"
 	"github.com/deckhouse/module-sdk/pkg/registry"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var _ = registry.RegisterFunc(
@@ -37,7 +38,6 @@ var _ = registry.RegisterFunc(
 func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	cl := input.DC.MustGetK8sClient()
 
-	// List propscontainers
 	propsList := &unstructured.UnstructuredList{}
 	propsList.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "internal.linstor.linbit.com",
@@ -47,7 +47,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 	if err := cl.List(ctx, propsList); err != nil {
 		input.Logger.Info("Failed to list propscontainers", "err", err)
-		return nil // Don't fail the hook, just log and continue
+		return nil
 	}
 
 	thinPoolExistence := false
@@ -56,7 +56,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	for i := range propsList.Items {
 		item := &propsList.Items[i]
 
-		// Get spec safely
 		spec, found, _ := unstructured.NestedMap(item.Object, "spec")
 		if !found {
 			continue
@@ -65,27 +64,27 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		propKey, _, _ := unstructured.NestedString(spec, "prop_key")
 		propValue, _, _ := unstructured.NestedString(spec, "prop_value")
 
-		// Handle AutoEvictAllowEviction
 		if propKey == "DrbdOptions/AutoEvictAllowEviction" && propValue == "True" {
-			// Create a copy of the item for patching
-			itemCopy := item.DeepCopy()
 
-			// Update the prop_value
-			if err := unstructured.SetNestedField(itemCopy.Object, "False", "spec", "prop_value"); err != nil {
-				input.Logger.Info("Failed to set prop_value", "name", item.GetName(), "err", err)
-				continue
+			patch := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"prop_value": "False",
+				},
 			}
 
-			// Apply the update
-			if err := cl.Update(ctx, itemCopy); err != nil {
-				input.Logger.Info("Failed to update propscontainer", "name", item.GetName(), "err", err)
+			patchBytes, err := json.Marshal(patch)
+			if err != nil {
+				input.Logger.Info("Failed to marshal patch for propscontainer", "name", item.GetName(), "err", err)
 			} else {
-				input.Logger.Info("Updated AutoEvictAllowEviction to False", "name", item.GetName())
-				patchedCount++
+				if err := cl.Patch(ctx, item, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
+					input.Logger.Info("Failed to patch propscontainer", "name", item.GetName(), "err", err)
+				} else {
+					input.Logger.Info("Patched AutoEvictAllowEviction to False", "name", item.GetName())
+					patchedCount++
+				}
 			}
 		}
 
-		// Check for thin pool granularity
 		if propKey == "StorDriver/internal/lvmthin/thinPoolGranularity" {
 			thinPoolExistence = true
 		}
@@ -106,6 +105,14 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 		err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
 		if err != nil {
+
+			if client.IgnoreNotFound(err) == nil {
+				input.Logger.Info("ModuleConfig not found, creating new one")
+			} else {
+				input.Logger.Info("Failed to get ModuleConfig", "err", err)
+				return err
+			}
+
 			// Create new ModuleConfig
 			newModCfg := &unstructured.Unstructured{}
 			newModCfg.SetGroupVersionKind(schema.GroupVersionKind{
@@ -128,22 +135,24 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 				input.Logger.Info("Created moduleconfig with thin provisioning enabled")
 			}
 		} else {
-			// Update existing ModuleConfig
-			modCfgCopy := modCfg.DeepCopy()
-
-			// Get existing settings or create new ones
-			settings, _, _ := unstructured.NestedMap(modCfgCopy.Object, "spec", "settings")
-			if settings == nil {
-				settings = make(map[string]interface{})
+			// Update existing ModuleConfig using patch
+			patch := map[string]interface{}{
+				"spec": map[string]interface{}{
+					"settings": map[string]interface{}{
+						"enableThinProvisioning": true,
+					},
+				},
 			}
-			settings["enableThinProvisioning"] = true
 
-			if err := unstructured.SetNestedField(modCfgCopy.Object, settings, "spec", "settings"); err != nil {
-				input.Logger.Info("Failed to set settings", "err", err)
-			} else if err := cl.Update(ctx, modCfgCopy); err != nil {
-				input.Logger.Info("Failed to update moduleconfig", "err", err)
+			patchBytes, err := json.Marshal(patch)
+			if err != nil {
+				input.Logger.Info("Failed to marshal patch for moduleconfig", "err", err)
 			} else {
-				input.Logger.Info("Updated moduleconfig with thin provisioning enabled")
+				if err := cl.Patch(ctx, modCfg, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
+					input.Logger.Info("Failed to patch moduleconfig", "err", err)
+				} else {
+					input.Logger.Info("Patched moduleconfig with thin provisioning enabled")
+				}
 			}
 		}
 	} else {

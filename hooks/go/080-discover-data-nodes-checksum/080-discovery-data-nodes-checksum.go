@@ -19,9 +19,6 @@ package discoverdatanodeschecksum
 import (
 	"context"
 	"crypto/sha256"
-
-	// "encoding/hex"
-	// "encoding/json"
 	"fmt"
 	"sort"
 
@@ -57,36 +54,8 @@ var _ = registry.RegisterFunc(
 )
 
 func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
-	// snapshots := input.Snapshots.Get(nodeSnapshotName)
-	// var uids []string
-	// for _, snap := range snapshots {
-	// 	b, err := json.Marshal(snap)
-	// 	if err != nil {
-	// 		continue
-	// 	}
-	// 	var snapMap map[string]interface{}
-	// 	if err := json.Unmarshal(b, &snapMap); err != nil {
-	// 		continue
-	// 	}
-	// 	filterResult, ok := snapMap["filterResult"].(map[string]interface{})
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	uid, ok := filterResult["uid"].(string)
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	uids = append(uids, uid)
-	// }
-	// sort.Strings(uids)
-	// h := sha256.New()
-	// h.Write([]byte(fmt.Sprintf("%v", uids)))
-	// hash := hex.EncodeToString(h.Sum(nil))
 
-	// input.Values.Set("sdsReplicatedVolume.internal.dataNodesChecksum", hash)
-	// return nil
-
-	uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, "nodes")
+	uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, nodeSnapshotName)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal node UIDs: %w", err)
 	}
