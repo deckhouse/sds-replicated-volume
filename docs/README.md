@@ -20,7 +20,7 @@ After you enable the `sds-replicated-volume` module in the Deckhouse configurati
 
 > **Caution!** The user is not allowed to create a `StorageClass` for the replicated.csi.storage.deckhouse.io CSI driver.
 
-> **Caution!** If the cluster has only a single node, it is recommended to use either `sds-local-volume` instead of `sds-replicated-volume`.
+> **Caution!** If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
 > To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
 
 To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
