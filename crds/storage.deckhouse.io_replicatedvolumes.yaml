@@ -37,10 +37,14 @@ spec:
             type: object
           spec:
             properties:
+              replicas:
+                format: int64
+                type: integer
               size:
                 format: int64
                 type: integer
             required:
+            - replicas
             - size
             type: object
           status:

@@ -8,6 +8,7 @@ git:
     to: /src
     includePaths:
       - api
+      - lib/go
       - images/{{ $.ImageName }}
     stageDependencies:
       install:

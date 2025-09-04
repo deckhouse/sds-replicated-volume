@@ -55,6 +55,9 @@ spec:
             type: object
           spec:
             properties:
+              allowTwoPrimaries:
+                default: false
+                type: boolean
               nodeAddress:
                 properties:
                   ipv4:
@@ -109,10 +112,18 @@ spec:
               primary:
                 default: false
                 type: boolean
+              quorum:
+                maximum: 7
+                minimum: 0
+                type: integer
+              quorumMinimumRedundancy:
+                maximum: 7
+                minimum: 0
+                type: integer
               replicatedVolumeName:
-                maxLength: 32
+                maxLength: 127
                 minLength: 1
-                pattern: ^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$
+                pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
               sharedSecret:
                 minLength: 1
@@ -125,8 +136,7 @@ spec:
                       minimum: 0
                       type: integer
                     disk:
-                      minLength: 1
-                      pattern: ^/[a-zA-Z0-9/_-]+$
+                      pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
                     number:
                       maximum: 255
@@ -134,7 +144,6 @@ spec:
                       type: integer
                   required:
                   - device
-                  - disk
                   - number
                   type: object
                 maxItems: 100
@@ -144,7 +153,6 @@ spec:
             - nodeAddress
             - nodeId
             - nodeName
-            - peers
             - replicatedVolumeName
             - sharedSecret
             - volumes
@@ -207,6 +215,9 @@ spec:
                   - type
                   type: object
                 type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               drbd:
                 properties:
                   connections:
@@ -399,8 +410,6 @@ spec:
                 - suspended-user
                 - write-ordering
                 type: object
-            required:
-            - conditions
             type: object
         required:
         - metadata
