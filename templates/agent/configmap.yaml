@@ -16,7 +16,7 @@ data:
     format=json
 
     # for each log print "source" property with information about callsite
-    callsite=true
+    callsite=false
 
     render=true
     stringValues=true

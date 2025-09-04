@@ -110,7 +110,10 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 				v1alpha2.ConditionTypeInitialSync,
 				metav1.ConditionFalse,
 				v1alpha2.ReasonSafeForInitialSync,
-				"Safe for initial synchronization",
+				fmt.Sprintf(
+					"Initial synchronization should be triggered by adding annotation %s='true' to this resource",
+					v1alpha2.AnnotationKeyPrimaryForce,
+				),
 				h.rvr.Generation,
 			); err != nil {
 				return err
