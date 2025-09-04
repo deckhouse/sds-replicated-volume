@@ -178,7 +178,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		} else {
 			// Check if enableThinProvisioning is currently true
 			enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
-			input.Logger.Info("Debug: enableThinProvisioning check", "found", found, "value", enableThinProvisioning)
+			input.Logger.Info("Debug: enableThinProvisioning check found %v value %v", found, enableThinProvisioning)
 
 			if found && enableThinProvisioning {
 
