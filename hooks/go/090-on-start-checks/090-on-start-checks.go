@@ -178,6 +178,8 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		} else {
 			// Check if enableThinProvisioning is currently true
 			enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
+			input.Logger.Info("Debug: enableThinProvisioning check", "found", found, "value", enableThinProvisioning)
+
 			if found && enableThinProvisioning {
 
 				// Disable thin provisioning
@@ -202,9 +204,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 						input.Logger.Info("Patched moduleconfig with thin provisioning disabled")
 					}
 				}
-
-				return nil
-
 			} else {
 				input.Logger.Info("Thin provisioning already disabled or not set")
 			}
