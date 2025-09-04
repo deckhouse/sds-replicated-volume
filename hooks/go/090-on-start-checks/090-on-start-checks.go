@@ -46,7 +46,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 	})
 
 	if err := cl.List(ctx, propsList); err != nil {
-		input.Logger.Info("Failed to list propscontainers", "err", err)
+		input.Logger.Info("Failed to list propscontainers err: %s", err.Error())
 		return nil
 	}
 
@@ -74,10 +74,10 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 			patchBytes, err := json.Marshal(patch)
 			if err != nil {
-				input.Logger.Info("Failed to marshal patch for propscontainer", "name", item.GetName(), "err", err)
+				input.Logger.Info("Failed to marshal patch for propscontainer name: %s, err: %s", item.GetName(), err.Error())
 			} else {
 				if err := cl.Patch(ctx, item, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
-					input.Logger.Info("Failed to patch propscontainer", "name", item.GetName(), "err", err)
+					input.Logger.Error("Failed to patch propscontainer name: %s, err: %s", item.GetName(), err.Error())
 				} else {
 					input.Logger.Info("Patched AutoEvictAllowEviction to False", "name", item.GetName())
 					patchedCount++
@@ -109,7 +109,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 			if client.IgnoreNotFound(err) == nil {
 				input.Logger.Info("ModuleConfig not found, creating new one")
 			} else {
-				input.Logger.Info("Failed to get ModuleConfig", "err", err)
+				input.Logger.Error("Failed to get ModuleConfig %s", err.Error())
 				return err
 			}
 
@@ -130,7 +130,7 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 			})
 
 			if err := cl.Create(ctx, newModCfg); err != nil {
-				input.Logger.Info("Failed to create moduleconfig", "err", err)
+				input.Logger.Error("Failed to create moduleconfig %s", err.Error())
 			} else {
 				input.Logger.Info("Created moduleconfig with thin provisioning enabled")
 			}
@@ -146,15 +146,18 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 			patchBytes, err := json.Marshal(patch)
 			if err != nil {
-				input.Logger.Info("Failed to marshal patch for moduleconfig", "err", err)
+				input.Logger.Error("Failed to marshal patch for moduleconfig %s", err.Error())
 			} else {
 				if err := cl.Patch(ctx, modCfg, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
-					input.Logger.Info("Failed to patch moduleconfig", "err", err)
+					input.Logger.Error("Failed to patch moduleconfig %s", err.Error())
 				} else {
 					input.Logger.Info("Patched moduleconfig with thin provisioning enabled")
 				}
 			}
 		}
+
+		return nil
+
 	} else {
 		input.Logger.Info("No thin pool granularity found, checking if thin provisioning should be disabled")
 
@@ -172,13 +175,13 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 			if client.IgnoreNotFound(err) == nil {
 				input.Logger.Info("ModuleConfig not found, nothing to disable")
 			} else {
-				input.Logger.Info("Failed to get ModuleConfig", "err", err)
+				input.Logger.Error("Failed to get ModuleConfig %s", err.Error())
 				return err
 			}
 		} else {
 			// Check if enableThinProvisioning is currently true
 			enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
-			input.Logger.Info("Debug: enableThinProvisioning check found %v value %v", found, enableThinProvisioning)
+			input.Logger.Info("Debug: enableThinProvisioning check found %s value %s", found, enableThinProvisioning)
 
 			if found && enableThinProvisioning {
 
@@ -196,10 +199,10 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 				patchBytes, err := json.Marshal(patch)
 				if err != nil {
-					input.Logger.Info("Failed to marshal patch for moduleconfig", "err", err)
+					input.Logger.Info("Failed to marshal patch for moduleconfig %s", err.Error())
 				} else {
 					if err := cl.Patch(ctx, modCfg, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
-						input.Logger.Info("Failed to patch moduleconfig", "err", err)
+						input.Logger.Info("Failed to patch moduleconfig %s", err.Error())
 					} else {
 						input.Logger.Info("Patched moduleconfig with thin provisioning disabled")
 					}
