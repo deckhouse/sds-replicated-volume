@@ -41,14 +41,14 @@ const (
 	TriggerKeyBackupDaemonSetAffinity  = "backup-daemonset-affinity-"
 	TriggerKeyBackupDeploymentReplicas = "backup-deployment-replicas-"
 
-	DaemonSetNameCsiNode = "linstor-csi-node"
+	DaemonSetNameCsiNode = "csi-node"
 	DaemonSetNameNode    = "linstor-node"
 
 	DeploymentNameSchedulerExtender  = "linstor-scheduler-extender"
 	DeploymentNameWebhooks           = "webhooks"
 	DeploymentNameSpaas              = "spaas"
 	DeploymentNameController         = "linstor-controller"
-	DeploymentNameCsiController      = "linstor-csi-controller"
+	DeploymentNameCsiController      = "csi-controller"
 	DeploymentNameAffinityController = "linstor-affinity-controller"
 	DeploymentNameSdsRVController    = "sds-replicated-volume-controller"
 

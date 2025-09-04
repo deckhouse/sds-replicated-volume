@@ -38,6 +38,10 @@ moduleStatus: preview
 Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+Для работы с снапшотами требуется подключенный модуль [snapshot-controller](../../snapshot-controller/).
+{{< /alert >}}
+
 - Настройте LVMVolumeGroup.
   
   Перед созданием StorageClass необходимо создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) модуля `sds-node-configurator` на узлах кластера.

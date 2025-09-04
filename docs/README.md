@@ -37,6 +37,10 @@ Direct configuration of the LINSTOR backend by the user is prohibited.
 Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+For working with snapshots, the [snapshot-controller](../../snapshot-controller/) module must be connected.
+{{< /alert >}}
+
 - Configure LVMVolumeGroup.
   Before creating a StorageClass, create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
 
