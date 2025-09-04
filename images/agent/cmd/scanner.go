@@ -348,27 +348,21 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				devicesIter,
 				func(d *drbdsetup.Device) bool { return !d.Quorum },
 			)
-			meta.SetStatusCondition(
-				&rvr.Status.Conditions,
-				metav1.Condition{
-					Type: v1alpha2.ConditionTypeQuorum,
-					Status: If(
-						foundNoQuorum,
-						metav1.ConditionFalse,
-						metav1.ConditionTrue,
-					),
-					Reason: If(
-						foundNoQuorum,
-						v1alpha2.ReasonNoQuorumStatus,
-						v1alpha2.ReasonQuorumStatus,
-					),
-					Message: If(
-						foundNoQuorum,
-						fmt.Sprintf("Device %d not in quorum", noQuorumDevice.Minor),
-						"All devices are in quorum",
-					),
-				},
-			)
+
+			quorumCond := metav1.Condition{
+				Type: v1alpha2.ConditionTypeQuorum,
+			}
+			if foundNoQuorum {
+				quorumCond.Status = metav1.ConditionFalse
+				quorumCond.Reason = v1alpha2.ReasonNoQuorumStatus
+				quorumCond.Message = fmt.Sprintf("Device %d not in quorum", noQuorumDevice.Minor)
+			} else {
+				quorumCond.Status = metav1.ConditionTrue
+				quorumCond.Reason = v1alpha2.ReasonQuorumStatus
+				quorumCond.Message = "All devices are in quorum"
+
+			}
+			meta.SetStatusCondition(&rvr.Status.Conditions, quorumCond)
 
 			// SuspendedIO
 			suspendedCond := metav1.Condition{
