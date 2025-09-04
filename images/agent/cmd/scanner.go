@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -64,7 +63,8 @@ func (s *scanner) retryUntilCancel(fn func() error) error {
 			Jitter:   0.1,
 		},
 		func(err error) bool {
-			return !errors.Is(err, context.Canceled) || s.ctx.Err() == nil
+			// retry any error until parent context is done
+			return s.ctx.Err() == nil
 		},
 		fn,
 	)
@@ -79,8 +79,13 @@ func (s *scanner) Run() error {
 			s.batcher.Add(ev)
 		}
 
-		if err != nil {
+		if err != nil && s.ctx.Err() == nil {
 			return LogError(s.log, fmt.Errorf("run events2: %w", err))
+		}
+
+		if err != nil && s.ctx.Err() != nil {
+			// err likely caused by context cancelation, so it's not critical
+			s.log.Warn(fmt.Sprintf("run events2: %v", err))
 		}
 
 		return s.ctx.Err()
