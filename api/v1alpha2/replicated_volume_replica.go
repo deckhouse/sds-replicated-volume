@@ -41,27 +41,11 @@ func (rvr *ReplicatedVolumeReplica) Diskless() (bool, error) {
 	diskless := rvr.Spec.Volumes[0].Disk == ""
 	for _, v := range rvr.Spec.Volumes[1:] {
 		if diskless != (v.Disk == "") {
+			// TODO move to validation webhook
 			return false, fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
 		}
 	}
 	return diskless, nil
-}
-
-func (rvr *ReplicatedVolumeReplica) StatusConditionsInitialized() bool {
-	if rvr.Status == nil {
-		return false
-	}
-
-	if rvr.Status.Conditions == nil {
-		return false
-	}
-
-	for t := range ReplicatedVolumeReplicaConditions {
-		if meta.FindStatusCondition(rvr.Status.Conditions, t) == nil {
-			return false
-		}
-	}
-	return true
 }
 
 func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
@@ -96,40 +80,40 @@ func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
 		return
 	}
 
-	if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			metav1.Condition{
-				Type:               ConditionTypeReady,
-				Status:             metav1.ConditionFalse,
-				Reason:             ReasonDevicesAreNotReady,
-				Message:            "Devices are not ready",
-				ObservedGeneration: rvr.Generation,
-			},
-		)
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeConfigurationAdjusted) {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			metav1.Condition{
-				Type:               ConditionTypeReady,
-				Status:             metav1.ConditionFalse,
-				Reason:             ReasonAdjustmentFailed,
-				Message:            "Resource adjustment failed",
-				ObservedGeneration: rvr.Generation,
-			},
-		)
-	} else {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			metav1.Condition{
-				Type:               ConditionTypeReady,
-				Status:             metav1.ConditionTrue,
-				Reason:             ReasonReady,
-				Message:            "Replica is configured and operational",
-				ObservedGeneration: rvr.Generation,
-			},
-		)
+	cfgAdjCondition := meta.FindStatusCondition(
+		rvr.Status.Conditions,
+		ConditionTypeConfigurationAdjusted,
+	)
+
+	readyCond := metav1.Condition{
+		Type:               ConditionTypeReady,
+		Status:             metav1.ConditionFalse,
+		ObservedGeneration: rvr.Generation,
 	}
+
+	if cfgAdjCondition != nil &&
+		cfgAdjCondition.Status == metav1.ConditionFalse &&
+		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync {
+		readyCond.Reason = ReasonWaitingForInitialSync
+		readyCond.Message = "Configuration adjustment waits for InitialSync"
+	} else if cfgAdjCondition == nil ||
+		cfgAdjCondition.Status != metav1.ConditionTrue {
+		readyCond.Reason = ReasonAdjustmentFailed
+		readyCond.Message = "Resource adjustment failed"
+	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
+		readyCond.Reason = ReasonDevicesAreNotReady
+		readyCond.Message = "Devices are not ready"
+	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum) {
+		readyCond.Reason = ReasonNoQuorum
+	} else if meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended) {
+		readyCond.Reason = ReasonDiskIOSuspended
+	} else {
+		readyCond.Status = metav1.ConditionTrue
+		readyCond.Reason = ReasonReady
+		readyCond.Message = "Replica is configured and operational"
+	}
+
+	meta.SetStatusCondition(&rvr.Status.Conditions, readyCond)
 }
 
 // +k8s:deepcopy-gen=true

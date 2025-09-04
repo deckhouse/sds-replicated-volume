@@ -254,8 +254,10 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				return err
 			}
 
+			devicesIter := uslices.Ptrs(resource.Devices)
+
 			failedDevice, foundFailed := uiter.Find(
-				uslices.Ptrs(resource.Devices),
+				devicesIter,
 				func(d *drbdsetup.Device) bool {
 					if diskless {
 						return d.DiskState != "Diskless"
@@ -340,6 +342,59 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 					Message: fmt.Sprintf("Resource is in a '%s' role", resource.Role),
 				},
 			)
+
+			// Quorum
+			noQuorumDevice, foundNoQuorum := uiter.Find(
+				devicesIter,
+				func(d *drbdsetup.Device) bool { return !d.Quorum },
+			)
+			meta.SetStatusCondition(
+				&rvr.Status.Conditions,
+				metav1.Condition{
+					Type: v1alpha2.ConditionTypeQuorum,
+					Status: If(
+						foundNoQuorum,
+						metav1.ConditionFalse,
+						metav1.ConditionTrue,
+					),
+					Reason: If(
+						foundNoQuorum,
+						v1alpha2.ReasonNoQuorumStatus,
+						v1alpha2.ReasonQuorumStatus,
+					),
+					Message: If(
+						foundNoQuorum,
+						fmt.Sprintf("Device %d not in quorum", noQuorumDevice.Minor),
+						"All devices are in quorum",
+					),
+				},
+			)
+
+			// SuspendedIO
+			suspendedCond := metav1.Condition{
+				Type: v1alpha2.ConditionTypeDiskIOSuspended,
+			}
+			switch {
+			case resource.SuspendedFencing:
+				suspendedCond.Status = metav1.ConditionTrue
+				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedFencing
+			case resource.SuspendedNoData:
+				suspendedCond.Status = metav1.ConditionTrue
+				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedNoData
+			case resource.SuspendedQuorum:
+				suspendedCond.Status = metav1.ConditionTrue
+				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedQuorum
+			case resource.SuspendedUser:
+				suspendedCond.Status = metav1.ConditionTrue
+				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedByUser
+			case resource.Suspended:
+				suspendedCond.Status = metav1.ConditionTrue
+				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedUnknownReason
+			default:
+				suspendedCond.Status = metav1.ConditionFalse
+				suspendedCond.Reason = v1alpha2.ReasonDiskIONotSuspendedStatus
+			}
+			meta.SetStatusCondition(&rvr.Status.Conditions, suspendedCond)
 
 			// Ready handling
 			rvr.RecalculateStatusConditionReady()

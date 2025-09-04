@@ -18,7 +18,6 @@ import (
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -42,6 +41,9 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return err
 	}
 
+	// normalize
+	h.rvr.InitializeStatusConditions()
+
 	// ensure finalizer present during normal reconcile
 	err = api.PatchWithConflictRetry(
 		h.ctx, h.cl, h.rvr,
@@ -57,7 +59,8 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return fmt.Errorf("ensuring finalizer: %w", err)
 	}
 
-	if err := h.writeResourceConfig(); err != nil {
+	initialSyncPassed := meta.IsStatusConditionTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
+	if err := h.writeResourceConfig(initialSyncPassed); err != nil {
 		return h.failAdjustmentWithReason(
 			"failed to write resource config",
 			err,
@@ -147,36 +150,56 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return h.failAdjustmentWithReason(
 			"failed to adjust resource",
 			err,
-			v1alpha2.ReasonAdjustmentFailed,
+			v1alpha2.ReasonConfigurationAdjustFailed,
 		)
 	}
 
 	h.log.Info("successfully adjusted resource")
 
+	if !initialSyncPassed {
+		h.log.Debug("initial synchronization has not been completed, not doing further configuration")
+		return h.setConditionIfNeeded(
+			v1alpha2.ConditionTypeConfigurationAdjusted,
+			metav1.ConditionFalse,
+			v1alpha2.ReasonConfigurationAdjustmentPausedUntilInitialSync,
+			"Waiting for initial sync to happen before finishing configuration",
+			h.rvr.Generation,
+		)
+	}
+
+	// Post-InitialSync actions:
+	if err := h.handlePrimarySecondary(); err != nil {
+		return h.failAdjustmentWithReason(
+			"failed to promote/demote",
+			err,
+			v1alpha2.ReasonPromotionDemotionFailed,
+		)
+	}
+
 	if err := h.setConditionIfNeeded(
 		v1alpha2.ConditionTypeConfigurationAdjusted,
 		metav1.ConditionTrue,
-		v1alpha2.ReasonAdjustmentSucceeded,
+		v1alpha2.ReasonConfigurationAdjustmentSucceeded,
 		"Replica is configured",
 		h.rvr.Generation,
 	); err != nil {
 		return err
 	}
-
-	if err := h.handlePrimarySecondary(); err != nil {
-		return fmt.Errorf("handling primary/secondary: %w", err)
-	}
-
 	return nil
 }
 
-func (h *resourceReconcileRequestHandler) writeResourceConfig() error {
-	resourceCfg := h.generateResourceConfig()
-
+func (h *resourceReconcileRequestHandler) writeResourceConfig(initialSyncPassed bool) error {
 	rootSection := &drbdconf.Section{}
 
-	if err := drbdconf.Marshal(resourceCfg, rootSection); err != nil {
-		return fmt.Errorf("marshaling resource %s cfg: %w", h.rvr.Spec.ReplicatedVolumeName, err)
+	err := drbdconf.Marshal(
+		&v9.Config{Resources: []*v9.Resource{h.generateResourceConfig(initialSyncPassed)}},
+		rootSection,
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"marshaling resource %s cfg: %w",
+			h.rvr.Spec.ReplicatedVolumeName, err,
+		)
 	}
 
 	root := &drbdconf.Root{}
@@ -203,7 +226,7 @@ func (h *resourceReconcileRequestHandler) writeResourceConfig() error {
 	return nil
 }
 
-func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
+func (h *resourceReconcileRequestHandler) generateResourceConfig(initialSyncPassed bool) *v9.Resource {
 	res := &v9.Resource{
 		Name: h.rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
@@ -216,24 +239,9 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
 			OnNoQuorum:                 v9.OnNoQuorumPolicySuspendIO,
 			OnNoDataAccessible:         v9.OnNoDataAccessiblePolicySuspendIO,
 			OnSuspendedPrimaryOutdated: v9.OnSuspendedPrimaryOutdatedPolicyForceSecondary,
+			AutoPromote:                Ptr(false),
 		},
 	}
-
-	res.Options.Quorum = If[v9.Quorum](
-		h.rvr.Spec.Quorum == 0,
-		&v9.QuorumOff{},
-		&v9.QuorumNumeric{
-			Value: int(h.rvr.Spec.Quorum),
-		},
-	)
-
-	res.Options.QuorumMinimumRedundancy = If[v9.QuorumMinimumRedundancy](
-		h.rvr.Spec.QuorumMinimumRedundancy == 0,
-		&v9.QuorumMinimumRedundancyOff{},
-		&v9.QuorumMinimumRedundancyNumeric{
-			Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
-		},
-	)
 
 	// current node
 	h.populateResourceForNode(res, h.nodeName, h.rvr.Spec.NodeId, h.rvr.Spec.NodeAddress, nil)
@@ -247,8 +255,29 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig() *v9.Config {
 		h.populateResourceForNode(res, peerName, peer.NodeId, peer.Address, &peer)
 	}
 
-	return &v9.Config{
-		Resources: []*v9.Resource{res},
+	// Post-InitialSync parameters
+	if initialSyncPassed {
+		h.updateResourceConfigAfterInitialSync(res)
+	}
+
+	return res
+}
+
+func (h *resourceReconcileRequestHandler) updateResourceConfigAfterInitialSync(res *v9.Resource) {
+	if h.rvr.Spec.Quorum == 0 {
+		res.Options.Quorum = &v9.QuorumOff{}
+	} else {
+		res.Options.Quorum = &v9.QuorumNumeric{
+			Value: int(h.rvr.Spec.Quorum),
+		}
+	}
+
+	if h.rvr.Spec.QuorumMinimumRedundancy == 0 {
+		res.Options.QuorumMinimumRedundancy = &v9.QuorumMinimumRedundancyOff{}
+	} else {
+		res.Options.QuorumMinimumRedundancy = &v9.QuorumMinimumRedundancyNumeric{
+			Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
+		}
 	}
 }
 
@@ -321,14 +350,6 @@ func apiAddressToV9HostAddress(hostname string, address v1alpha2.Address) v9.Hos
 }
 
 func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
-	if !meta.IsStatusConditionTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
-		h.log.Debug(
-			"initial synchronization has not been completed, skipping primary/secondary promotion",
-			"conditions", h.rvr.Status.Conditions,
-		)
-		return nil
-	}
-
 	statusResult, err := drbdsetup.ExecuteStatus(h.ctx)
 	if err != nil {
 		h.log.Error("failed to get DRBD status", "error", err)

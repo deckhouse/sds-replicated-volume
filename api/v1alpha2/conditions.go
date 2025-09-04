@@ -16,6 +16,12 @@ const (
 
 	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+
+	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
+	ConditionTypeQuorum = "Quorum"
+
+	// [ConditionTypeDiskIOSuspended] indicates whether replica has achieved quorum
+	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -24,23 +30,31 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeIsPrimary:             {false},
 	ConditionTypeDevicesReady:          {false},
 	ConditionTypeConfigurationAdjusted: {true},
+	ConditionTypeQuorum:                {false},
+	ConditionTypeDiskIOSuspended:       {false},
 }
 
 // Condition reasons for [ConditionTypeReady] condition
 const (
-	ReasonDevicesAreNotReady = "DevicesAreNotReady"
-	ReasonAdjustmentFailed   = "AdjustmentFailed"
-	ReasonReady              = "Ready"
+	ReasonWaitingForInitialSync = "WaitingForInitialSync"
+	ReasonDevicesAreNotReady    = "DevicesAreNotReady"
+	ReasonAdjustmentFailed      = "AdjustmentFailed"
+	ReasonNoQuorum              = "NoQuorum"
+	ReasonDiskIOSuspended       = "DiskIOSuspended"
+	ReasonReady                 = "Ready"
 )
 
 // Condition reasons for [ConditionTypeConfigurationAdjusted] condition
 const (
-	ReasonConfigurationFailed    = "ConfigurationFailed"
-	ReasonMetadataCheckFailed    = "MetadataCheckFailed"
-	ReasonMetadataCreationFailed = "MetadataCreationFailed"
-	ReasonStatusCheckFailed      = "StatusCheckFailed"
-	ReasonResourceUpFailed       = "ResourceUpFailed"
-	ReasonAdjustmentSucceeded    = "AdjustmentSucceeded"
+	ReasonConfigurationFailed                           = "ConfigurationFailed"
+	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
+	ReasonMetadataCreationFailed                        = "MetadataCreationFailed"
+	ReasonStatusCheckFailed                             = "StatusCheckFailed"
+	ReasonResourceUpFailed                              = "ResourceUpFailed"
+	ReasonConfigurationAdjustFailed                     = "ConfigurationAdjustFailed"
+	ReasonConfigurationAdjustmentPausedUntilInitialSync = "ConfigurationAdjustmentPausedUntilInitialSync"
+	ReasonPromotionDemotionFailed                       = "PromotionDemotionFailed"
+	ReasonConfigurationAdjustmentSucceeded              = "ConfigurationAdjustmentSucceeded"
 )
 
 // Condition reasons for [ConditionTypeInitialSync] condition
@@ -60,4 +74,20 @@ const (
 const (
 	ReasonResourceRoleIsPrimary    = "ResourceRoleIsPrimary"
 	ReasonResourceRoleIsNotPrimary = "ResourceRoleIsNotPrimary"
+)
+
+// Condition reasons for [ConditionTypeQuorum] condition
+const (
+	ReasonNoQuorumStatus = "NoQuorumStatus"
+	ReasonQuorumStatus   = "QuorumStatus"
+)
+
+// Condition reasons for [ConditionTypeDiskIOSuspended] condition
+const (
+	ReasonDiskIONotSuspendedStatus     = "DiskIONotSuspendedStatus"
+	ReasonDiskIOSuspendedUnknownReason = "DiskIOSuspendedUnknownReason"
+	ReasonDiskIOSuspendedByUser        = "DiskIOSuspendedByUser"
+	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
+	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
+	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
 )
