@@ -293,10 +293,6 @@ kubectl get sc replicated-storage-class
 
 - Если `StorageClass` с именем `replicated-storage-class` появился, значит настройка модуля `sds-replicated-volume` завершена. Теперь пользователи могут создавать PV, указывая `StorageClass` с именем `replicated-storage-class`. При указанных выше настройках будет создаваться том с 3мя репликами на разных узлах.
 
-  ```shell
-  kubectl get module sds-node-configurator -w
-  ```
-
 ## Системные требования и рекомендации
 
 ### Требования
