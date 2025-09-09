@@ -135,6 +135,8 @@ spec:
               mountPath: /dev/
             - name: host-sys-dir
               mountPath: /sys/
+            - name: host-sys-fs-cgroup
+              mountPath: /sys/fs/cgroup
             - name: host-root
               mountPath: /host-root/
               mountPropagation: HostToContainer
@@ -147,6 +149,9 @@ spec:
           hostPath:
             path: /sys/
             type: Directory
+        - name: host-sys-fs-cgroup
+          hostPath:
+            path: /sys/fs/cgroup
         - name: host-root
           hostPath:
             path: /

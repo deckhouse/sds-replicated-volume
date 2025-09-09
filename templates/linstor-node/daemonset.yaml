@@ -173,6 +173,8 @@ spec:
             name: device-dir
           - mountPath: /sys/
             name: sys-dir
+          - mountPath: /sys/fs/cgroup
+            name: sys-fs-cgroup-dir
           - mountPath: /lib/modules/
             mountPropagation: Bidirectional
             name: modules-dir
@@ -307,6 +309,9 @@ spec:
             path: /sys/
             type: Directory
           name: sys-dir
+        - hostPath:
+            path: /sys/fs/cgroup
+          name: sys-fs-cgroup-dir
         - hostPath:
             path: /lib/modules/
             type: DirectoryOrCreate
