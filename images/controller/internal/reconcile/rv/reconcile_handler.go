@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
@@ -44,7 +45,11 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 	nodes := make([]string, 0, len(desiredNodeNames))
 	for _, name := range desiredNodeNames {
-		if uslices.Find(nodeList.Items, func(n *corev1.Node) bool { return n.Name == name }) != nil {
+		_, found := uiter.Find(
+			uslices.Ptrs(nodeList.Items),
+			func(n *corev1.Node) bool { return n.Name == name },
+		)
+		if found {
 			nodes = append(nodes, name)
 		}
 	}
@@ -65,7 +70,11 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 	foundLVGs := make(map[string]*snc.LVMVolumeGroup, len(lvgNames))
 	for _, name := range lvgNames {
-		if lvg := uslices.Find(lvgList.Items, func(x *snc.LVMVolumeGroup) bool { return x.Name == name }); lvg != nil {
+		lvg, found := uiter.Find(
+			uslices.Ptrs(lvgList.Items),
+			func(x *snc.LVMVolumeGroup) bool { return x.Name == name },
+		)
+		if found {
 			foundLVGs[name] = lvg
 		}
 	}
@@ -97,15 +106,17 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 			plans = append(plans, replicaInitPlan{Spec: v.RVR.Spec})
 			h.log.Info("replica exists", "node", v.Node, "rvr", v.RVR.Name)
 		case replicaMissing:
-			plan := replicaInitPlan{Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: h.rv.Name,
-				NodeName:             v.Node,
-				NodeId:               0,
-				NodeAddress:          v1alpha2.Address{IPv4: "127.0.0.1", Port: v.FreePort},
-				Volumes:              []v1alpha2.Volume{{Number: 0, Disk: "/not/used", Device: v.FreeMinor}},
-				SharedSecret:         "placeholder",
-				Primary:              false,
-			}}
+			plan := replicaInitPlan{
+				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: h.rv.Name,
+					NodeName:             v.Node,
+					NodeId:               0,
+					NodeAddress:          v1alpha2.Address{IPv4: "127.0.0.1", Port: v.FreePort},
+					Volumes:              []v1alpha2.Volume{{Number: 0, Disk: "/not/used", Device: v.FreeMinor}},
+					SharedSecret:         "placeholder",
+					Primary:              false,
+				},
+			}
 			plans = append(plans, plan)
 			missingPlans = append(missingPlans, plan)
 		}
@@ -140,6 +151,22 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	return nil
 }
 
+// func (h *resourceReconcileRequestHandler) queryReplicas() (*replicaQueryResult2, error) {
+// 	var rvrList v1alpha2.ReplicatedVolumeReplicaList
+// 	if err := h.cl.List(
+// 		h.ctx,
+// 		&rvrList,
+// 		client.MatchingFields{"spec.replicatedVolumeName": h.rv.Name},
+// 	); err != nil {
+// 		return nil, utils.LogError(h.log, fmt.Errorf("getting RVRs by replicatedVolumeName", err))
+// 	}
+
+// 	res := &replicaQueryResult2{}
+// 	for i, rvr := range rvrList.Items {
+
+// 	}
+// }
+
 func (h *resourceReconcileRequestHandler) queryReplica(node string) replicaQueryResult {
 	var rvrList v1alpha2.ReplicatedVolumeReplicaList
 	if err := h.cl.List(
@@ -167,30 +194,6 @@ func (h *resourceReconcileRequestHandler) queryReplica(node string) replicaQuery
 	freeMinor := findLowestFreeMinor(usedMinors)
 	return replicaMissing{Node: node, FreePort: freePort, FreeMinor: freeMinor}
 }
-
-type replicaQueryResult interface{ _isReplicaResult() }
-
-type errorReplicaQueryResult struct {
-	Node string
-	Err  error
-}
-
-func (errorReplicaQueryResult) _isReplicaResult() {}
-
-type replicaExists struct {
-	Node string
-	RVR  *v1alpha2.ReplicatedVolumeReplica
-}
-
-func (replicaExists) _isReplicaResult() {}
-
-type replicaMissing struct {
-	Node      string
-	FreePort  uint
-	FreeMinor uint
-}
-
-func (replicaMissing) _isReplicaResult() {}
 
 // Phase 2 types
 
