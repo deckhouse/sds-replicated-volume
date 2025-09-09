@@ -5,7 +5,7 @@ go 1.24.5
 require (
 	github.com/cloudflare/cfssl v1.6.5
 	github.com/deckhouse/deckhouse/pkg/log v0.0.0-20250909165437-ef0b7f73d870
-	github.com/deckhouse/module-sdk v0.3.8
+	github.com/deckhouse/module-sdk v0.3.9-0.20250909224210-e2dda8bbcea8
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.0
 	k8s.io/client-go v0.34.0
