@@ -41,9 +41,6 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return err
 	}
 
-	// normalize
-	h.rvr.InitializeStatusConditions()
-
 	// ensure finalizer present during normal reconcile
 	err = api.PatchWithConflictRetry(
 		h.ctx, h.cl, h.rvr,
@@ -58,6 +55,9 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	if err != nil {
 		return fmt.Errorf("ensuring finalizer: %w", err)
 	}
+
+	// normalize
+	h.rvr.InitializeStatusConditions()
 
 	initialSyncPassed := meta.IsStatusConditionTrue(h.rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
 	if err := h.writeResourceConfig(initialSyncPassed); err != nil {
