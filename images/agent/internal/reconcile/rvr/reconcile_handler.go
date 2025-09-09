@@ -313,7 +313,9 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 				RsDiscardGranularity:   Ptr(uint(8192)),
 			}
 		} else {
-			if !peerOptions.Diskless {
+			if peerOptions.Diskless {
+				vol.Disk = &v9.VolumeDiskNone{}
+			} else {
 				vol.Disk = Ptr(v9.VolumeDisk("/not/used"))
 			}
 		}
