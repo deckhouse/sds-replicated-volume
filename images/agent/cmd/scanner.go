@@ -267,7 +267,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				},
 			)
 
-			allReady := !foundFailed
+			allReady := !foundFailed && len(resource.Devices) > 0
 
 			if allReady && !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
 				meta.SetStatusCondition(
