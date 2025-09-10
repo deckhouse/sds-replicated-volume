@@ -26,7 +26,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Primary')].status
       name: Primary
       type: string
-    - jsonPath: .spec.volumes[0].disk=="" || .spec.volumes[0].disk==null
+    - jsonPath: .spec.volumes[0].disk==null
       name: Diskless
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -171,6 +171,8 @@ spec:
             - nodeAddress
             - nodeId
             - nodeName
+            - quorum
+            - quorumMinimumRedundancy
             - replicatedVolumeName
             - sharedSecret
             - volumes
