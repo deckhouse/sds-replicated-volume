@@ -19,7 +19,7 @@ import (
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Primary",type=string,JSONPath=".status.conditions[?(@.type=='Primary')].status"
-// +kubebuilder:printcolumn:name="Diskless",type=string,JSONPath=".spec.volumes[0].disk==\"\" || .spec.volumes[0].disk==null"
+// +kubebuilder:printcolumn:name="Diskless",type=string,JSONPath=".spec.volumes[0].disk==null"
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="ConfigurationAdjusted",type=string,JSONPath=".status.conditions[?(@.type=='ConfigurationAdjusted')].status"
 // +kubebuilder:printcolumn:name="InitialSync",type=string,JSONPath=".status.conditions[?(@.type=='InitialSync')].status"
@@ -158,11 +158,11 @@ type ReplicatedVolumeReplicaSpec struct {
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
-	Quorum byte `json:"quorum,omitempty"`
+	Quorum byte `json:"quorum"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
-	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
 
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
