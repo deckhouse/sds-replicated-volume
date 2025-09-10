@@ -8,4 +8,5 @@ requirements:
   deckhouse: ">= 1.67"
   modules:
     sds-node-configurator: ">= 0.0.0"
+    snapshot-controller: ">= 0.0.0"  
 namespace: "d8-sds-replicated-volume"
