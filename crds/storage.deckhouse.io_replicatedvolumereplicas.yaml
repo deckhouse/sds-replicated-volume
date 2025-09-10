@@ -23,10 +23,10 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
-    - jsonPath: .spec.primary
+    - jsonPath: .status.conditions[?(@.type=='Primary')].status
       name: Primary
-      type: boolean
-    - jsonPath: .spec.volumes[0].disk==""
+      type: string
+    - jsonPath: .spec.volumes[0].disk=="" || .spec.volumes[0].disk==null
       name: Diskless
       type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
@@ -42,7 +42,7 @@ spec:
       name: Quorum
       type: string
     - jsonPath: .status.conditions[?(@.type=='DevicesReady')].status
-      name: Devices
+      name: DevicesReady
       type: string
     - jsonPath: .status.conditions[?(@.type=='DiskIOSuspended')].status
       name: DiskIOSuspended
