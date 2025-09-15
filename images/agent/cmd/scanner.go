@@ -284,16 +284,20 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
 
 			if !allReady && condDevicesReady.Status != metav1.ConditionFalse {
+				var msg string = "No devices found"
+				if len(resource.Devices) > 0 {
+					msg = fmt.Sprintf(
+						"Device %d volume %d is %s",
+						failedDevice.Minor, failedDevice.Volume, failedDevice.DiskState,
+					)
+				}
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha2.ConditionTypeDevicesReady,
-						Status: metav1.ConditionFalse,
-						Reason: v1alpha2.ReasonDeviceIsNotReady,
-						Message: fmt.Sprintf(
-							"Device %d volume %d is %s",
-							failedDevice.Minor, failedDevice.Volume, failedDevice.DiskState,
-						),
+						Type:    v1alpha2.ConditionTypeDevicesReady,
+						Status:  metav1.ConditionFalse,
+						Reason:  v1alpha2.ReasonDeviceIsNotReady,
+						Message: msg,
 					},
 				)
 			}
