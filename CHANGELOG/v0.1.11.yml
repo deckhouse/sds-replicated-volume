@@ -1,0 +1,2 @@
+Changes:
+  - Fix enabled script, module will not be disabled if sds-node-configurator module disappears from cluster

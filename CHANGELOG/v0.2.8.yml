@@ -1,0 +1,5 @@
+Changes:
+  - Add check if /etc/modules file exists
+  - Add liveness probe for linstor-node
+  - Add age field
+  - Patch CSI to 98544cadb6d111d27a86a11ec07de91b99704b82: Prevent Node Reboots on Volume Deletion

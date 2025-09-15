@@ -3,14 +3,25 @@
 image: release-channel-version-artifact
 fromImage: builder/alpine
 final: false
+git:
+- add: /
+  to: /
+  includePaths:
+  - CHANGELOG
+  - module.yaml
+  stageDependencies:
+    setup:
+    - '**/*'
 shell:
   beforeInstall:
+    {{- include "alpine packages proxy" . | nindent 4 }}
     - apk add --no-cache curl
     - curl -sfL https://github.com/mikefarah/yq/releases/download/2.4.1/yq_linux_amd64 --output /usr/local/bin/yq
     - chmod +x /usr/local/bin/yq
   install:
     - |
-      yq n version "{{ env "CI_COMMIT_REF_NAME" }}" | yq r - -j > version.json
+      yq n version "{{ env "MODULES_MODULE_TAG" }}" | yq r - -j > version.json
+    - cp -f CHANGELOG/{{ env "MODULES_MODULE_TAG" "local" }}.yml /changelog.yaml || touch /changelog.yaml      
 ---
 image: release-channel-version
 fromImage: builder/scratch
@@ -21,3 +32,5 @@ import:
     after: install
     includePaths:
       - version.json
+      - changelog.yaml
+      - module.yaml
