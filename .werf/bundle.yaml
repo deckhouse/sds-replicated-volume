@@ -1,3 +1,30 @@
+---
+image: docs-generator
+fromImage: builder/alt
+final: false
+
+git:
+  - add: /
+    to: /
+    includePaths:
+      - CHANGELOG
+    stageDependencies:
+      setup:
+        - "**/*"
+
+shell:
+  setup:
+    - cd /
+    - mkdir -p /docs
+    - apt-get update
+    - apt-get install -y python3 python3-module-pip curl
+    - pip3 install PyYAML packaging
+    - curl -s https://raw.githubusercontent.com/deckhouse/modules-gitlab-ci/main/scripts/generate_release_notes.py > /generate_release_notes.py
+    - python3 /generate_release_notes.py
+    - rm -rf CHANGELOG
+    - cat /docs/RELEASE_NOTES.md
+    - cat /docs/RELEASE_NOTES.ru.md
+
 # Bundle image, stored in your.registry.io/modules/<module-name>:<semver>
 ---
 image: bundle
@@ -11,13 +38,21 @@ import:
     after: setup
   # Rendering .werf/go-hooks.yaml is required!
   - image: go-hooks-artifact
-    add: /usr/local/bin/go-hooks
+    add: /go-hooks
     to: /hooks/go-hooks
     after: setup
   # Rendering .werf/choose-edition.yaml is required!
   - image: choose-edition
     add: /openapi
     to: /openapi
+    after: setup
+  - image: docs-generator
+    add: /docs/RELEASE_NOTES.md
+    to: /docs/RELEASE_NOTES.md
+    after: setup
+  - image: docs-generator
+    add: /docs/RELEASE_NOTES.ru.md
+    to: /docs/RELEASE_NOTES.ru.md
     after: setup
 git:
   - add: /
@@ -34,3 +69,5 @@ git:
       - templates
       - Chart.yaml
       - module.yaml
+      - hack
+      - CHANGELOG
