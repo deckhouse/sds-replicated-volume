@@ -69,5 +69,3 @@ git:
       - templates
       - Chart.yaml
       - module.yaml
-      - hack
-      - CHANGELOG
