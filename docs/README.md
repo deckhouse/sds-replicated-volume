@@ -302,7 +302,7 @@ Applicable to both single-zone clusters and clusters using multiple availability
 
 - Use stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
   - A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
-  - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms.
+  - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5ms will cause serious performance issues.
   - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
 
 ### Recommendations
