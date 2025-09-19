@@ -1,0 +1,7 @@
+Изменения:
+  - Добавлены настройки диапазона портов DRBD
+  - Исправлен путь в liveness-satellite
+  - Исправлена опечатка lvmVolumeGroups и thinPoolName в примерах
+  - Добавлена проверка свойства AutoplaceTarget узла Linstor
+  - Изменено lvmvolumegroups на lvmVolumeGroups в русской документации
+  - Исправлен linstor satellite VPA

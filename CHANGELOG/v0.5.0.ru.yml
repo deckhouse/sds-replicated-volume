@@ -1,0 +1,5 @@
+Изменения:
+  - Множественные небольшие правки в templates, monitoring alerts и документацию
+  - Переход с linstor scheduler-extender на внутренние механизмы самого Deckhouse (KubeSchedulerWebhookConfiguration)
+  - Перевод образов на distroless
+  - Поправлен и дополнен скрипт для вывода drbd ресурсов с ноды

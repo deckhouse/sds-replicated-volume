@@ -1,0 +1,3 @@
+Changes:
+  - Changes in hooks for correct manual certificate update process
+  - Fixed D8NodeHighUnknownMemoryUsage alert grouping

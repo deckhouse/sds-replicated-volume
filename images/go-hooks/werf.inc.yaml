@@ -32,4 +32,4 @@ shell:
   beforeSetup:
     - |
       cd /usr/src/app/hooks/go;
-      CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /usr/local/bin/go-hooks *.go;
+      CGO_ENABLED=0 go build -a -gcflags=all="-l -B" -ldflags="-w -s" -o /go-hooks *.go;

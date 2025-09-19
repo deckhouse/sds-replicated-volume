@@ -1,0 +1,3 @@
+Changes:
+  - Added CSI patch for full support of topologies specified in ReplicatedStorageClass (could be ignored)
+  - Added D8NodeHighUnknownMemoryUsage alert for detecting DRBD memory leak cases (report issues to team storage)

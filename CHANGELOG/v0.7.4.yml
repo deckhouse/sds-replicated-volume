@@ -1,0 +1,2 @@
+Changes:
+  - If topology allows, controller removes annotation for StorageClass that prohibits ordering RWX volumes

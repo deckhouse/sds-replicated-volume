@@ -1,0 +1,2 @@
+Changes:
+  - In evict.sh script for cleaning node from DRBD resources, AutoplaceTarget parameter is now taken into account, moved replicas will not be moved to nodes with AutoplaceTarget value equal to false
