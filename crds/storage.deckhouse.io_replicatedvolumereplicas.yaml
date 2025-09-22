@@ -85,6 +85,9 @@ spec:
                     maximum: 65535
                     minimum: 1025
                     type: integer
+                    x-kubernetes-validations:
+                    - message: port is immutable
+                      rule: oldSelf == null || self == oldSelf
                 required:
                 - ipv4
                 - port
@@ -93,10 +96,16 @@ spec:
                 maximum: 7
                 minimum: 0
                 type: integer
+                x-kubernetes-validations:
+                - message: nodeId is immutable
+                  rule: oldSelf == null || self == oldSelf
               nodeName:
                 maxLength: 253
                 minLength: 1
                 type: string
+                x-kubernetes-validations:
+                - message: nodeName is immutable
+                  rule: oldSelf == null || self == oldSelf
               peers:
                 additionalProperties:
                   properties:
@@ -109,6 +118,9 @@ spec:
                           maximum: 65535
                           minimum: 1025
                           type: integer
+                          x-kubernetes-validations:
+                          - message: port is immutable
+                            rule: oldSelf == null || self == oldSelf
                       required:
                       - ipv4
                       - port
@@ -116,10 +128,16 @@ spec:
                     diskless:
                       default: false
                       type: boolean
+                      x-kubernetes-validations:
+                      - message: peer diskless is immutable
+                        rule: oldSelf == null || self == oldSelf
                     nodeId:
                       maximum: 7
                       minimum: 0
                       type: integer
+                      x-kubernetes-validations:
+                      - message: peer nodeId is immutable
+                        rule: oldSelf == null || self == oldSelf
                     sharedSecret:
                       type: string
                   required:
@@ -143,6 +161,9 @@ spec:
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
+                x-kubernetes-validations:
+                - message: replicatedVolumeName is immutable
+                  rule: oldSelf == null || self == oldSelf
               sharedSecret:
                 minLength: 1
                 type: string
@@ -153,13 +174,22 @@ spec:
                       maximum: 1048575
                       minimum: 0
                       type: integer
+                      x-kubernetes-validations:
+                      - message: volume device is immutable
+                        rule: oldSelf == null || self == oldSelf
                     disk:
                       pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
+                      x-kubernetes-validations:
+                      - message: volume disk is immutable
+                        rule: oldSelf == null || self == oldSelf
                     number:
                       maximum: 255
                       minimum: 0
                       type: integer
+                      x-kubernetes-validations:
+                      - message: volume number is immutable
+                        rule: oldSelf == null || self == oldSelf
                   required:
                   - device
                   - number
@@ -167,6 +197,9 @@ spec:
                 maxItems: 100
                 minItems: 1
                 type: array
+                x-kubernetes-validations:
+                - message: volumes list is immutable
+                  rule: oldSelf == null || self == oldSelf
             required:
             - nodeAddress
             - nodeId

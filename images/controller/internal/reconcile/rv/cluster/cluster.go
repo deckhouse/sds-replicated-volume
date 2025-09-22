@@ -3,8 +3,11 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
@@ -15,113 +18,218 @@ import (
 
 type RVRClient interface {
 	ByReplicatedVolumeName(ctx context.Context, resourceName string) ([]v1alpha2.ReplicatedVolumeReplica, error)
-	ByNodeName(ctx context.Context, nodeName string) ([]v1alpha2.ReplicatedVolumeReplica, error)
+}
+
+type MinorManager interface {
+	// result should not be returned for next calls
+	ReserveNodeMinor(ctx context.Context, nodeName string) (uint, error)
+}
+
+type PortManager interface {
+	// result should not be returned for next calls
+	ReserveNodePort(ctx context.Context, nodeName string) (uint, error)
 }
 
 type LLVClient interface {
-	ByActualNamesOnTheNode(nodeName string, actualVGNameOnTheNode string, actualLVNameOnTheNode string) ([]snc.LVMLogicalVolume, error)
-}
-
-type Config interface {
-	DRBDPortMinMax() (uint, uint)
+	// return nil, when not found
+	ByActualNamesOnTheNode(nodeName string, actualVGNameOnTheNode string, actualLVNameOnTheNode string) (*snc.LVMLogicalVolume, error)
 }
 
 type Cluster struct {
-	ctx    context.Context
-	rvrCl  RVRClient
-	llvCl  LLVClient
-	cfg    Config
-	rvName string
+	ctx          context.Context
+	rvrCl        RVRClient
+	llvCl        LLVClient
+	log          *slog.Logger
+	rvName       string
+	sharedSecret string
 	// Indexes are node ids.
 	replicas []*replica
 }
 
 func New(
 	ctx context.Context,
-	rvName string,
 	rvrCl RVRClient,
 	llvCl LLVClient,
+	rvName string,
+	sharedSecret string,
 ) *Cluster {
 	return &Cluster{
-		ctx:    ctx,
-		rvName: rvName,
-		rvrCl:  rvrCl,
-		llvCl:  llvCl,
+		ctx:          ctx,
+		rvName:       rvName,
+		rvrCl:        rvrCl,
+		llvCl:        llvCl,
+		sharedSecret: sharedSecret,
 	}
 }
 
-func (c *Cluster) AddReplica(nodeName string, ipv4 string) *replica {
+func (c *Cluster) AddReplica(
+	nodeName string,
+	ipv4 string,
+	primary bool,
+	quorum byte,
+	quorumMinimumRedundancy byte,
+) *replica {
 	r := &replica{
-		ctx:      c.ctx,
-		llvCl:    c.llvCl,
-		rvrCl:    c.rvrCl,
-		cfg:      c.cfg,
-		id:       len(c.replicas),
-		rvName:   c.rvName,
-		nodeName: nodeName,
-		ipv4:     ipv4,
+		ctx:   c.ctx,
+		llvCl: c.llvCl,
+		rvrCl: c.rvrCl,
+		props: replicaProps{
+			id:                      uint(len(c.replicas)),
+			rvName:                  c.rvName,
+			nodeName:                nodeName,
+			ipv4:                    ipv4,
+			sharedSecret:            c.sharedSecret,
+			primary:                 primary,
+			quorum:                  quorum,
+			quorumMinimumRedundancy: quorumMinimumRedundancy,
+		},
 	}
 	c.replicas = append(c.replicas, r)
 	return r
 }
 
-func (c *Cluster) Reconcile() (res []Action, err error) {
-	existingRvrs, err := c.rvrCl.ByReplicatedVolumeName(c.ctx, c.rvName)
-	if err != nil {
-		return nil, err
+func (c *Cluster) Reconcile() (Action, error) {
+	existingRvrs, getErr := c.rvrCl.ByReplicatedVolumeName(c.ctx, c.rvName)
+	if getErr != nil {
+		return nil, getErr
+	}
+
+	type nodeKey struct {
+		nodeId   uint
+		nodeName string
 	}
 
 	rvrsByNodeId := umaps.CollectGrouped(
 		uiter.MapTo2(
 			uslices.Ptrs(existingRvrs),
-			func(rvr *v1alpha2.ReplicatedVolumeReplica) (int, *v1alpha2.ReplicatedVolumeReplica) {
-				return int(rvr.Spec.NodeId), rvr
+			func(rvr *v1alpha2.ReplicatedVolumeReplica) (nodeKey, *v1alpha2.ReplicatedVolumeReplica) {
+				return nodeKey{rvr.Spec.NodeId, rvr.Spec.NodeName}, rvr
 			},
 		),
 	)
 
-	replicasByNodeIds := maps.Collect(slices.All(c.replicas))
+	replicasByNodeIds := maps.Collect(
+		uiter.MapTo2(
+			slices.Values(c.replicas),
+			func(r *replica) (nodeKey, *replica) {
+				return nodeKey{r.props.id, r.props.nodeName}, r
+			},
+		),
+	)
 
 	toDelete, toReconcile, toAdd := umaps.IntersectKeys(rvrsByNodeId, replicasByNodeIds)
 
-	group := ParallelActionGroup{}
-
 	// 1. RECONCILE
-	for id := range toReconcile {
-		rvrs := rvrsByNodeId[id]
+	// This can't be done in parallel, abd we should not proceed if some of the
+	// correctly placed replicas need to be reconciled, because correct values
+	// for spec depend on peers.
+	// TODO: But this can be improved by separating reconcile for peer-dependent
+	// fields from others.
+	toReconcileSorted := slices.Collect(maps.Keys(toReconcile))
+	slices.SortFunc(
+		toReconcileSorted,
+		func(a nodeKey, b nodeKey) int {
+			return int(a.nodeId) - int(b.nodeId)
+		},
+	)
+	for _, key := range toReconcileSorted {
+		rvrs := rvrsByNodeId[key]
 
-		replica := replicasByNodeIds[id]
+		replica := replicasByNodeIds[key]
 
-		replicaRes, replicaErr := replica.Reconcile(rvrs)
-		group = append(group, replicaRes...)
-		err = errors.Join(err, replicaErr)
-	}
+		replicaAction, err := replica.Reconcile(rvrs, c.replicas)
 
-	// 2. ADD - InitializeSelf
-	for id := range toAdd {
-		replicaErr := replicasByNodeIds[id].InitializeSelf()
-		err = errors.Join(err, replicaErr)
-	}
+		if err != nil {
+			return nil, fmt.Errorf("reconciling replica %d: %w", replica.props.id, err)
+		}
 
-	// 2. ADD - InitializePeers
-	// at this point, all replicas are either InitializeSelf'ed or Reconcile'd,
-	// so we can finish initialization of peers for new replicas
-	for id := range toAdd {
-		replica := replicasByNodeIds[id]
-		replicaErr := replica.InitializePeers(c.replicas)
-		group = append(group, &AddReplica{ReplicatedVolumeReplica: replica.ReplicatedVolumeReplica()})
-		err = errors.Join(err, replicaErr)
-	}
-
-	res = append(res, group...)
-
-	// 3. DELETE
-	for id := range toDelete {
-		rvrs := rvrsByNodeId[id]
-		for _, rvr := range rvrs {
-			res = append(res, &DeleteReplica{ReplicatedVolumeReplica: rvr})
+		if replicaAction != nil {
+			return Actions{replicaAction, RetryReconcile{}}, nil
 		}
 	}
 
-	return
+	// 2. ADD
+	// This also can't be done in parallel, because we need to keep number of
+	// active replicas low - and delete one replica as soon as one replica was
+	// created
+	// TODO: but this can also be improved for the case when no more replicas
+	// for deletion has left - then we can parallelize the addition of new replicas
+	var rvrsToSkipDelete map[string]struct{}
+	var actions Actions
+	for id := range toAdd {
+		replica := replicasByNodeIds[id]
+		replicaAction, err := replica.Initialize(c.replicas)
+		if err != nil {
+			return nil, fmt.Errorf("initializing replica %d: %w", replica.props.id, err)
+		}
+
+		actions = append(actions, replicaAction)
+
+		// 2.1. DELETE one rvr to alternate addition and deletion
+		for id := range toDelete {
+			rvrToDelete := rvrsByNodeId[id][0]
+
+			deleteAction, err := c.deleteRVR(rvrToDelete)
+			if err != nil {
+				return nil, err
+			}
+
+			actions = append(actions, deleteAction)
+
+			rvrsToSkipDelete = umaps.Set(rvrsToSkipDelete, rvrToDelete.Name, struct{}{})
+			break
+		}
+	}
+
+	// 3. DELETE
+	pa := ParallelActions{}
+
+	var deleteErrors error
+	for id := range toDelete {
+		rvrs := rvrsByNodeId[id]
+		for _, rvr := range rvrs {
+			if _, ok := rvrsToSkipDelete[rvr.Name]; ok {
+				continue
+			}
+			deleteAction, err := c.deleteRVR(rvr)
+
+			deleteErrors = errors.Join(deleteErrors, err)
+
+			pa = append(pa, deleteAction)
+		}
+	}
+
+	actions = append(actions, pa)
+
+	return actions, deleteErrors
+}
+
+func (c *Cluster) deleteRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Action, error) {
+	actions := Actions{DeleteReplica{ReplicatedVolumeReplica: rvr}}
+
+	for i := range rvr.Spec.Volumes {
+		// expecting: "/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}"
+		parts := strings.Split(rvr.Spec.Volumes[i].Disk, "/")
+		if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
+			len(parts[2]) == 0 || len(parts[3]) == 0 {
+			return nil,
+				fmt.Errorf(
+					"expected rvr.Spec.Volumes[i].Disk in format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'.",
+					rvr.Spec.Volumes[i].Disk,
+				)
+		}
+
+		actualVGNameOnTheNode, actualLVNameOnTheNode := parts[2], parts[3]
+
+		llv, err := c.llvCl.ByActualNamesOnTheNode(rvr.Spec.NodeName, actualVGNameOnTheNode, actualLVNameOnTheNode)
+		if err != nil {
+			return nil, err
+		}
+
+		if llv != nil {
+			actions = append(actions, DeleteLVMLogicalVolume{llv})
+		}
+	}
+
+	return actions, nil
 }

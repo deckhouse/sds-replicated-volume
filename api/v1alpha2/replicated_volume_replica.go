@@ -128,15 +128,18 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=127
 	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="nodeId is immutable"
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -147,6 +150,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=100
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="volumes list is immutable"
 	Volumes []Volume `json:"volumes"`
 
 	// +kubebuilder:validation:Required
@@ -172,12 +176,14 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="peer nodeId is immutable"
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
 	Address Address `json:"address"`
 
 	// +kubebuilder:default=false
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="peer diskless is immutable"
 	Diskless bool `json:"diskless,omitempty"`
 
 	SharedSecret string `json:"sharedSecret,omitempty"`
@@ -187,13 +193,16 @@ type Peer struct {
 type Volume struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=255
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="volume number is immutable"
 	Number uint `json:"number"`
 
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="volume disk is immutable"
 	Disk string `json:"disk,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="volume device is immutable"
 	Device uint `json:"device"`
 }
 
@@ -205,6 +214,7 @@ type Address struct {
 
 	// +kubebuilder:validation:Minimum=1025
 	// +kubebuilder:validation:Maximum=65535
+	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="port is immutable"
 	Port uint `json:"port"`
 }
 

@@ -1,24 +1,43 @@
 package cluster
 
-import "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+import (
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+)
 
 type Action interface {
 	_action()
 }
 
-type ParallelActionGroup []Action
+type Actions []Action
+
+type ParallelActions []Action
 
 type DeleteReplica struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
 }
 
-type AddReplica struct {
+type DeleteLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
+}
+
+type CreateLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
+}
+
+type WaitLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
+}
+
+type CreateReplicatedVolumeReplica struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
 }
 
-type FixReplicaIPOp struct {
-	NewIPv4 string
+type WaitReplicatedVolumeReplica struct {
+	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
 }
+
+type Patch[T any] func(T) error
 
 type WaitForVolumeOp struct {
 	VolumeId int
@@ -28,14 +47,29 @@ type DeleteVolumeOp struct {
 	VolumeId int
 }
 
-func (*ParallelActionGroup) _action() {}
-func (*DeleteReplica) _action()       {}
-func (*AddReplica) _action()          {}
-func (*FixReplicaIPOp) _action()      {}
-func (*WaitForVolumeOp) _action()     {}
+type RetryReconcile struct {
+}
 
-var _ Action = &ParallelActionGroup{}
-var _ Action = &DeleteReplica{}
-var _ Action = &AddReplica{}
-var _ Action = &FixReplicaIPOp{}
-var _ Action = &WaitForVolumeOp{}
+func (Actions) _action()                       {}
+func (ParallelActions) _action()               {}
+func (DeleteReplica) _action()                 {}
+func (DeleteLVMLogicalVolume) _action()        {}
+func (CreateLVMLogicalVolume) _action()        {}
+func (WaitLVMLogicalVolume) _action()          {}
+func (CreateReplicatedVolumeReplica) _action() {}
+func (WaitReplicatedVolumeReplica) _action()   {}
+func (Patch[T]) _action()                      {}
+func (WaitForVolumeOp) _action()               {}
+func (RetryReconcile) _action()                {}
+
+var _ Action = Actions{}
+var _ Action = ParallelActions{}
+var _ Action = DeleteReplica{}
+var _ Action = DeleteLVMLogicalVolume{}
+var _ Action = CreateLVMLogicalVolume{}
+var _ Action = WaitLVMLogicalVolume{}
+var _ Action = CreateReplicatedVolumeReplica{}
+var _ Action = WaitReplicatedVolumeReplica{}
+var _ Action = Patch[any](nil)
+var _ Action = WaitForVolumeOp{}
+var _ Action = RetryReconcile{}

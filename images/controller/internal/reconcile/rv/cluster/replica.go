@@ -2,9 +2,10 @@ package cluster
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 
+	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -12,177 +13,231 @@ import (
 const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
 
 type replica struct {
-	ctx                     context.Context
-	llvCl                   LLVClient
-	rvrCl                   RVRClient
-	cfg                     Config
-	id                      int
-	rvName                  string
-	nodeName                string
-	ipv4                    string
-	primary                 bool
-	quorum                  byte
-	quorumMinimumRedundancy byte
+	ctx      context.Context
+	llvCl    LLVClient
+	rvrCl    RVRClient
+	portMgr  PortManager
+	minorMgr MinorManager
+	props    replicaProps
 
 	// Indexes are volume ids.
 	volumes []*volume
 
-	// only non-nil after successful [replica.InitializeSelf] or [replica.Reconcile]
-	rvr *v1alpha2.ReplicatedVolumeReplica
+	// properties, which should be determined dynamically
+	dprops *replicaDynamicProps
 }
 
-func (r *replica) AddVolume(
-	actualVgNameOnTheNode string,
-	actualLvNameOnTheNode string,
-) *volume {
+type replicaProps struct {
+	id                      uint
+	rvName                  string
+	nodeName                string
+	sharedSecret            string
+	ipv4                    string
+	primary                 bool
+	quorum                  byte
+	quorumMinimumRedundancy byte
+}
+
+type replicaDynamicProps struct {
+	port uint
+}
+
+type replicaInitResult struct {
+	ReplicatedVolumeReplica   *v1alpha2.ReplicatedVolumeReplica
+	NewLVMLogicalVolumes      []snc.LVMLogicalVolume
+	ExistingLVMLogicalVolumes []snc.LVMLogicalVolume
+}
+
+func (r *replica) AddVolume(actualVgNameOnTheNode string) *volume {
 	v := &volume{
-		actualVGNameOnTheNode: actualVgNameOnTheNode,
-		actualLVNameOnTheNode: actualLvNameOnTheNode,
+		ctx:      r.ctx,
+		llvCl:    r.llvCl,
+		rvrCl:    r.rvrCl,
+		minorMgr: r.minorMgr,
+		props: volumeProps{
+			id:                    len(r.volumes),
+			rvName:                r.props.rvName,
+			nodeName:              r.props.nodeName,
+			actualVGNameOnTheNode: actualVgNameOnTheNode,
+		},
 	}
 	r.volumes = append(r.volumes, v)
 	return v
 }
 
-func (r *replica) Initialized() bool { return r.rvr != nil }
-
-func (r *replica) ReplicatedVolumeReplica() *v1alpha2.ReplicatedVolumeReplica {
-	if r.rvr == nil {
-		panic("expected Spec to be called after InitializeSelf or Reconcile")
+func (r *replica) Port() (uint, error) {
+	if r.dprops != nil {
+		return r.dprops.port, nil
 	}
-	return r.rvr.DeepCopy()
+
+	freePort, err := r.portMgr.ReserveNodePort(r.ctx, r.props.nodeName)
+	if err != nil {
+		return 0, err
+	}
+
+	r.dprops = &replicaDynamicProps{
+		port: freePort,
+	}
+
+	return freePort, nil
 }
 
-func (r *replica) InitializeSelf() error {
-	nodeReplicas, err := r.rvrCl.ByNodeName(r.ctx, r.nodeName)
-	if err != nil {
-		return err
-	}
-
-	usedPorts := map[uint]struct{}{}
-	usedMinors := map[uint]struct{}{}
-	for _, item := range nodeReplicas {
-		usedPorts[item.Spec.NodeAddress.Port] = struct{}{}
-		for _, v := range item.Spec.Volumes {
-			usedMinors[v.Device] = struct{}{}
-		}
-	}
-
-	portMin, portMax := r.cfg.DRBDPortMinMax()
-
-	freePort, err := findLowestUnusedInRange(usedPorts, portMin, portMax)
-	if err != nil {
-		return fmt.Errorf("unable to find free port on node %s: %w", r.nodeName, err)
-	}
+func (r *replica) Initialize(allReplicas []*replica) (Action, error) {
+	var actions Actions
 
 	// volumes
-	var volumes []v1alpha2.Volume
-	for volId, vol := range r.volumes {
-		freeMinor, err := findLowestUnusedInRange(usedMinors, 0, 1048576)
+	rvrVolumes := make([]v1alpha2.Volume, len(r.volumes))
+	for i, vol := range r.volumes {
+		volAction, err := vol.Initialize(&rvrVolumes[i])
 		if err != nil {
-			return fmt.Errorf("unable to find free minor on node %s: %w", r.nodeName, err)
+			return nil, err
 		}
-		usedMinors[freeMinor] = struct{}{}
 
-		volumes = append(
-			volumes,
-			v1alpha2.Volume{
-				Number: uint(volId),
-				Disk:   fmt.Sprintf("/dev/%s/%s", vol.actualVGNameOnTheNode, vol.actualLVNameOnTheNode),
-				Device: freeMinor,
+		actions = append(actions, volAction)
+	}
+
+	// initialize
+	port, err := r.Port()
+	if err != nil {
+		return nil, err
+	}
+
+	var rvrPeers map[string]v1alpha2.Peer
+	for nodeId, peer := range allReplicas {
+		if peer == r {
+			continue
+		}
+
+		diskless := len(peer.volumes) == 0
+
+		port, err := peer.Port()
+		if err != nil {
+			return nil, err
+		}
+
+		rvrPeers = umaps.Set(
+			rvrPeers,
+			peer.props.nodeName,
+			v1alpha2.Peer{
+				NodeId: uint(nodeId),
+				Address: v1alpha2.Address{
+					IPv4: peer.props.ipv4,
+					Port: port,
+				},
+				Diskless: diskless,
 			},
 		)
 	}
 
-	// initialize
-	r.rvr = &v1alpha2.ReplicatedVolumeReplica{
+	rvr := &v1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", r.rvName),
+			GenerateName: fmt.Sprintf("%s-", r.props.rvName),
 			Finalizers:   []string{rvrFinalizerName},
 		},
 		Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: r.rvName,
-			NodeName:             r.nodeName,
-			NodeId:               uint(r.id),
+			ReplicatedVolumeName: r.props.rvName,
+			NodeName:             r.props.nodeName,
+			NodeId:               uint(r.props.id),
 			NodeAddress: v1alpha2.Address{
-				IPv4: r.ipv4,
-				Port: freePort,
+				IPv4: r.props.ipv4,
+				Port: port,
 			},
-			Volumes:                 volumes,
-			Primary:                 r.primary,
-			Quorum:                  r.quorum,
-			QuorumMinimumRedundancy: r.quorumMinimumRedundancy,
+			SharedSecret:            r.props.sharedSecret,
+			Volumes:                 rvrVolumes,
+			Primary:                 r.props.primary,
+			Quorum:                  r.props.quorum,
+			QuorumMinimumRedundancy: r.props.quorumMinimumRedundancy,
 		},
 	}
 
-	return nil
+	actions = append(
+		actions,
+		CreateReplicatedVolumeReplica{rvr},
+		WaitReplicatedVolumeReplica{rvr},
+	)
+
+	return actions, nil
 }
 
-func (r *replica) InitializePeers(initializedReplicas []*replica) error {
-	if r.rvr == nil {
-		panic("expected InitializePeers to be called after InitializeSelf")
+func setIfNeeded[T comparable](changeTracker *bool, current *T, expected T) {
+	if *current == expected {
+		return
 	}
-
-	// find any replica with shared secret initialized, or generate one
-	var sharedSecret string
-	for _, peer := range initializedReplicas {
-		if peer == r {
-			continue
-		}
-		peerRvr := peer.ReplicatedVolumeReplica()
-		if peerRvr.Spec.SharedSecret != "" {
-			sharedSecret = peerRvr.Spec.SharedSecret
-		}
-	}
-	if sharedSecret == "" {
-		sharedSecret = rand.Text()
-	}
-	r.rvr.Spec.SharedSecret = sharedSecret
-
-	// peers
-	for nodeId, peer := range initializedReplicas {
-		if peer == r {
-			continue
-		}
-		peerRvr := peer.ReplicatedVolumeReplica()
-
-		if r.rvr.Spec.Peers == nil {
-			r.rvr.Spec.Peers = map[string]v1alpha2.Peer{}
-		}
-
-		diskless, err := peerRvr.Diskless()
-		if err != nil {
-			return fmt.Errorf("determining disklessness for rvr %s: %w", peerRvr.Name, err)
-		}
-
-		r.rvr.Spec.Peers[peer.nodeName] = v1alpha2.Peer{
-			NodeId:   uint(nodeId),
-			Address:  peerRvr.Spec.NodeAddress,
-			Diskless: diskless,
-		}
-	}
-
-	return nil
+	*current = expected
+	*changeTracker = true
 }
 
-func (r *replica) Reconcile(rvrs []*v1alpha2.ReplicatedVolumeReplica) (res []Action, err error) {
-	// guaranteed to match replica:
-	// - rvr.Spec.ReplicatedVolumeName
-	// - rvr.Spec.NodeId,
-	// everything else should be reconciled
+// rvrs is non-empty slice of RVRs, which are guaranteed to match replica's:
+//   - rvr.Spec.ReplicatedVolumeName
+//   - rvr.Spec.NodeId
+//   - rvr.Spec.NodeName
+//
+// Everything else should be reconciled.
+func (r *replica) Reconcile(
+	rvrs []*v1alpha2.ReplicatedVolumeReplica,
+	peers []*replica,
+) (Action, error) {
 
-	if rvrs[0].Spec.NodeName != r.nodeName {
+	var pa ParallelActions
 
+	var invalid []*v1alpha2.ReplicatedVolumeReplica
+
+	// reconcile every each
+	for _, rvr := range rvrs {
+		// if immutable props are invalid - rvr should be recreated
+		// but creation & readiness should come before deletion
+
+		if len(rvr.Spec.Volumes) != len(r.volumes) {
+			invalid = append(invalid, rvr)
+			continue
+		}
+
+		for id, vol := range r.volumes {
+			rvrVol := &rvr.Spec.Volumes[id]
+			if rvrVol.Number != uint(id) {
+				invalid = append(invalid, rvr)
+				continue
+			}
+			if rvrVol.Device != vol.dprops.minor {
+				invalid = append(invalid, rvr)
+				continue
+			}
+
+		}
+
+		//
+		changed := new(bool)
+
+		setIfNeeded(changed, &rvr.Spec.NodeAddress.IPv4, r.props.ipv4)
+		setIfNeeded(changed, &rvr.Spec.Primary, r.props.primary)
+		setIfNeeded(changed, &rvr.Spec.Quorum, r.props.quorum)
+		setIfNeeded(changed, &rvr.Spec.QuorumMinimumRedundancy, r.props.quorumMinimumRedundancy)
+		setIfNeeded(changed, &rvr.Spec.SharedSecret, r.props.sharedSecret)
+
+		// volumes
+
+		//
+
+		// peers
+
+		//
+
+		if *changed {
+			// pa = append(
+			// 	pa,
+			// 	&ChangeReplicaSpec{rvr.DeepCopy()},
+			// )
+		}
 	}
+
+	// a = append(a, pa)
+
+	// wait for any
+
+	// delete the rest
 
 	// make sure SharedSecret is initialized
-	return
-}
 
-func findLowestUnusedInRange(used map[uint]struct{}, minVal, maxVal uint) (uint, error) {
-	for i := minVal; i <= maxVal; i++ {
-		if _, ok := used[i]; !ok {
-			return i, nil
-		}
-	}
-	return 0, fmt.Errorf("unable to find a free number in range [%d;%d]", minVal, maxVal)
+	// TODO: intiialize dprops *replicaDynamicProps
+	return nil, nil
 }
