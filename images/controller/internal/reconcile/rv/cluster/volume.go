@@ -15,6 +15,7 @@ type volume struct {
 	rvrCl    RVRClient
 	minorMgr MinorManager
 	props    volumeProps
+	dprops   volumeDynamicProps
 }
 
 type volumeProps struct {
@@ -26,7 +27,15 @@ type volumeProps struct {
 	size                  int64
 }
 
-func (v *volume) Initialize(rvrVolume *v1alpha2.Volume) (Action, error) {
+type volumeDynamicProps struct {
+}
+
+func (v *volume) Initialize(existingLLV *snc.LVMLogicalVolume) error {
+	// TODO
+	return nil
+}
+
+func (v *volume) Create(rvrVolume *v1alpha2.Volume) (Action, error) {
 	minor, err := v.minorMgr.ReserveNodeMinor(v.ctx, v.props.nodeName)
 	if err != nil {
 		return nil, err
@@ -50,6 +59,10 @@ func (v *volume) Initialize(rvrVolume *v1alpha2.Volume) (Action, error) {
 	actualLVNameOnTheNode := v.props.rvName
 	if existingLLV != nil {
 		action, err = v.reconcileLLV(existingLLV)
+		if err != nil {
+			return nil, err
+		}
+
 		actualLVNameOnTheNode = existingLLV.Spec.ActualLVNameOnTheNode
 	} else {
 		llv := &snc.LVMLogicalVolume{
@@ -99,14 +112,9 @@ func (v *volume) reconcileLLV(llv *snc.LVMLogicalVolume) (Action, error) {
 	return nil, nil
 }
 
-// func (v *volume) IsValid(rvrVol *v1alpha2.Volume) (bool, string) {
-// 	if int(rvrVol.Number) != v.props.id {
-// 		return false,
-// 			fmt.Sprintf(
-// 				"expected volume number %d, go %d",
-// 				v.props.id, rvrVol.Number,
-// 			)
-// 	}
-
-// 	// rvrVol.Device
-// }
+func (v *volume) ShouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
+	if int(rvrVol.Number) != v.props.id {
+		return true
+	}
+	return false
+}

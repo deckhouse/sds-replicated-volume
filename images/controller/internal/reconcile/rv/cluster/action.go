@@ -13,20 +13,9 @@ type Actions []Action
 
 type ParallelActions []Action
 
-type DeleteReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
-}
+type Patch[T any] func(T) error
 
-type DeleteLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
-}
-
-type CreateLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
-}
-
-type WaitLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type RetryReconcile struct {
 }
 
 type CreateReplicatedVolumeReplica struct {
@@ -37,39 +26,42 @@ type WaitReplicatedVolumeReplica struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
 }
 
-type Patch[T any] func(T) error
-
-type WaitForVolumeOp struct {
-	VolumeId int
+type DeleteReplicatedVolumeReplica struct {
+	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
 }
 
-type DeleteVolumeOp struct {
-	VolumeId int
+type CreateLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
 }
 
-type RetryReconcile struct {
+type WaitLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
 }
 
-func (Actions) _action()                       {}
-func (ParallelActions) _action()               {}
-func (DeleteReplica) _action()                 {}
-func (DeleteLVMLogicalVolume) _action()        {}
-func (CreateLVMLogicalVolume) _action()        {}
-func (WaitLVMLogicalVolume) _action()          {}
+type DeleteLVMLogicalVolume struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
+}
+
+func (Actions) _action()         {}
+func (ParallelActions) _action() {}
+func (Patch[T]) _action()        {}
+func (RetryReconcile) _action()  {}
+
 func (CreateReplicatedVolumeReplica) _action() {}
 func (WaitReplicatedVolumeReplica) _action()   {}
-func (Patch[T]) _action()                      {}
-func (WaitForVolumeOp) _action()               {}
-func (RetryReconcile) _action()                {}
+func (DeleteReplicatedVolumeReplica) _action() {}
+
+func (CreateLVMLogicalVolume) _action() {}
+func (WaitLVMLogicalVolume) _action()   {}
+func (DeleteLVMLogicalVolume) _action() {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
-var _ Action = DeleteReplica{}
-var _ Action = DeleteLVMLogicalVolume{}
-var _ Action = CreateLVMLogicalVolume{}
-var _ Action = WaitLVMLogicalVolume{}
+var _ Action = Patch[any](nil)
+var _ Action = RetryReconcile{}
 var _ Action = CreateReplicatedVolumeReplica{}
 var _ Action = WaitReplicatedVolumeReplica{}
-var _ Action = Patch[any](nil)
-var _ Action = WaitForVolumeOp{}
-var _ Action = RetryReconcile{}
+var _ Action = DeleteReplicatedVolumeReplica{}
+var _ Action = CreateLVMLogicalVolume{}
+var _ Action = WaitLVMLogicalVolume{}
+var _ Action = DeleteLVMLogicalVolume{}
