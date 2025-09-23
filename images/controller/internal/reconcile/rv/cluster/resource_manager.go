@@ -27,6 +27,7 @@ type nodeResources struct {
 }
 
 var _ PortManager = &ResourceManager{}
+var _ MinorManager = &ResourceManager{}
 
 func NewResourceManager(cl NodeRVRClient, portRange DRBDPortRange) *ResourceManager {
 	return &ResourceManager{

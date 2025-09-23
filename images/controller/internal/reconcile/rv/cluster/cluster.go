@@ -38,6 +38,8 @@ type Cluster struct {
 	ctx          context.Context
 	rvrCl        RVRClient
 	llvCl        LLVClient
+	portManager  PortManager
+	minorManager MinorManager
 	rvName       string
 	sharedSecret string
 	// Indexes are node ids.
@@ -47,15 +49,20 @@ type Cluster struct {
 func New(
 	ctx context.Context,
 	rvrCl RVRClient,
+	nodeRVRCl NodeRVRClient,
+	portRange DRBDPortRange,
 	llvCl LLVClient,
 	rvName string,
 	sharedSecret string,
 ) *Cluster {
+	rm := NewResourceManager(nodeRVRCl, portRange)
 	return &Cluster{
 		ctx:          ctx,
 		rvName:       rvName,
 		rvrCl:        rvrCl,
 		llvCl:        llvCl,
+		portManager:  rm,
+		minorManager: rm,
 		sharedSecret: sharedSecret,
 	}
 }
@@ -68,9 +75,11 @@ func (c *Cluster) AddReplica(
 	quorumMinimumRedundancy byte,
 ) *replica {
 	r := &replica{
-		ctx:   c.ctx,
-		llvCl: c.llvCl,
-		rvrCl: c.rvrCl,
+		ctx:      c.ctx,
+		llvCl:    c.llvCl,
+		rvrCl:    c.rvrCl,
+		portMgr:  c.portManager,
+		minorMgr: c.minorManager,
 		props: replicaProps{
 			id:                      uint(len(c.replicas)),
 			rvName:                  c.rvName,
