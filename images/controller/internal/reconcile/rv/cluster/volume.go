@@ -28,46 +28,78 @@ type volumeProps struct {
 }
 
 type volumeDynamicProps struct {
+	actualVGNameOnTheNode string
+	actualLVNameOnTheNode string
+	minor                 uint
+	existingLLV           *snc.LVMLogicalVolume
+	existingLLVSizeQty    resource.Quantity
 }
 
-func (v *volume) Initialize(existingLLV *snc.LVMLogicalVolume) error {
-	// TODO
-	return nil
-}
+func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
+	if existingRVRVolume == nil {
+		v.dprops.actualVGNameOnTheNode = v.props.actualVGNameOnTheNode
+		v.dprops.actualLVNameOnTheNode = v.props.rvName
 
-func (v *volume) Create(rvrVolume *v1alpha2.Volume) (Action, error) {
-	minor, err := v.minorMgr.ReserveNodeMinor(v.ctx, v.props.nodeName)
-	if err != nil {
-		return nil, err
+		// minor
+		minor, err := v.minorMgr.ReserveNodeMinor(v.ctx, v.props.nodeName)
+		if err != nil {
+			return err
+		}
+		v.dprops.minor = minor
+	} else {
+		aVGName, aLVName, err := existingRVRVolume.ParseDisk()
+		if err != nil {
+			return err
+		}
+		v.dprops.actualVGNameOnTheNode = aVGName
+		v.dprops.actualLVNameOnTheNode = aLVName
+
+		// minor
+		v.dprops.minor = existingRVRVolume.Device
 	}
 
-	existingLLV, err := v.llvCl.ByActualNamesOnTheNode(v.props.nodeName, v.props.actualVGNameOnTheNode, v.props.rvName)
+	existingLLV, err := v.llvCl.ByActualNamesOnTheNode(
+		v.props.nodeName,
+		v.dprops.actualVGNameOnTheNode,
+		v.dprops.actualLVNameOnTheNode,
+	)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if existingLLV == nil {
 		// support volumes migrated from LINSTOR
 		// TODO: check suffix
-		existingLLV, err = v.llvCl.ByActualNamesOnTheNode(v.props.nodeName, v.props.actualVGNameOnTheNode, v.props.rvName+"_000000")
+		existingLLV, err = v.llvCl.ByActualNamesOnTheNode(
+			v.props.nodeName,
+			v.props.actualVGNameOnTheNode,
+			v.dprops.actualLVNameOnTheNode+"_000000",
+		)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
 
-	var action Action
-	actualLVNameOnTheNode := v.props.rvName
 	if existingLLV != nil {
-		action, err = v.reconcileLLV(existingLLV)
+		llvSizeQty, err := resource.ParseQuantity(existingLLV.Spec.Size)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("parsing the size of llv %s: %w", existingLLV.Name, err)
 		}
+		v.dprops.existingLLVSizeQty = llvSizeQty
+	}
 
-		actualLVNameOnTheNode = existingLLV.Spec.ActualLVNameOnTheNode
+	v.dprops.existingLLV = existingLLV
+
+	return nil
+}
+
+func (v *volume) Reconcile() Action {
+	if v.dprops.existingLLV != nil {
+		return v.reconcileLLV()
 	} else {
 		llv := &snc.LVMLogicalVolume{
 			Spec: snc.LVMLogicalVolumeSpec{
-				ActualLVNameOnTheNode: actualLVNameOnTheNode,
+				ActualLVNameOnTheNode: v.dprops.actualLVNameOnTheNode,
 				Size:                  resource.NewQuantity(v.props.size, resource.BinarySI).String(),
 				// TODO: check these props and pass them
 				Type:               "Thick",
@@ -75,45 +107,43 @@ func (v *volume) Create(rvrVolume *v1alpha2.Volume) (Action, error) {
 			},
 		}
 
-		action = Actions{
+		return Actions{
 			CreateLVMLogicalVolume{LVMLogicalVolume: llv},
 			WaitLVMLogicalVolume{llv},
 		}
 	}
-
-	*rvrVolume = v1alpha2.Volume{
-		Number: uint(v.props.id),
-		Disk: fmt.Sprintf(
-			"/dev/%s/%s",
-			v.props.actualVGNameOnTheNode, actualLVNameOnTheNode,
-		),
-		Device: minor,
-	}
-
-	return action, nil
 }
 
-func (v *volume) reconcileLLV(llv *snc.LVMLogicalVolume) (Action, error) {
-	llvSizeQty, err := resource.ParseQuantity(llv.Spec.Size)
-	if err != nil {
-		return nil, fmt.Errorf("parsing the size of llv %s: %w", llv.Name, err)
+func (v *volume) RVRVolume() v1alpha2.Volume {
+	rvrVolume := v1alpha2.Volume{
+		Number: uint(v.props.id),
+		Device: v.dprops.minor,
 	}
 
-	cmp := llvSizeQty.CmpInt64(v.props.size)
+	rvrVolume.SetDisk(v.dprops.actualVGNameOnTheNode, v.dprops.actualLVNameOnTheNode)
+
+	return rvrVolume
+}
+
+func (v *volume) reconcileLLV() Action {
+	cmp := v.dprops.existingLLVSizeQty.CmpInt64(v.props.size)
 	if cmp < 0 {
-		return Patch[*snc.LVMLogicalVolume](func(llv *snc.LVMLogicalVolume) error {
+		return LLVPatch(func(llv *snc.LVMLogicalVolume) error {
 			llv.Spec.Size = resource.NewQuantity(v.props.size, resource.BinarySI).String()
 			return nil
-		}), nil
+		})
 	}
 
 	// TODO reconcile other props
 
-	return nil, nil
+	return nil
 }
 
 func (v *volume) ShouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
 	if int(rvrVol.Number) != v.props.id {
+		return true
+	}
+	if v.dprops.actualVGNameOnTheNode != v.props.actualVGNameOnTheNode {
 		return true
 	}
 	return false

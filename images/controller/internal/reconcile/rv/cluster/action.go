@@ -15,8 +15,8 @@ type ParallelActions []Action
 
 type Patch[T any] func(T) error
 
-type RetryReconcile struct {
-}
+type RVRPatch = Patch[*v1alpha2.ReplicatedVolumeReplica]
+type LLVPatch = Patch[*snc.LVMLogicalVolume]
 
 type CreateReplicatedVolumeReplica struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
@@ -42,23 +42,19 @@ type DeleteLVMLogicalVolume struct {
 	LVMLogicalVolume *snc.LVMLogicalVolume
 }
 
-func (Actions) _action()         {}
-func (ParallelActions) _action() {}
-func (Patch[T]) _action()        {}
-func (RetryReconcile) _action()  {}
-
+func (Actions) _action()                       {}
+func (ParallelActions) _action()               {}
+func (Patch[T]) _action()                      {}
 func (CreateReplicatedVolumeReplica) _action() {}
 func (WaitReplicatedVolumeReplica) _action()   {}
 func (DeleteReplicatedVolumeReplica) _action() {}
-
-func (CreateLVMLogicalVolume) _action() {}
-func (WaitLVMLogicalVolume) _action()   {}
-func (DeleteLVMLogicalVolume) _action() {}
+func (CreateLVMLogicalVolume) _action()        {}
+func (WaitLVMLogicalVolume) _action()          {}
+func (DeleteLVMLogicalVolume) _action()        {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
 var _ Action = Patch[any](nil)
-var _ Action = RetryReconcile{}
 var _ Action = CreateReplicatedVolumeReplica{}
 var _ Action = WaitReplicatedVolumeReplica{}
 var _ Action = DeleteReplicatedVolumeReplica{}

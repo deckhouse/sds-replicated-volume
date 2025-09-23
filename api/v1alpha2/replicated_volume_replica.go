@@ -2,6 +2,7 @@ package v1alpha2
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -204,6 +205,23 @@ type Volume struct {
 	// +kubebuilder:validation:Maximum=1048575
 	// +kubebuilder:validation:XValidation:rule="oldSelf == null || self == oldSelf",message="volume device is immutable"
 	Device uint `json:"device"`
+}
+
+func (v *Volume) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
+	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
+}
+
+func (v *Volume) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
+	parts := strings.Split(v.Disk, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
+		len(parts[2]) == 0 || len(parts[3]) == 0 {
+		return "", "",
+			fmt.Errorf(
+				"parsing Volume %d Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
+				v.Number, v.Disk,
+			)
+	}
+	return parts[2], parts[3], nil
 }
 
 // +k8s:deepcopy-gen=true

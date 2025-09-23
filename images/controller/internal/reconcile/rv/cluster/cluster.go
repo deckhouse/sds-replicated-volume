@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"strings"
 
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
@@ -116,12 +115,11 @@ func (c *Cluster) Reconcile() (Action, error) {
 		),
 	)
 
-	toDelete, toReconcile, toAdd := umaps.IntersectKeys(rvrsByNodeKey, replicasByNodeKey)
-
-	// 0.0. INITIALIZE existing replicas
-	for key := range toReconcile {
+	// 0. INITIALIZE existing&new replicas and volumes
+	for key, replica := range replicasByNodeKey {
 		rvrs := rvrsByNodeKey[key]
 
+		var rvr *v1alpha2.ReplicatedVolumeReplica
 		if len(rvrs) > 1 {
 			return nil,
 				fmt.Errorf(
@@ -129,53 +127,30 @@ func (c *Cluster) Reconcile() (Action, error) {
 					c.rvName, key.nodeName, key.nodeId,
 					cstrings.JoinNames(rvrs, ", "),
 				)
+		} else if len(rvrs) == 1 {
+			rvr = rvrs[0]
 		}
 
-		replica := replicasByNodeKey[key]
-
-		if err := replica.Initialize(rvrs[0]); err != nil {
-			return nil, err
-		}
-		// 0.1. INITIALIZE existing volumes for existing replicas
-		if err := replica.InitializeVolumes(); err != nil {
+		if err := replica.Initialize(rvr, c.replicas); err != nil {
 			return nil, err
 		}
 	}
 
-	// 0.2. INITIALIZE existing volumes for non-existing replicas
-	for key := range toAdd {
-		replica := replicasByNodeKey[key]
-		if err := replica.InitializeVolumes(); err != nil {
-			return nil, err
-		}
+	// Create/Resize all volumes
+	pa := ParallelActions{}
+	for _, replica := range c.replicas {
+		pa = append(pa, replica.ReconcileVolumes())
 	}
+
+	// Diff
+	toDelete, toReconcile, toAdd := umaps.IntersectKeys(rvrsByNodeKey, replicasByNodeKey)
 
 	// 1. RECONCILE - fix or recreate existing replicas
-	// This can't be done in parallel, and we should not proceed if some of the
-	// correctly placed replicas need to be reconciled, because correct values
-	// for spec depend on peers.
-	// TODO: But this can be improved by separating reconcile for peer-dependent
-	// fields from others.
-	toReconcileSorted := slices.Collect(maps.Keys(toReconcile))
-	slices.SortFunc(
-		toReconcileSorted,
-		func(a nodeKey, b nodeKey) int {
-			return int(a.nodeId) - int(b.nodeId)
-		},
-	)
-	for _, key := range toReconcileSorted {
-		replica := replicasByNodeKey[key]
-
-		replicaAction, err := replica.Reconcile(c.replicas)
-
-		if err != nil {
-			return nil, fmt.Errorf("reconciling replica %d: %w", replica.props.id, err)
-		}
-
-		if replicaAction != nil {
-			return Actions{replicaAction, RetryReconcile{}}, nil
-		}
+	for key := range toReconcile {
+		pa = append(pa, replicasByNodeKey[key].RecreateOrFix())
 	}
+
+	actions := Actions{pa}
 
 	// 2.0. ADD - create non-existing replicas
 	// This also can't be done in parallel, because we need to keep number of
@@ -184,15 +159,11 @@ func (c *Cluster) Reconcile() (Action, error) {
 	// TODO: but this can also be improved for the case when no more replicas
 	// for deletion has left - then we can parallelize the addition of new replicas
 	var rvrsToSkipDelete map[string]struct{}
-	var actions Actions
 	for id := range toAdd {
 		replica := replicasByNodeKey[id]
-		replicaAction, err := replica.Create(c.replicas, "")
-		if err != nil {
-			return nil, fmt.Errorf("initializing replica %d: %w", replica.props.id, err)
-		}
 
-		actions = append(actions, replicaAction)
+		rvr := replica.RVR("")
+		actions = append(actions, CreateReplicatedVolumeReplica{rvr}, WaitReplicatedVolumeReplica{rvr})
 
 		// 2.1. DELETE one rvr to alternate addition and deletion
 		for id := range toDelete {
@@ -211,7 +182,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 	}
 
 	// 3. DELETE not needed RVRs
-	pa := ParallelActions{}
+	deleteActions := ParallelActions{}
 
 	var deleteErrors error
 	for id := range toDelete {
@@ -224,11 +195,11 @@ func (c *Cluster) Reconcile() (Action, error) {
 
 			deleteErrors = errors.Join(deleteErrors, err)
 
-			pa = append(pa, deleteAction)
+			deleteActions = append(deleteActions, deleteAction)
 		}
 	}
 
-	actions = append(actions, pa)
+	actions = append(actions, deleteActions)
 
 	return actions, deleteErrors
 }
@@ -237,18 +208,10 @@ func (c *Cluster) deleteRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Action, erro
 	actions := Actions{DeleteReplicatedVolumeReplica{ReplicatedVolumeReplica: rvr}}
 
 	for i := range rvr.Spec.Volumes {
-		// expecting: "/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}"
-		parts := strings.Split(rvr.Spec.Volumes[i].Disk, "/")
-		if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
-			len(parts[2]) == 0 || len(parts[3]) == 0 {
-			return nil,
-				fmt.Errorf(
-					"expected rvr.Spec.Volumes[i].Disk in format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-					rvr.Spec.Volumes[i].Disk,
-				)
+		actualVGNameOnTheNode, actualLVNameOnTheNode, err := rvr.Spec.Volumes[i].ParseDisk()
+		if err != nil {
+			return nil, err
 		}
-
-		actualVGNameOnTheNode, actualLVNameOnTheNode := parts[2], parts[3]
 
 		llv, err := c.llvCl.ByActualNamesOnTheNode(rvr.Spec.NodeName, actualVGNameOnTheNode, actualLVNameOnTheNode)
 		if err != nil {

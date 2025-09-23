@@ -3,8 +3,11 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"slices"
 
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -24,7 +27,7 @@ type replica struct {
 	// Indexes are volume ids.
 	volumes []*volume
 
-	existingRVR *v1alpha2.ReplicatedVolumeReplica
+	peers []*replica
 }
 
 type replicaProps struct {
@@ -39,7 +42,8 @@ type replicaProps struct {
 }
 
 type replicaDynamicProps struct {
-	port uint
+	existingRVR *v1alpha2.ReplicatedVolumeReplica
+	port        uint
 }
 
 func (r *replica) AddVolume(actualVgNameOnTheNode string) *volume {
@@ -63,7 +67,10 @@ func (r *replica) Diskless() bool {
 	return len(r.volumes) == 0
 }
 
-func (r *replica) Initialize(existingRVR *v1alpha2.ReplicatedVolumeReplica) error {
+func (r *replica) Initialize(
+	existingRVR *v1alpha2.ReplicatedVolumeReplica,
+	allReplicas []*replica,
+) error {
 	var port uint
 	if existingRVR == nil {
 		freePort, err := r.portMgr.ReserveNodePort(r.ctx, r.props.nodeName)
@@ -75,41 +82,47 @@ func (r *replica) Initialize(existingRVR *v1alpha2.ReplicatedVolumeReplica) erro
 		port = existingRVR.Spec.NodeAddress.Port
 	}
 
-	r.dprops = replicaDynamicProps{
-		port: port,
-	}
-	r.existingRVR = existingRVR
-	return nil
-}
-
-func (r *replica) InitializeVolumes() error {
 	for _, vol := range r.volumes {
-
-	}
-	return nil
-}
-
-func (r *replica) Create(allReplicas []*replica, recreatedFromName string) (Action, error) {
-	var actions Actions
-
-	// volumes
-	rvrVolumes := make([]v1alpha2.Volume, len(r.volumes))
-	for i, vol := range r.volumes {
-		volAction, err := vol.Create(&rvrVolumes[i])
-		if err != nil {
-			return nil, err
+		var existingRVRVolume *v1alpha2.Volume
+		if existingRVR != nil {
+			existingRVRVolume, _ = uiter.Find(
+				uslices.Ptrs(existingRVR.Spec.Volumes),
+				func(rvrVol *v1alpha2.Volume) bool {
+					return rvrVol.Number == uint(vol.props.id)
+				},
+			)
 		}
 
-		actions = append(actions, volAction)
+		err := vol.Initialize(existingRVRVolume)
+		if err != nil {
+			return err
+		}
+	}
+
+	r.dprops = replicaDynamicProps{
+		port:        port,
+		existingRVR: existingRVR,
+	}
+
+	r.peers = slices.Collect(
+		uiter.Filter(
+			slices.Values(allReplicas),
+			func(peer *replica) bool { return r != peer },
+		),
+	)
+	return nil
+}
+
+func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplica {
+	// volumes
+	rvrVolumes := make([]v1alpha2.Volume, 0, len(r.volumes))
+	for _, vol := range r.volumes {
+		rvrVolumes = append(rvrVolumes, vol.RVRVolume())
 	}
 
 	// peers
 	var rvrPeers map[string]v1alpha2.Peer
-	for nodeId, peer := range allReplicas {
-		if peer == r {
-			continue
-		}
-
+	for nodeId, peer := range r.peers {
 		rvrPeers = umaps.Set(
 			rvrPeers,
 			peer.props.nodeName,
@@ -148,39 +161,37 @@ func (r *replica) Create(allReplicas []*replica, recreatedFromName string) (Acti
 	if recreatedFromName != "" {
 		rvr.Annotations[v1alpha2.AnnotationKeyRecreatedFrom] = recreatedFromName
 	}
-
-	actions = append(
-		actions,
-		CreateReplicatedVolumeReplica{rvr},
-		WaitReplicatedVolumeReplica{rvr},
-	)
-
-	return actions, nil
+	return rvr
 }
 
-// rvrs is non-empty slice of RVRs, which are guaranteed to match replica's:
-//   - rvr.Spec.ReplicatedVolumeName
-//   - rvr.Spec.NodeId
-//   - rvr.Spec.NodeName
-//
-// Everything else should be reconciled.
-func (r *replica) Reconcile(peers []*replica) (Action, error) {
+func (r *replica) ReconcileVolumes() Action {
+	var actions Actions
+	for _, vol := range r.volumes {
+		actions = append(actions, vol.Reconcile())
+	}
+	return actions
+}
+
+func (r *replica) RecreateOrFix() Action {
 	// if immutable props are invalid - rvr should be recreated
 	// but creation & readiness should come before deletion
-
-	if r.ShouldBeRecreated(r.existingRVR, peers) {
-		return r.Create(peers, r.existingRVR.Name)
-	} else if r.ShouldBeFixed(r.existingRVR, peers) {
-		return r.Fix(peers), nil
+	if r.ShouldBeRecreated(r.dprops.existingRVR) {
+		rvr := r.RVR(r.dprops.existingRVR.Name)
+		return Actions{
+			CreateReplicatedVolumeReplica{rvr},
+			WaitReplicatedVolumeReplica{rvr},
+		}
+	} else if r.ShouldBeFixed(r.dprops.existingRVR) {
+		return Actions{
+			RVRPatch(r.MakeFix()),
+			WaitReplicatedVolumeReplica{r.dprops.existingRVR},
+		}
 	}
 
-	return nil, nil
+	return nil
 }
 
-func (r *replica) ShouldBeRecreated(
-	rvr *v1alpha2.ReplicatedVolumeReplica,
-	peers []*replica,
-) bool {
+func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if len(rvr.Spec.Volumes) != len(r.volumes) {
 		return true
 	}
@@ -193,15 +204,11 @@ func (r *replica) ShouldBeRecreated(
 		}
 	}
 
-	if len(rvr.Spec.Peers) != len(peers)-1 {
+	if len(rvr.Spec.Peers) != len(r.peers) {
 		return true
 	}
 
-	for _, peer := range peers {
-		if peer == r {
-			continue
-		}
-
+	for _, peer := range r.peers {
 		rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
 		if !ok {
 			return true
@@ -219,10 +226,7 @@ func (r *replica) ShouldBeRecreated(
 	return false
 }
 
-func (r *replica) ShouldBeFixed(
-	rvr *v1alpha2.ReplicatedVolumeReplica,
-	peers []*replica,
-) bool {
+func (r *replica) ShouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if rvr.Spec.NodeAddress.IPv4 != r.props.ipv4 {
 		return false
 	}
@@ -239,11 +243,7 @@ func (r *replica) ShouldBeFixed(
 		return false
 	}
 
-	for _, peer := range peers {
-		if peer == r {
-			continue
-		}
-
+	for _, peer := range r.peers {
 		rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
 		if !ok {
 			// should never happen, since replica would require recreation, not fixing
@@ -266,40 +266,32 @@ func (r *replica) ShouldBeFixed(
 	return false
 }
 
-func (r *replica) Fix(peers []*replica) Action {
-	patch := Patch[*v1alpha2.ReplicatedVolumeReplica](
-		func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
-			if r.ShouldBeRecreated(rvr, peers) {
-				return fmt.Errorf(
-					"can not patch rvr %s, since it should be recreated",
-					rvr.Name,
-				)
-			}
+func (r *replica) MakeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+	return func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+		if r.ShouldBeRecreated(rvr) {
+			return fmt.Errorf(
+				"can not patch rvr %s, since it should be recreated",
+				rvr.Name,
+			)
+		}
 
-			if !r.ShouldBeFixed(rvr, peers) {
-				return nil
-			}
-
-			rvr.Spec.NodeAddress.IPv4 = r.props.ipv4
-			rvr.Spec.Primary = r.props.primary
-			rvr.Spec.Quorum = r.props.quorum
-			rvr.Spec.QuorumMinimumRedundancy = r.props.quorumMinimumRedundancy
-			rvr.Spec.SharedSecret = r.props.sharedSecret
-
-			for _, peer := range peers {
-				if peer == r {
-					continue
-				}
-
-				rvrPeer := rvr.Spec.Peers[peer.props.nodeName]
-
-				rvrPeer.Address.IPv4 = peer.props.ipv4
-				rvrPeer.Address.Port = peer.dprops.port
-			}
-
+		if !r.ShouldBeFixed(rvr) {
 			return nil
-		},
-	)
+		}
 
-	return Actions{patch, WaitReplicatedVolumeReplica{r.existingRVR}}
+		rvr.Spec.NodeAddress.IPv4 = r.props.ipv4
+		rvr.Spec.Primary = r.props.primary
+		rvr.Spec.Quorum = r.props.quorum
+		rvr.Spec.QuorumMinimumRedundancy = r.props.quorumMinimumRedundancy
+		rvr.Spec.SharedSecret = r.props.sharedSecret
+
+		for _, peer := range r.peers {
+			rvrPeer := rvr.Spec.Peers[peer.props.nodeName]
+
+			rvrPeer.Address.IPv4 = peer.props.ipv4
+			rvrPeer.Address.Port = peer.dprops.port
+		}
+
+		return nil
+	}
 }
