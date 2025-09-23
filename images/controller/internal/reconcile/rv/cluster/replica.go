@@ -159,6 +159,9 @@ func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 	}
 
 	if recreatedFromName != "" {
+		if rvr.Annotations == nil {
+			rvr.Annotations = map[string]string{}
+		}
 		rvr.Annotations[v1alpha2.AnnotationKeyRecreatedFrom] = recreatedFromName
 	}
 	return rvr

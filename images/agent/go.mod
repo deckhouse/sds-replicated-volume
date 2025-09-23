@@ -5,7 +5,7 @@ go 1.24.6
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
 require (
-	github.com/deckhouse/sds-common-lib v0.6.2
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	golang.org/x/sync v0.17.0
 )
