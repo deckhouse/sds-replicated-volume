@@ -183,7 +183,7 @@ func (r *replica) RecreateOrFix() Action {
 		}
 	} else if r.ShouldBeFixed(r.dprops.existingRVR) {
 		return Actions{
-			RVRPatch(r.MakeFix()),
+			RVRPatch{ReplicatedVolumeReplica: r.dprops.existingRVR, Apply: r.MakeFix()},
 			WaitReplicatedVolumeReplica{r.dprops.existingRVR},
 		}
 	}

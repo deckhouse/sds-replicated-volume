@@ -13,10 +13,17 @@ type Actions []Action
 
 type ParallelActions []Action
 
-type Patch[T any] func(T) error
+// RVRPatch represents a patch to be applied to a specific ReplicatedVolumeReplica
+type RVRPatch struct {
+	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+	Apply                   func(*v1alpha2.ReplicatedVolumeReplica) error
+}
 
-type RVRPatch = Patch[*v1alpha2.ReplicatedVolumeReplica]
-type LLVPatch = Patch[*snc.LVMLogicalVolume]
+// LLVPatch represents a patch to be applied to a specific LVMLogicalVolume
+type LLVPatch struct {
+	LVMLogicalVolume *snc.LVMLogicalVolume
+	Apply            func(*snc.LVMLogicalVolume) error
+}
 
 type CreateReplicatedVolumeReplica struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
@@ -44,7 +51,8 @@ type DeleteLVMLogicalVolume struct {
 
 func (Actions) _action()                       {}
 func (ParallelActions) _action()               {}
-func (Patch[T]) _action()                      {}
+func (RVRPatch) _action()                      {}
+func (LLVPatch) _action()                      {}
 func (CreateReplicatedVolumeReplica) _action() {}
 func (WaitReplicatedVolumeReplica) _action()   {}
 func (DeleteReplicatedVolumeReplica) _action() {}
@@ -54,7 +62,10 @@ func (DeleteLVMLogicalVolume) _action()        {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
-var _ Action = Patch[any](nil)
+
+// ensure interface conformance
+var _ Action = RVRPatch{}
+var _ Action = LLVPatch{}
 var _ Action = CreateReplicatedVolumeReplica{}
 var _ Action = WaitReplicatedVolumeReplica{}
 var _ Action = DeleteReplicatedVolumeReplica{}

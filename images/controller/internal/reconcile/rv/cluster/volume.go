@@ -59,6 +59,7 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 	}
 
 	existingLLV, err := v.llvCl.ByActualNamesOnTheNode(
+		v.ctx,
 		v.props.nodeName,
 		v.dprops.actualVGNameOnTheNode,
 		v.dprops.actualLVNameOnTheNode,
@@ -71,6 +72,7 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 		// support volumes migrated from LINSTOR
 		// TODO: check suffix
 		existingLLV, err = v.llvCl.ByActualNamesOnTheNode(
+			v.ctx,
 			v.props.nodeName,
 			v.props.actualVGNameOnTheNode,
 			v.dprops.actualLVNameOnTheNode+"_000000",
@@ -128,10 +130,10 @@ func (v *volume) RVRVolume() v1alpha2.Volume {
 func (v *volume) reconcileLLV() Action {
 	cmp := v.dprops.existingLLVSizeQty.CmpInt64(v.props.size)
 	if cmp < 0 {
-		return LLVPatch(func(llv *snc.LVMLogicalVolume) error {
+		return LLVPatch{LVMLogicalVolume: v.dprops.existingLLV, Apply: func(llv *snc.LVMLogicalVolume) error {
 			llv.Spec.Size = resource.NewQuantity(v.props.size, resource.BinarySI).String()
 			return nil
-		})
+		}}
 	}
 
 	// TODO reconcile other props

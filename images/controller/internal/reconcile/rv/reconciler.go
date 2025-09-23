@@ -14,12 +14,14 @@ import (
 type Reconciler struct {
 	log *slog.Logger
 	cl  client.Client
+	rdr client.Reader
 }
 
-func NewReconciler(log *slog.Logger, cl client.Client) *Reconciler {
+func NewReconciler(log *slog.Logger, cl client.Client, rdr client.Reader) *Reconciler {
 	return &Reconciler{
 		log: log,
 		cl:  cl,
+		rdr: rdr,
 	}
 }
 
@@ -55,6 +57,7 @@ func (r *Reconciler) Reconcile(
 			ctx: ctx,
 			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
 			cl:  r.cl,
+			rdr: r.rdr,
 			cfg: clusterCfg,
 			rv:  rvr,
 		}

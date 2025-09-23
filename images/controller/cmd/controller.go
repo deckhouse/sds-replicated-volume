@@ -106,7 +106,7 @@ func runController(
 					log.Debug("GenericFunc", "name", ge.Object.GetName())
 				},
 			}).
-		Complete(rv.NewReconciler(log, mgr.GetClient()))
+		Complete(rv.NewReconciler(log, mgr.GetClient(), mgr.GetAPIReader()))
 
 	if err != nil {
 		return LogError(log, fmt.Errorf("building controller: %w", err))
