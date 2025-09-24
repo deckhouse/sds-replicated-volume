@@ -151,6 +151,8 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=100
+	// +listType=map
+	// +listMapKey=number
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volumes list is immutable"
 	Volumes []Volume `json:"volumes"`
 
