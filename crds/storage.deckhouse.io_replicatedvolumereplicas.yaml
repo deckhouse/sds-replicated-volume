@@ -82,33 +82,27 @@ spec:
                     pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                     type: string
                   port:
+                    description: '||+kubebuilder:validation:XValidation:rule="self
+                      == oldSelf",message="port is immutable",optionalOldSelf=true'
                     maximum: 65535
                     minimum: 1025
                     type: integer
-                    x-kubernetes-validations:
-                    - message: port is immutable
-                      optionalOldSelf: true
-                      rule: self == oldSelf
                 required:
                 - ipv4
                 - port
                 type: object
               nodeId:
+                description: '||+kubebuilder:validation:XValidation:rule="self ==
+                  oldSelf",message="nodeId is immutable",optionalOldSelf=true'
                 maximum: 7
                 minimum: 0
                 type: integer
-                x-kubernetes-validations:
-                - message: nodeId is immutable
-                  optionalOldSelf: true
-                  rule: self == oldSelf
               nodeName:
+                description: '||+kubebuilder:validation:XValidation:rule="self ==
+                  oldSelf",message="nodeName is immutable",optionalOldSelf=true'
                 maxLength: 253
                 minLength: 1
                 type: string
-                x-kubernetes-validations:
-                - message: nodeName is immutable
-                  optionalOldSelf: true
-                  rule: self == oldSelf
               peers:
                 additionalProperties:
                   properties:
@@ -118,32 +112,26 @@ spec:
                           pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
                           type: string
                         port:
+                          description: '||+kubebuilder:validation:XValidation:rule="self
+                            == oldSelf",message="port is immutable",optionalOldSelf=true'
                           maximum: 65535
                           minimum: 1025
                           type: integer
-                          x-kubernetes-validations:
-                          - message: port is immutable
-                            optionalOldSelf: true
-                            rule: self == oldSelf
                       required:
                       - ipv4
                       - port
                       type: object
                     diskless:
                       default: false
+                      description: '||+kubebuilder:validation:XValidation:rule="self
+                        == oldSelf",message="peer diskless is immutable",optionalOldSelf=true'
                       type: boolean
-                      x-kubernetes-validations:
-                      - message: peer diskless is immutable
-                        optionalOldSelf: true
-                        rule: self == oldSelf
                     nodeId:
+                      description: '||+kubebuilder:validation:XValidation:rule="self
+                        == oldSelf",message="peer nodeId is immutable",optionalOldSelf=true'
                       maximum: 7
                       minimum: 0
                       type: integer
-                      x-kubernetes-validations:
-                      - message: peer nodeId is immutable
-                        optionalOldSelf: true
-                        rule: self == oldSelf
                     sharedSecret:
                       type: string
                   required:
@@ -163,43 +151,37 @@ spec:
                 minimum: 0
                 type: integer
               replicatedVolumeName:
+                description: '||+kubebuilder:validation:XValidation:rule="self ==
+                  oldSelf",message="replicatedVolumeName is immutable",optionalOldSelf=true'
                 maxLength: 127
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
-                x-kubernetes-validations:
-                - message: replicatedVolumeName is immutable
-                  optionalOldSelf: true
-                  rule: self == oldSelf
               sharedSecret:
                 minLength: 1
                 type: string
               volumes:
+                description: '||+kubebuilder:validation:XValidation:rule="self ==
+                  oldSelf",message="volumes list is immutable",optionalOldSelf=true'
                 items:
                   properties:
                     device:
+                      description: '||+kubebuilder:validation:XValidation:rule="self
+                        == oldSelf",message="volume device is immutable",optionalOldSelf=true'
                       maximum: 1048575
                       minimum: 0
                       type: integer
-                      x-kubernetes-validations:
-                      - message: volume device is immutable
-                        optionalOldSelf: true
-                        rule: self == oldSelf
                     disk:
+                      description: '||+kubebuilder:validation:XValidation:rule="self
+                        == oldSelf",message="volume disk is immutable",optionalOldSelf=true'
                       pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
-                      x-kubernetes-validations:
-                      - message: volume disk is immutable
-                        optionalOldSelf: true
-                        rule: self == oldSelf
                     number:
+                      description: '||+kubebuilder:validation:XValidation:rule="self
+                        == oldSelf",message="volume number is immutable",optionalOldSelf=true'
                       maximum: 255
                       minimum: 0
                       type: integer
-                      x-kubernetes-validations:
-                      - message: volume number is immutable
-                        optionalOldSelf: true
-                        rule: self == oldSelf
                   required:
                   - device
                   - number
@@ -207,10 +189,6 @@ spec:
                 maxItems: 100
                 minItems: 1
                 type: array
-                x-kubernetes-validations:
-                - message: volumes list is immutable
-                  optionalOldSelf: true
-                  rule: self == oldSelf
             required:
             - nodeAddress
             - nodeId
