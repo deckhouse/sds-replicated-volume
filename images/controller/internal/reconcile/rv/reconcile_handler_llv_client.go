@@ -14,6 +14,7 @@ type llvClientImpl struct {
 	log *slog.Logger
 }
 
+// TODO: may be support _00000 on this level?
 func (l *llvClientImpl) ByActualNamesOnTheNode(ctx context.Context, nodeName string, actualVGNameOnTheNode string, actualLVNameOnTheNode string) (*snc.LVMLogicalVolume, error) {
 	l.log.Debug("LLV list start", "nodeName", nodeName, "vg", actualVGNameOnTheNode, "lv", actualLVNameOnTheNode)
 	// NOTE: The LVMLogicalVolume identity fields are not indexed here; fetch and filter client-side.

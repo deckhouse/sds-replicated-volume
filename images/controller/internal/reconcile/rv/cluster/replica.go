@@ -162,6 +162,7 @@ func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 		if rvr.Annotations == nil {
 			rvr.Annotations = map[string]string{}
 		}
+		// TODO: may be old rvr should be deleted by controller, not agent?
 		rvr.Annotations[v1alpha2.AnnotationKeyRecreatedFrom] = recreatedFromName
 	}
 	return rvr

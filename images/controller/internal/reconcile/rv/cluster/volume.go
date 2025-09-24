@@ -75,7 +75,7 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 			v.ctx,
 			v.props.nodeName,
 			v.props.actualVGNameOnTheNode,
-			v.dprops.actualLVNameOnTheNode+"_000000",
+			v.dprops.actualLVNameOnTheNode+"_00000",
 		)
 		if err != nil {
 			return err
@@ -96,6 +96,8 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 }
 
 func (v *volume) Reconcile() Action {
+	// TODO: do not recreate LLV, recreate replicas
+	// TODO: discuss that Failed LLV may lead to banned nodes
 	if v.dprops.existingLLV != nil {
 		return v.reconcileLLV()
 	} else {
@@ -136,12 +138,26 @@ func (v *volume) reconcileLLV() Action {
 		// from the current one. Otherwise, leave as is (no-op patch).
 		if v.props.size > 0 {
 			desired := resource.NewQuantity(v.props.size, resource.BinarySI).String()
+			// TODO only increase
 			if llv.Spec.Size != desired {
 				llv.Spec.Size = desired
 			}
 		}
 		return nil
 	}}
+
+	// TODO
+	// type LVMLogicalVolumeSpec struct {
+	// 	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`   // -
+	// 	Type                  string                     `json:"type"`                    // -
+	// 	Size                  string                     `json:"size"`                    // +
+	// 	LVMVolumeGroupName    string                     `json:"lvmVolumeGroupName"`      // recreate
+	// 	Source                *LVMLogicalVolumeSource    `json:"source"`                  // -
+	// 	Thin                  *LVMLogicalVolumeThinSpec  `json:"thin"`                    // +TODO: добавляем в RV lvmVolumeGroups
+	// 	Thick                 *LVMLogicalVolumeThickSpec `json:"thick"`                   // +
+	// 	VolumeCleanup         *string                    `json:"volumeCleanup,omitempty"` // + (fix maybe?)
+	// }
+
 }
 
 func (v *volume) ShouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
