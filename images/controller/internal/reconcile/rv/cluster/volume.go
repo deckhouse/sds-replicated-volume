@@ -128,17 +128,20 @@ func (v *volume) RVRVolume() v1alpha2.Volume {
 }
 
 func (v *volume) reconcileLLV() Action {
-	cmp := v.dprops.existingLLVSizeQty.CmpInt64(v.props.size)
-	if cmp < 0 {
-		return LLVPatch{LVMLogicalVolume: v.dprops.existingLLV, Apply: func(llv *snc.LVMLogicalVolume) error {
-			llv.Spec.Size = resource.NewQuantity(v.props.size, resource.BinarySI).String()
-			return nil
-		}}
-	}
-
-	// TODO reconcile other props
-
-	return nil
+	// Always produce a patch action when LLV exists so higher layers can
+	// reconcile desired properties (size and others) deterministically.
+	// If no change is needed, the patch becomes a no-op.
+	return LLVPatch{LVMLogicalVolume: v.dprops.existingLLV, Apply: func(llv *snc.LVMLogicalVolume) error {
+		// Resize only when a positive desired size is specified and differs
+		// from the current one. Otherwise, leave as is (no-op patch).
+		if v.props.size > 0 {
+			desired := resource.NewQuantity(v.props.size, resource.BinarySI).String()
+			if llv.Spec.Size != desired {
+				llv.Spec.Size = desired
+			}
+		}
+		return nil
+	}}
 }
 
 func (v *volume) ShouldBeRecreated(rvrVol *v1alpha2.Volume) bool {

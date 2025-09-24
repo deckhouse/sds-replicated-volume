@@ -148,7 +148,9 @@ func (c *Cluster) Reconcile() (Action, error) {
 	// Create/Resize all volumes
 	pa := ParallelActions{}
 	for _, replica := range c.replicas {
-		pa = append(pa, replica.ReconcileVolumes())
+		if a := replica.ReconcileVolumes(); a != nil {
+			pa = append(pa, a)
+		}
 	}
 
 	// Diff
@@ -159,7 +161,17 @@ func (c *Cluster) Reconcile() (Action, error) {
 		pa = append(pa, replicasByNodeKey[key].RecreateOrFix())
 	}
 
-	actions := Actions{pa}
+	actions := Actions{}
+	if len(pa) > 0 {
+		actions = append(actions, pa)
+	} else if len(toAdd)+len(toDelete) == 0 {
+		// initial sync
+		rvrs := make([]*v1alpha2.ReplicatedVolumeReplica, 0, len(replicasByNodeKey))
+		for key := range replicasByNodeKey {
+			rvrs = append(rvrs, rvrsByNodeKey[key][0])
+		}
+		return WaitAndTriggerInitialSync{rvrs}, nil
+	}
 
 	// 2.0. ADD - create non-existing replicas
 	// This also can't be done in parallel, because we need to keep number of
@@ -208,7 +220,9 @@ func (c *Cluster) Reconcile() (Action, error) {
 		}
 	}
 
-	actions = append(actions, deleteActions)
+	if len(deleteActions) > 0 {
+		actions = append(actions, deleteActions)
+	}
 
 	return actions, deleteErrors
 }

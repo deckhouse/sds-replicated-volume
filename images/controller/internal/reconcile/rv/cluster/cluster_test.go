@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -41,50 +42,131 @@ type mockPortRange struct{ min, max uint }
 
 func (m mockPortRange) PortMinMax() (uint, uint) { return m.min, m.max }
 
-// --- Helpers ---
+// --- Matchers ---
 
-func flatten(actions Action, out *[]Action) {
-	switch a := actions.(type) {
-	case Actions:
-		for _, sub := range a {
-			flatten(sub, out)
-		}
-	case ParallelActions:
-		for _, sub := range a {
-			flatten(sub, out)
-		}
-	default:
-		*out = append(*out, a)
+type Matcher interface{ Match(Action) error }
+
+type Seq struct{ Elems []Matcher }
+
+func (m Seq) Match(a Action) error {
+	as, ok := a.(Actions)
+	if !ok {
+		return fmt.Errorf("expected Actions, got %T", a)
 	}
-}
-
-type expectedCounts struct {
-	createRVR, waitRVR, deleteRVR           int
-	createLLV, waitLLV, patchLLV, deleteLLV int
-}
-
-func countActions(all []Action) expectedCounts {
-	var c expectedCounts
-	for _, a := range all {
-		switch a.(type) {
-		case CreateReplicatedVolumeReplica:
-			c.createRVR++
-		case WaitReplicatedVolumeReplica:
-			c.waitRVR++
-		case DeleteReplicatedVolumeReplica:
-			c.deleteRVR++
-		case CreateLVMLogicalVolume:
-			c.createLLV++
-		case WaitLVMLogicalVolume:
-			c.waitLLV++
-		case LLVPatch:
-			c.patchLLV++
-		case DeleteLVMLogicalVolume:
-			c.deleteLLV++
+	if len(as) != len(m.Elems) {
+		return fmt.Errorf("actions len %d != expected %d", len(as), len(m.Elems))
+	}
+	for i := range m.Elems {
+		if err := m.Elems[i].Match(as[i]); err != nil {
+			return fmt.Errorf("seq[%d]: %w", i, err)
 		}
 	}
-	return c
+	return nil
 }
+
+type Par struct{ Elems []Matcher }
+
+func (m Par) Match(a Action) error {
+	pa, ok := a.(ParallelActions)
+	if !ok {
+		return fmt.Errorf("expected ParallelActions, got %T", a)
+	}
+	if len(pa) < len(m.Elems) {
+		return fmt.Errorf("parallel len %d < expected %d", len(pa), len(m.Elems))
+	}
+	used := make([]bool, len(pa))
+	for i := range m.Elems {
+		found := false
+		for j := range pa {
+			if used[j] {
+				continue
+			}
+			if err := m.Elems[i].Match(pa[j]); err == nil {
+				used[j] = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("parallel: did not find match for elem %d", i)
+		}
+	}
+	return nil
+}
+
+// OneOf matches if at least one of the alternatives matches
+type OneOf struct{ Alts []Matcher }
+
+func (o OneOf) Match(a Action) error {
+	var errs []error
+	for _, m := range o.Alts {
+		if err := m.Match(a); err == nil {
+			return nil
+		} else {
+			errs = append(errs, err)
+		}
+	}
+	return fmt.Errorf("none matched: %v", errs)
+}
+
+type IsCreateRVR struct{}
+
+type IsWaitRVR struct{}
+
+type IsDeleteRVR struct{}
+
+type IsCreateLLV struct{}
+
+type IsWaitLLV struct{}
+
+type IsPatchLLV struct{}
+
+type IsDeleteLLV struct{}
+
+func (IsCreateRVR) Match(a Action) error {
+	if _, ok := a.(CreateReplicatedVolumeReplica); !ok {
+		return fmt.Errorf("not CreateRVR: %T", a)
+	}
+	return nil
+}
+func (IsWaitRVR) Match(a Action) error {
+	if _, ok := a.(WaitReplicatedVolumeReplica); !ok {
+		return fmt.Errorf("not WaitRVR: %T", a)
+	}
+	return nil
+}
+func (IsDeleteRVR) Match(a Action) error {
+	if _, ok := a.(DeleteReplicatedVolumeReplica); !ok {
+		return fmt.Errorf("not DeleteRVR: %T", a)
+	}
+	return nil
+}
+func (IsCreateLLV) Match(a Action) error {
+	if _, ok := a.(CreateLVMLogicalVolume); !ok {
+		return fmt.Errorf("not CreateLLV: %T", a)
+	}
+	return nil
+}
+func (IsWaitLLV) Match(a Action) error {
+	if _, ok := a.(WaitLVMLogicalVolume); !ok {
+		return fmt.Errorf("not WaitLLV: %T", a)
+	}
+	return nil
+}
+func (IsPatchLLV) Match(a Action) error {
+	if _, ok := a.(LLVPatch); !ok {
+		return fmt.Errorf("not LLVPatch: %T", a)
+	}
+	return nil
+}
+func (IsDeleteLLV) Match(a Action) error {
+	if _, ok := a.(DeleteLVMLogicalVolume); !ok {
+		return fmt.Errorf("not DeleteLLV: %T", a)
+	}
+	return nil
+}
+
+// --- Test input helpers ---
 
 type replicaSpec struct {
 	node    string
@@ -93,7 +175,6 @@ type replicaSpec struct {
 	vg      string // empty => diskless
 }
 
-// newRVR builds a minimal existing RVR used by mocks
 func newRVR(name, rvName, node, ip string, nodeId uint, port uint, hasVol bool, vg, lv string, minor uint) v1alpha2.ReplicatedVolumeReplica {
 	r := v1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
@@ -113,6 +194,13 @@ func newRVR(name, rvName, node, ip string, nodeId uint, port uint, hasVol bool, 
 	return r
 }
 
+func mustMatch(t *testing.T, act Action, m Matcher) {
+	t.Helper()
+	if err := m.Match(act); err != nil {
+		t.Fatalf("action does not match: %v", err)
+	}
+}
+
 func TestCluster_Reconcile_Table(t *testing.T) {
 	ctx := context.Background()
 
@@ -122,13 +210,13 @@ func TestCluster_Reconcile_Table(t *testing.T) {
 		existing []v1alpha2.ReplicatedVolumeReplica
 		llvs     map[string]*snc.LVMLogicalVolume
 		replicas []replicaSpec
-		expect   expectedCounts
+		expect   Matcher
 	}{
 		{
 			name:     "one diskless replica, no existing",
 			rvName:   "rv-a",
 			replicas: []replicaSpec{{node: "n1", ip: "10.0.0.1", primary: true}},
-			expect:   expectedCounts{createRVR: 1, waitRVR: 1},
+			expect:   Seq{Elems: []Matcher{IsCreateRVR{}, IsWaitRVR{}}},
 		},
 		{
 			name:   "three replicas, two diskful create LLVs",
@@ -138,7 +226,14 @@ func TestCluster_Reconcile_Table(t *testing.T) {
 				{node: "n2", ip: "10.0.0.2", vg: "vg-1"},
 				{node: "n3", ip: "10.0.0.3"}, // diskless
 			},
-			expect: expectedCounts{createLLV: 2, waitLLV: 2, createRVR: 3, waitRVR: 3},
+			// Each diskful replica contributes Actions{ Actions{ CreateLLV, WaitLLV } }
+			expect: Seq{Elems: []Matcher{
+				Par{Elems: []Matcher{
+					Seq{Elems: []Matcher{Seq{Elems: []Matcher{IsCreateLLV{}, IsWaitLLV{}}}}},
+					Seq{Elems: []Matcher{Seq{Elems: []Matcher{IsCreateLLV{}, IsWaitLLV{}}}}},
+				}},
+				IsCreateRVR{}, IsWaitRVR{}, IsCreateRVR{}, IsWaitRVR{}, IsCreateRVR{}, IsWaitRVR{},
+			}},
 		},
 		{
 			name:   "one existing diskful rvr recreated due to new peer, plus one new diskless",
@@ -150,7 +245,16 @@ func TestCluster_Reconcile_Table(t *testing.T) {
 				llvKey("n1", "vg-1", "rv-c"): {ObjectMeta: metav1.ObjectMeta{Name: "llv-1"}, Spec: snc.LVMLogicalVolumeSpec{ActualLVNameOnTheNode: "rv-c", LVMVolumeGroupName: "vg-1", Size: "1Gi"}},
 			},
 			replicas: []replicaSpec{{node: "n1", ip: "10.0.0.1", primary: true, vg: "vg-1"}, {node: "n2", ip: "10.0.0.2"}},
-			expect:   expectedCounts{createRVR: 2, waitRVR: 2},
+			// Existing diskful replica contributes either a create+wait or a patch wrapped in one Actions
+			expect: Seq{Elems: []Matcher{
+				Par{Elems: []Matcher{
+					OneOf{Alts: []Matcher{
+						Seq{Elems: []Matcher{Seq{Elems: []Matcher{IsCreateLLV{}, IsWaitLLV{}}}}},
+						Seq{Elems: []Matcher{IsPatchLLV{}}},
+					}},
+				}},
+				IsCreateRVR{}, IsWaitRVR{},
+			}},
 		},
 		{
 			name:   "delete extra existing rvr and its llv",
@@ -162,7 +266,8 @@ func TestCluster_Reconcile_Table(t *testing.T) {
 				llvKey("n2", "vg-1", "rv-d"): {ObjectMeta: metav1.ObjectMeta{Name: "llv-del"}, Spec: snc.LVMLogicalVolumeSpec{ActualLVNameOnTheNode: "rv-d", LVMVolumeGroupName: "vg-1", Size: "1Gi"}},
 			},
 			replicas: []replicaSpec{{node: "n1", ip: "10.0.0.1", primary: true}},
-			expect:   expectedCounts{createRVR: 1, waitRVR: 1, deleteRVR: 1, deleteLLV: 1},
+			// Expect: [CreateRVR, WaitRVR, Actions(DeleteRVR, maybe DeleteLLV)]
+			expect: Seq{Elems: []Matcher{IsCreateRVR{}, IsWaitRVR{}, OneOf{Alts: []Matcher{Seq{Elems: []Matcher{IsDeleteRVR{}}}, Seq{Elems: []Matcher{IsDeleteRVR{}, IsDeleteLLV{}}}}}}},
 		},
 	}
 
@@ -193,13 +298,7 @@ func TestCluster_Reconcile_Table(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Reconcile error: %v", err)
 			}
-
-			var flat []Action
-			flatten(action, &flat)
-			got := countActions(flat)
-			if got != tc.expect {
-				t.Fatalf("unexpected actions: got %+v, want %+v", got, tc.expect)
-			}
+			mustMatch(t, action, tc.expect)
 		})
 	}
 }

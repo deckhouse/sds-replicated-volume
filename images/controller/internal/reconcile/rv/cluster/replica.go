@@ -170,7 +170,13 @@ func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 func (r *replica) ReconcileVolumes() Action {
 	var actions Actions
 	for _, vol := range r.volumes {
-		actions = append(actions, vol.Reconcile())
+		a := vol.Reconcile()
+		if a != nil {
+			actions = append(actions, a)
+		}
+	}
+	if len(actions) == 0 {
+		return nil
 	}
 	return actions
 }
@@ -207,14 +213,10 @@ func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 		}
 	}
 
-	if len(rvr.Spec.Peers) != len(r.peers) {
-		return true
-	}
-
 	for _, peer := range r.peers {
 		rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
 		if !ok {
-			return true
+			continue
 		}
 
 		if rvrPeer.NodeId != peer.props.id {
@@ -231,26 +233,28 @@ func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 
 func (r *replica) ShouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if rvr.Spec.NodeAddress.IPv4 != r.props.ipv4 {
-		return false
+		return true
 	}
 	if rvr.Spec.Primary != r.props.primary {
-		return false
+		return true
 	}
 	if rvr.Spec.Quorum != r.props.quorum {
-		return false
+		return true
 	}
 	if rvr.Spec.QuorumMinimumRedundancy != r.props.quorumMinimumRedundancy {
-		return false
+		return true
 	}
 	if rvr.Spec.SharedSecret != r.props.sharedSecret {
-		return false
+		return true
+	}
+	if len(rvr.Spec.Peers) != len(r.peers) {
+		return true
 	}
 
 	for _, peer := range r.peers {
 		rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
 		if !ok {
-			// should never happen, since replica would require recreation, not fixing
-			continue
+			return true
 		}
 
 		if rvrPeer.Address.IPv4 != peer.props.ipv4 {
@@ -288,11 +292,18 @@ func (r *replica) MakeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 		rvr.Spec.QuorumMinimumRedundancy = r.props.quorumMinimumRedundancy
 		rvr.Spec.SharedSecret = r.props.sharedSecret
 
-		for _, peer := range r.peers {
-			rvrPeer := rvr.Spec.Peers[peer.props.nodeName]
-
-			rvrPeer.Address.IPv4 = peer.props.ipv4
-			rvrPeer.Address.Port = peer.dprops.port
+		// recreate peers
+		rvr.Spec.Peers = map[string]v1alpha2.Peer{}
+		for nodeId, peer := range r.peers {
+			rvr.Spec.Peers[peer.props.nodeName] =
+				v1alpha2.Peer{
+					NodeId: uint(nodeId),
+					Address: v1alpha2.Address{
+						IPv4: peer.props.ipv4,
+						Port: peer.dprops.port,
+					},
+					Diskless: peer.Diskless(),
+				}
 		}
 
 		return nil

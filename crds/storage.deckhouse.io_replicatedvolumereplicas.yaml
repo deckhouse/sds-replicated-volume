@@ -87,7 +87,8 @@ spec:
                     type: integer
                     x-kubernetes-validations:
                     - message: port is immutable
-                      rule: oldSelf == null || self == oldSelf
+                      optionalOldSelf: true
+                      rule: self == oldSelf
                 required:
                 - ipv4
                 - port
@@ -98,14 +99,16 @@ spec:
                 type: integer
                 x-kubernetes-validations:
                 - message: nodeId is immutable
-                  rule: oldSelf == null || self == oldSelf
+                  optionalOldSelf: true
+                  rule: self == oldSelf
               nodeName:
                 maxLength: 253
                 minLength: 1
                 type: string
                 x-kubernetes-validations:
                 - message: nodeName is immutable
-                  rule: oldSelf == null || self == oldSelf
+                  optionalOldSelf: true
+                  rule: self == oldSelf
               peers:
                 additionalProperties:
                   properties:
@@ -120,7 +123,8 @@ spec:
                           type: integer
                           x-kubernetes-validations:
                           - message: port is immutable
-                            rule: oldSelf == null || self == oldSelf
+                            optionalOldSelf: true
+                            rule: self == oldSelf
                       required:
                       - ipv4
                       - port
@@ -130,14 +134,16 @@ spec:
                       type: boolean
                       x-kubernetes-validations:
                       - message: peer diskless is immutable
-                        rule: oldSelf == null || self == oldSelf
+                        optionalOldSelf: true
+                        rule: self == oldSelf
                     nodeId:
                       maximum: 7
                       minimum: 0
                       type: integer
                       x-kubernetes-validations:
                       - message: peer nodeId is immutable
-                        rule: oldSelf == null || self == oldSelf
+                        optionalOldSelf: true
+                        rule: self == oldSelf
                     sharedSecret:
                       type: string
                   required:
@@ -163,7 +169,8 @@ spec:
                 type: string
                 x-kubernetes-validations:
                 - message: replicatedVolumeName is immutable
-                  rule: oldSelf == null || self == oldSelf
+                  optionalOldSelf: true
+                  rule: self == oldSelf
               sharedSecret:
                 minLength: 1
                 type: string
@@ -176,20 +183,23 @@ spec:
                       type: integer
                       x-kubernetes-validations:
                       - message: volume device is immutable
-                        rule: oldSelf == null || self == oldSelf
+                        optionalOldSelf: true
+                        rule: self == oldSelf
                     disk:
                       pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
                       x-kubernetes-validations:
                       - message: volume disk is immutable
-                        rule: oldSelf == null || self == oldSelf
+                        optionalOldSelf: true
+                        rule: self == oldSelf
                     number:
                       maximum: 255
                       minimum: 0
                       type: integer
                       x-kubernetes-validations:
                       - message: volume number is immutable
-                        rule: oldSelf == null || self == oldSelf
+                        optionalOldSelf: true
+                        rule: self == oldSelf
                   required:
                   - device
                   - number
@@ -199,7 +209,8 @@ spec:
                 type: array
                 x-kubernetes-validations:
                 - message: volumes list is immutable
-                  rule: oldSelf == null || self == oldSelf
+                  optionalOldSelf: true
+                  rule: self == oldSelf
             required:
             - nodeAddress
             - nodeId

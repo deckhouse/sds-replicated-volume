@@ -49,6 +49,10 @@ type DeleteLVMLogicalVolume struct {
 	LVMLogicalVolume *snc.LVMLogicalVolume
 }
 
+type WaitAndTriggerInitialSync struct {
+	ReplicatedVolumeReplicas []*v1alpha2.ReplicatedVolumeReplica
+}
+
 func (Actions) _action()                       {}
 func (ParallelActions) _action()               {}
 func (RVRPatch) _action()                      {}
@@ -59,6 +63,7 @@ func (DeleteReplicatedVolumeReplica) _action() {}
 func (CreateLVMLogicalVolume) _action()        {}
 func (WaitLVMLogicalVolume) _action()          {}
 func (DeleteLVMLogicalVolume) _action()        {}
+func (WaitAndTriggerInitialSync) _action()     {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
@@ -72,3 +77,4 @@ var _ Action = DeleteReplicatedVolumeReplica{}
 var _ Action = CreateLVMLogicalVolume{}
 var _ Action = WaitLVMLogicalVolume{}
 var _ Action = DeleteLVMLogicalVolume{}
+var _ Action = WaitAndTriggerInitialSync{}

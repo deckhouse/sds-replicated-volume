@@ -2,6 +2,7 @@ package rv
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -180,7 +181,42 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		}
 		h.log.Debug("LLV delete done", "name", action.LVMLogicalVolume.Name)
 		return nil
+	case cluster.WaitAndTriggerInitialSync:
+		allSynced := true
+		allSafeToBeSynced := true
+		for _, rvr := range action.ReplicatedVolumeReplicas {
+			cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
+			if cond.Status != metav1.ConditionTrue {
+				allSynced = false
+			} else if cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha2.ReasonSafeForInitialSync {
+				allSafeToBeSynced = false
+			}
+		}
+		if allSynced {
+			h.log.Debug("All resources synced")
+			return nil
+		}
+		if !allSafeToBeSynced {
+			return errors.New("waiting for resources to become safe for initial sync")
+		}
 
+		rvr := action.ReplicatedVolumeReplicas[0]
+		h.log.Debug("RVR patch start (primary-force)", "name", rvr.Name)
+
+		if err := api.PatchWithConflictRetry(h.ctx, h.cl, rvr, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+			ann := r.GetAnnotations()
+			if ann == nil {
+				ann = map[string]string{}
+			}
+			ann[v1alpha2.AnnotationKeyPrimaryForce] = "true"
+			r.SetAnnotations(ann)
+			return nil
+		}); err != nil {
+			h.log.Error("RVR patch failed (primary-force)", "name", rvr.Name, "err", err)
+			return err
+		}
+		h.log.Debug("RVR patch done (primary-force)", "name", rvr.Name)
+		return nil
 	default:
 		panic("unknown action type")
 	}
