@@ -178,6 +178,7 @@ spec:
                       - message: volume device is immutable
                         rule: self == oldSelf
                     disk:
+                      maxLength: 256
                       pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                       type: string
                       x-kubernetes-validations:

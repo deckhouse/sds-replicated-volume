@@ -200,6 +200,7 @@ type Volume struct {
 	Number uint `json:"number"`
 
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
+	// +kubebuilder:validation:MaxLength=256
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volume disk is immutable"
 	Disk string `json:"disk,omitempty"`
 
