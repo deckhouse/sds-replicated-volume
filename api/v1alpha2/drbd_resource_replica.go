@@ -14,42 +14,51 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package v1alpha2
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
 
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ReplicatedStoragePool struct {
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+type DRBDResourceReplica struct {
 	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              ReplicatedStoragePoolSpec   `json:"spec"`
-	Status            ReplicatedStoragePoolStatus `json:"status,omitempty"`
+	metav1.ObjectMeta `json:"metadata"`
+
+	Spec   DRBDResourceReplicaSpec    `json:"spec"`
+	Status *DRBDResourceReplicaStatus `json:"status,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
-type ReplicatedStoragePoolSpec struct {
-	Type            string                                 `json:"type"`
-	LVMVolumeGroups []ReplicatedStoragePoolLVMVolumeGroups `json:"lvmVolumeGroups"`
+type DRBDResourceReplicaSpec struct {
+	// NodeName string `json:"nodeName"`
+	Peers map[string]Peer `json:"peers,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
-type ReplicatedStoragePoolLVMVolumeGroups struct {
-	Name         string `json:"name"`
-	ThinPoolName string `json:"thinPoolName"`
+type Peer struct {
+	Address  Address `json:"address"`
+	NodeName string  `json:"nodeName"`
+	Diskless bool    `json:"diskless"`
 }
 
 // +k8s:deepcopy-gen=true
-type ReplicatedStoragePoolStatus struct {
-	Phase  string `json:"phase"`
-	Reason string `json:"reason"`
+type Address struct {
+	IPv4 string `json:"ipv4"`
 }
 
-// ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
+// +k8s:deepcopy-gen=true
+type DRBDResourceReplicaStatus struct {
+	Conditions []metav1.Condition `json:"conditions"`
+}
+
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-type ReplicatedStoragePoolList struct {
+type DRBDResourceReplicaList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []ReplicatedStoragePool `json:"items"`
+	Items           []DRBDResourceReplica `json:"items"`
 }

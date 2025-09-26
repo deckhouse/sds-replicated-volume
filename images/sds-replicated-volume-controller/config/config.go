@@ -60,12 +60,7 @@ func NewConfig() (*Options, error) {
 	opts.LinstorLeaseName = LinstorLeaseName
 	opts.ConfigSecretName = ConfigSecretName
 
-	loglevel := os.Getenv(LogLevel)
-	if loglevel == "" {
-		opts.Loglevel = logger.DebugLevel
-	} else {
-		opts.Loglevel = logger.Verbosity(loglevel)
-	}
+	opts.Loglevel = logger.TraceLevel
 
 	opts.MetricsPort = os.Getenv(MetricsPortEnv)
 	if opts.MetricsPort == "" {
