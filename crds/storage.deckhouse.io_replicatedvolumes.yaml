@@ -37,15 +37,59 @@ spec:
             type: object
           spec:
             properties:
+              lvm:
+                properties:
+                  type:
+                    enum:
+                    - Thin
+                    - Thick
+                    type: string
+                  volumeGroups:
+                    items:
+                      properties:
+                        name:
+                          maxLength: 255
+                          minLength: 1
+                          type: string
+                        thinPoolName:
+                          type: string
+                        zone:
+                          maxLength: 255
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - zone
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                required:
+                - type
+                - volumeGroups
+                type: object
               replicas:
                 format: int64
                 type: integer
+              sharedSecret:
+                minLength: 1
+                type: string
               size:
                 format: int64
                 type: integer
+              topology:
+                enum:
+                - TransZonal
+                - Zonal
+                - Ignored
+                type: string
             required:
+            - lvm
             - replicas
+            - sharedSecret
             - size
+            - topology
             type: object
           status:
             type: object

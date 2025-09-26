@@ -1,8 +1,6 @@
 package v1alpha2
 
 import (
-	// TODO: topologySpreadConstraints+affinity
-	// corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -23,9 +21,45 @@ type ReplicatedVolume struct {
 type ReplicatedVolumeSpec struct {
 	Size     int64 `json:"size"`
 	Replicas int64 `json:"replicas"`
-	// TODO: topologySpreadConstraints+affinity
-	// TopologySpreadConstraints []corev1.TopologySpreadConstraint `json:"topologySpreadConstraints,omitempty"`
-	// Affinity                  *corev1.Affinity                  `json:"affinity,omitempty"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SharedSecret string `json:"sharedSecret"`
+
+	// +kubebuilder:validation:Required
+	LVM LVMSpec `json:"lvm"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
+	Topology string `json:"topology"`
+
+	// topology TransZonal, Zonal, Ignored
+}
+
+// +k8s:deepcopy-gen=true
+type LVMSpec struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Thin;Thick
+	Type string `json:"type"` // Thin/Thick
+	// +listType=map
+	// +listMapKey=name
+	// +kubebuilder:validation:Required
+	LVMVolumeGroups []LVGSpec `json:"volumeGroups"`
+}
+
+// +k8s:deepcopy-gen=true
+type LVGSpec struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	Name string `json:"name"`
+
+	ThinPoolName string `json:"thinPoolName,omitempty"` // only for Thin
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=255
+	Zone string `json:"zone"`
 }
 
 // +k8s:deepcopy-gen=true
