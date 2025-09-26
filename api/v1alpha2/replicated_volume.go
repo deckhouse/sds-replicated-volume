@@ -44,7 +44,7 @@ type LVMSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:Required
-	LVMVolumeGroups []LVGSpec `json:"volumeGroups"`
+	LVMVolumeGroups []LVGSpec `json:"volumeGroups" patchStrategy:"merge" patchMergeKey:"name"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -64,6 +64,12 @@ type LVGSpec struct {
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeStatus struct {
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 // +k8s:deepcopy-gen=true
