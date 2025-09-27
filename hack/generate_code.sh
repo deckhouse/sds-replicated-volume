@@ -29,4 +29,7 @@ go mod tidy
 
 cd ..
 
+# generate mocks and any other go:generate targets across all modules
+./hack/for-each-mod go generate ./...
+
 echo "OK"

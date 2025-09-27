@@ -43,7 +43,13 @@ type Cluster struct {
 	rvName       string
 	sharedSecret string
 	// Indexes are node ids.
-	replicas []*replica
+	replicas []*Replica
+}
+
+type ReplicaVolumeOptions struct {
+	VGName                string
+	ActualVgNameOnTheNode string
+	Type                  string
 }
 
 func New(
@@ -73,8 +79,8 @@ func (c *Cluster) AddReplica(
 	primary bool,
 	quorum byte,
 	quorumMinimumRedundancy byte,
-) *replica {
-	r := &replica{
+) *Replica {
+	r := &Replica{
 		ctx:      c.ctx,
 		llvCl:    c.llvCl,
 		rvrCl:    c.rvrCl,
@@ -118,7 +124,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 	replicasByNodeKey := maps.Collect(
 		uiter.MapTo2(
 			slices.Values(c.replicas),
-			func(r *replica) (nodeKey, *replica) {
+			func(r *Replica) (nodeKey, *Replica) {
 				return nodeKey{r.props.id, r.props.nodeName}, r
 			},
 		),
@@ -140,7 +146,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 			rvr = rvrs[0]
 		}
 
-		if err := replica.Initialize(rvr, c.replicas); err != nil {
+		if err := replica.initialize(rvr, c.replicas); err != nil {
 			return nil, err
 		}
 	}
@@ -148,7 +154,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 	// Create/Resize all volumes
 	pa := ParallelActions{}
 	for _, replica := range c.replicas {
-		if a := replica.ReconcileVolumes(); a != nil {
+		if a := replica.reconcileVolumes(); a != nil {
 			pa = append(pa, a)
 		}
 	}
@@ -158,7 +164,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 
 	// 1. RECONCILE - fix or recreate existing replicas
 	for key := range toReconcile {
-		pa = append(pa, replicasByNodeKey[key].RecreateOrFix())
+		pa = append(pa, replicasByNodeKey[key].recreateOrFix())
 	}
 
 	actions := Actions{}
@@ -183,7 +189,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 	for id := range toAdd {
 		replica := replicasByNodeKey[id]
 
-		rvr := replica.RVR("")
+		rvr := replica.rvr("")
 		actions = append(actions, CreateReplicatedVolumeReplica{rvr}, WaitReplicatedVolumeReplica{rvr})
 
 		// 2.1. DELETE one rvr to alternate addition and deletion

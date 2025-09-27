@@ -33,7 +33,7 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	Topology string `json:"topology"`
 
-	// topology TransZonal, Zonal, Ignored
+	AttachmentRequested []string `json:"attachmentRequested"`
 }
 
 // +k8s:deepcopy-gen=true

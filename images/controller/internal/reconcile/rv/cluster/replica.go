@@ -14,7 +14,7 @@ import (
 
 const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
 
-type replica struct {
+type Replica struct {
 	ctx      context.Context
 	llvCl    LLVClient
 	rvrCl    RVRClient
@@ -25,9 +25,9 @@ type replica struct {
 	dprops replicaDynamicProps
 
 	// Indexes are volume ids.
-	volumes []*volume
+	volumes []*Volume
 
-	peers []*replica
+	peers []*Replica
 }
 
 type replicaProps struct {
@@ -46,8 +46,13 @@ type replicaDynamicProps struct {
 	port        uint
 }
 
-func (r *replica) AddVolume(actualVgNameOnTheNode string) *volume {
-	v := &volume{
+func (r *Replica) AddVolume(
+	size int64,
+	vgName string,
+	actualVgNameOnTheNode string,
+	llvProps LLVProps,
+) *Volume {
+	v := &Volume{
 		ctx:      r.ctx,
 		llvCl:    r.llvCl,
 		rvrCl:    r.rvrCl,
@@ -57,19 +62,22 @@ func (r *replica) AddVolume(actualVgNameOnTheNode string) *volume {
 			rvName:                r.props.rvName,
 			nodeName:              r.props.nodeName,
 			actualVGNameOnTheNode: actualVgNameOnTheNode,
+			vgName:                vgName,
+			size:                  size,
+			llvProps:              llvProps,
 		},
 	}
 	r.volumes = append(r.volumes, v)
 	return v
 }
 
-func (r *replica) Diskless() bool {
+func (r *Replica) diskless() bool {
 	return len(r.volumes) == 0
 }
 
-func (r *replica) Initialize(
+func (r *Replica) initialize(
 	existingRVR *v1alpha2.ReplicatedVolumeReplica,
-	allReplicas []*replica,
+	allReplicas []*Replica,
 ) error {
 	var port uint
 	if existingRVR == nil {
@@ -93,7 +101,7 @@ func (r *replica) Initialize(
 			)
 		}
 
-		err := vol.Initialize(existingRVRVolume)
+		err := vol.initialize(existingRVRVolume)
 		if err != nil {
 			return err
 		}
@@ -107,17 +115,17 @@ func (r *replica) Initialize(
 	r.peers = slices.Collect(
 		uiter.Filter(
 			slices.Values(allReplicas),
-			func(peer *replica) bool { return r != peer },
+			func(peer *Replica) bool { return r != peer },
 		),
 	)
 	return nil
 }
 
-func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplica {
+func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplica {
 	// volumes
 	rvrVolumes := make([]v1alpha2.Volume, 0, len(r.volumes))
 	for _, vol := range r.volumes {
-		rvrVolumes = append(rvrVolumes, vol.RVRVolume())
+		rvrVolumes = append(rvrVolumes, vol.rvrVolume())
 	}
 
 	// peers
@@ -132,7 +140,7 @@ func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 					IPv4: peer.props.ipv4,
 					Port: peer.dprops.port,
 				},
-				Diskless: peer.Diskless(),
+				Diskless: peer.diskless(),
 			},
 		)
 	}
@@ -168,10 +176,10 @@ func (r *replica) RVR(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 	return rvr
 }
 
-func (r *replica) ReconcileVolumes() Action {
+func (r *Replica) reconcileVolumes() Action {
 	var actions Actions
 	for _, vol := range r.volumes {
-		a := vol.Reconcile()
+		a := vol.reconcile()
 		if a != nil {
 			actions = append(actions, a)
 		}
@@ -182,18 +190,18 @@ func (r *replica) ReconcileVolumes() Action {
 	return actions
 }
 
-func (r *replica) RecreateOrFix() Action {
+func (r *Replica) recreateOrFix() Action {
 	// if immutable props are invalid - rvr should be recreated
 	// but creation & readiness should come before deletion
-	if r.ShouldBeRecreated(r.dprops.existingRVR) {
-		rvr := r.RVR(r.dprops.existingRVR.Name)
+	if r.shouldBeRecreated(r.dprops.existingRVR) {
+		rvr := r.rvr(r.dprops.existingRVR.Name)
 		return Actions{
 			CreateReplicatedVolumeReplica{rvr},
 			WaitReplicatedVolumeReplica{rvr},
 		}
-	} else if r.ShouldBeFixed(r.dprops.existingRVR) {
+	} else if r.shouldBeFixed(r.dprops.existingRVR) {
 		return Actions{
-			RVRPatch{ReplicatedVolumeReplica: r.dprops.existingRVR, Apply: r.MakeFix()},
+			RVRPatch{ReplicatedVolumeReplica: r.dprops.existingRVR, Apply: r.makeFix()},
 			WaitReplicatedVolumeReplica{r.dprops.existingRVR},
 		}
 	}
@@ -201,7 +209,7 @@ func (r *replica) RecreateOrFix() Action {
 	return nil
 }
 
-func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
+func (r *Replica) shouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if len(rvr.Spec.Volumes) != len(r.volumes) {
 		return true
 	}
@@ -209,7 +217,7 @@ func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 	for id, vol := range r.volumes {
 		rvrVol := &rvr.Spec.Volumes[id]
 
-		if vol.ShouldBeRecreated(rvrVol) {
+		if vol.shouldBeRecreated(rvrVol) {
 			return true
 		}
 	}
@@ -224,7 +232,7 @@ func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 			return true
 		}
 
-		if rvrPeer.Diskless != peer.Diskless() {
+		if rvrPeer.Diskless != peer.diskless() {
 			return true
 		}
 	}
@@ -232,7 +240,7 @@ func (r *replica) ShouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 	return false
 }
 
-func (r *replica) ShouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
+func (r *Replica) shouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if rvr.Spec.NodeAddress.IPv4 != r.props.ipv4 {
 		return true
 	}
@@ -274,16 +282,16 @@ func (r *replica) ShouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	return false
 }
 
-func (r *replica) MakeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+func (r *Replica) makeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 	return func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
-		if r.ShouldBeRecreated(rvr) {
+		if r.shouldBeRecreated(rvr) {
 			return fmt.Errorf(
 				"can not patch rvr %s, since it should be recreated",
 				rvr.Name,
 			)
 		}
 
-		if !r.ShouldBeFixed(rvr) {
+		if !r.shouldBeFixed(rvr) {
 			return nil
 		}
 
@@ -303,7 +311,7 @@ func (r *replica) MakeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 						IPv4: peer.props.ipv4,
 						Port: peer.dprops.port,
 					},
-					Diskless: peer.Diskless(),
+					Diskless: peer.diskless(),
 				}
 		}
 

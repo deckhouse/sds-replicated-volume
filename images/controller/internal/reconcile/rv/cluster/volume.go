@@ -7,9 +7,10 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type volume struct {
+type Volume struct {
 	ctx      context.Context
 	llvCl    LLVClient
 	rvrCl    RVRClient
@@ -25,6 +26,7 @@ type volumeProps struct {
 	vgName                string
 	actualVGNameOnTheNode string
 	size                  int64
+	llvProps              LLVProps
 }
 
 type volumeDynamicProps struct {
@@ -35,7 +37,7 @@ type volumeDynamicProps struct {
 	existingLLVSizeQty    resource.Quantity
 }
 
-func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
+func (v *Volume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 	if existingRVRVolume == nil {
 		v.dprops.actualVGNameOnTheNode = v.props.actualVGNameOnTheNode
 		v.dprops.actualLVNameOnTheNode = v.props.rvName
@@ -70,7 +72,6 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 
 	if existingLLV == nil {
 		// support volumes migrated from LINSTOR
-		// TODO: check suffix
 		existingLLV, err = v.llvCl.ByActualNamesOnTheNode(
 			v.ctx,
 			v.props.nodeName,
@@ -95,21 +96,25 @@ func (v *volume) Initialize(existingRVRVolume *v1alpha2.Volume) error {
 	return nil
 }
 
-func (v *volume) Reconcile() Action {
+func (v *Volume) reconcile() Action {
 	// TODO: do not recreate LLV, recreate replicas
 	// TODO: discuss that Failed LLV may lead to banned nodes
 	if v.dprops.existingLLV != nil {
 		return v.reconcileLLV()
 	} else {
 		llv := &snc.LVMLogicalVolume{
+			ObjectMeta: v1.ObjectMeta{
+				GenerateName: fmt.Sprintf("%s-", v.props.rvName),
+				Finalizers:   []string{rvrFinalizerName},
+			},
 			Spec: snc.LVMLogicalVolumeSpec{
 				ActualLVNameOnTheNode: v.dprops.actualLVNameOnTheNode,
 				Size:                  resource.NewQuantity(v.props.size, resource.BinarySI).String(),
-				// TODO: check these props and pass them
-				Type:               "Thick",
-				LVMVolumeGroupName: v.props.vgName,
+				LVMVolumeGroupName:    v.props.vgName,
 			},
 		}
+
+		v.props.llvProps.applyToLLV(&llv.Spec)
 
 		return Actions{
 			CreateLVMLogicalVolume{LVMLogicalVolume: llv},
@@ -118,7 +123,7 @@ func (v *volume) Reconcile() Action {
 	}
 }
 
-func (v *volume) RVRVolume() v1alpha2.Volume {
+func (v *Volume) rvrVolume() v1alpha2.Volume {
 	rvrVolume := v1alpha2.Volume{
 		Number: uint(v.props.id),
 		Device: v.dprops.minor,
@@ -129,10 +134,8 @@ func (v *volume) RVRVolume() v1alpha2.Volume {
 	return rvrVolume
 }
 
-func (v *volume) reconcileLLV() Action {
-	// Always produce a patch action when LLV exists so higher layers can
-	// reconcile desired properties (size and others) deterministically.
-	// If no change is needed, the patch becomes a no-op.
+func (v *Volume) reconcileLLV() Action {
+
 	return LLVPatch{LVMLogicalVolume: v.dprops.existingLLV, Apply: func(llv *snc.LVMLogicalVolume) error {
 		// Resize only when a positive desired size is specified and differs
 		// from the current one. Otherwise, leave as is (no-op patch).
@@ -160,7 +163,7 @@ func (v *volume) reconcileLLV() Action {
 
 }
 
-func (v *volume) ShouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
+func (v *Volume) shouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
 	if int(rvrVol.Number) != v.props.id {
 		return true
 	}

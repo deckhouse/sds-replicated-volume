@@ -51,8 +51,8 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		"shared-secret", // TODO: source from a Secret/config when available
 	)
 
-	clr.AddReplica("a-stefurishin-worker-0", "10.10.11.52", true, 0, 0).AddVolume("vg-1")
-	clr.AddReplica("a-stefurishin-worker-1", "10.10.11.149", false, 0, 0).AddVolume("vg-1")
+	clr.AddReplica("a-stefurishin-worker-0", "10.10.11.52", true, 0, 0).AddVolume(200, "lvg-0-1", "vg-1", cluster.ThickVolumeProps{})
+	clr.AddReplica("a-stefurishin-worker-1", "10.10.11.149", false, 0, 0).AddVolume(200, "lvg-1-1", "vg-1", cluster.ThickVolumeProps{})
 	clr.AddReplica("a-stefurishin-worker-2", "10.10.11.150", false, 0, 0) // diskless
 
 	action, err := clr.Reconcile()
