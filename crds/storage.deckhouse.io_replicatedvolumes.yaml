@@ -37,6 +37,10 @@ spec:
             type: object
           spec:
             properties:
+              attachmentRequested:
+                items:
+                  type: string
+                type: array
               lvm:
                 properties:
                   type:
@@ -85,6 +89,7 @@ spec:
                 - Ignored
                 type: string
             required:
+            - attachmentRequested
             - lvm
             - replicas
             - sharedSecret

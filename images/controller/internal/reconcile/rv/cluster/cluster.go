@@ -40,6 +40,7 @@ type Cluster struct {
 	llvCl        LLVClient
 	portManager  PortManager
 	minorManager MinorManager
+	size         int64
 	rvName       string
 	sharedSecret string
 	// Indexes are node ids.
@@ -59,6 +60,7 @@ func New(
 	portRange DRBDPortRange,
 	llvCl LLVClient,
 	rvName string,
+	size int64,
 	sharedSecret string,
 ) *Cluster {
 	rm := NewResourceManager(nodeRVRCl, portRange)
@@ -69,6 +71,7 @@ func New(
 		llvCl:        llvCl,
 		portManager:  rm,
 		minorManager: rm,
+		size:         size,
 		sharedSecret: sharedSecret,
 	}
 }
@@ -95,6 +98,7 @@ func (c *Cluster) AddReplica(
 			primary:                 primary,
 			quorum:                  quorum,
 			quorumMinimumRedundancy: quorumMinimumRedundancy,
+			size:                    c.size,
 		},
 	}
 	c.replicas = append(c.replicas, r)
@@ -176,7 +180,11 @@ func (c *Cluster) Reconcile() (Action, error) {
 		for key := range replicasByNodeKey {
 			rvrs = append(rvrs, rvrsByNodeKey[key][0])
 		}
-		return WaitAndTriggerInitialSync{rvrs}, nil
+		if len(rvrs) > 0 {
+			return WaitAndTriggerInitialSync{rvrs}, nil
+		} else {
+			return nil, nil
+		}
 	}
 
 	// 2.0. ADD - create non-existing replicas
@@ -230,7 +238,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 		actions = append(actions, deleteActions)
 	}
 
-	return actions, deleteErrors
+	return cleanAction(actions), deleteErrors
 }
 
 func (c *Cluster) deleteRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Action, error) {

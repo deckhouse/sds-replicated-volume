@@ -39,6 +39,7 @@ type replicaProps struct {
 	primary                 bool
 	quorum                  byte
 	quorumMinimumRedundancy byte
+	size                    int64
 }
 
 type replicaDynamicProps struct {
@@ -47,7 +48,6 @@ type replicaDynamicProps struct {
 }
 
 func (r *Replica) AddVolume(
-	size int64,
 	vgName string,
 	actualVgNameOnTheNode string,
 	llvProps LLVProps,
@@ -63,7 +63,7 @@ func (r *Replica) AddVolume(
 			nodeName:              r.props.nodeName,
 			actualVGNameOnTheNode: actualVgNameOnTheNode,
 			vgName:                vgName,
-			size:                  size,
+			size:                  r.props.size,
 			llvProps:              llvProps,
 		},
 	}

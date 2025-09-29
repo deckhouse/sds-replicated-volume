@@ -13,6 +13,36 @@ type Actions []Action
 
 type ParallelActions []Action
 
+func cleanAction(a Action) Action {
+	switch t := a.(type) {
+	case Actions:
+		t = cleanActions(t)
+		if len(t) == 1 {
+			return t[0]
+		}
+		return t
+	case ParallelActions:
+		t = cleanActions(t)
+		if len(t) == 1 {
+			return t[0]
+		}
+		return t
+	default:
+		return a
+	}
+}
+
+func cleanActions(actions []Action) (result []Action) {
+	for _, a := range actions {
+		a = cleanAction(a)
+		if a == nil {
+			continue
+		}
+		result = append(result, a)
+	}
+	return
+}
+
 // RVRPatch represents a patch to be applied to a specific ReplicatedVolumeReplica
 type RVRPatch struct {
 	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica

@@ -406,6 +406,11 @@ func (in *ReplicatedVolumeReplicaStatus) DeepCopy() *ReplicatedVolumeReplicaStat
 func (in *ReplicatedVolumeSpec) DeepCopyInto(out *ReplicatedVolumeSpec) {
 	*out = *in
 	in.LVM.DeepCopyInto(&out.LVM)
+	if in.AttachmentRequested != nil {
+		in, out := &in.AttachmentRequested, &out.AttachmentRequested
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	return
 }
 
