@@ -6,6 +6,8 @@ metadata:
   namespace: d8-{{ .Chart.Name }}
   {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 data:
+  drbdMinPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.minPort }}"
+  drbdMaxPort: "{{ $.Values.sdsReplicatedVolume.drbdPortRange.maxPort }}"
   slogh.cfg: |
     # those are all keys with default values:
 
