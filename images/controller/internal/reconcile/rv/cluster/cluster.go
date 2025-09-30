@@ -105,7 +105,44 @@ func (c *Cluster) AddReplica(
 	return r
 }
 
+func (c *Cluster) validateAndNormalize() error {
+	// find first replica with non-zero number of volumes
+	var expectedVolumeNum int
+	for _, r := range c.replicas {
+		if expectedVolumeNum = r.volumeNum(); expectedVolumeNum != 0 {
+			break
+		}
+	}
+
+	if expectedVolumeNum == 0 {
+		return fmt.Errorf("cluster expected to have at least one replica and one volume")
+	}
+
+	// validate same amount of volumes on each replica, or 0
+	for i, r := range c.replicas {
+		if num := r.volumeNum(); num != 0 && expectedVolumeNum != num {
+			return fmt.Errorf(
+				"expected to have %d volumes in replica %d on %s, got %d",
+				expectedVolumeNum, i, r.props.nodeName, num,
+			)
+		}
+	}
+
+	// for 0-volume replicas create diskless volumes
+	for _, r := range c.replicas {
+		for r.volumeNum() < expectedVolumeNum {
+			r.addVolumeDiskless()
+		}
+	}
+
+	return nil
+}
+
 func (c *Cluster) Reconcile() (Action, error) {
+	if err := c.validateAndNormalize(); err != nil {
+		return nil, err
+	}
+
 	existingRvrs, getErr := c.rvrCl.ByReplicatedVolumeName(c.ctx, c.rvName)
 	if getErr != nil {
 		return nil, getErr
@@ -188,7 +225,7 @@ func (c *Cluster) Reconcile() (Action, error) {
 	}
 
 	// 2.0. ADD - create non-existing replicas
-	// This also can't be done in parallel, because we need to keep number of
+	// This can't be done in parallel, because we need to keep number of
 	// active replicas low - and delete one replica as soon as one replica was
 	// created
 	// TODO: but this can also be improved for the case when no more replicas

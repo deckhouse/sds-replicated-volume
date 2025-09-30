@@ -32,13 +32,18 @@ func cleanAction(a Action) Action {
 	}
 }
 
-func cleanActions(actions []Action) (result []Action) {
+func cleanActions[T ~[]Action](actions T) (result T) {
 	for _, a := range actions {
 		a = cleanAction(a)
 		if a == nil {
 			continue
 		}
-		result = append(result, a)
+		// ungroup items of same type
+		if t, ok := a.(T); ok {
+			result = append(result, t...)
+		} else {
+			result = append(result, a)
+		}
 	}
 	return
 }

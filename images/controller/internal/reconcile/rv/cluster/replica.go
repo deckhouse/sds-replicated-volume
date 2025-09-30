@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
@@ -25,9 +26,17 @@ type Replica struct {
 	dprops replicaDynamicProps
 
 	// Indexes are volume ids.
-	volumes []*Volume
+	volumes  []volume
+	diskless *bool
 
 	peers []*Replica
+}
+
+type volume interface {
+	initialize(existingRVRVolume *v1alpha2.Volume) error
+	reconcile() Action
+	rvrVolume() v1alpha2.Volume
+	shouldBeRecreated(rvrVol *v1alpha2.Volume) bool
 }
 
 type replicaProps struct {
@@ -47,32 +56,49 @@ type replicaDynamicProps struct {
 	port        uint
 }
 
+func (r *Replica) volumeNum() int {
+	return len(r.volumes)
+}
+
 func (r *Replica) AddVolume(
 	vgName string,
 	actualVgNameOnTheNode string,
 	llvProps LLVProps,
-) *Volume {
-	v := &Volume{
-		ctx:      r.ctx,
-		llvCl:    r.llvCl,
-		rvrCl:    r.rvrCl,
-		minorMgr: r.minorMgr,
-		props: volumeProps{
-			id:                    len(r.volumes),
-			rvName:                r.props.rvName,
-			nodeName:              r.props.nodeName,
-			actualVGNameOnTheNode: actualVgNameOnTheNode,
-			vgName:                vgName,
-			size:                  r.props.size,
-			llvProps:              llvProps,
+) {
+	r.ensureDisklessness(false)
+	r.volumes = append(
+		r.volumes,
+		&diskfulVolume{
+			ctx:      r.ctx,
+			llvCl:    r.llvCl,
+			rvrCl:    r.rvrCl,
+			minorMgr: r.minorMgr,
+			props: diskfulVolumeProps{
+				id:                    len(r.volumes),
+				rvName:                r.props.rvName,
+				nodeName:              r.props.nodeName,
+				actualVGNameOnTheNode: actualVgNameOnTheNode,
+				vgName:                vgName,
+				size:                  r.props.size,
+				llvProps:              llvProps,
+			},
 		},
-	}
-	r.volumes = append(r.volumes, v)
-	return v
+	)
 }
 
-func (r *Replica) diskless() bool {
-	return len(r.volumes) == 0
+func (r *Replica) addVolumeDiskless() {
+	r.ensureDisklessness(true)
+	r.volumes = append(
+		r.volumes,
+		&disklessVolume{
+			ctx:      r.ctx,
+			minorMgr: r.minorMgr,
+			props: disklessVolumeProps{
+				id:       len(r.volumes),
+				nodeName: r.props.nodeName,
+			},
+		},
+	)
 }
 
 func (r *Replica) initialize(
@@ -90,13 +116,13 @@ func (r *Replica) initialize(
 		port = existingRVR.Spec.NodeAddress.Port
 	}
 
-	for _, vol := range r.volumes {
+	for volId, vol := range r.volumes {
 		var existingRVRVolume *v1alpha2.Volume
 		if existingRVR != nil {
 			existingRVRVolume, _ = uiter.Find(
 				uslices.Ptrs(existingRVR.Spec.Volumes),
 				func(rvrVol *v1alpha2.Volume) bool {
-					return rvrVol.Number == uint(vol.props.id)
+					return rvrVol.Number == uint(volId)
 				},
 			)
 		}
@@ -140,7 +166,7 @@ func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 					IPv4: peer.props.ipv4,
 					Port: peer.dprops.port,
 				},
-				Diskless: peer.diskless(),
+				Diskless: *peer.diskless,
 			},
 		)
 	}
@@ -232,7 +258,7 @@ func (r *Replica) shouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool 
 			return true
 		}
 
-		if rvrPeer.Diskless != peer.diskless() {
+		if rvrPeer.Diskless != *peer.diskless {
 			return true
 		}
 	}
@@ -311,10 +337,18 @@ func (r *Replica) makeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 						IPv4: peer.props.ipv4,
 						Port: peer.dprops.port,
 					},
-					Diskless: peer.diskless(),
+					Diskless: *peer.diskless,
 				}
 		}
 
 		return nil
+	}
+}
+
+func (r *Replica) ensureDisklessness(diskless bool) {
+	if r.diskless == nil {
+		r.diskless = utils.Ptr(diskless)
+	} else if *r.diskless != diskless {
+		panic(fmt.Sprintf("replica is already diskless=%t, can not change to %t", *r.diskless, diskless))
 	}
 }

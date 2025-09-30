@@ -8,18 +8,19 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
-	testRVName           = "testRVName"
-	testRVNameIrrelevant = "testRVNameIrrelevant"
-	testRVRName          = "testRVRName"
-	testRVRName2         = "testRVRName2"
-	testRVRName3         = "testRVRName3"
-	testNodeName         = "testNodeName"
-	testSharedSecret     = "testSharedSecret"
-	testPortRng          = testPortRange{7000, 9000}
+	testRVName                = "testRVName"
+	testRVRName               = "testRVRName"
+	testLLVName               = "testLLVName"
+	testNodeName              = "testNodeName"
+	testSharedSecret          = "testSharedSecret"
+	testVGName                = "testVGName"
+	testActualVGNameOnTheNode = "testActualVGNameOnTheNode"
+	testPortRng               = testPortRange{7000, 9000}
+	testSize                  = int64(500 * 1024 * 1024)
+	testSizeStr               = "500Mi"
 )
 
 type reconcileTestCase struct {
@@ -29,98 +30,70 @@ type reconcileTestCase struct {
 	existingLLVs map[LLVPhysicalKey]*snc.LVMLogicalVolume
 
 	replicaConfigs []testReplicaConfig
-	size           int64
+	rvName         *string
+	size           *int64
 
 	expectedAction ActionMatcher
 	expectedErr    error
 }
 
+// TODO: Do not take ownership over llv, without special label/owner ref of controller,
+// for new LLVs - always create it,
+// during reconcile - manage (incl. deletion) all LLV with this label.
+// Currently some LLVs may hang, when there's no diskful rvr in same LVG
+
 var reconcileTestCases []reconcileTestCase = []reconcileTestCase{
 	{
-		name: "empty cluster - 0 replicas - no actions",
-	},
-	{
-		name: "empty cluster - 1 diskless replicas - 1 create&wait action",
+		name: "empty cluster - 1 replica - 1 create&wait action",
 		replicaConfigs: []testReplicaConfig{
 			{
 				NodeName: testNodeName,
+				Volume: &testVolumeConfig{
+					VGName:                testVGName,
+					ActualVgNameOnTheNode: testActualVGNameOnTheNode,
+					LLVProps:              cluster.ThickVolumeProps{},
+				},
 			},
 		},
 		expectedAction: ActionsMatcher{
-			CreateReplicatedVolumeReplicaMatcher{}, // TODO
-		},
-	},
-	{
-		name: "1 rvr - 0 replicas - delete action",
-		existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName,
+			CreateLVMLogicalVolumeMatcher{
+				LLVSpec: snc.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: testRVName,
+					Type:                  "Thick",
+					Size:                  testSizeStr,
+					LVMVolumeGroupName:    testVGName,
+					Thick:                 &snc.LVMLogicalVolumeThickSpec{},
 				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+				OnMatch: func(action cluster.CreateLVMLogicalVolume) {
+					action.LVMLogicalVolume.Name = testLLVName
+				},
+			},
+			WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
+			CreateReplicatedVolumeReplicaMatcher{
+				RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: testRVName,
+					NodeName:             testNodeName,
+					NodeAddress: v1alpha2.Address{
+						IPv4: generateIPv4(testNodeName),
+						Port: testPortRng.MinPort,
+					},
+					SharedSecret: testSharedSecret,
+					Volumes: []v1alpha2.Volume{
+						{
+							Number: 0,
+							Device: 0,
+							Disk: fmt.Sprintf(
+								"/dev/%s/%s",
+								testActualVGNameOnTheNode, testRVName,
+							),
+						},
+					},
+				},
+				OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
+					action.ReplicatedVolumeReplica.Name = testRVRName
 				},
 			},
-		},
-		expectedAction: DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-	},
-	{
-		name: "2 rvrs - 0 replicas - 2 delete actions",
-		existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName,
-				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: testRVName,
-				},
-			},
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName2,
-				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: testRVName,
-				},
-			},
-		},
-		expectedAction: ParallelActionsMatcher{
-			DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-			DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName2},
-		},
-	},
-	{
-		name: "3 rvrs (1 irrelevant) - 0 replicas - 2 delete actions",
-		existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName,
-				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: testRVName,
-				},
-			},
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName2,
-				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: testRVName,
-				},
-			},
-			{
-				ObjectMeta: v1.ObjectMeta{
-					Name: testRVRName3,
-				},
-				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-					// irrelevant rv name
-					ReplicatedVolumeName: testRVNameIrrelevant,
-				},
-			},
-		},
-		expectedAction: ParallelActionsMatcher{
-			DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-			DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName2},
+			WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
 		},
 	},
 }
@@ -135,15 +108,31 @@ func TestClusterReconcile(t *testing.T) {
 	}
 }
 
+func ifDefined[T any](p *T, def T) T {
+	if p != nil {
+		return *p
+	}
+	return def
+}
+
 func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 	// arrange
 	rvrClient := NewMockRVRClient(tc.existingRVRs)
 	llvClient := NewMockLLVClient(tc.existingLLVs)
 
-	clr := cluster.New(t.Context(), rvrClient, rvrClient, testPortRng, llvClient, testRVName, tc.size, testSharedSecret)
+	clr := cluster.New(
+		t.Context(),
+		rvrClient,
+		rvrClient,
+		testPortRng,
+		llvClient,
+		ifDefined(tc.rvName, testRVName),
+		ifDefined(tc.size, testSize),
+		testSharedSecret,
+	)
 
 	for _, rCfg := range tc.replicaConfigs {
-		r := clr.AddReplica(rCfg.NodeName, rCfg.GenIPv4(), false, 0, 0)
+		r := clr.AddReplica(rCfg.NodeName, generateIPv4(rCfg.NodeName), false, 0, 0)
 		if rCfg.Volume != nil {
 			r.AddVolume(rCfg.Volume.VGName, rCfg.Volume.ActualVgNameOnTheNode, rCfg.Volume.LLVProps)
 		}
@@ -171,19 +160,14 @@ func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 
 type testReplicaConfig struct {
 	NodeName string
-	IPv4     string
 	Volume   *testVolumeConfig
 }
 
-func (cfg testReplicaConfig) GenIPv4() string {
-	if cfg.IPv4 != "" {
-		return cfg.IPv4
-	}
-
+func generateIPv4(nodeName string) string {
 	// generate private IP as a hash from [testReplicaConfig.NodeName]
 
 	h := fnv.New32a()
-	_, _ = h.Write([]byte(cfg.NodeName))
+	_, _ = h.Write([]byte(nodeName))
 	v := h.Sum32()
 
 	o2 := byte(v >> 16)

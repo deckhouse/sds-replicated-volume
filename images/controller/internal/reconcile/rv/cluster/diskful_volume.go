@@ -10,16 +10,18 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-type Volume struct {
+type diskfulVolume struct {
 	ctx      context.Context
 	llvCl    LLVClient
 	rvrCl    RVRClient
 	minorMgr MinorManager
-	props    volumeProps
-	dprops   volumeDynamicProps
+	props    diskfulVolumeProps
+	dprops   diskfulVolumeDynamicProps
 }
 
-type volumeProps struct {
+var _ volume = &diskfulVolume{}
+
+type diskfulVolumeProps struct {
 	rvName                string
 	nodeName              string
 	id                    int
@@ -29,7 +31,7 @@ type volumeProps struct {
 	llvProps              LLVProps
 }
 
-type volumeDynamicProps struct {
+type diskfulVolumeDynamicProps struct {
 	actualVGNameOnTheNode string
 	actualLVNameOnTheNode string
 	minor                 uint
@@ -37,7 +39,7 @@ type volumeDynamicProps struct {
 	existingLLVSizeQty    resource.Quantity
 }
 
-func (v *Volume) initialize(existingRVRVolume *v1alpha2.Volume) error {
+func (v *diskfulVolume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 	if existingRVRVolume == nil {
 		v.dprops.actualVGNameOnTheNode = v.props.actualVGNameOnTheNode
 		v.dprops.actualLVNameOnTheNode = v.props.rvName
@@ -96,7 +98,7 @@ func (v *Volume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 	return nil
 }
 
-func (v *Volume) reconcile() Action {
+func (v *diskfulVolume) reconcile() Action {
 	// TODO: do not recreate LLV, recreate replicas
 	// TODO: discuss that Failed LLV may lead to banned nodes
 	if v.dprops.existingLLV != nil {
@@ -123,7 +125,7 @@ func (v *Volume) reconcile() Action {
 	}
 }
 
-func (v *Volume) rvrVolume() v1alpha2.Volume {
+func (v *diskfulVolume) rvrVolume() v1alpha2.Volume {
 	rvrVolume := v1alpha2.Volume{
 		Number: uint(v.props.id),
 		Device: v.dprops.minor,
@@ -134,20 +136,22 @@ func (v *Volume) rvrVolume() v1alpha2.Volume {
 	return rvrVolume
 }
 
-func (v *Volume) reconcileLLV() Action {
-
-	return LLVPatch{LVMLogicalVolume: v.dprops.existingLLV, Apply: func(llv *snc.LVMLogicalVolume) error {
-		// Resize only when a positive desired size is specified and differs
-		// from the current one. Otherwise, leave as is (no-op patch).
-		if v.props.size > 0 {
-			desired := resource.NewQuantity(v.props.size, resource.BinarySI).String()
-			// TODO only increase
-			if llv.Spec.Size != desired {
-				llv.Spec.Size = desired
+func (v *diskfulVolume) reconcileLLV() Action {
+	return LLVPatch{
+		LVMLogicalVolume: v.dprops.existingLLV,
+		Apply: func(llv *snc.LVMLogicalVolume) error {
+			// Resize only when a positive desired size is specified and differs
+			// from the current one. Otherwise, leave as is (no-op patch).
+			if v.props.size > 0 {
+				desired := resource.NewQuantity(v.props.size, resource.BinarySI).String()
+				// TODO only increase
+				if llv.Spec.Size != desired {
+					llv.Spec.Size = desired
+				}
 			}
-		}
-		return nil
-	}}
+			return nil
+		},
+	}
 
 	// TODO
 	// type LVMLogicalVolumeSpec struct {
@@ -163,7 +167,7 @@ func (v *Volume) reconcileLLV() Action {
 
 }
 
-func (v *Volume) shouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
+func (v *diskfulVolume) shouldBeRecreated(rvrVol *v1alpha2.Volume) bool {
 	if int(rvrVol.Number) != v.props.id {
 		return true
 	}

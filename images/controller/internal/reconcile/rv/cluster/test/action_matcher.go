@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/google/go-cmp/cmp"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 )
@@ -157,6 +160,7 @@ func (m DeleteReplicatedVolumeReplicaMatcher) Match(action cluster.Action) error
 
 type CreateReplicatedVolumeReplicaMatcher struct {
 	RVRSpec v1alpha2.ReplicatedVolumeReplicaSpec
+	OnMatch func(action cluster.CreateReplicatedVolumeReplica)
 }
 
 var _ ActionMatcher = CreateReplicatedVolumeReplicaMatcher{}
@@ -167,12 +171,87 @@ func (m CreateReplicatedVolumeReplicaMatcher) Match(action cluster.Action) error
 		return err
 	}
 
-	if !reflect.DeepEqual(typedAction.ReplicatedVolumeReplica.Spec, m.RVRSpec) {
-		return newErrorf(
-			// TODO:
-			"expected RVR to be created to be .., got ...",
-		)
+	if diff := cmp.Diff(m.RVRSpec, typedAction.ReplicatedVolumeReplica.Spec); diff != "" {
+		return newErrorf("mismatch (-want +got):\n%s", diff)
 	}
 
+	m.OnMatch(typedAction)
+
+	return nil
+}
+
+//
+// action matcher: [cluster.WaitReplicatedVolumeReplica]
+//
+
+type WaitReplicatedVolumeReplicaMatcher struct {
+	RVRName string
+}
+
+var _ ActionMatcher = WaitReplicatedVolumeReplicaMatcher{}
+
+func (m WaitReplicatedVolumeReplicaMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.WaitReplicatedVolumeReplica](action)
+	if err != nil {
+		return err
+	}
+
+	if typedAction.ReplicatedVolumeReplica.Name != m.RVRName {
+		return newErrorf(
+			"expected RVR to be waited to have name '%s', got '%s'",
+			m.RVRName, typedAction.ReplicatedVolumeReplica.Name,
+		)
+	}
+	return nil
+}
+
+//
+// action matcher: [cluster.CreateLVMLogicalVolume]
+//
+
+type CreateLVMLogicalVolumeMatcher struct {
+	LLVSpec snc.LVMLogicalVolumeSpec
+	OnMatch func(action cluster.CreateLVMLogicalVolume)
+}
+
+var _ ActionMatcher = CreateLVMLogicalVolumeMatcher{}
+
+func (m CreateLVMLogicalVolumeMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.CreateLVMLogicalVolume](action)
+	if err != nil {
+		return err
+	}
+
+	if diff := cmp.Diff(m.LLVSpec, typedAction.LVMLogicalVolume.Spec); diff != "" {
+		return newErrorf("mismatch (-want +got):\n%s", diff)
+	}
+
+	m.OnMatch(typedAction)
+
+	return nil
+}
+
+//
+// action matcher: [cluster.WaitLVMLogicalVolume]
+//
+
+type WaitLVMLogicalVolumeMatcher struct {
+	LLVName string
+}
+
+var _ ActionMatcher = WaitLVMLogicalVolumeMatcher{}
+
+func (m WaitLVMLogicalVolumeMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.WaitLVMLogicalVolume](action)
+	if err != nil {
+		return err
+	}
+
+	if typedAction.LVMLogicalVolume.Name != m.LLVName {
+		return newErrorf(
+			"expected RVR to be waited to have name '%s', got '%s'",
+			m.LLVName, typedAction.LVMLogicalVolume.Name,
+		)
+	}
 	return nil
 }
