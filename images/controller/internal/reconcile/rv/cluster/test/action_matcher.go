@@ -255,3 +255,53 @@ func (m WaitLVMLogicalVolumeMatcher) Match(action cluster.Action) error {
 	}
 	return nil
 }
+
+//
+// action matcher: [cluster.LLVPatch]
+//
+
+type LLVPatchMatcher struct {
+	LLVName string
+}
+
+var _ ActionMatcher = LLVPatchMatcher{}
+
+func (m LLVPatchMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.LLVPatch](action)
+	if err != nil {
+		return err
+	}
+
+	if typedAction.LVMLogicalVolume.Name != m.LLVName {
+		return newErrorf(
+			"expected LLV to be patched to have name '%s', got '%s'",
+			m.LLVName, typedAction.LVMLogicalVolume.Name,
+		)
+	}
+	return nil
+}
+
+//
+// action matcher: [cluster.RVRPatch]
+//
+
+type RVRPatchMatcher struct {
+	RVRName string
+}
+
+var _ ActionMatcher = RVRPatchMatcher{}
+
+func (m RVRPatchMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.RVRPatch](action)
+	if err != nil {
+		return err
+	}
+
+	if typedAction.ReplicatedVolumeReplica.Name != m.RVRName {
+		return newErrorf(
+			"expected RVR to be patched to have name '%s', got '%s'",
+			m.RVRName, typedAction.ReplicatedVolumeReplica.Name,
+		)
+	}
+	return nil
+}

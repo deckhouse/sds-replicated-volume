@@ -8,6 +8,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var (
@@ -94,6 +95,199 @@ var reconcileTestCases []reconcileTestCase = []reconcileTestCase{
 				},
 			},
 			WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+		},
+	},
+	{
+		name: "existing LLV - 1 replica - patch llv & create rvr & wait rvr",
+		existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
+			{nodeName: testNodeName, actualVGNameOnTheNode: testActualVGNameOnTheNode, actualLVNameOnTheNode: testRVName}: {
+				ObjectMeta: v1.ObjectMeta{Name: testLLVName},
+				Spec: snc.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: testRVName,
+					Size:                  testSizeStr,
+					LVMVolumeGroupName:    testVGName,
+					Thick:                 &snc.LVMLogicalVolumeThickSpec{},
+					Type:                  "Thick",
+				},
+			},
+		},
+		replicaConfigs: []testReplicaConfig{
+			{
+				NodeName: testNodeName,
+				Volume: &testVolumeConfig{
+					VGName:                testVGName,
+					ActualVgNameOnTheNode: testActualVGNameOnTheNode,
+					LLVProps:              cluster.ThickVolumeProps{},
+				},
+			},
+		},
+		expectedAction: ActionsMatcher{
+			LLVPatchMatcher{LLVName: testLLVName},
+			CreateReplicatedVolumeReplicaMatcher{
+				RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: testRVName,
+					NodeName:             testNodeName,
+					NodeAddress: v1alpha2.Address{
+						IPv4: generateIPv4(testNodeName),
+						Port: testPortRng.MinPort,
+					},
+					SharedSecret: testSharedSecret,
+					Volumes: []v1alpha2.Volume{
+						{
+							Number: 0,
+							Device: 0,
+							Disk: fmt.Sprintf(
+								"/dev/%s/%s",
+								testActualVGNameOnTheNode, testRVName,
+							),
+						},
+					},
+				},
+				OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
+					action.ReplicatedVolumeReplica.Name = testRVRName
+				},
+			},
+			WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+		},
+	},
+	{
+		name: "add 1 diskful and fix existing diskless - (parallel) create&wait llv + patch&wait rvr; then create&wait rvr",
+		existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: v1.ObjectMeta{Name: testRVRName},
+				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: testRVName,
+					NodeName:             "node-b",
+					NodeId:               1,
+					NodeAddress: v1alpha2.Address{
+						IPv4: "192.0.2.1", // wrong, will be fixed to generateIPv4("node-b")
+						Port: testPortRng.MinPort,
+					},
+					SharedSecret: testSharedSecret,
+					Volumes:      []v1alpha2.Volume{{Number: 0, Device: 0}}, // diskless
+				},
+			},
+		},
+		replicaConfigs: []testReplicaConfig{
+			{ // diskful to add
+				NodeName: "node-a",
+				Volume: &testVolumeConfig{
+					VGName:                testVGName,
+					ActualVgNameOnTheNode: testActualVGNameOnTheNode,
+					LLVProps:              cluster.ThickVolumeProps{},
+				},
+			},
+			{ // diskless to fix
+				NodeName: "node-b",
+			},
+		},
+		expectedAction: ActionsMatcher{
+			ParallelActionsMatcher{
+				ActionsMatcher{
+					CreateLVMLogicalVolumeMatcher{
+						LLVSpec: snc.LVMLogicalVolumeSpec{
+							ActualLVNameOnTheNode: testRVName,
+							Type:                  "Thick",
+							Size:                  testSizeStr,
+							LVMVolumeGroupName:    testVGName,
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{},
+						},
+						OnMatch: func(action cluster.CreateLVMLogicalVolume) {
+							action.LVMLogicalVolume.Name = testLLVName
+						},
+					},
+					WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
+				},
+				ActionsMatcher{
+					RVRPatchMatcher{RVRName: testRVRName},
+					WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+				},
+			},
+			CreateReplicatedVolumeReplicaMatcher{
+				RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: testRVName,
+					NodeName:             "node-a",
+					NodeAddress: v1alpha2.Address{
+						IPv4: generateIPv4("node-a"),
+						Port: testPortRng.MinPort,
+					},
+					SharedSecret: testSharedSecret,
+					Volumes: []v1alpha2.Volume{
+						{
+							Number: 0,
+							Device: 0,
+							Disk:   fmt.Sprintf("/dev/%s/%s", testActualVGNameOnTheNode, testRVName),
+						},
+					},
+				},
+				OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
+					action.ReplicatedVolumeReplica.Name = testRVRName
+				},
+			},
+			WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+		},
+	},
+	{
+		name: "add 1 diskful and delete 1 orphan rvr - (parallel) create&wait llv; then create&wait rvr and delete orphan",
+		existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
+			{
+				ObjectMeta: v1.ObjectMeta{Name: testRVRName},
+				Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: testRVName,
+					NodeName:             "old-node",
+					NodeId:               3,
+					NodeAddress:          v1alpha2.Address{IPv4: generateIPv4("old-node"), Port: testPortRng.MinPort},
+					SharedSecret:         testSharedSecret,
+					Volumes: []v1alpha2.Volume{{
+						Number: 0,
+						Device: 0,
+						Disk:   fmt.Sprintf("/dev/%s/%s", testActualVGNameOnTheNode, testRVName),
+					}},
+				},
+			},
+		},
+		replicaConfigs: []testReplicaConfig{
+			{
+				NodeName: "node-a",
+				Volume: &testVolumeConfig{
+					VGName:                testVGName,
+					ActualVgNameOnTheNode: testActualVGNameOnTheNode,
+					LLVProps:              cluster.ThickVolumeProps{},
+				},
+			},
+		},
+		expectedAction: ActionsMatcher{
+			CreateLVMLogicalVolumeMatcher{
+				LLVSpec: snc.LVMLogicalVolumeSpec{
+					ActualLVNameOnTheNode: testRVName,
+					Type:                  "Thick",
+					Size:                  testSizeStr,
+					LVMVolumeGroupName:    testVGName,
+					Thick:                 &snc.LVMLogicalVolumeThickSpec{},
+				},
+				OnMatch: func(action cluster.CreateLVMLogicalVolume) {
+					action.LVMLogicalVolume.Name = testLLVName
+				},
+			},
+			WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
+			CreateReplicatedVolumeReplicaMatcher{
+				RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: testRVName,
+					NodeName:             "node-a",
+					NodeAddress:          v1alpha2.Address{IPv4: generateIPv4("node-a"), Port: testPortRng.MinPort},
+					SharedSecret:         testSharedSecret,
+					Volumes: []v1alpha2.Volume{{
+						Number: 0,
+						Device: 0,
+						Disk:   fmt.Sprintf("/dev/%s/%s", testActualVGNameOnTheNode, testRVName),
+					}},
+				},
+				OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
+					action.ReplicatedVolumeReplica.Name = testRVRName
+				},
+			},
+			WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+			DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
 		},
 	},
 }
