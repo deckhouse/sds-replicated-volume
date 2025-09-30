@@ -44,7 +44,7 @@ type reconcileTestCase struct {
 
 var reconcileTestCases []reconcileTestCase = []reconcileTestCase{
 	{
-		name: "empty cluster - 1 replica - 1 create&wait action",
+		name: "empty cluster - 1 replica - 1 create llv & wait llv & create rvr & wait rvr",
 		replicaConfigs: []testReplicaConfig{
 			{
 				NodeName: testNodeName,
