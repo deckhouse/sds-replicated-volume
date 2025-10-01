@@ -1,6 +1,7 @@
 package v1alpha2
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -9,6 +10,10 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Size",type=integer,format=int64,JSONPath=".spec.size"
+// +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=".spec.replicas"
+// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=".spec.topology"
 type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
@@ -19,8 +24,13 @@ type ReplicatedVolume struct {
 
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeSpec struct {
-	Size     int64 `json:"size"`
-	Replicas int64 `json:"replicas"`
+	// +kubebuilder:validation:Required
+	Size resource.Quantity `json:"size"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=8
+	Replicas byte `json:"replicas"`
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -29,11 +39,17 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	LVM LVMSpec `json:"lvm"`
 
+	// +kubebuilder:validation:MaxItems=1024
+	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	Zones []string `json:"zones,omitempty"`
+
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	Topology string `json:"topology"`
 
-	AttachmentRequested []string `json:"attachmentRequested"`
+	// +kubebuilder:validation:MaxItems=2
+	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	PublishRequested []string `json:"publishRequested"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -41,25 +57,22 @@ type LVMSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Thin;Thick
 	Type string `json:"type"` // Thin/Thick
+
 	// +listType=map
 	// +listMapKey=name
 	// +kubebuilder:validation:Required
-	LVMVolumeGroups []LVGSpec `json:"volumeGroups" patchStrategy:"merge" patchMergeKey:"name"`
+	LVMVolumeGroups []LVGRef `json:"volumeGroups" patchStrategy:"merge" patchMergeKey:"name"`
 }
 
 // +k8s:deepcopy-gen=true
-type LVGSpec struct {
+type LVGRef struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
 	Name string `json:"name"`
 
-	ThinPoolName string `json:"thinPoolName,omitempty"` // only for Thin
-
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=255
-	Zone string `json:"zone"`
+	ThinPoolName string `json:"thinPoolName,omitempty"` // only for Thin
 }
 
 // +k8s:deepcopy-gen=true
@@ -70,6 +83,10 @@ type ReplicatedVolumeStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// +kubebuilder:validation:MaxItems=2
+	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	PublishProvided []string `json:"publishProvided"`
 }
 
 // +k8s:deepcopy-gen=true
