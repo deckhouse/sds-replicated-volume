@@ -10,6 +10,7 @@ require (
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/go-logr/logr v1.4.3
+	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.17.0
 	k8s.io/api v0.34.0
 	k8s.io/apimachinery v0.34.1

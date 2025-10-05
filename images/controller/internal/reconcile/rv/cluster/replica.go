@@ -235,6 +235,7 @@ func (r *Replica) recreateOrFix() Action {
 	return nil
 }
 
+// TODO: separate recreate and replace
 func (r *Replica) shouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 	if len(rvr.Spec.Volumes) != len(r.volumes) {
 		return true

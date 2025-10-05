@@ -1,0 +1,100 @@
+package topology
+
+import "iter"
+
+//
+// iter
+//
+
+func repeat[T any](src []T, counts []int) iter.Seq[T] {
+	return func(yield func(T) bool) {
+
+		// for times := range counts {
+		// 	if times == 0 {
+		// 		continue
+		// 	}
+		// 	next, stop := iter.Pull(src)
+
+		// }
+	}
+}
+
+//
+// combinations
+//
+
+func elementCombinations[T any](s []T, k int) iter.Seq[[]T] {
+	result := make([]T, k)
+
+	return func(yield func([]T) bool) {
+		for sIndexes := range indexCombinations(len(s), k) {
+			for i, sIndex := range sIndexes {
+				result[i] = s[sIndex]
+			}
+
+			if !yield(result) {
+				return
+			}
+		}
+	}
+}
+
+// indexCombinations yields all k-combinations of indices [0..n).
+// The same backing slice is reused for every yield.
+// If you need to retain a combination, copy it in the caller.
+func indexCombinations(n int, k int) iter.Seq[[]int] {
+	if k > n {
+		panic("expected k<=n")
+	}
+
+	result := make([]int, k)
+
+	return func(yield func([]int) bool) {
+		if k == 0 {
+			return
+		}
+
+		// Initialize to the first combination: [0,1,2,...,k-1]
+		for i := range k {
+			result[i] = i
+		}
+		if !yield(result) {
+			return
+		}
+
+		resultTail := k - 1
+		nk := n - k
+
+		for {
+			// find rightmost index that can be incremented
+			i := resultTail
+
+			for {
+				if result[i] == nk+i {
+					// already maximum
+					i--
+				} else {
+					// found
+					break
+				}
+
+				if i < 0 {
+					// all combinations generated
+					return
+				}
+			}
+
+			// increment and reset the tail to the minimal increasing sequence.
+			result[i]++
+			next := result[i]
+			for j := i + 1; j < k; j++ {
+				next++
+				result[j] = next
+			}
+
+			if !yield(result) {
+				return
+			}
+		}
+	}
+}

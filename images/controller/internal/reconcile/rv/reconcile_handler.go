@@ -37,6 +37,15 @@ type resourceReconcileRequestHandler struct {
 	rv  *v1alpha2.ReplicatedVolume
 }
 
+func (h *resourceReconcileRequestHandler) selectLVGs() (res []v1alpha2.LVGRef, err error) {
+	//
+	// TransZonal;Zonal;Ignored
+	if h.rv.Spec.Topology == "Ignored" {
+
+	}
+	return nil, nil
+}
+
 func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("controller: reconcile resource", "name", h.rv.Name)
 
