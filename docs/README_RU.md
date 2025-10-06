@@ -13,7 +13,7 @@ moduleStatus: preview
 
 Модуль позволяет создавать `Storage Pool` и `StorageClass` через создание [пользовательских ресурсов Kubernetes](./cr.html).
 
-Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
+Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
 > **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
 >
@@ -26,7 +26,7 @@ moduleStatus: preview
 
 Для корректной работы модуля `sds-replicated-volume` выполните следующие шаги:
 
-- Включите модуль [sds-node-configurator](../../sds-node-configurator/stable/).
+- Включите модуль [sds-node-configurator](/modules/sds-node-configurator/).
 
   Убедитесь, что модуль `sds-node-configurator` включен **до** включения модуля `sds-replicated-volume`.
 
@@ -39,12 +39,12 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Для работы с снапшотами требуется подключенный модуль [snapshot-controller](../../snapshot-controller/).
+Для работы с снапшотами требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.
   
-  Перед созданием StorageClass необходимо создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) модуля `sds-node-configurator` на узлах кластера.
+  Перед созданием StorageClass необходимо создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) модуля `sds-node-configurator` на узлах кластера.
 
 - Создайте пулы хранения и соответствующие StorageClass'ы.
 
@@ -118,7 +118,7 @@ moduleStatus: preview
 
 Приступим к настройке хранилища:
 
-- Получить все ресурсы [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice), которые доступны в вашем кластере:
+- Получить все ресурсы [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice), которые доступны в вашем кластере:
 
 ```shell
 kubectl get bd
@@ -131,7 +131,7 @@ dev-75d455a9c59858cf2b571d196ffd9883f1349d2e   worker-2   true         35Gi     
 dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi       /dev/vdb
 ```
 
-- Создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-0`:
+- Создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-0`:
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -162,7 +162,7 @@ kubectl get lvg vg-1-on-worker-0 -w
 
 - Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
+- Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-1`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -192,7 +192,7 @@ kubectl get lvg vg-1-on-worker-1 -w
 
 - Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
+- Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-2`:
 
 ```shell
 kubectl apply -f - <<EOF
