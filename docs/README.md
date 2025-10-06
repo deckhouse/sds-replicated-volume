@@ -13,7 +13,7 @@ This module manages replicated block storage based on `DRBD`. Currently, `LINSTO
 
 The module allows you to create a `Storage Pool` as well as a `StorageClass` by creating [Kubernetes custom resources](./cr.html).
 
-To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/stable/) module.
+To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](/modules/sds-node-configurator/) module.
 
 > **Caution.** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 >
@@ -26,7 +26,7 @@ After you enable the `sds-replicated-volume` module in the Deckhouse configurati
 
 To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
 
-- Enable the [sds-node-configurator](../../sds-node-configurator/stable/) module.  
+- Enable the [sds-node-configurator](/modules/sds-node-configurator/) module.  
   Ensure that the `sds-node-configurator` module is enabled **before** enabling the `sds-replicated-volume` module.
 
 {{< alert level="warning" >}}
@@ -38,11 +38,11 @@ Data synchronization during volume replication occurs only in synchronous mode. 
 {{< /alert >}}
 
 {{< alert level="info" >}}
-For working with snapshots, the [snapshot-controller](../../snapshot-controller/) module must be connected.
+For working with snapshots, the [snapshot-controller](/modules/snapshot-controller/) module must be connected.
 {{< /alert >}}
 
 - Configure LVMVolumeGroup.
-  Before creating a StorageClass, create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
+  Before creating a StorageClass, create the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
 
 - Create Storage Pools and Corresponding StorageClasses.
 
@@ -116,7 +116,7 @@ You need to create `LVM` volume groups on the nodes using `LVMVolumeGroup` custo
 
 To configure the storage:
 
-- List all the [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice) resources available in your cluster:
+- List all the [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice) resources available in your cluster:
 
 ```shell
 kubectl get bd
@@ -130,7 +130,7 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 ```
 
 
-- Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-0`:
+- Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-0`:
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -161,7 +161,7 @@ kubectl get lvg vg-1-on-worker-0 -w
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
 
-  - Next, create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-1`:
+  - Next, create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-1`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -191,7 +191,7 @@ kubectl get lvg vg-1-on-worker-1 -w
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
 
-  - Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-2`:
+  - Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-2`:
 
 ```shell
 kubectl apply -f - <<EOF

@@ -100,7 +100,7 @@ Add corresponding StorageClass name to `spec.settings.defaultClusterStorageClass
 
 To expand an existing ReplicatedStoragePool use new LVM Volume Group, follow these steps:
 
-1. Create new LVMVolumeGroup with [sds-node-configurator](../../sds-node-configurator/stable/usage.html#creating-an-lvmvolumegroup-resource)
+1. Create new LVMVolumeGroup with [sds-node-configurator](/modules/sds-node-configurator/usage.html#creating-an-lvmvolumegroup-resource)
 
 1. Add the new Volume Group to the existing ReplicatedStoragePool by editing the resource:
 
@@ -686,7 +686,7 @@ You can read more about working with ReplicatedStorageClass resources [in the do
 
 ### Migrating to ReplicatedStoragePool
 
-The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
+The `ReplicatedStoragePool` resource allows you to create a `Storage Pool` in the modules's backend. It is recommended to create this resource for the `Storage Pools` that already exist and specify the existing `LVMVolumeGroups` in this resource. In this case, the controller will see that the corresponding `Storage Pool` has been created and leave it unchanged, while the `status.phase` field of the created resource will be set to `Created`. Refer to the [sds-node-configurator](/modules/sds-node-configurator/usage.html) documentation to learn more about `LVMVolumeGroup` resources. To learn more about working with `ReplicatedStoragePool` resources, click [here](./usage.html).
 
 ## Migrating from sds-drbd module to sds-replicated-volume
 
