@@ -1,0 +1,26 @@
+From 912cd2b81c579932e78c860f2f31d0fc4549ecba Mon Sep 17 00:00:00 2001
+From: Pavel Karpov <pavel.karpov@flant.com>
+Date: Tue, 7 Oct 2025 17:53:24 +0300
+Subject: [PATCH] add filesystem creation on mount failure
+
+Signed-off-by: Pavel Karpov <pavel.karpov@flant.com>
+---
+ pkg/driver/driver.go | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/pkg/driver/driver.go b/pkg/driver/driver.go
+index 78fce3a..b69cff9 100644
+--- a/pkg/driver/driver.go
++++ b/pkg/driver/driver.go
+@@ -381,7 +381,7 @@ func (d Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolum
+ 
+ 	err = d.Mounter.Mount(ctx, assignment.Path, req.GetTargetPath(), fsType, ro, volCtx.MountOptions)
+ 	if err != nil {
+-		return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s: %v", req.GetVolumeId(), err)
++		return nil, status.Errorf(codes.Internal, "NodePublishVolume (krpsh-test-1) failed for %s: %v", req.GetVolumeId(), err)
+ 	}
+ 
+ 	// Runs post-mount xfs_io if PostMountXfsOpts is configured
+-- 
+2.43.0
+
