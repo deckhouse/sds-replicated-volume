@@ -13,48 +13,50 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology/hungarian/munkres"
 )
 
-type Matrix struct {
+type ScoreMatrix[T any] struct {
 	n      int
-	rowIds []string
-	scores [][]int
+	rows   []T
+	scores [][]int64
 }
 
-func NewMatrix(n int) *Matrix {
+func NewScoreMatrix[T any](n int) *ScoreMatrix[T] {
 	if n <= 0 {
 		panic("expected n to be positive")
 	}
-	return &Matrix{
+	return &ScoreMatrix[T]{
 		n:      n,
-		rowIds: make([]string, 0, n),
-		scores: make([][]int, 0, n),
+		rows:   make([]T, 0, n),
+		scores: make([][]int64, 0, n),
 	}
 }
 
-func (m *Matrix) AddRow(id string, scores []int) {
-	m.rowIds = append(m.rowIds, id)
+func (m *ScoreMatrix[T]) AddRow(row T, scores []int64) {
+	m.rows = append(m.rows, row)
 	m.scores = append(m.scores, scores)
 }
 
-func (m *Matrix) Solve() []string {
-	if len(m.rowIds) != m.n {
-		panic(fmt.Sprintf("expected %d rows, got %d", m.n, len(m.rowIds)))
+func (m *ScoreMatrix[T]) Solve() ([]T, int64) {
+	if len(m.rows) != m.n {
+		panic(fmt.Sprintf("expected %d rows, got %d", m.n, len(m.rows)))
 	}
 
 	mx := munkres.NewMatrix(m.n)
 	var aIdx int
 	for _, row := range m.scores {
 		for _, score := range row {
-			mx.A[aIdx] = int64(score)
+			mx.A[aIdx] = score
 			aIdx++
 		}
 	}
 
 	rowCols := munkres.ComputeMunkresMax(mx)
 
-	result := make([]string, m.n)
+	resultRowIds := make([]T, m.n)
+	var totalScore int64
 	for _, rowCol := range rowCols {
-		result[rowCol.Col] = m.rowIds[rowCol.Row]
+		resultRowIds[rowCol.Col] = m.rows[rowCol.Row]
+		totalScore += m.scores[rowCol.Row][rowCol.Col]
 	}
 
-	return result
+	return resultRowIds, totalScore
 }

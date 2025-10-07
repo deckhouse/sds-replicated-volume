@@ -7,16 +7,39 @@ import "iter"
 //
 
 func repeat[T any](src []T, counts []int) iter.Seq[T] {
-	return func(yield func(T) bool) {
-
-		// for times := range counts {
-		// 	if times == 0 {
-		// 		continue
-		// 	}
-		// 	next, stop := iter.Pull(src)
-
-		// }
+	if len(src) != len(counts) {
+		panic("expected len(src) == len(counts)")
 	}
+
+	return func(yield func(T) bool) {
+		for i := 0; i < len(src); i++ {
+			for range counts[i] {
+				if !yield(src[i]) {
+					return
+				}
+			}
+		}
+	}
+}
+
+// opposite of [repeat]
+func compact[T any](src []T, counts []int) [][]T {
+	res := make([][]T, len(counts))
+
+	var srcIndex int
+	for i, count := range counts {
+		for range count {
+			if srcIndex == len(src) {
+				panic("expected len(src) to be sum of all counts, got smaller")
+			}
+			res[i] = append(res[i], src[srcIndex])
+			srcIndex++
+		}
+	}
+	if srcIndex != len(src) {
+		panic("expected len(src) to be sum of all counts, got bigger")
+	}
+	return res
 }
 
 //

@@ -25,10 +25,10 @@ const (
 	// FEAT: Evenly - start like in OnePerGroup, and then allow putting more per group
 )
 
-type Score int
+type Score int64
 
 const (
-	NeverSelect  Score = -1 << 63  // MinInt64
+	NeverSelect  Score = 0
 	AlwaysSelect Score = 1<<63 - 1 // MaxInt64
 )
 
