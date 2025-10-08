@@ -1,23 +1,44 @@
-From 912cd2b81c579932e78c860f2f31d0fc4549ecba Mon Sep 17 00:00:00 2001
+From 4be63c0253d4c5b42fb2c5c4efcb7a5bb445ce30 Mon Sep 17 00:00:00 2001
 From: Pavel Karpov <pavel.karpov@flant.com>
-Date: Tue, 7 Oct 2025 17:53:24 +0300
+Date: Wed, 8 Oct 2025 17:38:15 +0300
 Subject: [PATCH] add filesystem creation on mount failure
 
 Signed-off-by: Pavel Karpov <pavel.karpov@flant.com>
 ---
- pkg/driver/driver.go | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ pkg/driver/driver.go | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
 
 diff --git a/pkg/driver/driver.go b/pkg/driver/driver.go
-index 78fce3a..b69cff9 100644
+index 78fce3a..ec78b4a 100644
 --- a/pkg/driver/driver.go
 +++ b/pkg/driver/driver.go
-@@ -381,7 +381,7 @@ func (d Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolum
+@@ -381,7 +381,28 @@ func (d Driver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolum
  
  	err = d.Mounter.Mount(ctx, assignment.Path, req.GetTargetPath(), fsType, ro, volCtx.MountOptions)
  	if err != nil {
 -		return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s: %v", req.GetVolumeId(), err)
-+		return nil, status.Errorf(codes.Internal, "NodePublishVolume (krpsh-test-1) failed for %s: %v", req.GetVolumeId(), err)
++		errText := strings.ToLower(fmt.Sprintf("%v", err))
++		if strings.Contains(errText, "exit status 16") {
++			d.log.Infof("NodePublishVolume for %s: problems writing or locking /etc/mtab", req.GetVolumeId())
++		} else if strings.Contains(errText, "exit status 32") && strings.Contains(errText, "wrong fs type") {
++			if fsType == "ext4" {
++				d.log.Infof("NodePublishVolume for %s: wrong fs type, create ext4 filesystem on %v", req.GetVolumeId(), assignment.Path)
++				out, err := exec.Command("mkfs.ext4", "-E", "nodiscard", assignment.Path).CombinedOutput()
++				if err != nil {
++					return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s; mkfs.ext4 failed: %v (%s)", req.GetVolumeId(), err, out)
++				}
++
++				// Try to mount the volume again
++				err = d.Mounter.Mount(ctx, assignment.Path, req.GetTargetPath(), fsType, ro, volCtx.MountOptions)
++				if err != nil {
++					return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s: %v", req.GetVolumeId(), err)
++				}
++			} else {
++				return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s: %v", req.GetVolumeId(), err)
++			}
++		} else {
++			return nil, status.Errorf(codes.Internal, "NodePublishVolume failed for %s: %v", req.GetVolumeId(), err)
++		}
  	}
  
  	// Runs post-mount xfs_io if PostMountXfsOpts is configured
