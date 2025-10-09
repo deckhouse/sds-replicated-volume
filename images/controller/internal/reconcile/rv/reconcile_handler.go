@@ -173,16 +173,16 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 			continue
 		}
 
-		var lvgPoolFound bool
 		if h.rv.Spec.LVM.Type == "Thin" {
+			var lvgPoolFound bool
 			for _, tp := range lvg.Spec.ThinPools {
 				if lvgRef.ThinPoolName == tp.Name {
 					lvgPoolFound = true
 				}
 			}
-		}
-		if !lvgPoolFound {
-			return fmt.Errorf("thin pool '%s' not found in LVG '%s'", lvgRef.ThinPoolName, lvg.Name)
+			if !lvgPoolFound {
+				return fmt.Errorf("thin pool '%s' not found in LVG '%s'", lvgRef.ThinPoolName, lvg.Name)
+			}
 		}
 
 		var publishRequested bool
