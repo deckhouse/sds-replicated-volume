@@ -3,14 +3,21 @@ package rv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"slices"
 	"time"
 
+	"github.com/deckhouse/sds-common-lib/utils"
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"golang.org/x/sync/errgroup"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,17 +44,224 @@ type resourceReconcileRequestHandler struct {
 	rv  *v1alpha2.ReplicatedVolume
 }
 
-func (h *resourceReconcileRequestHandler) selectLVGs() (res []v1alpha2.LVGRef, err error) {
-	//
-	// TransZonal;Zonal;Ignored
-	if h.rv.Spec.Topology == "Ignored" {
+type replicaInfo struct {
+	Node             *corev1.Node
+	NodeAddress      corev1.NodeAddress
+	Zone             string
+	LVG              *snc.LVMVolumeGroup
+	LLVProps         cluster.LLVProps
+	PublishRequested bool
+	Score            *replicaScoreBuilder
+}
 
+type replicaScoreBuilder struct {
+	disklessPurpose  bool
+	withDisk         bool
+	publishRequested bool
+}
+
+func (b *replicaScoreBuilder) clusterHasDiskless() {
+	b.disklessPurpose = true
+}
+
+func (b *replicaScoreBuilder) replicaWithDisk() {
+	b.withDisk = true
+}
+
+func (b *replicaScoreBuilder) replicaPublishRequested() {
+	b.publishRequested = true
+}
+
+func (b *replicaScoreBuilder) Build() []topology.Score {
+	baseScore := topology.Score(100)
+	var scores []topology.Score
+	if b.withDisk {
+		if b.publishRequested {
+			scores = append(scores, topology.AlwaysSelect)
+		} else {
+			scores = append(scores, baseScore)
+		}
+	} else {
+		scores = append(scores, topology.NeverSelect)
 	}
-	return nil, nil
+
+	if b.disklessPurpose {
+		if b.withDisk {
+			scores = append(scores, baseScore)
+		} else {
+			// prefer nodes without disk for diskless purposes
+			scores = append(scores, baseScore*2)
+		}
+	}
+	return scores
 }
 
 func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("controller: reconcile resource", "name", h.rv.Name)
+
+	// tie-breaker
+	var needTieBreaker bool
+	var counts = []int{int(h.rv.Spec.Replicas)}
+	if h.rv.Spec.Replicas%2 == 0 {
+		needTieBreaker = true
+		counts = append(counts, 1)
+	}
+
+	zones := make(map[string]struct{}, len(h.rv.Spec.Zones))
+	for _, zone := range h.rv.Spec.Zones {
+		zones[zone] = struct{}{}
+	}
+
+	lvgRefs := make(map[string]*v1alpha2.LVGRef, len(h.rv.Spec.LVM.LVMVolumeGroups))
+	for i := range h.rv.Spec.LVM.LVMVolumeGroups {
+		lvgRefs[h.rv.Spec.LVM.LVMVolumeGroups[i].Name] = &h.rv.Spec.LVM.LVMVolumeGroups[i]
+	}
+
+	var pool map[string]*replicaInfo
+
+	nodeList := &corev1.NodeList{}
+	if err := h.rdr.List(h.ctx, nodeList); err != nil {
+		return fmt.Errorf("getting nodes: %w", err)
+	}
+
+	for node := range uslices.Ptrs(nodeList.Items) {
+		nodeZone := node.Labels["topology.kubernetes.io/zone"]
+		if _, ok := zones[nodeZone]; ok {
+
+			// TODO ignore non-ready nodes?
+			addr, found := uiter.Find(
+				slices.Values(node.Status.Addresses),
+				func(addr corev1.NodeAddress) bool {
+					return addr.Type == corev1.NodeInternalIP
+				},
+			)
+			if !found {
+				h.log.Warn("ignoring node, because it has no InternalIP address", "node.Name", node.Name)
+				continue
+			}
+
+			ri := &replicaInfo{
+				Node:        node,
+				NodeAddress: addr,
+				Zone:        nodeZone,
+				Score:       &replicaScoreBuilder{},
+			}
+
+			if needTieBreaker {
+				ri.Score.clusterHasDiskless()
+			}
+
+			pool[node.Name] = ri
+		}
+	}
+
+	// validate:
+	// - LVGs are in nodePool
+	// - only one LVGs on a node
+	// - all publishRequested have LVG
+	// - LVG type and poolname are the same as in LVG ref
+	// TODO: validate LVG status?
+	lvgList := &snc.LVMVolumeGroupList{}
+	if err := h.rdr.List(h.ctx, lvgList); err != nil {
+		return fmt.Errorf("getting lvgs: %w", err)
+	}
+
+	publishRequestedFoundLVG := make([]bool, len(h.rv.Spec.PublishRequested))
+	for lvg := range uslices.Ptrs(lvgList.Items) {
+		lvgRef, ok := lvgRefs[lvg.Name]
+		if !ok {
+			continue
+		}
+
+		if h.rv.Spec.LVM.Type != lvg.Spec.Type {
+			return fmt.Errorf(
+				"RV's reference to LVG '%s' has type '%s', but real type is '%s'",
+				lvg.Name, h.rv.Spec.LVM.Type, lvg.Spec.Type,
+			)
+		}
+
+		var lvgPoolFound bool
+		if lvg.Spec.Type == "Thin" {
+			for _, tp := range lvg.Spec.ThinPools {
+				if lvgRef.ThinPoolName == tp.Name {
+					lvgPoolFound = true
+				}
+			}
+		}
+		if !lvgPoolFound {
+			return fmt.Errorf("thin pool '%s' not found in LVG '%s'", lvgRef.ThinPoolName, lvg.Name)
+		}
+
+		var publishRequested bool
+		for i := range h.rv.Spec.PublishRequested {
+			if lvg.Spec.Local.NodeName == h.rv.Spec.PublishRequested[i] {
+				publishRequestedFoundLVG[i] = true
+				publishRequested = true
+			}
+		}
+
+		if repl, ok := pool[lvg.Spec.Local.NodeName]; !ok {
+			return fmt.Errorf("lvg '%s' is on node '%s', which is not in any of specified zones", lvg.Name, lvg.Spec.Local.NodeName)
+		} else if repl.LVG != nil {
+			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
+		} else {
+			switch lvg.Spec.Type {
+			case "Thin":
+				repl.LLVProps = cluster.ThinVolumeProps{
+					PoolName: lvgRef.ThinPoolName,
+				}
+			case "Thick":
+				repl.LLVProps = cluster.ThickVolumeProps{
+					Contigous: utils.Ptr(true),
+				}
+			default:
+				return fmt.Errorf("unsupported LVG Type: '%s' has type '%s'", lvg.Name, lvg.Spec.Type)
+			}
+
+			repl.LVG = lvg
+			repl.Score.replicaWithDisk()
+			if publishRequested {
+				repl.Score.replicaPublishRequested()
+				repl.PublishRequested = true
+			}
+		}
+	}
+
+	for i, found := range publishRequestedFoundLVG {
+		if !found {
+			return fmt.Errorf("publishRequested can not be satisfied - no LVG found for node '%s'", h.rv.Spec.PublishRequested[i])
+		}
+	}
+
+	// solve topology
+	var nodeSelector topology.NodeSelector
+	switch h.rv.Spec.Topology {
+	case "TransZonal":
+		sel := topology.NewTransZonalMultiPurposeNodeSelector(len(counts))
+		for nodeName, repl := range pool {
+			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
+		}
+		nodeSelector = sel
+	case "Zonal":
+		sel := topology.NewZonalMultiPurposeNodeSelector(len(counts))
+		for nodeName, repl := range pool {
+			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
+		}
+		nodeSelector = sel
+	case "Ignore":
+		sel := topology.NewMultiPurposeNodeSelector(len(counts))
+		for nodeName, repl := range pool {
+			sel.SetNode(nodeName, repl.Score.Build())
+		}
+		nodeSelector = sel
+	default:
+		return fmt.Errorf("unknown topology: %s", h.rv.Spec.Topology)
+	}
+
+	selectedNodes, err := nodeSelector.SelectNodes(counts)
+	if err != nil {
+		return fmt.Errorf("selecting nodes: %w", err)
+	}
 
 	// Build cluster with required clients and port range (non-cached reader for data fetches)
 	clr := cluster.New(
@@ -57,13 +271,26 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)},
 		&llvClientImpl{rdr: h.rdr, log: h.log.WithGroup("llvClient")},
 		h.rv.Name,
-		200000000,
-		"shared-secret", // TODO: source from a Secret/config when available
+		h.rv.Spec.Size.Value(),
+		h.rv.Spec.SharedSecret,
 	)
 
-	clr.AddReplica("a-stefurishin-worker-0", "10.10.11.52", true, 0, 0).AddVolume("lvg-0-1", "vg-1", cluster.ThickVolumeProps{})
-	clr.AddReplica("a-stefurishin-worker-1", "10.10.11.149", false, 0, 0).AddVolume("lvg-1-1", "vg-1", cluster.ThickVolumeProps{})
-	clr.AddReplica("a-stefurishin-worker-2", "10.10.11.150", false, 0, 0) // diskless
+	// diskful
+	quorum := h.rv.Spec.Replicas/2 + 1
+	qmr := h.rv.Spec.Replicas/2 + 1
+
+	for _, nodeName := range selectedNodes[0] {
+		repl := pool[nodeName]
+
+		clr.AddReplica(nodeName, repl.NodeAddress.Address, repl.PublishRequested, quorum, qmr).
+			AddVolume(repl.LVG.Name, repl.LVG.Spec.ActualVGNameOnTheNode, repl.LLVProps)
+	}
+
+	if needTieBreaker {
+		nodeName := selectedNodes[1][0]
+		repl := pool[nodeName]
+		clr.AddReplica(nodeName, repl.NodeAddress.Address, repl.PublishRequested, quorum, qmr)
+	}
 
 	action, err := clr.Reconcile()
 	if err != nil {

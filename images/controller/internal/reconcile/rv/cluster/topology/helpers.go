@@ -17,6 +17,10 @@ var MaxSelectionCount = 8 // TODO adjust
 var ErrInputError = errors.New("invalid input to SelectNodes")
 var ErrSelectionImpossibleError = errors.New("node selection problem is not solvable")
 
+type NodeSelector interface {
+	SelectNodes(counts []int) ([][]string, error)
+}
+
 type node struct {
 	nodeId string
 	scores []Score
