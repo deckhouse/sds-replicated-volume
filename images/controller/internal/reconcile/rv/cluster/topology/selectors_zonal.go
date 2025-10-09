@@ -41,5 +41,9 @@ func (s *ZonalMultiPurposeNodeSelector) SelectNodes(counts []int) ([][]string, e
 		}
 	}
 
+	if len(bestNodes) == 0 {
+		return nil, ErrSelectionImpossibleError
+	}
+
 	return compact(bestNodes, counts), nil
 }

@@ -23,9 +23,7 @@ func (s *MultiPurposeNodeSelector) SetNode(nodeId string, scores []Score) {
 	node := &node{
 		nodeId: nodeId,
 	}
-	for _, score := range scores {
-		node.scores = append(node.scores, int64(score))
-	}
+	node.scores = scores
 
 	s.nodes = append(s.nodes, node)
 

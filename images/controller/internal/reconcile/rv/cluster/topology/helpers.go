@@ -15,10 +15,11 @@ var MaxPurposeCount = 100 // TODO adjust
 var MaxSelectionCount = 8 // TODO adjust
 
 var ErrInputError = errors.New("invalid input to SelectNodes")
+var ErrSelectionImpossibleError = errors.New("node selection problem is not solvable")
 
 type node struct {
 	nodeId string
-	scores []int64
+	scores []Score
 }
 
 type zone struct {
@@ -59,7 +60,15 @@ func solveZone(nodes []*node, totalCount int, counts []int) ([]string, int64) {
 		m := hungarian.NewScoreMatrix[*node](totalCount)
 
 		for _, node := range nodes {
-			m.AddRow(node, slices.Collect(repeat(node.scores, counts)))
+			m.AddRow(
+				node,
+				slices.Collect(
+					uiter.Map(
+						repeat(node.scores, counts),
+						func(s Score) int64 { return int64(s) },
+					),
+				),
+			)
 		}
 
 		optimalNodes, totalScore := m.Solve()

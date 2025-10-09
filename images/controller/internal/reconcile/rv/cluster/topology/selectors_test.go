@@ -205,7 +205,7 @@ func filterNonEmpty(s []string) []string {
 	return out
 }
 
-func TestMultiSelector_CustomFormat(t *testing.T) {
+func TestSelectors(t *testing.T) {
 	suites, err := parseCustomSuites(testCasesText)
 	if err != nil {
 		t.Fatalf("parse: %v", err)

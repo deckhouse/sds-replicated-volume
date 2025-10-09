@@ -1,6 +1,7 @@
 package topology
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 
@@ -21,6 +22,44 @@ func NewTransZonalMultiPurposeNodeSelector(purposeCount int) *TransZonalMultiPur
 func (s *TransZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, scores []Score) {
 	if len(scores) != s.purposeCount {
 		panic(fmt.Sprintf("expected len(scores) to be %d (purposeCount), got %d", s.purposeCount, len(scores)))
+	}
+
+	idx, found := slices.BinarySearchFunc(
+		s.zones,
+		zoneId,
+		func(z *zone, id string) int { return cmp.Compare(z.zoneId, id) },
+	)
+
+	var z *zone
+	if found {
+		z = s.zones[idx]
+	} else {
+		z = &zone{
+			zoneId:                zoneId,
+			bestNodesForPurposes:  make([]*node, s.purposeCount),
+			bestScoresForPurposes: make([]int64, s.purposeCount),
+		}
+		s.zones = slices.Insert(s.zones, idx, z)
+	}
+
+	idx, found = slices.BinarySearchFunc(z.nodes, nodeId, func(n *node, id string) int { return cmp.Compare(n.nodeId, id) })
+	var n *node
+	if found {
+		n = z.nodes[idx]
+	} else {
+		n = &node{
+			nodeId: nodeId,
+		}
+		z.nodes = slices.Insert(z.nodes, idx, n)
+	}
+	n.scores = scores
+
+	for i, bestScore := range z.bestScoresForPurposes {
+		nodeScore := int64(scores[i])
+		if z.bestNodesForPurposes[i] == nil || nodeScore > bestScore {
+			z.bestScoresForPurposes[i] = nodeScore
+			z.bestNodesForPurposes[i] = n
+		}
 	}
 
 	// TODO
