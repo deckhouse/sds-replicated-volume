@@ -181,7 +181,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		}
 
 		var lvgPoolFound bool
-		if lvg.Spec.Type == "Thin" {
+		if h.rv.Spec.LVM.Type == "Thin" {
 			for _, tp := range lvg.Spec.ThinPools {
 				if lvgRef.ThinPoolName == tp.Name {
 					lvgPoolFound = true
@@ -205,7 +205,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		} else if repl.LVG != nil {
 			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
 		} else {
-			switch lvg.Spec.Type {
+			switch h.rv.Spec.LVM.Type {
 			case "Thin":
 				repl.LLVProps = cluster.ThinVolumeProps{
 					PoolName: lvgRef.ThinPoolName,
@@ -215,7 +215,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 					Contigous: utils.Ptr(true),
 				}
 			default:
-				return fmt.Errorf("unsupported LVG Type: '%s' has type '%s'", lvg.Name, lvg.Spec.Type)
+				return fmt.Errorf("unsupported volume Type: '%s' has type '%s'", lvg.Name, h.rv.Spec.LVM.Type)
 			}
 
 			repl.LVG = lvg
