@@ -117,7 +117,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		lvgRefs[h.rv.Spec.LVM.LVMVolumeGroups[i].Name] = &h.rv.Spec.LVM.LVMVolumeGroups[i]
 	}
 
-	var pool map[string]*replicaInfo
+	pool := map[string]*replicaInfo{}
 
 	nodeList := &corev1.NodeList{}
 	if err := h.rdr.List(h.ctx, nodeList); err != nil {
