@@ -1,0 +1,19 @@
+---
+description: Repository-wide Cursor Context Rules for sds-replicated-volume-2
+globs:
+  - "**/*"
+alwaysApply: true
+---
+
+- Tests: embed static fixtures using //go:embed into a []byte. Do not read from disk at runtime unless embedding is impossible.
+- Struct tags: include only the codec actually used. Do not duplicate json and yaml tags unless both are parsed in the same code path. Prefer relying on field names; add a yaml tag only when the YAML key differs and renaming the field would hurt clarity.
+- Tests should be minimal: only include fields that are asserted. Avoid optional features until used. Prefer small, explicit test bodies over helpers until reused in 3+ places.
+- Match existing formatting and indentation exactly.
+
+- Cleanup policy: if I create a file and later replace it with a correct alternative, I must remove the now-invalid file(s) in the same change.
+- Dialogue adherence: user answers are authoritative context. If I ask a question and receive an answer, subsequent actions must align with that answer and not contradict or ignore it.
+
+- Topology tests specifics:
+  - Parse YAML fixtures into existing structs without adding extra tags.
+  - Embed testdata (e.g., testdata/tests.yaml) and unmarshal directly; avoid runtime I/O.
+

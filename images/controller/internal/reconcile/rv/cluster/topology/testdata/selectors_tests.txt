@@ -1,0 +1,150 @@
+2 nodes, 1 purpose
+
+a=10
+b=20
+
+> 1
+< b
+
+> 2
+< (a,b)
+
+---
+
+4 nodes, 3 purposes
+
+a=1,2,3
+b=0,0,0
+c=3,2,1
+d=5,5,5
+
+> 0
+< err=invalid input to SelectNodes
+
+> 0,0
+< err=invalid input to SelectNodes
+
+> 0,0,0
+< err=invalid input to SelectNodes
+
+> 0,0,1
+< err=invalid input to SelectNodes
+
+> 1,0,1
+< err=invalid input to SelectNodes
+
+> 2,1,1
+< (b,c),d,a
+
+> 1,1,2
+< c,d,(a,b)
+
+
+---
+
+transzonal OnePerGroup_positive
+
+zone-a/node-0=1,0,0
+zone-a/node-1=0,1,0
+zone-a/node-2=0,0,1
+
+zone-b/node-3=2,0,0
+zone-b/node-4=0,2,0
+zone-b/node-5=0,0,2
+
+zone-c/node-6=3,0,0
+zone-c/node-7=0,3,0
+zone-c/node-8=0,0,3
+
+zone-d0/node-9=-1,-1,-1
+zone-d1/node-10=-1,-1,-1
+zone-d2/node-11=-1,-1,-1
+zone-e/node-12=N,N,N
+
+> 1,2,3
+< node-6,(node-4,node-1),(node-9,node-10,node-11)
+
+---
+
+transzonal OnePerGroup_negative_because_NeverSelect
+
+zone-a/node-0=1,0,0
+zone-a/node-1=0,1,0
+zone-a/node-2=0,0,1
+zone-b/node-3=2,0,0
+zone-b/node-4=0,2,0
+zone-b/node-5=0,0,2
+zone-c/node-6=3,0,0
+zone-c/node-7=0,3,0
+zone-c/node-8=0,0,3
+zone-d0/node-9=-1,-1,-1
+zone-d1/node-10=-1,-1,-1
+zone-d2/node-11=-1,-1,-1
+zone-e/node-12=N,N,N
+
+> 1,2,4
+< err=not enough slots for selection
+
+---
+
+transzonal OnePerGroup_negative_because_AlwaysSelect_same_group
+
+zone-a/node-0=0
+zone-a/node-1=0
+zone-a/node-2=0
+zone-b/node-3=A
+zone-b/node-4=A
+zone-b/node-5=0
+
+> 2
+< err=can not select slot, which is required for selection
+
+---
+
+transzonal OnePerGroup_negative_because_AlwaysSelect_different_group
+
+zone-a/node-0=A
+zone-a/node-1=0
+zone-a/node-2=0
+zone-b/node-3=0
+zone-b/node-4=0
+zone-b/node-5=A
+
+> 1
+< err=can not select slot, which is required for selection
+
+---
+
+transzonal OnePerGroup_negative_because_AlwaysSelect_count_zero
+
+zone-a/node-0=A
+zone-a/node-1=0
+zone-a/node-2=0
+zone-b/node-3=0
+zone-b/node-4=0
+zone-b/node-5=0
+
+> 0
+< err=invalid input to SelectNodes
+
+---
+
+zonal SingleGroup_positive
+
+zone-a/node-0=1,0,0
+zone-a/node-1=0,3,0
+zone-a/node-2=0,0,1
+zone-b/node-3=2,0,0
+zone-b/node-4=0,2,0
+zone-b/node-5=0,0,2
+zone-c/node-6=3,0,0
+zone-c/node-7=0,1,0
+zone-c/node-8=0,0,3
+zone-d0/node-9=-1,-1,-1
+zone-d1/node-10=-1,-1,-1
+zone-d2/node-11=-1,-1,-1
+zone-e/node-12=N,N,N
+
+> 1,2,3
+< node-6,(node-7,node-8),(node-9,node-10,node-11)
+
