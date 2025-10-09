@@ -163,7 +163,7 @@ func elementCombinations[T any](s []T, k int) iter.Seq[[]T] {
 // If you need to retain a combination, copy it in the caller.
 func indexCombinations(n int, k int) iter.Seq[[]int] {
 	if k > n {
-		panic("expected k<=n")
+		panic(fmt.Sprintf("expected k<=n, got k=%d, n=%d", k, n))
 	}
 
 	result := make([]int, k)

@@ -232,18 +232,21 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	case "TransZonal":
 		sel := topology.NewTransZonalMultiPurposeNodeSelector(len(counts))
 		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with TransZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
 			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
 		}
 		nodeSelector = sel
 	case "Zonal":
 		sel := topology.NewZonalMultiPurposeNodeSelector(len(counts))
 		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with ZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
 			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
 		}
 		nodeSelector = sel
 	case "Ignore":
 		sel := topology.NewMultiPurposeNodeSelector(len(counts))
 		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with MultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
 			sel.SetNode(nodeName, repl.Score.Build())
 		}
 		nodeSelector = sel
@@ -251,6 +254,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return fmt.Errorf("unknown topology: %s", h.rv.Spec.Topology)
 	}
 
+	h.log.Info("selecting nodes", "counts", counts)
 	selectedNodes, err := nodeSelector.SelectNodes(counts)
 	if err != nil {
 		return fmt.Errorf("selecting nodes: %w", err)

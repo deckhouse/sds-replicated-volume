@@ -12,7 +12,7 @@ spec:
     listKind: ReplicatedVolumeList
     plural: replicatedvolumes
     shortNames:
-    - rvr
+    - rv
     singular: replicatedvolume
   scope: Cluster
   versions:
