@@ -173,13 +173,6 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 			continue
 		}
 
-		if h.rv.Spec.LVM.Type != lvg.Spec.Type {
-			return fmt.Errorf(
-				"RV's reference to LVG '%s' has type '%s', but real type is '%s'",
-				lvg.Name, h.rv.Spec.LVM.Type, lvg.Spec.Type,
-			)
-		}
-
 		var lvgPoolFound bool
 		if h.rv.Spec.LVM.Type == "Thin" {
 			for _, tp := range lvg.Spec.ThinPools {
