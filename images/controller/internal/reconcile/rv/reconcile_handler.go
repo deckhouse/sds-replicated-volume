@@ -58,6 +58,7 @@ type replicaScoreBuilder struct {
 	disklessPurpose  bool
 	withDisk         bool
 	publishRequested bool
+	alreadyExists    bool
 }
 
 func (b *replicaScoreBuilder) clusterHasDiskless() {
@@ -68,16 +69,21 @@ func (b *replicaScoreBuilder) replicaWithDisk() {
 	b.withDisk = true
 }
 
+func (b *replicaScoreBuilder) replicaAlreadyExists() {
+	b.alreadyExists = true
+}
+
 func (b *replicaScoreBuilder) replicaPublishRequested() {
 	b.publishRequested = true
 }
 
 func (b *replicaScoreBuilder) Build() []topology.Score {
 	baseScore := topology.Score(100)
+	maxScore := topology.Score(1000000)
 	var scores []topology.Score
 	if b.withDisk {
-		if b.publishRequested {
-			scores = append(scores, topology.AlwaysSelect)
+		if b.publishRequested || b.alreadyExists {
+			scores = append(scores, maxScore)
 		} else {
 			scores = append(scores, baseScore)
 		}
@@ -159,7 +165,6 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	// - LVGs are in nodePool
 	// - only one LVGs on a node
 	// - all publishRequested have LVG
-	// - LVG type and poolname are the same as in LVG ref
 	// TODO: validate LVG status?
 	lvgList := &snc.LVMVolumeGroupList{}
 	if err := h.rdr.List(h.ctx, lvgList); err != nil {
@@ -226,6 +231,17 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		}
 	}
 
+	// prioritize existing nodes
+	rvrClient := &rvrClientImpl{rdr: h.rdr, log: h.log.WithGroup("rvrClient")}
+	rvrs, err := rvrClient.ByReplicatedVolumeName(h.ctx, h.rv.Name)
+	if err != nil {
+		return fmt.Errorf("getting rvrs: %w", err)
+	}
+	for i := range rvrs {
+		repl := pool[rvrs[i].Spec.NodeName]
+		repl.Score.replicaAlreadyExists()
+	}
+
 	// solve topology
 	var nodeSelector topology.NodeSelector
 	switch h.rv.Spec.Topology {
@@ -264,7 +280,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	// Build cluster with required clients and port range (non-cached reader for data fetches)
 	clr := cluster.New(
 		h.ctx,
-		&rvrClientImpl{rdr: h.rdr, log: h.log.WithGroup("rvrClient")},
+		rvrClient,
 		&nodeRVRClientImpl{rdr: h.rdr, log: h.log.WithGroup("nodeRvrClient")},
 		drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)},
 		&llvClientImpl{rdr: h.rdr, log: h.log.WithGroup("llvClient")},
