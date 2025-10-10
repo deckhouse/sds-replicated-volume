@@ -406,7 +406,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
 			}
-			if target.Status == nil || target.Status.Phase != "Ready" {
+			if target.Status == nil || target.Status.Phase != "Created" {
 				return false, nil
 			}
 			specQty, err := resource.ParseQuantity(target.Spec.Size)
