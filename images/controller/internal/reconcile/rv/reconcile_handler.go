@@ -259,6 +259,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	if err != nil {
 		return fmt.Errorf("selecting nodes: %w", err)
 	}
+	h.log.Info("selected nodes", "selectedNodes", selectedNodes)
 
 	// Build cluster with required clients and port range (non-cached reader for data fetches)
 	clr := cluster.New(
