@@ -365,7 +365,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		h.log.Debug("RVR wait start", "name", target.Name)
 		gen := target.GetGeneration()
 		err := wait.PollUntilContextTimeout(h.ctx, 500*time.Millisecond, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
+			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
 			}
 			if target.Status == nil {
@@ -403,7 +403,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		target := action.LVMLogicalVolume
 		h.log.Debug("LLV wait start", "name", target.Name)
 		err := wait.PollUntilContextTimeout(h.ctx, 500*time.Millisecond, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
-			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); err != nil {
+			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
 			}
 			if target.Status == nil || target.Status.Phase != "Ready" {
@@ -444,7 +444,24 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			}
 		}
 		if allSynced {
-			h.log.Debug("All resources synced")
+			if err := api.PatchWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
+				meta.SetStatusCondition(
+					&rv.Status.Conditions,
+					metav1.Condition{
+						Type:               v1alpha2.ConditionTypeReady,
+						Status:             metav1.ConditionTrue,
+						ObservedGeneration: rv.Generation,
+						Reason:             "All resources synced",
+					},
+				)
+				return nil
+			}); err != nil {
+				h.log.Error("RV patch failed (setting Ready=true)", "name", h.rv.Name, "err", err)
+				return err
+			}
+			h.log.Debug("RV patch done (setting Ready=true)", "name", h.rv.Name)
+
+			h.log.Info("All resources synced")
 			return nil
 		}
 		if !allSafeToBeSynced {
