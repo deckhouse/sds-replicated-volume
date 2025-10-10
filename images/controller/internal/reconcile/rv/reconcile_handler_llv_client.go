@@ -25,7 +25,7 @@ func (l *llvClientImpl) ByActualNamesOnTheNode(ctx context.Context, nodeName str
 	}
 	for i := range llvList.Items {
 		llv := &llvList.Items[i]
-		if llv.Spec.ActualLVNameOnTheNode == actualLVNameOnTheNode && llv.Spec.LVMVolumeGroupName == actualVGNameOnTheNode {
+		if llv.Spec.ActualLVNameOnTheNode == actualLVNameOnTheNode {
 			l.log.Debug("LLV found", "name", llv.Name)
 			return llv, nil
 		}
