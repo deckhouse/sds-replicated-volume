@@ -96,7 +96,7 @@ func (v *diskfulVolume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 	return nil
 }
 
-func (v *diskfulVolume) reconcile() Action {
+func (v *diskfulVolume) reconcile() (Action, bool, error) {
 	// TODO: do not recreate LLV, recreate replicas
 	// TODO: discuss that Failed LLV may lead to banned nodes
 	if v.dprops.existingLLV != nil {
@@ -119,7 +119,7 @@ func (v *diskfulVolume) reconcile() Action {
 		return Actions{
 			CreateLVMLogicalVolume{LVMLogicalVolume: llv},
 			WaitLVMLogicalVolume{llv},
-		}
+		}, false, nil
 	}
 }
 
@@ -134,23 +134,42 @@ func (v *diskfulVolume) rvrVolume() v1alpha2.Volume {
 	return rvrVolume
 }
 
-func (v *diskfulVolume) reconcileLLV() Action {
-	return LLVPatch{
-		LVMLogicalVolume: v.dprops.existingLLV,
-		Apply: func(llv *snc.LVMLogicalVolume) error {
-			// Resize only when a positive desired size is specified and differs
-			// from the current one. Otherwise, leave as is (no-op patch).
-			if v.props.size > 0 {
-				desired := resource.NewQuantity(v.props.size, resource.BinarySI).String()
-				// TODO only increase
-				if llv.Spec.Size != desired {
-					llv.Spec.Size = desired
-				}
-			}
-			return nil
-		},
+func (v *diskfulVolume) reconcileLLV() (Action, bool, error) {
+	desired := resource.NewQuantity(v.props.size, resource.BinarySI)
+	actual, err := resource.ParseQuantity(v.dprops.existingLLV.Spec.Size)
+
+	if err != nil {
+		return nil, false, fmt.Errorf(
+			"parsing LLV %s spec size '%s': %w",
+			v.dprops.existingLLV.Name, v.dprops.existingLLV.Spec.Size, err,
+		)
 	}
 
+	if actual.Cmp(*desired) >= 0 {
+		return nil, false, nil
+	}
+
+	return Actions{
+		LLVPatch{
+			LVMLogicalVolume: v.dprops.existingLLV,
+			Apply: func(llv *snc.LVMLogicalVolume) error {
+				desired := resource.NewQuantity(v.props.size, resource.BinarySI)
+				actual, err := resource.ParseQuantity(llv.Spec.Size)
+				if err != nil {
+					return err
+				}
+
+				if actual.Cmp(*desired) >= 0 {
+					return nil
+				}
+				llv.Spec.Size = desired.String()
+				return nil
+			},
+		},
+		WaitLVMLogicalVolume{
+			LVMLogicalVolume: v.dprops.existingLLV,
+		},
+	}, true, nil
 	// TODO
 	// type LVMLogicalVolumeSpec struct {
 	// 	ActualLVNameOnTheNode string                     `json:"actualLVNameOnTheNode"`   // -

@@ -200,9 +200,17 @@ func (c *Cluster) Reconcile() (Action, error) {
 
 	// Create/Resize all volumes
 	pa := ParallelActions{}
+	var rvrToResize *v1alpha2.ReplicatedVolumeReplica
 	for _, replica := range c.replicas {
-		if a := replica.reconcileVolumes(); a != nil {
+		a, resized, err := replica.reconcileVolumes()
+		if err != nil {
+			return nil, err
+		}
+		if a != nil {
 			pa = append(pa, a)
+		}
+		if rvrToResize == nil && resized {
+			rvrToResize = replica.dprops.existingRVR
 		}
 	}
 
@@ -217,6 +225,13 @@ func (c *Cluster) Reconcile() (Action, error) {
 	actions := Actions{}
 	if len(pa) > 0 {
 		actions = append(actions, pa)
+
+		if rvrToResize != nil {
+			actions = append(actions, TriggerRVRResize{
+				ReplicatedVolumeReplica: rvrToResize,
+			})
+		}
+
 	} else if len(toAdd)+len(toDelete) == 0 {
 		// initial sync
 		rvrs := make([]*v1alpha2.ReplicatedVolumeReplica, 0, len(replicasByNodeName))

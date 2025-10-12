@@ -499,6 +499,23 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		}
 		h.log.Debug("RVR patch done (primary-force)", "name", rvr.Name)
 		return nil
+	case cluster.TriggerRVRResize:
+		rvr := action.ReplicatedVolumeReplica
+
+		if err := api.PatchWithConflictRetry(h.ctx, h.cl, rvr, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+			ann := r.GetAnnotations()
+			if ann == nil {
+				ann = map[string]string{}
+			}
+			ann[v1alpha2.AnnotationKeyNeedResize] = "true"
+			r.SetAnnotations(ann)
+			return nil
+		}); err != nil {
+			h.log.Error("RVR patch failed (need-resize)", "name", rvr.Name, "err", err)
+			return err
+		}
+		h.log.Debug("RVR patch done (need-resize)", "name", rvr.Name)
+		return nil
 	default:
 		panic("unknown action type")
 	}

@@ -42,9 +42,9 @@ func (v *disklessVolume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 	return nil
 }
 
-func (v *disklessVolume) reconcile() Action {
+func (v *disklessVolume) reconcile() (Action, bool, error) {
 	// not creating llv for diskless replica
-	return nil
+	return nil, false, nil
 }
 
 func (v *disklessVolume) rvrVolume() v1alpha2.Volume {

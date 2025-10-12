@@ -36,7 +36,7 @@ type Replica struct {
 
 type volume interface {
 	initialize(existingRVRVolume *v1alpha2.Volume) error
-	reconcile() Action
+	reconcile() (Action, bool, error)
 	rvrVolume() v1alpha2.Volume
 	shouldBeRecreated(rvrVol *v1alpha2.Volume) bool
 }
@@ -218,18 +218,28 @@ func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 	return rvr
 }
 
-func (r *Replica) reconcileVolumes() Action {
+func (r *Replica) reconcileVolumes() (Action, bool, error) {
 	var actions Actions
+
+	var resizeNeeded bool
 	for _, vol := range r.volumes {
-		a := vol.reconcile()
+		a, resized, err := vol.reconcile()
+		if err != nil {
+			return nil, false, err
+		}
 		if a != nil {
 			actions = append(actions, a)
 		}
+
+		if resized {
+			resizeNeeded = true
+		}
 	}
 	if len(actions) == 0 {
-		return nil
+		return nil, false, nil
 	}
-	return actions
+
+	return actions, resizeNeeded, nil
 }
 
 func (r *Replica) recreateOrFix() Action {
