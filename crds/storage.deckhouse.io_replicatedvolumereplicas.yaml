@@ -85,9 +85,6 @@ spec:
                     maximum: 65535
                     minimum: 1025
                     type: integer
-                    x-kubernetes-validations:
-                    - message: port is immutable
-                      rule: self == oldSelf
                 required:
                 - ipv4
                 - port
@@ -118,9 +115,6 @@ spec:
                           maximum: 65535
                           minimum: 1025
                           type: integer
-                          x-kubernetes-validations:
-                          - message: port is immutable
-                            rule: self == oldSelf
                       required:
                       - ipv4
                       - port
@@ -128,16 +122,10 @@ spec:
                     diskless:
                       default: false
                       type: boolean
-                      x-kubernetes-validations:
-                      - message: peer diskless is immutable
-                        rule: self == oldSelf
                     nodeId:
                       maximum: 7
                       minimum: 0
                       type: integer
-                      x-kubernetes-validations:
-                      - message: peer nodeId is immutable
-                        rule: self == oldSelf
                     sharedSecret:
                       type: string
                   required:

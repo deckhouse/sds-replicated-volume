@@ -15,7 +15,7 @@ type DRBDPortRange interface {
 	PortMinMax() (uint, uint)
 }
 
-type ResourceManager struct {
+type NodeManager struct {
 	cl        NodeRVRClient
 	portRange DRBDPortRange
 	nodes     map[string]*nodeResources
@@ -26,17 +26,17 @@ type nodeResources struct {
 	usedMinors map[uint]struct{}
 }
 
-var _ PortManager = &ResourceManager{}
-var _ MinorManager = &ResourceManager{}
+var _ PortManager = &NodeManager{}
+var _ MinorManager = &NodeManager{}
 
-func NewResourceManager(cl NodeRVRClient, portRange DRBDPortRange) *ResourceManager {
-	return &ResourceManager{
+func NewNodeManager(cl NodeRVRClient, portRange DRBDPortRange) *NodeManager {
+	return &NodeManager{
 		cl:        cl,
 		portRange: portRange,
 	}
 }
 
-func (m *ResourceManager) ReserveNodeMinor(ctx context.Context, nodeName string) (uint, error) {
+func (m *NodeManager) ReserveNodeMinor(ctx context.Context, nodeName string) (uint, error) {
 	node, err := m.initNodeResources(ctx, nodeName)
 	if err != nil {
 		return 0, err
@@ -57,7 +57,7 @@ func (m *ResourceManager) ReserveNodeMinor(ctx context.Context, nodeName string)
 	return freeMinor, nil
 }
 
-func (m *ResourceManager) ReserveNodePort(ctx context.Context, nodeName string) (uint, error) {
+func (m *NodeManager) ReserveNodePort(ctx context.Context, nodeName string) (uint, error) {
 	node, err := m.initNodeResources(ctx, nodeName)
 	if err != nil {
 		return 0, err
@@ -76,7 +76,7 @@ func (m *ResourceManager) ReserveNodePort(ctx context.Context, nodeName string) 
 	return freePort, nil
 }
 
-func (m *ResourceManager) initNodeResources(ctx context.Context, nodeName string) (*nodeResources, error) {
+func (m *NodeManager) initNodeResources(ctx context.Context, nodeName string) (*nodeResources, error) {
 	r, ok := m.nodes[nodeName]
 	if ok {
 		return r, nil

@@ -179,14 +179,12 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peer nodeId is immutable"
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
 	Address Address `json:"address"`
 
 	// +kubebuilder:default=false
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="peer diskless is immutable"
 	Diskless bool `json:"diskless,omitempty"`
 
 	SharedSecret string `json:"sharedSecret,omitempty"`
@@ -235,7 +233,6 @@ type Address struct {
 
 	// +kubebuilder:validation:Minimum=1025
 	// +kubebuilder:validation:Maximum=65535
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="port is immutable"
 	Port uint `json:"port"`
 }
 

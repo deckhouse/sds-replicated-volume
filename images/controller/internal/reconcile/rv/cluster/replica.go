@@ -42,7 +42,6 @@ type volume interface {
 }
 
 type replicaProps struct {
-	id                      uint
 	rvName                  string
 	nodeName                string
 	sharedSecret            string
@@ -56,6 +55,7 @@ type replicaProps struct {
 type replicaDynamicProps struct {
 	existingRVR *v1alpha2.ReplicatedVolumeReplica
 	port        uint
+	id          uint
 }
 
 func (r *Replica) volumeNum() int {
@@ -106,6 +106,7 @@ func (r *Replica) addVolumeDiskless() {
 func (r *Replica) initialize(
 	existingRVR *v1alpha2.ReplicatedVolumeReplica,
 	allReplicas []*Replica,
+	nodeIdMgr NodeIdManager,
 ) error {
 	var port uint
 	if existingRVR == nil {
@@ -116,6 +117,17 @@ func (r *Replica) initialize(
 		port = freePort
 	} else {
 		port = existingRVR.Spec.NodeAddress.Port
+	}
+
+	var nodeId uint
+	if existingRVR == nil {
+		freeNodeId, err := nodeIdMgr.ReserveNodeId()
+		if err != nil {
+			return err
+		}
+		nodeId = freeNodeId
+	} else {
+		nodeId = existingRVR.Spec.NodeId
 	}
 
 	for volId, vol := range r.volumes {
@@ -137,6 +149,7 @@ func (r *Replica) initialize(
 
 	r.dprops = replicaDynamicProps{
 		port:        port,
+		id:          nodeId,
 		existingRVR: existingRVR,
 	}
 
@@ -158,12 +171,12 @@ func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 
 	// peers
 	var rvrPeers map[string]v1alpha2.Peer
-	for nodeId, peer := range r.peers {
+	for _, peer := range r.peers {
 		rvrPeers = umaps.Set(
 			rvrPeers,
 			peer.props.nodeName,
 			v1alpha2.Peer{
-				NodeId: uint(nodeId),
+				NodeId: uint(peer.dprops.id),
 				Address: v1alpha2.Address{
 					IPv4: peer.props.ipv4,
 					Port: peer.dprops.port,
@@ -181,11 +194,12 @@ func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 		Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: r.props.rvName,
 			NodeName:             r.props.nodeName,
-			NodeId:               uint(r.props.id),
+			NodeId:               uint(r.dprops.id),
 			NodeAddress: v1alpha2.Address{
 				IPv4: r.props.ipv4,
 				Port: r.dprops.port,
 			},
+			Peers:                   rvrPeers,
 			SharedSecret:            r.props.sharedSecret,
 			Volumes:                 rvrVolumes,
 			Primary:                 r.props.primary,
@@ -300,16 +314,16 @@ func (r *Replica) shouldBeFixed(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
 		if !ok {
 			return true
 		}
-
+		if rvrPeer.NodeId != peer.dprops.id {
+			return true
+		}
+		if rvrPeer.Diskless != *peer.diskless {
+			return true
+		}
 		if rvrPeer.Address.IPv4 != peer.props.ipv4 {
 			return true
 		}
-
 		if rvrPeer.Address.Port != peer.dprops.port {
-			return true
-		}
-
-		if rvrPeer.SharedSecret != peer.props.sharedSecret {
 			return true
 		}
 	}
@@ -338,10 +352,10 @@ func (r *Replica) makeFix() func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 
 		// recreate peers
 		rvr.Spec.Peers = map[string]v1alpha2.Peer{}
-		for nodeId, peer := range r.peers {
+		for _, peer := range r.peers {
 			rvr.Spec.Peers[peer.props.nodeName] =
 				v1alpha2.Peer{
-					NodeId: uint(nodeId),
+					NodeId: peer.dprops.id,
 					Address: v1alpha2.Address{
 						IPv4: peer.props.ipv4,
 						Port: peer.dprops.port,
