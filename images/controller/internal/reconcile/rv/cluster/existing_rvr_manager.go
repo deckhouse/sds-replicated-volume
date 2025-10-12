@@ -27,6 +27,7 @@ func NewExistingRVRManager(existingRVRs []v1alpha2.ReplicatedVolumeReplica) *Exi
 func (e *ExistingRVRManager) ReserveNodeId() (uint, error) {
 	for nodeId := uint(0); nodeId <= MaxNodeId; nodeId++ {
 		if _, ok := e.occupiedNodeIds[nodeId]; !ok {
+			e.occupiedNodeIds[nodeId] = struct{}{}
 			return nodeId, nil
 		}
 	}
