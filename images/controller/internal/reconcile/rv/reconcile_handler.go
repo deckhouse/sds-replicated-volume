@@ -377,7 +377,6 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		// Wait for Ready=True with observedGeneration >= generation
 		target := action.ReplicatedVolumeReplica
 		h.log.Debug("RVR wait start", "name", target.Name)
-		gen := target.GetGeneration()
 		err := wait.PollUntilContextTimeout(h.ctx, 500*time.Millisecond, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
 			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
@@ -386,9 +385,16 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 				return false, nil
 			}
 			cond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeReady)
-			if cond == nil || cond.Status != metav1.ConditionTrue || cond.ObservedGeneration < gen {
+
+			if cond == nil || cond.ObservedGeneration < target.Generation {
 				return false, nil
 			}
+
+			if cond.Status == metav1.ConditionTrue ||
+				(cond.Status == metav1.ConditionFalse && cond.Reason == v1alpha2.ReasonWaitingForInitialSync) {
+				return true, nil
+			}
+
 			return true, nil
 		})
 		if err != nil {
