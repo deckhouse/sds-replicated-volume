@@ -258,11 +258,19 @@ func (c *Cluster) Reconcile() (Action, error) {
 	// TODO: but this can also be improved for the case when no more replicas
 	// for deletion has left - then we can parallelize the addition of new replicas
 	var rvrsToSkipDelete map[string]struct{}
+
+	var initialSyncTriggered bool
 	for id := range toAdd {
 		replica := replicasByNodeName[id]
 
 		rvr := replica.rvr("")
 		actions = append(actions, CreateReplicatedVolumeReplica{rvr}, WaitReplicatedVolumeReplica{rvr})
+
+		if len(toReconcile) == 0 && !initialSyncTriggered {
+			// first replica in cluster, do initial sync
+			initialSyncTriggered = true
+			actions = append(actions, WaitAndTriggerInitialSync{ReplicatedVolumeReplicas: []*v1alpha2.ReplicatedVolumeReplica{rvr}})
+		}
 
 		// 2.1. DELETE one rvr to alternate addition and deletion
 		for id := range toDelete {
