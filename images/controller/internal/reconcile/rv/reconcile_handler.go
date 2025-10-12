@@ -427,7 +427,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			if err != nil {
 				return false, err
 			}
-			if target.Status.ActualSize.Cmp(specQty) != 0 {
+			if target.Status.ActualSize.Cmp(specQty) < 0 {
 				return false, nil
 			}
 			return true, nil
