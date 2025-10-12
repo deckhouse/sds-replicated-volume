@@ -453,6 +453,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		h.log.Debug("LLV delete done", "name", action.LVMLogicalVolume.Name)
 		return nil
 	case cluster.WaitAndTriggerInitialSync:
+		h.log.Debug("WaitAndTriggerInitialSync", "name", h.rv.Name)
 		allSynced := true
 		allSafeToBeSynced := true
 		for _, rvr := range action.ReplicatedVolumeReplicas {

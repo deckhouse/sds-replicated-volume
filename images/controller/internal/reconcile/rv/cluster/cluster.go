@@ -219,7 +219,13 @@ func (c *Cluster) Reconcile() (Action, error) {
 
 	// 1. RECONCILE - fix or recreate existing replicas
 	for key := range toReconcile {
-		pa = append(pa, replicasByNodeName[key].recreateOrFix())
+		fixAction := replicasByNodeName[key].recreateOrFix()
+		if fixAction != nil {
+			// TODO: the need to check fixAction != nil is a general problem,
+			// which need to be solved in general if we want checks like
+			// "len(pa) > 0" to work as expected
+			pa = append(pa, fixAction)
+		}
 	}
 
 	actions := Actions{}
