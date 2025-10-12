@@ -280,6 +280,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	// Build cluster with required clients and port range (non-cached reader for data fetches)
 	clr := cluster.New(
 		h.ctx,
+		h.log,
 		rvrClient,
 		&nodeRVRClientImpl{rdr: h.rdr, log: h.log.WithGroup("nodeRvrClient")},
 		drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)},

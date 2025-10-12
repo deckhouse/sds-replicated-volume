@@ -3,6 +3,7 @@ package clustertest
 import (
 	"fmt"
 	"hash/fnv"
+	"log/slog"
 	"testing"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
@@ -316,6 +317,7 @@ func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 
 	clr := cluster.New(
 		t.Context(),
+		slog.Default(),
 		rvrClient,
 		rvrClient,
 		testPortRng,

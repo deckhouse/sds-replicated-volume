@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 
 	"github.com/deckhouse/sds-common-lib/utils"
@@ -17,6 +18,7 @@ const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
 
 type Replica struct {
 	ctx      context.Context
+	log      *slog.Logger
 	llvCl    LLVClient
 	rvrCl    RVRClient
 	portMgr  PortManager
@@ -237,32 +239,38 @@ func (r *Replica) recreateOrFix() Action {
 
 // TODO: separate recreate and replace
 func (r *Replica) shouldBeRecreated(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
-	if len(rvr.Spec.Volumes) != len(r.volumes) {
-		return true
-	}
+	// TODO:
 
-	for id, vol := range r.volumes {
-		rvrVol := &rvr.Spec.Volumes[id]
+	// if len(rvr.Spec.Volumes) != len(r.volumes) {
+	// 	r.log.Debug("shouldBeRecreated, because of volumes")
+	// 	return true
+	// }
 
-		if vol.shouldBeRecreated(rvrVol) {
-			return true
-		}
-	}
+	// for id, vol := range r.volumes {
+	// 	rvrVol := &rvr.Spec.Volumes[id]
 
-	for _, peer := range r.peers {
-		rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
-		if !ok {
-			continue
-		}
+	// 	if vol.shouldBeRecreated(rvrVol) {
+	// 		r.log.Debug("shouldBeRecreated, because of volume 'id'", "id", id)
+	// 		return true
+	// 	}
+	// }
 
-		if rvrPeer.NodeId != peer.props.id {
-			return true
-		}
+	// for _, peer := range r.peers {
+	// 	rvrPeer, ok := rvr.Spec.Peers[peer.props.nodeName]
+	// 	if !ok {
+	// 		continue
+	// 	}
 
-		if rvrPeer.Diskless != *peer.diskless {
-			return true
-		}
-	}
+	// 	if rvrPeer.NodeId != peer.props.id {
+	// 		r.log.Debug("shouldBeRecreated, because of peer 'id' ", "id", peer.props.id)
+	// 		return true
+	// 	}
+
+	// 	if rvrPeer.Diskless != *peer.diskless {
+	// 		r.log.Debug("shouldBeRecreated, because of peer 'id' disklessness", "id", peer.props.id)
+	// 		return true
+	// 	}
+	// }
 
 	return false
 }

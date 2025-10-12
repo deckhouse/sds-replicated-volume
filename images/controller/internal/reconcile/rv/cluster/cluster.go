@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 
@@ -36,6 +37,7 @@ type LLVClient interface {
 
 type Cluster struct {
 	ctx          context.Context
+	log          *slog.Logger
 	rvrCl        RVRClient
 	llvCl        LLVClient
 	portManager  PortManager
@@ -55,6 +57,7 @@ type ReplicaVolumeOptions struct {
 
 func New(
 	ctx context.Context,
+	log *slog.Logger,
 	rvrCl RVRClient,
 	nodeRVRCl NodeRVRClient,
 	portRange DRBDPortRange,
@@ -66,6 +69,7 @@ func New(
 	rm := NewResourceManager(nodeRVRCl, portRange)
 	return &Cluster{
 		ctx:          ctx,
+		log:          log,
 		rvName:       rvName,
 		rvrCl:        rvrCl,
 		llvCl:        llvCl,
@@ -85,6 +89,7 @@ func (c *Cluster) AddReplica(
 ) *Replica {
 	r := &Replica{
 		ctx:      c.ctx,
+		log:      c.log.With("replica", nodeName),
 		llvCl:    c.llvCl,
 		rvrCl:    c.rvrCl,
 		portMgr:  c.portManager,
