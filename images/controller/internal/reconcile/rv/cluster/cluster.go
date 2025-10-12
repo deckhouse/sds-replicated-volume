@@ -36,7 +36,8 @@ type PortManager interface {
 
 type LLVClient interface {
 	// return nil, when not found
-	ByActualNamesOnTheNode(ctx context.Context, nodeName string, actualVGNameOnTheNode string, actualLVNameOnTheNode string) (*snc.LVMLogicalVolume, error)
+
+	ByActualLVNameOnTheNode(ctx context.Context, nodeName string, actualLVNameOnTheNode string) (*snc.LVMLogicalVolume, error)
 }
 
 type Cluster struct {
@@ -287,12 +288,12 @@ func (c *Cluster) deleteRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Action, erro
 	actions := Actions{DeleteReplicatedVolumeReplica{ReplicatedVolumeReplica: rvr}}
 
 	for i := range rvr.Spec.Volumes {
-		actualVGNameOnTheNode, actualLVNameOnTheNode, err := rvr.Spec.Volumes[i].ParseDisk()
+		_, actualLVNameOnTheNode, err := rvr.Spec.Volumes[i].ParseDisk()
 		if err != nil {
 			return nil, err
 		}
 
-		llv, err := c.llvCl.ByActualNamesOnTheNode(c.ctx, rvr.Spec.NodeName, actualVGNameOnTheNode, actualLVNameOnTheNode)
+		llv, err := c.llvCl.ByActualLVNameOnTheNode(c.ctx, rvr.Spec.NodeName, actualLVNameOnTheNode)
 		if err != nil {
 			return nil, err
 		}

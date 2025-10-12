@@ -9,7 +9,7 @@ import (
 )
 
 type LLVPhysicalKey struct {
-	nodeName, actualVGNameOnTheNode, actualLVNameOnTheNode string
+	nodeName, actualLVNameOnTheNode string
 }
 
 type MockLLVClient struct {
@@ -21,13 +21,12 @@ func NewMockLLVClient(llvs map[LLVPhysicalKey]*snc.LVMLogicalVolume) *MockLLVCli
 	return res
 }
 
-func (m *MockLLVClient) ByActualNamesOnTheNode(
+func (m *MockLLVClient) ByActualLVNameOnTheNode(
 	ctx context.Context,
 	nodeName string,
-	actualVGNameOnTheNode string,
 	actualLVNameOnTheNode string,
 ) (*snc.LVMLogicalVolume, error) {
-	return m.llvs[LLVPhysicalKey{nodeName, actualVGNameOnTheNode, actualLVNameOnTheNode}], nil
+	return m.llvs[LLVPhysicalKey{nodeName, actualLVNameOnTheNode}], nil
 }
 
 var _ cluster.LLVClient = &MockLLVClient{}

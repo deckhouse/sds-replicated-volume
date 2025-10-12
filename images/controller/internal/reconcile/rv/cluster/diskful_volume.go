@@ -62,10 +62,9 @@ func (v *diskfulVolume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 		v.dprops.minor = existingRVRVolume.Device
 	}
 
-	existingLLV, err := v.llvCl.ByActualNamesOnTheNode(
+	existingLLV, err := v.llvCl.ByActualLVNameOnTheNode(
 		v.ctx,
 		v.props.nodeName,
-		v.dprops.actualVGNameOnTheNode,
 		v.dprops.actualLVNameOnTheNode,
 	)
 	if err != nil {
@@ -74,10 +73,9 @@ func (v *diskfulVolume) initialize(existingRVRVolume *v1alpha2.Volume) error {
 
 	if existingLLV == nil {
 		// support volumes migrated from LINSTOR
-		existingLLV, err = v.llvCl.ByActualNamesOnTheNode(
+		existingLLV, err = v.llvCl.ByActualLVNameOnTheNode(
 			v.ctx,
 			v.props.nodeName,
-			v.props.actualVGNameOnTheNode,
 			v.dprops.actualLVNameOnTheNode+"_00000",
 		)
 		if err != nil {

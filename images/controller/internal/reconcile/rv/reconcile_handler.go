@@ -278,13 +278,26 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("selected nodes", "selectedNodes", selectedNodes)
 
 	// Build cluster with required clients and port range (non-cached reader for data fetches)
+
+	lvgByNode := make(map[string]string, len(pool))
+	for nodeName, ri := range pool {
+		if ri.LVG == nil {
+			continue
+		}
+		lvgByNode[nodeName] = ri.LVG.Name
+	}
+
 	clr := cluster.New(
 		h.ctx,
 		h.log,
 		rvrClient,
 		&nodeRVRClientImpl{rdr: h.rdr, log: h.log.WithGroup("nodeRvrClient")},
 		drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)},
-		&llvClientImpl{rdr: h.rdr, log: h.log.WithGroup("llvClient")},
+		&llvClientImpl{
+			rdr:       h.rdr,
+			log:       h.log.WithGroup("llvClient"),
+			lvgByNode: lvgByNode,
+		},
 		h.rv.Name,
 		h.rv.Spec.Size.Value(),
 		h.rv.Spec.SharedSecret,

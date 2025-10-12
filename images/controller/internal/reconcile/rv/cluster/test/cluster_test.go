@@ -101,7 +101,7 @@ var reconcileTestCases []reconcileTestCase = []reconcileTestCase{
 	{
 		name: "existing LLV - 1 replica - patch llv & create rvr & wait rvr",
 		existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
-			{nodeName: testNodeName, actualVGNameOnTheNode: testActualVGNameOnTheNode, actualLVNameOnTheNode: testRVName}: {
+			{nodeName: testNodeName, actualLVNameOnTheNode: testRVName}: {
 				ObjectMeta: v1.ObjectMeta{Name: testLLVName},
 				Spec: snc.LVMLogicalVolumeSpec{
 					ActualLVNameOnTheNode: testRVName,
