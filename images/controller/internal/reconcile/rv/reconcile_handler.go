@@ -466,6 +466,9 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		}
 		if allSynced {
 			if err := api.PatchWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
+				if rv.Status == nil {
+					rv.Status = &v1alpha2.ReplicatedVolumeStatus{}
+				}
 				meta.SetStatusCondition(
 					&rv.Status.Conditions,
 					metav1.Condition{
