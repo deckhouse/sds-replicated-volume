@@ -230,7 +230,6 @@ func (r *Replica) reconcileVolumes() (Action, bool, error) {
 		if a != nil {
 			actions = append(actions, a)
 		}
-
 		if resized {
 			resizeNeeded = true
 		}

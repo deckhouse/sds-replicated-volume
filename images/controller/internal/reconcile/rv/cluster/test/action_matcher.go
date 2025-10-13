@@ -3,6 +3,7 @@ package clustertest
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -80,7 +81,11 @@ func (m ActionsMatcher) Match(action cluster.Action) error {
 		}
 	}
 	if i != len(actions) {
-		return newErrorf("expected end of slice, got %d more actions", len(actions)-i)
+		extra := make([]string, 0, len(actions)-i)
+		for _, a := range actions[i:] {
+			extra = append(extra, fmt.Sprintf("%T", a))
+		}
+		return newErrorf("expected end of slice, got %d more actions: [%s]", len(actions)-i, strings.Join(extra, ", "))
 	}
 
 	return nil
@@ -261,7 +266,8 @@ func (m WaitLVMLogicalVolumeMatcher) Match(action cluster.Action) error {
 //
 
 type LLVPatchMatcher struct {
-	LLVName string
+	LLVName  string
+	Validate func(before, after *snc.LVMLogicalVolume) error
 }
 
 var _ ActionMatcher = LLVPatchMatcher{}
@@ -278,6 +284,20 @@ func (m LLVPatchMatcher) Match(action cluster.Action) error {
 			m.LLVName, typedAction.LVMLogicalVolume.Name,
 		)
 	}
+
+	// Simulate Apply to verify intended mutations
+	before := *typedAction.LVMLogicalVolume
+	llvCopy := *typedAction.LVMLogicalVolume
+	if err := typedAction.Apply(&llvCopy); err != nil {
+		return newErrorf("apply function returned error: %v", err)
+	}
+
+	if m.Validate != nil {
+		if err := m.Validate(&before, &llvCopy); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
@@ -303,5 +323,47 @@ func (m RVRPatchMatcher) Match(action cluster.Action) error {
 			m.RVRName, typedAction.ReplicatedVolumeReplica.Name,
 		)
 	}
+	return nil
+}
+
+//
+// action matcher: [cluster.WaitAndTriggerInitialSync]
+//
+
+type WaitAndTriggerInitialSyncMatcher struct {
+	RVRNames []string
+}
+
+var _ ActionMatcher = WaitAndTriggerInitialSyncMatcher{}
+
+func (m WaitAndTriggerInitialSyncMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.WaitAndTriggerInitialSync](action)
+	if err != nil {
+		return err
+	}
+
+	if len(m.RVRNames) == 0 {
+		return nil
+	}
+
+	expected := make(map[string]int, len(m.RVRNames))
+	for _, name := range m.RVRNames {
+		expected[name]++
+	}
+
+	for _, rvr := range typedAction.ReplicatedVolumeReplicas {
+		if expected[rvr.Name] == 0 {
+			return newErrorf("unexpected RVR in initial sync: '%s'", rvr.Name)
+		}
+		expected[rvr.Name]--
+		if expected[rvr.Name] == 0 {
+			delete(expected, rvr.Name)
+		}
+	}
+
+	if len(expected) != 0 {
+		return newErrorf("expected initial sync for RVRs: %v, got different set", m.RVRNames)
+	}
+
 	return nil
 }

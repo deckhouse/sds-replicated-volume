@@ -76,6 +76,14 @@ func runController(
 					typedObjOld := ue.ObjectOld.(*v1alpha2.ReplicatedVolume)
 					typedObjNew := ue.ObjectNew.(*v1alpha2.ReplicatedVolume)
 
+					// handle deletion: when deletionTimestamp is set, enqueue delete request
+					if typedObjNew.DeletionTimestamp != nil {
+						q.Add(rv.ResourceDeleteRequest{
+							Name: typedObjNew.Name,
+						})
+						return
+					}
+
 					// skip status and metadata updates
 					if typedObjOld.Generation >= typedObjNew.Generation {
 						log.Debug(
@@ -92,11 +100,7 @@ func runController(
 					de event.TypedDeleteEvent[client.Object],
 					q TQueue,
 				) {
-					log.Debug("DeleteFunc", "name", de.Object.GetName())
-					typedObj := de.Object.(*v1alpha2.ReplicatedVolume)
-					q.Add(rv.ResourceDeleteRequest{
-						Name: typedObj.Name,
-					})
+					log.Debug("DeleteFunc - noop", "name", de.Object.GetName())
 				},
 				GenericFunc: func(
 					ctx context.Context,

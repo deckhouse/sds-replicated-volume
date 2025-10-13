@@ -13,8 +13,7 @@ func (r ResourceReconcileRequest) _isRequest() {}
 
 // single resource was deleted and needs cleanup
 type ResourceDeleteRequest struct {
-	Name                 string
-	ReplicatedVolumeName string
+	Name string
 }
 
 func (r ResourceDeleteRequest) _isRequest() {}
