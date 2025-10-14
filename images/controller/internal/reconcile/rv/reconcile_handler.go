@@ -405,6 +405,25 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		return nil
 	case cluster.DeleteReplicatedVolumeReplica:
 		h.log.Debug("RVR delete start", "name", action.ReplicatedVolumeReplica.Name)
+
+		if err := api.PatchWithConflictRetry(
+			h.ctx,
+			h.cl,
+			action.ReplicatedVolumeReplica,
+			func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+				rvr.SetFinalizers(
+					slices.DeleteFunc(
+						rvr.Finalizers,
+						func(f string) bool { return f == cluster.ControllerFinalizerName },
+					),
+				)
+				return nil
+			},
+		); err != nil {
+			h.log.Error("RVR patch failed (remove finalizer)", "err", err)
+			return err
+		}
+
 		if err := h.cl.Delete(h.ctx, action.ReplicatedVolumeReplica); client.IgnoreNotFound(err) != nil {
 			h.log.Error("RVR delete failed", "name", action.ReplicatedVolumeReplica.Name, "err", err)
 			return err
@@ -446,6 +465,25 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		return nil
 	case cluster.DeleteLVMLogicalVolume:
 		h.log.Debug("LLV delete start", "name", action.LVMLogicalVolume.Name)
+
+		if err := api.PatchWithConflictRetry(
+			h.ctx,
+			h.cl,
+			action.LVMLogicalVolume,
+			func(llv *snc.LVMLogicalVolume) error {
+				llv.SetFinalizers(
+					slices.DeleteFunc(
+						llv.Finalizers,
+						func(f string) bool { return f == cluster.ControllerFinalizerName },
+					),
+				)
+				return nil
+			},
+		); err != nil {
+			h.log.Error("LLV patch failed (remove finalizer)", "err", err)
+			return err
+		}
+
 		if err := h.cl.Delete(h.ctx, action.LVMLogicalVolume); client.IgnoreNotFound(err) != nil {
 			h.log.Error("LLV delete failed", "name", action.LVMLogicalVolume.Name, "err", err)
 			return err

@@ -14,7 +14,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
+const ControllerFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
 
 type Replica struct {
 	ctx      context.Context
@@ -189,7 +189,7 @@ func (r *Replica) rvr(recreatedFromName string) *v1alpha2.ReplicatedVolumeReplic
 	rvr := &v1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			GenerateName: fmt.Sprintf("%s-", r.props.rvName),
-			Finalizers:   []string{rvrFinalizerName},
+			Finalizers:   []string{ControllerFinalizerName},
 		},
 		Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: r.props.rvName,

@@ -105,7 +105,7 @@ func (v *diskfulVolume) reconcile() (Action, bool, error) {
 		llv := &snc.LVMLogicalVolume{
 			ObjectMeta: v1.ObjectMeta{
 				GenerateName: fmt.Sprintf("%s-", v.props.rvName),
-				Finalizers:   []string{rvrFinalizerName},
+				Finalizers:   []string{ControllerFinalizerName},
 			},
 			Spec: snc.LVMLogicalVolumeSpec{
 				ActualLVNameOnTheNode: v.dprops.actualLVNameOnTheNode,
