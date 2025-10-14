@@ -17,9 +17,15 @@ spec:
   validations:
     - expression: |
         oldObject == null ||
-        !(has(oldObject.spec.settings.useLinstor) && has(object.spec.settings.useLinstor) &&
-          oldObject.spec.settings.useLinstor == false && object.spec.settings.useLinstor == true)
-      messageExpression: '"Changing spec.settings.useLinstor from false to true is not allowed for sds-replicated-volume"'
+        !(
+          has(oldObject.spec.settings.useLinstor) &&
+          oldObject.spec.settings.useLinstor == false &&
+          (
+            !has(object.spec.settings.useLinstor) ||
+            object.spec.settings.useLinstor == true
+          )
+        )
+      message: "Changing spec.settings.useLinstor from false to true is not allowed for {{ .Chart.Name }}"
       reason: "Forbidden"
 ---
 apiVersion: admissionregistration.k8s.io/v1
