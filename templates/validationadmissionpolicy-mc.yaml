@@ -1,0 +1,33 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: {{ .Chart.Name }}-mc.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["deckhouse.io"]
+        apiVersions: ["*"]
+        resources: ["moduleconfigs"]
+        resourceNames: ["{{ .Chart.Name }}"]
+        operations: ["CREATE", "UPDATE"]
+  validations:
+    - expression: |
+        has(oldObject) == false ||
+        !(has(oldObject.spec.settings.useLinstor) && has(object.spec.settings.useLinstor) &&
+          oldObject.spec.settings.useLinstor == false && object.spec.settings.useLinstor == true)
+      messageExpression: "Changing spec.settings.useLinstor from false to true is not allowed for sds-replicated-volume"
+      reason: "Forbidden"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: {{ .Chart.Name }}-mc.deckhouse.io
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+spec:
+  policyName: {{ .Chart.Name }}-mc.deckhouse.io
+  validationAction: ["Deny","Audit"]
+{{- end }}
