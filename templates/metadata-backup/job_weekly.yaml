@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "metadata_backup_resources" }}
 cpu: 10m
 memory: 25Mi
@@ -54,4 +55,5 @@ spec:
           volumes:
             - name: tmp
               emptyDir: {}
+{{- end }}
 {{- end }}

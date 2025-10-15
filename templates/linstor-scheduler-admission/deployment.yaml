@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "linstor_scheduler_admission_resources" }}
 cpu: 20m
 memory: 50Mi
@@ -95,4 +96,5 @@ spec:
         - name: linstor-scheduler-admission-certs
           secret:
             secretName: linstor-scheduler-admission-certs
+{{- end }}
 {{- end }}

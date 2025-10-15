@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
@@ -14,4 +15,5 @@ spec:
     - protocol: TCP
       port: 4443
       targetPort: 8080
+{{- end }}
 {{- end }}

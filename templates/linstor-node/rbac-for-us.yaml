@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -48,3 +49,4 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: d8:rbac-proxy
+{{- end }}

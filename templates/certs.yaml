@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: Secret
@@ -54,3 +55,4 @@ data:
   tls.key: {{ .key | b64enc }}
   ca.crt: {{ .ca | b64enc }}
   {{- end }}
+{{- end }}

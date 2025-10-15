@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
 apiVersion: deckhouse.io/v1alpha1
 kind: KubeSchedulerWebhookConfiguration
@@ -15,5 +16,5 @@ webhooks:
       path: /
     caBundle: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca | b64enc }}
   timeoutSeconds: 5
-
+{{- end }}
 {{- end }}

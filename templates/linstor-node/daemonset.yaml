@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "linstor_satellite_resources" }}
 cpu: 100m
 memory: 250Mi
@@ -339,3 +340,4 @@ spec:
       maxSurge: 0
       maxUnavailable: 100%
     type: RollingUpdate
+{{- end }}

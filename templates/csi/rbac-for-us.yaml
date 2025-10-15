@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- include "helm_lib_csi_controller_rbac" . }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -47,3 +48,4 @@ roleRef:
   kind: ClusterRole
   name: d8:{{ .Chart.Name }}:rsc-watcher
   apiGroup: rbac.authorization.k8s.io
+{{- end }}

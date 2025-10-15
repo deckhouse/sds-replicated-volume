@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- if and (not $dhVersionIsDev) (semverCompare "<1.64" .Values.global.deckhouseVersion) }}
 ---
@@ -27,4 +28,5 @@ data:
         nodeCacheCapable: true
         tlsConfig:
           caData: {{ .Values.sdsReplicatedVolume.internal.customSchedulerExtenderCert.ca | b64enc }}
+{{- end }}
 {{- end }}

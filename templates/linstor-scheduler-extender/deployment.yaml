@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 # Source https://github.com/kvaps/linstor-scheduler-extender/blob/master/deploy/all.yaml
 {{- define "kube_scheduler_resources" }}
 cpu: 10m
@@ -191,3 +192,4 @@ spec:
       {{- end }}
 {{- end }}
       serviceAccountName: linstor-scheduler-extender
+{{- end }}

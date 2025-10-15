@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "linstor_affinity_controller_resources" }}
 cpu: 10m
 memory: 25Mi
@@ -156,4 +157,4 @@ spec:
               {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "linstor_affinity_controller_resources" . | nindent 14 }}
               {{- end }}
-
+{{- end }}

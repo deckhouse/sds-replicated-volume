@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -74,3 +75,4 @@ subjects:
   - kind: ServiceAccount
     name: linstor-scheduler-extender
     namespace: d8-{{ .Chart.Name }}
+{{- end }}

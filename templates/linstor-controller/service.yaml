@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: Service
@@ -18,3 +19,4 @@ spec:
       port: 3371
       protocol: TCP
       targetPort: linstor
+{{- end }}
