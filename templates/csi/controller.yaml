@@ -77,7 +77,7 @@
 storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- $csiControllerImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiControllerConfig := dict }}
@@ -184,7 +184,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- define "csi_additional_node_volume_mounts" }}
 {{- end }}
 
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- $csiNodeImage := include "helm_lib_module_image" (list . "linstorCsi") }}
 
 {{- $csiNodeConfig := dict }}

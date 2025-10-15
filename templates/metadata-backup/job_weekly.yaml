@@ -3,7 +3,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- if dig "backup" "enabled" true .Values.sdsReplicatedVolume }}
 ---
 apiVersion: batch/v1
