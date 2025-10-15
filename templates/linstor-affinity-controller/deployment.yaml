@@ -1,9 +1,9 @@
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "linstor_affinity_controller_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1

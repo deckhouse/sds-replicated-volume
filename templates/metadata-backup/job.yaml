@@ -1,9 +1,9 @@
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "metadata_backup_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if dig "backup" "enabled" true .Values.sdsReplicatedVolume }}
 ---
 apiVersion: batch/v1

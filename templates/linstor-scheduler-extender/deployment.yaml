@@ -1,4 +1,3 @@
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 # Source https://github.com/kvaps/linstor-scheduler-extender/blob/master/deploy/all.yaml
 {{- define "kube_scheduler_resources" }}
 cpu: 10m
@@ -10,6 +9,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- $kubeVersion := semver .Values.global.discovery.kubernetesVersion -}}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}

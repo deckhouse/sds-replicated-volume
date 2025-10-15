@@ -1,10 +1,10 @@
-{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- define "linstor_controller_resources" }}
 cpu: 30m
 memory: 300Mi
 {{- end }}
 
 
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
