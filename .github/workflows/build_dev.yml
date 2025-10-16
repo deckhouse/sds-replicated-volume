@@ -9,7 +9,7 @@ env:
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
   GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  BASE_IMAGES_VERSION: "v0.5.23"
+  BASE_IMAGES_VERSION: "v0.5.34"
 
 on:
   #pull_request:
