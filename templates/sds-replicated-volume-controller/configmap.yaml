@@ -1,3 +1,4 @@
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -10,4 +11,5 @@ data:
   virtualizationEnabled: "true"
 {{- else }}
   virtualizationEnabled: "false"
+{{- end }}
 {{- end }}
