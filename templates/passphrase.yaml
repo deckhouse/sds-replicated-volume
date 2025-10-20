@@ -1,3 +1,4 @@
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- if .Values.sdsReplicatedVolume.internal.masterPassphrase }}
 apiVersion: v1
 kind: Secret
@@ -8,4 +9,5 @@ metadata:
 type: Opaque
 data:
   MASTER_PASSPHRASE: {{ b64enc .Values.sdsReplicatedVolume.internal.masterPassphrase }}
+{{- end }}
 {{- end }}

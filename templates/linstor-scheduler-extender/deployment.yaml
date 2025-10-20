@@ -9,6 +9,7 @@ cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- $dhVersionIsDev := or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) }}
 {{- $kubeVersion := semver .Values.global.discovery.kubernetesVersion -}}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
@@ -191,3 +192,4 @@ spec:
       {{- end }}
 {{- end }}
       serviceAccountName: linstor-scheduler-extender
+{{- end }}

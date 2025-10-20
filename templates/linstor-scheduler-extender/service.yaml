@@ -1,3 +1,4 @@
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.64" .Values.global.deckhouseVersion) }}
 ---
 apiVersion: v1
@@ -15,4 +16,5 @@ spec:
       name: http
   selector:
     app: linstor-scheduler-extender
+{{- end }}
 {{- end }}
