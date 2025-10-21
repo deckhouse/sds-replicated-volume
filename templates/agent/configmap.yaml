@@ -1,3 +1,4 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -20,3 +21,4 @@ data:
 
     render=true
     stringValues=true
+{{- end }}

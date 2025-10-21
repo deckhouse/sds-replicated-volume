@@ -1,4 +1,4 @@
-{{- define "sds_utils_installer_resources" }}
+{{- define "drbd_wait_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
@@ -8,6 +8,12 @@ cpu: 50m
 memory: 50Mi
 {{- end }}
 
+{{- define "drbd_prometheus_exporter_resources" }}
+cpu: 50m
+memory: 25Mi
+{{- end }}
+
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -31,9 +37,14 @@ spec:
       maxAllowed:
         cpu: 200m
         memory: 100Mi
+    - containerName: drbd-prometheus-exporter
+      minAllowed:
+        {{- include "drbd_prometheus_exporter_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 100m
+        memory: 50Mi
 {{- end }}
 
-{{- if not .Values.sdsReplicatedVolume.disableDs }}
 ---
 apiVersion: apps/v1
 kind: DaemonSet
@@ -70,6 +81,25 @@ spec:
         seLinuxOptions:
           level: s0
           type: spc_t
+      initContainers:
+      - command:
+          - /linstor-drbd-wait
+        env:
+          - name: FILE_CONTENT
+            value: "version: 9.2"
+          - name: WAITING_MSG
+            value: "Waiting for DRBD version 9.2.x on host"
+        image: {{ include "helm_lib_module_image" (list . "linstorDrbdWait") }}
+        imagePullPolicy: IfNotPresent
+        name: wait-drbd-ver-9-2
+        securityContext:
+          readOnlyRootFilesystem: true
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "drbd_wait_resources" . | nindent 12 }}
+            {{- end }}
       containers:
       - name: agent
         image: {{ include "helm_lib_module_image" (list . "agent") }}
@@ -116,10 +146,34 @@ spec:
           name: var-lock
         resources:
           requests:
-            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-            {{- include "sds_replicated_volume_agent_resources" . | nindent 14 }}
-{{- end }}
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "sds_replicated_volume_agent_resources" . | nindent 12 }}
+            {{- end }}
+      - name: drbd-prometheus-exporter
+        image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            host: 127.0.0.1
+            path: /
+            port: 4215
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        ports:
+          - containerPort: 4215
+            hostPort: 4215
+            name: prometheus
+            protocol: TCP
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+              {{- include "drbd_prometheus_exporter_resources" . | nindent 12 }}
+            {{- end }}
       volumes:
       - hostPath:
           path: /dev/
