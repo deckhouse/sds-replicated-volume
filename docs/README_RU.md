@@ -15,12 +15,14 @@ moduleStatus: preview
 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-> **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
->
-> **Внимание.** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
->
-> **Внимание.** Если в кластере используется только одна нода, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
-> Для использования `sds-replicated-volume` необходимо иметь минимально 3 ноды. Рекомендуется использовать 4 и более на случай выхода нод из строя.
+{{< alert level="warning" >}}
+Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
+
+Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
+
+Если в кластере используется только одна нода, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
+Для использования `sds-replicated-volume` необходимо иметь минимально 3 ноды. Рекомендуется использовать 4 и более на случай выхода нод из строя.
+{{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
@@ -35,11 +37,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Для работы с снапшотами требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
+Для работы со снимками требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.
