@@ -73,15 +73,15 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-   2. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
+1. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
 
-      ```shell
-      kubectl get module sds-node-configurator -w
-      ```
+   ```shell
+   kubectl get module sds-node-configurator -w
+   ```
 
-   3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
+1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
 
-  The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
+   The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -95,18 +95,18 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
+1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-   5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
+1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
-      ```shell
-      kubectl -n d8-sds-replicated-volume get pod -o wide -w
-      kubectl -n d8-sds-node-configurator get pod -o wide -w
-      ```
+   ```shell
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
+   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   ```
 
 ### Configuring storage on nodes
 

@@ -75,15 +75,15 @@ moduleStatus: preview
    EOF
    ```
 
-2. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
+1. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-node-configurator -w
    ```
 
-3. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
+1. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
 
-  Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегестрирует CSI драйвер:
+   Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -97,13 +97,13 @@ moduleStatus: preview
    EOF
    ```
 
-4. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
+1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-5. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
    kubectl -n d8-sds-replicated-volume get pod -o wide -w
