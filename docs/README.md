@@ -15,12 +15,14 @@ The module allows you to create a `Storage Pool` as well as a `StorageClass` by 
 
 To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](/modules/sds-node-configurator/) module.
 
-> **Caution.** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
->
-> **Caution.** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+{{< alert level="warning" >}}
+Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 
-> **Caution.** If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
-> To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+
+If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
+To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+{{< /alert >}}
 
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
@@ -31,10 +33,6 @@ To ensure the proper functioning of the `sds-replicated-volume` module, follow t
 
 {{< alert level="warning" >}}
 Direct configuration of the LINSTOR backend by the user is prohibited.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
 {{< /alert >}}
 
 {{< alert level="info" >}}
@@ -75,15 +73,15 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-   2. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
+1. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
 
-      ```shell
-      kubectl get module sds-node-configurator -w
-      ```
+   ```shell
+   kubectl get module sds-node-configurator -w
+   ```
 
-   3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
+1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
 
-  The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
+   The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -97,18 +95,18 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
+1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-   5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
+1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
-      ```shell
-      kubectl -n d8-sds-replicated-volume get pod -o wide -w
-      kubectl -n d8-sds-node-configurator get pod -o wide -w
-      ```
+   ```shell
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
+   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   ```
 
 ### Configuring storage on nodes
 

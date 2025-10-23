@@ -15,12 +15,14 @@ moduleStatus: preview
 
 Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-> **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
->
-> **Внимание.** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
->
-> **Внимание.** Если в кластере используется только одна нода, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
-> Для использования `sds-replicated-volume` необходимо иметь минимально 3 ноды. Рекомендуется использовать 4 и более на случай выхода нод из строя.
+{{< alert level="warning" >}}
+Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
+
+Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
+
+Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
+Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
+{{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
@@ -35,11 +37,7 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Для работы с снапшотами требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
+Для работы со снимками требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.
@@ -77,15 +75,15 @@ moduleStatus: preview
    EOF
    ```
 
-2. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
+1. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-node-configurator -w
    ```
 
-3. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
+1. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
 
-  Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегестрирует CSI драйвер:
+   Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -99,13 +97,13 @@ moduleStatus: preview
    EOF
    ```
 
-4. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
+1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-5. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
    kubectl -n d8-sds-replicated-volume get pod -o wide -w
