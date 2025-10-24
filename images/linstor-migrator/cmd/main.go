@@ -42,12 +42,12 @@ import (
 )
 
 const (
-	csiDriverReplicated = "replicated.csi.storage.deckhouse.io"
-	typeLVMThin         = "Thin"
-	typeLVMThick        = "Thick"
-	linstorLVMSuffix    = "_00000"
-	finalizerName       = "linstor-migrator.deckhouse.io" // TODO: confirm finalizer name
-	llmPhaseCreated     = "Created"
+	csiDriverReplicated     = "replicated.csi.storage.deckhouse.io"
+	typeLVMThin             = "Thin"
+	typeLVMThick            = "Thick"
+	linstorLVMSuffix        = "_00000"
+	controllerFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
+	llmPhaseCreated         = "Created"
 
 	maximumWaitingTimeInMinutes = 5
 )
@@ -334,8 +334,8 @@ func createLLV(
 
 	llv := &sncv1alpha1.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:       llvName,
-			Finalizers: []string{finalizerName},
+			GenerateName: fmt.Sprintf("%s-", llvName),
+			Finalizers:   []string{controllerFinalizerName},
 		},
 		Spec: sncv1alpha1.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: fmt.Sprintf("%s%s", pvName, linstorLVMSuffix),
