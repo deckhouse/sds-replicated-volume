@@ -24,7 +24,7 @@ rules:
     verbs: ["list", "get", "watch", "patch", "update"]
   - apiGroups: ["storage.deckhouse.io"]
     resources: ["lvmvolumegroups", "lvmvolumegroups/status", "lvmlogicalvolumes/status", "replicatedvolumereplicas/status"]
-    verbs: ["list", "get"]
+    verbs: ["list", "get", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
