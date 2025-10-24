@@ -66,3 +66,7 @@ properties:
         type: string
         default: "0 3 * * *"
         description: Backup schedule
+  useLinstor:
+    type: boolean
+    default: true
+    description: Use LINSTOR as a backend for the module

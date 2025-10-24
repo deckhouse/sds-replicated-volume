@@ -1,8 +1,9 @@
-{{- define "sds_drbd_controller_resources" }}
+{{- define "sds_replicated_volume_controller_resources" }}
 cpu: 10m
 memory: 25Mi
 {{- end }}
 
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -22,7 +23,7 @@ spec:
     containerPolicies:
     - containerName: "controller"
       minAllowed:
-        {{- include "sds_drbd_controller_resources" . | nindent 8 }}
+        {{- include "sds_replicated_volume_controller_resources" . | nindent 8 }}
       maxAllowed:
         cpu: 200m
         memory: 100Mi
@@ -61,6 +62,7 @@ spec:
       {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
       {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
+      {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 6 }}
       {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "controller")) | nindent 6 }}
       imagePullSecrets:
         - name: {{ .Chart.Name }}-module-registry
@@ -87,43 +89,20 @@ spec:
           resources:
             requests:
               {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 14 }}
-{{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
-              {{- include "sds_drbd_controller_resources" . | nindent 14 }}
-{{- end }}
-          securityContext:
-            privileged: true
-            readOnlyRootFilesystem: true
-            seLinuxOptions:
-              level: s0
-              type: spc_t
+              {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+                {{- include "sds_replicated_volume_controller_resources" . | nindent 14 }}
+              {{- end }}
           env:
             - name: SLOGH_CONFIG_PATH
               value: "/etc/config/slogh.cfg"
           volumeMounts:
-            - name: host-device-dir
-              mountPath: /dev/
-            - name: host-sys-dir
-              mountPath: /sys/
-            - name: host-root
-              mountPath: /host-root/
-              mountPropagation: HostToContainer
-            - mountPath: /etc/config/
-              name: config
+            - name: controller-config
+              mountPath: /etc/config/
       volumes:
-        - name: host-device-dir
-          hostPath:
-            path: /dev
-            type: ""
-        - name: host-sys-dir
-          hostPath:
-            path: /sys/
-            type: Directory
-        - name: host-root
-          hostPath:
-            path: /
-        - name: config
+        - name: controller-config
           configMap:
             name: controller-config
             items:
               - key: slogh.cfg
                 path: slogh.cfg
+{{- end }}

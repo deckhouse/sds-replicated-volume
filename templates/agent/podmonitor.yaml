@@ -1,15 +1,15 @@
-{{- if .Values.sdsReplicatedVolume.useLinstor }}
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "operator-prometheus-crd") }}
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: linstor-node
+  name: sds-replicated-volume-agent
   namespace: d8-monitoring
   {{- include "helm_lib_module_labels" (list $ (dict "prometheus" "main")) | nindent 2 }}
 spec:
   podMetricsEndpoints:
-  - targetPort: 4215
+  - port: prometheus
     scheme: https
     path: /metrics
     bearerTokenSecret:
@@ -21,7 +21,7 @@ spec:
     - regex: endpoint|namespace|pod|container
       action: labeldrop
     - targetLabel: job
-      replacement: linstor-node
+      replacement: sds-replicated-volume-agent
     - sourceLabels: [__meta_kubernetes_pod_node_name]
       targetLabel: node
     - targetLabel: tier
@@ -31,7 +31,7 @@ spec:
       action: keep
   selector:
     matchLabels:
-      app: linstor-node
+      app: agent
   namespaceSelector:
     matchNames:
     - d8-{{ .Chart.Name }}
