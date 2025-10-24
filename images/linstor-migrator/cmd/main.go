@@ -215,7 +215,6 @@ func migratePV(
 	log = log.With("pv_name", pv.Name)
 	log.Info("Start migrating Replicated PersistentVolume")
 
-	// TODO: разобраться с размером
 	size, err := getPVSize(pv, linstorVolDef)
 	if err != nil {
 		return err
