@@ -43,11 +43,13 @@ import (
 
 const (
 	csiDriverReplicated = "replicated.csi.storage.deckhouse.io"
-	TypeLVMThin         = "Thin"
-	TypeLVM             = "Thick"
+	typeLVMThin         = "Thin"
+	typeLVMThick        = "Thick"
 	linstorLVMSuffix    = "_00000"
 	finalizerName       = "linstor-migrator.deckhouse.io" // TODO: confirm finalizer name
 	llmPhaseCreated     = "Created"
+
+	maximumWaitingTimeInMinutes = 5
 )
 
 func main() {
@@ -325,9 +327,9 @@ func createLLV(
 	}
 	var typeLVM string
 	if thinPoolName != "" {
-		typeLVM = TypeLVMThin
+		typeLVM = typeLVMThin
 	} else {
-		typeLVM = TypeLVM
+		typeLVM = typeLVMThick
 	}
 
 	llv := &sncv1alpha1.LVMLogicalVolume{
@@ -365,7 +367,7 @@ func createLLV(
 			break
 		}
 		time.Sleep(1 * time.Second)
-		if time.Since(startTime) > 5*time.Minute {
+		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
 			return fmt.Errorf("LLV created but not in phase %s (current phase: %s)", llmPhaseCreated, llvExists.Status.Phase)
 		}
 	}
