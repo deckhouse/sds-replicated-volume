@@ -235,7 +235,11 @@ func migratePV(
 		return err
 	}
 
-	// TODO: createRV
+	// TODO:
+	rv, err := createRV(ctx, kCient, log, pv.Name)
+	if err != nil {
+		return err
+	}
 
 	linstorResources, ok := linstorRes[pv.Name]
 	if !ok {
@@ -244,7 +248,7 @@ func migratePV(
 	for _, linstorResource := range linstorResources {
 		// 0-Diskful|388-TieBreaker|260-Diskless
 		if linstorResource.Spec.ResourceFlags == 0 {
-			err := createLLV(ctx, kCient, log, pv.Name, linstorResource, size, myLvmVolumeGroups)
+			err := createLLV(ctx, kCient, log, pv.Name, linstorResource, size, myLvmVolumeGroups, rv)
 			if err != nil {
 				return err
 			}
@@ -284,6 +288,50 @@ func getMyLvmVolumeGroups(
 	return lvmVolumeGroups, nil
 }
 
+func createRV(
+	ctx context.Context,
+	kCient kubecl.Client,
+	log *slog.Logger,
+	pvName string,
+) (*corev1.ConfigMap, error) {
+	// TODO: replace ConfigMap -> ReplicatedVolume
+	rvName := pvName
+
+	log = log.With("rv_name", rvName)
+	log.Info("Creating RV")
+
+	rvExists := &corev1.ConfigMap{}
+	err := kCient.Get(ctx, types.NamespacedName{Namespace: "default", Name: rvName}, rvExists)
+	if err == nil {
+		log.Info("RV already exists")
+		return rvExists, nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to get ReplicatedVolume: %w", err)
+	}
+
+	rvNew := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      rvName,
+			Namespace: "default",
+		},
+		Data: map[string]string{
+			"key": "value",
+		},
+	}
+
+	err = kCient.Create(ctx, rvNew)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create ReplicatedVolume: %w", err)
+	}
+
+	// TODO: wait ready RV
+
+	log.Info("RV created")
+
+	return rvNew, nil
+}
+
 func createLLV(
 	ctx context.Context,
 	kCient kubecl.Client,
@@ -292,6 +340,7 @@ func createLLV(
 	linstorResource srvlinstor.Resources,
 	size int,
 	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
+	rv *corev1.ConfigMap,
 ) error {
 	generateLlvName := fmt.Sprintf("%s%s", pvName, "-")
 
@@ -341,6 +390,16 @@ func createLLV(
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateLlvName,
 			Finalizers:   []string{controllerFinalizerName},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         corev1.SchemeGroupVersion.String(),
+					Kind:               "ConfigMap",
+					Name:               rv.Name,
+					UID:                rv.UID,
+					Controller:         ptrTo(true),
+					BlockOwnerDeletion: ptrTo(true),
+				},
+			},
 		},
 		Spec: sncv1alpha1.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: fmt.Sprintf("%s%s", pvName, linstorLVMSuffix),
@@ -448,4 +507,9 @@ func newScheme() (*runtime.Scheme, error) {
 	}
 
 	return scheme, nil
+}
+
+// TODO https://github.com/deckhouse/sds-common-lib/blob/main/utils/ptr.go
+func ptrTo(b bool) *bool {
+	return &b
 }
