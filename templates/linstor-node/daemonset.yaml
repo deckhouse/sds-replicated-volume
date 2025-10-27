@@ -130,11 +130,17 @@ spec:
           - {{ .Values.sdsReplicatedVolume.logLevel }}
           - --log-level-linstor
           - {{ .Values.sdsReplicatedVolume.logLevel }}
+          - --bind-address
+          - $(NODE_IP)
         env:
           - name: SPAAS_URL
             value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
           - name: LB_SELINUX_AS
             value: modules_object_t
+          - name: NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
         image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
         imagePullPolicy: IfNotPresent
         name: linstor-satellite
