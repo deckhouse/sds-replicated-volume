@@ -145,7 +145,7 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 }
 
 func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, migrationPVs []corev1.PersistentVolume) error {
-	log.Info("Migrating Replicated PersistentVolumeList", "count", len(migrationPVs))
+	log.Info("Migrating Replicated PersistentVolumeList", "number_of_pv", len(migrationPVs))
 
 	// During migration Linstor will be down, so fetch all needed resources from Kubernetes here
 	linstorVolumeDefinitions := &srvlinstor.VolumeDefinitionsList{}
@@ -235,6 +235,8 @@ func migratePV(
 		return err
 	}
 
+	// TODO: createRV
+
 	linstorResources, ok := linstorRes[pv.Name]
 	if !ok {
 		return fmt.Errorf("linstor resources not found")
@@ -250,8 +252,6 @@ func migratePV(
 
 		// TODO: createRVR
 	}
-
-	// TODO: createRV
 
 	log.Info("End migrating Replicated PersistentVolume")
 	return nil
@@ -293,23 +293,10 @@ func createLLV(
 	size int,
 	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
 ) error {
-	llvName := fmt.Sprintf("%s%s", pvName, ".0") // TODO: define LLV suffix generation rule
+	generateLlvName := fmt.Sprintf("%s%s", pvName, "-")
 
-	log = log.With("node_name", linstorResource.Spec.NodeName, "llv_name", llvName)
+	log = log.With("node_name", linstorResource.Spec.NodeName, "generate_llv_name", generateLlvName)
 	log.Info("Creating LLV")
-
-	llvExists := &sncv1alpha1.LVMLogicalVolume{}
-	err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvName}, llvExists)
-	if err == nil {
-		if llvExists.Status.Phase != llmPhaseCreated {
-			return fmt.Errorf("LLV already exists but not in phase %s (current phase: %s)", llmPhaseCreated, llvExists.Status.Phase)
-		}
-		log.Info("LLV already exists")
-		return nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return fmt.Errorf("failed to get LLV: %w", err)
-	}
 
 	var lvmVolumeGroupName string
 	var thinPoolName string
@@ -325,6 +312,24 @@ func createLLV(
 	if lvmVolumeGroupName == "" {
 		return fmt.Errorf("LVMVolumeGroup not found")
 	}
+
+	llvs := &sncv1alpha1.LVMLogicalVolumeList{}
+	if err := kCient.List(ctx, llvs); err != nil {
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("failed to get LVMLogicalVolumeList: %w", err)
+		}
+	}
+	for _, llv := range llvs.Items {
+		if llv.GenerateName == generateLlvName && llv.Spec.LVMVolumeGroupName == lvmVolumeGroupName {
+			if llv.Status.Phase == llmPhaseCreated {
+				log.Info("LLV already exists")
+				return nil
+			} else {
+				return fmt.Errorf("LLV already exists but not in phase %s (current phase: %s)", llmPhaseCreated, llv.Status.Phase)
+			}
+		}
+	}
+
 	var typeLVM string
 	if thinPoolName != "" {
 		typeLVM = typeLVMThin
@@ -332,9 +337,9 @@ func createLLV(
 		typeLVM = typeLVMThick
 	}
 
-	llv := &sncv1alpha1.LVMLogicalVolume{
+	llvNew := &sncv1alpha1.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", llvName),
+			GenerateName: generateLlvName,
 			Finalizers:   []string{controllerFinalizerName},
 		},
 		Spec: sncv1alpha1.LVMLogicalVolumeSpec{
@@ -345,21 +350,23 @@ func createLLV(
 		},
 	}
 	if thinPoolName != "" {
-		llv.Spec.Thin = &sncv1alpha1.LVMLogicalVolumeThinSpec{
+		llvNew.Spec.Thin = &sncv1alpha1.LVMLogicalVolumeThinSpec{
 			PoolName: thinPoolName,
 		}
 	}
 
-	err = kCient.Create(ctx, llv)
+	err := kCient.Create(ctx, llvNew)
 	if err != nil {
 		return fmt.Errorf("failed to create LLV: %w", err)
 	}
 
-	// Wait for LLV to reach Created phase, polling every 1s, up to 5 minutes
+	log = log.With("llv_name", llvNew.Name)
+
+	// Wait for LLV to reach Created phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
 	startTime := time.Now()
 	for {
 		llvExists := &sncv1alpha1.LVMLogicalVolume{}
-		err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvName}, llvExists)
+		err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvNew.Name}, llvExists)
 		if err != nil {
 			return fmt.Errorf("failed to get LLV: %w", err)
 		}
