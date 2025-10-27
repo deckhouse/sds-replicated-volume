@@ -132,6 +132,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
+	// TODO: should be NodeHostName?
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
@@ -199,7 +200,6 @@ type Volume struct {
 
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volume disk is immutable"
 	Disk string `json:"disk,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0

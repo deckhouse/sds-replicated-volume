@@ -65,7 +65,7 @@ func (b *replicaScoreBuilder) clusterHasDiskless() {
 	b.disklessPurpose = true
 }
 
-func (b *replicaScoreBuilder) replicaWithDisk() {
+func (b *replicaScoreBuilder) nodeWithDisk() {
 	b.withDisk = true
 }
 
@@ -217,7 +217,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 			}
 
 			repl.LVG = lvg
-			repl.Score.replicaWithDisk()
+			repl.Score.nodeWithDisk()
 			if publishRequested {
 				repl.Score.replicaPublishRequested()
 				repl.PublishRequested = true
