@@ -55,13 +55,15 @@ const (
 )
 
 type linstorDB struct {
-	VolumeDefinitions   map[string]srvlinstor.VolumeDefinitions
-	ResourceDefinitions map[string]srvlinstor.ResourceDefinitions
-	ResourceGroups      map[string]srvlinstor.ResourceGroups
-	Resources           map[string][]srvlinstor.Resources
-	LayerResourcesIds   *srvlinstor.LayerResourceIdsList
-	LayerDrbdResources  map[int]srvlinstor.LayerDrbdResources
-	NodeNetInterfaces   *srvlinstor.NodeNetInterfacesList
+	VolumeDefinitions            map[string]srvlinstor.VolumeDefinitions
+	ResourceDefinitions          map[string]srvlinstor.ResourceDefinitions
+	ResourceGroups               map[string]srvlinstor.ResourceGroups
+	Resources                    map[string][]srvlinstor.Resources
+	LayerResourcesIds            *srvlinstor.LayerResourceIdsList
+	LayerDrbdResources           map[int]srvlinstor.LayerDrbdResources
+	NodeNetInterfaces            *srvlinstor.NodeNetInterfacesList
+	LayerDrbdResourceDefinitions map[string]srvlinstor.LayerDrbdResourceDefinitions
+	LayerDrbdVolumeDefinitions   map[string]srvlinstor.LayerDrbdVolumeDefinitions
 }
 
 func main() {
@@ -301,19 +303,9 @@ func createOrGetLLV(
 	log = log.With("node_name", linstorResource.Spec.NodeName, "generate_llv_name", generateLlvName)
 	log.Info("Creating LLV")
 
-	var lvmVolumeGroupName string
-	var thinPoolName string
-	for _, lvg := range myLvmVolumeGroups {
-		if strings.ToUpper(lvg.Spec.Local.NodeName) == linstorResource.Spec.NodeName {
-			lvmVolumeGroupName = lvg.Name
-			if lvg.Spec.ThinPools != nil {
-				thinPoolName = lvg.Spec.ThinPools[0].Name
-			}
-			break
-		}
-	}
-	if lvmVolumeGroupName == "" {
-		return fmt.Errorf("LVMVolumeGroup not found")
+	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(linstorResource.Spec.NodeName, myLvmVolumeGroups)
+	if err != nil {
+		return err
 	}
 
 	llvs := &sncv1alpha1.LVMLogicalVolumeList{}
@@ -368,7 +360,7 @@ func createOrGetLLV(
 		}
 	}
 
-	err := kCient.Create(ctx, llvNew)
+	err = kCient.Create(ctx, llvNew)
 	if err != nil {
 		return fmt.Errorf("failed to create LLV: %w", err)
 	}
@@ -425,10 +417,18 @@ func createOrGetRVR(
 	}
 	for _, rvr := range rvrs.Items {
 		if rvr.Spec.NodeName == nodeName && rvr.Spec.ReplicatedVolumeName == pvName {
+			if rvr.Status == nil {
+				return fmt.Errorf("RVR already exists; status is not set")
+			}
+			if rvr.Status.Conditions == nil {
+				return fmt.Errorf("RVR already exists; conditions are not set")
+			}
 			for _, condition := range rvr.Status.Conditions {
 				if condition.Type == srvv1alpha2.ConditionTypeReady && condition.Status == metav1.ConditionTrue {
 					log.Info("RVR already exists")
 					return nil
+				} else {
+					return fmt.Errorf("RVR already exists; condition %s is not true (current status: %s)", srvv1alpha2.ConditionTypeReady, condition.Status)
 				}
 			}
 		}
@@ -438,61 +438,98 @@ func createOrGetRVR(
 	if err != nil {
 		return err
 	}
-	log.Debug(fmt.Sprintf("node id: %d", nodeId))
+	log.Debug("node id", "node_id", nodeId)
 
-	//rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
-	//	ObjectMeta: metav1.ObjectMeta{
-	//		GenerateName: generateRvrName,
-	//		Finalizers:   []string{controllerFinalizerName},
-	//		OwnerReferences: []metav1.OwnerReference{
-	//			{
-	//				APIVersion:         corev1.SchemeGroupVersion.String(),
-	//				Kind:               "ConfigMap",
-	//				Name:               rv.Name,
-	//				UID:                rv.UID,
-	//				Controller:         ptrTo(true),
-	//				BlockOwnerDeletion: ptrTo(true),
-	//			},
-	//		},
-	//	},
-	//	Spec: srvv1alpha2.ReplicatedVolumeReplicaSpec{
-	//		NodeName:             nodeName,
-	//		ReplicatedVolumeName: pvName,
-	//		NodeId:               0,
-	//		NodeAddress: srvv1alpha2.Address{
-	//			IPv4: "127.0.0.1",
-	//			Port: 12345,
-	//		},
-	//		Peers: map[string]srvv1alpha2.Peer{
-	//			"peer1": {
-	//				NodeId: 1,
-	//				Address: srvv1alpha2.Address{
-	//					IPv4: "127.0.0.1",
-	//					Port: 12345,
-	//				},
-	//			},
-	//		},
-	//		SharedSecret:            "secret",
-	//		Primary:                 false,
-	//		Quorum:                  0,
-	//		QuorumMinimumRedundancy: 0,
-	//		AllowTwoPrimaries:       false,
-	//		Volumes: []srvv1alpha2.Volume{
-	//			{
-	//				Device: 0,
-	//				Number: 0,
-	//				Disk:   "/dev/vg0/demo-11",
-	//			},
-	//		},
-	//	},
-	//}
+	nodeIPv4, err := getNodeIPv4(nodeName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("node ipv4: %s", nodeIPv4))
 
-	//err := kCient.Create(ctx, rvrNew)
-	//if err != nil {
-	//	return fmt.Errorf("failed to create RVR: %w", err)
-	//}
+	drbdPort, err := getDRBDPort(pvName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("drbd port: %d", drbdPort))
 
-	//log = log.With("rvr_name", rvrNew.Name)
+	sharedSecret, err := getSharedSecret(pvName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("shared secret: %s", sharedSecret))
+
+	peers, err := getPeers(pvName, nodeName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("peers: %v", peers))
+
+	drbdMinor, err := getDRBDMinor(pvName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("drbd minor: %d", drbdMinor))
+
+	rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: generateRvrName,
+			Finalizers:   []string{controllerFinalizerName},
+			OwnerReferences: []metav1.OwnerReference{
+				{
+					APIVersion:         corev1.SchemeGroupVersion.String(),
+					Kind:               "ConfigMap",
+					Name:               rv.Name,
+					UID:                rv.UID,
+					Controller:         ptrTo(true),
+					BlockOwnerDeletion: ptrTo(true),
+				},
+			},
+		},
+		Spec: srvv1alpha2.ReplicatedVolumeReplicaSpec{
+			NodeName:             nodeName,
+			ReplicatedVolumeName: pvName,
+			NodeId:               uint(nodeId),
+			NodeAddress: srvv1alpha2.Address{
+				IPv4: nodeIPv4,
+				Port: uint(drbdPort),
+			},
+			Peers:                   peers,
+			SharedSecret:            sharedSecret,
+			Primary:                 false, // TODO: volumeattachment
+			Quorum:                  0,     // TODO: set quorum
+			QuorumMinimumRedundancy: 0,     // TODO: set quorum minimum redundancy
+			AllowTwoPrimaries:       false,
+			Volumes: []srvv1alpha2.Volume{
+				{
+					Device: uint(drbdMinor),
+					Number: 0,
+				},
+			},
+		},
+	}
+	if !diskless {
+		lvmVolumeGroupName, _, err := getLVMVolumeGroupNameAndThinPoolName(nodeName, myLvmVolumeGroups)
+		if err != nil {
+			return err
+		}
+
+		lvmVolumeGroup := &sncv1alpha1.LVMVolumeGroup{}
+		if err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: lvmVolumeGroupName}, lvmVolumeGroup); err != nil {
+			return fmt.Errorf("failed to get LVMVolumeGroup: %w", err)
+		}
+
+		lvName := fmt.Sprintf("%s%s", pvName, linstorLVMSuffix)
+
+		rvrNew.Spec.Volumes[0].Disk = fmt.Sprintf("/dev/%s/%s", lvmVolumeGroup.Spec.ActualVGNameOnTheNode, lvName)
+		log.Debug(fmt.Sprintf("disk: %s", rvrNew.Spec.Volumes[0].Disk))
+	}
+
+	err = kCient.Create(ctx, rvrNew)
+	if err != nil {
+		return fmt.Errorf("failed to create RVR: %w", err)
+	}
+
+	log = log.With("rvr_name", rvrNew.Name)
 
 	//// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
 	//startTime := time.Now()
@@ -510,7 +547,7 @@ func createOrGetRVR(
 	//		return fmt.Errorf("RVR created but not in phase %s (current phase: %s)", rvrPhaseReady, rvrExists.Status.Phase)
 	//	}
 	//}
-	//log.Info(fmt.Sprintf("RVR created and in phase %s", rvrPhaseReady))
+	log.Info("RVR created and ready")
 
 	return nil
 }
@@ -673,6 +710,24 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 		return nil, fmt.Errorf("failed to get linstor NodeNetInterfacesList: %w", err)
 	}
 
+	layerDrbdResourceDefinitions := &srvlinstor.LayerDrbdResourceDefinitionsList{}
+	if err := kCient.List(ctx, layerDrbdResourceDefinitions); err != nil {
+		return nil, fmt.Errorf("failed to get linstor LayerDrbdResourceDefinitionsList: %w", err)
+	}
+	linstorDB.LayerDrbdResourceDefinitions = make(map[string]srvlinstor.LayerDrbdResourceDefinitions)
+	for _, layerDrbdResourceDefinition := range layerDrbdResourceDefinitions.Items {
+		linstorDB.LayerDrbdResourceDefinitions[strings.ToLower(layerDrbdResourceDefinition.Spec.ResourceName)] = layerDrbdResourceDefinition
+	}
+
+	layerDrbdVolumeDefinitions := &srvlinstor.LayerDrbdVolumeDefinitionsList{}
+	if err := kCient.List(ctx, layerDrbdVolumeDefinitions); err != nil {
+		return nil, fmt.Errorf("failed to get linstor LayerDrbdVolumeDefinitionsList: %w", err)
+	}
+	linstorDB.LayerDrbdVolumeDefinitions = make(map[string]srvlinstor.LayerDrbdVolumeDefinitions)
+	for _, layerDrbdVolumeDefinition := range layerDrbdVolumeDefinitions.Items {
+		linstorDB.LayerDrbdVolumeDefinitions[strings.ToLower(layerDrbdVolumeDefinition.Spec.ResourceName)] = layerDrbdVolumeDefinition
+	}
+
 	return linstorDB, nil
 }
 
@@ -694,4 +749,100 @@ func getNodeId(pvName string, nodeName string, linstorDB *linstorDB) (int, error
 	}
 
 	return layerDrbdResource.Spec.NodeID, nil
+}
+
+func getNodeIPv4(nodeName string, linstorDB *linstorDB) (string, error) {
+	for _, nodeNetInterface := range linstorDB.NodeNetInterfaces.Items {
+		if strings.EqualFold(nodeNetInterface.Spec.NodeName, nodeName) {
+			return nodeNetInterface.Spec.InetAddress, nil
+		}
+	}
+	return "", fmt.Errorf("node ipv4 not found")
+}
+
+func getDRBDPort(pvName string, linstorDB *linstorDB) (int, error) {
+	layerDrbdResourceDefinition, ok := linstorDB.LayerDrbdResourceDefinitions[pvName]
+	if !ok {
+		return 0, fmt.Errorf("LayerDrbdResourceDefinition not found")
+	}
+	return layerDrbdResourceDefinition.Spec.TCPPort, nil
+}
+
+func getSharedSecret(pvName string, linstorDB *linstorDB) (string, error) {
+	layerDrbdResourceDefinition, ok := linstorDB.LayerDrbdResourceDefinitions[pvName]
+	if !ok {
+		return "", fmt.Errorf("LayerDrbdResourceDefinition not found")
+	}
+	return layerDrbdResourceDefinition.Spec.Secret, nil
+}
+
+func getPeers(pvName string, currentNodeName string, linstorDB *linstorDB) (map[string]srvv1alpha2.Peer, error) {
+	peers := make(map[string]srvv1alpha2.Peer)
+	for _, linstorResource := range linstorDB.Resources[pvName] {
+		if strings.EqualFold(linstorResource.Spec.NodeName, currentNodeName) {
+			// Skip current node
+			continue
+		}
+
+		nodeId, err := getNodeId(pvName, linstorResource.Spec.NodeName, linstorDB)
+		if err != nil {
+			return nil, fmt.Errorf("getPeers: failed to get node id: %w", err)
+		}
+
+		nodeIPv4, err := getNodeIPv4(linstorResource.Spec.NodeName, linstorDB)
+		if err != nil {
+			return nil, fmt.Errorf("getPeers: failed to get node ipv4: %w", err)
+		}
+
+		drbdPort, err := getDRBDPort(pvName, linstorDB)
+		if err != nil {
+			return nil, fmt.Errorf("getPeers: failed to get drbd port: %w", err)
+		}
+
+		diskless := false
+		if linstorResource.Spec.ResourceFlags != 0 {
+			diskless = true
+		}
+
+		peers[strings.ToLower(linstorResource.Spec.NodeName)] = srvv1alpha2.Peer{
+			NodeId: uint(nodeId),
+			Address: srvv1alpha2.Address{
+				IPv4: nodeIPv4,
+				Port: uint(drbdPort),
+			},
+			Diskless: diskless,
+			//SharedSecret: sharedSecret,
+		}
+	}
+
+	return peers, nil
+}
+
+func getDRBDMinor(pvName string, linstorDB *linstorDB) (int, error) {
+	layerDrbdVolumeDefinition, ok := linstorDB.LayerDrbdVolumeDefinitions[pvName]
+	if !ok {
+		return 0, fmt.Errorf("LayerDrbdVolumeDefinition not found")
+	}
+	return layerDrbdVolumeDefinition.Spec.VlmMinorNr, nil
+}
+
+func getLVMVolumeGroupNameAndThinPoolName(nodeName string, myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup) (string, string, error) {
+	var lvmVolumeGroupName string
+	var thinPoolName string
+
+	for _, lvg := range myLvmVolumeGroups {
+		if strings.EqualFold(lvg.Spec.Local.NodeName, nodeName) {
+			lvmVolumeGroupName = lvg.Name
+			if lvg.Spec.ThinPools != nil {
+				thinPoolName = lvg.Spec.ThinPools[0].Name
+			}
+			break
+		}
+	}
+
+	if lvmVolumeGroupName == "" {
+		return "", "", fmt.Errorf("LVMVolumeGroup not found")
+	}
+
+	return lvmVolumeGroupName, thinPoolName, nil
 }
