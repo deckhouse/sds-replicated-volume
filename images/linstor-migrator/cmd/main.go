@@ -54,6 +54,13 @@ const (
 	maximumWaitingTimeInMinutes = 5
 )
 
+type linstorDB struct {
+	VolumeDefinitions   map[string]srvlinstor.VolumeDefinitions
+	ResourceDefinitions map[string]srvlinstor.ResourceDefinitions
+	ResourceGroups      map[string]srvlinstor.ResourceGroups
+	Resources           map[string][]srvlinstor.Resources
+}
+
 func main() {
 	opt := &Opt{}
 	opt.Parse()
@@ -150,40 +157,9 @@ func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, mi
 	log.Info("Migrating Replicated PersistentVolumeList", "number_of_pv", len(migrationPVs))
 
 	// During migration Linstor will be down, so fetch all needed resources from Kubernetes here
-	linstorVolumeDefinitions := &srvlinstor.VolumeDefinitionsList{}
-	if err := kCient.List(ctx, linstorVolumeDefinitions); err != nil {
-		return fmt.Errorf("failed to get linstor volume definitions: %w", err)
-	}
-	linstorVolDef := make(map[string]srvlinstor.VolumeDefinitions)
-	for _, volume := range linstorVolumeDefinitions.Items {
-		linstorVolDef[strings.ToLower(volume.Spec.ResourceName)] = volume
-	}
-
-	linstorResourceDefinitions := &srvlinstor.ResourceDefinitionsList{}
-	if err := kCient.List(ctx, linstorResourceDefinitions); err != nil {
-		return fmt.Errorf("failed to get linstor resource definitions: %w", err)
-	}
-	linstorResDef := make(map[string]srvlinstor.ResourceDefinitions)
-	for _, resource := range linstorResourceDefinitions.Items {
-		linstorResDef[strings.ToLower(resource.Spec.ResourceName)] = resource
-	}
-
-	linstorResourceGroups := &srvlinstor.ResourceGroupsList{}
-	if err := kCient.List(ctx, linstorResourceGroups); err != nil {
-		return fmt.Errorf("failed to get linstor resource groups: %w", err)
-	}
-	linstorResGr := make(map[string]srvlinstor.ResourceGroups)
-	for _, group := range linstorResourceGroups.Items {
-		linstorResGr[group.Spec.ResourceGroupName] = group
-	}
-
-	linstorResources := &srvlinstor.ResourcesList{}
-	if err := kCient.List(ctx, linstorResources); err != nil {
-		return fmt.Errorf("failed to get linstor resources: %w", err)
-	}
-	linstorRes := make(map[string][]srvlinstor.Resources)
-	for _, resource := range linstorResources.Items {
-		linstorRes[strings.ToLower(resource.Spec.ResourceName)] = append(linstorRes[strings.ToLower(resource.Spec.ResourceName)], resource)
+	linstorDB, err := initLinstorDB(ctx, kCient)
+	if err != nil {
+		return fmt.Errorf("failed to initialize linstor DB: %w", err)
 	}
 
 	replicatedStoragePools := &srvv1alpha1.ReplicatedStoragePoolList{}
@@ -197,7 +173,7 @@ func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, mi
 
 	// Can be parallelized
 	for _, pv := range migrationPVs {
-		err := migratePV(ctx, kCient, log, pv, linstorVolDef, linstorResDef, linstorResGr, linstorRes, repStorPools)
+		err := migratePV(ctx, kCient, log, pv, linstorDB, repStorPools)
 		if err != nil {
 			return fmt.Errorf("failed to migrate PersistentVolume: %w", err)
 		}
@@ -210,22 +186,19 @@ func migratePV(
 	kCient kubecl.Client,
 	log *slog.Logger,
 	pv corev1.PersistentVolume,
-	linstorVolDef map[string]srvlinstor.VolumeDefinitions,
-	linstorResDef map[string]srvlinstor.ResourceDefinitions,
-	linstorResGr map[string]srvlinstor.ResourceGroups,
-	linstorRes map[string][]srvlinstor.Resources,
+	linstorDB *linstorDB,
 	repStorPools map[string]srvv1alpha1.ReplicatedStoragePool,
 ) error {
 	log = log.With("pv_name", pv.Name)
 	log.Info("Start migrating Replicated PersistentVolume")
 
-	size, err := getPVSize(pv, linstorVolDef)
+	size, err := getPVSize(pv, linstorDB.VolumeDefinitions)
 	if err != nil {
 		return err
 	}
 	log.Debug(fmt.Sprintf("size: %d bytes", size))
 
-	poolName, err := getPoolName(pv, linstorResDef, linstorResGr)
+	poolName, err := getPoolName(pv, linstorDB.ResourceDefinitions, linstorDB.ResourceGroups)
 	if err != nil {
 		return err
 	}
@@ -243,9 +216,9 @@ func migratePV(
 		return err
 	}
 
-	linstorResources, ok := linstorRes[pv.Name]
+	linstorResources, ok := linstorDB.Resources[pv.Name]
 	if !ok {
-		return fmt.Errorf("linstor resources not found")
+		return fmt.Errorf("linstor Resources not found")
 	}
 	for _, linstorResource := range linstorResources {
 		// 0-Diskful|388-TieBreaker|260-Diskless
@@ -629,4 +602,46 @@ func newScheme() (*runtime.Scheme, error) {
 // TODO https://github.com/deckhouse/sds-common-lib/blob/main/utils/ptr.go
 func ptrTo(b bool) *bool {
 	return &b
+}
+
+func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error) {
+	linstorDB := &linstorDB{}
+
+	volumeDefinitions := &srvlinstor.VolumeDefinitionsList{}
+	if err := kCient.List(ctx, volumeDefinitions); err != nil {
+		return nil, fmt.Errorf("failed to get linstor VolumeDefinitionsList: %w", err)
+	}
+	linstorDB.VolumeDefinitions = make(map[string]srvlinstor.VolumeDefinitions)
+	for _, volume := range volumeDefinitions.Items {
+		linstorDB.VolumeDefinitions[strings.ToLower(volume.Spec.ResourceName)] = volume
+	}
+
+	resourceDefinitions := &srvlinstor.ResourceDefinitionsList{}
+	if err := kCient.List(ctx, resourceDefinitions); err != nil {
+		return nil, fmt.Errorf("failed to get linstor ResourceDefinitionsList: %w", err)
+	}
+	linstorDB.ResourceDefinitions = make(map[string]srvlinstor.ResourceDefinitions)
+	for _, resource := range resourceDefinitions.Items {
+		linstorDB.ResourceDefinitions[strings.ToLower(resource.Spec.ResourceName)] = resource
+	}
+
+	resourceGroups := &srvlinstor.ResourceGroupsList{}
+	if err := kCient.List(ctx, resourceGroups); err != nil {
+		return nil, fmt.Errorf("failed to get linstor ResourceGroupsList: %w", err)
+	}
+	linstorDB.ResourceGroups = make(map[string]srvlinstor.ResourceGroups)
+	for _, group := range resourceGroups.Items {
+		linstorDB.ResourceGroups[group.Spec.ResourceGroupName] = group
+	}
+
+	resources := &srvlinstor.ResourcesList{}
+	if err := kCient.List(ctx, resources); err != nil {
+		return nil, fmt.Errorf("failed to get linstor ResourcesList: %w", err)
+	}
+	linstorDB.Resources = make(map[string][]srvlinstor.Resources)
+	for _, resource := range resources.Items {
+		linstorDB.Resources[strings.ToLower(resource.Spec.ResourceName)] = append(linstorDB.Resources[strings.ToLower(resource.Spec.ResourceName)], resource)
+	}
+
+	return linstorDB, nil
 }
