@@ -24,6 +24,11 @@ go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
     --go-header-file ../hack/boilerplate.txt \
     ./v1alpha2
 
+go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
+    --output-file zz_generated.deepcopy_linstor.go \
+    --go-header-file ../hack/boilerplate.txt \
+    ./linstor
+
 # remove development dependencies
 go mod tidy
 
