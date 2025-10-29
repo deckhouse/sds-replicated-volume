@@ -38,7 +38,7 @@ func main() {
 		With("startedAt", time.Now().Format(time.RFC3339))
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
-	log.Info("started")
+	log.Info("controller started")
 
 	err := run(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
