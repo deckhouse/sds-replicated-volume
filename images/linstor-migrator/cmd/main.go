@@ -59,6 +59,8 @@ type linstorDB struct {
 	ResourceDefinitions map[string]srvlinstor.ResourceDefinitions
 	ResourceGroups      map[string]srvlinstor.ResourceGroups
 	Resources           map[string][]srvlinstor.Resources
+	LayerResourcesIds   *srvlinstor.LayerResourceIdsList
+	LayerDrbdResources  map[int]srvlinstor.LayerDrbdResources
 }
 
 func main() {
@@ -229,7 +231,7 @@ func migratePV(
 			}
 		}
 
-		err := createOrGetRVR(ctx, kCient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource)
+		err := createOrGetRVR(ctx, kCient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
 		if err != nil {
 			return err
 		}
@@ -380,7 +382,7 @@ func createOrGetLLV(
 		if err != nil {
 			return fmt.Errorf("failed to get LLV: %w", err)
 		}
-		if llvExists.Status.Phase == llmPhaseCreated {
+		if llvExists.Status != nil && llvExists.Status.Phase == llmPhaseCreated {
 			break
 		}
 		time.Sleep(1 * time.Second)
@@ -401,6 +403,7 @@ func createOrGetRVR(
 	rv *corev1.ConfigMap,
 	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
 	linstorResource srvlinstor.Resources,
+	linstorDB *linstorDB,
 ) error {
 	nodeName := strings.ToLower(linstorResource.Spec.NodeName)
 	generateRvrName := fmt.Sprintf("%s-", pvName)
@@ -429,6 +432,12 @@ func createOrGetRVR(
 			}
 		}
 	}
+
+	nodeId, err := getNodeId(pvName, nodeName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("node id: %d", nodeId))
 
 	//rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
 	//	ObjectMeta: metav1.ObjectMeta{
@@ -586,6 +595,7 @@ func newScheme() (*runtime.Scheme, error) {
 	var schemeFuncs = []func(s *runtime.Scheme) error{
 		corev1.AddToScheme,
 		srvv1alpha1.AddToScheme,
+		srvv1alpha2.AddToScheme,
 		srvlinstor.AddToScheme,
 		sncv1alpha1.AddToScheme,
 	}
@@ -643,5 +653,39 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 		linstorDB.Resources[strings.ToLower(resource.Spec.ResourceName)] = append(linstorDB.Resources[strings.ToLower(resource.Spec.ResourceName)], resource)
 	}
 
+	linstorDB.LayerResourcesIds = &srvlinstor.LayerResourceIdsList{}
+	if err := kCient.List(ctx, linstorDB.LayerResourcesIds); err != nil {
+		return nil, fmt.Errorf("failed to get linstor LayerResourceIdsList: %w", err)
+	}
+
+	layerDrbdResources := &srvlinstor.LayerDrbdResourcesList{}
+	if err := kCient.List(ctx, layerDrbdResources); err != nil {
+		return nil, fmt.Errorf("failed to get linstor LayerDrbdResourcesList: %w", err)
+	}
+	linstorDB.LayerDrbdResources = make(map[int]srvlinstor.LayerDrbdResources)
+	for _, layerDrbdResource := range layerDrbdResources.Items {
+		linstorDB.LayerDrbdResources[layerDrbdResource.Spec.LayerResourceID] = layerDrbdResource
+	}
+
 	return linstorDB, nil
+}
+
+func getNodeId(pvName string, nodeName string, linstorDB *linstorDB) (int, error) {
+	fieldLayerResourceId := -1
+	for _, layerResourceId := range linstorDB.LayerResourcesIds.Items {
+		if layerResourceId.Spec.LayerResourceKind == "DRBD" && strings.EqualFold(layerResourceId.Spec.NodeName, nodeName) && strings.EqualFold(layerResourceId.Spec.ResourceName, pvName) {
+			fieldLayerResourceId = layerResourceId.Spec.LayerResourceID
+			break
+		}
+	}
+	if fieldLayerResourceId == -1 {
+		return -1, fmt.Errorf("field layer_resource_id not found")
+	}
+
+	layerDrbdResource, ok := linstorDB.LayerDrbdResources[fieldLayerResourceId]
+	if !ok {
+		return -1, fmt.Errorf("LayerDrbdResource not found")
+	}
+
+	return layerDrbdResource.Spec.NodeID, nil
 }
