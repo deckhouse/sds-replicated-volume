@@ -1,13 +1,11 @@
 package cluster2
 
-import snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-
 type llvReconciler struct {
-	node NodeAdapter
-	llv  *snc.LVMLogicalVolume
+	node RVNodeAdapter
+	llv  LLVAdapter
 }
 
-func newLLVReconciler(node NodeAdapter) (*llvReconciler, error) {
+func newLLVReconciler(node RVNodeAdapter) (*llvReconciler, error) {
 	if node == nil {
 		return nil, errArgNil("node")
 	}
@@ -18,7 +16,7 @@ func newLLVReconciler(node NodeAdapter) (*llvReconciler, error) {
 	return res, nil
 }
 
-func (a *llvReconciler) setExistingLLV(llv *snc.LVMLogicalVolume) error {
+func (a *llvReconciler) setExistingLLV(llv LLVAdapter) error {
 	if llv == nil {
 		return errArgNil("llv")
 	}
@@ -26,14 +24,14 @@ func (a *llvReconciler) setExistingLLV(llv *snc.LVMLogicalVolume) error {
 	if a.llv != nil {
 		return errInvalidCluster(
 			"expected single LLV on the node, got: %s, %s",
-			a.llv.Name, llv.Name,
+			a.llv.LLVName(), llv.LLVName(),
 		)
 	}
 
-	if llv.Spec.LVMVolumeGroupName != a.node.LVGName() {
+	if llv.LVGName() != a.node.LVGName() {
 		return errInvalidCluster(
 			"expected llv spec.lvmVolumeGroupName to be '%s', got '%s'",
-			llv.Spec.LVMVolumeGroupName, a.node.LVGName(),
+			llv.LVGName(), a.node.LVGName(),
 		)
 	}
 

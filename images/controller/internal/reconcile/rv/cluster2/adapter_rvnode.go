@@ -2,15 +2,26 @@ package cluster2
 
 import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 )
 
-type nodeAdapter struct {
+type rvNodeAdapter struct {
 	nodeName, nodeIP,
 	lvgName, actualVGNameOnTheNode string
 }
 
-type NodeAdapter interface {
+// NewNodeMinor implements RVNodeManager.
+func (n *rvNodeAdapter) NewNodeMinor() (uint, error) {
+	panic("unimplemented")
+}
+
+// NewNodePort implements RVNodeManager.
+func (n *rvNodeAdapter) NewNodePort() (uint, error) {
+	panic("unimplemented")
+}
+
+type RVNodeAdapter interface {
 	NodeName() string
 	NodeIP() string
 	LVGName() string
@@ -18,30 +29,34 @@ type NodeAdapter interface {
 	Diskless() bool
 }
 
-var _ NodeAdapter = &nodeAdapter{}
+var _ RVNodeAdapter = &rvNodeAdapter{}
 
-func (n *nodeAdapter) NodeIP() string {
+func (n *rvNodeAdapter) NodeIP() string {
 	return n.nodeIP
 }
 
-func (n *nodeAdapter) NodeName() string {
+func (n *rvNodeAdapter) NodeName() string {
 	return n.nodeName
 }
 
-func (n *nodeAdapter) LVGName() string {
+func (n *rvNodeAdapter) LVGName() string {
 	return n.lvgName
 }
 
-func (n *nodeAdapter) LVGActualVGNameOnTheNode() string {
+func (n *rvNodeAdapter) LVGActualVGNameOnTheNode() string {
 	return n.actualVGNameOnTheNode
 }
 
-func (n *nodeAdapter) Diskless() bool {
+func (n *rvNodeAdapter) Diskless() bool {
 	return n.lvgName == ""
 }
 
 // lvg is optional
-func newNodeAdapter(node *corev1.Node, lvg *snc.LVMVolumeGroup) (*nodeAdapter, error) {
+func newRVNodeAdapter(
+	rv *v1alpha2.ReplicatedVolume,
+	node *corev1.Node,
+	lvg *snc.LVMVolumeGroup,
+) (*rvNodeAdapter, error) {
 	if node == nil {
 		return nil, errArgNil("node")
 	}
@@ -59,7 +74,7 @@ func newNodeAdapter(node *corev1.Node, lvg *snc.LVMVolumeGroup) (*nodeAdapter, e
 			)
 	}
 
-	res := &nodeAdapter{
+	res := &rvNodeAdapter{
 		nodeName: nodeHostName,
 		nodeIP:   nodeIP,
 	}

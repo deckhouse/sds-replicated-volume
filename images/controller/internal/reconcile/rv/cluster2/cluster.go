@@ -1,41 +1,28 @@
 package cluster2
 
 import (
-	"context"
 	"log/slog"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	cmaps "github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
-type NodeManager interface {
-	NodeAdapter
-	ReserveNodePort() (uint, error)
-	ReserveNodeMinor() (uint, error)
-}
-
-type NodeIdManager interface {
-	ReserveNodeId() (uint, error)
-}
-
 type Cluster struct {
 	log *slog.Logger
-	rv  RVAdapterWithOwned
+	rv  RVAdapter
 
 	rvrsByNodeName map[string]*rvrReconciler
 	llvsByLVGName  map[string]*llvReconciler
+	nodeIdMgr      nodeIdManager
 
-	rvrs []*v1alpha2.ReplicatedVolumeReplica
-
-	rvrsToDelete []*v1alpha2.ReplicatedVolumeReplica
-	llvsToDelete []*snc.LVMLogicalVolume
+	rvrsToDelete []RVRAdapter
+	llvsToDelete []LLVAdapter
 }
 
 func NewCluster(
 	log *slog.Logger,
-	rv RVAdapterWithOwned,
-	nodes []NodeManager,
+	rv RVAdapter,
+	rvNodes []RVNodeAdapter,
+	nodeMgrs []NodeManager,
 ) (*Cluster, error) {
 	if log == nil {
 		log = slog.Default()
@@ -44,28 +31,52 @@ func NewCluster(
 		return nil, errArgNil("rv")
 	}
 
+	if len(rvNodes) != len(nodeMgrs) {
+		return nil,
+			errArg("expected len(rvNodes)==len(nodeMgrs), got %d!=%d",
+				len(rvNodes), len(nodeMgrs),
+			)
+	}
+
 	// init reconcilers
-	rvrsByNodeName := make(map[string]*rvrReconciler, len(nodes))
-	llvsByLVGName := make(map[string]*llvReconciler, len(nodes))
-	for _, node := range nodes {
-		rvr, err := newRVRReconciler(node, rv)
+	rvrsByNodeName := make(map[string]*rvrReconciler, len(rvNodes))
+	llvsByLVGName := make(map[string]*llvReconciler, len(rvNodes))
+	for i, rvNode := range rvNodes {
+		if rvNode == nil {
+			return nil, errArg("expected rvNodes not to have nil elements, got nil at %d", i)
+		}
+
+		nodeMgr := nodeMgrs[i]
+		if nodeMgr == nil {
+			return nil, errArg("expected nodeMgrs not to have nil elements, got nil at %d", i)
+		}
+
+		if rvNode.NodeName() != nodeMgr.NodeName() {
+			return nil,
+				errArg(
+					"expected rvNodes elements to have the same node names as  nodeMgrs elements, got '%s'!='%s' at %d",
+					rvNode.NodeName(), nodeMgr.NodeName(), i,
+				)
+		}
+
+		rvr, err := newRVRReconciler(rv, rvNode, nodeMgr)
 		if err != nil {
 			return nil, err
 		}
 
 		var added bool
-		if rvrsByNodeName, added = cmaps.SetUnique(rvrsByNodeName, node.NodeName(), rvr); !added {
-			return nil, errInvalidCluster("duplicate node name: %s", node.NodeName())
+		if rvrsByNodeName, added = cmaps.SetUnique(rvrsByNodeName, rvNode.NodeName(), rvr); !added {
+			return nil, errInvalidCluster("duplicate node name: %s", rvNode.NodeName())
 		}
 
-		if !node.Diskless() {
-			llv, err := newLLVReconciler(node)
+		if !rvNode.Diskless() {
+			llv, err := newLLVReconciler(rvNode)
 			if err != nil {
 				return nil, err
 			}
 
-			if llvsByLVGName, added = cmaps.SetUnique(llvsByLVGName, node.LVGName(), llv); !added {
-				return nil, errInvalidCluster("duplicate lvg name: %s", node.LVGName())
+			if llvsByLVGName, added = cmaps.SetUnique(llvsByLVGName, rvNode.LVGName(), llv); !added {
+				return nil, errInvalidCluster("duplicate lvg name: %s", rvNode.LVGName())
 			}
 		}
 	}
@@ -82,33 +93,40 @@ func NewCluster(
 	return c, nil
 }
 
-func (c *Cluster) Load() error {
-	return nil
-}
-
-func (c *Cluster) AddExistingRVR(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+func (c *Cluster) AddExistingRVR(rvr RVRAdapter) (err error) {
 	if rvr == nil {
 		return errArgNil("rvr")
 	}
 
-	rvrA, ok := c.rvrsByNodeName[rvr.Spec.NodeName]
+	nodeId := rvr.NodeId()
+
+	if err = c.nodeIdMgr.ReserveNodeId(nodeId); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			c.nodeIdMgr.FreeNodeId(nodeId)
+		}
+	}()
+
+	rvrRec, ok := c.rvrsByNodeName[rvr.NodeName()]
 	if ok {
-		if err := rvrA.setExistingRVR(rvr); err != nil {
+		if err = rvrRec.setExistingRVR(rvr); err != nil {
 			return err
 		}
 	} else {
 		c.rvrsToDelete = append(c.rvrsToDelete, rvr)
 	}
-	c.rvrs = append(c.rvrs, rvr)
+
 	return nil
 }
 
-func (c *Cluster) AddExistingLLV(llv *snc.LVMLogicalVolume) error {
+func (c *Cluster) AddExistingLLV(llv LLVAdapter) error {
 	if llv == nil {
 		return errArgNil("llv")
 	}
 
-	llvA, ok := c.llvAdaptersByLVGName[llv.Spec.LVMVolumeGroupName]
+	llvA, ok := c.llvsByLVGName[llv.LVGName()]
 	if ok {
 		if err := llvA.setExistingLLV(llv); err != nil {
 			return err
@@ -120,16 +138,11 @@ func (c *Cluster) AddExistingLLV(llv *snc.LVMLogicalVolume) error {
 	return nil
 }
 
-func (c *Cluster) Reconcile(ctx context.Context) (Action, error) {
+func (c *Cluster) Reconcile() (Action, error) {
 	// INITIALIZE
 
-	nodeIdMgr, err := NewNodeIdManager(c.rvrs)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, repl := range c.replicasByNodeName {
-		if err := repl.initializeDynamicProps(ctx, c.rv.Name, c.nodeMgr, nodeIdMgr); err != nil {
+	for _, rvrRec := range c.rvrsByNodeName {
+		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr); err != nil {
 			return nil, err
 		}
 	}

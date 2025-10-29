@@ -5,9 +5,11 @@ import (
 )
 
 type rvrReconciler struct {
-	node NodeManager
-	rv   RVAdapter
-	rvr  RVRAdapter // optional
+	rv      RVAdapter
+	rvNode  RVNodeAdapter
+	nodeMgr NodeManager
+
+	rvr RVRAdapter // optional
 
 	dprops *replicaDynamicProps
 }
@@ -21,23 +23,49 @@ type replicaDynamicProps struct {
 }
 
 func newRVRReconciler(
-	node NodeManager,
 	rv RVAdapter,
-	rvr RVRAdapter, // optional
+	rvNode RVNodeAdapter,
+	nodeMgr NodeManager,
 ) (*rvrReconciler, error) {
-	if node == nil {
-		return nil, errArgNil("node")
-	}
 	if rv == nil {
 		return nil, errArgNil("rv")
 	}
+	if rvNode == nil {
+		return nil, errArgNil("rvNode")
+	}
+	if nodeMgr == nil {
+		return nil, errArgNil("nodeMgr")
+	}
 
 	res := &rvrReconciler{
-		node: node,
-		rv:   rv,
-		rvr:  rvr,
+		rv:      rv,
+		rvNode:  rvNode,
+		nodeMgr: nodeMgr,
 	}
 	return res, nil
+}
+
+func (r *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
+	if rvr == nil {
+		return errArgNil("rvr")
+	}
+
+	if rvr.NodeName() != r.rvNode.NodeName() {
+		return errInvalidCluster(
+			"expected rvr '%s' to have node name '%s', got '%s'",
+			rvr.Name(), r.rvNode.NodeName(), rvr.NodeName(),
+		)
+	}
+
+	if r.rvr != nil {
+		return errInvalidCluster(
+			"expected single RVR on the node, got: %s, %s",
+			r.rvr.Name(), rvr.Name(),
+		)
+	}
+
+	r.rvr = rvr
+	return nil
 }
 
 func (r *rvrReconciler) initializeDynamicProps(nodeIdMgr NodeIdManager) error {
@@ -46,7 +74,7 @@ func (r *rvrReconciler) initializeDynamicProps(nodeIdMgr NodeIdManager) error {
 
 	// port
 	if r.rvr == nil || r.rvr.Port() == 0 {
-		port, err := r.node.ReserveNodePort()
+		port, err := r.nodeMgr.NewNodePort()
 		if err != nil {
 			return err
 		}
@@ -57,7 +85,7 @@ func (r *rvrReconciler) initializeDynamicProps(nodeIdMgr NodeIdManager) error {
 
 	// minor
 	if r.rvr == nil || r.rvr.Minor() == nil {
-		minor, err := r.node.ReserveNodeMinor()
+		minor, err := r.nodeMgr.NewNodeMinor()
 		if err != nil {
 			return err
 		}
@@ -68,13 +96,13 @@ func (r *rvrReconciler) initializeDynamicProps(nodeIdMgr NodeIdManager) error {
 
 	// nodeid
 	if r.rvr == nil {
-		nodeId, err := nodeIdMgr.ReserveNodeId()
+		nodeId, err := nodeIdMgr.NewNodeId()
 		if err != nil {
 			return err
 		}
 		dprops.nodeId = nodeId
 	} else {
-		dprops.nodeId = r.rvr.Spec.NodeId
+		dprops.nodeId = r.rvr.NodeId()
 	}
 
 	// disk
@@ -96,10 +124,10 @@ func (r *rvrReconciler) asPeer() v1alpha2.Peer {
 	res := v1alpha2.Peer{
 		NodeId: uint(r.dprops.nodeId),
 		Address: v1alpha2.Address{
-			IPv4: r.node.NodeIP(),
+			IPv4: r.rvNode.NodeIP(),
 			Port: r.dprops.port,
 		},
-		Diskless:     r.node.Diskless(),
+		Diskless:     r.rvNode.Diskless(),
 		SharedSecret: r.rv.SharedSecret(),
 	}
 
@@ -114,7 +142,7 @@ func (r *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler) e
 			continue
 		}
 
-		peers[repl.node.NodeName()] = repl.asPeer()
+		peers[repl.rvNode.NodeName()] = repl.asPeer()
 	}
 
 	r.dprops.peers = peers
@@ -123,7 +151,7 @@ func (r *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler) e
 }
 
 func (r *rvrReconciler) createVolumeIfNeeded() (Action, error) {
-	if r.node.Diskless() {
+	if r.rvNode.Diskless() {
 		return nil, nil
 	}
 

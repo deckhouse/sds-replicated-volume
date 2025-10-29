@@ -5,8 +5,6 @@ import (
 	"fmt"
 )
 
-var MaxNodeId = uint(7)
-
 func errArg(format string, a ...any) error {
 	return fmt.Errorf("invalid argument: %w", fmt.Errorf(format, a...))
 }
