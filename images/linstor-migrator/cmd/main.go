@@ -61,6 +61,7 @@ type linstorDB struct {
 	Resources           map[string][]srvlinstor.Resources
 	LayerResourcesIds   *srvlinstor.LayerResourceIdsList
 	LayerDrbdResources  map[int]srvlinstor.LayerDrbdResources
+	NodeNetInterfaces   *srvlinstor.NodeNetInterfacesList
 }
 
 func main() {
@@ -665,6 +666,11 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	linstorDB.LayerDrbdResources = make(map[int]srvlinstor.LayerDrbdResources)
 	for _, layerDrbdResource := range layerDrbdResources.Items {
 		linstorDB.LayerDrbdResources[layerDrbdResource.Spec.LayerResourceID] = layerDrbdResource
+	}
+
+	linstorDB.NodeNetInterfaces = &srvlinstor.NodeNetInterfacesList{}
+	if err := kCient.List(ctx, linstorDB.NodeNetInterfaces); err != nil {
+		return nil, fmt.Errorf("failed to get linstor NodeNetInterfacesList: %w", err)
 	}
 
 	return linstorDB, nil

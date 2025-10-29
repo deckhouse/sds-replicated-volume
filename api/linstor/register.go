@@ -60,6 +60,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&LayerResourceIdsList{},
 		&LayerDrbdResources{},
 		&LayerDrbdResourcesList{},
+		&NodeNetInterfaces{},
+		&NodeNetInterfacesList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
