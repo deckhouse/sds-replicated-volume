@@ -181,7 +181,7 @@ func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, mi
 	for _, pv := range migrationPVs {
 		err := migratePV(ctx, kCient, log, pv, linstorDB, repStorPools)
 		if err != nil {
-			return fmt.Errorf("failed to migrate PersistentVolume: %w", err)
+			return fmt.Errorf("failed to migrate PersistentVolume; pv: %s; err: %w", pv.Name, err)
 		}
 	}
 	return nil
@@ -231,13 +231,13 @@ func migratePV(
 		if linstorResource.Spec.ResourceFlags == 0 {
 			err := createOrGetLLV(ctx, kCient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
 			if err != nil {
-				return err
+				return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 			}
 		}
 
 		err := createOrGetRVR(ctx, kCient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
 		if err != nil {
-			return err
+			return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 		}
 	}
 
