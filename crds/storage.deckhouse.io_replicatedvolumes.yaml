@@ -105,6 +105,13 @@ spec:
                 - Zonal
                 - Ignored
                 type: string
+              volumeAccess:
+                enum:
+                - Local
+                - PreferablyLocal
+                - EventuallyLocal
+                - Any
+                type: string
               zones:
                 items:
                   type: string
@@ -117,6 +124,7 @@ spec:
             - sharedSecret
             - size
             - topology
+            - volumeAccess
             type: object
           status:
             properties:

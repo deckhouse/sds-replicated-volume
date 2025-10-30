@@ -147,20 +147,22 @@ func (c *Cluster) Reconcile() (Action, error) {
 		}
 	}
 
-	for _, repl := range c.replicasByNodeName {
-		if err := repl.initializePeers(c.replicasByNodeName); err != nil {
-			return nil, err
-		}
-	}
+	return nil, nil
 
-	//
+	// for _, repl := range c.replicasByNodeName {
+	// 	if err := repl.initializePeers(c.replicasByNodeName); err != nil {
+	// 		return nil, err
+	// 	}
+	// }
 
-	var res Actions
-	for {
-		for nodeName, repl := range c.replicasByNodeName {
-			_ = nodeName
-			_ = repl
-		}
-	}
-	return res, nil
+	// //
+
+	// var res Actions
+	// for {
+	// 	for nodeName, repl := range c.replicasByNodeName {
+	// 		_ = nodeName
+	// 		_ = repl
+	// 	}
+	// }
+	// return res, nil
 }

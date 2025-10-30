@@ -50,6 +50,10 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	PublishRequested []string `json:"publishRequested"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Local;PreferablyLocal;EventuallyLocal;Any
+	VolumeAccess string `json:"volumeAccess"`
 }
 
 // +k8s:deepcopy-gen=true
