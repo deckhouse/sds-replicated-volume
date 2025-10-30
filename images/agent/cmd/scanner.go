@@ -138,10 +138,6 @@ func (s *scanner) processEvents(
 				s.log.Debug("events online")
 			}
 
-			if !online {
-				continue
-			}
-
 			if resourceName, ok := typedEvent.State["name"]; !ok {
 				s.log.Debug("skipping event without name")
 				continue
