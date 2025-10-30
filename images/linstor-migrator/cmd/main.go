@@ -551,23 +551,28 @@ func createOrGetRVR(
 
 	log = log.With("rvr_name", rvrNew.Name)
 
-	//// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
-	//startTime := time.Now()
-	//for {
-	//	rvrExists := &srvv1alpha2.ReplicatedVolumeReplica{}
-	//	err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
-	//	if err != nil {
-	//		return fmt.Errorf("failed to get RVR: %w", err)
-	//	}
-	//	if rvrExists.Status.Phase == rvrPhaseReady {
-	//		break
-	//	}
-	//	time.Sleep(1 * time.Second)
-	//	if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
-	//		return fmt.Errorf("RVR created but not in phase %s (current phase: %s)", rvrPhaseReady, rvrExists.Status.Phase)
-	//	}
-	//}
-	log.Info("RVR created and ready")
+	// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
+	startTime := time.Now()
+	for {
+		rvrExists := &srvv1alpha2.ReplicatedVolumeReplica{}
+		err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
+		if err != nil {
+			return fmt.Errorf("failed to get RVR: %w", err)
+		}
+		if rvrExists.Status != nil && rvrExists.Status.Conditions != nil {
+			for _, condition := range rvrExists.Status.Conditions {
+				if condition.Type == srvv1alpha2.ConditionTypeReady && condition.Status == metav1.ConditionTrue {
+					break
+				}
+			}
+			break
+		}
+		time.Sleep(1 * time.Second)
+		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
+			return fmt.Errorf("RVR created but not in Ready state")
+		}
+	}
+	log.Info("RVR created and in Ready state")
 
 	return nil
 }
