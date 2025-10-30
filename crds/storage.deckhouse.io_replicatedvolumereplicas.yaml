@@ -159,8 +159,8 @@ spec:
                 items:
                   properties:
                     device:
-                      maximum: 1048575
-                      minimum: 0
+                      maximum: 10000
+                      minimum: 1000
                       type: integer
                       x-kubernetes-validations:
                       - message: volume device is immutable
@@ -173,7 +173,7 @@ spec:
                       - message: volume disk is immutable
                         rule: self == oldSelf
                     number:
-                      maximum: 255
+                      maximum: 20
                       minimum: 0
                       type: integer
                       x-kubernetes-validations:

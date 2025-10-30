@@ -193,7 +193,7 @@ type Peer struct {
 // +k8s:deepcopy-gen=true
 type Volume struct {
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=255
+	// +kubebuilder:validation:Maximum=20
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volume number is immutable"
 	Number uint `json:"number"`
 
@@ -202,8 +202,8 @@ type Volume struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volume disk is immutable"
 	Disk string `json:"disk,omitempty"`
 
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1048575
+	// +kubebuilder:validation:Minimum=1000
+	// +kubebuilder:validation:Maximum=10000
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="volume device is immutable"
 	Device uint `json:"device"`
 }
