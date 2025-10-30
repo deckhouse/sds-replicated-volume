@@ -36,6 +36,7 @@ import (
 
 	srvv1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -470,6 +471,12 @@ func createOrGetRVR(
 	}
 	log.Debug(fmt.Sprintf("drbd minor: %d", drbdMinor))
 
+	primary, err := getPrimary(ctx, kCient, pvName, nodeName)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("primary: %t", primary))
+
 	rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateRvrName,
@@ -495,9 +502,9 @@ func createOrGetRVR(
 			},
 			Peers:                   peers,
 			SharedSecret:            sharedSecret,
-			Primary:                 false, // TODO: volumeattachment
-			Quorum:                  0,     // TODO: set quorum
-			QuorumMinimumRedundancy: 0,     // TODO: set quorum minimum redundancy
+			Primary:                 primary,
+			Quorum:                  0, // TODO: set quorum
+			QuorumMinimumRedundancy: 0, // TODO: set quorum minimum redundancy
 			AllowTwoPrimaries:       false,
 			Volumes: []srvv1alpha2.Volume{
 				{
@@ -636,6 +643,7 @@ func newScheme() (*runtime.Scheme, error) {
 		srvv1alpha2.AddToScheme,
 		srvlinstor.AddToScheme,
 		sncv1alpha1.AddToScheme,
+		storagev1.AddToScheme,
 	}
 
 	for i, f := range schemeFuncs {
@@ -845,4 +853,20 @@ func getLVMVolumeGroupNameAndThinPoolName(nodeName string, myLvmVolumeGroups map
 	}
 
 	return lvmVolumeGroupName, thinPoolName, nil
+}
+
+func getPrimary(ctx context.Context, kCient kubecl.Client, pvName string, nodeName string) (bool, error) {
+	volumeAttachments := &storagev1.VolumeAttachmentList{}
+	if err := kCient.List(ctx, volumeAttachments); err != nil {
+		return false, fmt.Errorf("failed to get VolumeAttachmentList: %w", err)
+	}
+	for _, volumeAttachment := range volumeAttachments.Items {
+		if volumeAttachment.Spec.Attacher == csiDriverReplicated &&
+			volumeAttachment.Spec.Source.PersistentVolumeName != nil &&
+			strings.EqualFold(*volumeAttachment.Spec.Source.PersistentVolumeName, pvName) &&
+			strings.EqualFold(volumeAttachment.Spec.NodeName, nodeName) {
+			return volumeAttachment.Status.Attached, nil
+		}
+	}
+	return false, nil
 }
