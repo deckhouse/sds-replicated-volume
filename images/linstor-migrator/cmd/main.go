@@ -198,13 +198,13 @@ func migratePV(
 	log = log.With("pv_name", pv.Name)
 	log.Info("Start migrating Replicated PersistentVolume")
 
-	size, err := getPVSize(pv, linstorDB.VolumeDefinitions)
+	size, err := getPVSize(pv, linstorDB)
 	if err != nil {
 		return err
 	}
 	log.Debug(fmt.Sprintf("size: %d bytes", size))
 
-	poolName, err := getPoolName(pv, linstorDB.ResourceDefinitions, linstorDB.ResourceGroups)
+	poolName, err := getPoolName(pv.Name, linstorDB)
 	if err != nil {
 		return err
 	}
@@ -477,6 +477,19 @@ func createOrGetRVR(
 	}
 	log.Debug(fmt.Sprintf("primary: %t", primary))
 
+	replicaCount, err := getReplicaCount(pvName, linstorDB)
+	if err != nil {
+		return err
+	}
+	log.Debug(fmt.Sprintf("replica count: %d", replicaCount))
+	quorum := replicaCount/2 + 1
+	quorumMinimumRedundancy := byte(0)
+	if replicaCount > 2 {
+		quorumMinimumRedundancy = quorum
+	}
+	log.Debug(fmt.Sprintf("quorum: %d", quorum))
+	log.Debug(fmt.Sprintf("quorum minimum redundancy: %d", quorumMinimumRedundancy))
+
 	rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateRvrName,
@@ -503,8 +516,8 @@ func createOrGetRVR(
 			Peers:                   peers,
 			SharedSecret:            sharedSecret,
 			Primary:                 primary,
-			Quorum:                  0, // TODO: set quorum
-			QuorumMinimumRedundancy: 0, // TODO: set quorum minimum redundancy
+			Quorum:                  quorum,
+			QuorumMinimumRedundancy: quorumMinimumRedundancy,
 			AllowTwoPrimaries:       false,
 			Volumes: []srvv1alpha2.Volume{
 				{
@@ -586,7 +599,7 @@ func getMyLvmVolumeGroups(
 	return lvmVolumeGroups, nil
 }
 
-func getPVSize(pv corev1.PersistentVolume, linstorVolDef map[string]srvlinstor.VolumeDefinitions) (int, error) {
+func getPVSize(pv corev1.PersistentVolume, linstorDB *linstorDB) (int, error) {
 	var size int
 	if pv.Spec.Capacity != nil {
 		if qty, ok := pv.Spec.Capacity[corev1.ResourceStorage]; ok {
@@ -594,7 +607,7 @@ func getPVSize(pv corev1.PersistentVolume, linstorVolDef map[string]srvlinstor.V
 		}
 	}
 	if size == 0 {
-		volume, ok := linstorVolDef[strings.ToLower(pv.Name)]
+		volume, ok := linstorDB.VolumeDefinitions[strings.ToLower(pv.Name)]
 		if ok {
 			size = volume.Spec.VlmSize * 1024
 		}
@@ -605,19 +618,15 @@ func getPVSize(pv corev1.PersistentVolume, linstorVolDef map[string]srvlinstor.V
 	return size, nil
 }
 
-func getPoolName(
-	pv corev1.PersistentVolume,
-	linstorResDef map[string]srvlinstor.ResourceDefinitions,
-	linstorResGr map[string]srvlinstor.ResourceGroups,
-) (string, error) {
-	resourceDefinition, ok := linstorResDef[strings.ToLower(pv.Name)]
+func getPoolName(pvName string, linstorDB *linstorDB) (string, error) {
+	resourceDefinition, ok := linstorDB.ResourceDefinitions[strings.ToLower(pvName)]
 	if !ok {
-		return "", fmt.Errorf("linstor resource definition not found")
+		return "", fmt.Errorf("linstor ResourceDefinition not found")
 	}
 
-	resourceGroup, ok := linstorResGr[resourceDefinition.Spec.ResourceGroupName]
+	resourceGroup, ok := linstorDB.ResourceGroups[resourceDefinition.Spec.ResourceGroupName]
 	if !ok {
-		return "", fmt.Errorf("linstor resource group not found")
+		return "", fmt.Errorf("linstor ResourceGroup not found")
 	}
 
 	poolNameJson := resourceGroup.Spec.PoolName
@@ -869,4 +878,23 @@ func getPrimary(ctx context.Context, kCient kubecl.Client, pvName string, nodeNa
 		}
 	}
 	return false, nil
+}
+
+func getReplicaCount(pvName string, linstorDB *linstorDB) (byte, error) {
+	resourceDefinition, ok := linstorDB.ResourceDefinitions[strings.ToLower(pvName)]
+	if !ok {
+		return 0, fmt.Errorf("linstor ResourceDefinition not found")
+	}
+
+	resourceGroup, ok := linstorDB.ResourceGroups[resourceDefinition.Spec.ResourceGroupName]
+	if !ok {
+		return 0, fmt.Errorf("linstor ResourceGroup not found")
+	}
+
+	replicaCount := resourceGroup.Spec.ReplicaCount
+	if replicaCount == 0 {
+		return 0, fmt.Errorf("replica count is 0")
+	}
+
+	return byte(replicaCount), nil
 }
