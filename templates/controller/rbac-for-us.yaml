@@ -14,8 +14,11 @@ metadata:
   {{- include "helm_lib_module_labels" (list . (dict "app" "controller")) | nindent 2 }}
 rules:
   - apiGroups: [""]
-    resources: ["nodes", "configmaps"]
+    resources: ["nodes"]
     verbs: ["list", "get"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["list", "get", "watch"]
   - apiGroups: ["storage.deckhouse.io"]
     resources: ["lvmlogicalvolumes", "replicatedvolumereplicas"]
     verbs: ["list", "get", "watch", "create", "patch", "update", "delete"]
