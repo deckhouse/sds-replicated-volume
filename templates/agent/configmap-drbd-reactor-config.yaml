@@ -1,0 +1,15 @@
+{{- if not .Values.sdsReplicatedVolume.useLinstor }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: drbd-reactor-config
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "agent")) | nindent 2 }}
+data:
+  prometheus.toml: |2
+
+    [[prometheus]]
+    address = "127.0.0.1:4215"
+    enums = true
+{{- end }}

@@ -4,6 +4,7 @@ memory: 300Mi
 {{- end }}
 
 
+{{- if .Values.sdsReplicatedVolume.useLinstor }}
 {{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
 ---
 apiVersion: autoscaling.k8s.io/v1
@@ -271,3 +272,4 @@ spec:
           secret:
             defaultMode: 420
             secretName: linstor-controller-ssl-cert
+{{- end }}
