@@ -38,6 +38,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -383,6 +384,8 @@ func createOrGetLLV(
 		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
 			return fmt.Errorf("LLV created but not in phase %s (current phase: %s)", llmPhaseCreated, llvExists.Status.Phase)
 		}
+
+		log.Debug("waiting to reach Created phase...")
 	}
 	log.Info(fmt.Sprintf("LLV created and in phase %s", llmPhaseCreated))
 
@@ -424,13 +427,17 @@ func createOrGetRVR(
 			if rvr.Status.Conditions == nil {
 				return fmt.Errorf("RVR already exists; conditions are not set")
 			}
-			for _, condition := range rvr.Status.Conditions {
-				if condition.Type == srvv1alpha2.ConditionTypeReady && condition.Status == metav1.ConditionTrue {
-					log.Info("RVR already exists")
-					return nil
-				} else {
-					return fmt.Errorf("RVR already exists; condition %s is not true (current status: %s)", srvv1alpha2.ConditionTypeReady, condition.Status)
-				}
+			cond := meta.FindStatusCondition(rvr.Status.Conditions, srvv1alpha2.ConditionTypeReady)
+			if cond != nil && cond.Status == metav1.ConditionTrue {
+				log.Info("RVR already exists")
+				return nil
+			} else {
+				return fmt.Errorf("RVR already exists; condition %s is not true (current status: %q)", srvv1alpha2.ConditionTypeReady, func() string {
+					if cond == nil {
+						return "<nil>"
+					}
+					return string(cond.Status)
+				}())
 			}
 		}
 	}
@@ -560,17 +567,17 @@ func createOrGetRVR(
 			return fmt.Errorf("failed to get RVR: %w", err)
 		}
 		if rvrExists.Status != nil && rvrExists.Status.Conditions != nil {
-			for _, condition := range rvrExists.Status.Conditions {
-				if condition.Type == srvv1alpha2.ConditionTypeReady && condition.Status == metav1.ConditionTrue {
-					break
-				}
+			cond := meta.FindStatusCondition(rvrExists.Status.Conditions, srvv1alpha2.ConditionTypeReady)
+			if cond != nil && cond.Status == metav1.ConditionTrue {
+				break
 			}
-			break
 		}
 		time.Sleep(1 * time.Second)
 		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
 			return fmt.Errorf("RVR created but not in Ready state")
 		}
+
+		log.Debug("waiting to reach Ready state...")
 	}
 	log.Info("RVR created and in Ready state")
 
