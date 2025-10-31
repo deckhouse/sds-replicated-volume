@@ -12,6 +12,8 @@ type RVRAdapter interface {
 	Minor() *uint
 	Disk() string
 	NodeId() uint
+
+	Size() int64
 }
 
 var _ RVRAdapter = &rvrAdapter{}
@@ -60,5 +62,10 @@ func (r *rvrAdapter) Minor() *uint {
 
 // NodeId implements RVRAdapter.
 func (r *rvrAdapter) NodeId() uint {
+	panic("unimplemented")
+}
+
+// Size implements RVRAdapter.
+func (r *rvrAdapter) Size() int64 {
 	panic("unimplemented")
 }

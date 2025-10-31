@@ -126,9 +126,9 @@ func (c *Cluster) AddExistingLLV(llv LLVAdapter) error {
 		return errArgNil("llv")
 	}
 
-	llvA, ok := c.llvsByLVGName[llv.LVGName()]
+	llvRec, ok := c.llvsByLVGName[llv.LVGName()]
 	if ok {
-		if err := llvA.setExistingLLV(llv); err != nil {
+		if err := llvRec.setExistingLLV(llv); err != nil {
 			return err
 		}
 	} else {
@@ -138,31 +138,117 @@ func (c *Cluster) AddExistingLLV(llv LLVAdapter) error {
 	return nil
 }
 
-func (c *Cluster) Reconcile() (Action, error) {
-	// INITIALIZE
+func (c *Cluster) deleteLLV(llv LLVAdapter) Action {
+	return nil
+}
 
+func (c *Cluster) deleteRVR(rvr RVRAdapter) Action {
+	return nil
+}
+
+func (c *Cluster) initializeReconcilers() error {
+	// llv need no initialization
+
+	// rvrs may need to query for some props
 	for _, rvrRec := range c.rvrsByNodeName {
-		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr); err != nil {
-			return nil, err
+		var dp diskPath
+		if !rvrRec.Diskless() {
+			dp = c.llvsByLVGName[rvrRec.LVGName()]
+		}
+
+		if err := rvrRec.initializeTargetProps(&c.nodeIdMgr, dp); err != nil {
+			return err
 		}
 	}
 
-	return nil, nil
+	// initialize information about each other
+	for _, rvrRec := range c.rvrsByNodeName {
+		if err := rvrRec.initializePeers(c.rvrsByNodeName); err != nil {
+			return err
+		}
+	}
 
-	// for _, repl := range c.replicasByNodeName {
-	// 	if err := repl.initializePeers(c.replicasByNodeName); err != nil {
-	// 		return nil, err
-	// 	}
-	// }
+	return nil
+}
 
-	// //
+func (c *Cluster) Reconcile() (Action, error) {
+	// 1. INITIALIZE
+	if err := c.initializeReconcilers(); err != nil {
+		return nil, err
+	}
 
-	// var res Actions
-	// for {
-	// 	for nodeName, repl := range c.replicasByNodeName {
-	// 		_ = nodeName
-	// 		_ = repl
-	// 	}
-	// }
-	// return res, nil
+	// common for existing LLVs and RVRs
+	var existingResourcesActions ParallelActions
+
+	// 2. RECONCILE LLVs
+	var addWithDeleteLLVActions Actions
+	var addOrDeleteLLVActions ParallelActions
+	{
+		llvsToDelete := c.llvsToDelete
+		for _, llvRec := range c.llvsByLVGName {
+			reconcileAction, err := llvRec.reconcile()
+			if err != nil {
+				return nil, err
+			}
+
+			if reconcileAction == nil {
+				continue
+			}
+
+			if llvRec.hasExisting() {
+				existingResourcesActions = append(existingResourcesActions, reconcileAction)
+			} else if len(llvsToDelete) > 0 {
+				addWithDeleteLLVActions = append(addWithDeleteLLVActions, reconcileAction)
+				addWithDeleteLLVActions = append(addWithDeleteLLVActions, c.deleteLLV(llvsToDelete[0]))
+				llvsToDelete = llvsToDelete[1:]
+			} else {
+				addOrDeleteLLVActions = append(addOrDeleteLLVActions, reconcileAction)
+			}
+		}
+		for len(llvsToDelete) > 0 {
+			addOrDeleteLLVActions = append(addOrDeleteLLVActions, c.deleteLLV(llvsToDelete[0]))
+			llvsToDelete = llvsToDelete[1:]
+		}
+	}
+
+	// 3. RECONCILE RVRs
+	var addWithDeleteRVRActions Actions
+	var addOrDeleteRVRActions ParallelActions
+	{
+		rvrsToDelete := c.rvrsToDelete
+		for _, rvrRec := range c.rvrsByNodeName {
+			reconcileAction, err := rvrRec.reconcile()
+			if err != nil {
+				return nil, err
+			}
+
+			if reconcileAction == nil {
+				continue
+			}
+
+			if rvrRec.hasExisting() {
+				existingResourcesActions = append(existingResourcesActions, reconcileAction)
+			} else if len(rvrsToDelete) > 0 {
+				addWithDeleteRVRActions = append(addWithDeleteRVRActions, reconcileAction)
+				addWithDeleteRVRActions = append(addWithDeleteRVRActions, c.deleteRVR(rvrsToDelete[0]))
+				rvrsToDelete = rvrsToDelete[1:]
+			} else {
+				addOrDeleteRVRActions = append(addOrDeleteRVRActions, reconcileAction)
+			}
+		}
+		for len(rvrsToDelete) > 0 {
+			addOrDeleteRVRActions = append(addOrDeleteRVRActions, c.deleteRVR(rvrsToDelete[0]))
+			rvrsToDelete = rvrsToDelete[1:]
+		}
+	}
+
+	// DONE
+	result := Actions{
+		existingResourcesActions,
+		addWithDeleteLLVActions, addOrDeleteLLVActions,
+		addWithDeleteRVRActions, addOrDeleteRVRActions,
+	}
+
+	return cleanActions(result), nil
+
 }

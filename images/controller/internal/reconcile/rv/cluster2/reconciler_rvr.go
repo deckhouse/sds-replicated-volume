@@ -4,17 +4,21 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
+type diskPath interface {
+	diskPath() string
+}
+
 type rvrReconciler struct {
+	RVNodeAdapter
 	rv      RVAdapter
-	rvNode  RVNodeAdapter
 	nodeMgr NodeManager
 
 	rvr RVRAdapter // optional
 
-	dprops *replicaDynamicProps
+	tgtProps *replicaTargetProps
 }
 
-type replicaDynamicProps struct {
+type replicaTargetProps struct {
 	port   uint
 	minor  uint
 	nodeId uint
@@ -38,124 +42,126 @@ func newRVRReconciler(
 	}
 
 	res := &rvrReconciler{
-		rv:      rv,
-		rvNode:  rvNode,
-		nodeMgr: nodeMgr,
+		RVNodeAdapter: rvNode,
+		rv:            rv,
+		nodeMgr:       nodeMgr,
 	}
 	return res, nil
 }
 
-func (r *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
+func (rec *rvrReconciler) hasExisting() bool {
+	return rec.rvr != nil
+}
+
+func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 	if rvr == nil {
 		return errArgNil("rvr")
 	}
 
-	if rvr.NodeName() != r.rvNode.NodeName() {
+	if rvr.NodeName() != rec.NodeName() {
 		return errInvalidCluster(
 			"expected rvr '%s' to have node name '%s', got '%s'",
-			rvr.Name(), r.rvNode.NodeName(), rvr.NodeName(),
+			rvr.Name(), rec.NodeName(), rvr.NodeName(),
 		)
 	}
 
-	if r.rvr != nil {
+	if rec.rvr != nil {
 		return errInvalidCluster(
-			"expected single RVR on the node, got: %s, %s",
-			r.rvr.Name(), rvr.Name(),
+			"expected one RVR on the node, got: %s, %s",
+			rec.rvr.Name(), rvr.Name(),
 		)
 	}
 
-	r.rvr = rvr
+	rec.rvr = rvr
 	return nil
 }
 
-func (r *rvrReconciler) initializeDynamicProps(nodeIdMgr NodeIdManager) error {
+func (rec *rvrReconciler) initializeTargetProps(
+	nodeIdMgr NodeIdManager,
+	dp diskPath,
+) error {
 
-	dprops := &replicaDynamicProps{}
+	if rec.Diskless() != (dp == nil) {
+		return errUnexpected("expected rec.Diskless() == (dp == nil)")
+	}
+
+	tgtProps := &replicaTargetProps{}
 
 	// port
-	if r.rvr == nil || r.rvr.Port() == 0 {
-		port, err := r.nodeMgr.NewNodePort()
+	if rec.rvr == nil || rec.rvr.Port() == 0 {
+		port, err := rec.nodeMgr.NewNodePort()
 		if err != nil {
 			return err
 		}
-		dprops.port = port
+		tgtProps.port = port
 	} else {
-		dprops.port = r.rvr.Port()
+		tgtProps.port = rec.rvr.Port()
 	}
 
 	// minor
-	if r.rvr == nil || r.rvr.Minor() == nil {
-		minor, err := r.nodeMgr.NewNodeMinor()
+	if rec.rvr == nil || rec.rvr.Minor() == nil {
+		minor, err := rec.nodeMgr.NewNodeMinor()
 		if err != nil {
 			return err
 		}
-		dprops.minor = minor
+		tgtProps.minor = minor
 	} else {
-		dprops.minor = *r.rvr.Minor()
+		tgtProps.minor = *rec.rvr.Minor()
 	}
 
 	// nodeid
-	if r.rvr == nil {
+	if rec.rvr == nil {
 		nodeId, err := nodeIdMgr.NewNodeId()
 		if err != nil {
 			return err
 		}
-		dprops.nodeId = nodeId
+		tgtProps.nodeId = nodeId
 	} else {
-		dprops.nodeId = r.rvr.NodeId()
+		tgtProps.nodeId = rec.rvr.NodeId()
 	}
 
 	// disk
-	// TODO
-	// if !r.node.Diskless() {
-	// 	if r.existingLLV == nil {
-	// 		dprops.disk = fmt.Sprintf("/dev/%s/%s", r.node.LVGActualVGNameOnTheNode(), rvName)
-	// 	} else {
-	// 		dprops.disk = fmt.Sprintf("/dev/%s/%s", r.node.LVGActualVGNameOnTheNode(), r.existingLLV.Spec.ActualLVNameOnTheNode)
-	// 	}
-	// }
+	if dp != nil {
+		tgtProps.disk = dp.diskPath()
+	}
 
-	r.dprops = dprops
+	rec.tgtProps = tgtProps
 
 	return nil
 }
 
-func (r *rvrReconciler) asPeer() v1alpha2.Peer {
+func (rec *rvrReconciler) asPeer() v1alpha2.Peer {
 	res := v1alpha2.Peer{
-		NodeId: uint(r.dprops.nodeId),
+		NodeId: uint(rec.tgtProps.nodeId),
 		Address: v1alpha2.Address{
-			IPv4: r.rvNode.NodeIP(),
-			Port: r.dprops.port,
+			IPv4: rec.NodeIP(),
+			Port: rec.tgtProps.port,
 		},
-		Diskless:     r.rvNode.Diskless(),
-		SharedSecret: r.rv.SharedSecret(),
+		Diskless:     rec.Diskless(),
+		SharedSecret: rec.rv.SharedSecret(),
 	}
 
 	return res
 }
 
-func (r *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler) error {
+func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler) error {
 	peers := make(map[string]v1alpha2.Peer, len(allReplicas)-1)
 
-	for _, repl := range allReplicas {
-		if r == repl {
+	for _, peerRec := range allReplicas {
+		if rec == peerRec {
 			continue
 		}
 
-		peers[repl.rvNode.NodeName()] = repl.asPeer()
+		peers[peerRec.NodeName()] = peerRec.asPeer()
 	}
 
-	r.dprops.peers = peers
+	rec.tgtProps.peers = peers
 
 	return nil
 }
 
-func (r *rvrReconciler) createVolumeIfNeeded() (Action, error) {
-	if r.rvNode.Diskless() {
-		return nil, nil
-	}
-
-	var res Actions
+func (rec *rvrReconciler) reconcile() (Action, error) {
+	var res Action
 	// if r.existingLLV == nil {
 	// 	// newLLV := &snc.LVMLogicalVolume{
 

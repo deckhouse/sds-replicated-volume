@@ -24,7 +24,9 @@ func (n *rvNodeAdapter) NewNodePort() (uint, error) {
 type RVNodeAdapter interface {
 	NodeName() string
 	NodeIP() string
+	// empty if [RVNodeAdapter.Diskless]
 	LVGName() string
+	// empty if [RVNodeAdapter.Diskless]
 	LVGActualVGNameOnTheNode() string
 	Diskless() bool
 }

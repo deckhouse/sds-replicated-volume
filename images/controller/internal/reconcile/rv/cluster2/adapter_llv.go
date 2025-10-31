@@ -5,8 +5,14 @@ import snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 type llvAdapter struct {
 }
 
+// LLVActualLVNameOnTheNode implements LLVAdapter.
+func (l *llvAdapter) LLVActualLVNameOnTheNode() string {
+	panic("unimplemented")
+}
+
 type LLVAdapter interface {
 	LLVName() string
+	LLVActualLVNameOnTheNode() string
 	LVGName() string
 }
 
