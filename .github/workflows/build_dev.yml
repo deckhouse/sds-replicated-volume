@@ -7,15 +7,21 @@ env:
   MODULES_MODULE_SOURCE: ${{ vars.DEV_MODULE_SOURCE }}
   MODULES_REGISTRY_LOGIN: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
   MODULES_REGISTRY_PASSWORD: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-  GOLANG_VERSION: ${{ vars.GOLANG_VERSION }}
   GOPROXY: ${{ secrets.GOPROXY }}
-  BASE_IMAGES_VERSION: "v0.5.34"
+  SOURCE_REPO: ${{ secrets.SOURCE_REPO }}
+  SOURCE_REPO_SSH_KEY: ${{ secrets.SOURCE_REPO_SSH_KEY }}
+  BASE_IMAGES_VERSION: "v0.5.37"
 
 on:
   #pull_request:
   # call from trivy_image_check.yaml, which in turn call from pull_request
   # https://stackoverflow.com/a/71489231
   workflow_call:
+    inputs:
+      svace_enabled:
+        description: "Enable svace build and analyze"
+        type: boolean
+        required: false
   push:
     branches:
       - main
@@ -23,6 +29,10 @@ on:
 defaults:
   run:
     shell: bash
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.number || github.ref }}"
+  cancel-in-progress: true
 
 jobs:
   lint:
@@ -116,13 +126,38 @@ jobs:
           wget https://fox.flant.com/api/v4/projects/deckhouse%2Fbase-images/packages/generic/base_images/$BASE_IMAGES_VERSION/base_images.yml -O base_images.yml
           cat base_images.yml
 
-      - uses: deckhouse/modules-actions/setup@v2
+      - uses: deckhouse/modules-actions/setup@v4
         with:
           registry: ${{ vars.DEV_REGISTRY }}
           registry_login: ${{ vars.DEV_MODULES_REGISTRY_LOGIN }}
           registry_password: ${{ secrets.DEV_MODULES_REGISTRY_PASSWORD }}
-      - uses: deckhouse/modules-actions/build@v2
+      - uses: deckhouse/modules-actions/build@v4
         with:
           module_source: "${{ vars.DEV_MODULE_SOURCE }}"
           module_name: ${{ vars.MODULE_NAME }}
           module_tag: ${{ env.MODULES_MODULE_TAG }}
+          source_repo: ${{ secrets.SOURCE_REPO }}
+          source_repo_ssh_key: ${{ secrets.SOURCE_REPO_SSH_KEY }}
+          svace_enabled: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || inputs.svace_enabled == true }}
+          svace_analyze_host: "${{ secrets.SVACE_ANALYZE_HOST }}"
+          svace_analyze_ssh_user: "${{ secrets.SVACE_ANALYZE_SSH_USER }}"
+          svace_analyze_ssh_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
+
+  analyze_build:
+    if: ${{ contains(github.event.pull_request.labels.*.name, 'analyze/svace') || inputs.svace_enabled == true }}
+    name: Analyze build
+    runs-on: [self-hosted, large]
+    needs:
+      - dev_setup_build
+    steps:
+      - uses: deckhouse/modules-actions/svace_analyze@v4
+        with:
+          project_group: ${{ github.event.repository.name }}
+          ci_commit_ref_name: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          ci_commit_hash: ${{ github.sha }}
+          svace_analyze_host: "${{ secrets.SVACE_ANALYZE_HOST }}"
+          svace_analyze_ssh_user: "${{ secrets.SVACE_ANALYZE_SSH_USER }}"
+          svacer_url: "${{ secrets.SVACER_URL }}"
+          svacer_import_user: "${{ secrets.SVACER_IMPORT_USER }}"
+          svacer_import_password: "${{ secrets.SVACER_IMPORT_PASSWORD }}"
+          svace_analyze_ssh_private_key: "${{ secrets.SVACE_ANALYZE_SSH_PRIVATE_KEY }}"
