@@ -2,7 +2,7 @@ name: Build and checks
 
 on:
   schedule:
-    - cron: "0 01 * * 0,3"
+    - cron: "0 01 * * 0,3" # Regular CVE scan
   pull_request:
     types: [opened, reopened, labeled, synchronize]
   push:
@@ -22,12 +22,18 @@ on:
       severity:
         description: "Optional. Vulnerabilities severity to scan. Default is: UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL"
         required: false
+      svace_enabled:
+        description: "Enable svace build and analyze"
+        type: boolean
+        required: false
 
 jobs:
   build_dev:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build_dev.yml
     secrets: inherit
+    with:
+      svace_enabled: ${{ github.event.inputs.svace_enabled && true || false }}
   cve_scan_on_pr:
     if: github.event_name == 'pull_request'
     name: CVE scan for PR
