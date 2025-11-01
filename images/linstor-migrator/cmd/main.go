@@ -39,6 +39,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -104,7 +105,7 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 		return fmt.Errorf("failed to create Kubernetes default config: %w", err)
 	}
 
-	kCient, err := kubecl.New(kConfig, kubecl.Options{
+	kClient, err := kubecl.New(kConfig, kubecl.Options{
 		Scheme: scheme,
 	})
 	if err != nil {
@@ -112,7 +113,7 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 	}
 
 	pvs := &corev1.PersistentVolumeList{}
-	if err := kCient.List(ctx, pvs); err != nil {
+	if err := kClient.List(ctx, pvs); err != nil {
 		return fmt.Errorf("failed to get PersistentVolumeList: %w", err)
 	}
 	if len(pvs.Items) == 0 {
@@ -157,30 +158,39 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 		fmt.Printf("%d. %s\n", i+1, pv.Name)
 	}
 
-	return runMigrator(ctx, log, kCient, migrationPVs)
+	return runMigrator(ctx, log, kClient, migrationPVs)
 }
 
-func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, migrationPVs []corev1.PersistentVolume) error {
+func runMigrator(ctx context.Context, log *slog.Logger, kClient kubecl.Client, migrationPVs []corev1.PersistentVolume) error {
 	log.Info("Migrating Replicated PersistentVolumeList", "number_of_pv", len(migrationPVs))
 
 	// During migration Linstor will be down, so fetch all needed resources from Kubernetes here
-	linstorDB, err := initLinstorDB(ctx, kCient)
+	linstorDB, err := initLinstorDB(ctx, kClient)
 	if err != nil {
 		return fmt.Errorf("failed to initialize linstor DB: %w", err)
 	}
 
 	replicatedStoragePools := &srvv1alpha1.ReplicatedStoragePoolList{}
-	if err := kCient.List(ctx, replicatedStoragePools); err != nil {
-		return fmt.Errorf("failed to get replicated storage pools: %w", err)
+	if err := kClient.List(ctx, replicatedStoragePools); err != nil {
+		return fmt.Errorf("failed to get ReplicatedStoragePoolList: %w", err)
 	}
 	repStorPools := make(map[string]srvv1alpha1.ReplicatedStoragePool)
 	for _, pool := range replicatedStoragePools.Items {
 		repStorPools[pool.Name] = pool
 	}
 
+	replicatedStorageClasses := &srvv1alpha1.ReplicatedStorageClassList{}
+	if err := kClient.List(ctx, replicatedStorageClasses); err != nil {
+		return fmt.Errorf("failed to get ReplicatedStorageClassList: %w", err)
+	}
+	repStorClasses := make(map[string]srvv1alpha1.ReplicatedStorageClass)
+	for _, class := range replicatedStorageClasses.Items {
+		repStorClasses[class.Name] = class
+	}
+
 	// Can be parallelized
 	for _, pv := range migrationPVs {
-		err := migratePV(ctx, kCient, log, pv, linstorDB, repStorPools)
+		err := migratePV(ctx, kClient, log, pv, linstorDB, repStorPools, repStorClasses)
 		if err != nil {
 			return fmt.Errorf("failed to migrate PersistentVolume; pv: %s; err: %w", pv.Name, err)
 		}
@@ -190,11 +200,12 @@ func runMigrator(ctx context.Context, log *slog.Logger, kCient kubecl.Client, mi
 
 func migratePV(
 	ctx context.Context,
-	kCient kubecl.Client,
+	kClient kubecl.Client,
 	log *slog.Logger,
 	pv corev1.PersistentVolume,
 	linstorDB *linstorDB,
 	repStorPools map[string]srvv1alpha1.ReplicatedStoragePool,
+	repStorClasses map[string]srvv1alpha1.ReplicatedStorageClass,
 ) error {
 	log = log.With("pv_name", pv.Name)
 	log.Info("Start migrating Replicated PersistentVolume")
@@ -211,14 +222,27 @@ func migratePV(
 	}
 	log.Debug(fmt.Sprintf("pool name: %s", poolName))
 
+	repStorPool, ok := repStorPools[poolName]
+	if !ok {
+		return fmt.Errorf("ReplicatedStoragePool %s not found", poolName)
+	}
+
+	if pv.Spec.StorageClassName == "" {
+		return fmt.Errorf("StorageClassName is empty for PV %s", pv.Name)
+	}
+	repStorClass, ok := repStorClasses[pv.Spec.StorageClassName]
+	if !ok {
+		return fmt.Errorf("ReplicatedStorageClass %s not found", pv.Spec.StorageClassName)
+	}
+
 	// Fetch all LVMVolumeGroups for this poolName/ReplicatedStoragePool
-	myLvmVolumeGroups, err := getMyLvmVolumeGroups(ctx, kCient, log, poolName, repStorPools)
+	myLvmVolumeGroups, err := getMyLvmVolumeGroups(ctx, kClient, log, repStorPool)
 	if err != nil {
 		return err
 	}
 
 	// TODO:
-	rv, err := createOrGetRV(ctx, kCient, log, pv.Name)
+	rv, err := createOrGetRV(ctx, kClient, log, pv.Name, size, linstorDB, repStorPool, repStorClass)
 	if err != nil {
 		return err
 	}
@@ -230,13 +254,13 @@ func migratePV(
 	for _, linstorResource := range linstorResources {
 		// 0-Diskful|388-TieBreaker|260-Diskless
 		if linstorResource.Spec.ResourceFlags == 0 {
-			err := createOrGetLLV(ctx, kCient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
+			err := createOrGetLLV(ctx, kClient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
 			if err != nil {
 				return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 			}
 		}
 
-		err := createOrGetRVR(ctx, kCient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
+		err := createOrGetRVR(ctx, kClient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
 		if err != nil {
 			return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 		}
@@ -248,9 +272,13 @@ func migratePV(
 
 func createOrGetRV(
 	ctx context.Context,
-	kCient kubecl.Client,
+	kClient kubecl.Client,
 	log *slog.Logger,
 	pvName string,
+	size int,
+	linstorDB *linstorDB,
+	repStorPool srvv1alpha1.ReplicatedStoragePool,
+	repStorClass srvv1alpha1.ReplicatedStorageClass,
 ) (*corev1.ConfigMap, error) {
 	// TODO: replace ConfigMap -> ReplicatedVolume
 	rvName := pvName
@@ -258,8 +286,55 @@ func createOrGetRV(
 	log = log.With("rv_name", rvName)
 	log.Info("Creating RV")
 
+	replicaCount, err := getReplicaCount(pvName, linstorDB)
+	if err != nil {
+		return nil, err
+	}
+
+	sharedSecret, err := getSharedSecret(pvName, linstorDB)
+	if err != nil {
+		return nil, err
+	}
+
+	var typeLVM string
+	if repStorPool.Spec.Type == "LVMThin" {
+		typeLVM = typeLVMThin
+	} else {
+		typeLVM = typeLVMThick
+	}
+
+	lvmVolumeGroups := make([]srvv1alpha2.LVGRef, 0, len(repStorPool.Spec.LVMVolumeGroups))
+	for _, lvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
+		lvmVolumeGroups = append(lvmVolumeGroups, srvv1alpha2.LVGRef{
+			Name:         lvmVolumeGroup.Name,
+			ThinPoolName: lvmVolumeGroup.ThinPoolName,
+		})
+	}
+
+	rvNew1 := &srvv1alpha2.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rvName,
+			// TODO: add csi finalizer
+			Finalizers: []string{controllerFinalizerName},
+		},
+		Spec: srvv1alpha2.ReplicatedVolumeSpec{
+			Size:         *resource.NewQuantity(int64(size), resource.BinarySI),
+			Replicas:     replicaCount,
+			SharedSecret: sharedSecret,
+			LVM: srvv1alpha2.LVMSpec{
+				Type:            typeLVM,
+				LVMVolumeGroups: lvmVolumeGroups,
+			},
+			Topology: repStorClass.Spec.Topology,
+			Zones:    repStorClass.Spec.Zones,
+			// patch in createOrGetRVR function
+			//PublishRequested: ,
+		},
+	}
+	log.Debug(fmt.Sprintf("rvNew1: %+v", rvNew1))
+
 	rvExists := &corev1.ConfigMap{}
-	err := kCient.Get(ctx, types.NamespacedName{Namespace: "default", Name: rvName}, rvExists)
+	err = kClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: rvName}, rvExists)
 	if err == nil {
 		log.Info("RV already exists")
 		return rvExists, nil
@@ -278,7 +353,7 @@ func createOrGetRV(
 		},
 	}
 
-	err = kCient.Create(ctx, rvNew)
+	err = kClient.Create(ctx, rvNew)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ReplicatedVolume: %w", err)
 	}
@@ -292,7 +367,7 @@ func createOrGetRV(
 
 func createOrGetLLV(
 	ctx context.Context,
-	kCient kubecl.Client,
+	kClient kubecl.Client,
 	log *slog.Logger,
 	pvName string,
 	rv *corev1.ConfigMap,
@@ -311,7 +386,7 @@ func createOrGetLLV(
 	}
 
 	llvs := &sncv1alpha1.LVMLogicalVolumeList{}
-	if err := kCient.List(ctx, llvs); err != nil {
+	if err := kClient.List(ctx, llvs); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get LVMLogicalVolumeList: %w", err)
 		}
@@ -362,7 +437,7 @@ func createOrGetLLV(
 		}
 	}
 
-	err = kCient.Create(ctx, llvNew)
+	err = kClient.Create(ctx, llvNew)
 	if err != nil {
 		return fmt.Errorf("failed to create LLV: %w", err)
 	}
@@ -373,7 +448,7 @@ func createOrGetLLV(
 	startTime := time.Now()
 	for {
 		llvExists := &sncv1alpha1.LVMLogicalVolume{}
-		err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvNew.Name}, llvExists)
+		err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvNew.Name}, llvExists)
 		if err != nil {
 			return fmt.Errorf("failed to get LLV: %w", err)
 		}
@@ -394,7 +469,7 @@ func createOrGetLLV(
 
 func createOrGetRVR(
 	ctx context.Context,
-	kCient kubecl.Client,
+	kClient kubecl.Client,
 	log *slog.Logger,
 	pvName string,
 	rv *corev1.ConfigMap,
@@ -414,7 +489,7 @@ func createOrGetRVR(
 	log.Info("Creating RVR")
 
 	rvrs := &srvv1alpha2.ReplicatedVolumeReplicaList{}
-	if err := kCient.List(ctx, rvrs); err != nil {
+	if err := kClient.List(ctx, rvrs); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ReplicatedVolumeReplicaList: %w", err)
 		}
@@ -478,11 +553,19 @@ func createOrGetRVR(
 	}
 	log.Debug(fmt.Sprintf("drbd minor: %d", drbdMinor))
 
-	primary, err := getPrimary(ctx, kCient, pvName, nodeName)
+	primary, err := getPrimary(ctx, kClient, pvName, nodeName)
 	if err != nil {
 		return err
 	}
 	log.Debug(fmt.Sprintf("primary: %t", primary))
+
+	//if primary {
+	//	err := setPublishRequested(ctx, kClient, rv, nodeName)
+	//	if err != nil {
+	//		return err
+	//	}
+	//	log.Debug(fmt.Sprintf("patched PublishRequested in RV (node_name: %s)", nodeName))
+	//}
 
 	replicaCount, err := getReplicaCount(pvName, linstorDB)
 	if err != nil {
@@ -541,7 +624,7 @@ func createOrGetRVR(
 		}
 
 		lvmVolumeGroup := &sncv1alpha1.LVMVolumeGroup{}
-		if err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: lvmVolumeGroupName}, lvmVolumeGroup); err != nil {
+		if err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: lvmVolumeGroupName}, lvmVolumeGroup); err != nil {
 			return fmt.Errorf("failed to get LVMVolumeGroup: %w", err)
 		}
 
@@ -551,7 +634,7 @@ func createOrGetRVR(
 		log.Debug(fmt.Sprintf("disk: %s", rvrNew.Spec.Volumes[0].Disk))
 	}
 
-	err = kCient.Create(ctx, rvrNew)
+	err = kClient.Create(ctx, rvrNew)
 	if err != nil {
 		return fmt.Errorf("failed to create RVR: %w", err)
 	}
@@ -562,7 +645,7 @@ func createOrGetRVR(
 	//startTime := time.Now()
 	//for {
 	//	rvrExists := &srvv1alpha2.ReplicatedVolumeReplica{}
-	//	err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
+	//	err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
 	//	if err != nil {
 	//		return fmt.Errorf("failed to get RVR: %w", err)
 	//	}
@@ -586,22 +669,16 @@ func createOrGetRVR(
 
 func getMyLvmVolumeGroups(
 	ctx context.Context,
-	kCient kubecl.Client,
+	kClient kubecl.Client,
 	log *slog.Logger,
-	poolName string,
-	repStorPools map[string]srvv1alpha1.ReplicatedStoragePool,
+	repStorPool srvv1alpha1.ReplicatedStoragePool,
 ) (map[string]sncv1alpha1.LVMVolumeGroup, error) {
 	log.Debug("Getting my LVMVolumeGroups")
-
-	repStorPool, ok := repStorPools[poolName]
-	if !ok {
-		return nil, fmt.Errorf("replicated storage pool not found")
-	}
 
 	lvmVolumeGroups := make(map[string]sncv1alpha1.LVMVolumeGroup, len(repStorPool.Spec.LVMVolumeGroups))
 	for _, rspLvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
 		lvg := &sncv1alpha1.LVMVolumeGroup{}
-		err := kCient.Get(ctx, types.NamespacedName{Namespace: "", Name: rspLvmVolumeGroup.Name}, lvg)
+		err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: rspLvmVolumeGroup.Name}, lvg)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get LVMVolumeGroup: %w", err)
 		}
@@ -681,11 +758,11 @@ func ptrTo(b bool) *bool {
 	return &b
 }
 
-func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error) {
+func initLinstorDB(ctx context.Context, kClient kubecl.Client) (*linstorDB, error) {
 	linstorDB := &linstorDB{}
 
 	volumeDefinitions := &srvlinstor.VolumeDefinitionsList{}
-	if err := kCient.List(ctx, volumeDefinitions); err != nil {
+	if err := kClient.List(ctx, volumeDefinitions); err != nil {
 		return nil, fmt.Errorf("failed to get linstor VolumeDefinitionsList: %w", err)
 	}
 	linstorDB.VolumeDefinitions = make(map[string]srvlinstor.VolumeDefinitions)
@@ -694,7 +771,7 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	resourceDefinitions := &srvlinstor.ResourceDefinitionsList{}
-	if err := kCient.List(ctx, resourceDefinitions); err != nil {
+	if err := kClient.List(ctx, resourceDefinitions); err != nil {
 		return nil, fmt.Errorf("failed to get linstor ResourceDefinitionsList: %w", err)
 	}
 	linstorDB.ResourceDefinitions = make(map[string]srvlinstor.ResourceDefinitions)
@@ -703,7 +780,7 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	resourceGroups := &srvlinstor.ResourceGroupsList{}
-	if err := kCient.List(ctx, resourceGroups); err != nil {
+	if err := kClient.List(ctx, resourceGroups); err != nil {
 		return nil, fmt.Errorf("failed to get linstor ResourceGroupsList: %w", err)
 	}
 	linstorDB.ResourceGroups = make(map[string]srvlinstor.ResourceGroups)
@@ -712,7 +789,7 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	resources := &srvlinstor.ResourcesList{}
-	if err := kCient.List(ctx, resources); err != nil {
+	if err := kClient.List(ctx, resources); err != nil {
 		return nil, fmt.Errorf("failed to get linstor ResourcesList: %w", err)
 	}
 	linstorDB.Resources = make(map[string][]srvlinstor.Resources)
@@ -721,12 +798,12 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	linstorDB.LayerResourcesIds = &srvlinstor.LayerResourceIdsList{}
-	if err := kCient.List(ctx, linstorDB.LayerResourcesIds); err != nil {
+	if err := kClient.List(ctx, linstorDB.LayerResourcesIds); err != nil {
 		return nil, fmt.Errorf("failed to get linstor LayerResourceIdsList: %w", err)
 	}
 
 	layerDrbdResources := &srvlinstor.LayerDrbdResourcesList{}
-	if err := kCient.List(ctx, layerDrbdResources); err != nil {
+	if err := kClient.List(ctx, layerDrbdResources); err != nil {
 		return nil, fmt.Errorf("failed to get linstor LayerDrbdResourcesList: %w", err)
 	}
 	linstorDB.LayerDrbdResources = make(map[int]srvlinstor.LayerDrbdResources)
@@ -735,12 +812,12 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	linstorDB.NodeNetInterfaces = &srvlinstor.NodeNetInterfacesList{}
-	if err := kCient.List(ctx, linstorDB.NodeNetInterfaces); err != nil {
+	if err := kClient.List(ctx, linstorDB.NodeNetInterfaces); err != nil {
 		return nil, fmt.Errorf("failed to get linstor NodeNetInterfacesList: %w", err)
 	}
 
 	layerDrbdResourceDefinitions := &srvlinstor.LayerDrbdResourceDefinitionsList{}
-	if err := kCient.List(ctx, layerDrbdResourceDefinitions); err != nil {
+	if err := kClient.List(ctx, layerDrbdResourceDefinitions); err != nil {
 		return nil, fmt.Errorf("failed to get linstor LayerDrbdResourceDefinitionsList: %w", err)
 	}
 	linstorDB.LayerDrbdResourceDefinitions = make(map[string]srvlinstor.LayerDrbdResourceDefinitions)
@@ -749,7 +826,7 @@ func initLinstorDB(ctx context.Context, kCient kubecl.Client) (*linstorDB, error
 	}
 
 	layerDrbdVolumeDefinitions := &srvlinstor.LayerDrbdVolumeDefinitionsList{}
-	if err := kCient.List(ctx, layerDrbdVolumeDefinitions); err != nil {
+	if err := kClient.List(ctx, layerDrbdVolumeDefinitions); err != nil {
 		return nil, fmt.Errorf("failed to get linstor LayerDrbdVolumeDefinitionsList: %w", err)
 	}
 	linstorDB.LayerDrbdVolumeDefinitions = make(map[string]srvlinstor.LayerDrbdVolumeDefinitions)
@@ -876,9 +953,9 @@ func getLVMVolumeGroupNameAndThinPoolName(nodeName string, myLvmVolumeGroups map
 	return lvmVolumeGroupName, thinPoolName, nil
 }
 
-func getPrimary(ctx context.Context, kCient kubecl.Client, pvName string, nodeName string) (bool, error) {
+func getPrimary(ctx context.Context, kClient kubecl.Client, pvName string, nodeName string) (bool, error) {
 	volumeAttachments := &storagev1.VolumeAttachmentList{}
-	if err := kCient.List(ctx, volumeAttachments); err != nil {
+	if err := kClient.List(ctx, volumeAttachments); err != nil {
 		return false, fmt.Errorf("failed to get VolumeAttachmentList: %w", err)
 	}
 	for _, volumeAttachment := range volumeAttachments.Items {
@@ -910,3 +987,13 @@ func getReplicaCount(pvName string, linstorDB *linstorDB) (byte, error) {
 
 	return byte(replicaCount), nil
 }
+
+//func setPublishRequested(ctx context.Context, kClient kubecl.Client, rv *corev1.ConfigMap, nodeName string) error {
+//	oldRV := rv.DeepCopy()
+//	rv.Spec.PublishRequested = append(rv.Spec.PublishRequested, nodeName)
+//	err := kClient.Patch(ctx, rv, kClient.MergeFrom(oldRV))
+//	if err != nil {
+//		return fmt.Errorf("failed to patch ReplicatedVolume: %w", err)
+//	}
+//	return nil
+//}
