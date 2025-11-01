@@ -16,6 +16,9 @@ limitations under the License.
 
 package main
 
+// TODO:
+// do not fall if there is no cdr from linstor db
+
 import (
 	"context"
 	"encoding/json"
@@ -315,6 +318,7 @@ func createOrGetRV(
 		ObjectMeta: metav1.ObjectMeta{
 			Name: rvName,
 			// TODO: add csi finalizer
+			// TODO: remove this finalizer
 			Finalizers: []string{controllerFinalizerName},
 		},
 		Spec: srvv1alpha2.ReplicatedVolumeSpec{
@@ -412,7 +416,8 @@ func createOrGetLLV(
 	llvNew := &sncv1alpha1.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateLlvName,
-			Finalizers:   []string{controllerFinalizerName},
+			// TODO: remove this finalizer
+			Finalizers: []string{controllerFinalizerName},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         corev1.SchemeGroupVersion.String(),
@@ -583,7 +588,8 @@ func createOrGetRVR(
 	rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateRvrName,
-			Finalizers:   []string{controllerFinalizerName},
+			// TODO: remove this finalizer
+			Finalizers: []string{controllerFinalizerName},
 			OwnerReferences: []metav1.OwnerReference{
 				{
 					APIVersion:         corev1.SchemeGroupVersion.String(),
