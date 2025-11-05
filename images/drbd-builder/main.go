@@ -1,5 +1,10 @@
 package main
 
+// TODO: Add ctx where possible
+// TODO: Test with distroless
+// TODO: check if repo copies not move
+// TODO: rename to drbd-build-server
+
 import (
 	"archive/tar"
 	"bytes"
@@ -25,8 +30,10 @@ import (
 var GitCommit string
 
 var (
-	flagAddr         = flag.String("addr", ":2020", "Server address")
+	flagAddr         = flag.String("addr", ":2021", "Server address")
 	flagDRBDDir      = flag.String("drbd-dir", "/drbd", "Path to DRBD source directory")
+	flagDRBDVersion  = flag.String("drbd-version", "", "DRBD version to clone (e.g., 9.2.12). If empty, will try to use existing drbd-dir")
+	flagDRBDRepo     = flag.String("drbd-repo", "https://github.com/LINBIT/drbd.git", "DRBD repository URL")
 	flagCacheDir     = flag.String("cache-dir", "/var/cache/drbd-builder", "Path to cache directory for built modules")
 	flagMaxBytesBody = flag.Int64("maxbytesbody", 100*1024*1024, "Maximum number of bytes in the body (100MB)")
 	flagKeepTmpDir   = flag.Bool("keeptmpdir", false, "Do not delete the temporary directory, useful for debugging")
@@ -64,7 +71,7 @@ type BuildResponse struct {
 
 type server struct {
 	router       *mux.Router
-	drbdDir      string
+	drbdDir      string // Base DRBD directory (if pre-existing)
 	cacheDir     string
 	maxBytesBody int64
 	keepTmpDir   bool
@@ -73,6 +80,10 @@ type server struct {
 	// Jobs management
 	jobs map[string]*BuildJob
 	jmu  sync.RWMutex
+
+	// DRBD source configuration
+	drbdVersion string // DRBD version to clone (if needed)
+	drbdRepo    string // DRBD repository URL
 }
 
 func main() {
@@ -88,19 +99,49 @@ func main() {
 		spaasURL = "https://spaas.drbd.io"
 	}
 
+	// Get DRBD version from environment or flag
+	drbdVersion := *flagDRBDVersion
+	if drbdVersion == "" {
+		drbdVersion = os.Getenv("DRBD_VERSION")
+	}
+
+	// Get DRBD repo from environment or flag
+	drbdRepo := *flagDRBDRepo
+	if envRepo := os.Getenv("DRBD_REPO"); envRepo != "" {
+		drbdRepo = envRepo
+	}
+
 	// Create cache directory if it doesn't exist
 	if err := os.MkdirAll(*flagCacheDir, 0755); err != nil {
 		log.Fatalf("Failed to create cache directory: %v", err)
 	}
 
+	// Check if base DRBD directory exists
+	hasDRBD := false
+	if info, err := os.Stat(*flagDRBDDir); err == nil && info.IsDir() {
+		if _, err := os.Stat(filepath.Join(*flagDRBDDir, "Makefile")); err == nil {
+			hasDRBD = true
+			log.Printf("DRBD source found at %s (will be copied per build)", *flagDRBDDir)
+		}
+	}
+
+	// If no base DRBD directory and version specified, we'll clone per build
+	if !hasDRBD && drbdVersion == "" {
+		log.Printf("WARNING: No DRBD source found and no version specified. Builds will fail.")
+		log.Printf("Either provide -drbd-dir with existing source or -drbd-version to clone.")
+		return
+	}
+
 	s := &server{
 		router:       mux.NewRouter(),
-		drbdDir:      *flagDRBDDir,
+		drbdDir:      *flagDRBDDir, // Base directory (if exists, will be copied)
 		cacheDir:     *flagCacheDir,
 		maxBytesBody: *flagMaxBytesBody,
 		keepTmpDir:   *flagKeepTmpDir,
 		spaasURL:     spaasURL,
 		jobs:         make(map[string]*BuildJob),
+		drbdVersion:  drbdVersion,
+		drbdRepo:     drbdRepo,
 	}
 
 	s.routes()
@@ -129,7 +170,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) routes() {
-	s.router.HandleFunc("/api/v1/build", s.buildModule()).Methods("POST")
+	s.router.HandleFunc("/api/v1/build", s.buildModuleHandler()).Methods("POST")
 	s.router.HandleFunc("/api/v1/status/{job_id}", s.getStatus()).Methods("GET")
 	s.router.HandleFunc("/api/v1/download/{job_id}", s.downloadModule()).Methods("GET")
 	s.router.HandleFunc("/api/v1/hello", s.hello()).Methods("GET")
@@ -152,7 +193,7 @@ func generateCacheKey(kernelVersion string, headersData []byte) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *server) buildModule() http.HandlerFunc {
+func (s *server) buildModuleHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		remoteAddr := r.RemoteAddr
 		log.Printf("[DEBUG] [%s] Received build request: method=%s, path=%s", remoteAddr, r.Method, r.URL.Path)
@@ -172,11 +213,7 @@ func (s *server) buildModule() http.HandlerFunc {
 		}
 
 		// Validate kernel version format
-		if len(kernelVersion) > 64 || strings.ContainsAny(kernelVersion, "/\\") {
-			log.Printf("[DEBUG] [%s] ERROR: Invalid kernel version format: len=%d", remoteAddr, len(kernelVersion))
-			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid kernel version format")
-			return
-		}
+		// TODO: Add regex for validation
 
 		// Read headers data for cache key generation
 		body := r.Body
@@ -192,9 +229,8 @@ func (s *server) buildModule() http.HandlerFunc {
 		log.Printf("[DEBUG] [%s] Read %d bytes of kernel headers data", remoteAddr, len(headersData))
 
 		// Generate cache key
-		log.Printf("[DEBUG] [%s] Generating cache key for kernel %s...", remoteAddr, kernelVersion)
 		cacheKey := generateCacheKey(kernelVersion, headersData)
-		log.Printf("[DEBUG] [%s] Generated cache key: %s (first 16 chars: %s)", remoteAddr, cacheKey, cacheKey[:16])
+		log.Printf("[DEBUG] [%s] Generated cache key: %s", remoteAddr, cacheKey)
 
 		// Check if already in cache
 		cachePath := filepath.Join(s.cacheDir, cacheKey+".tar.gz")
@@ -294,9 +330,9 @@ func (s *server) buildModule() http.HandlerFunc {
 
 		log.Printf("[INFO] [%s] Starting DRBD build for kernel version: %s (job: %s)", remoteAddr, kernelVersion, cacheKey[:16])
 
-		// Start build asynchronously
+		// Start build in background
 		log.Printf("[DEBUG] [%s] Launching async build goroutine for job %s", remoteAddr, cacheKey[:16])
-		go s.buildModuleAsync(job, headersData, remoteAddr)
+		go s.buildModule(job, headersData, remoteAddr)
 
 		// Return job ID immediately
 		resp := BuildResponse{
@@ -310,7 +346,7 @@ func (s *server) buildModule() http.HandlerFunc {
 	}
 }
 
-func (s *server) buildModuleAsync(job *BuildJob, headersData []byte, remoteAddr string) {
+func (s *server) buildModule(job *BuildJob, headersData []byte, remoteAddr string) {
 	jobID := job.Key[:16]
 	log.Printf("[DEBUG] [job:%s] Async build started for kernel %s", jobID, job.KernelVersion)
 
@@ -379,6 +415,9 @@ func (s *server) buildModuleAsync(job *BuildJob, headersData []byte, remoteAddr 
 	log.Printf("[DEBUG] [job:%s] Successfully extracted kernel headers to %s", jobID, kernelHeadersDir)
 
 	// Find the build directory (usually /lib/modules/KVER/build)
+	// TODO: Move to separate method & write step-by-step comment
+	// TODO: Use early return
+	// TODO: Check if KVER is valid
 	log.Printf("[DEBUG] [job:%s] Searching for kernel build directory...", jobID)
 	buildDir := filepath.Join(kernelHeadersDir, "lib", "modules", job.KernelVersion, "build")
 	log.Printf("[DEBUG] [job:%s] Trying standard location: %s", jobID, buildDir)
@@ -423,6 +462,29 @@ func (s *server) buildModuleAsync(job *BuildJob, headersData []byte, remoteAddr 
 	}
 	log.Printf("[INFO] [job:%s] Using kernel build directory: %s", jobID, buildDir)
 
+	// Prepare DRBD source for this build (create isolated copy)
+	log.Printf("[INFO] [job:%s] Preparing DRBD source (isolated copy for this build)...", jobID)
+	drbdBuildDir := filepath.Join(tmpDir, "drbd")
+	if err := s.prepareDRBDForBuild(drbdBuildDir, jobID); err != nil {
+		job.mu.Lock()
+		job.Status = StatusFailed
+		job.Error = fmt.Sprintf("Failed to prepare DRBD source: %v", err)
+		job.mu.Unlock()
+		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		return
+	}
+	log.Printf("[DEBUG] [job:%s] DRBD source prepared at: %s", jobID, drbdBuildDir)
+
+	// Cleanup DRBD copy after build (unless keepTmpDir is set)
+	if !s.keepTmpDir {
+		defer func() {
+			log.Printf("[DEBUG] [job:%s] Cleaning up DRBD build directory: %s", jobID, drbdBuildDir)
+			if err := os.RemoveAll(drbdBuildDir); err != nil {
+				log.Printf("[WARNING] [job:%s] Failed to remove DRBD build directory: %v", jobID, err)
+			}
+		}()
+	}
+
 	// Build DRBD module
 	modulesDir := filepath.Join(tmpDir, "modules")
 	log.Printf("[DEBUG] [job:%s] Creating modules output directory: %s", jobID, modulesDir)
@@ -436,7 +498,7 @@ func (s *server) buildModuleAsync(job *BuildJob, headersData []byte, remoteAddr 
 	}
 
 	log.Printf("[INFO] [job:%s] Starting DRBD module build process...", jobID)
-	if err := s.buildDRBD(job.KernelVersion, buildDir, modulesDir, jobID); err != nil {
+	if err := s.buildDRBD(job.KernelVersion, buildDir, modulesDir, drbdBuildDir, jobID); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = err.Error()
@@ -636,8 +698,8 @@ func (s *server) downloadModule() http.HandlerFunc {
 	}
 }
 
-func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID string) error {
-	log.Printf("[DEBUG] [job:%s] Starting buildDRBD: kernel=%s, kdir=%s, output=%s", jobID, kernelVersion, kernelBuildDir, outputDir)
+func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jobID string) error {
+	log.Printf("[DEBUG] [job:%s] Starting buildDRBD: kernel=%s, kdir=%s, output=%s, drbd=%s", jobID, kernelVersion, kernelBuildDir, outputDir, drbdDir)
 
 	// Change to DRBD directory
 	originalDir, err := os.Getwd()
@@ -646,20 +708,21 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID strin
 	}
 	defer os.Chdir(originalDir)
 
-	log.Printf("[DEBUG] [job:%s] Changing to DRBD directory: %s", jobID, s.drbdDir)
-	if err := os.Chdir(s.drbdDir); err != nil {
-		return fmt.Errorf("failed to change to DRBD directory %s: %v", s.drbdDir, err)
+	log.Printf("[DEBUG] [job:%s] Changing to DRBD directory: %s", jobID, drbdDir)
+	if err := os.Chdir(drbdDir); err != nil {
+		return fmt.Errorf("failed to change to DRBD directory %s: %v", drbdDir, err)
 	}
 
 	// Verify DRBD Makefile exists
 	log.Printf("[DEBUG] [job:%s] Verifying DRBD Makefile exists...", jobID)
 	if _, err := os.Stat("Makefile"); os.IsNotExist(err) {
-		return fmt.Errorf("DRBD Makefile not found in %s", s.drbdDir)
+		return fmt.Errorf("DRBD Makefile not found in %s", drbdDir)
 	}
 	log.Printf("[DEBUG] [job:%s] DRBD Makefile found", jobID)
 
 	// Set environment variables for make
-	env := os.Environ()
+	// env := os.Environ() // TODO: check if outer ENV is needed
+	env := []string{}
 	env = append(env, fmt.Sprintf("KVER=%s", kernelVersion))
 	env = append(env, fmt.Sprintf("KDIR=%s", kernelBuildDir))
 	env = append(env, fmt.Sprintf("SPAAS_URL=%s", s.spaasURL))
@@ -672,7 +735,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID strin
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Dir = s.drbdDir
+	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
 		// Don't fail on clean errors
 		log.Printf("[DEBUG] [job:%s] WARNING: make clean failed (ignored): %v", jobID, err)
@@ -681,12 +744,13 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID strin
 	}
 
 	// Check and update submodules if needed (required by make module)
+	// TODO: check
 	log.Printf("[DEBUG] [job:%s] Checking submodules...", jobID)
 	cmd = exec.Command("make", "check-submods")
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Dir = s.drbdDir
+	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
 		log.Printf("[DEBUG] [job:%s] WARNING: make check-submods failed (may be OK if no submodules): %v", jobID, err)
 	} else {
@@ -700,7 +764,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID strin
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Dir = s.drbdDir
+	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("make module failed: %v", err)
 	}
@@ -713,11 +777,148 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, jobID strin
 	cmd.Env = append(env, fmt.Sprintf("DESTDIR=%s", outputDir))
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Dir = s.drbdDir
+	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("make install failed: %v", err)
 	}
 	log.Printf("[DEBUG] [job:%s] Modules installed successfully to %s", jobID, outputDir)
+
+	return nil
+}
+
+// prepareDRBDForBuild prepares an isolated DRBD source directory for a build.
+// It either copies from base drbdDir or clones from repository if version is specified.
+func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
+	log.Printf("[DEBUG] [job:%s] Preparing DRBD source at: %s", jobID, destDir)
+
+	// Create destination directory
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create DRBD build directory: %v", err)
+	}
+
+	// Check if base DRBD directory exists
+	if s.drbdDir != "" {
+		if info, err := os.Stat(s.drbdDir); err == nil && info.IsDir() {
+			if _, err := os.Stat(filepath.Join(s.drbdDir, "Makefile")); err == nil {
+				// Copy existing DRBD directory
+				log.Printf("[INFO] [job:%s] Copying DRBD source from %s to %s...", jobID, s.drbdDir, destDir)
+				if err := copyDirectory(s.drbdDir, destDir, jobID); err != nil {
+					return fmt.Errorf("failed to copy DRBD directory: %v", err)
+				}
+				log.Printf("[DEBUG] [job:%s] DRBD source copied successfully", jobID)
+				return nil
+			}
+		}
+	}
+
+	// If no base directory or version specified, clone from repository
+	if s.drbdVersion == "" {
+		return fmt.Errorf("no DRBD source available: neither drbd-dir exists nor drbd-version specified")
+	}
+
+	log.Printf("[INFO] [job:%s] Cloning DRBD repository (version=%s)...", jobID, s.drbdVersion)
+	if err := s.cloneDRBDRepoToDir(s.drbdVersion, s.drbdRepo, destDir, jobID); err != nil {
+		return fmt.Errorf("failed to clone DRBD repository: %v", err)
+	}
+	log.Printf("[DEBUG] [job:%s] DRBD repository cloned successfully", jobID)
+	return nil
+}
+
+// copyDirectory recursively copies a directory from src to dst
+// TODO: review
+func copyDirectory(src, dst, jobID string) error {
+	log.Printf("[DEBUG] [job:%s] Copying directory: %s -> %s", jobID, src, dst)
+
+	err := filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		// Calculate relative path
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		destPath := filepath.Join(dst, relPath)
+
+		if info.IsDir() {
+			return os.MkdirAll(destPath, info.Mode())
+		}
+
+		// Copy file
+		srcFile, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
+
+		destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer destFile.Close()
+
+		_, err = io.Copy(destFile, srcFile)
+		return err
+	})
+
+	if err != nil {
+		log.Printf("[ERROR] [job:%s] Failed to copy directory: %v", jobID, err)
+		return err
+	}
+
+	log.Printf("[DEBUG] [job:%s] Directory copied successfully", jobID)
+	return nil
+}
+
+// cloneDRBDRepoToDir clones the DRBD repository to the specified directory
+func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) error {
+	log.Printf("[DEBUG] [job:%s] Cloning DRBD repository: version=%s, repo=%s, dest=%s", jobID, version, repoURL, destDir)
+
+	// Determine branch name (format: drbd-9.2.12)
+	branch := fmt.Sprintf("drbd-%s", version)
+	log.Printf("[DEBUG] [job:%s] Cloning branch: %s", jobID, branch)
+
+	// Clone repository directly to destination
+	log.Printf("[DEBUG] [job:%s] Running: git clone --depth 1 --branch %s %s %s", jobID, branch, repoURL, destDir)
+	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", branch, repoURL, destDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git clone failed: %v", err)
+	}
+
+	gitHash := "123456" // TODO: git rev-parse HEAD
+
+	// Update submodules
+	log.Printf("[DEBUG] [job:%s] Updating submodules...", jobID)
+	cmd = exec.Command("git", "submodule", "update", "--init", "--recursive")
+	cmd.Dir = destDir
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("git submodule update failed: %v", err)
+	}
+
+	// Remove .git directory
+	log.Printf("[DEBUG] [job:%s] Removing .git directory...", jobID)
+	if err := os.RemoveAll(filepath.Join(destDir, ".git")); err != nil {
+		log.Printf("[WARNING] [job:%s] Failed to remove .git directory: %v", jobID, err)
+	}
+
+	// Create drbd/.drbd_git_revision file
+	gitRevisionPath := filepath.Join(destDir, "drbd", ".drbd_git_revision")
+	gitRevisionDir := filepath.Dir(gitRevisionPath)
+	if err := os.MkdirAll(gitRevisionDir, 0755); err != nil {
+		return fmt.Errorf("failed to create drbd directory: %v", err)
+	}
+
+	gitRevisionContent := fmt.Sprintf("GIT-hash:%s\n", gitHash)
+	if err := os.WriteFile(gitRevisionPath, []byte(gitRevisionContent), 0644); err != nil {
+		return fmt.Errorf("failed to create .drbd_git_revision file: %v", err)
+	}
+	log.Printf("[DEBUG] [job:%s] Created drbd/.drbd_git_revision with hash: %s", jobID, gitHash)
 
 	return nil
 }
