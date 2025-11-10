@@ -2,7 +2,6 @@ package rv
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -15,14 +14,17 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
+	cluster2 "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster2"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // client impls moved to separate files
@@ -33,15 +35,21 @@ type drbdPortRange struct {
 	max uint
 }
 
+const (
+	waitPollInterval = 500 * time.Millisecond
+	waitPollTimeout  = 2 * time.Minute
+)
+
 func (d drbdPortRange) PortMinMax() (uint, uint) { return d.min, d.max }
 
 type resourceReconcileRequestHandler struct {
-	ctx context.Context
-	log *slog.Logger
-	cl  client.Client
-	rdr client.Reader
-	cfg *ReconcilerClusterConfig
-	rv  *v1alpha2.ReplicatedVolume
+	ctx    context.Context
+	log    *slog.Logger
+	cl     client.Client
+	rdr    client.Reader
+	scheme *runtime.Scheme
+	cfg    *ReconcilerClusterConfig
+	rv     *v1alpha2.ReplicatedVolume
 }
 
 type replicaInfo struct {
@@ -231,15 +239,19 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		}
 	}
 
-	// prioritize existing nodes
-	rvrClient := &rvrClientImpl{rdr: h.rdr, log: h.log.WithGroup("rvrClient")}
-	rvrs, err := rvrClient.ByReplicatedVolumeName(h.ctx, h.rv.Name)
-	if err != nil {
-		return fmt.Errorf("getting rvrs: %w", err)
+	// prioritize existing nodes (identify by ownerReference to this RV) using cache index
+	var rvrList v1alpha2.ReplicatedVolumeReplicaList
+	if err := h.cl.List(h.ctx, &rvrList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+		return fmt.Errorf("listing rvrs: %w", err)
 	}
-	for i := range rvrs {
-		repl := pool[rvrs[i].Spec.NodeName]
-		repl.Score.replicaAlreadyExists()
+	var ownedRvrs []v1alpha2.ReplicatedVolumeReplica
+	for i := range rvrList.Items {
+		ownedRvrs = append(ownedRvrs, rvrList.Items[i])
+	}
+	for i := range ownedRvrs {
+		if repl, ok := pool[ownedRvrs[i].Spec.NodeName]; ok {
+			repl.Score.replicaAlreadyExists()
+		}
 	}
 
 	// solve topology
@@ -277,50 +289,76 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 	h.log.Info("selected nodes", "selectedNodes", selectedNodes)
 
-	// Build cluster with required clients and port range (non-cached reader for data fetches)
-
-	lvgByNode := make(map[string]string, len(pool))
-	for nodeName, ri := range pool {
-		if ri.LVG == nil {
-			continue
-		}
-		lvgByNode[nodeName] = ri.LVG.Name
+	// Build cluster2 with adapters and managers
+	rvAdapter, err := cluster2.NewRVAdapter(h.rv)
+	if err != nil {
+		return err
 	}
 
-	clr := cluster.New(
-		h.ctx,
-		h.log,
-		rvrClient,
-		&nodeRVRClientImpl{rdr: h.rdr, log: h.log.WithGroup("nodeRvrClient")},
-		drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)},
-		&llvClientImpl{
-			rdr:       h.rdr,
-			log:       h.log.WithGroup("llvClient"),
-			lvgByNode: lvgByNode,
-		},
-		h.rv.Name,
-		h.rv.Spec.Size.Value(),
-		h.rv.Spec.SharedSecret,
-	)
+	var rvNodes []cluster2.RVNodeAdapter
+	var nodeMgrs []cluster2.NodeManager
 
 	// diskful
-	quorum := h.rv.Spec.Replicas/2 + 1
-	qmr := h.rv.Spec.Replicas/2 + 1
-
 	for _, nodeName := range selectedNodes[0] {
 		repl := pool[nodeName]
-
-		clr.AddReplica(nodeName, repl.NodeAddress.Address, repl.PublishRequested, quorum, qmr).
-			AddVolume(repl.LVG.Name, repl.LVG.Spec.ActualVGNameOnTheNode, repl.LLVProps)
+		rvNode, err := cluster2.NewRVNodeAdapter(rvAdapter, repl.Node, repl.LVG)
+		if err != nil {
+			return err
+		}
+		rvNodes = append(rvNodes, rvNode)
+		nodeMgrs = append(nodeMgrs, cluster2.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
 	}
 
+	// tiebreaker (diskless), if needed
 	if needTieBreaker {
 		nodeName := selectedNodes[1][0]
 		repl := pool[nodeName]
-		clr.AddReplica(nodeName, repl.NodeAddress.Address, repl.PublishRequested, quorum, qmr)
+		rvNode, err := cluster2.NewRVNodeAdapter(rvAdapter, repl.Node, nil)
+		if err != nil {
+			return err
+		}
+		rvNodes = append(rvNodes, rvNode)
+		nodeMgrs = append(nodeMgrs, cluster2.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
 	}
 
-	action, err := clr.Reconcile()
+	clr2, err := cluster2.NewCluster(
+		h.log,
+		rvAdapter,
+		rvNodes,
+		nodeMgrs,
+	)
+	if err != nil {
+		return err
+	}
+
+	// existing RVRs (by ownerReference)
+	for i := range ownedRvrs {
+		ra, err := cluster2.NewRVRAdapter(&ownedRvrs[i])
+		if err != nil {
+			return err
+		}
+		if err := clr2.AddExistingRVR(ra); err != nil {
+			return err
+		}
+	}
+
+	// existing LLVs for this RV (by owner reference to RV) using cache index
+	var llvList snc.LVMLogicalVolumeList
+	if err := h.cl.List(h.ctx, &llvList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+		return fmt.Errorf("listing llvs: %w", err)
+	}
+	for i := range llvList.Items {
+		llv := &llvList.Items[i]
+		la, err := cluster2.NewLLVAdapter(llv)
+		if err != nil {
+			return err
+		}
+		if err := clr2.AddExistingLLV(la); err != nil {
+			return err
+		}
+	}
+
+	action, err := clr2.Reconcile()
 	if err != nil {
 		return err
 	}
@@ -328,9 +366,9 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	return h.processAction(action)
 }
 
-func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Action) error {
+func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error {
 	switch action := untypedAction.(type) {
-	case cluster.Actions:
+	case cluster2.Actions:
 		// Execute subactions sequentially using recursion. Stop on first error.
 		for _, a := range action {
 			if err := h.processAction(a); err != nil {
@@ -338,46 +376,27 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			}
 		}
 		return nil
-	case cluster.ParallelActions:
+	case cluster2.ParallelActions:
 		// Execute in parallel; collect errors
 		var eg errgroup.Group
 		for _, sa := range action {
 			eg.Go(func() error { return h.processAction(sa) })
 		}
 		return eg.Wait()
-	case cluster.RVRPatch:
-		h.log.Debug("RVR patch start", "name", action.ReplicatedVolumeReplica.Name)
-		if err := api.PatchWithConflictRetry(h.ctx, h.cl, action.ReplicatedVolumeReplica, func(r *v1alpha2.ReplicatedVolumeReplica) error {
-			return action.Apply(r)
+	case cluster2.PatchRVR:
+		// Patch existing RVR and wait until Ready/SafeForInitialSync
+		target := &v1alpha2.ReplicatedVolumeReplica{}
+		target.Name = action.RVR.Name()
+		h.log.Debug("RVR patch start", "name", target.Name)
+		if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+			return action.PatchRVR(r)
 		}); err != nil {
-			h.log.Error("RVR patch failed", "name", action.ReplicatedVolumeReplica.Name, "err", err)
+			h.log.Error("RVR patch failed", "name", target.Name, "err", err)
 			return err
 		}
-		h.log.Debug("RVR patch done", "name", action.ReplicatedVolumeReplica.Name)
-		return nil
-	case cluster.LLVPatch:
-		h.log.Debug("LLV patch start", "name", action.LVMLogicalVolume.Name)
-		if err := api.PatchWithConflictRetry(h.ctx, h.cl, action.LVMLogicalVolume, func(llv *snc.LVMLogicalVolume) error {
-			return action.Apply(llv)
-		}); err != nil {
-			h.log.Error("LLV patch failed", "name", action.LVMLogicalVolume.Name, "err", err)
-			return err
-		}
-		h.log.Debug("LLV patch done", "name", action.LVMLogicalVolume.Name)
-		return nil
-	case cluster.CreateReplicatedVolumeReplica:
-		h.log.Debug("RVR create start")
-		if err := h.cl.Create(h.ctx, action.ReplicatedVolumeReplica); err != nil {
-			h.log.Error("RVR create failed", "err", err)
-			return err
-		}
-		h.log.Debug("RVR create done", "name", action.ReplicatedVolumeReplica.Name)
-		return nil
-	case cluster.WaitReplicatedVolumeReplica:
-		// Wait for Ready=True with observedGeneration >= generation
-		target := action.ReplicatedVolumeReplica
+		h.log.Debug("RVR patch done", "name", target.Name)
 		h.log.Debug("RVR wait start", "name", target.Name)
-		err := wait.PollUntilContextTimeout(h.ctx, 500*time.Millisecond, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
 			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
 			}
@@ -403,13 +422,99 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		}
 		h.log.Debug("RVR wait done", "name", target.Name)
 		return nil
-	case cluster.DeleteReplicatedVolumeReplica:
-		h.log.Debug("RVR delete start", "name", action.ReplicatedVolumeReplica.Name)
+	case cluster2.CreateRVR:
+		// Create new RVR and wait until Ready/SafeForInitialSync
+		h.log.Debug("RVR create start")
+		target := &v1alpha2.ReplicatedVolumeReplica{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: fmt.Sprintf("%s-", h.rv.Name),
+				Finalizers:   []string{cluster.ControllerFinalizerName},
+			},
+		}
+		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
+			return err
+		}
+		if err := action.InitRVR(target); err != nil {
+			h.log.Error("RVR init failed", "err", err)
+			return err
+		}
+		if err := h.cl.Create(h.ctx, target); err != nil {
+			h.log.Error("RVR create failed", "err", err)
+			return err
+		}
+		h.log.Debug("RVR create done", "name", target.Name)
+		h.log.Debug("RVR wait start", "name", target.Name)
+		err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
+			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
+				return false, err
+			}
+			if target.Status == nil {
+				return false, nil
+			}
+			cond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeReady)
+			if cond == nil || cond.ObservedGeneration < target.Generation {
+				return false, nil
+			}
+			if cond.Status == metav1.ConditionTrue ||
+				(cond.Status == metav1.ConditionFalse && cond.Reason == v1alpha2.ReasonWaitingForInitialSync) {
+				return true, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			h.log.Error("RVR wait failed", "name", target.Name, "err", err)
+			return err
+		}
+		h.log.Debug("RVR wait done", "name", target.Name)
 
+		// If waiting for initial sync - trigger and wait for completion
+		if target.Status != nil {
+			readyCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeReady)
+			if readyCond != nil &&
+				readyCond.Status == metav1.ConditionFalse &&
+				readyCond.Reason == v1alpha2.ReasonWaitingForInitialSync {
+				h.log.Debug("Trigger initial sync via primary-force", "name", target.Name)
+				if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+					ann := r.GetAnnotations()
+					if ann == nil {
+						ann = map[string]string{}
+					}
+					ann[v1alpha2.AnnotationKeyPrimaryForce] = "true"
+					r.SetAnnotations(ann)
+					return nil
+				}); err != nil {
+					h.log.Error("RVR patch failed (primary-force)", "name", target.Name, "err", err)
+					return err
+				}
+				h.log.Debug("Primary-force set, waiting for initial sync to complete", "name", target.Name)
+				if err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
+					if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
+						return false, err
+					}
+					if target.Status == nil {
+						return false, nil
+					}
+					isCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
+					if isCond == nil || isCond.ObservedGeneration < target.Generation {
+						return false, nil
+					}
+					return isCond.Status == metav1.ConditionTrue, nil
+				}); err != nil {
+					h.log.Error("RVR wait failed (initial sync)", "name", target.Name, "err", err)
+					return err
+				}
+				h.log.Debug("Initial sync completed", "name", target.Name)
+			}
+		}
+		return nil
+	case cluster2.DeleteRVR:
+		h.log.Debug("RVR delete start", "name", action.RVR.Name())
+		target := &v1alpha2.ReplicatedVolumeReplica{}
+		target.Name = action.RVR.Name()
 		if err := api.PatchWithConflictRetry(
 			h.ctx,
 			h.cl,
-			action.ReplicatedVolumeReplica,
+			target,
 			func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
 				rvr.SetFinalizers(
 					slices.DeleteFunc(
@@ -424,24 +529,25 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			return err
 		}
 
-		if err := h.cl.Delete(h.ctx, action.ReplicatedVolumeReplica); client.IgnoreNotFound(err) != nil {
-			h.log.Error("RVR delete failed", "name", action.ReplicatedVolumeReplica.Name, "err", err)
+		if err := h.cl.Delete(h.ctx, target); client.IgnoreNotFound(err) != nil {
+			h.log.Error("RVR delete failed", "name", target.Name, "err", err)
 			return err
 		}
-		h.log.Debug("RVR delete done", "name", action.ReplicatedVolumeReplica.Name)
+		h.log.Debug("RVR delete done", "name", target.Name)
 		return nil
-	case cluster.CreateLVMLogicalVolume:
-		h.log.Debug("LLV create start")
-		if err := h.cl.Create(h.ctx, action.LVMLogicalVolume); err != nil {
-			h.log.Error("LLV create failed", "err", err)
+	case cluster2.PatchLLV:
+		target := &snc.LVMLogicalVolume{}
+		target.Name = action.LLV.LLVName()
+		h.log.Debug("LLV patch start", "name", target.Name)
+		if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(llv *snc.LVMLogicalVolume) error {
+			return action.PatchLLV(llv)
+		}); err != nil {
+			h.log.Error("LLV patch failed", "name", target.Name, "err", err)
 			return err
 		}
-		h.log.Debug("LLV create done", "name", action.LVMLogicalVolume.Name)
-		return nil
-	case cluster.WaitLVMLogicalVolume:
-		target := action.LVMLogicalVolume
+		h.log.Debug("LLV patch done", "name", target.Name)
 		h.log.Debug("LLV wait start", "name", target.Name)
-		err := wait.PollUntilContextTimeout(h.ctx, 500*time.Millisecond, 2*time.Minute, true, func(ctx context.Context) (bool, error) {
+		err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
 			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
 				return false, err
 			}
@@ -463,13 +569,59 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 		}
 		h.log.Debug("LLV wait done", "name", target.Name)
 		return nil
-	case cluster.DeleteLVMLogicalVolume:
-		h.log.Debug("LLV delete start", "name", action.LVMLogicalVolume.Name)
+	case cluster2.CreateLLV:
+		// Create new LLV and wait until Created with size satisfied
+		h.log.Debug("LLV create start")
+		target := &snc.LVMLogicalVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: fmt.Sprintf("%s-", h.rv.Name),
+				Finalizers:   []string{cluster.ControllerFinalizerName},
+			},
+		}
+		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
+			return err
+		}
+		if err := action.InitLLV(target); err != nil {
+			h.log.Error("LLV init failed", "err", err)
+			return err
+		}
+		if err := h.cl.Create(h.ctx, target); err != nil {
+			h.log.Error("LLV create failed", "err", err)
+			return err
+		}
+		h.log.Debug("LLV create done", "name", target.Name)
+		h.log.Debug("LLV wait start", "name", target.Name)
+		err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
+			if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
+				return false, err
+			}
+			if target.Status == nil || target.Status.Phase != "Created" {
+				return false, nil
+			}
+			specQty, err := resource.ParseQuantity(target.Spec.Size)
+			if err != nil {
+				return false, err
+			}
+			if target.Status.ActualSize.Cmp(specQty) < 0 {
+				return false, nil
+			}
+			return true, nil
+		})
+		if err != nil {
+			h.log.Error("LLV wait failed", "name", target.Name, "err", err)
+			return err
+		}
+		h.log.Debug("LLV wait done", "name", target.Name)
+		return nil
+	case cluster2.DeleteLLV:
+		h.log.Debug("LLV delete start", "name", action.LLV.LLVName())
+		target := &snc.LVMLogicalVolume{}
+		target.Name = action.LLV.LLVName()
 
 		if err := api.PatchWithConflictRetry(
 			h.ctx,
 			h.cl,
-			action.LVMLogicalVolume,
+			target,
 			func(llv *snc.LVMLogicalVolume) error {
 				llv.SetFinalizers(
 					slices.DeleteFunc(
@@ -484,73 +636,18 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			return err
 		}
 
-		if err := h.cl.Delete(h.ctx, action.LVMLogicalVolume); client.IgnoreNotFound(err) != nil {
-			h.log.Error("LLV delete failed", "name", action.LVMLogicalVolume.Name, "err", err)
+		if err := h.cl.Delete(h.ctx, target); client.IgnoreNotFound(err) != nil {
+			h.log.Error("LLV delete failed", "name", target.Name, "err", err)
 			return err
 		}
-		h.log.Debug("LLV delete done", "name", action.LVMLogicalVolume.Name)
+		h.log.Debug("LLV delete done", "name", target.Name)
 		return nil
-	case cluster.WaitAndTriggerInitialSync:
-		h.log.Debug("WaitAndTriggerInitialSync", "name", h.rv.Name)
-		allSynced := true
-		allSafeToBeSynced := true
-		for _, rvr := range action.ReplicatedVolumeReplicas {
-			cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
-			if cond.Status != metav1.ConditionTrue {
-				allSynced = false
-			} else if cond.Status != metav1.ConditionFalse || cond.Reason != v1alpha2.ReasonSafeForInitialSync {
-				allSafeToBeSynced = false
-			}
-		}
-		if allSynced {
-			if err := api.PatchWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
-				if rv.Status == nil {
-					rv.Status = &v1alpha2.ReplicatedVolumeStatus{}
-				}
-				meta.SetStatusCondition(
-					&rv.Status.Conditions,
-					metav1.Condition{
-						Type:               v1alpha2.ConditionTypeReady,
-						Status:             metav1.ConditionTrue,
-						ObservedGeneration: rv.Generation,
-						Reason:             "All resources synced",
-					},
-				)
-				return nil
-			}); err != nil {
-				h.log.Error("RV patch failed (setting Ready=true)", "name", h.rv.Name, "err", err)
-				return err
-			}
-			h.log.Debug("RV patch done (setting Ready=true)", "name", h.rv.Name)
-
-			h.log.Info("All resources synced")
-			return nil
-		}
-		if !allSafeToBeSynced {
-			return errors.New("waiting for resources to become safe for initial sync")
-		}
-
-		rvr := action.ReplicatedVolumeReplicas[0]
-		h.log.Debug("RVR patch start (primary-force)", "name", rvr.Name)
-
-		if err := api.PatchWithConflictRetry(h.ctx, h.cl, rvr, func(r *v1alpha2.ReplicatedVolumeReplica) error {
-			ann := r.GetAnnotations()
-			if ann == nil {
-				ann = map[string]string{}
-			}
-			ann[v1alpha2.AnnotationKeyPrimaryForce] = "true"
-			r.SetAnnotations(ann)
-			return nil
-		}); err != nil {
-			h.log.Error("RVR patch failed (primary-force)", "name", rvr.Name, "err", err)
-			return err
-		}
-		h.log.Debug("RVR patch done (primary-force)", "name", rvr.Name)
-		return nil
-	case cluster.TriggerRVRResize:
-		rvr := action.ReplicatedVolumeReplica
-
-		if err := api.PatchWithConflictRetry(h.ctx, h.cl, rvr, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+	// TODO: initial sync/Ready condition handling for RV is not implemented in cluster2 flow yet
+	case cluster2.ResizeRVR:
+		// trigger resize via annotation
+		target := &v1alpha2.ReplicatedVolumeReplica{}
+		target.Name = action.RVR.Name()
+		if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
 			ann := r.GetAnnotations()
 			if ann == nil {
 				ann = map[string]string{}
@@ -559,10 +656,10 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction cluster.Ac
 			r.SetAnnotations(ann)
 			return nil
 		}); err != nil {
-			h.log.Error("RVR patch failed (need-resize)", "name", rvr.Name, "err", err)
+			h.log.Error("RVR patch failed (need-resize)", "name", target.Name, "err", err)
 			return err
 		}
-		h.log.Debug("RVR patch done (need-resize)", "name", rvr.Name)
+		h.log.Debug("RVR patch done (need-resize)", "name", target.Name)
 		return nil
 	default:
 		panic("unknown action type")

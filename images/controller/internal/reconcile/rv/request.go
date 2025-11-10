@@ -18,5 +18,13 @@ type ResourceDeleteRequest struct {
 
 func (r ResourceDeleteRequest) _isRequest() {}
 
+// children (RVR/LLV) status changed; refresh RV Ready condition
+type ResourceStatusReconcileRequest struct {
+	Name string
+}
+
+func (r ResourceStatusReconcileRequest) _isRequest() {}
+
 var _ Request = ResourceReconcileRequest{}
 var _ Request = ResourceDeleteRequest{}
+var _ Request = ResourceStatusReconcileRequest{}

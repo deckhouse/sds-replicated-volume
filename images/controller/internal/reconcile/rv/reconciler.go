@@ -7,6 +7,7 @@ import (
 	"reflect"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -15,13 +16,15 @@ type Reconciler struct {
 	log *slog.Logger
 	cl  client.Client
 	rdr client.Reader
+	sch *runtime.Scheme
 }
 
-func NewReconciler(log *slog.Logger, cl client.Client, rdr client.Reader) *Reconciler {
+func NewReconciler(log *slog.Logger, cl client.Client, rdr client.Reader, sch *runtime.Scheme) *Reconciler {
 	return &Reconciler{
 		log: log,
 		cl:  cl,
 		rdr: rdr,
+		sch: sch,
 	}
 }
 
@@ -54,15 +57,40 @@ func (r *Reconciler) Reconcile(
 		}
 
 		h := &resourceReconcileRequestHandler{
+			ctx:    ctx,
+			log:    r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
+			cl:     r.cl,
+			rdr:    r.rdr,
+			scheme: r.sch,
+			cfg:    clusterCfg,
+			rv:     rvr,
+		}
+
+		return reconcile.Result{}, h.Handle()
+
+	case ResourceStatusReconcileRequest:
+		rv := &v1alpha2.ReplicatedVolume{}
+		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rv)
+		if err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				r.log.Warn(
+					"rv 'name' not found for status reconcile, it might be deleted, ignore",
+					"name", typedReq.Name,
+				)
+				return reconcile.Result{}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("getting rv %s for status reconcile: %w", typedReq.Name, err)
+		}
+
+		sh := &resourceStatusReconcileRequestHandler{
 			ctx: ctx,
 			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
 			cl:  r.cl,
 			rdr: r.rdr,
-			cfg: clusterCfg,
-			rv:  rvr,
+			// scheme is not needed for status handler
+			rv: rv,
 		}
-
-		return reconcile.Result{}, h.Handle()
+		return reconcile.Result{}, sh.Handle()
 
 	case ResourceDeleteRequest:
 		// h := &resourceDeleteRequestHandler{
