@@ -24,6 +24,10 @@ If your cluster has only a single node, use `sds-local-volume` instead of `sds-r
 To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+Available access modes: RWO; RWX — only in DVP;
+{{< /alert >}}
+
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
 To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
