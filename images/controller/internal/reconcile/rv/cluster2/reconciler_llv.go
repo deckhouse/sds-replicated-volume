@@ -4,20 +4,10 @@ import "fmt"
 
 type llvReconciler struct {
 	RVNodeAdapter
-	rv RVAdapter
 
-	llv LLVAdapter // may be nil
-}
+	existingLLV LLVAdapter // may be nil
 
-func (rec *llvReconciler) diskPath() string {
-	var volName string
-	if rec.llv == nil {
-		volName = rec.rv.RVName()
-	} else {
-		volName = rec.llv.LLVActualLVNameOnTheNode()
-	}
-
-	return fmt.Sprintf("/dev/%s/%s", rec.LVGActualVGNameOnTheNode(), volName)
+	llvBuilder *LLVBuilder
 }
 
 var _ diskPath = &llvReconciler{}
@@ -34,7 +24,7 @@ func newLLVReconciler(rvNode RVNodeAdapter) (*llvReconciler, error) {
 }
 
 func (rec *llvReconciler) hasExisting() bool {
-	return rec.llv != nil
+	return rec.existingLLV != nil
 }
 
 func (rec *llvReconciler) setExistingLLV(llv LLVAdapter) error {
@@ -42,10 +32,10 @@ func (rec *llvReconciler) setExistingLLV(llv LLVAdapter) error {
 		return errArgNil("llv")
 	}
 
-	if rec.llv != nil {
+	if rec.existingLLV != nil {
 		return errInvalidCluster(
 			"expected single LLV on the node, got: %s, %s",
-			rec.llv.LLVName(), llv.LLVName(),
+			rec.existingLLV.LLVName(), llv.LLVName(),
 		)
 	}
 
@@ -56,12 +46,47 @@ func (rec *llvReconciler) setExistingLLV(llv LLVAdapter) error {
 		)
 	}
 
-	rec.llv = llv
+	rec.existingLLV = llv
 
 	return nil
 }
 
-// resizeNeeded - if size of any
-func (rec *llvReconciler) reconcile() (a Action, err error) {
-	return nil, nil
+func (rec *llvReconciler) diskPath() string {
+	return fmt.Sprintf("/dev/%s/%s", rec.LVGActualVGNameOnTheNode(), rec.actualLVNameOnTheNode())
+}
+
+func (rec *llvReconciler) initializeDynamicProps() error {
+	rec.llvBuilder.SetActualLVNameOnTheNode(rec.actualLVNameOnTheNode())
+	return nil
+}
+
+func (rec *llvReconciler) actualLVNameOnTheNode() string {
+	if rec.existingLLV == nil {
+		return rec.RVName()
+	} else {
+		return rec.existingLLV.LLVActualLVNameOnTheNode()
+	}
+}
+
+func (rec *llvReconciler) reconcile() (Action, error) {
+	var res Actions
+
+	if rec.existingLLV == nil {
+		res = append(
+			res,
+			CreateLLV{
+				InitLLV: rec.llvBuilder.BuildInitializer(),
+			},
+		)
+	} else {
+		// TODO: handle error/recreate/replace scenarios
+		res = append(
+			res,
+			PatchLLV{
+				PatchLLV: rec.llvBuilder.BuildInitializer(),
+			},
+		)
+	}
+
+	return res, nil
 }

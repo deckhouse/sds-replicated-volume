@@ -59,7 +59,15 @@ func NewCluster(
 				)
 		}
 
-		rvr, err := newRVRReconciler(rv, rvNode, nodeMgr)
+		if rvNode.RVName() != rv.RVName() {
+			return nil,
+				errArg(
+					"expected rvNodes elements to have the same names as rv, got '%s'!='%s' at %d",
+					rvNode.RVName(), rv.RVName(), i,
+				)
+		}
+
+		rvr, err := newRVRReconciler(rvNode, nodeMgr)
 		if err != nil {
 			return nil, err
 		}
@@ -139,15 +147,20 @@ func (c *Cluster) AddExistingLLV(llv LLVAdapter) error {
 }
 
 func (c *Cluster) deleteLLV(llv LLVAdapter) Action {
-	return nil
+	return DeleteLLV{llv}
 }
 
 func (c *Cluster) deleteRVR(rvr RVRAdapter) Action {
-	return nil
+	return DeleteRVR{rvr}
 }
 
 func (c *Cluster) initializeReconcilers() error {
-	// llv need no initialization
+	// llvs dynamic props
+	for _, llvRec := range c.llvsByLVGName {
+		if err := llvRec.initializeDynamicProps(); err != nil {
+			return err
+		}
+	}
 
 	// rvrs may need to query for some props
 	for _, rvrRec := range c.rvrsByNodeName {
@@ -156,7 +169,7 @@ func (c *Cluster) initializeReconcilers() error {
 			dp = c.llvsByLVGName[rvrRec.LVGName()]
 		}
 
-		if err := rvrRec.initializeTargetProps(&c.nodeIdMgr, dp); err != nil {
+		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr, dp); err != nil {
 			return err
 		}
 	}
@@ -191,10 +204,6 @@ func (c *Cluster) Reconcile() (Action, error) {
 				return nil, err
 			}
 
-			if reconcileAction == nil {
-				continue
-			}
-
 			if llvRec.hasExisting() {
 				existingResourcesActions = append(existingResourcesActions, reconcileAction)
 			} else if len(llvsToDelete) > 0 {
@@ -222,10 +231,6 @@ func (c *Cluster) Reconcile() (Action, error) {
 				return nil, err
 			}
 
-			if reconcileAction == nil {
-				continue
-			}
-
 			if rvrRec.hasExisting() {
 				existingResourcesActions = append(existingResourcesActions, reconcileAction)
 			} else if len(rvrsToDelete) > 0 {
@@ -250,5 +255,4 @@ func (c *Cluster) Reconcile() (Action, error) {
 	}
 
 	return cleanActions(result), nil
-
 }

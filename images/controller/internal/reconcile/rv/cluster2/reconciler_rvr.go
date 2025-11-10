@@ -10,30 +10,18 @@ type diskPath interface {
 
 type rvrReconciler struct {
 	RVNodeAdapter
-	rv      RVAdapter
 	nodeMgr NodeManager
 
-	rvr RVRAdapter // optional
+	existingRVR RVRAdapter // optional
 
-	tgtProps *replicaTargetProps
-}
-
-type replicaTargetProps struct {
-	port   uint
-	minor  uint
-	nodeId uint
-	disk   string
-	peers  map[string]v1alpha2.Peer
+	//
+	rvrBuilder *RVRBuilder
 }
 
 func newRVRReconciler(
-	rv RVAdapter,
 	rvNode RVNodeAdapter,
 	nodeMgr NodeManager,
 ) (*rvrReconciler, error) {
-	if rv == nil {
-		return nil, errArgNil("rv")
-	}
 	if rvNode == nil {
 		return nil, errArgNil("rvNode")
 	}
@@ -41,16 +29,21 @@ func newRVRReconciler(
 		return nil, errArgNil("nodeMgr")
 	}
 
+	rvrBuilder, err := NewRVRBuilder(rvNode)
+	if err != nil {
+		return nil, err
+	}
+
 	res := &rvrReconciler{
 		RVNodeAdapter: rvNode,
-		rv:            rv,
 		nodeMgr:       nodeMgr,
+		rvrBuilder:    rvrBuilder,
 	}
 	return res, nil
 }
 
 func (rec *rvrReconciler) hasExisting() bool {
-	return rec.rvr != nil
+	return rec.existingRVR != nil
 }
 
 func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
@@ -65,115 +58,110 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 		)
 	}
 
-	if rec.rvr != nil {
+	if rec.existingRVR != nil {
 		return errInvalidCluster(
 			"expected one RVR on the node, got: %s, %s",
-			rec.rvr.Name(), rvr.Name(),
+			rec.existingRVR.Name(), rvr.Name(),
 		)
 	}
 
-	rec.rvr = rvr
+	rec.existingRVR = rvr
 	return nil
 }
 
-func (rec *rvrReconciler) initializeTargetProps(
+func (rec *rvrReconciler) initializeDynamicProps(
 	nodeIdMgr NodeIdManager,
 	dp diskPath,
 ) error {
-
 	if rec.Diskless() != (dp == nil) {
 		return errUnexpected("expected rec.Diskless() == (dp == nil)")
 	}
 
-	tgtProps := &replicaTargetProps{}
-
 	// port
-	if rec.rvr == nil || rec.rvr.Port() == 0 {
+	if rec.existingRVR == nil || rec.existingRVR.Port() == 0 {
 		port, err := rec.nodeMgr.NewNodePort()
 		if err != nil {
 			return err
 		}
-		tgtProps.port = port
+		rec.rvrBuilder.SetPort(port)
 	} else {
-		tgtProps.port = rec.rvr.Port()
-	}
-
-	// minor
-	if rec.rvr == nil || rec.rvr.Minor() == nil {
-		minor, err := rec.nodeMgr.NewNodeMinor()
-		if err != nil {
-			return err
-		}
-		tgtProps.minor = minor
-	} else {
-		tgtProps.minor = *rec.rvr.Minor()
+		rec.rvrBuilder.SetPort(rec.existingRVR.Port())
 	}
 
 	// nodeid
-	if rec.rvr == nil {
+	if rec.existingRVR == nil {
 		nodeId, err := nodeIdMgr.NewNodeId()
 		if err != nil {
 			return err
 		}
-		tgtProps.nodeId = nodeId
+		rec.rvrBuilder.SetNodeId(nodeId)
 	} else {
-		tgtProps.nodeId = rec.rvr.NodeId()
+		rec.rvrBuilder.SetNodeId(rec.existingRVR.NodeId())
 	}
 
-	// disk
+	// if diskful
 	if dp != nil {
-		tgtProps.disk = dp.diskPath()
-	}
+		vol := v1alpha2.Volume{}
 
-	rec.tgtProps = tgtProps
+		// disk
+		vol.Disk = dp.diskPath()
+
+		// minor
+		if rec.existingRVR == nil || rec.existingRVR.Minor() < 0 {
+			minor, err := rec.nodeMgr.NewNodeMinor()
+			if err != nil {
+				return err
+			}
+			vol.Device = minor
+		} else {
+			vol.Device = uint(rec.existingRVR.Minor())
+		}
+
+		rec.rvrBuilder.SetVolume(vol)
+	}
 
 	return nil
 }
 
-func (rec *rvrReconciler) asPeer() v1alpha2.Peer {
-	res := v1alpha2.Peer{
-		NodeId: uint(rec.tgtProps.nodeId),
-		Address: v1alpha2.Address{
-			IPv4: rec.NodeIP(),
-			Port: rec.tgtProps.port,
-		},
-		Diskless:     rec.Diskless(),
-		SharedSecret: rec.rv.SharedSecret(),
-	}
-
-	return res
-}
-
 func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler) error {
-	peers := make(map[string]v1alpha2.Peer, len(allReplicas)-1)
-
 	for _, peerRec := range allReplicas {
 		if rec == peerRec {
 			continue
 		}
 
-		peers[peerRec.NodeName()] = peerRec.asPeer()
+		rec.rvrBuilder.AddPeer(peerRec.NodeName(), peerRec.rvrBuilder.BuildPeer())
 	}
-
-	rec.tgtProps.peers = peers
 
 	return nil
 }
 
 func (rec *rvrReconciler) reconcile() (Action, error) {
-	var res Action
-	// if r.existingLLV == nil {
-	// 	// newLLV := &snc.LVMLogicalVolume{
+	var res Actions
+	if rec.existingRVR == nil {
+		res = append(
+			res,
+			CreateRVR{
+				InitRVR: rec.rvrBuilder.BuildInitializer(),
+			},
+		)
+	} else {
+		// TODO: handle error/recreate/replace scenarios
+		res = append(
+			res,
+			PatchRVR{
+				RVR:      rec.existingRVR,
+				PatchRVR: rec.rvrBuilder.BuildInitializer(),
+			},
+		)
 
-	// 	// }
-	// 	res = append(
-	// 		res,
-	// 		CreateLVMLogicalVolume{},
-	// 		WaitLVMLogicalVolume{},
-	// 	)
-	// } else {
-
-	// }
-
+		if rec.existingRVR.Size() != rec.Size() {
+			res = append(
+				res,
+				ResizeRVR{
+					RVR: rec.existingRVR,
+				},
+			)
+		}
+	}
 	return res, nil
 }

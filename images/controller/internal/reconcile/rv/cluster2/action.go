@@ -48,74 +48,56 @@ func cleanActions[T ~[]Action](actions T) (result T) {
 	return
 }
 
-// RVRPatch represents a patch to be applied to a specific ReplicatedVolumeReplica
-type RVRPatch struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
-	Apply                   func(*v1alpha2.ReplicatedVolumeReplica) error
+type PatchRVR struct {
+	RVR      RVRAdapter
+	PatchRVR func(*v1alpha2.ReplicatedVolumeReplica) error
 }
 
-// LLVPatch represents a patch to be applied to a specific LVMLogicalVolume
-type LLVPatch struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
-	Apply            func(*snc.LVMLogicalVolume) error
+type PatchLLV struct {
+	LLV      LLVAdapter
+	PatchLLV func(*snc.LVMLogicalVolume) error
 }
 
-type CreateReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+// Creates RVR and waits for Ready=True status
+// It should also initialize it, if needed
+type CreateRVR struct {
+	InitRVR func(*v1alpha2.ReplicatedVolumeReplica) error
 }
 
-type WaitReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+type DeleteRVR struct {
+	RVR RVRAdapter
 }
 
-type DeleteReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+type CreateLLV struct {
+	InitLLV func(*snc.LVMLogicalVolume) error
 }
 
-type CreateLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type DeleteLLV struct {
+	LLV LLVAdapter
 }
 
-type WaitLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type ResizeRVR struct {
+	RVR RVRAdapter
 }
 
-type DeleteLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
-}
-
-type WaitAndTriggerInitialSync struct {
-	ReplicatedVolumeReplicas []*v1alpha2.ReplicatedVolumeReplica
-}
-
-type TriggerRVRResize struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
-}
-
-func (Actions) _action()                       {}
-func (ParallelActions) _action()               {}
-func (RVRPatch) _action()                      {}
-func (LLVPatch) _action()                      {}
-func (CreateReplicatedVolumeReplica) _action() {}
-func (WaitReplicatedVolumeReplica) _action()   {}
-func (DeleteReplicatedVolumeReplica) _action() {}
-func (CreateLVMLogicalVolume) _action()        {}
-func (WaitLVMLogicalVolume) _action()          {}
-func (DeleteLVMLogicalVolume) _action()        {}
-func (WaitAndTriggerInitialSync) _action()     {}
-func (TriggerRVRResize) _action()              {}
+func (Actions) _action()         {}
+func (ParallelActions) _action() {}
+func (PatchRVR) _action()        {}
+func (PatchLLV) _action()        {}
+func (CreateRVR) _action()       {}
+func (DeleteRVR) _action()       {}
+func (CreateLLV) _action()       {}
+func (DeleteLLV) _action()       {}
+func (ResizeRVR) _action()       {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
 
 // ensure interface conformance
-var _ Action = RVRPatch{}
-var _ Action = LLVPatch{}
-var _ Action = CreateReplicatedVolumeReplica{}
-var _ Action = WaitReplicatedVolumeReplica{}
-var _ Action = DeleteReplicatedVolumeReplica{}
-var _ Action = CreateLVMLogicalVolume{}
-var _ Action = WaitLVMLogicalVolume{}
-var _ Action = DeleteLVMLogicalVolume{}
-var _ Action = WaitAndTriggerInitialSync{}
-var _ Action = TriggerRVRResize{}
+var _ Action = PatchRVR{}
+var _ Action = PatchLLV{}
+var _ Action = CreateRVR{}
+var _ Action = DeleteRVR{}
+var _ Action = CreateLLV{}
+var _ Action = DeleteLLV{}
+var _ Action = ResizeRVR{}
