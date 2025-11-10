@@ -3,11 +3,9 @@ package cluster2
 import snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 
 type llvAdapter struct {
-}
-
-// LLVActualLVNameOnTheNode implements LLVAdapter.
-func (l *llvAdapter) LLVActualLVNameOnTheNode() string {
-	panic("unimplemented")
+	llvName                  string
+	llvActualLVNameOnTheNode string
+	lvgName                  string
 }
 
 type LLVAdapter interface {
@@ -18,18 +16,26 @@ type LLVAdapter interface {
 
 var _ LLVAdapter = &llvAdapter{}
 
-func NewLLVAdapter(llv *snc.LVMLogicalVolume) *llvAdapter {
-	llvA := &llvAdapter{}
-
-	return llvA
+func NewLLVAdapter(llv *snc.LVMLogicalVolume) (*llvAdapter, error) {
+	if llv == nil {
+		return nil, errArgNil("llv")
+	}
+	llvA := &llvAdapter{
+		llvName:                  llv.Name,
+		lvgName:                  llv.Spec.LVMVolumeGroupName,
+		llvActualLVNameOnTheNode: llv.Spec.ActualLVNameOnTheNode,
+	}
+	return llvA, nil
 }
 
-// LVMVolumeGroupName implements LLVAdapter.
 func (l *llvAdapter) LVGName() string {
-	panic("unimplemented")
+	return l.lvgName
 }
 
-// LLVName implements LLVAdapter.
 func (l *llvAdapter) LLVName() string {
-	panic("unimplemented")
+	return l.llvName
+}
+
+func (l *llvAdapter) LLVActualLVNameOnTheNode() string {
+	return l.llvActualLVNameOnTheNode
 }

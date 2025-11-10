@@ -60,7 +60,7 @@ type ReplicatedVolumeSpec struct {
 type LVMSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Thin;Thick
-	Type string `json:"type"` // Thin/Thick
+	Type string `json:"type"`
 
 	// +listType=map
 	// +listMapKey=name

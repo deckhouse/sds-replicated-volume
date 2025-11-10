@@ -38,7 +38,7 @@ func (b *LLVBuilder) BuildInitializer() LLVInitializer {
 		llv.Spec.Size = resource.NewQuantity(int64(b.Size()), resource.BinarySI).String()
 		llv.Spec.LVMVolumeGroupName = b.LVGName()
 
-		llv.Spec.Type = b.LVGType()
+		llv.Spec.Type = b.LVMType()
 
 		switch llv.Spec.Type {
 		case "Thin":
@@ -51,7 +51,7 @@ func (b *LLVBuilder) BuildInitializer() LLVInitializer {
 				Contiguous: utils.Ptr(true),
 			}
 		default:
-			return fmt.Errorf("expected either Thin or Thick LVG type, got: %s", b.LVGType())
+			return fmt.Errorf("expected either Thin or Thick LVG type, got: %s", llv.Spec.Type)
 		}
 
 		// TODO: support VolumeCleanup

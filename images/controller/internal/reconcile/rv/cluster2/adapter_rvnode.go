@@ -10,65 +10,7 @@ import (
 type rvNodeAdapter struct {
 	RVAdapter
 	nodeName, nodeIP,
-	lvgName, actualVGNameOnTheNode string
-}
-
-// AllowTwoPrimaries implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).AllowTwoPrimaries of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) AllowTwoPrimaries() bool {
-	panic("unimplemented")
-}
-
-// LVGThinPoolName implements RVNodeAdapter.
-func (n *rvNodeAdapter) LVGThinPoolName() string {
-	panic("unimplemented")
-}
-
-// LVGType implements RVNodeAdapter.
-func (n *rvNodeAdapter) LVGType() string {
-	panic("unimplemented")
-}
-
-// PublishRequested implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).PublishRequested of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) PublishRequested() []string {
-	panic("unimplemented")
-}
-
-// Quorum implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).Quorum of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) Quorum() byte {
-	panic("unimplemented")
-}
-
-// QuorumMinimumRedundancy implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).QuorumMinimumRedundancy of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) QuorumMinimumRedundancy() byte {
-	panic("unimplemented")
-}
-
-// RVName implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).RVName of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) RVName() string {
-	panic("unimplemented")
-}
-
-// Replicas implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).Replicas of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) Replicas() byte {
-	panic("unimplemented")
-}
-
-// SharedSecret implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).SharedSecret of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) SharedSecret() string {
-	panic("unimplemented")
-}
-
-// Size implements RVNodeAdapter.
-// Subtle: this method shadows the method (RVAdapter).Size of rvNodeAdapter.RVAdapter.
-func (n *rvNodeAdapter) Size() int {
-	panic("unimplemented")
+	lvgName, actualVGNameOnTheNode, thinPoolName string
 }
 
 type RVNodeAdapter interface {
@@ -79,9 +21,7 @@ type RVNodeAdapter interface {
 	LVGName() string
 	// empty if [RVNodeAdapter.Diskless]
 	LVGActualVGNameOnTheNode() string
-	// "Thin"/"Thick" or empty if [RVNodeAdapter.Diskless]
-	LVGType() string
-	// empty if [RVNodeAdapter.LVGType] is not "Thin"
+	// empty if [RVNodeAdapter.Diskless] or [RVAdapter.LVMType] is not "Thin"
 	LVGThinPoolName() string
 	Diskless() bool
 	Primary() bool
@@ -95,6 +35,10 @@ func NewRVNodeAdapter(
 	node *corev1.Node,
 	lvg *snc.LVMVolumeGroup,
 ) (*rvNodeAdapter, error) {
+	if rv == nil {
+		return nil, errArgNil("rv")
+	}
+
 	if node == nil {
 		return nil, errArgNil("node")
 	}
@@ -129,33 +73,41 @@ func NewRVNodeAdapter(
 
 		res.lvgName = lvg.Name
 		res.actualVGNameOnTheNode = lvg.Spec.ActualVGNameOnTheNode
+
+		if rv.LVMType() == "Thin" {
+			res.thinPoolName = rv.ThinPoolName(lvg.Name)
+		}
 	}
 
 	return res, nil
 }
 
-func (n *rvNodeAdapter) NodeIP() string {
-	return n.nodeIP
+func (r *rvNodeAdapter) NodeIP() string {
+	return r.nodeIP
 }
 
-func (n *rvNodeAdapter) NodeName() string {
-	return n.nodeName
+func (r *rvNodeAdapter) NodeName() string {
+	return r.nodeName
 }
 
-func (n *rvNodeAdapter) LVGName() string {
-	return n.lvgName
+func (r *rvNodeAdapter) LVGName() string {
+	return r.lvgName
 }
 
-func (n *rvNodeAdapter) LVGActualVGNameOnTheNode() string {
-	return n.actualVGNameOnTheNode
+func (r *rvNodeAdapter) LVGActualVGNameOnTheNode() string {
+	return r.actualVGNameOnTheNode
 }
 
-func (n *rvNodeAdapter) Diskless() bool {
-	return n.lvgName == ""
+func (r *rvNodeAdapter) Diskless() bool {
+	return r.lvgName == ""
 }
 
-func (n *rvNodeAdapter) Primary() bool {
-	return slices.Contains(n.PublishRequested(), n.nodeName)
+func (r *rvNodeAdapter) Primary() bool {
+	return slices.Contains(r.PublishRequested(), r.nodeName)
+}
+
+func (r *rvNodeAdapter) LVGThinPoolName() string {
+	return r.thinPoolName
 }
 
 func nodeAddresses(node *corev1.Node) (nodeHostName string, nodeIP string, err error) {

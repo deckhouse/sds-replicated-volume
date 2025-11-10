@@ -14,6 +14,8 @@ type rvAdapter struct {
 	publishRequested        []string
 	quorum                  byte
 	quorumMinimumRedundancy byte
+	lvmType                 string
+	thinPoolNamesByLVGName  map[string]string
 }
 
 type RVAdapter interface {
@@ -25,6 +27,8 @@ type RVAdapter interface {
 	PublishRequested() []string
 	Quorum() byte
 	QuorumMinimumRedundancy() byte
+	LVMType() string // "Thin" or "Thick"
+	ThinPoolName(lvgName string) string
 }
 
 var _ RVAdapter = &rvAdapter{}
@@ -48,6 +52,14 @@ func NewRVAdapter(rv *v1alpha2.ReplicatedVolume) (*rvAdapter, error) {
 		publishRequested:        slices.Clone(rv.Spec.PublishRequested),
 		quorum:                  quorum,
 		quorumMinimumRedundancy: qmr,
+		lvmType:                 rv.Spec.LVM.Type,
+	}
+
+	if res.lvmType == "Thin" {
+		res.thinPoolNamesByLVGName = make(map[string]string, len(rv.Spec.LVM.LVMVolumeGroups))
+		for _, lvgRef := range rv.Spec.LVM.LVMVolumeGroups {
+			res.thinPoolNamesByLVGName[lvgRef.Name] = lvgRef.ThinPoolName
+		}
 	}
 
 	return res, nil
@@ -83,4 +95,12 @@ func (rv *rvAdapter) QuorumMinimumRedundancy() byte {
 
 func (rv *rvAdapter) AllowTwoPrimaries() bool {
 	return len(rv.publishRequested) > 1
+}
+
+func (rv *rvAdapter) LVMType() string {
+	return rv.lvmType
+}
+
+func (rv *rvAdapter) ThinPoolName(lvgName string) string {
+	return rv.thinPoolNamesByLVGName[lvgName]
 }
