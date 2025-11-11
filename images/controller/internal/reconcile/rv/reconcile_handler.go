@@ -108,9 +108,20 @@ func (b *replicaScoreBuilder) Build() []topology.Score {
 func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("controller: reconcile resource", "name", h.rv.Name)
 
-	// tie-breaker
+	// Build RV adapter once
+	rvAdapter, err := cluster.NewRVAdapter(h.rv)
+	if err != nil {
+		return err
+	}
+
+	// fast path for desired 0 replicas: skip nodes/LVGs/topology, reconcile existing only
+	if h.rv.Spec.Replicas == 0 {
+		return h.reconcileWithSelection(rvAdapter, nil, nil, nil)
+	}
+
+	// tie-breaker and desired counts
 	var needTieBreaker bool
-	var counts = []int{int(h.rv.Spec.Replicas)}
+	counts := []int{int(h.rv.Spec.Replicas)}
 	if h.rv.Spec.Replicas%2 == 0 {
 		needTieBreaker = true
 		counts = append(counts, 1)
@@ -281,87 +292,12 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 	h.log.Info("selected nodes", "selectedNodes", selectedNodes)
 
-	// Build cluster2 with adapters and managers
-	rvAdapter, err := cluster.NewRVAdapter(h.rv)
-	if err != nil {
-		return err
-	}
-
-	var rvNodes []cluster.RVNodeAdapter
-	var nodeMgrs []cluster.NodeManager
-
-	// diskful
-	for _, nodeName := range selectedNodes[0] {
-		repl := pool[nodeName]
-		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, repl.LVG)
-		if err != nil {
-			return err
-		}
-		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
-	}
-
-	// tiebreaker (diskless), if needed
+	var tieNode *string
 	if needTieBreaker {
-		nodeName := selectedNodes[1][0]
-		repl := pool[nodeName]
-		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, nil)
-		if err != nil {
-			return err
-		}
-		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
+		n := selectedNodes[1][0]
+		tieNode = &n
 	}
-
-	clr2, err := cluster.NewCluster(
-		h.log,
-		rvAdapter,
-		rvNodes,
-		nodeMgrs,
-	)
-	if err != nil {
-		return err
-	}
-
-	// existing RVRs (by ownerReference)
-	for i := range ownedRvrs {
-		ra, err := cluster.NewRVRAdapter(&ownedRvrs[i])
-		if err != nil {
-			return err
-		}
-		if err := clr2.AddExistingRVR(ra); err != nil {
-			return err
-		}
-	}
-
-	// existing LLVs for this RV (by owner reference to RV) using cache index
-	var llvList snc.LVMLogicalVolumeList
-	if err := h.cl.List(h.ctx, &llvList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
-		return fmt.Errorf("listing llvs: %w", err)
-	}
-	ownedLLVs := llvList.Items
-	for i := range llvList.Items {
-		llv := &llvList.Items[i]
-		la, err := cluster.NewLLVAdapter(llv)
-		if err != nil {
-			return err
-		}
-		if err := clr2.AddExistingLLV(la); err != nil {
-			return err
-		}
-	}
-
-	action, err := clr2.Reconcile()
-	if err != nil {
-		return err
-	}
-
-	if err := h.processAction(action); err != nil {
-		return err
-	}
-
-	// After reconcile actions, update RV Ready status based on owned resources
-	return h.updateRVReadyCondition(ownedRvrs, ownedLLVs)
+	return h.reconcileWithSelection(rvAdapter, pool, selectedNodes[0], tieNode)
 }
 
 func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error {
@@ -664,6 +600,88 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 	}
 }
 
+// reconcileWithSelection builds cluster from provided selection and reconciles existing/desired state.
+// pool may be nil when no nodes are needed (replicas=0). diskfulNames may be empty. tieNodeName is optional.
+func (h *resourceReconcileRequestHandler) reconcileWithSelection(
+	rvAdapter cluster.RVAdapter,
+	pool map[string]*replicaInfo,
+	diskfulNames []string,
+	tieNodeName *string,
+) error {
+	var rvNodes []cluster.RVNodeAdapter
+	var nodeMgrs []cluster.NodeManager
+
+	// diskful nodes
+	for _, nodeName := range diskfulNames {
+		repl := pool[nodeName]
+		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, repl.LVG)
+		if err != nil {
+			return err
+		}
+		rvNodes = append(rvNodes, rvNode)
+		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
+	}
+	// optional diskless tie-breaker
+	if tieNodeName != nil {
+		repl := pool[*tieNodeName]
+		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, nil)
+		if err != nil {
+			return err
+		}
+		rvNodes = append(rvNodes, rvNode)
+		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, *tieNodeName))
+	}
+
+	// build cluster
+	clr, err := cluster.NewCluster(h.log, rvAdapter, rvNodes, nodeMgrs)
+	if err != nil {
+		return err
+	}
+
+	// add existing RVRs/LLVs
+	var ownedRvrsList v1alpha2.ReplicatedVolumeReplicaList
+	if err := h.cl.List(h.ctx, &ownedRvrsList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+		return fmt.Errorf("listing rvrs: %w", err)
+	}
+	ownedRvrs := ownedRvrsList.Items
+	for i := range ownedRvrs {
+		ra, err := cluster.NewRVRAdapter(&ownedRvrs[i])
+		if err != nil {
+			return err
+		}
+		if err := clr.AddExistingRVR(ra); err != nil {
+			return err
+		}
+	}
+
+	var llvList snc.LVMLogicalVolumeList
+	if err := h.cl.List(h.ctx, &llvList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+		return fmt.Errorf("listing llvs: %w", err)
+	}
+	ownedLLVs := llvList.Items
+	for i := range ownedLLVs {
+		llv := &ownedLLVs[i]
+		la, err := cluster.NewLLVAdapter(llv)
+		if err != nil {
+			return err
+		}
+		if err := clr.AddExistingLLV(la); err != nil {
+			return err
+		}
+	}
+
+	// reconcile
+	action, err := clr.Reconcile()
+	if err != nil {
+		return err
+	}
+	if err := h.processAction(action); err != nil {
+		return err
+	}
+
+	// update ready condition
+	return h.updateRVReadyCondition(ownedRvrs, ownedLLVs)
+}
 func (h *resourceReconcileRequestHandler) updateRVReadyCondition(ownedRvrs []v1alpha2.ReplicatedVolumeReplica, ownedLLVs []snc.LVMLogicalVolume) error {
 	allReady := true
 	for i := range ownedRvrs {

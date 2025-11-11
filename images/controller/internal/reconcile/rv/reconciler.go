@@ -69,16 +69,26 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, h.Handle()
 
 	case ResourceDeleteRequest:
-		// h := &resourceDeleteRequestHandler{
-		// 	ctx:                  ctx,
-		// 	log:                  r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
-		// 	cl:                   r.cl,
-		// 	nodeName:             r.nodeName,
-		// 	replicatedVolumeName: typedReq.ReplicatedVolumeName,
-		// }
+		rv := &v1alpha2.ReplicatedVolume{}
+		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rv)
+		if err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				r.log.Warn(
+					"rv 'name' not found for delete reconcile, it might be deleted, ignore",
+					"name", typedReq.Name,
+				)
+				return reconcile.Result{}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("getting rv %s for delete reconcile: %w", typedReq.Name, err)
+		}
 
-		// return reconcile.Result{}, h.Handle()
-		return reconcile.Result{}, nil
+		h := &resourceDeleteRequestHandler{
+			ctx: ctx,
+			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
+			cl:  r.cl,
+			rv:  rv,
+		}
+		return reconcile.Result{}, h.Handle()
 
 	default:
 		r.log.Error("unknown req type", "type", reqTypeName)

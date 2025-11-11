@@ -88,7 +88,7 @@ spec:
                 type: array
               replicas:
                 maximum: 8
-                minimum: 1
+                minimum: 0
                 type: integer
               sharedSecret:
                 minLength: 1
