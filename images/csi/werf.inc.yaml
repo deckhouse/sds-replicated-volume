@@ -1,15 +1,14 @@
-{{- $csiBinaries := "/usr/sbin/blkid /usr/sbin/blockdev /usr/bin/curl /lib64/libnss_files.so.2 /lib64/libnss_dns.so.2 /usr/sbin/mkfs.xfs /usr/sbin/xfs_admin /usr/sbin/xfs_bmap /usr/sbin/xfs_copy /usr/sbin/xfs_db /usr/sbin/xfs_estimate /usr/sbin/xfs_freeze /usr/sbin/xfs_fsr /usr/sbin/xfs_growfs /usr/sbin/xfs_info /usr/sbin/xfs_io /usr/sbin/xfs_logprint /usr/sbin/xfs_mdrestore /usr/sbin/xfs_metadump /usr/sbin/xfs_mkfile /usr/sbin/xfs_ncheck /usr/sbin/xfs_property /usr/sbin/xfs_quota /usr/sbin/xfs_repair /usr/sbin/xfs_rtcp /usr/sbin/xfs_scrub /usr/sbin/xfs_scrub_all /usr/sbin/xfs_spaceman /sbin/badblocks /sbin/debugfs /sbin/dumpe2fs /sbin/e2freefrag /sbin/e2fsck /sbin/e2image /sbin/e2initrd_helper /sbin/e2label /sbin/e2mmpstatus /sbin/e2scrub /sbin/e2scrub_all /sbin/e2undo /sbin/e4crypt /sbin/e4defrag /sbin/filefrag /sbin/fsck.ext2 /sbin/fsck.ext3 /sbin/fsck.ext4 /sbin/fsck.ext4dev /sbin/logsave /sbin/mke2fs /sbin/mkfs.ext2 /sbin/mkfs.ext3 /sbin/mkfs.ext4 /sbin/mkfs.ext4dev /sbin/mklost+found /sbin/resize2fs /sbin/tune2fs /usr/bin/chattr /usr/bin/lsattr /usr/sbin/dmfilemapd /usr/sbin/fsadm /usr/sbin/lvchange /usr/sbin/lvconvert /usr/sbin/lvcreate /usr/sbin/lvdisplay /usr/sbin/lvextend /usr/sbin/lvm /usr/sbin/lvm_import_vdo /usr/sbin/lvmconfig /usr/sbin/lvmdevices /usr/sbin/lvmdiskscan /usr/sbin/lvmdump /usr/sbin/lvmpolld /usr/sbin/lvmsadc /usr/sbin/lvmsar /usr/sbin/lvreduce /usr/sbin/lvremove /usr/sbin/lvrename /usr/sbin/lvresize /usr/sbin/lvs /usr/sbin/lvscan /usr/sbin/pvchange /usr/sbin/pvck /usr/sbin/pvcreate /usr/sbin/pvdisplay /usr/sbin/pvmove /usr/sbin/pvremove /usr/sbin/pvresize /usr/sbin/pvs /usr/sbin/pvscan /usr/sbin/vgcfgbackup /usr/sbin/vgcfgrestore /usr/sbin/vgchange /usr/sbin/vgck /usr/sbin/vgconvert /usr/sbin/vgcreate /usr/sbin/vgdisplay /usr/sbin/vgexport /usr/sbin/vgextend /usr/sbin/vgimport /usr/sbin/vgimportclone /usr/sbin/vgimportdevices /usr/sbin/vgmerge /usr/sbin/vgmknodes /usr/sbin/vgreduce /usr/sbin/vgremove /usr/sbin/vgrename /usr/sbin/vgs /usr/sbin/vgscan /usr/sbin/vgsplit /bin/mount /bin/umount /sbin/swapoff /sbin/swapon" }}
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
-fromImage: builder/src
+image: {{ $.ImageName }}-src-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
 
 git:
-  - add: {{ .ModuleDir }}
+  - add: /
     to: /src
     includePaths:
       - api
-      - lib/go      
+      - lib/go
       - images/{{ $.ImageName }}
     stageDependencies:
       install:
@@ -20,71 +19,98 @@ git:
 shell:
   install:
     - echo "src artifact"
-
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/alt-go-svace" }}
+image: {{ $.ImageName }}-golang-artifact
+fromImage: builder/golang-alpine
 final: false
 
 import:
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+  - image: {{ $.ImageName }}-src-artifact
     add: /src
     to: /src
     before: install
 
 mount:
-{{ include "mount points for golang builds" . }}
-
-secrets:
-- id: GOPROXY
-  value: {{ .GOPROXY }}
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
 
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
-    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
-    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
-    - |
-      {{- include "image-build.build" (set $ "BuildCommand" (printf `go build -ldflags="-s -w" -tags "%s" -o /%s` .MODULE_EDITION $.ImageName)) | nindent 6 }}
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
     - chmod +x /{{ $.ImageName }}
 
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
-fromImage: builder/alt
+{{- $csiBinariesMount     := "/lib64/libnss_files.so.2 /lib64/libnss_dns.so.2 /bin/mount /bin/umount" }}
+{{- $csiBinariesE2fsprogs := "/etc/e2scrub.conf /etc/mke2fs.conf /sbin/badblocks /sbin/debugfs /sbin/dumpe2fs /sbin/e2freefrag /sbin/e2fsck /sbin/e2image /sbin/e2initrd_helper /sbin/e2label /sbin/e2mmpstatus /sbin/e2scrub /sbin/e2scrub_all /sbin/e2undo /sbin/e4crypt /sbin/e4defrag /sbin/filefrag /sbin/fsck.ext2 /sbin/fsck.ext3 /sbin/fsck.ext4 /sbin/fsck.ext4dev /sbin/logsave /sbin/mke2fs /sbin/mkfs.ext2 /sbin/mkfs.ext3 /sbin/mkfs.ext4 /sbin/mkfs.ext4dev /sbin/mklost+found /sbin/resize2fs /sbin/tune2fs /usr/bin/chattr /usr/bin/lsattr" }}
+{{- $csiBinariesXfsprogs  := "/usr/lib64/xfsprogs/xfs_scrub_fail /usr/sbin/fsck.xfs /usr/sbin/mkfs.xfs /usr/sbin/xfs_* /usr/share/xfsprogs/mkfs/* " }}
+{{- $csiBinariesUtilLinux := "/usr/sbin/blkid /usr/sbin/blockdev" }}
+image: {{ $.ImageName }}-binaries-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
 final: false
-
 git:
-  - add: {{ .ModuleDir }}/tools/dev_images/additional_tools/binary_replace.sh
+  - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
     to: /binary_replace.sh
     stageDependencies:
-      install:
+      beforeSetup:
         - '**/*'
-
 shell:
-  install:
-    {{- include "alt packages proxy" . | nindent 4 }}
+  beforeInstall:
     - apt-get update
-    - apt-get -y install glibc-utils glibc-core glibc-nss mount nfs-utils curl curl lvm2 e2fsprogs xfsprogs
-    - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+    - apt-get install -y glibc-utils glibc-nss glibc-core util-linux mount xfsprogs e2fsprogs
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  beforeSetup:
     - chmod +x /binary_replace.sh
-    - /binary_replace.sh -i "{{ $csiBinaries }}" -o /relocate
-
+    - /binary_replace.sh -i "{{ $csiBinariesMount }}"     -o /relocate
+    - /binary_replace.sh -i "{{ $csiBinariesE2fsprogs }}" -o /relocate
+    - /binary_replace.sh -i "{{ $csiBinariesXfsprogs }}"  -o /relocate
+    - /binary_replace.sh -i "{{ $csiBinariesUtilLinux }}" -o /relocate
+  setup:
+    - mkdir -p /relocate/etc
+    - ln -sf /proc/mounts /relocate/etc/mtab
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}
-fromImage: base/distroless
-
+image: {{ $.ImageName }}-distroless-artifact
+from: {{ $.Root.BASE_ALT_P11 }}
+final: false
+shell:
+  beforeInstall:
+    - apt-get update
+    - apt-get install -y openssl tzdata libtirpc
+    - {{ $.Root.ALT_CLEANUP_CMD }}
+  install:
+    - mkdir -p /relocate/bin /relocate/sbin /relocate/etc /relocate/var/lib/ssl /relocate/usr/bin /relocate/usr/sbin /relocate/usr/share
+    - cp -pr /tmp /relocate
+    - cp -pr /etc/passwd /etc/group /etc/hostname /etc/hosts /etc/shadow /etc/protocols /etc/services /etc/nsswitch.conf /etc/netconfig /relocate/etc
+    - cp -pr /usr/share/ca-certificates /relocate/usr/share
+    - cp -pr /usr/share/zoneinfo /relocate/usr/share
+    - cp -pr /var/lib/ssl/cert.pem /relocate/var/lib/ssl
+    - cp -pr /var/lib/ssl/certs /relocate/var/lib/ssl
+    - echo "deckhouse:x:{{ $.Root.DECKHOUSE_UID_GID }}:{{ $.Root.DECKHOUSE_UID_GID }}:deckhouse:/:/sbin/nologin" >> /relocate/etc/passwd
+    - echo "deckhouse:x:{{ $.Root.DECKHOUSE_UID_GID }}:" >> /relocate/etc/group
+    - echo "deckhouse:!::0:::::" >> /relocate/etc/shadow
+---
+image: {{ $.ImageName }}-distroless
+from: {{ $.Root.BASE_SCRATCH }}
+final: false
 import:
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
-    add: /{{ $.ImageName }}
-    to: /{{ $.ImageName }}
-    before: install
-  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
+  - image: {{ $.ImageName }}-distroless-artifact
     add: /relocate
     to: /
-    before: install
-    includePaths:
-      - '**/*'
-
-imageSpec:
-  config:
-    entrypoint: ["/{{ $.ImageName }}"]
+    before: setup
+---
+image: {{ $.ImageName }}
+fromImage: {{ $.ImageName }}-distroless
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: setup
+  - image: {{ $.ImageName }}-binaries-artifact
+    add: /relocate
+    to: /
+    before: setup
+docker:
+  ENTRYPOINT: ["/{{ $.ImageName }}"]
+  LABEL:
+    distro: all
+    version: all
