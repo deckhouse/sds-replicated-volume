@@ -1,0 +1,90 @@
+{{- $csiBinaries := "/usr/sbin/blkid /usr/sbin/blockdev /usr/bin/curl /lib64/libnss_files.so.2 /lib64/libnss_dns.so.2 /usr/sbin/mkfs.xfs /usr/sbin/xfs_admin /usr/sbin/xfs_bmap /usr/sbin/xfs_copy /usr/sbin/xfs_db /usr/sbin/xfs_estimate /usr/sbin/xfs_freeze /usr/sbin/xfs_fsr /usr/sbin/xfs_growfs /usr/sbin/xfs_info /usr/sbin/xfs_io /usr/sbin/xfs_logprint /usr/sbin/xfs_mdrestore /usr/sbin/xfs_metadump /usr/sbin/xfs_mkfile /usr/sbin/xfs_ncheck /usr/sbin/xfs_property /usr/sbin/xfs_quota /usr/sbin/xfs_repair /usr/sbin/xfs_rtcp /usr/sbin/xfs_scrub /usr/sbin/xfs_scrub_all /usr/sbin/xfs_spaceman /sbin/badblocks /sbin/debugfs /sbin/dumpe2fs /sbin/e2freefrag /sbin/e2fsck /sbin/e2image /sbin/e2initrd_helper /sbin/e2label /sbin/e2mmpstatus /sbin/e2scrub /sbin/e2scrub_all /sbin/e2undo /sbin/e4crypt /sbin/e4defrag /sbin/filefrag /sbin/fsck.ext2 /sbin/fsck.ext3 /sbin/fsck.ext4 /sbin/fsck.ext4dev /sbin/logsave /sbin/mke2fs /sbin/mkfs.ext2 /sbin/mkfs.ext3 /sbin/mkfs.ext4 /sbin/mkfs.ext4dev /sbin/mklost+found /sbin/resize2fs /sbin/tune2fs /usr/bin/chattr /usr/bin/lsattr /usr/sbin/dmfilemapd /usr/sbin/fsadm /usr/sbin/lvchange /usr/sbin/lvconvert /usr/sbin/lvcreate /usr/sbin/lvdisplay /usr/sbin/lvextend /usr/sbin/lvm /usr/sbin/lvm_import_vdo /usr/sbin/lvmconfig /usr/sbin/lvmdevices /usr/sbin/lvmdiskscan /usr/sbin/lvmdump /usr/sbin/lvmpolld /usr/sbin/lvmsadc /usr/sbin/lvmsar /usr/sbin/lvreduce /usr/sbin/lvremove /usr/sbin/lvrename /usr/sbin/lvresize /usr/sbin/lvs /usr/sbin/lvscan /usr/sbin/pvchange /usr/sbin/pvck /usr/sbin/pvcreate /usr/sbin/pvdisplay /usr/sbin/pvmove /usr/sbin/pvremove /usr/sbin/pvresize /usr/sbin/pvs /usr/sbin/pvscan /usr/sbin/vgcfgbackup /usr/sbin/vgcfgrestore /usr/sbin/vgchange /usr/sbin/vgck /usr/sbin/vgconvert /usr/sbin/vgcreate /usr/sbin/vgdisplay /usr/sbin/vgexport /usr/sbin/vgextend /usr/sbin/vgimport /usr/sbin/vgimportclone /usr/sbin/vgimportdevices /usr/sbin/vgmerge /usr/sbin/vgmknodes /usr/sbin/vgreduce /usr/sbin/vgremove /usr/sbin/vgrename /usr/sbin/vgs /usr/sbin/vgscan /usr/sbin/vgsplit /bin/mount /bin/umount /sbin/swapoff /sbin/swapon" }}
+---
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+
+git:
+  - add: {{ .ModuleDir }}
+    to: /src
+    includePaths:
+      - api
+      - lib/go      
+      - images/{{ $.ImageName }}
+    stageDependencies:
+      install:
+        - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
+fromImage: {{ eq .SVACE_ENABLED "false" | ternary "builder/golang-alpine" "builder/alt-go-svace" }}
+final: false
+
+import:
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+{{ include "mount points for golang builds" . }}
+
+secrets:
+- id: GOPROXY
+  value: {{ .GOPROXY }}
+
+shell:
+  setup:
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0
+    - |
+      {{- include "image-build.build" (set $ "BuildCommand" (printf `go build -ldflags="-s -w" -tags "%s" -o /%s` .MODULE_EDITION $.ImageName)) | nindent 6 }}
+    - chmod +x /{{ $.ImageName }}
+
+---
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
+fromImage: builder/alt
+final: false
+
+git:
+  - add: {{ .ModuleDir }}/tools/dev_images/additional_tools/binary_replace.sh
+    to: /binary_replace.sh
+    stageDependencies:
+      install:
+        - '**/*'
+
+shell:
+  install:
+    {{- include "alt packages proxy" . | nindent 4 }}
+    - apt-get update
+    - apt-get -y install glibc-utils glibc-core glibc-nss mount nfs-utils curl curl lvm2 e2fsprogs xfsprogs
+    - rm -rf /var/lib/apt/lists/* /var/cache/apt/* && mkdir -p /var/lib/apt/lists/partial /var/cache/apt/archives/partial
+    - chmod +x /binary_replace.sh
+    - /binary_replace.sh -i "{{ $csiBinaries }}" -o /relocate
+
+---
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}
+fromImage: base/distroless
+
+import:
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-golang-artifact
+    add: /{{ $.ImageName }}
+    to: /{{ $.ImageName }}
+    before: install
+  - image: {{ .ModuleNamePrefix }}{{ .ImageName }}-binaries-artifact
+    add: /relocate
+    to: /
+    before: install
+    includePaths:
+      - '**/*'
+
+imageSpec:
+  config:
+    entrypoint: ["/{{ $.ImageName }}"]
