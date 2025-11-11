@@ -24,6 +24,10 @@ moduleStatus: preview
 Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
 {{< /alert >}}
 
+{{< alert level="info" >}}
+Доступные режимы работы для модуля: RWO; RWX — только в DVP.
+{{< /alert >}}
+
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
 Для корректной работы модуля `sds-replicated-volume` выполните следующие шаги:
