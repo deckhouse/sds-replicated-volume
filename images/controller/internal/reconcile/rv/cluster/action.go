@@ -17,16 +17,24 @@ func cleanAction(a Action) Action {
 	switch t := a.(type) {
 	case Actions:
 		t = cleanActions(t)
-		if len(t) == 1 {
+		switch len(t) {
+		case 0:
+			return nil
+		case 1:
 			return t[0]
+		default:
+			return t
 		}
-		return t
 	case ParallelActions:
 		t = cleanActions(t)
-		if len(t) == 1 {
+		switch len(t) {
+		case 0:
+			return nil
+		case 1:
 			return t[0]
+		default:
+			return t
 		}
-		return t
 	default:
 		return a
 	}

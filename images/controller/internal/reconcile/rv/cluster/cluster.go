@@ -254,5 +254,5 @@ func (c *Cluster) Reconcile() (Action, error) {
 		addWithDeleteRVRActions, addOrDeleteRVRActions,
 	}
 
-	return cleanActions(result), nil
+	return cleanAction(result), nil
 }

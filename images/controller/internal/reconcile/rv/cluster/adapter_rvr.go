@@ -95,7 +95,7 @@ func (r *rvrAdapter) NodeId() uint {
 
 func (r *rvrAdapter) Size() int {
 	var size int
-	if len(r.rvr.Status.DRBD.Devices) > 0 {
+	if r.rvr.Status != nil && r.rvr.Status.DRBD != nil && len(r.rvr.Status.DRBD.Devices) > 0 {
 		size = r.rvr.Status.DRBD.Devices[0].Size
 	}
 	return size

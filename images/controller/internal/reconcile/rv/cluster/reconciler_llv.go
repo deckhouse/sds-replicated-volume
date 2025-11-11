@@ -4,10 +4,9 @@ import "fmt"
 
 type llvReconciler struct {
 	RVNodeAdapter
+	llvBuilder *LLVBuilder
 
 	existingLLV LLVAdapter // may be nil
-
-	llvBuilder *LLVBuilder
 }
 
 var _ diskPath = &llvReconciler{}
@@ -16,8 +15,15 @@ func newLLVReconciler(rvNode RVNodeAdapter) (*llvReconciler, error) {
 	if rvNode == nil {
 		return nil, errArgNil("rvNode")
 	}
+
+	llvBuilder, err := NewLLVBuilder(rvNode)
+	if err != nil {
+		return nil, err
+	}
+
 	res := &llvReconciler{
 		RVNodeAdapter: rvNode,
+		llvBuilder:    llvBuilder,
 	}
 
 	return res, nil
@@ -83,6 +89,7 @@ func (rec *llvReconciler) reconcile() (Action, error) {
 		res = append(
 			res,
 			PatchLLV{
+				LLV:      rec.existingLLV,
 				PatchLLV: rec.llvBuilder.BuildInitializer(),
 			},
 		)

@@ -67,7 +67,9 @@ func (b *RVRBuilder) BuildInitializer() RVRInitializer {
 		rvrSpec.NodeAddress.IPv4 = b.NodeIP()
 		rvrSpec.NodeAddress.Port = b.port
 
-		rvrSpec.Peers = maps.Clone(b.peers)
+		if len(b.peers) > 0 {
+			rvrSpec.Peers = maps.Clone(b.peers)
+		}
 
 		if b.volume != nil {
 			rvrSpec.Volumes = []v1alpha2.Volume{*b.volume}
