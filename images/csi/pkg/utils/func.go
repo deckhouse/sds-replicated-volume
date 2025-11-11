@@ -23,23 +23,21 @@ import (
 	"slices"
 	"time"
 
-	"github.com/container-storage-interface/spec/lib/go/csi"
 	"gopkg.in/yaml.v2"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
 	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 const (
-	KubernetesAPIRequestLimit   = 3
-	KubernetesAPIRequestTimeout = 1
+	KubernetesAPIRequestLimit       = 3
+	KubernetesAPIRequestTimeout     = 1
 	SDSReplicatedVolumeCSIFinalizer = "storage.deckhouse.io/sds-replicated-volume-csi"
 )
 
@@ -48,55 +46,6 @@ func AreSizesEqualWithinDelta(leftSize, rightSize, allowedDelta resource.Quantit
 	rightSizeFloat := float64(rightSize.Value())
 
 	return math.Abs(leftSizeFloat-rightSizeFloat) < float64(allowedDelta.Value())
-}
-
-func GetNodeWithMaxFreeSpace(lvgs []snc.LVMVolumeGroup, storageClassLVGParametersMap map[string]string, lvmType string) (nodeName string, freeSpace resource.Quantity, err error) {
-	var maxFreeSpace int64
-	for _, lvg := range lvgs {
-		switch lvmType {
-		case internal.LVMTypeThick:
-			freeSpace = lvg.Status.VGFree
-		case internal.LVMTypeThin:
-			thinPoolName, ok := storageClassLVGParametersMap[lvg.Name]
-			if !ok {
-				return "", freeSpace, fmt.Errorf("thin pool name for lvg %s not found in storage class parameters: %+v", lvg.Name, storageClassLVGParametersMap)
-			}
-			freeSpace, err = GetLVMThinPoolFreeSpace(lvg, thinPoolName)
-			if err != nil {
-				return "", freeSpace, fmt.Errorf("get free space for thin pool %s in lvg %s: %w", thinPoolName, lvg.Name, err)
-			}
-		}
-
-		if freeSpace.Value() > maxFreeSpace {
-			nodeName = lvg.Status.Nodes[0].Name
-			maxFreeSpace = freeSpace.Value()
-		}
-	}
-
-	return nodeName, *resource.NewQuantity(maxFreeSpace, resource.BinarySI), nil
-}
-
-func GetLVMVolumeGroup(ctx context.Context, kc client.Client, lvgName string) (*snc.LVMVolumeGroup, error) {
-	lvg := &snc.LVMVolumeGroup{}
-
-	if err := kc.Get(
-		ctx,
-		client.ObjectKey{Name: lvgName, Namespace: ""},
-		lvg,
-	); err != nil {
-		return nil, err
-	}
-
-	return lvg, nil
-}
-
-func GetLVMThinPoolFreeSpace(lvg snc.LVMVolumeGroup, thinPoolName string) (resource.Quantity, error) {
-	for _, tp := range lvg.Status.ThinPools {
-		if tp.Name == thinPoolName {
-			return tp.AvailableSpace, nil
-		}
-	}
-	return resource.Quantity{}, fmt.Errorf("thin pool %s not found in LVMVolumeGroup %s", thinPoolName, lvg.Name)
 }
 
 func GetStorageClassLVGsAndParameters(
@@ -142,91 +91,6 @@ func GetStorageClassLVGsAndParameters(
 func GetLVGList(ctx context.Context, kc client.Client) (*snc.LVMVolumeGroupList, error) {
 	listLvgs := &snc.LVMVolumeGroupList{}
 	return listLvgs, kc.List(ctx, listLvgs)
-}
-
-func GetLLVSpec(
-	log *logger.Logger,
-	lvName string,
-	selectedLVG snc.LVMVolumeGroup,
-	storageClassLVGParametersMap map[string]string,
-	lvmType string,
-	llvSize resource.Quantity,
-	contiguous bool,
-	source *snc.LVMLogicalVolumeSource,
-	volumeCleanup string,
-) snc.LVMLogicalVolumeSpec {
-	lvmLogicalVolumeSpec := snc.LVMLogicalVolumeSpec{
-		ActualLVNameOnTheNode: lvName,
-		Type:                  lvmType,
-		Size:                  llvSize.String(),
-		LVMVolumeGroupName:    selectedLVG.Name,
-		Source:                source,
-	}
-
-	switch lvmType {
-	case internal.LVMTypeThin:
-		lvmLogicalVolumeSpec.Thin = &snc.LVMLogicalVolumeThinSpec{
-			PoolName: storageClassLVGParametersMap[selectedLVG.Name],
-		}
-		log.Info(fmt.Sprintf("[GetLLVSpec] Thin pool name: %s", lvmLogicalVolumeSpec.Thin.PoolName))
-	case internal.LVMTypeThick:
-		if contiguous {
-			lvmLogicalVolumeSpec.Thick = &snc.LVMLogicalVolumeThickSpec{
-				Contiguous: &contiguous,
-			}
-		}
-
-		log.Info(fmt.Sprintf("[GetLLVSpec] Thick contiguous: %t", contiguous))
-	}
-
-	if volumeCleanup != "" {
-		lvmLogicalVolumeSpec.VolumeCleanup = &volumeCleanup
-	}
-
-	log.Info(fmt.Sprintf("[GetLLVSpec] volumeCleanup: %s", volumeCleanup))
-
-	return lvmLogicalVolumeSpec
-}
-
-func SelectLVG(storageClassLVGs []snc.LVMVolumeGroup, nodeName string) (*snc.LVMVolumeGroup, error) {
-	for i := 0; i < len(storageClassLVGs); i++ {
-		if storageClassLVGs[i].Status.Nodes[0].Name == nodeName {
-			return &storageClassLVGs[i], nil
-		}
-	}
-	return nil, fmt.Errorf("[SelectLVG] no LVMVolumeGroup found for node %s", nodeName)
-}
-
-func SelectLVGByName(storageClassLVGs []snc.LVMVolumeGroup, name string) (*snc.LVMVolumeGroup, error) {
-	for i := 0; i < len(storageClassLVGs); i++ {
-		if storageClassLVGs[i].Name == name {
-			return &storageClassLVGs[i], nil
-		}
-	}
-	return nil, fmt.Errorf("[SelectLVG] no LVMVolumeGroup found with name %s", name)
-}
-
-func SelectLVGByActualNameOnTheNode(storageClassLVGs []snc.LVMVolumeGroup, nodeName string, actualNameOnTheNode string) (*snc.LVMVolumeGroup, error) {
-	for i := 0; i < len(storageClassLVGs); i++ {
-		if storageClassLVGs[i].Spec.Local.NodeName == nodeName &&
-			storageClassLVGs[i].Spec.ActualVGNameOnTheNode == actualNameOnTheNode {
-			return &storageClassLVGs[i], nil
-		}
-	}
-	return nil, fmt.Errorf("[SelectLVG] no LVMVolumeGroup found with actualNameOnTheNode %s on node %s", actualNameOnTheNode, nodeName)
-}
-
-func IsContiguous(request *csi.CreateVolumeRequest, lvmType string) bool {
-	if lvmType == internal.LVMTypeThin {
-		return false
-	}
-
-	val, exist := request.Parameters[internal.LVMVThickContiguousParamKey]
-	if exist {
-		return val == "true"
-	}
-
-	return false
 }
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource
@@ -430,7 +294,7 @@ func BuildReplicatedVolumeSpec(
 		PublishRequested: publishRequested,
 		Zones:            zones,
 		LVM: v1alpha2.LVMSpec{
-			Type:          lvmType,
+			Type:            lvmType,
 			LVMVolumeGroups: volumeGroups,
 		},
 	}
