@@ -68,30 +68,6 @@ func (r *Reconciler) Reconcile(
 
 		return reconcile.Result{}, h.Handle()
 
-	case ResourceStatusReconcileRequest:
-		rv := &v1alpha2.ReplicatedVolume{}
-		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rv)
-		if err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				r.log.Warn(
-					"rv 'name' not found for status reconcile, it might be deleted, ignore",
-					"name", typedReq.Name,
-				)
-				return reconcile.Result{}, nil
-			}
-			return reconcile.Result{}, fmt.Errorf("getting rv %s for status reconcile: %w", typedReq.Name, err)
-		}
-
-		sh := &resourceStatusReconcileRequestHandler{
-			ctx: ctx,
-			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
-			cl:  r.cl,
-			rdr: r.rdr,
-			// scheme is not needed for status handler
-			rv: rv,
-		}
-		return reconcile.Result{}, sh.Handle()
-
 	case ResourceDeleteRequest:
 		// h := &resourceDeleteRequestHandler{
 		// 	ctx:                  ctx,

@@ -25,6 +25,17 @@ func runController(
 	log *slog.Logger,
 	mgr manager.Manager,
 ) error {
+	ownerRVName := func(obj client.Object) (string, bool) {
+		for _, ow := range obj.GetOwnerReferences() {
+			if ow.Controller != nil && *ow.Controller &&
+				ow.Kind == "ReplicatedVolume" &&
+				ow.APIVersion == v1alpha2.SchemeGroupVersion.String() {
+				return ow.Name, true
+			}
+		}
+		return "", false
+	}
+
 	// Field indexers for cache queries by node and volume name
 	if err := mgr.GetFieldIndexer().IndexField(
 		ctx,
@@ -57,13 +68,8 @@ func runController(
 		&v1alpha2.ReplicatedVolumeReplica{},
 		"index.rvOwnerName",
 		func(o client.Object) []string {
-			r := o.(*v1alpha2.ReplicatedVolumeReplica)
-			for _, ow := range r.OwnerReferences {
-				if ow.Controller != nil && *ow.Controller &&
-					ow.Kind == "ReplicatedVolume" &&
-					ow.APIVersion == v1alpha2.SchemeGroupVersion.String() {
-					return []string{ow.Name}
-				}
+			if name, ok := ownerRVName(o); ok {
+				return []string{name}
 			}
 			return nil
 		},
@@ -75,13 +81,8 @@ func runController(
 		&snc.LVMLogicalVolume{},
 		"index.rvOwnerName",
 		func(o client.Object) []string {
-			llv := o.(*snc.LVMLogicalVolume)
-			for _, ow := range llv.OwnerReferences {
-				if ow.Controller != nil && *ow.Controller &&
-					ow.Kind == "ReplicatedVolume" &&
-					ow.APIVersion == v1alpha2.SchemeGroupVersion.String() {
-					return []string{ow.Name}
-				}
+			if name, ok := ownerRVName(o); ok {
+				return []string{name}
 			}
 			return nil
 		},
@@ -91,14 +92,10 @@ func runController(
 	type TReq = rv.Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
-	// common mapper: enqueue owner RV status reconcile for any owned child
+	// common mapper: enqueue owner RV reconcile for any owned child
 	toOwnerRV := func(ctx context.Context, obj client.Object) []TReq {
-		for _, ow := range obj.GetOwnerReferences() {
-			if ow.Controller != nil && *ow.Controller &&
-				ow.Kind == "ReplicatedVolume" &&
-				ow.APIVersion == v1alpha2.SchemeGroupVersion.String() {
-				return []TReq{rv.ResourceStatusReconcileRequest{Name: ow.Name}}
-			}
+		if name, ok := ownerRVName(obj); ok {
+			return []TReq{rv.ResourceReconcileRequest{Name: name}}
 		}
 		return nil
 	}

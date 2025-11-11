@@ -347,6 +347,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	if err := h.cl.List(h.ctx, &llvList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
 		return fmt.Errorf("listing llvs: %w", err)
 	}
+	ownedLLVs := llvList.Items
 	for i := range llvList.Items {
 		llv := &llvList.Items[i]
 		la, err := cluster2.NewLLVAdapter(llv)
@@ -363,7 +364,12 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		return err
 	}
 
-	return h.processAction(action)
+	if err := h.processAction(action); err != nil {
+		return err
+	}
+
+	// After reconcile actions, update RV Ready status based on owned resources
+	return h.updateRVReadyCondition(ownedRvrs, ownedLLVs)
 }
 
 func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error {
@@ -664,4 +670,56 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 	default:
 		panic("unknown action type")
 	}
+}
+
+func (h *resourceReconcileRequestHandler) updateRVReadyCondition(ownedRvrs []v1alpha2.ReplicatedVolumeReplica, ownedLLVs []snc.LVMLogicalVolume) error {
+	allReady := true
+	for i := range ownedRvrs {
+		rvr := &ownedRvrs[i]
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeReady)
+		if cond == nil || cond.Status != metav1.ConditionTrue {
+			allReady = false
+			break
+		}
+	}
+
+	// list owned LLVs
+	if allReady {
+		for i := range ownedLLVs {
+			llv := &ownedLLVs[i]
+			if llv.Status == nil || llv.Status.Phase != "Created" {
+				allReady = false
+				break
+			}
+			specQty, err := resource.ParseQuantity(llv.Spec.Size)
+			if err != nil {
+				return err
+			}
+			if llv.Status.ActualSize.Cmp(specQty) < 0 {
+				allReady = false
+				break
+			}
+		}
+	}
+
+	if !allReady {
+		return nil
+	}
+
+	// set RV Ready=True
+	return api.PatchWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
+		if rv.Status == nil {
+			rv.Status = &v1alpha2.ReplicatedVolumeStatus{}
+		}
+		meta.SetStatusCondition(
+			&rv.Status.Conditions,
+			metav1.Condition{
+				Type:               v1alpha2.ConditionTypeReady,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: rv.Generation,
+				Reason:             "All resources synced",
+			},
+		)
+		return nil
+	})
 }
