@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/csi
 
-go 1.24.10
+go 1.24.6
 
 require (
 	github.com/container-storage-interface/spec v1.10.0
