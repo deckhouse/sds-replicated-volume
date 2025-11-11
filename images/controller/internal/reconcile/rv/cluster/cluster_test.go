@@ -22,8 +22,11 @@ type LLVPhysicalKey struct {
 var (
 	testRVName                = "testRVName"
 	testRVRName               = "testRVRName"
+	testRVRName2              = "testRVRName2"
 	testLLVName               = "testLLVName"
+	testLLVName2              = "testLLVName2"
 	testNodeName              = "testNodeName"
+	testNodeName2             = "testNodeName2"
 	testSharedSecret          = "testSharedSecret"
 	testVGName                = "testVGName"
 	testActualVGNameOnTheNode = "testActualVGNameOnTheNode"
@@ -45,6 +48,55 @@ type reconcileTestCase struct {
 }
 
 func TestClusterReconcile(t *testing.T) {
+	t.Run("empty cluster - 0 replicas - no-op",
+		func(t *testing.T) {
+			runClusterReconcileTestCase(t, &reconcileTestCase{})
+		},
+	)
+
+	t.Run("existing cluster - 0 replicas - delete LLVs & delete RVRs",
+		func(t *testing.T) {
+			runClusterReconcileTestCase(t, &reconcileTestCase{
+				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: v1.ObjectMeta{
+							Name: testRVRName,
+						},
+						Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+							NodeId: 0,
+						},
+					},
+					{
+						ObjectMeta: v1.ObjectMeta{
+							Name: testRVRName2,
+						},
+						Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+							NodeId: 1,
+						},
+					},
+				},
+				existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
+					{nodeName: testNodeName}: {
+						ObjectMeta: v1.ObjectMeta{Name: testLLVName},
+					},
+					{nodeName: testNodeName2}: {
+						ObjectMeta: v1.ObjectMeta{Name: testLLVName2},
+					},
+				},
+				expectedAction: ActionsMatcher{
+					ParallelActionsMatcher{
+						DeleteLLVMatcher{LLVName: testLLVName},
+						DeleteLLVMatcher{LLVName: testLLVName2},
+					},
+					ParallelActionsMatcher{
+						DeleteRVRMatcher{RVRName: testRVRName},
+						DeleteRVRMatcher{RVRName: testRVRName2},
+					},
+				},
+			})
+		},
+	)
+
 	t.Run("empty cluster - 1 replica - 1 create llv & create rvr",
 		func(t *testing.T) {
 			runClusterReconcileTestCase(t, &reconcileTestCase{

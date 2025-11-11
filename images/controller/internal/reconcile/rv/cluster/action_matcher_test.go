@@ -223,6 +223,31 @@ func (m CreateLLVMatcher) Match(action cluster.Action) error {
 }
 
 //
+// action matcher: [cluster.DeleteLLV]
+//
+
+type DeleteLLVMatcher struct {
+	LLVName string
+}
+
+var _ ActionMatcher = DeleteLLVMatcher{}
+
+func (m DeleteLLVMatcher) Match(action cluster.Action) error {
+	typedAction, err := matchType[cluster.DeleteLLV](action)
+	if err != nil {
+		return err
+	}
+
+	if typedAction.LLV.LLVName() != m.LLVName {
+		return newErrorf(
+			"expected LLV to be deleted to have name '%s', got '%s'",
+			m.LLVName, typedAction.LLV.LLVName(),
+		)
+	}
+	return nil
+}
+
+//
 // action matcher: [cluster.PatchLLV]
 //
 
