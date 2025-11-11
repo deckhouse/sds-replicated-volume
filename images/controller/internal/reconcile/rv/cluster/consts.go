@@ -1,4 +1,4 @@
-package cluster2
+package cluster
 
 const (
 	MaxNodeId    = uint(7)

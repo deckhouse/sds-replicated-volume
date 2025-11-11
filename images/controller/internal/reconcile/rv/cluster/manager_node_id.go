@@ -1,4 +1,4 @@
-package cluster2
+package cluster
 
 import (
 	cmaps "github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"

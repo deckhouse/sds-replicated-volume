@@ -7,14 +7,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
-	cluster2 "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster2"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
@@ -26,8 +24,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
-
-// client impls moved to separate files
 
 // drbdPortRange implements cluster.DRBDPortRange backed by controller config
 type drbdPortRange struct {
@@ -57,7 +53,6 @@ type replicaInfo struct {
 	NodeAddress      corev1.NodeAddress
 	Zone             string
 	LVG              *snc.LVMVolumeGroup
-	LLVProps         cluster.LLVProps
 	PublishRequested bool
 	Score            *replicaScoreBuilder
 }
@@ -211,18 +206,18 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		} else if repl.LVG != nil {
 			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
 		} else {
-			switch h.rv.Spec.LVM.Type {
-			case "Thin":
-				repl.LLVProps = cluster.ThinVolumeProps{
-					PoolName: lvgRef.ThinPoolName,
-				}
-			case "Thick":
-				repl.LLVProps = cluster.ThickVolumeProps{
-					Contigous: utils.Ptr(true),
-				}
-			default:
-				return fmt.Errorf("unsupported volume Type: '%s' has type '%s'", lvg.Name, h.rv.Spec.LVM.Type)
-			}
+			// switch h.rv.Spec.LVM.Type {
+			// case "Thin":
+			// 	repl.LLVProps = cluster.ThinVolumeProps{
+			// 		PoolName: lvgRef.ThinPoolName,
+			// 	}
+			// case "Thick":
+			// 	repl.LLVProps = cluster.ThickVolumeProps{
+			// 		Contigous: utils.Ptr(true),
+			// 	}
+			// default:
+			// 	return fmt.Errorf("unsupported volume Type: '%s' has type '%s'", lvg.Name, h.rv.Spec.LVM.Type)
+			// }
 
 			repl.LVG = lvg
 			repl.Score.nodeWithDisk()
@@ -244,10 +239,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	if err := h.cl.List(h.ctx, &rvrList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
 		return fmt.Errorf("listing rvrs: %w", err)
 	}
-	var ownedRvrs []v1alpha2.ReplicatedVolumeReplica
-	for i := range rvrList.Items {
-		ownedRvrs = append(ownedRvrs, rvrList.Items[i])
-	}
+	ownedRvrs := rvrList.Items
 	for i := range ownedRvrs {
 		if repl, ok := pool[ownedRvrs[i].Spec.NodeName]; ok {
 			repl.Score.replicaAlreadyExists()
@@ -290,38 +282,38 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("selected nodes", "selectedNodes", selectedNodes)
 
 	// Build cluster2 with adapters and managers
-	rvAdapter, err := cluster2.NewRVAdapter(h.rv)
+	rvAdapter, err := cluster.NewRVAdapter(h.rv)
 	if err != nil {
 		return err
 	}
 
-	var rvNodes []cluster2.RVNodeAdapter
-	var nodeMgrs []cluster2.NodeManager
+	var rvNodes []cluster.RVNodeAdapter
+	var nodeMgrs []cluster.NodeManager
 
 	// diskful
 	for _, nodeName := range selectedNodes[0] {
 		repl := pool[nodeName]
-		rvNode, err := cluster2.NewRVNodeAdapter(rvAdapter, repl.Node, repl.LVG)
+		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, repl.LVG)
 		if err != nil {
 			return err
 		}
 		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster2.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
+		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
 	}
 
 	// tiebreaker (diskless), if needed
 	if needTieBreaker {
 		nodeName := selectedNodes[1][0]
 		repl := pool[nodeName]
-		rvNode, err := cluster2.NewRVNodeAdapter(rvAdapter, repl.Node, nil)
+		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, repl.Node, nil)
 		if err != nil {
 			return err
 		}
 		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster2.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
+		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
 	}
 
-	clr2, err := cluster2.NewCluster(
+	clr2, err := cluster.NewCluster(
 		h.log,
 		rvAdapter,
 		rvNodes,
@@ -333,7 +325,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 
 	// existing RVRs (by ownerReference)
 	for i := range ownedRvrs {
-		ra, err := cluster2.NewRVRAdapter(&ownedRvrs[i])
+		ra, err := cluster.NewRVRAdapter(&ownedRvrs[i])
 		if err != nil {
 			return err
 		}
@@ -350,7 +342,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	ownedLLVs := llvList.Items
 	for i := range llvList.Items {
 		llv := &llvList.Items[i]
-		la, err := cluster2.NewLLVAdapter(llv)
+		la, err := cluster.NewLLVAdapter(llv)
 		if err != nil {
 			return err
 		}
@@ -374,7 +366,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 
 func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error {
 	switch action := untypedAction.(type) {
-	case cluster2.Actions:
+	case cluster.Actions:
 		// Execute subactions sequentially using recursion. Stop on first error.
 		for _, a := range action {
 			if err := h.processAction(a); err != nil {
@@ -382,14 +374,14 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 			}
 		}
 		return nil
-	case cluster2.ParallelActions:
+	case cluster.ParallelActions:
 		// Execute in parallel; collect errors
 		var eg errgroup.Group
 		for _, sa := range action {
 			eg.Go(func() error { return h.processAction(sa) })
 		}
 		return eg.Wait()
-	case cluster2.PatchRVR:
+	case cluster.PatchRVR:
 		// Patch existing RVR and wait until Ready/SafeForInitialSync
 		target := &v1alpha2.ReplicatedVolumeReplica{}
 		target.Name = action.RVR.Name()
@@ -428,13 +420,13 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		}
 		h.log.Debug("RVR wait done", "name", target.Name)
 		return nil
-	case cluster2.CreateRVR:
+	case cluster.CreateRVR:
 		// Create new RVR and wait until Ready/SafeForInitialSync
 		h.log.Debug("RVR create start")
 		target := &v1alpha2.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: fmt.Sprintf("%s-", h.rv.Name),
-				Finalizers:   []string{cluster.ControllerFinalizerName},
+				Finalizers:   []string{ControllerFinalizerName},
 			},
 		}
 		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
@@ -513,7 +505,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 			}
 		}
 		return nil
-	case cluster2.DeleteRVR:
+	case cluster.DeleteRVR:
 		h.log.Debug("RVR delete start", "name", action.RVR.Name())
 		target := &v1alpha2.ReplicatedVolumeReplica{}
 		target.Name = action.RVR.Name()
@@ -525,7 +517,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 				rvr.SetFinalizers(
 					slices.DeleteFunc(
 						rvr.Finalizers,
-						func(f string) bool { return f == cluster.ControllerFinalizerName },
+						func(f string) bool { return f == ControllerFinalizerName },
 					),
 				)
 				return nil
@@ -541,7 +533,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		}
 		h.log.Debug("RVR delete done", "name", target.Name)
 		return nil
-	case cluster2.PatchLLV:
+	case cluster.PatchLLV:
 		target := &snc.LVMLogicalVolume{}
 		target.Name = action.LLV.LLVName()
 		h.log.Debug("LLV patch start", "name", target.Name)
@@ -575,13 +567,13 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		}
 		h.log.Debug("LLV wait done", "name", target.Name)
 		return nil
-	case cluster2.CreateLLV:
+	case cluster.CreateLLV:
 		// Create new LLV and wait until Created with size satisfied
 		h.log.Debug("LLV create start")
 		target := &snc.LVMLogicalVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: fmt.Sprintf("%s-", h.rv.Name),
-				Finalizers:   []string{cluster.ControllerFinalizerName},
+				Finalizers:   []string{ControllerFinalizerName},
 			},
 		}
 		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
@@ -619,7 +611,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		}
 		h.log.Debug("LLV wait done", "name", target.Name)
 		return nil
-	case cluster2.DeleteLLV:
+	case cluster.DeleteLLV:
 		h.log.Debug("LLV delete start", "name", action.LLV.LLVName())
 		target := &snc.LVMLogicalVolume{}
 		target.Name = action.LLV.LLVName()
@@ -632,7 +624,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 				llv.SetFinalizers(
 					slices.DeleteFunc(
 						llv.Finalizers,
-						func(f string) bool { return f == cluster.ControllerFinalizerName },
+						func(f string) bool { return f == ControllerFinalizerName },
 					),
 				)
 				return nil
@@ -649,7 +641,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		h.log.Debug("LLV delete done", "name", target.Name)
 		return nil
 	// TODO: initial sync/Ready condition handling for RV is not implemented in cluster2 flow yet
-	case cluster2.ResizeRVR:
+	case cluster.ResizeRVR:
 		// trigger resize via annotation
 		target := &v1alpha2.ReplicatedVolumeReplica{}
 		target.Name = action.RVR.Name()
