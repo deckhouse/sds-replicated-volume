@@ -638,15 +638,12 @@ rules:
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get"]
-{{- if eq $csiControllerDaemonSet "true" }}
 - apiGroups: ["apps"]
   resources: ["daemonsets"]
   verbs: ["get"]
-{{- else }}
 - apiGroups: ["apps"]
   resources: ["replicasets"]
   verbs: ["get"]
-{{- end }}
 ---
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
