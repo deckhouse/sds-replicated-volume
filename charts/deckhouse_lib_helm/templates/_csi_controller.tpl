@@ -69,7 +69,6 @@ memory: 50Mi
   {{- $additionalContainers := $config.additionalContainers }}
   {{- $csiControllerHostNetwork := $config.csiControllerHostNetwork | default "true" }}
   {{- $csiControllerHostPID := $config.csiControllerHostPID | default "false" }}
-  {{- $csiControllerDaemonSet := $config.csiControllerDaemonSet | default "false" }}
   {{- $livenessProbePort := $config.livenessProbePort | default 9808 }}
   {{- $initContainers := $config.initContainers }}
   {{- $customNodeSelector := $config.customNodeSelector }}
@@ -108,11 +107,7 @@ metadata:
 spec:
   targetRef:
     apiVersion: "apps/v1"
-    {{- if eq $csiControllerDaemonSet "true" }}
-    kind: DaemonSet
-    {{- else }}
     kind: Deployment
-    {{- end }}
     name: {{ $fullname }}
   updatePolicy:
     updateMode: "Auto"
@@ -170,7 +165,6 @@ spec:
     {{- $additionalControllerVPA | toYaml | nindent 4 }}
     {{- end }}
     {{- end }}
-{{- if ne $csiControllerDaemonSet "true" }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget
@@ -184,12 +178,7 @@ spec:
     matchLabels:
       app: {{ $fullname }}
 ---
-{{- end }}
-{{- if eq $csiControllerDaemonSet "true" }}
-kind: DaemonSet
-{{- else }}
 kind: Deployment
-{{- end }}
 apiVersion: apps/v1
 metadata:
   name: {{ $fullname }}
@@ -197,12 +186,6 @@ metadata:
   {{- include "helm_lib_module_labels" (list $context (dict "app" "csi-controller")) | nindent 2 }}
 
 spec:
-  {{- if eq $csiControllerDaemonSet "true" }}
-  updateStrategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxUnavailable: 1
-  {{- else }}
   {{- if $csiControllerHaMode }}
   {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" $context | nindent 2 }}
   {{- else }}
@@ -211,7 +194,6 @@ spec:
     type: Recreate
   {{- end }}
   revisionHistoryLimit: 2
-  {{- end }}
   selector:
     matchLabels:
       app: {{ $fullname }}
@@ -634,12 +616,8 @@ rules:
 # for CSIStorageCapacity. They are sufficient for deployment via
 # StatefulSet (only needs to get Pod) and Deployment (needs to get
 # Pod and then ReplicaSet to find the Deployment).
-# For DaemonSet, we need to get Pod and then DaemonSet.
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get"]
-- apiGroups: ["apps"]
-  resources: ["daemonsets"]
   verbs: ["get"]
 - apiGroups: ["apps"]
   resources: ["replicasets"]
