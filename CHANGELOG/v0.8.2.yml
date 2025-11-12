@@ -1,0 +1,3 @@
+Changes:
+  - Certificate update hook fixes
+  - Removal of obsolete migration hooks

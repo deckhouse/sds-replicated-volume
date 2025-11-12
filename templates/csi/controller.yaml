@@ -1,4 +1,12 @@
 ###
+### common
+###
+
+{{- define "additional_pull_secrets" }} 
+- name: {{ .Chart.Name }}-module-registry
+{{- end }}
+
+###
 ### controller
 ###
 
@@ -94,6 +102,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiControllerConfig "additionalControllerVolumes" (include "csi_additional_controller_volumes" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "additionalControllerVolumeMounts" (include "csi_additional_controller_volume_mounts" . | fromYamlArray) }}
 {{- $_ := set $csiControllerConfig "initContainers" (include "csi_controller_init_containers" . | fromYamlArray) }}
+{{- $_ := set $csiControllerConfig "additionalPullSecrets" (include "additional_pull_secrets" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_controller_manifests" (list . $csiControllerConfig) }}
 
@@ -197,5 +206,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "additionalNodeVolumeMounts" (include "csi_additional_node_volume_mounts" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "customNodeSelector" (include "csi_custom_node_selector" . | fromYaml) }}
 {{- $_ := set $csiNodeConfig "forceCsiNodeAndStaticNodesDepoloy" true }}
+{{- $_ := set $csiNodeConfig "additionalPullSecrets" (include "additional_pull_secrets" . | fromYamlArray) }}
 
 {{- include "helm_lib_csi_node_manifests" (list . $csiNodeConfig) }}

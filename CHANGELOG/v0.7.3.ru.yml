@@ -1,0 +1,3 @@
+Изменения:
+  - Рефакторинг модуля
+  - Исправлен podAntiAffinity для sds-replicated-volume-controller

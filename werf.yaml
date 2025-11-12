@@ -15,6 +15,5 @@ build:
 {{ tpl (.Files.Get ".werf/utils.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/images-digests.yaml") $ }}
-{{ tpl (.Files.Get ".werf/python-deps.yaml") $ }}
 {{ tpl (.Files.Get ".werf/bundle.yaml") $ }}
 {{ tpl (.Files.Get ".werf/release.yaml") $ }}
