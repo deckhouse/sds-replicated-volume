@@ -1,146 +1,183 @@
 package cluster
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"log/slog"
-	"maps"
-	"slices"
 
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
-	umaps "github.com/deckhouse/sds-common-lib/utils/maps"
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	cstrings "github.com/deckhouse/sds-replicated-volume/lib/go/common/strings"
+	cmaps "github.com/deckhouse/sds-replicated-volume/lib/go/common/maps"
 )
 
-type RVRClient interface {
-	ByReplicatedVolumeName(ctx context.Context, resourceName string) ([]v1alpha2.ReplicatedVolumeReplica, error)
-}
-
-type MinorManager interface {
-	// result should not be returned for next calls
-	ReserveNodeMinor(ctx context.Context, nodeName string) (uint, error)
-}
-
-type NodeIdManager interface {
-	ReserveNodeId() (uint, error)
-}
-
-type PortManager interface {
-	// result should not be returned for next calls
-	ReserveNodePort(ctx context.Context, nodeName string) (uint, error)
-}
-
-type LLVClient interface {
-	// return nil, when not found
-
-	ByActualLVNameOnTheNode(ctx context.Context, nodeName string, actualLVNameOnTheNode string) (*snc.LVMLogicalVolume, error)
-}
-
 type Cluster struct {
-	ctx          context.Context
-	log          *slog.Logger
-	rvrCl        RVRClient
-	llvCl        LLVClient
-	portManager  PortManager
-	minorManager MinorManager
-	size         int64
-	rvName       string
-	sharedSecret string
-	// Indexes are node ids.
-	replicas []*Replica
+	log *slog.Logger
+	rv  RVAdapter
+
+	rvrsByNodeName map[string]*rvrReconciler
+	llvsByLVGName  map[string]*llvReconciler
+	nodeIdMgr      nodeIdManager
+
+	rvrsToDelete []RVRAdapter
+	llvsToDelete []LLVAdapter
 }
 
-type ReplicaVolumeOptions struct {
-	VGName                string
-	ActualVgNameOnTheNode string
-	Type                  string
-}
-
-func New(
-	ctx context.Context,
+func NewCluster(
 	log *slog.Logger,
-	rvrCl RVRClient,
-	nodeRVRCl NodeRVRClient,
-	portRange DRBDPortRange,
-	llvCl LLVClient,
-	rvName string,
-	size int64,
-	sharedSecret string,
-) *Cluster {
-	rm := NewNodeManager(nodeRVRCl, portRange)
-	return &Cluster{
-		ctx:          ctx,
-		log:          log,
-		rvName:       rvName,
-		rvrCl:        rvrCl,
-		llvCl:        llvCl,
-		portManager:  rm,
-		minorManager: rm,
-		size:         size,
-		sharedSecret: sharedSecret,
+	rv RVAdapter,
+	rvNodes []RVNodeAdapter,
+	nodeMgrs []NodeManager,
+) (*Cluster, error) {
+	if log == nil {
+		log = slog.Default()
 	}
-}
-
-func (c *Cluster) AddReplica(
-	nodeName string,
-	ipv4 string,
-	primary bool,
-	quorum byte,
-	quorumMinimumRedundancy byte,
-) *Replica {
-	r := &Replica{
-		ctx:      c.ctx,
-		log:      c.log.With("replica", nodeName),
-		llvCl:    c.llvCl,
-		rvrCl:    c.rvrCl,
-		portMgr:  c.portManager,
-		minorMgr: c.minorManager,
-		props: replicaProps{
-			rvName:                  c.rvName,
-			nodeName:                nodeName,
-			ipv4:                    ipv4,
-			sharedSecret:            c.sharedSecret,
-			primary:                 primary,
-			quorum:                  quorum,
-			quorumMinimumRedundancy: quorumMinimumRedundancy,
-			size:                    c.size,
-		},
-	}
-	c.replicas = append(c.replicas, r)
-	return r
-}
-
-func (c *Cluster) validateAndNormalize() error {
-	// find first replica with non-zero number of volumes
-	var expectedVolumeNum int
-	for _, r := range c.replicas {
-		if expectedVolumeNum = r.volumeNum(); expectedVolumeNum != 0 {
-			break
-		}
+	if rv == nil {
+		return nil, errArgNil("rv")
 	}
 
-	if expectedVolumeNum == 0 {
-		return fmt.Errorf("cluster expected to have at least one replica and one volume")
-	}
-
-	// validate same amount of volumes on each replica, or 0
-	for i, r := range c.replicas {
-		if num := r.volumeNum(); num != 0 && expectedVolumeNum != num {
-			return fmt.Errorf(
-				"expected to have %d volumes in replica %d on %s, got %d",
-				expectedVolumeNum, i, r.props.nodeName, num,
+	if len(rvNodes) != len(nodeMgrs) {
+		return nil,
+			errArg("expected len(rvNodes)==len(nodeMgrs), got %d!=%d",
+				len(rvNodes), len(nodeMgrs),
 			)
+	}
+
+	// init reconcilers
+	rvrsByNodeName := make(map[string]*rvrReconciler, len(rvNodes))
+	llvsByLVGName := make(map[string]*llvReconciler, len(rvNodes))
+	for i, rvNode := range rvNodes {
+		if rvNode == nil {
+			return nil, errArg("expected rvNodes not to have nil elements, got nil at %d", i)
+		}
+
+		nodeMgr := nodeMgrs[i]
+		if nodeMgr == nil {
+			return nil, errArg("expected nodeMgrs not to have nil elements, got nil at %d", i)
+		}
+
+		if rvNode.NodeName() != nodeMgr.NodeName() {
+			return nil,
+				errArg(
+					"expected rvNodes elements to have the same node names as  nodeMgrs elements, got '%s'!='%s' at %d",
+					rvNode.NodeName(), nodeMgr.NodeName(), i,
+				)
+		}
+
+		if rvNode.RVName() != rv.RVName() {
+			return nil,
+				errArg(
+					"expected rvNodes elements to have the same names as rv, got '%s'!='%s' at %d",
+					rvNode.RVName(), rv.RVName(), i,
+				)
+		}
+
+		rvr, err := newRVRReconciler(rvNode, nodeMgr)
+		if err != nil {
+			return nil, err
+		}
+
+		var added bool
+		if rvrsByNodeName, added = cmaps.SetUnique(rvrsByNodeName, rvNode.NodeName(), rvr); !added {
+			return nil, errInvalidCluster("duplicate node name: %s", rvNode.NodeName())
+		}
+
+		if !rvNode.Diskless() {
+			llv, err := newLLVReconciler(rvNode)
+			if err != nil {
+				return nil, err
+			}
+
+			if llvsByLVGName, added = cmaps.SetUnique(llvsByLVGName, rvNode.LVGName(), llv); !added {
+				return nil, errInvalidCluster("duplicate lvg name: %s", rvNode.LVGName())
+			}
 		}
 	}
 
-	// for 0-volume replicas create diskless volumes
-	for _, r := range c.replicas {
-		for r.volumeNum() < expectedVolumeNum {
-			r.addVolumeDiskless()
+	//
+	c := &Cluster{
+		log: log,
+		rv:  rv,
+
+		rvrsByNodeName: rvrsByNodeName,
+		llvsByLVGName:  llvsByLVGName,
+	}
+
+	return c, nil
+}
+
+func (c *Cluster) AddExistingRVR(rvr RVRAdapter) (err error) {
+	if rvr == nil {
+		return errArgNil("rvr")
+	}
+
+	nodeId := rvr.NodeId()
+
+	if err = c.nodeIdMgr.ReserveNodeId(nodeId); err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			c.nodeIdMgr.FreeNodeId(nodeId)
+		}
+	}()
+
+	rvrRec, ok := c.rvrsByNodeName[rvr.NodeName()]
+	if ok {
+		if err = rvrRec.setExistingRVR(rvr); err != nil {
+			return err
+		}
+	} else {
+		c.rvrsToDelete = append(c.rvrsToDelete, rvr)
+	}
+
+	return nil
+}
+
+func (c *Cluster) AddExistingLLV(llv LLVAdapter) error {
+	if llv == nil {
+		return errArgNil("llv")
+	}
+
+	llvRec, ok := c.llvsByLVGName[llv.LVGName()]
+	if ok {
+		if err := llvRec.setExistingLLV(llv); err != nil {
+			return err
+		}
+	} else {
+		c.llvsToDelete = append(c.llvsToDelete, llv)
+	}
+
+	return nil
+}
+
+func (c *Cluster) deleteLLV(llv LLVAdapter) Action {
+	return DeleteLLV{llv}
+}
+
+func (c *Cluster) deleteRVR(rvr RVRAdapter) Action {
+	return DeleteRVR{rvr}
+}
+
+func (c *Cluster) initializeReconcilers() error {
+	// llvs dynamic props
+	for _, llvRec := range c.llvsByLVGName {
+		if err := llvRec.initializeDynamicProps(); err != nil {
+			return err
+		}
+	}
+
+	// rvrs may need to query for some props
+	for _, rvrRec := range c.rvrsByNodeName {
+		var dp diskPath
+		if !rvrRec.Diskless() {
+			dp = c.llvsByLVGName[rvrRec.LVGName()]
+		}
+
+		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr, dp); err != nil {
+			return err
+		}
+	}
+
+	// initialize information about each other
+	for _, rvrRec := range c.rvrsByNodeName {
+		if err := rvrRec.initializePeers(c.rvrsByNodeName); err != nil {
+			return err
 		}
 	}
 
@@ -148,189 +185,74 @@ func (c *Cluster) validateAndNormalize() error {
 }
 
 func (c *Cluster) Reconcile() (Action, error) {
-	if err := c.validateAndNormalize(); err != nil {
+	// 1. INITIALIZE
+	if err := c.initializeReconcilers(); err != nil {
 		return nil, err
 	}
 
-	existingRvrs, err := c.rvrCl.ByReplicatedVolumeName(c.ctx, c.rvName)
-	if err != nil {
-		return nil, err
-	}
+	// common for existing LLVs and RVRs
+	var existingResourcesActions ParallelActions
 
-	nodeIdMgr := NewExistingRVRManager(existingRvrs)
-
-	rvrsByNodeName := umaps.CollectGrouped(
-		uiter.MapTo2(
-			uslices.Ptrs(existingRvrs),
-			func(rvr *v1alpha2.ReplicatedVolumeReplica) (string, *v1alpha2.ReplicatedVolumeReplica) {
-				return rvr.Spec.NodeName, rvr
-			},
-		),
-	)
-
-	replicasByNodeName := maps.Collect(
-		uiter.MapTo2(
-			slices.Values(c.replicas),
-			func(r *Replica) (string, *Replica) {
-				return r.props.nodeName, r
-			},
-		),
-	)
-
-	// 0. INITIALIZE existing&new replicas and volumes
-	for nodeName, replica := range replicasByNodeName {
-		rvrs := rvrsByNodeName[nodeName]
-
-		var rvr *v1alpha2.ReplicatedVolumeReplica
-		if len(rvrs) > 1 {
-			return nil,
-				fmt.Errorf(
-					"found duplicate rvrs for rv %s with nodeName %s: %s",
-					c.rvName, nodeName,
-					cstrings.JoinNames(rvrs, ", "),
-				)
-		} else if len(rvrs) == 1 {
-			rvr = rvrs[0]
-		}
-
-		if err := replica.initialize(rvr, c.replicas, nodeIdMgr); err != nil {
-			return nil, err
-		}
-	}
-
-	// Create/Resize all volumes
-	pa := ParallelActions{}
-	var rvrToResize *v1alpha2.ReplicatedVolumeReplica
-	for _, replica := range c.replicas {
-		a, resized, err := replica.reconcileVolumes()
-		if err != nil {
-			return nil, err
-		}
-		if a != nil {
-			pa = append(pa, a)
-		}
-		if rvrToResize == nil && resized {
-			rvrToResize = replica.dprops.existingRVR
-		}
-	}
-
-	// Diff
-	toDelete, toReconcile, toAdd := umaps.IntersectKeys(rvrsByNodeName, replicasByNodeName)
-
-	// 1. RECONCILE - fix or recreate existing replicas
-	for key := range toReconcile {
-		fixAction := replicasByNodeName[key].recreateOrFix()
-		if fixAction != nil {
-			// TODO: the need to check fixAction != nil is a general problem,
-			// which need to be solved in general if we want checks like
-			// "len(pa) > 0" to work as expected
-			pa = append(pa, fixAction)
-		}
-	}
-
-	actions := Actions{}
-	if len(pa) > 0 {
-		actions = append(actions, pa)
-
-		if rvrToResize != nil {
-			actions = append(actions, TriggerRVRResize{
-				ReplicatedVolumeReplica: rvrToResize,
-			})
-		}
-
-	} else if len(toAdd)+len(toDelete) == 0 {
-		// initial sync
-		rvrs := make([]*v1alpha2.ReplicatedVolumeReplica, 0, len(replicasByNodeName))
-		for key := range replicasByNodeName {
-			rvrs = append(rvrs, rvrsByNodeName[key][0])
-		}
-		if len(rvrs) > 0 {
-			return WaitAndTriggerInitialSync{rvrs}, nil
-		} else {
-			return nil, nil
-		}
-	}
-
-	// 2.0. ADD - create non-existing replicas
-	// This can't be done in parallel, because we need to keep number of
-	// active replicas low - and delete one replica as soon as one replica was
-	// created
-	// TODO: but this can also be improved for the case when no more replicas
-	// for deletion has left - then we can parallelize the addition of new replicas
-	var rvrsToSkipDelete map[string]struct{}
-
-	var initialSyncTriggered bool
-	for id := range toAdd {
-		replica := replicasByNodeName[id]
-
-		rvr := replica.rvr("")
-		actions = append(actions, CreateReplicatedVolumeReplica{rvr}, WaitReplicatedVolumeReplica{rvr})
-
-		if len(toReconcile) == 0 && !initialSyncTriggered {
-			// first replica in cluster, do initial sync
-			initialSyncTriggered = true
-			actions = append(actions, WaitAndTriggerInitialSync{ReplicatedVolumeReplicas: []*v1alpha2.ReplicatedVolumeReplica{rvr}})
-		}
-
-		// 2.1. DELETE one rvr to alternate addition and deletion
-		for id := range toDelete {
-			rvrToDelete := rvrsByNodeName[id][0]
-
-			deleteAction, err := c.deleteRVR(rvrToDelete)
+	// 2. RECONCILE LLVs
+	var addWithDeleteLLVActions Actions
+	var addOrDeleteLLVActions ParallelActions
+	{
+		llvsToDelete := c.llvsToDelete
+		for _, llvRec := range c.llvsByLVGName {
+			reconcileAction, err := llvRec.reconcile()
 			if err != nil {
 				return nil, err
 			}
 
-			actions = append(actions, deleteAction)
-
-			rvrsToSkipDelete = umaps.Set(rvrsToSkipDelete, rvrToDelete.Name, struct{}{})
-			break
-		}
-	}
-
-	// 3. DELETE not needed RVRs
-	deleteActions := ParallelActions{}
-
-	var deleteErrors error
-	for id := range toDelete {
-		rvrs := rvrsByNodeName[id]
-		for _, rvr := range rvrs {
-			if _, ok := rvrsToSkipDelete[rvr.Name]; ok {
-				continue
+			if llvRec.hasExisting() {
+				existingResourcesActions = append(existingResourcesActions, reconcileAction)
+			} else if len(llvsToDelete) > 0 {
+				addWithDeleteLLVActions = append(addWithDeleteLLVActions, reconcileAction)
+				addWithDeleteLLVActions = append(addWithDeleteLLVActions, c.deleteLLV(llvsToDelete[0]))
+				llvsToDelete = llvsToDelete[1:]
+			} else {
+				addOrDeleteLLVActions = append(addOrDeleteLLVActions, reconcileAction)
 			}
-			deleteAction, err := c.deleteRVR(rvr)
-
-			deleteErrors = errors.Join(deleteErrors, err)
-
-			deleteActions = append(deleteActions, deleteAction)
+		}
+		for len(llvsToDelete) > 0 {
+			addOrDeleteLLVActions = append(addOrDeleteLLVActions, c.deleteLLV(llvsToDelete[0]))
+			llvsToDelete = llvsToDelete[1:]
 		}
 	}
 
-	if len(deleteActions) > 0 {
-		actions = append(actions, deleteActions)
+	// 3. RECONCILE RVRs
+	var addWithDeleteRVRActions Actions
+	var addOrDeleteRVRActions ParallelActions
+	{
+		rvrsToDelete := c.rvrsToDelete
+		for _, rvrRec := range c.rvrsByNodeName {
+			reconcileAction, err := rvrRec.reconcile()
+			if err != nil {
+				return nil, err
+			}
+
+			if rvrRec.hasExisting() {
+				existingResourcesActions = append(existingResourcesActions, reconcileAction)
+			} else if len(rvrsToDelete) > 0 {
+				addWithDeleteRVRActions = append(addWithDeleteRVRActions, reconcileAction)
+				addWithDeleteRVRActions = append(addWithDeleteRVRActions, c.deleteRVR(rvrsToDelete[0]))
+				rvrsToDelete = rvrsToDelete[1:]
+			} else {
+				addOrDeleteRVRActions = append(addOrDeleteRVRActions, reconcileAction)
+			}
+		}
+		for len(rvrsToDelete) > 0 {
+			addOrDeleteRVRActions = append(addOrDeleteRVRActions, c.deleteRVR(rvrsToDelete[0]))
+			rvrsToDelete = rvrsToDelete[1:]
+		}
 	}
 
-	return cleanAction(actions), deleteErrors
-}
-
-func (c *Cluster) deleteRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Action, error) {
-	actions := Actions{DeleteReplicatedVolumeReplica{ReplicatedVolumeReplica: rvr}}
-
-	for i := range rvr.Spec.Volumes {
-		_, actualLVNameOnTheNode, err := rvr.Spec.Volumes[i].ParseDisk()
-		if err != nil {
-			return nil, err
-		}
-
-		llv, err := c.llvCl.ByActualLVNameOnTheNode(c.ctx, rvr.Spec.NodeName, actualLVNameOnTheNode)
-		if err != nil {
-			return nil, err
-		}
-
-		if llv != nil {
-			actions = append(actions, DeleteLVMLogicalVolume{llv})
-		}
+	// DONE
+	result := Actions{
+		existingResourcesActions,
+		addWithDeleteLLVActions, addOrDeleteLLVActions,
+		addWithDeleteRVRActions, addOrDeleteRVRActions,
 	}
 
-	return actions, nil
+	return cleanAction(result), nil
 }

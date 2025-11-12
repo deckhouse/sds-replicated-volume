@@ -148,3 +148,41 @@ zone-e/node-12=N,N,N
 > 1,2,3
 < node-6,(node-7,node-8),(node-9,node-10,node-11)
 
+---
+
+zonal positive_single_zone
+
+zone-a/node-0=1,0,0
+zone-a/node-1=0,3,0
+zone-a/node-2=0,0,1
+zone-a/node-3=0,0,1
+zone-a/node-4=0,0,1
+zone-a/node-5=0,0,1
+zone-a/node-6=0,0,1
+
+> 1,1,1
+< node-0,node-1,node-2
+
+
+---
+
+zonal positive_two_zones
+
+zone-a/node-0=1,0,0
+zone-a/node-1=0,3,0
+zone-a/node-2=0,0,1
+zone-a/node-3=0,0,1
+zone-a/node-4=0,0,1
+zone-a/node-5=0,0,1
+zone-a/node-6=0,0,1
+zone-b/node-20=1,0,0
+zone-b/node-21=0,4,0
+zone-b/node-22=0,0,1
+zone-b/node-23=0,0,1
+zone-b/node-24=0,0,1
+zone-b/node-25=0,0,1
+zone-b/node-26=0,0,1
+
+
+> 1,1,1
+< node-20,node-21,node-22

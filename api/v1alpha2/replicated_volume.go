@@ -28,7 +28,7 @@ type ReplicatedVolumeSpec struct {
 	Size resource.Quantity `json:"size"`
 
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=8
 	Replicas byte `json:"replicas"`
 
@@ -50,13 +50,17 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	PublishRequested []string `json:"publishRequested"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=Local;PreferablyLocal;EventuallyLocal;Any
+	VolumeAccess string `json:"volumeAccess"`
 }
 
 // +k8s:deepcopy-gen=true
 type LVMSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Thin;Thick
-	Type string `json:"type"` // Thin/Thick
+	Type string `json:"type"`
 
 	// +listType=map
 	// +listMapKey=name

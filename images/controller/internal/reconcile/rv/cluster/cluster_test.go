@@ -1,4 +1,4 @@
-package clustertest
+package cluster_test
 
 import (
 	"fmt"
@@ -6,18 +6,27 @@ import (
 	"log/slog"
 	"testing"
 
+	"github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
-	"github.com/google/go-cmp/cmp"
+	cluster "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+type LLVPhysicalKey struct {
+	nodeName, actualLVNameOnTheNode string
+}
 
 var (
 	testRVName                = "testRVName"
 	testRVRName               = "testRVRName"
+	testRVRName2              = "testRVRName2"
 	testLLVName               = "testLLVName"
+	testLLVName2              = "testLLVName2"
 	testNodeName              = "testNodeName"
+	testNodeName2             = "testNodeName2"
 	testSharedSecret          = "testSharedSecret"
 	testVGName                = "testVGName"
 	testActualVGNameOnTheNode = "testActualVGNameOnTheNode"
@@ -33,19 +42,62 @@ type reconcileTestCase struct {
 
 	replicaConfigs []testReplicaConfig
 	rvName         *string
-	size           *int64
 
 	expectedAction ActionMatcher
 	expectedErr    error
 }
 
-// TODO: Do not take ownership over llv, without special label/owner ref of controller,
-// for new LLVs - always create it,
-// during reconcile - manage (incl. deletion) all LLV with this label.
-// Currently some LLVs may hang, when there's no diskful rvr in same LVG
-
 func TestClusterReconcile(t *testing.T) {
-	t.Run("empty cluster - 1 replica - 1 create llv & wait llv & create rvr & wait rvr & trigger initial sync",
+	t.Run("empty cluster - 0 replicas - no-op",
+		func(t *testing.T) {
+			runClusterReconcileTestCase(t, &reconcileTestCase{})
+		},
+	)
+
+	t.Run("existing cluster - 0 replicas - delete LLVs & delete RVRs",
+		func(t *testing.T) {
+			runClusterReconcileTestCase(t, &reconcileTestCase{
+				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: v1.ObjectMeta{
+							Name: testRVRName,
+						},
+						Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+							NodeId: 0,
+						},
+					},
+					{
+						ObjectMeta: v1.ObjectMeta{
+							Name: testRVRName2,
+						},
+						Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
+							NodeId: 1,
+						},
+					},
+				},
+				existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
+					{nodeName: testNodeName}: {
+						ObjectMeta: v1.ObjectMeta{Name: testLLVName},
+					},
+					{nodeName: testNodeName2}: {
+						ObjectMeta: v1.ObjectMeta{Name: testLLVName2},
+					},
+				},
+				expectedAction: ActionsMatcher{
+					ParallelActionsMatcher{
+						DeleteLLVMatcher{LLVName: testLLVName},
+						DeleteLLVMatcher{LLVName: testLLVName2},
+					},
+					ParallelActionsMatcher{
+						DeleteRVRMatcher{RVRName: testRVRName},
+						DeleteRVRMatcher{RVRName: testRVRName2},
+					},
+				},
+			})
+		},
+	)
+
+	t.Run("empty cluster - 1 replica - 1 create llv & create rvr",
 		func(t *testing.T) {
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				replicaConfigs: []testReplicaConfig{
@@ -54,25 +106,20 @@ func TestClusterReconcile(t *testing.T) {
 						Volume: &testVolumeConfig{
 							VGName:                testVGName,
 							ActualVgNameOnTheNode: testActualVGNameOnTheNode,
-							LLVProps:              cluster.ThickVolumeProps{},
 						},
 					},
 				},
 				expectedAction: ActionsMatcher{
-					CreateLVMLogicalVolumeMatcher{
+					CreateLLVMatcher{
 						LLVSpec: snc.LVMLogicalVolumeSpec{
 							ActualLVNameOnTheNode: testRVName,
 							Type:                  "Thick",
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
-							Thick:                 &snc.LVMLogicalVolumeThickSpec{},
-						},
-						OnMatch: func(action cluster.CreateLVMLogicalVolume) {
-							action.LVMLogicalVolume.Name = testLLVName
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
 						},
 					},
-					WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
-					CreateReplicatedVolumeReplicaMatcher{
+					CreateRVRMatcher{
 						RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: testRVName,
 							NodeName:             testNodeName,
@@ -81,6 +128,7 @@ func TestClusterReconcile(t *testing.T) {
 								Port: testPortRng.MinPort,
 							},
 							SharedSecret: testSharedSecret,
+							Quorum:       1,
 							Volumes: []v1alpha2.Volume{
 								{
 									Number: 0,
@@ -92,18 +140,13 @@ func TestClusterReconcile(t *testing.T) {
 								},
 							},
 						},
-						OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
-							action.ReplicatedVolumeReplica.Name = testRVRName
-						},
 					},
-					WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-					WaitAndTriggerInitialSyncMatcher{RVRNames: []string{testRVRName}},
 				},
 			})
 		},
 	)
 
-	t.Run("existing small LLV - 1 replica - resize llv & create rvr & wait rvr",
+	t.Run("existing small LLV - 1 replica - resize llv & create rvr",
 		func(t *testing.T) {
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
@@ -124,25 +167,21 @@ func TestClusterReconcile(t *testing.T) {
 						Volume: &testVolumeConfig{
 							VGName:                testVGName,
 							ActualVgNameOnTheNode: testActualVGNameOnTheNode,
-							LLVProps:              cluster.ThickVolumeProps{},
 						},
 					},
 				},
 				expectedAction: ActionsMatcher{
-					LLVPatchMatcher{LLVName: testLLVName, Validate: func(before, after *snc.LVMLogicalVolume) error {
-						if after.Spec.Size != testSizeStr {
-							return fmt.Errorf("expected size to be patched to '%s', got '%s'", testSizeStr, after.Spec.Size)
-						}
-						// ensure only size changed in Spec
-						afterSpec := after.Spec
-						afterSpec.Size = before.Spec.Size
-						if diff := cmp.Diff(before.Spec, afterSpec); diff != "" {
-							return fmt.Errorf("unexpected LLV spec changes besides size (-want +got):\n%s", diff)
-						}
-						return nil
-					}},
-					WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
-					CreateReplicatedVolumeReplicaMatcher{
+					PatchLLVMatcher{
+						LLVName: testLLVName,
+						LLVSpec: snc.LVMLogicalVolumeSpec{
+							ActualLVNameOnTheNode: testRVName,
+							Size:                  testSizeStr,
+							LVMVolumeGroupName:    testVGName,
+							Type:                  "Thick",
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
+						},
+					},
+					CreateRVRMatcher{
 						RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: testRVName,
 							NodeName:             testNodeName,
@@ -151,6 +190,7 @@ func TestClusterReconcile(t *testing.T) {
 								Port: testPortRng.MinPort,
 							},
 							SharedSecret: testSharedSecret,
+							Quorum:       1,
 							Volumes: []v1alpha2.Volume{
 								{
 									Number: 0,
@@ -162,18 +202,13 @@ func TestClusterReconcile(t *testing.T) {
 								},
 							},
 						},
-						OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
-							action.ReplicatedVolumeReplica.Name = testRVRName
-						},
 					},
-					WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-					WaitAndTriggerInitialSyncMatcher{RVRNames: []string{testRVRName}},
 				},
 			})
 		},
 	)
 
-	t.Run("add 1 diskful and fix existing diskless - (parallel) create&wait llv + patch&wait rvr; then create&wait rvr",
+	t.Run("add 1 diskful and fix existing diskless - (parallel) create llv + patch rvr; then create rvr",
 		func(t *testing.T) {
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
@@ -190,6 +225,13 @@ func TestClusterReconcile(t *testing.T) {
 							SharedSecret: testSharedSecret,
 							Volumes:      []v1alpha2.Volume{{Number: 0, Device: 0}}, // diskless
 						},
+						Status: &v1alpha2.ReplicatedVolumeReplicaStatus{
+							DRBD: &v1alpha2.DRBDStatus{
+								Devices: []v1alpha2.DeviceStatus{
+									{Size: int(testSize)},
+								},
+							},
+						},
 					},
 				},
 				replicaConfigs: []testReplicaConfig{
@@ -198,7 +240,6 @@ func TestClusterReconcile(t *testing.T) {
 						Volume: &testVolumeConfig{
 							VGName:                testVGName,
 							ActualVgNameOnTheNode: testActualVGNameOnTheNode,
-							LLVProps:              cluster.ThickVolumeProps{},
 						},
 					},
 					{ // diskless to fix
@@ -206,28 +247,17 @@ func TestClusterReconcile(t *testing.T) {
 					},
 				},
 				expectedAction: ActionsMatcher{
-					ParallelActionsMatcher{
-						ActionsMatcher{
-							CreateLVMLogicalVolumeMatcher{
-								LLVSpec: snc.LVMLogicalVolumeSpec{
-									ActualLVNameOnTheNode: testRVName,
-									Type:                  "Thick",
-									Size:                  testSizeStr,
-									LVMVolumeGroupName:    testVGName,
-									Thick:                 &snc.LVMLogicalVolumeThickSpec{},
-								},
-								OnMatch: func(action cluster.CreateLVMLogicalVolume) {
-									action.LVMLogicalVolume.Name = testLLVName
-								},
-							},
-							WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
-						},
-						ActionsMatcher{
-							RVRPatchMatcher{RVRName: testRVRName},
-							WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+					PatchRVRMatcher{RVRName: testRVRName},
+					CreateLLVMatcher{
+						LLVSpec: snc.LVMLogicalVolumeSpec{
+							ActualLVNameOnTheNode: testRVName,
+							Type:                  "Thick",
+							Size:                  testSizeStr,
+							LVMVolumeGroupName:    testVGName,
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
 						},
 					},
-					CreateReplicatedVolumeReplicaMatcher{
+					CreateRVRMatcher{
 						RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: testRVName,
 							NodeName:             "node-a",
@@ -236,6 +266,15 @@ func TestClusterReconcile(t *testing.T) {
 								Port: testPortRng.MinPort,
 							},
 							SharedSecret: testSharedSecret,
+							Quorum:       2,
+							Peers: map[string]v1alpha2.Peer{
+								"node-b": {
+									NodeId:       1,
+									Address:      v1alpha2.Address{IPv4: generateIPv4("node-b"), Port: testPortRng.MinPort},
+									Diskless:     true,
+									SharedSecret: "testSharedSecret",
+								},
+							},
 							Volumes: []v1alpha2.Volume{
 								{
 									Number: 0,
@@ -244,17 +283,13 @@ func TestClusterReconcile(t *testing.T) {
 								},
 							},
 						},
-						OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
-							action.ReplicatedVolumeReplica.Name = testRVRName
-						},
 					},
-					WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
 				},
 			})
 		},
 	)
 
-	t.Run("add 1 diskful and delete 1 orphan rvr - (parallel) create&wait llv; then create&wait rvr and delete orphan",
+	t.Run("add 1 diskful and delete 1 orphan rvr - (parallel) create llv; then create rvr and delete orphan",
 		func(t *testing.T) {
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
@@ -280,42 +315,38 @@ func TestClusterReconcile(t *testing.T) {
 						Volume: &testVolumeConfig{
 							VGName:                testVGName,
 							ActualVgNameOnTheNode: testActualVGNameOnTheNode,
-							LLVProps:              cluster.ThickVolumeProps{},
 						},
 					},
 				},
 				expectedAction: ActionsMatcher{
-					CreateLVMLogicalVolumeMatcher{
+					CreateLLVMatcher{
 						LLVSpec: snc.LVMLogicalVolumeSpec{
 							ActualLVNameOnTheNode: testRVName,
 							Type:                  "Thick",
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
-							Thick:                 &snc.LVMLogicalVolumeThickSpec{},
-						},
-						OnMatch: func(action cluster.CreateLVMLogicalVolume) {
-							action.LVMLogicalVolume.Name = testLLVName
+							Thick: &snc.LVMLogicalVolumeThickSpec{
+								Contiguous: utils.Ptr(true),
+							},
 						},
 					},
-					WaitLVMLogicalVolumeMatcher{LLVName: testLLVName},
-					CreateReplicatedVolumeReplicaMatcher{
+					CreateRVRMatcher{
 						RVRSpec: v1alpha2.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: testRVName,
 							NodeName:             "node-a",
 							NodeAddress:          v1alpha2.Address{IPv4: generateIPv4("node-a"), Port: testPortRng.MinPort},
 							SharedSecret:         testSharedSecret,
-							Volumes: []v1alpha2.Volume{{
-								Number: 0,
-								Device: 0,
-								Disk:   fmt.Sprintf("/dev/%s/%s", testActualVGNameOnTheNode, testRVName),
-							}},
-						},
-						OnMatch: func(action cluster.CreateReplicatedVolumeReplica) {
-							action.ReplicatedVolumeReplica.Name = testRVRName
+							Volumes: []v1alpha2.Volume{
+								{
+									Number: 0,
+									Device: 0,
+									Disk:   fmt.Sprintf("/dev/%s/%s", testActualVGNameOnTheNode, testRVName),
+								},
+							},
+							Quorum: 1,
 						},
 					},
-					WaitReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
-					DeleteReplicatedVolumeReplicaMatcher{RVRName: testRVRName},
+					DeleteRVRMatcher{RVRName: testRVRName},
 				},
 			})
 		},
@@ -331,25 +362,73 @@ func ifDefined[T any](p *T, def T) T {
 
 func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 	// arrange
-	rvrClient := NewMockRVRClient(tc.existingRVRs)
-	llvClient := NewMockLLVClient(tc.existingLLVs)
-
-	clr := cluster.New(
-		t.Context(),
-		slog.Default(),
-		rvrClient,
-		rvrClient,
-		testPortRng,
-		llvClient,
-		ifDefined(tc.rvName, testRVName),
-		ifDefined(tc.size, testSize),
-		testSharedSecret,
-	)
-
+	rv := &v1alpha2.ReplicatedVolume{
+		ObjectMeta: v1.ObjectMeta{Name: ifDefined(tc.rvName, testRVName)},
+		Spec: v1alpha2.ReplicatedVolumeSpec{
+			Replicas:     byte(len(tc.replicaConfigs)),
+			SharedSecret: testSharedSecret,
+			Size:         *resource.NewQuantity(testSize, resource.BinarySI),
+			LVM: v1alpha2.LVMSpec{
+				Type: "Thick",
+				LVMVolumeGroups: []v1alpha2.LVGRef{
+					{Name: testVGName},
+				},
+			},
+		},
+	}
+	rvAdapter, err := cluster.NewRVAdapter(rv)
+	if err != nil {
+		t.Fatalf("rv adapter: %v", err)
+	}
+	var rvNodes []cluster.RVNodeAdapter
+	var nodeMgrs []cluster.NodeManager
 	for _, rCfg := range tc.replicaConfigs {
-		r := clr.AddReplica(rCfg.NodeName, generateIPv4(rCfg.NodeName), false, 0, 0)
+		var lvg *snc.LVMVolumeGroup
 		if rCfg.Volume != nil {
-			r.AddVolume(rCfg.Volume.VGName, rCfg.Volume.ActualVgNameOnTheNode, rCfg.Volume.LLVProps)
+			lvg = &snc.LVMVolumeGroup{
+				ObjectMeta: v1.ObjectMeta{Name: rCfg.Volume.VGName},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local:                 snc.LVMVolumeGroupLocalSpec{NodeName: rCfg.NodeName},
+					ActualVGNameOnTheNode: rCfg.Volume.ActualVgNameOnTheNode,
+				},
+			}
+		}
+		node := &corev1.Node{
+			ObjectMeta: v1.ObjectMeta{Name: rCfg.NodeName},
+			Status: corev1.NodeStatus{
+				Addresses: []corev1.NodeAddress{
+					{Type: corev1.NodeHostName, Address: rCfg.NodeName},
+					{Type: corev1.NodeInternalIP, Address: generateIPv4(rCfg.NodeName)},
+				},
+			},
+		}
+		rvNode, err := cluster.NewRVNodeAdapter(rvAdapter, node, lvg)
+		if err != nil {
+			t.Fatalf("rv node adapter: %v", err)
+		}
+		rvNodes = append(rvNodes, rvNode)
+		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(testPortRng, rCfg.NodeName))
+	}
+	clr, err := cluster.NewCluster(slog.Default(), rvAdapter, rvNodes, nodeMgrs)
+	if err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	for i := range tc.existingRVRs {
+		ra, err := cluster.NewRVRAdapter(&tc.existingRVRs[i])
+		if err != nil {
+			t.Fatalf("rvrAdapter: %v", err)
+		}
+		if err := clr.AddExistingRVR(ra); err != nil {
+			t.Fatalf("addExistingRVR: %v", err)
+		}
+	}
+	for _, llv := range tc.existingLLVs {
+		la, err := cluster.NewLLVAdapter(llv)
+		if err != nil {
+			t.Fatalf("llvAdapter: %v", err)
+		}
+		if err := clr.AddExistingLLV(la); err != nil {
+			t.Fatalf("addExistingLLV: %v", err)
 		}
 	}
 
@@ -400,7 +479,6 @@ func generateIPv4(nodeName string) string {
 type testVolumeConfig struct {
 	VGName                string
 	ActualVgNameOnTheNode string
-	LLVProps              cluster.LLVProps
 }
 
 type testPortRange struct {
