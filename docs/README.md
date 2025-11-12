@@ -311,4 +311,5 @@ Applicable to both single-zone clusters and clusters using multiple availability
 
 - Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
   - Use local physical disks. The reasons are detailed [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
-  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 20ms between nodes
+  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 10ms between nodes
+  - For guaranteed data consistency, use `ReplicatedStorageClass` with the `ConsistencyAndAvailability` replication mode (spec.replication) — this mode is used by default. **Important:** changing the mode to `Availability` may lead to split brain and data loss in case of network connectivity issues.
