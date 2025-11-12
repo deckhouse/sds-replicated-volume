@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/controller
 
-go 1.24.6
+go 1.24.9
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
