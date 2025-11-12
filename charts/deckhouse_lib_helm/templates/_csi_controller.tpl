@@ -634,12 +634,19 @@ rules:
 # for CSIStorageCapacity. They are sufficient for deployment via
 # StatefulSet (only needs to get Pod) and Deployment (needs to get
 # Pod and then ReplicaSet to find the Deployment).
+# For DaemonSet, we need to get Pod and then DaemonSet.
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get"]
+{{- if eq $csiControllerDaemonSet "true" }}
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get"]
+{{- else }}
 - apiGroups: ["apps"]
   resources: ["replicasets"]
   verbs: ["get"]
+{{- end }}
 ---
 kind: RoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
