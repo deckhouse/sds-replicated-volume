@@ -137,152 +137,24 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		lvgRefs[h.rv.Spec.LVM.LVMVolumeGroups[i].Name] = &h.rv.Spec.LVM.LVMVolumeGroups[i]
 	}
 
-	pool := map[string]*replicaInfo{}
-
-	nodeList := &corev1.NodeList{}
-	if err := h.rdr.List(h.ctx, nodeList); err != nil {
-		return fmt.Errorf("getting nodes: %w", err)
+	pool, err := h.buildNodePool(zones, needTieBreaker)
+	if err != nil {
+		return err
 	}
 
-	for node := range uslices.Ptrs(nodeList.Items) {
-		nodeZone := node.Labels["topology.kubernetes.io/zone"]
-		if _, ok := zones[nodeZone]; ok {
-
-			// TODO ignore non-ready nodes?
-			addr, found := uiter.Find(
-				slices.Values(node.Status.Addresses),
-				func(addr corev1.NodeAddress) bool {
-					return addr.Type == corev1.NodeInternalIP
-				},
-			)
-			if !found {
-				h.log.Warn("ignoring node, because it has no InternalIP address", "node.Name", node.Name)
-				continue
-			}
-
-			ri := &replicaInfo{
-				Node:        node,
-				NodeAddress: addr,
-				Zone:        nodeZone,
-				Score:       &replicaScoreBuilder{},
-			}
-
-			if needTieBreaker {
-				ri.Score.clusterHasDiskless()
-			}
-
-			pool[node.Name] = ri
-		}
+	if err := h.applyLVGs(pool, lvgRefs); err != nil {
+		return err
 	}
 
-	// validate:
-	// - LVGs are in nodePool
-	// - only one LVGs on a node
-	// - all publishRequested have LVG
-	// TODO: validate LVG status?
-	lvgList := &snc.LVMVolumeGroupList{}
-	if err := h.rdr.List(h.ctx, lvgList); err != nil {
-		return fmt.Errorf("getting lvgs: %w", err)
-	}
-
-	publishRequestedFoundLVG := make([]bool, len(h.rv.Spec.PublishRequested))
-	for lvg := range uslices.Ptrs(lvgList.Items) {
-		lvgRef, ok := lvgRefs[lvg.Name]
-		if !ok {
-			continue
-		}
-
-		if h.rv.Spec.LVM.Type == "Thin" {
-			var lvgPoolFound bool
-			for _, tp := range lvg.Spec.ThinPools {
-				if lvgRef.ThinPoolName == tp.Name {
-					lvgPoolFound = true
-				}
-			}
-			if !lvgPoolFound {
-				return fmt.Errorf("thin pool '%s' not found in LVG '%s'", lvgRef.ThinPoolName, lvg.Name)
-			}
-		}
-
-		var publishRequested bool
-		for i := range h.rv.Spec.PublishRequested {
-			if lvg.Spec.Local.NodeName == h.rv.Spec.PublishRequested[i] {
-				publishRequestedFoundLVG[i] = true
-				publishRequested = true
-			}
-		}
-
-		if repl, ok := pool[lvg.Spec.Local.NodeName]; !ok {
-			return fmt.Errorf("lvg '%s' is on node '%s', which is not in any of specified zones", lvg.Name, lvg.Spec.Local.NodeName)
-		} else if repl.LVG != nil {
-			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
-		} else {
-			// switch h.rv.Spec.LVM.Type {
-			// case "Thin":
-			// 	repl.LLVProps = cluster.ThinVolumeProps{
-			// 		PoolName: lvgRef.ThinPoolName,
-			// 	}
-			// case "Thick":
-			// 	repl.LLVProps = cluster.ThickVolumeProps{
-			// 		Contigous: utils.Ptr(true),
-			// 	}
-			// default:
-			// 	return fmt.Errorf("unsupported volume Type: '%s' has type '%s'", lvg.Name, h.rv.Spec.LVM.Type)
-			// }
-
-			repl.LVG = lvg
-			repl.Score.nodeWithDisk()
-			if publishRequested {
-				repl.Score.replicaPublishRequested()
-				repl.PublishRequested = true
-			}
-		}
-	}
-
-	for i, found := range publishRequestedFoundLVG {
-		if !found {
-			return fmt.Errorf("publishRequested can not be satisfied - no LVG found for node '%s'", h.rv.Spec.PublishRequested[i])
-		}
-	}
-
-	// prioritize existing nodes (identify by ownerReference to this RV) using cache index
-	var rvrList v1alpha2.ReplicatedVolumeReplicaList
-	if err := h.cl.List(h.ctx, &rvrList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
-		return fmt.Errorf("listing rvrs: %w", err)
-	}
-	ownedRvrs := rvrList.Items
-	for i := range ownedRvrs {
-		if repl, ok := pool[ownedRvrs[i].Spec.NodeName]; ok {
-			repl.Score.replicaAlreadyExists()
-		}
+	_, err = h.ownedRVRsAndPrioritize(pool)
+	if err != nil {
+		return err
 	}
 
 	// solve topology
-	var nodeSelector topology.NodeSelector
-	switch h.rv.Spec.Topology {
-	case "TransZonal":
-		sel := topology.NewTransZonalMultiPurposeNodeSelector(len(counts))
-		for nodeName, repl := range pool {
-			h.log.Info("setting node for selection with TransZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
-			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
-		}
-		nodeSelector = sel
-	case "Zonal":
-		sel := topology.NewZonalMultiPurposeNodeSelector(len(counts))
-		for nodeName, repl := range pool {
-			h.log.Info("setting node for selection with ZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
-			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
-		}
-		nodeSelector = sel
-	case "Ignore":
-		sel := topology.NewMultiPurposeNodeSelector(len(counts))
-		for nodeName, repl := range pool {
-			h.log.Info("setting node for selection with MultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
-			sel.SetNode(nodeName, repl.Score.Build())
-		}
-		nodeSelector = sel
-	default:
-		return fmt.Errorf("unknown topology: %s", h.rv.Spec.Topology)
+	nodeSelector, err := h.buildNodeSelector(pool, len(counts))
+	if err != nil {
+		return err
 	}
 
 	h.log.Info("selecting nodes", "counts", counts)
@@ -597,6 +469,137 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		return nil
 	default:
 		panic("unknown action type")
+	}
+}
+
+// buildNodePool lists nodes, filters by zones and prepares replicaInfo pool with scores.
+func (h *resourceReconcileRequestHandler) buildNodePool(zones map[string]struct{}, needTieBreaker bool) (map[string]*replicaInfo, error) {
+	pool := map[string]*replicaInfo{}
+	nodeList := &corev1.NodeList{}
+	if err := h.rdr.List(h.ctx, nodeList); err != nil {
+		return nil, fmt.Errorf("getting nodes: %w", err)
+	}
+	for node := range uslices.Ptrs(nodeList.Items) {
+		nodeZone := node.Labels["topology.kubernetes.io/zone"]
+		if _, ok := zones[nodeZone]; !ok {
+			continue
+		}
+		addr, found := uiter.Find(
+			slices.Values(node.Status.Addresses),
+			func(addr corev1.NodeAddress) bool { return addr.Type == corev1.NodeInternalIP },
+		)
+		if !found {
+			h.log.Warn("ignoring node, because it has no InternalIP address", "node.Name", node.Name)
+			continue
+		}
+		ri := &replicaInfo{
+			Node:        node,
+			NodeAddress: addr,
+			Zone:        nodeZone,
+			Score:       &replicaScoreBuilder{},
+		}
+		if needTieBreaker {
+			ri.Score.clusterHasDiskless()
+		}
+		pool[node.Name] = ri
+	}
+	return pool, nil
+}
+
+// applyLVGs validates LVGs and marks pool entries with LVG selection and extra scoring.
+func (h *resourceReconcileRequestHandler) applyLVGs(pool map[string]*replicaInfo, lvgRefs map[string]*v1alpha2.LVGRef) error {
+	lvgList := &snc.LVMVolumeGroupList{}
+	if err := h.rdr.List(h.ctx, lvgList); err != nil {
+		return fmt.Errorf("getting lvgs: %w", err)
+	}
+
+	publishRequestedFoundLVG := make([]bool, len(h.rv.Spec.PublishRequested))
+	for lvg := range uslices.Ptrs(lvgList.Items) {
+		lvgRef, ok := lvgRefs[lvg.Name]
+		if !ok {
+			continue
+		}
+		if h.rv.Spec.LVM.Type == "Thin" {
+			var lvgPoolFound bool
+			for _, tp := range lvg.Spec.ThinPools {
+				if lvgRef.ThinPoolName == tp.Name {
+					lvgPoolFound = true
+				}
+			}
+			if !lvgPoolFound {
+				return fmt.Errorf("thin pool '%s' not found in LVG '%s'", lvgRef.ThinPoolName, lvg.Name)
+			}
+		}
+		var publishRequested bool
+		for i := range h.rv.Spec.PublishRequested {
+			if lvg.Spec.Local.NodeName == h.rv.Spec.PublishRequested[i] {
+				publishRequestedFoundLVG[i] = true
+				publishRequested = true
+			}
+		}
+		repl, ok := pool[lvg.Spec.Local.NodeName]
+		if !ok {
+			return fmt.Errorf("lvg '%s' is on node '%s', which is not in any of specified zones", lvg.Name, lvg.Spec.Local.NodeName)
+		}
+		if repl.LVG != nil {
+			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
+		}
+		repl.LVG = lvg
+		repl.Score.nodeWithDisk()
+		if publishRequested {
+			repl.Score.replicaPublishRequested()
+			repl.PublishRequested = true
+		}
+	}
+	for i, found := range publishRequestedFoundLVG {
+		if !found {
+			return fmt.Errorf("publishRequested can not be satisfied - no LVG found for node '%s'", h.rv.Spec.PublishRequested[i])
+		}
+	}
+	return nil
+}
+
+// ownedRVRsAndPrioritize fetches existing RVRs, marks corresponding nodes and returns the list.
+func (h *resourceReconcileRequestHandler) ownedRVRsAndPrioritize(pool map[string]*replicaInfo) ([]v1alpha2.ReplicatedVolumeReplica, error) {
+	var rvrList v1alpha2.ReplicatedVolumeReplicaList
+	if err := h.cl.List(h.ctx, &rvrList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+		return nil, fmt.Errorf("listing rvrs: %w", err)
+	}
+	ownedRvrs := rvrList.Items
+	for i := range ownedRvrs {
+		if repl, ok := pool[ownedRvrs[i].Spec.NodeName]; ok {
+			repl.Score.replicaAlreadyExists()
+		}
+	}
+	return ownedRvrs, nil
+}
+
+// buildNodeSelector builds a selector according to topology and fills it with nodes/scores.
+func (h *resourceReconcileRequestHandler) buildNodeSelector(pool map[string]*replicaInfo, countsLen int) (topology.NodeSelector, error) {
+	switch h.rv.Spec.Topology {
+	case "TransZonal":
+		sel := topology.NewTransZonalMultiPurposeNodeSelector(countsLen)
+		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with TransZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
+			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
+		}
+		return sel, nil
+	case "Zonal":
+		sel := topology.NewZonalMultiPurposeNodeSelector(countsLen)
+		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with ZonalMultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
+			sel.SetNode(nodeName, repl.Zone, repl.Score.Build())
+		}
+		return sel, nil
+	case "Ignore":
+		sel := topology.NewMultiPurposeNodeSelector(countsLen)
+		for nodeName, repl := range pool {
+			h.log.Info("setting node for selection with MultiPurposeNodeSelector", "nodeName", nodeName, "zone", repl.Zone, "scores", repl.Score.Build())
+			sel.SetNode(nodeName, repl.Score.Build())
+		}
+		return sel, nil
+	default:
+		return nil, fmt.Errorf("unknown topology: %s", h.rv.Spec.Topology)
 	}
 }
 
