@@ -127,7 +127,7 @@ strategy:
 {{- /* returns deployment strategy and replicas for ha components running not on master nodes */ -}}
 {{- define "helm_lib_deployment_strategy_and_replicas_for_ha" }}
 {{- /* Template context with .Values, .Chart, etc */ -}}
-replicas: {{ include "helm_lib_is_ha_to_value" (list . 2 1) }}
+replicas: {{ include "helm_lib_is_ha_to_value" (list . 3 1) }}
 {{- if (include "helm_lib_ha_enabled" .) }}
 strategy:
   type: RollingUpdate
