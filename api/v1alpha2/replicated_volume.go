@@ -91,6 +91,8 @@ type ReplicatedVolumeStatus struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	PublishProvided []string `json:"publishProvided"`
+
+	ActualSize resource.Quantity `json:"actualSize"`
 }
 
 // +k8s:deepcopy-gen=true

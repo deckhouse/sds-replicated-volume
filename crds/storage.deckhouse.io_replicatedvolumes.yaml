@@ -128,6 +128,12 @@ spec:
             type: object
           status:
             properties:
+              actualSize:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -193,6 +199,7 @@ spec:
                 maxItems: 2
                 type: array
             required:
+            - actualSize
             - publishProvided
             type: object
         required:

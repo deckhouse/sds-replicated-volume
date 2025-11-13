@@ -445,6 +445,7 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	out.ActualSize = in.ActualSize.DeepCopy()
 	return
 }
 
