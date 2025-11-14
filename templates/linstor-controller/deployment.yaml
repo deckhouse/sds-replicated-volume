@@ -170,6 +170,8 @@ spec:
         securityContext: 
           readOnlyRootFilesystem: true
           AllowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
@@ -220,6 +222,11 @@ spec:
                     name: linstor-controller
         image: {{ include "helm_lib_module_common_image" (list . "kubeRbacProxy") }}
         imagePullPolicy: IfNotPresent
+        securityContext: 
+          readOnlyRootFilesystem: true
+          AllowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         livenessProbe:
           httpGet:
             path: /livez
