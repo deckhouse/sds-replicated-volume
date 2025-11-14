@@ -115,6 +115,8 @@ spec:
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -170,6 +172,8 @@ spec:
           privileged: true
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: true
+          seccompProfile:
+            type: RuntimeDefault
           seLinuxOptions:
             level: s0
             type: spc_t

@@ -74,6 +74,8 @@
   securityContext:
     readOnlyRootFilesystem: true
     allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
 {{- end }}
 
 {{- define "csi_additional_controller_volumes" }}
@@ -184,6 +186,9 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
   name: linstor-wait-node-online
   securityContext:
     readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    seccompProfile:
+      type: RuntimeDefault
 {{- end }}
 
 
