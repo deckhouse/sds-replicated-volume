@@ -51,8 +51,6 @@ spec:
               requests:
                 {{- include "helm_lib_module_ephemeral_storage_logs_with_extra" 10 | nindent 16 }}
                 {{- include "metadata_backup_resources" . | nindent 16 }}
-            securityContext:
-              allowPrivilegeEscalation: false
           volumes:
             - name: tmp
               emptyDir: {}
