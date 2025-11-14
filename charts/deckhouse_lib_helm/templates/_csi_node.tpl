@@ -182,6 +182,8 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          seccompProfile:
+            type: RuntimeDefault
         {{- if $setSysAdminCapability }}
           capabilities:
             add:
