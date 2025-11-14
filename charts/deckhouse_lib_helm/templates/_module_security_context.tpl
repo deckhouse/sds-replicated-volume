@@ -94,7 +94,7 @@ securityContext:
 
 securityContext:
   readOnlyRootFilesystem: {{ $ro }}
-  allowPrivilegeEscalation: false
+  allowPrivilegeEscalation: {{ not $runAsNonRoot }}
   capabilities:
     drop:
       - ALL
