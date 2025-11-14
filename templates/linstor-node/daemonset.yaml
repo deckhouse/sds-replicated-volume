@@ -277,6 +277,7 @@ spec:
 {{- end }}
         securityContext:
           readOnlyRootFilesystem: true
+          AllowPrivilegeEscalation: false
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:
