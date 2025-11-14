@@ -87,7 +87,10 @@ securityContext:
 {{- end -}}
 {{- $caps := default (list) .caps -}}
 {{- $uid  := default 64535 .uid  -}}
-{{- $runAsNonRoot := default true .runAsNonRoot }}
+{{- $runAsNonRoot := true }}
+{{- if hasKey . "runAsNonRoot" -}}
+  {{- $runAsNonRoot = .runAsNonRoot -}}
+{{- end -}}
 
 securityContext:
   readOnlyRootFilesystem: {{ $ro }}
