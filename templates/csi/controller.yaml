@@ -51,7 +51,8 @@
   - /linstor-wait-until
   - api-online
   securityContext:
-    readOnlyRootFilesystem: true  
+    readOnlyRootFilesystem: true
+    AllowPrivilegeEscalation: false
   env:
   - name: LS_CONTROLLERS
     value: https://linstor.d8-sds-replicated-volume.svc:3371

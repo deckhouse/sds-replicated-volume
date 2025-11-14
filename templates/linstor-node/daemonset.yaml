@@ -96,6 +96,7 @@ spec:
         name: wait-drbd-ver-9-2
         securityContext:
           readOnlyRootFilesystem: true
+          AllowPrivilegeEscalation: false
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
