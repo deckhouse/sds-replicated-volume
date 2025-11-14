@@ -87,7 +87,7 @@ securityContext:
 {{- end -}}
 {{- $caps := default (list) .caps -}}
 {{- $uid  := default 64535 .uid  -}}
-{{- $runAsNonRoot := true }}
+{{- $runAsNonRoot := true -}}
 {{- if hasKey . "runAsNonRoot" -}}
   {{- $runAsNonRoot = .runAsNonRoot -}}
 {{- end -}}
