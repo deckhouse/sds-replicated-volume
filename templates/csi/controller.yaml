@@ -50,9 +50,6 @@
 - command:
   - /linstor-wait-until
   - api-online
-  securityContext:
-    readOnlyRootFilesystem: true
-    AllowPrivilegeEscalation: false
   env:
   - name: LS_CONTROLLERS
     value: https://linstor.d8-sds-replicated-volume.svc:3371
@@ -74,6 +71,9 @@
   image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
   imagePullPolicy: IfNotPresent
   name: linstor-wait-api-online
+  securityContext:
+    readOnlyRootFilesystem: true
+    AllowPrivilegeEscalation: false
 {{- end }}
 
 {{- define "csi_additional_controller_volumes" }}
@@ -156,8 +156,6 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
     - /linstor-wait-until
     - satellite-online
     - $(KUBE_NODE_NAME)
-  securityContext:
-    readOnlyRootFilesystem: true
   env:
     - name: KUBE_NODE_NAME
       valueFrom:
@@ -184,6 +182,8 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
   image: {{ include "helm_lib_module_image" (list . "linstorWaitUntil") }}
   imagePullPolicy: IfNotPresent
   name: linstor-wait-node-online
+  securityContext:
+    readOnlyRootFilesystem: true
 {{- end }}
 
 
