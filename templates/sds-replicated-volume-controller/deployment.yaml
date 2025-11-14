@@ -91,6 +91,7 @@ spec:
               {{- include "sds_drbd_controller_resources" . | nindent 14 }}
 {{- end }}
           securityContext:
+            allowPrivilegeEscalation: true
             privileged: true
             readOnlyRootFilesystem: true
             seLinuxOptions:

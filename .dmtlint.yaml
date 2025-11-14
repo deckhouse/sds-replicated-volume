@@ -1,6 +1,16 @@
 linters-settings:
   container:
     exclude-rules:
+      no-new-privileges:
+        - kind: DaemonSet
+          name: csi-node
+          container: node
+        - kind: DaemonSet
+          name: linstor-node
+          container: linstor-satellite
+        - kind: Deployment
+          name: sds-replicated-volume-controller
+          container: sds-replicated-volume-controller
       liveness-probe:
         - kind: Deployment
           name: csi-controller
