@@ -73,7 +73,7 @@
   name: linstor-wait-api-online
   securityContext:
     readOnlyRootFilesystem: true
-    AllowPrivilegeEscalation: false
+    allowPrivilegeEscalation: false
 {{- end }}
 
 {{- define "csi_additional_controller_volumes" }}
