@@ -6,6 +6,9 @@ linters-settings:
           name: csi-node
           container: node
         - kind: DaemonSet
+          name: csi-node
+          container: node-driver-registrar
+        - kind: DaemonSet
           name: linstor-node
           container: linstor-satellite
         - kind: Deployment
