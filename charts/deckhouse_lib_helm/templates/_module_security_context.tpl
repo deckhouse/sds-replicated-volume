@@ -75,7 +75,7 @@ securityContext:
 {{- /* .caps – []string, capabilities.add (default empty) */ -}}
 {{- /* .uid  – int, runAsUser/runAsGroup (default 64535) */ -}}
 {{- /* .seccompProfile  – bool, disable seccompProfile when false (default true) */ -}}
-{{- /* Usage: include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" false "caps" (list "NET_ADMIN" "SYS_TIME") "uid" 1001 "seccompProfile" false) */ -}}
+{{- /* Usage: include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" false "caps" (list "NET_ADMIN" "SYS_TIME") "uid" 1001 "seccompProfile" false "runAsNonRoot" true) */ -}}
 {{- define "helm_lib_module_container_security_context_pss_restricted_flexible" -}}
 {{- $ro := true -}}
 {{- if hasKey . "ro" -}}
@@ -87,6 +87,10 @@ securityContext:
 {{- end -}}
 {{- $caps := default (list) .caps -}}
 {{- $uid  := default 64535 .uid  -}}
+{{- $runAsNonRoot := true }}
+{{- if hasKey . "runAsNonRoot" -}}
+  {{- $runAsNonRoot = .runAsNonRoot -}}
+{{- end -}}
 
 securityContext:
   readOnlyRootFilesystem: {{ $ro }}
@@ -99,7 +103,7 @@ securityContext:
 {{- end }}
   runAsUser:   {{ $uid }}
   runAsGroup:  {{ $uid }}
-  runAsNonRoot: true
+  runAsNonRoot: {{ $runAsNonRoot }}
 {{- if $seccompProfile }}
   seccompProfile:
     type: RuntimeDefault
