@@ -17,6 +17,16 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// newTestServer creates a test server with default logger level from flagLogLevel
+func newTestServer() *server {
+	return &server{
+		router:   mux.NewRouter(),
+		logger:   initLogger(*flagLogLevel),
+		jobs:     make(map[string]*BuildJob),
+		cacheDir: "",
+	}
+}
+
 func TestGenerateCacheKey(t *testing.T) {
 	kernelVersion := "5.15.0-86-generic"
 	headersData1 := []byte("test headers data 1")
@@ -175,9 +185,7 @@ func TestFindKOFiles(t *testing.T) {
 }
 
 func TestHelloEndpoint(t *testing.T) {
-	s := &server{
-		router: mux.NewRouter(),
-	}
+	s := newTestServer()
 	s.routes()
 
 	req := httptest.NewRequest("GET", "/api/v1/hello", nil)
@@ -196,12 +204,9 @@ func TestHelloEndpoint(t *testing.T) {
 
 func TestBuildModuleEndpoint_NoKernelVersion(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:       mux.NewRouter(),
-		cacheDir:     cacheDir,
-		maxBytesBody: 100 * 1024 * 1024,
-		jobs:         make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
+	s.maxBytesBody = 100 * 1024 * 1024
 	s.routes()
 
 	req := httptest.NewRequest("POST", "/api/v1/build", nil)
@@ -215,12 +220,9 @@ func TestBuildModuleEndpoint_NoKernelVersion(t *testing.T) {
 
 func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:       mux.NewRouter(),
-		cacheDir:     cacheDir,
-		maxBytesBody: 100 * 1024 * 1024,
-		jobs:         make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
+	s.maxBytesBody = 100 * 1024 * 1024
 	s.routes()
 
 	kernelVersion := "5.15.0-86-generic"
@@ -278,11 +280,8 @@ func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 
 func TestGetStatusEndpoint(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:   mux.NewRouter(),
-		cacheDir: cacheDir,
-		jobs:     make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
 	s.routes()
 
 	// Create a test job
@@ -314,10 +313,7 @@ func TestGetStatusEndpoint(t *testing.T) {
 }
 
 func TestGetStatusEndpoint_NotFound(t *testing.T) {
-	s := &server{
-		router: mux.NewRouter(),
-		jobs:   make(map[string]*BuildJob),
-	}
+	s := newTestServer()
 	s.routes()
 
 	req := httptest.NewRequest("GET", "/api/v1/status/non-existent-job", nil)
@@ -330,10 +326,7 @@ func TestGetStatusEndpoint_NotFound(t *testing.T) {
 }
 
 func TestDownloadModuleEndpoint_NotCompleted(t *testing.T) {
-	s := &server{
-		router: mux.NewRouter(),
-		jobs:   make(map[string]*BuildJob),
-	}
+	s := newTestServer()
 	s.routes()
 
 	job := &BuildJob{
@@ -355,11 +348,8 @@ func TestDownloadModuleEndpoint_NotCompleted(t *testing.T) {
 
 func TestDownloadModuleEndpoint_Completed(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:   mux.NewRouter(),
-		cacheDir: cacheDir,
-		jobs:     make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
 	s.routes()
 
 	cachePath := filepath.Join(cacheDir, "test-modules.tar.gz")
@@ -392,12 +382,9 @@ func TestDownloadModuleEndpoint_Completed(t *testing.T) {
 
 func TestBuildModuleEndpoint_RaceCondition(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:       mux.NewRouter(),
-		cacheDir:     cacheDir,
-		maxBytesBody: 100 * 1024 * 1024,
-		jobs:         make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
+	s.maxBytesBody = 100 * 1024 * 1024
 	s.routes()
 
 	kernelVersion := "5.15.0-86-generic"
@@ -515,11 +502,8 @@ func TestCreateTarGz(t *testing.T) {
 
 func TestServer_ConcurrentJobs(t *testing.T) {
 	cacheDir := t.TempDir()
-	s := &server{
-		router:   mux.NewRouter(),
-		cacheDir: cacheDir,
-		jobs:     make(map[string]*BuildJob),
-	}
+	s := newTestServer()
+	s.cacheDir = cacheDir
 	s.routes()
 
 	// Create multiple jobs concurrently

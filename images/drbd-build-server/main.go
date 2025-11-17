@@ -1,10 +1,5 @@
 package main
 
-// TODO: Add ctx where possible
-// TODO: Test with distroless
-// TODO: check if repo copies not move
-// TODO: rename to drbd-build-server
-
 import (
 	"archive/tar"
 	"bytes"
@@ -15,11 +10,12 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -34,12 +30,13 @@ var (
 	flagDRBDDir      = flag.String("drbd-dir", "/drbd", "Path to DRBD source directory")
 	flagDRBDVersion  = flag.String("drbd-version", "", "DRBD version to clone (e.g., 9.2.12). If empty, will try to use existing drbd-dir")
 	flagDRBDRepo     = flag.String("drbd-repo", "https://github.com/LINBIT/drbd.git", "DRBD repository URL")
-	flagCacheDir     = flag.String("cache-dir", "/var/cache/drbd-builder", "Path to cache directory for built modules")
+	flagCacheDir     = flag.String("cache-dir", "/var/cache/drbd-build-server", "Path to cache directory for built modules")
 	flagMaxBytesBody = flag.Int64("maxbytesbody", 100*1024*1024, "Maximum number of bytes in the body (100MB)")
 	flagKeepTmpDir   = flag.Bool("keeptmpdir", false, "Do not delete the temporary directory, useful for debugging")
 	flagCertFile     = flag.String("certfile", "", "Path to a TLS cert file")
 	flagKeyFile      = flag.String("keyfile", "", "Path to a TLS key file")
 	flagVersion      = flag.Bool("version", false, "Print version and exit")
+	flagLogLevel     = flag.String("log-level", "info", "Log level: debug, info, warn, error")
 )
 
 type BuildStatus string
@@ -76,6 +73,7 @@ type server struct {
 	maxBytesBody int64
 	keepTmpDir   bool
 	spaasURL     string
+	logger       *slog.Logger // Structured logger
 
 	// Jobs management
 	jobs map[string]*BuildJob
@@ -111,9 +109,13 @@ func main() {
 		drbdRepo = envRepo
 	}
 
+	// Initialize logger
+	logger := initLogger(*flagLogLevel)
+
 	// Create cache directory if it doesn't exist
 	if err := os.MkdirAll(*flagCacheDir, 0755); err != nil {
-		log.Fatalf("Failed to create cache directory: %v", err)
+		logger.Error("Failed to create cache directory", "error", err)
+		os.Exit(1)
 	}
 
 	// Check if base DRBD directory exists
@@ -121,14 +123,14 @@ func main() {
 	if info, err := os.Stat(*flagDRBDDir); err == nil && info.IsDir() {
 		if _, err := os.Stat(filepath.Join(*flagDRBDDir, "Makefile")); err == nil {
 			hasDRBD = true
-			log.Printf("DRBD source found at %s (will be copied per build)", *flagDRBDDir)
+			logger.Info("DRBD source found", "path", *flagDRBDDir, "note", "will be copied per build")
 		}
 	}
 
 	// If no base DRBD directory and version specified, we'll clone per build
 	if !hasDRBD && drbdVersion == "" {
-		log.Printf("WARNING: No DRBD source found and no version specified. Builds will fail.")
-		log.Printf("Either provide -drbd-dir with existing source or -drbd-version to clone.")
+		logger.Warn("No DRBD source found and no version specified. Builds will fail.")
+		logger.Info("Either provide -drbd-dir with existing source or -drbd-version to clone.")
 		return
 	}
 
@@ -139,6 +141,7 @@ func main() {
 		maxBytesBody: *flagMaxBytesBody,
 		keepTmpDir:   *flagKeepTmpDir,
 		spaasURL:     spaasURL,
+		logger:       logger,
 		jobs:         make(map[string]*BuildJob),
 		drbdVersion:  drbdVersion,
 		drbdRepo:     drbdRepo,
@@ -155,12 +158,37 @@ func main() {
 	}
 
 	if *flagCertFile != "" && *flagKeyFile != "" {
-		log.Printf("Starting TLS server on %s", *flagAddr)
-		log.Fatal(server.ListenAndServeTLS(*flagCertFile, *flagKeyFile))
+		logger.Info("Starting TLS server", "addr", *flagAddr)
+		logger.Error("Server failed", "error", server.ListenAndServeTLS(*flagCertFile, *flagKeyFile))
 	} else {
-		log.Printf("Starting HTTP server on %s (TLS not configured)", *flagAddr)
-		log.Fatal(server.ListenAndServe())
+		logger.Info("Starting HTTP server", "addr", *flagAddr, "note", "TLS not configured")
+		logger.Error("Server failed", "error", server.ListenAndServe())
 	}
+}
+
+// initLogger initializes structured logger with the specified log level
+func initLogger(levelStr string) *slog.Logger {
+	var level slog.Level
+	switch strings.ToLower(levelStr) {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{
+		Level:     level,
+		AddSource: false,
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	return slog.New(handler)
 }
 
 // handler interface, wrapped for MaxBytesReader
@@ -179,7 +207,7 @@ func (s *server) routes() {
 func (s *server) hello() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
-		if _, err := fmt.Fprintf(w, "Successfully connected to DRBD Builder ('%s')\n", GitCommit); err != nil {
+		if _, err := fmt.Fprintf(w, "Successfully connected to DRBD Build Server ('%s')\n", GitCommit); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}
@@ -196,68 +224,75 @@ func generateCacheKey(kernelVersion string, headersData []byte) string {
 func (s *server) buildModuleHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		remoteAddr := r.RemoteAddr
-		log.Printf("[DEBUG] [%s] Received build request: method=%s, path=%s", remoteAddr, r.Method, r.URL.Path)
+		s.logger.Debug("Received build request", "remote_addr", remoteAddr, "method", r.Method, "path", r.URL.Path)
 
 		// Get kernel version from query parameter or header
 		kernelVersion := r.URL.Query().Get("kernel_version")
 		if kernelVersion == "" {
 			kernelVersion = r.Header.Get("X-Kernel-Version")
-			log.Printf("[DEBUG] [%s] Got kernel version from X-Kernel-Version header: %s", remoteAddr, kernelVersion)
+			s.logger.Debug("Got kernel version from header", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
 		} else {
-			log.Printf("[DEBUG] [%s] Got kernel version from query parameter: %s", remoteAddr, kernelVersion)
+			s.logger.Debug("Got kernel version from query", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
 		}
 		if kernelVersion == "" {
-			log.Printf("[DEBUG] [%s] ERROR: kernel_version not provided", remoteAddr)
+			s.logger.Error("kernel_version not provided", "remote_addr", remoteAddr)
 			s.errorf(http.StatusBadRequest, remoteAddr, w, "kernel_version parameter or X-Kernel-Version header is required")
 			return
 		}
 
 		// Validate kernel version format
-		// TODO: Add regex for validation
+		// Kernel version format: X.Y.Z[-flavor] or X.Y.Z[-flavor]-build
+		// Examples: 5.15.0, 5.15.0-generic, 5.15.0-86-generic
+		kernelVersionRegex := regexp.MustCompile(`^\d+\.\d+\.\d+(-[a-zA-Z0-9_-]+)?(-[0-9]+)?$`)
+		if !kernelVersionRegex.MatchString(kernelVersion) {
+			s.logger.Error("Invalid kernel version format", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
+			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid kernel version format. Expected format: X.Y.Z[-flavor] or X.Y.Z[-flavor]-build")
+			return
+		}
 
 		// Read headers data for cache key generation
 		body := r.Body
 		defer body.Close()
 
-		log.Printf("[DEBUG] [%s] Reading kernel headers from request body...", remoteAddr)
+		s.logger.Debug("Reading kernel headers from request body", "remote_addr", remoteAddr)
 		headersData, err := io.ReadAll(body)
 		if err != nil {
-			log.Printf("[DEBUG] [%s] ERROR: Failed to read request body: %v", remoteAddr, err)
+			s.logger.Error("Failed to read request body", "remote_addr", remoteAddr, "error", err)
 			s.errorf(http.StatusBadRequest, remoteAddr, w, "Failed to read request body: %v", err)
 			return
 		}
-		log.Printf("[DEBUG] [%s] Read %d bytes of kernel headers data", remoteAddr, len(headersData))
+		s.logger.Debug("Read kernel headers data", "remote_addr", remoteAddr, "bytes", len(headersData))
 
 		// Generate cache key
 		cacheKey := generateCacheKey(kernelVersion, headersData)
-		log.Printf("[DEBUG] [%s] Generated cache key: %s", remoteAddr, cacheKey)
+		s.logger.Debug("Generated cache key", "remote_addr", remoteAddr, "cache_key", cacheKey)
 
 		// Check if already in cache
 		cachePath := filepath.Join(s.cacheDir, cacheKey+".tar.gz")
-		log.Printf("[DEBUG] [%s] Checking cache at path: %s", remoteAddr, cachePath)
+		s.logger.Debug("Checking cache", "remote_addr", remoteAddr, "cache_path", cachePath)
 		info, err := os.Stat(cachePath)
 		if err == nil && info.Size() > 0 {
-			log.Printf("[INFO] [%s] Cache HIT for kernel %s (key: %s, size: %d bytes)", remoteAddr, kernelVersion, cacheKey[:16], info.Size())
+			s.logger.Info("Cache HIT", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "cache_key", cacheKey[:16], "size_bytes", info.Size())
 			w.Header().Set("Content-Type", "application/gzip")
 			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"drbd-modules-%s.tar.gz\"", kernelVersion))
-			log.Printf("[DEBUG] [%s] Serving cached module file to client...", remoteAddr)
+			s.logger.Debug("Serving cached module file", "remote_addr", remoteAddr)
 			http.ServeFile(w, r, cachePath)
-			log.Printf("[DEBUG] [%s] Successfully sent cached module to client", remoteAddr)
+			s.logger.Debug("Successfully sent cached module to client", "remote_addr", remoteAddr)
 			return
 		}
 		if err != nil {
-			log.Printf("[DEBUG] [%s] Cache miss (file not found or error): %v", remoteAddr, err)
+			s.logger.Debug("Cache miss", "remote_addr", remoteAddr, "reason", "file not found or error", "error", err)
 		} else if info != nil && info.Size() == 0 {
-			log.Printf("[DEBUG] [%s] Cache miss (file exists but size is 0)", remoteAddr)
+			s.logger.Debug("Cache miss", "remote_addr", remoteAddr, "reason", "file exists but size is 0")
 		}
 
 		// Check if build is in progress
-		log.Printf("[DEBUG] [%s] Checking for existing job with key: %s", remoteAddr, cacheKey[:16])
+		s.logger.Debug("Checking for existing job", "remote_addr", remoteAddr, "cache_key", cacheKey[:16])
 		s.jmu.RLock()
 		job, exists := s.jobs[cacheKey]
 		activeJobsCount := len(s.jobs)
 		s.jmu.RUnlock()
-		log.Printf("[DEBUG] [%s] Total active jobs: %d", remoteAddr, activeJobsCount)
+		s.logger.Debug("Total active jobs", "remote_addr", remoteAddr, "count", activeJobsCount)
 
 		if exists {
 			job.mu.RLock()
@@ -265,17 +300,17 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 			jobID := job.Key
 			createdAt := job.CreatedAt
 			job.mu.RUnlock()
-			log.Printf("[DEBUG] [%s] Found existing job: id=%s, status=%s, created_at=%s", remoteAddr, jobID[:16], status, createdAt.Format(time.RFC3339))
+			s.logger.Debug("Found existing job", "remote_addr", remoteAddr, "job_id", jobID[:16], "status", status, "created_at", createdAt.Format(time.RFC3339))
 
 			if status == StatusBuilding || status == StatusPending {
-				log.Printf("[INFO] [%s] Build already in progress for kernel %s (job: %s, status: %s)", remoteAddr, kernelVersion, jobID[:16], status)
+				s.logger.Info("Build already in progress", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "job_id", jobID[:16], "status", status)
 				resp := BuildResponse{
 					Status: status,
 					JobID:  jobID,
 				}
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
-				log.Printf("[DEBUG] [%s] Returning job ID to client: %s", remoteAddr, jobID)
+				s.logger.Debug("Returning job ID to client", "remote_addr", remoteAddr, "job_id", jobID)
 				json.NewEncoder(w).Encode(resp)
 				return
 			}
@@ -285,18 +320,17 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 				cachePath := job.CachePath
 				completedAt := job.CompletedAt
 				job.mu.RUnlock()
-				log.Printf("[DEBUG] [%s] Job completed, checking cache file: %s", remoteAddr, cachePath)
+				s.logger.Debug("Job completed, checking cache file", "remote_addr", remoteAddr, "cache_path", cachePath)
 				if cachePath != "" {
 					if info, err := os.Stat(cachePath); err == nil {
-						log.Printf("[INFO] [%s] Serving completed build for kernel %s (completed_at: %v, size: %d bytes)",
-							remoteAddr, kernelVersion, completedAt, info.Size())
+						s.logger.Info("Serving completed build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "completed_at", completedAt, "size_bytes", info.Size())
 						w.Header().Set("Content-Type", "application/gzip")
 						w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"drbd-modules-%s.tar.gz\"", kernelVersion))
 						http.ServeFile(w, r, cachePath)
-						log.Printf("[DEBUG] [%s] Successfully sent completed build to client", remoteAddr)
+						s.logger.Debug("Successfully sent completed build to client", "remote_addr", remoteAddr)
 						return
 					} else {
-						log.Printf("[DEBUG] [%s] WARNING: Cache file for completed job not found: %v", remoteAddr, err)
+						s.logger.Warn("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
 					}
 				}
 			}
@@ -305,14 +339,14 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 				job.mu.RLock()
 				errorMsg := job.Error
 				job.mu.RUnlock()
-				log.Printf("[DEBUG] [%s] Previous job failed, creating new one. Error: %s", remoteAddr, errorMsg)
+				s.logger.Debug("Previous job failed, creating new one", "remote_addr", remoteAddr, "error", errorMsg)
 			}
 		} else {
-			log.Printf("[DEBUG] [%s] No existing job found, will create new one", remoteAddr)
+			s.logger.Debug("No existing job found, will create new one", "remote_addr", remoteAddr)
 		}
 
 		// Create new job
-		log.Printf("[DEBUG] [%s] Creating new build job...", remoteAddr)
+		s.logger.Debug("Creating new build job", "remote_addr", remoteAddr)
 		job = &BuildJob{
 			Key:           cacheKey,
 			KernelVersion: kernelVersion,
@@ -325,13 +359,12 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		s.jobs[cacheKey] = job
 		activeJobsCount = len(s.jobs)
 		s.jmu.Unlock()
-		log.Printf("[INFO] [%s] Created new build job: id=%s, kernel=%s, cache_path=%s, total_jobs=%d",
-			remoteAddr, cacheKey[:16], kernelVersion, cachePath, activeJobsCount)
+		s.logger.Info("Created new build job", "remote_addr", remoteAddr, "job_id", cacheKey[:16], "kernel_version", kernelVersion, "cache_path", cachePath, "total_jobs", activeJobsCount)
 
-		log.Printf("[INFO] [%s] Starting DRBD build for kernel version: %s (job: %s)", remoteAddr, kernelVersion, cacheKey[:16])
+		s.logger.Info("Starting DRBD build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "job_id", cacheKey[:16])
 
 		// Start build in background
-		log.Printf("[DEBUG] [%s] Launching async build goroutine for job %s", remoteAddr, cacheKey[:16])
+		s.logger.Debug("Launching async build goroutine", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
 		go s.buildModule(job, headersData, remoteAddr)
 
 		// Return job ID immediately
@@ -341,20 +374,20 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
-		log.Printf("[DEBUG] [%s] Returning job ID %s to client with status 202 Accepted", remoteAddr, cacheKey[:16])
+		s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
 		json.NewEncoder(w).Encode(resp)
 	}
 }
 
 func (s *server) buildModule(job *BuildJob, headersData []byte, remoteAddr string) {
 	jobID := job.Key[:16]
-	log.Printf("[DEBUG] [job:%s] Async build started for kernel %s", jobID, job.KernelVersion)
+	s.logger.Debug("Async build started", "job_id", jobID, "kernel_version", job.KernelVersion)
 
 	job.mu.Lock()
 	job.Status = StatusBuilding
 	startTime := time.Now()
 	job.mu.Unlock()
-	log.Printf("[DEBUG] [job:%s] Job status set to BUILDING", jobID)
+	s.logger.Debug("Job status set to BUILDING", "job_id", jobID)
 
 	defer func() {
 		job.mu.Lock()
@@ -363,214 +396,177 @@ func (s *server) buildModule(job *BuildJob, headersData []byte, remoteAddr strin
 		duration := now.Sub(startTime)
 		status := job.Status
 		job.mu.Unlock()
-		log.Printf("[DEBUG] [job:%s] Build completed with status=%s, duration=%v", jobID, status, duration)
+		s.logger.Debug("Build completed", "job_id", jobID, "status", status, "duration", duration)
 	}()
 
 	// Create temporary directory for kernel headers
-	log.Printf("[DEBUG] [job:%s] Creating temporary directory...", jobID)
-	tmpDir, err := os.MkdirTemp("", "drbd-builder-*")
+	s.logger.Debug("Creating temporary directory", "job_id", jobID)
+	tmpDir, err := os.MkdirTemp("", "drbd-build-server-*")
 	if err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to create temporary directory: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] Build failed: %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
-	log.Printf("[DEBUG] [job:%s] Created temporary directory: %s", jobID, tmpDir)
+	s.logger.Debug("Created temporary directory", "job_id", jobID, "tmp_dir", tmpDir)
 
 	if !s.keepTmpDir {
 		defer func() {
 			if err := os.RemoveAll(tmpDir); err != nil {
-				log.Printf("Failed to remove temporary directory %s: %v", tmpDir, err)
+				s.logger.Warn("Failed to remove temporary directory", "job_id", jobID, "tmp_dir", tmpDir, "error", err)
 			}
 		}()
 	} else {
-		log.Printf("Keeping temporary directory: %s", tmpDir)
+		s.logger.Info("Keeping temporary directory", "job_id", jobID, "tmp_dir", tmpDir)
 	}
 
 	// Extract kernel headers from request body
 	kernelHeadersDir := filepath.Join(tmpDir, "kernel-headers")
-	log.Printf("[DEBUG] [job:%s] Creating kernel headers directory: %s", jobID, kernelHeadersDir)
+	s.logger.Debug("Creating kernel headers directory", "job_id", jobID, "kernel_headers_dir", kernelHeadersDir)
 	if err := os.MkdirAll(kernelHeadersDir, 0755); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to create kernel headers directory: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 
 	// Extract tar.gz archive
-	log.Printf("[DEBUG] [job:%s] Extracting kernel headers archive (%d bytes)...", jobID, len(headersData))
+	s.logger.Debug("Extracting kernel headers archive", "job_id", jobID, "bytes", len(headersData))
 	headersReader := bytes.NewReader(headersData)
 	if err := extractTarGz(headersReader, kernelHeadersDir); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to extract kernel headers: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
-	log.Printf("[DEBUG] [job:%s] Successfully extracted kernel headers to %s", jobID, kernelHeadersDir)
+	s.logger.Debug("Successfully extracted kernel headers", "job_id", jobID, "kernel_headers_dir", kernelHeadersDir)
 
-	// Find the build directory (usually /lib/modules/KVER/build)
-	// TODO: Move to separate method & write step-by-step comment
-	// TODO: Use early return
-	// TODO: Check if KVER is valid
-	log.Printf("[DEBUG] [job:%s] Searching for kernel build directory...", jobID)
-	buildDir := filepath.Join(kernelHeadersDir, "lib", "modules", job.KernelVersion, "build")
-	log.Printf("[DEBUG] [job:%s] Trying standard location: %s", jobID, buildDir)
-	if _, err := os.Stat(buildDir); os.IsNotExist(err) {
-		log.Printf("[DEBUG] [job:%s] Standard location not found, trying alternative...", jobID)
-		// Try alternative location
-		buildDir = filepath.Join(kernelHeadersDir, "usr", "src", "linux-headers-"+job.KernelVersion)
-		log.Printf("[DEBUG] [job:%s] Trying alternative location: %s", jobID, buildDir)
-		if _, err := os.Stat(buildDir); os.IsNotExist(err) {
-			log.Printf("[DEBUG] [job:%s] Alternative location not found, searching for Makefile...", jobID)
-			// Try to find any build directory
-			matches, _ := filepath.Glob(filepath.Join(kernelHeadersDir, "**", "Makefile"))
-			log.Printf("[DEBUG] [job:%s] Found %d Makefile(s) in extracted headers", jobID, len(matches))
-			if len(matches) > 0 {
-				buildDir = filepath.Dir(matches[0])
-				log.Printf("[DEBUG] [job:%s] Using build directory from found Makefile: %s", jobID, buildDir)
-			} else {
-				job.mu.Lock()
-				job.Status = StatusFailed
-				job.Error = fmt.Sprintf("Kernel build directory not found for version %s", job.KernelVersion)
-				job.mu.Unlock()
-				log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
-				return
-			}
-		} else {
-			log.Printf("[DEBUG] [job:%s] Found build directory in alternative location", jobID)
-		}
-	} else {
-		log.Printf("[DEBUG] [job:%s] Found build directory in standard location", jobID)
-	}
-
-	// Verify Makefile exists
-	makefilePath := filepath.Join(buildDir, "Makefile")
-	log.Printf("[DEBUG] [job:%s] Verifying kernel Makefile exists: %s", jobID, makefilePath)
-	if _, err := os.Stat(makefilePath); os.IsNotExist(err) {
+	// Find the kernel build directory
+	buildDir, err := s.findKernelBuildDir(kernelHeadersDir, job.KernelVersion, jobID)
+	if err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
-		job.Error = fmt.Sprintf("Kernel Makefile not found in %s", buildDir)
+		job.Error = err.Error()
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
-	log.Printf("[INFO] [job:%s] Using kernel build directory: %s", jobID, buildDir)
+	s.logger.Info("Using kernel build directory", "job_id", jobID, "build_dir", buildDir)
 
 	// Prepare DRBD source for this build (create isolated copy)
-	log.Printf("[INFO] [job:%s] Preparing DRBD source (isolated copy for this build)...", jobID)
+	s.logger.Info("Preparing DRBD source (isolated copy for this build)", "job_id", jobID)
 	drbdBuildDir := filepath.Join(tmpDir, "drbd")
 	if err := s.prepareDRBDForBuild(drbdBuildDir, jobID); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to prepare DRBD source: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
-	log.Printf("[DEBUG] [job:%s] DRBD source prepared at: %s", jobID, drbdBuildDir)
+	s.logger.Debug("DRBD source prepared", "job_id", jobID, "drbd_build_dir", drbdBuildDir)
 
 	// Cleanup DRBD copy after build (unless keepTmpDir is set)
 	if !s.keepTmpDir {
 		defer func() {
-			log.Printf("[DEBUG] [job:%s] Cleaning up DRBD build directory: %s", jobID, drbdBuildDir)
+			s.logger.Debug("Cleaning up DRBD build directory", "job_id", jobID, "drbd_build_dir", drbdBuildDir)
 			if err := os.RemoveAll(drbdBuildDir); err != nil {
-				log.Printf("[WARNING] [job:%s] Failed to remove DRBD build directory: %v", jobID, err)
+				s.logger.Warn("Failed to remove DRBD build directory", "job_id", jobID, "error", err)
 			}
 		}()
 	}
 
 	// Build DRBD module
 	modulesDir := filepath.Join(tmpDir, "modules")
-	log.Printf("[DEBUG] [job:%s] Creating modules output directory: %s", jobID, modulesDir)
+	s.logger.Debug("Creating modules output directory", "job_id", jobID, "modules_dir", modulesDir)
 	if err := os.MkdirAll(modulesDir, 0755); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to create modules directory: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 
-	log.Printf("[INFO] [job:%s] Starting DRBD module build process...", jobID)
+	s.logger.Info("Starting DRBD module build process", "job_id", jobID)
 	if err := s.buildDRBD(job.KernelVersion, buildDir, modulesDir, drbdBuildDir, jobID); err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = err.Error()
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] Build failed: %s", jobID, err.Error())
+		s.logger.Error("Build failed", "job_id", jobID, "error", err.Error())
 		return
 	}
-	log.Printf("[DEBUG] [job:%s] DRBD module build completed successfully", jobID)
+	s.logger.Debug("DRBD module build completed successfully", "job_id", jobID)
 
 	// Collect .ko files
-	log.Printf("[DEBUG] [job:%s] Searching for .ko files in %s...", jobID, modulesDir)
+	s.logger.Debug("Searching for .ko files", "job_id", jobID, "modules_dir", modulesDir)
 	koFiles, err := findKOFiles(modulesDir)
 	if err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to find .ko files: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 
-	log.Printf("[DEBUG] [job:%s] Found %d .ko file(s)", jobID, len(koFiles))
+	s.logger.Debug("Found .ko files", "job_id", jobID, "count", len(koFiles))
 	if len(koFiles) == 0 {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("No .ko files found after build in %s", modulesDir)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 
 	for i, koFile := range koFiles {
-		log.Printf("[DEBUG] [job:%s]   [%d] %s", jobID, i+1, koFile)
+		s.logger.Debug("Found .ko file", "job_id", jobID, "index", i+1, "file", koFile)
 	}
 
 	// Create tar.gz archive with .ko files and save to cache
 	cachePath := job.CachePath
-	log.Printf("[DEBUG] [job:%s] Creating cache file: %s", jobID, cachePath)
+	s.logger.Debug("Creating cache file", "job_id", jobID, "cache_path", cachePath)
 	cacheFile, err := os.Create(cachePath)
 	if err != nil {
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to create cache file: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 	defer cacheFile.Close()
 
-	log.Printf("[DEBUG] [job:%s] Creating tar.gz archive with %d .ko file(s)...", jobID, len(koFiles))
+	s.logger.Debug("Creating tar.gz archive", "job_id", jobID, "ko_files_count", len(koFiles))
 	if err := createTarGz(cacheFile, koFiles, modulesDir); err != nil {
 		os.Remove(cachePath)
 		job.mu.Lock()
 		job.Status = StatusFailed
 		job.Error = fmt.Sprintf("Failed to create tar.gz: %v", err)
 		job.mu.Unlock()
-		log.Printf("[ERROR] [job:%s] %s", jobID, job.Error)
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
 		return
 	}
 
 	cacheFile.Close()
 	cacheInfo, _ := os.Stat(cachePath)
 	if cacheInfo != nil {
-		log.Printf("[DEBUG] [job:%s] Cache file created successfully: %d bytes", jobID, cacheInfo.Size())
+		s.logger.Debug("Cache file created successfully", "job_id", jobID, "size_bytes", cacheInfo.Size())
 	}
 
 	// Update job status
 	job.mu.Lock()
 	job.Status = StatusCompleted
 	job.mu.Unlock()
-	log.Printf("[INFO] [job:%s] Successfully built DRBD modules for kernel %s (cache: %s, size: %d bytes)",
-		jobID, job.KernelVersion, cachePath, cacheInfo.Size())
+	s.logger.Info("Successfully built DRBD modules", "job_id", jobID, "kernel_version", job.KernelVersion, "cache_path", cachePath, "size_bytes", cacheInfo.Size())
 }
 
 func (s *server) getStatus() http.HandlerFunc {
@@ -578,14 +574,14 @@ func (s *server) getStatus() http.HandlerFunc {
 		remoteAddr := r.RemoteAddr
 		vars := mux.Vars(r)
 		jobID := vars["job_id"]
-		log.Printf("[DEBUG] [%s] Status request for job: %s", remoteAddr, jobID)
+		s.logger.Debug("Status request for job", "remote_addr", remoteAddr, "job_id", jobID)
 
 		s.jmu.RLock()
 		job, exists := s.jobs[jobID]
 		s.jmu.RUnlock()
 
 		if !exists {
-			log.Printf("[DEBUG] [%s] Job not found: %s", remoteAddr, jobID)
+			s.logger.Debug("Job not found", "remote_addr", remoteAddr, "job_id", jobID)
 			s.errorf(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
 			return
 		}
@@ -605,8 +601,7 @@ func (s *server) getStatus() http.HandlerFunc {
 		} else {
 			duration = time.Since(createdAt).String()
 		}
-		log.Printf("[DEBUG] [%s] Job status: %s, kernel=%s, duration=%s, error=%v",
-			remoteAddr, status, kernelVersion, duration, errorMsg != "")
+		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", status, "kernel_version", kernelVersion, "duration", duration, "has_error", errorMsg != "")
 
 		resp := BuildResponse{
 			Status: status,
@@ -615,7 +610,7 @@ func (s *server) getStatus() http.HandlerFunc {
 
 		if status == StatusCompleted {
 			resp.DownloadURL = fmt.Sprintf("/api/v1/download/%s", jobID)
-			log.Printf("[DEBUG] [%s] Job completed, download_url: %s", remoteAddr, resp.DownloadURL)
+			s.logger.Debug("Job completed", "remote_addr", remoteAddr, "download_url", resp.DownloadURL)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -651,14 +646,14 @@ func (s *server) downloadModule() http.HandlerFunc {
 		remoteAddr := r.RemoteAddr
 		vars := mux.Vars(r)
 		jobID := vars["job_id"]
-		log.Printf("[DEBUG] [%s] Download request for job: %s", remoteAddr, jobID)
+		s.logger.Debug("Download request for job", "remote_addr", remoteAddr, "job_id", jobID)
 
 		s.jmu.RLock()
 		job, exists := s.jobs[jobID]
 		s.jmu.RUnlock()
 
 		if !exists {
-			log.Printf("[DEBUG] [%s] Job not found: %s", remoteAddr, jobID)
+			s.logger.Debug("Job not found", "remote_addr", remoteAddr, "job_id", jobID)
 			s.errorf(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
 			return
 		}
@@ -669,37 +664,37 @@ func (s *server) downloadModule() http.HandlerFunc {
 		kernelVersion := job.KernelVersion
 		job.mu.RUnlock()
 
-		log.Printf("[DEBUG] [%s] Job status: %s, cache_path: %s", remoteAddr, status, cachePath)
+		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", status, "cache_path", cachePath)
 
 		if status != StatusCompleted {
-			log.Printf("[DEBUG] [%s] Job not completed, status: %s", remoteAddr, status)
+			s.logger.Debug("Job not completed", "remote_addr", remoteAddr, "status", status)
 			s.errorf(http.StatusBadRequest, remoteAddr, w, "Job is not completed yet. Status: %s", status)
 			return
 		}
 
 		if cachePath == "" {
-			log.Printf("[DEBUG] [%s] Cache path not set for completed job", remoteAddr)
+			s.logger.Debug("Cache path not set for completed job", "remote_addr", remoteAddr)
 			s.errorf(http.StatusInternalServerError, remoteAddr, w, "Cache path not set for completed job")
 			return
 		}
 
 		cacheInfo, err := os.Stat(cachePath)
 		if os.IsNotExist(err) {
-			log.Printf("[DEBUG] [%s] Cache file not found: %s", remoteAddr, cachePath)
+			s.logger.Debug("Cache file not found", "remote_addr", remoteAddr, "cache_path", cachePath)
 			s.errorf(http.StatusNotFound, remoteAddr, w, "Cache file not found: %s", cachePath)
 			return
 		}
 
-		log.Printf("[INFO] [%s] Serving module file: %s (size: %d bytes)", remoteAddr, cachePath, cacheInfo.Size())
+		s.logger.Info("Serving module file", "remote_addr", remoteAddr, "cache_path", cachePath, "size_bytes", cacheInfo.Size())
 		w.Header().Set("Content-Type", "application/gzip")
 		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"drbd-modules-%s.tar.gz\"", kernelVersion))
 		http.ServeFile(w, r, cachePath)
-		log.Printf("[DEBUG] [%s] Module file sent successfully", remoteAddr)
+		s.logger.Debug("Module file sent successfully", "remote_addr", remoteAddr)
 	}
 }
 
 func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jobID string) error {
-	log.Printf("[DEBUG] [job:%s] Starting buildDRBD: kernel=%s, kdir=%s, output=%s, drbd=%s", jobID, kernelVersion, kernelBuildDir, outputDir, drbdDir)
+	s.logger.Debug("Starting buildDRBD", "job_id", jobID, "kernel_version", kernelVersion, "kdir", kernelBuildDir, "output", outputDir, "drbd_dir", drbdDir)
 
 	// Change to DRBD directory
 	originalDir, err := os.Getwd()
@@ -708,29 +703,30 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	}
 	defer os.Chdir(originalDir)
 
-	log.Printf("[DEBUG] [job:%s] Changing to DRBD directory: %s", jobID, drbdDir)
+	s.logger.Debug("Changing to DRBD directory", "job_id", jobID, "drbd_dir", drbdDir)
 	if err := os.Chdir(drbdDir); err != nil {
 		return fmt.Errorf("failed to change to DRBD directory %s: %v", drbdDir, err)
 	}
 
 	// Verify DRBD Makefile exists
-	log.Printf("[DEBUG] [job:%s] Verifying DRBD Makefile exists...", jobID)
+	s.logger.Debug("Verifying DRBD Makefile exists", "job_id", jobID)
 	if _, err := os.Stat("Makefile"); os.IsNotExist(err) {
 		return fmt.Errorf("DRBD Makefile not found in %s", drbdDir)
 	}
-	log.Printf("[DEBUG] [job:%s] DRBD Makefile found", jobID)
+	s.logger.Debug("DRBD Makefile found", "job_id", jobID)
 
 	// Set environment variables for make
-	// env := os.Environ() // TODO: check if outer ENV is needed
-	env := []string{}
+	// Use system environment variables as base and add DRBD-specific ones
+	// This ensures PATH and other important variables are available
+	env := os.Environ()
 	env = append(env, fmt.Sprintf("KVER=%s", kernelVersion))
 	env = append(env, fmt.Sprintf("KDIR=%s", kernelBuildDir))
 	env = append(env, fmt.Sprintf("SPAAS_URL=%s", s.spaasURL))
 	env = append(env, "SPAAS=true")
-	log.Printf("[DEBUG] [job:%s] Environment: KVER=%s, KDIR=%s, SPAAS_URL=%s", jobID, kernelVersion, kernelBuildDir, s.spaasURL)
+	s.logger.Debug("Environment variables set", "job_id", jobID, "KVER", kernelVersion, "KDIR", kernelBuildDir, "SPAAS_URL", s.spaasURL)
 
 	// Clean previous build
-	log.Printf("[DEBUG] [job:%s] Running 'make clean'...", jobID)
+	s.logger.Debug("Running 'make clean'", "job_id", jobID)
 	cmd := exec.Command("make", "clean")
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
@@ -738,27 +734,27 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
 		// Don't fail on clean errors
-		log.Printf("[DEBUG] [job:%s] WARNING: make clean failed (ignored): %v", jobID, err)
+		s.logger.Debug("make clean failed (ignored)", "job_id", jobID, "error", err)
 	} else {
-		log.Printf("[DEBUG] [job:%s] 'make clean' completed successfully", jobID)
+		s.logger.Debug("'make clean' completed successfully", "job_id", jobID)
 	}
 
 	// Check and update submodules if needed (required by make module)
-	// TODO: check
-	log.Printf("[DEBUG] [job:%s] Checking submodules...", jobID)
+	// This ensures all submodules are initialized before building
+	s.logger.Debug("Checking submodules", "job_id", jobID)
 	cmd = exec.Command("make", "check-submods")
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
-		log.Printf("[DEBUG] [job:%s] WARNING: make check-submods failed (may be OK if no submodules): %v", jobID, err)
+		s.logger.Debug("make check-submods failed (may be OK if no submodules)", "job_id", jobID, "error", err)
 	} else {
-		log.Printf("[DEBUG] [job:%s] Submodules check completed", jobID)
+		s.logger.Debug("Submodules check completed", "job_id", jobID)
 	}
 
 	// Build module
-	log.Printf("[INFO] [job:%s] Running 'make module' (this may take several minutes)...", jobID)
+	s.logger.Info("Running 'make module' (this may take several minutes)", "job_id", jobID)
 	startTime := time.Now()
 	cmd = exec.Command("make", "module")
 	cmd.Env = env
@@ -769,10 +765,10 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 		return fmt.Errorf("make module failed: %v", err)
 	}
 	buildDuration := time.Since(startTime)
-	log.Printf("[DEBUG] [job:%s] 'make module' completed successfully in %v", jobID, buildDuration)
+	s.logger.Debug("'make module' completed successfully", "job_id", jobID, "duration", buildDuration)
 
 	// Install modules to output directory
-	log.Printf("[DEBUG] [job:%s] Installing modules to %s...", jobID, outputDir)
+	s.logger.Debug("Installing modules to output directory", "job_id", jobID, "output_dir", outputDir)
 	cmd = exec.Command("make", "install")
 	cmd.Env = append(env, fmt.Sprintf("DESTDIR=%s", outputDir))
 	cmd.Stdout = os.Stdout
@@ -781,15 +777,72 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("make install failed: %v", err)
 	}
-	log.Printf("[DEBUG] [job:%s] Modules installed successfully to %s", jobID, outputDir)
+	s.logger.Debug("Modules installed successfully", "job_id", jobID, "output_dir", outputDir)
 
 	return nil
+}
+
+// findKernelBuildDir searches for the kernel build directory in the extracted headers.
+// It tries multiple locations in order:
+// 1. Standard location: /lib/modules/KVER/build
+// 2. Alternative location: /usr/src/linux-headers-KVER
+// 3. Search for any Makefile in the extracted headers
+// Returns the build directory path or an error if not found.
+func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID string) (string, error) {
+	s.logger.Debug("Searching for kernel build directory", "job_id", jobID)
+
+	// Step 1: Try standard location (/lib/modules/KVER/build)
+	buildDir := filepath.Join(kernelHeadersDir, "lib", "modules", kernelVersion, "build")
+	s.logger.Debug("Trying standard location", "job_id", jobID, "build_dir", buildDir)
+	if info, err := os.Stat(buildDir); err == nil && info.IsDir() {
+		makefilePath := filepath.Join(buildDir, "Makefile")
+		if _, err := os.Stat(makefilePath); err == nil {
+			s.logger.Debug("Found build directory in standard location", "job_id", jobID)
+			return buildDir, nil
+		}
+		s.logger.Debug("Standard location exists but Makefile not found", "job_id", jobID)
+	}
+
+	// Step 2: Try alternative location (/usr/src/linux-headers-KVER)
+	buildDir = filepath.Join(kernelHeadersDir, "usr", "src", "linux-headers-"+kernelVersion)
+	s.logger.Debug("Trying alternative location", "job_id", jobID, "build_dir", buildDir)
+	if info, err := os.Stat(buildDir); err == nil && info.IsDir() {
+		makefilePath := filepath.Join(buildDir, "Makefile")
+		if _, err := os.Stat(makefilePath); err == nil {
+			s.logger.Debug("Found build directory in alternative location", "job_id", jobID)
+			return buildDir, nil
+		}
+		s.logger.Debug("Alternative location exists but Makefile not found", "job_id", jobID)
+	}
+
+	// Step 3: Search for any Makefile in the extracted headers
+	s.logger.Debug("Standard locations not found, searching for Makefile", "job_id", jobID)
+	matches, err := filepath.Glob(filepath.Join(kernelHeadersDir, "**", "Makefile"))
+	if err != nil {
+		return "", fmt.Errorf("failed to search for Makefile: %v", err)
+	}
+	s.logger.Debug("Found Makefile(s) in extracted headers", "job_id", jobID, "count", len(matches))
+
+	if len(matches) > 0 {
+		// Use the first Makefile found (usually the kernel build Makefile)
+		buildDir = filepath.Dir(matches[0])
+		s.logger.Debug("Using build directory from found Makefile", "job_id", jobID, "build_dir", buildDir)
+		// Verify Makefile exists
+		makefilePath := filepath.Join(buildDir, "Makefile")
+		if _, err := os.Stat(makefilePath); err == nil {
+			return buildDir, nil
+		}
+	}
+
+	// Step 4: Validation failed - return error
+	return "", fmt.Errorf("kernel build directory not found for version %s. Searched in: %s/lib/modules/%s/build, %s/usr/src/linux-headers-%s, and all Makefiles in archive",
+		kernelVersion, kernelHeadersDir, kernelVersion, kernelHeadersDir, kernelVersion)
 }
 
 // prepareDRBDForBuild prepares an isolated DRBD source directory for a build.
 // It either copies from base drbdDir or clones from repository if version is specified.
 func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
-	log.Printf("[DEBUG] [job:%s] Preparing DRBD source at: %s", jobID, destDir)
+	s.logger.Debug("Preparing DRBD source", "job_id", jobID, "dest_dir", destDir)
 
 	// Create destination directory
 	if err := os.MkdirAll(destDir, 0755); err != nil {
@@ -801,11 +854,11 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 		if info, err := os.Stat(s.drbdDir); err == nil && info.IsDir() {
 			if _, err := os.Stat(filepath.Join(s.drbdDir, "Makefile")); err == nil {
 				// Copy existing DRBD directory
-				log.Printf("[INFO] [job:%s] Copying DRBD source from %s to %s...", jobID, s.drbdDir, destDir)
-				if err := copyDirectory(s.drbdDir, destDir, jobID); err != nil {
+				s.logger.Info("Copying DRBD source", "job_id", jobID, "src", s.drbdDir, "dst", destDir)
+				if err := copyDirectory(s.drbdDir, destDir, jobID, s.logger); err != nil {
 					return fmt.Errorf("failed to copy DRBD directory: %v", err)
 				}
-				log.Printf("[DEBUG] [job:%s] DRBD source copied successfully", jobID)
+				s.logger.Debug("DRBD source copied successfully", "job_id", jobID)
 				return nil
 			}
 		}
@@ -816,72 +869,41 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 		return fmt.Errorf("no DRBD source available: neither drbd-dir exists nor drbd-version specified")
 	}
 
-	log.Printf("[INFO] [job:%s] Cloning DRBD repository (version=%s)...", jobID, s.drbdVersion)
+	s.logger.Info("Cloning DRBD repository", "job_id", jobID, "version", s.drbdVersion)
 	if err := s.cloneDRBDRepoToDir(s.drbdVersion, s.drbdRepo, destDir, jobID); err != nil {
 		return fmt.Errorf("failed to clone DRBD repository: %v", err)
 	}
-	log.Printf("[DEBUG] [job:%s] DRBD repository cloned successfully", jobID)
+	s.logger.Debug("DRBD repository cloned successfully", "job_id", jobID)
 	return nil
 }
 
-// copyDirectory recursively copies a directory from src to dst
-// TODO: review
-func copyDirectory(src, dst, jobID string) error {
-	log.Printf("[DEBUG] [job:%s] Copying directory: %s -> %s", jobID, src, dst)
+// copyDirectory recursively copies a directory from src to dst.
+// Uses cp -a to preserve permissions, timestamps, and handle symlinks.
+func copyDirectory(src, dst, jobID string, logger *slog.Logger) error {
+	logger.Debug("Copying directory", "job_id", jobID, "src", src, "dst", dst)
 
-	err := filepath.Walk(src, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-
-		// Calculate relative path
-		relPath, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		destPath := filepath.Join(dst, relPath)
-
-		if info.IsDir() {
-			return os.MkdirAll(destPath, info.Mode())
-		}
-
-		// Copy file
-		srcFile, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		defer srcFile.Close()
-
-		destFile, err := os.OpenFile(destPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode())
-		if err != nil {
-			return err
-		}
-		defer destFile.Close()
-
-		_, err = io.Copy(destFile, srcFile)
-		return err
-	})
-
+	// Use cp -a to copy recursively with all attributes preserved
+	// -a = archive mode (equivalent to -dR --preserve=all)
+	cmd := exec.Command("cp", "-a", src+"/.", dst)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Printf("[ERROR] [job:%s] Failed to copy directory: %v", jobID, err)
-		return err
+		return fmt.Errorf("failed to copy directory: %v, output: %s", err, string(output))
 	}
 
-	log.Printf("[DEBUG] [job:%s] Directory copied successfully", jobID)
+	logger.Debug("Directory copied successfully", "job_id", jobID)
 	return nil
 }
 
 // cloneDRBDRepoToDir clones the DRBD repository to the specified directory
 func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) error {
-	log.Printf("[DEBUG] [job:%s] Cloning DRBD repository: version=%s, repo=%s, dest=%s", jobID, version, repoURL, destDir)
+	s.logger.Debug("Cloning DRBD repository", "job_id", jobID, "version", version, "repo", repoURL, "dest", destDir)
 
 	// Determine branch name (format: drbd-9.2.12)
 	branch := fmt.Sprintf("drbd-%s", version)
-	log.Printf("[DEBUG] [job:%s] Cloning branch: %s", jobID, branch)
+	s.logger.Debug("Cloning branch", "job_id", jobID, "branch", branch)
 
 	// Clone repository directly to destination
-	log.Printf("[DEBUG] [job:%s] Running: git clone --depth 1 --branch %s %s %s", jobID, branch, repoURL, destDir)
+	s.logger.Debug("Running git clone", "job_id", jobID, "branch", branch, "repo", repoURL, "dest", destDir)
 	cmd := exec.Command("git", "clone", "--depth", "1", "--branch", branch, repoURL, destDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -889,10 +911,19 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 		return fmt.Errorf("git clone failed: %v", err)
 	}
 
-	gitHash := "123456" // TODO: git rev-parse HEAD
+	// Get git hash before removing .git directory
+	gitHash := "unknown"
+	hashCmd := exec.Command("git", "rev-parse", "HEAD")
+	hashCmd.Dir = destDir
+	if output, err := hashCmd.Output(); err == nil {
+		gitHash = strings.TrimSpace(string(output))
+		s.logger.Debug("Got git hash", "job_id", jobID, "git_hash", gitHash)
+	} else {
+		s.logger.Warn("Failed to get git hash", "job_id", jobID, "error", err)
+	}
 
 	// Update submodules
-	log.Printf("[DEBUG] [job:%s] Updating submodules...", jobID)
+	s.logger.Debug("Updating submodules", "job_id", jobID)
 	cmd = exec.Command("git", "submodule", "update", "--init", "--recursive")
 	cmd.Dir = destDir
 	cmd.Stdout = os.Stdout
@@ -902,9 +933,9 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 	}
 
 	// Remove .git directory
-	log.Printf("[DEBUG] [job:%s] Removing .git directory...", jobID)
+	s.logger.Debug("Removing .git directory", "job_id", jobID)
 	if err := os.RemoveAll(filepath.Join(destDir, ".git")); err != nil {
-		log.Printf("[WARNING] [job:%s] Failed to remove .git directory: %v", jobID, err)
+		s.logger.Warn("Failed to remove .git directory", "job_id", jobID, "error", err)
 	}
 
 	// Create drbd/.drbd_git_revision file
@@ -918,7 +949,7 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 	if err := os.WriteFile(gitRevisionPath, []byte(gitRevisionContent), 0644); err != nil {
 		return fmt.Errorf("failed to create .drbd_git_revision file: %v", err)
 	}
-	log.Printf("[DEBUG] [job:%s] Created drbd/.drbd_git_revision with hash: %s", jobID, gitHash)
+	s.logger.Debug("Created drbd/.drbd_git_revision", "job_id", jobID, "git_hash", gitHash)
 
 	return nil
 }
@@ -1044,5 +1075,5 @@ func (s *server) errorf(code int, remoteAddr string, w http.ResponseWriter, form
 	w.WriteHeader(code)
 	msg := fmt.Sprintf(format, a...)
 	_, _ = fmt.Fprint(w, msg)
-	log.Printf("[%s] ERROR [%d]: %s", remoteAddr, code, msg)
+	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", msg)
 }

@@ -1,0 +1,93 @@
+---
+# Build Go binary
+image: {{ $.ImageName }}-src-artifact
+fromImage: builder/alt
+final: false
+
+git:
+  - add: /images/{{ $.ImageName }}
+    to: /src
+    excludePaths:
+      - werf.inc.yaml
+      - Dockerfile*
+    stageDependencies:
+      install:
+        - '**/*'
+
+shell:
+  install:
+    - echo "src artifact"
+
+---
+# Build Go application
+image: {{ $.ImageName }}-golang-artifact
+from: {{ $.Root.BASE_GOLANG_1_23 }}
+final: false
+
+import:
+  - image: {{ $.ImageName }}-src-artifact
+    add: /src
+    to: /src
+    before: install
+
+mount:
+  - fromPath: ~/go-pkg-cache
+    to: /go/pkg
+
+shell:
+  setup:
+    - cd /src/images/{{ $.ImageName }}
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-build-server main.go
+    - chmod +x /drbd-build-server
+
+---
+# Runtime image with build tools for DRBD kernel module compilation
+image: {{ $.ImageName }}
+from: debian:bullseye-slim
+
+import:
+  - image: {{ $.ImageName }}-golang-artifact
+    add: /drbd-build-server
+    to: /usr/local/bin/drbd-build-server
+    before: setup
+
+shell:
+  beforeInstall:
+    - export DEBIAN_FRONTEND=noninteractive
+  install:
+    - |
+      apt-get update \
+      && apt-get install -y --no-install-recommends \
+          coreutils \
+          flex \
+          bison \
+          coccinelle \
+          gcc \
+          make \
+          bc \
+          libssl-dev \
+          libelf-dev \
+          git \
+          ca-certificates \
+          tar \
+          gzip \
+          python3 \
+          python3-dev \
+          patch \
+          perl \
+          build-essential \
+          libc6-dev \
+      && ln -sf /usr/bin/python3 /usr/bin/python \
+      && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+  setup:
+    - mkdir -p /var/cache/drbd-build-server /tmp/drbd-builds /drbd
+
+docker:
+  WORKDIR: /drbd
+  EXPOSE: "2020"
+  ENTRYPOINT: ["/usr/local/bin/drbd-build-server"]
+  CMD: ["-addr", ":2020"]
+  LABEL:
+    distro: debian
+    version: all
+
