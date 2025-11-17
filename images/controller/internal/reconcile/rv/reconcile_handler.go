@@ -717,6 +717,7 @@ func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.Re
 					Status:             metav1.ConditionTrue,
 					ObservedGeneration: rv.Generation,
 					Reason:             "OwnedResourcesReady",
+					Message:            "All owned resources are Ready.",
 				},
 			)
 		} else {

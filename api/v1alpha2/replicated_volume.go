@@ -90,9 +90,11 @@ type ReplicatedVolumeStatus struct {
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
-	PublishProvided []string `json:"publishProvided"`
+	// +optional
+	PublishProvided []string `json:"publishProvided,omitempty"`
 
-	ActualSize resource.Quantity `json:"actualSize"`
+	// +optional
+	ActualSize resource.Quantity `json:"actualSize,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

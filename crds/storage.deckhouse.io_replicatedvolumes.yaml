@@ -198,9 +198,6 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
-            required:
-            - actualSize
-            - publishProvided
             type: object
         required:
         - metadata
