@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -91,6 +92,60 @@ func GetStorageClassLVGsAndParameters(
 func GetLVGList(ctx context.Context, kc client.Client) (*snc.LVMVolumeGroupList, error) {
 	listLvgs := &snc.LVMVolumeGroupList{}
 	return listLvgs, kc.List(ctx, listLvgs)
+}
+
+// GetLVGsFromStoragePool gets LVMVolumeGroups from ReplicatedStoragePool
+func GetLVGsFromStoragePool(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	storagePoolName string,
+) ([]snc.LVMVolumeGroup, map[string]string, error) {
+	// Get ReplicatedStoragePool
+	rsp := &srv.ReplicatedStoragePool{}
+	err := kc.Get(ctx, client.ObjectKey{Name: storagePoolName}, rsp)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("failed to get ReplicatedStoragePool: %s", storagePoolName))
+		return nil, nil, fmt.Errorf("failed to get ReplicatedStoragePool %s: %w", storagePoolName, err)
+	}
+
+	// Convert ReplicatedStoragePoolLVMVolumeGroups to LVMVolumeGroups format
+	lvgParamsList := make(LVMVolumeGroups, 0, len(rsp.Spec.LVMVolumeGroups))
+	storageClassLVGParametersMap := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
+
+	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
+		vg := VolumeGroup{
+			Name: rspLVG.Name,
+		}
+		if rspLVG.ThinPoolName != "" {
+			vg.Thin.PoolName = rspLVG.ThinPoolName
+		}
+		lvgParamsList = append(lvgParamsList, vg)
+		storageClassLVGParametersMap[rspLVG.Name] = rspLVG.ThinPoolName
+	}
+
+	log.Info(fmt.Sprintf("[GetLVGsFromStoragePool] StoragePool %s LVM volume groups parameters map: %+v", storagePoolName, storageClassLVGParametersMap))
+
+	// Get all LVMVolumeGroups and filter by names from StoragePool
+	lvgs, err := GetLVGList(ctx, kc)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	storageClassLVGs := make([]snc.LVMVolumeGroup, 0)
+	for _, lvg := range lvgs.Items {
+		log.Trace(fmt.Sprintf("[GetLVGsFromStoragePool] process lvg: %+v", lvg))
+
+		_, ok := storageClassLVGParametersMap[lvg.Name]
+		if ok {
+			log.Info(fmt.Sprintf("[GetLVGsFromStoragePool] found lvg from storage pool: %s", lvg.Name))
+			storageClassLVGs = append(storageClassLVGs, lvg)
+		} else {
+			log.Trace(fmt.Sprintf("[GetLVGsFromStoragePool] skip lvg: %s", lvg.Name))
+		}
+	}
+
+	return storageClassLVGs, storageClassLVGParametersMap, nil
 }
 
 // CreateReplicatedVolume creates a ReplicatedVolume resource

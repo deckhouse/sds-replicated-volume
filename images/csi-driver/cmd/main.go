@@ -33,6 +33,7 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/config"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/driver"
@@ -44,6 +45,7 @@ import (
 var (
 	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
 		snc.AddToScheme,
+		v1alpha1.AddToScheme,
 		v1alpha2.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,

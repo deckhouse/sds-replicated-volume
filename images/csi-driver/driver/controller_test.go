@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
@@ -55,6 +56,10 @@ var _ = Describe("CreateVolume", func() {
 
 	Context("when creating volume successfully", func() {
 		It("should create ReplicatedVolume and return success", func() {
+			// Create test ReplicatedStoragePool
+			rsp := createTestReplicatedStoragePool("test-pool", []string{"test-vg"})
+			Expect(cl.Create(ctx, rsp)).To(Succeed())
+
 			// Create test LVMVolumeGroup
 			lvg := createTestLVMVolumeGroup("test-vg", "node-1")
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
@@ -98,8 +103,8 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.LvmTypeKey:        internal.LVMTypeThick,
-					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: \"\"",
+					internal.LvmTypeKey:  internal.LVMTypeThick,
+					internal.StoragePoolKey: "test-pool",
 				},
 			}
 
@@ -121,6 +126,23 @@ var _ = Describe("CreateVolume", func() {
 		})
 
 		It("should parse custom parameters correctly", func() {
+			// Create test ReplicatedStoragePool with thin pool
+			rsp := &srv.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pool",
+				},
+				Spec: srv.ReplicatedStoragePoolSpec{
+					Type: "LVM",
+					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{
+						{
+							Name:         "test-vg",
+							ThinPoolName: "test-pool",
+						},
+					},
+				},
+			}
+			Expect(cl.Create(ctx, rsp)).To(Succeed())
+
 			lvg := createTestLVMVolumeGroup("test-vg", "node-1")
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
@@ -161,13 +183,13 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.LvmTypeKey:        internal.LVMTypeThin,
-					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: test-pool",
-					ReplicasKey:                "5",
-					TopologyKey:                "TransZonal",
-					VolumeAccessKey:            "Local",
-					SharedSecretKey:            "custom-secret",
-					ZonesKey:                   "zone-1,zone-2,zone-3",
+					internal.LvmTypeKey:  internal.LVMTypeThin,
+					internal.StoragePoolKey: "test-pool",
+					ReplicasKey:          "5",
+					TopologyKey:          "TransZonal",
+					VolumeAccessKey:      "Local",
+					SharedSecretKey:      "custom-secret",
+					ZonesKey:             "zone-1,zone-2,zone-3",
 				},
 			}
 
@@ -232,7 +254,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
 		})
 
-		It("should return error when LVMVolumeGroupKey is empty", func() {
+		It("should return error when StoragePool is empty", func() {
 			request := &csi.CreateVolumeRequest{
 				Name: "test-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -579,11 +601,32 @@ var _ = Describe("GetCapacity", func() {
 func newFakeClientForController() client.Client {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
+	_ = srv.AddToScheme(s)
 	_ = v1alpha2.AddToScheme(s)
 	_ = snc.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 	return builder.Build()
+}
+
+func createTestReplicatedStoragePool(name string, lvgNames []string) *srv.ReplicatedStoragePool {
+	lvgs := make([]srv.ReplicatedStoragePoolLVMVolumeGroups, 0, len(lvgNames))
+	for _, lvgName := range lvgNames {
+		lvgs = append(lvgs, srv.ReplicatedStoragePoolLVMVolumeGroups{
+			Name:         lvgName,
+			ThinPoolName: "",
+		})
+	}
+
+	return &srv.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: name,
+		},
+		Spec: srv.ReplicatedStoragePoolSpec{
+			Type:            "LVM",
+			LVMVolumeGroups: lvgs,
+		},
+	}
 }
 
 func createTestLVMVolumeGroup(name, nodeName string) *snc.LVMVolumeGroup {

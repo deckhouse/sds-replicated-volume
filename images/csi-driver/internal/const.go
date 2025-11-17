@@ -19,7 +19,7 @@ package internal
 const (
 	LvmTypeKey                  = "replicated.csi.storage.deckhouse.io/lvm-type"
 	BindingModeKey              = "replicated.csi.storage.deckhouse.io/volume-binding-mode"
-	LVMVolumeGroupKey           = "replicated.csi.storage.deckhouse.io/lvm-volume-groups"
+	StoragePoolKey              = "replicated.csi.storage.deckhouse.io/storagePool"
 	LVMVThickContiguousParamKey = "replicated.csi.storage.deckhouse.io/lvm-thick-contiguous"
 	ActualNameOnTheNodeKey      = "replicated.csi.storage.deckhouse.io/actualNameOnTheNode"
 	TopologyKey                 = "topology.sds-replicated-volume-csi/node"

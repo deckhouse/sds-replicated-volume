@@ -64,16 +64,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	LvmType := request.Parameters[internal.LvmTypeKey]
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class LvmType: %s", traceID, volumeID, LvmType))
 
-	if len(request.Parameters[internal.LVMVolumeGroupKey]) == 0 {
-		err := errors.New("no LVMVolumeGroups specified in a storage class's parameters")
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] no LVMVolumeGroups were found for the request: %+v", traceID, volumeID, request))
-		return nil, status.Errorf(codes.InvalidArgument, "no LVMVolumeGroups specified in a storage class's parameters")
+	// Get LVMVolumeGroups from StoragePool
+	storagePoolName := request.Parameters[internal.StoragePoolKey]
+	if len(storagePoolName) == 0 {
+		err := errors.New("no StoragePool specified in a storage class's parameters")
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] no StoragePool was found for the request: %+v", traceID, volumeID, request))
+		return nil, status.Errorf(codes.InvalidArgument, "no StoragePool specified in a storage class's parameters")
 	}
 
-	storageClassLVGs, storageClassLVGParametersMap, err := utils.GetStorageClassLVGsAndParameters(ctx, d.cl, d.log, request.Parameters[internal.LVMVolumeGroupKey])
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] using StoragePool: %s", traceID, volumeID, storagePoolName))
+	storageClassLVGs, storageClassLVGParametersMap, err := utils.GetLVGsFromStoragePool(ctx, d.cl, d.log, storagePoolName)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetStorageClassLVGs", traceID, volumeID))
-		return nil, status.Errorf(codes.Internal, "error during GetStorageClassLVGs")
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetLVGsFromStoragePool", traceID, volumeID))
+		return nil, status.Errorf(codes.Internal, "error during GetLVGsFromStoragePool: %v", err)
 	}
 
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
