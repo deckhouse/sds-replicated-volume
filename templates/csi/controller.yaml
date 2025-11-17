@@ -105,7 +105,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 - name: CSI_ADDRESS
   value: /csi/csi.sock
 - name: DRIVER_REG_SOCK_PATH
-  value: /var/lib/kubelet/plugins/replicated.csi.storage.deckhouse.io/csi.sock
+  value: /var/lib/kubelet/csi-plugins/replicated.csi.storage.deckhouse.io/csi.sock
 - name: KUBE_NODE_NAME
   valueFrom:
     fieldRef:
