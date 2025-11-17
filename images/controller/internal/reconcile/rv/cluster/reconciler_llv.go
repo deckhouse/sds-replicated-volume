@@ -4,7 +4,7 @@ import "fmt"
 
 type llvReconciler struct {
 	RVNodeAdapter
-	llvBuilder *LLVBuilder
+	llvWriter *LLVWriterImpl
 
 	existingLLV LLVAdapter // may be nil
 }
@@ -23,7 +23,7 @@ func newLLVReconciler(rvNode RVNodeAdapter) (*llvReconciler, error) {
 
 	res := &llvReconciler{
 		RVNodeAdapter: rvNode,
-		llvBuilder:    llvBuilder,
+		llvWriter:     llvBuilder,
 	}
 
 	return res, nil
@@ -62,7 +62,7 @@ func (rec *llvReconciler) diskPath() string {
 }
 
 func (rec *llvReconciler) initializeDynamicProps() error {
-	rec.llvBuilder.SetActualLVNameOnTheNode(rec.actualLVNameOnTheNode())
+	rec.llvWriter.SetActualLVNameOnTheNode(rec.actualLVNameOnTheNode())
 	return nil
 }
 
@@ -81,7 +81,7 @@ func (rec *llvReconciler) reconcile() (Action, error) {
 		res = append(
 			res,
 			CreateLLV{
-				InitLLV: rec.llvBuilder.BuildInitializer(),
+				Writer: rec.llvWriter,
 			},
 		)
 	} else {
@@ -89,8 +89,8 @@ func (rec *llvReconciler) reconcile() (Action, error) {
 		res = append(
 			res,
 			PatchLLV{
-				LLV:      rec.existingLLV,
-				PatchLLV: rec.llvBuilder.BuildInitializer(),
+				LLV:    rec.existingLLV,
+				Writer: rec.llvWriter,
 			},
 		)
 	}

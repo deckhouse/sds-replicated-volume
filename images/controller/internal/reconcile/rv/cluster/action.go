@@ -56,20 +56,29 @@ func cleanActions[T ~[]Action](actions T) (result T) {
 	return
 }
 
+type RVRWriter interface {
+	WriteToRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (ChangeSet, error)
+}
+
+type LLVWriter interface {
+	WriteToLLV(llv *snc.LVMLogicalVolume) (ChangeSet, error)
+}
+
 type PatchRVR struct {
-	RVR      RVRAdapter
-	PatchRVR func(*v1alpha2.ReplicatedVolumeReplica) error
+	RVR    RVRAdapter
+	Writer RVRWriter
 }
 
 type PatchLLV struct {
-	LLV      LLVAdapter
-	PatchLLV func(*snc.LVMLogicalVolume) error
+	LLV    LLVAdapter
+	Writer LLVWriter
 }
 
 // Creates RVR and waits for Ready=True status
 // It should also initialize it, if needed
 type CreateRVR struct {
-	InitRVR func(*v1alpha2.ReplicatedVolumeReplica) error
+	InitialSyncRequired bool
+	Writer              RVRWriter
 }
 
 type DeleteRVR struct {
@@ -77,7 +86,7 @@ type DeleteRVR struct {
 }
 
 type CreateLLV struct {
-	InitLLV func(*snc.LVMLogicalVolume) error
+	Writer LLVWriter
 }
 
 type DeleteLLV struct {

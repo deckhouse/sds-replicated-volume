@@ -177,10 +177,10 @@ func (m CreateRVRMatcher) Match(action cluster.Action) error {
 
 	// materialize object by applying initializer
 	obj := &v1alpha2.ReplicatedVolumeReplica{}
-	if typedAction.InitRVR == nil {
-		return newErrorf("InitRVR is nil")
+	if typedAction.Writer == nil {
+		return newErrorf("Writer is nil")
 	}
-	if err := typedAction.InitRVR(obj); err != nil {
+	if _, err := typedAction.Writer.WriteToRVR(obj); err != nil {
 		return err
 	}
 
@@ -208,10 +208,10 @@ func (m CreateLLVMatcher) Match(action cluster.Action) error {
 	}
 
 	obj := &snc.LVMLogicalVolume{}
-	if typedAction.InitLLV == nil {
-		return newErrorf("InitLLV is nil")
+	if typedAction.Writer == nil {
+		return newErrorf("Writer is nil")
 	}
-	if err := typedAction.InitLLV(obj); err != nil {
+	if _, err := typedAction.Writer.WriteToLLV(obj); err != nil {
 		return err
 	}
 
@@ -274,10 +274,10 @@ func (m PatchLLVMatcher) Match(action cluster.Action) error {
 	// Simulate Apply and validate final state (spec)
 	llvCopy := snc.LVMLogicalVolume{}
 	llvCopy.Name = m.LLVName
-	if typedAction.PatchLLV == nil {
+	if typedAction.Writer == nil {
 		return newErrorf("PatchLLV is nil")
 	}
-	if err := typedAction.PatchLLV(&llvCopy); err != nil {
+	if _, err := typedAction.Writer.WriteToLLV(&llvCopy); err != nil {
 		return newErrorf("apply function returned error: %v", err)
 	}
 

@@ -96,7 +96,7 @@ func (r *rvrAdapter) NodeId() uint {
 func (r *rvrAdapter) Size() int {
 	var size int
 	if r.rvr.Status != nil && r.rvr.Status.DRBD != nil && len(r.rvr.Status.DRBD.Devices) > 0 {
-		size = r.rvr.Status.DRBD.Devices[0].Size
+		size = r.rvr.Status.DRBD.Devices[0].Size * 1024 // DRBD report size in KB
 	}
 	return size
 }

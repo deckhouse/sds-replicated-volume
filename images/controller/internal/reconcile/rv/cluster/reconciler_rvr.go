@@ -15,7 +15,9 @@ type rvrReconciler struct {
 	existingRVR RVRAdapter // optional
 
 	//
-	rvrBuilder *RVRBuilder
+	rvrWriter             *RVRWriterImpl
+	firstReplicaInCluster bool
+	clusterHasRVRs        bool
 }
 
 func newRVRReconciler(
@@ -29,7 +31,7 @@ func newRVRReconciler(
 		return nil, errArgNil("nodeMgr")
 	}
 
-	rvrBuilder, err := NewRVRBuilder(rvNode)
+	rvrBuilder, err := NewRVRWriterImpl(rvNode)
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +39,7 @@ func newRVRReconciler(
 	res := &rvrReconciler{
 		RVNodeAdapter: rvNode,
 		nodeMgr:       nodeMgr,
-		rvrBuilder:    rvrBuilder,
+		rvrWriter:     rvrBuilder,
 	}
 	return res, nil
 }
@@ -66,6 +68,7 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 	}
 
 	rec.existingRVR = rvr
+	rec.clusterHasRVRs = true
 	return nil
 }
 
@@ -83,9 +86,9 @@ func (rec *rvrReconciler) initializeDynamicProps(
 		if err != nil {
 			return err
 		}
-		rec.rvrBuilder.SetPort(port)
+		rec.rvrWriter.SetPort(port)
 	} else {
-		rec.rvrBuilder.SetPort(rec.existingRVR.Port())
+		rec.rvrWriter.SetPort(rec.existingRVR.Port())
 	}
 
 	// nodeid
@@ -94,9 +97,12 @@ func (rec *rvrReconciler) initializeDynamicProps(
 		if err != nil {
 			return err
 		}
-		rec.rvrBuilder.SetNodeId(nodeId)
+		rec.rvrWriter.SetNodeId(nodeId)
+		if nodeId == 0 {
+			rec.firstReplicaInCluster = true
+		}
 	} else {
-		rec.rvrBuilder.SetNodeId(rec.existingRVR.NodeId())
+		rec.rvrWriter.SetNodeId(rec.existingRVR.NodeId())
 	}
 
 	// if diskful
@@ -117,7 +123,7 @@ func (rec *rvrReconciler) initializeDynamicProps(
 			vol.Device = uint(rec.existingRVR.Minor())
 		}
 
-		rec.rvrBuilder.SetVolume(vol)
+		rec.rvrWriter.SetVolume(vol)
 	}
 
 	return nil
@@ -129,7 +135,11 @@ func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler)
 			continue
 		}
 
-		rec.rvrBuilder.AddPeer(peerRec.NodeName(), peerRec.rvrBuilder.BuildPeer())
+		if peerRec.clusterHasRVRs {
+			rec.clusterHasRVRs = true
+		}
+
+		rec.rvrWriter.SetPeer(peerRec.NodeName(), peerRec.rvrWriter.ToPeer())
 	}
 
 	return nil
@@ -141,7 +151,8 @@ func (rec *rvrReconciler) reconcile() (Action, error) {
 		res = append(
 			res,
 			CreateRVR{
-				InitRVR: rec.rvrBuilder.BuildInitializer(),
+				Writer:              rec.rvrWriter,
+				InitialSyncRequired: !rec.clusterHasRVRs && rec.firstReplicaInCluster,
 			},
 		)
 	} else {
@@ -149,12 +160,15 @@ func (rec *rvrReconciler) reconcile() (Action, error) {
 		res = append(
 			res,
 			PatchRVR{
-				RVR:      rec.existingRVR,
-				PatchRVR: rec.rvrBuilder.BuildInitializer(),
+				RVR:    rec.existingRVR,
+				Writer: rec.rvrWriter,
 			},
 		)
 
-		if rec.existingRVR.Size() != rec.Size() {
+		existingRVRSize := rec.existingRVR.Size()
+		targetSize := rec.Size()
+
+		if existingRVRSize < targetSize {
 			res = append(
 				res,
 				ResizeRVR{

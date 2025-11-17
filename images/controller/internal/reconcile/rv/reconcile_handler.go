@@ -57,54 +57,6 @@ type replicaInfo struct {
 	Score            *replicaScoreBuilder
 }
 
-type replicaScoreBuilder struct {
-	disklessPurpose  bool
-	withDisk         bool
-	publishRequested bool
-	alreadyExists    bool
-}
-
-func (b *replicaScoreBuilder) clusterHasDiskless() {
-	b.disklessPurpose = true
-}
-
-func (b *replicaScoreBuilder) nodeWithDisk() {
-	b.withDisk = true
-}
-
-func (b *replicaScoreBuilder) replicaAlreadyExists() {
-	b.alreadyExists = true
-}
-
-func (b *replicaScoreBuilder) replicaPublishRequested() {
-	b.publishRequested = true
-}
-
-func (b *replicaScoreBuilder) Build() []topology.Score {
-	baseScore := topology.Score(100)
-	maxScore := topology.Score(1000000)
-	var scores []topology.Score
-	if b.withDisk {
-		if b.publishRequested || b.alreadyExists {
-			scores = append(scores, maxScore)
-		} else {
-			scores = append(scores, baseScore)
-		}
-	} else {
-		scores = append(scores, topology.NeverSelect)
-	}
-
-	if b.disklessPurpose {
-		if b.withDisk {
-			scores = append(scores, baseScore)
-		} else {
-			// prefer nodes without disk for diskless purposes
-			scores = append(scores, baseScore*2)
-		}
-	}
-	return scores
-}
-
 func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("controller: reconcile resource", "name", h.rv.Name)
 
@@ -195,7 +147,16 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		target.Name = action.RVR.Name()
 		h.log.Debug("RVR patch start", "name", target.Name)
 		if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
-			return action.PatchRVR(r)
+			changes, err := action.Writer.WriteToRVR(r)
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				h.log.Info("no changes")
+			} else {
+				h.log.Info("fields changed", "changes", changes.String())
+			}
+			return nil
 		}); err != nil {
 			h.log.Error("RVR patch failed", "name", target.Name, "err", err)
 			return err
@@ -240,7 +201,8 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
 			return err
 		}
-		if err := action.InitRVR(target); err != nil {
+
+		if _, err := action.Writer.WriteToRVR(target); err != nil {
 			h.log.Error("RVR init failed", "err", err)
 			return err
 		}
@@ -274,43 +236,43 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		h.log.Debug("RVR wait done", "name", target.Name)
 
 		// If waiting for initial sync - trigger and wait for completion
-		if target.Status != nil {
-			readyCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeReady)
-			if readyCond != nil &&
-				readyCond.Status == metav1.ConditionFalse &&
-				readyCond.Reason == v1alpha2.ReasonWaitingForInitialSync {
-				h.log.Debug("Trigger initial sync via primary-force", "name", target.Name)
-				if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
-					ann := r.GetAnnotations()
-					if ann == nil {
-						ann = map[string]string{}
-					}
-					ann[v1alpha2.AnnotationKeyPrimaryForce] = "true"
-					r.SetAnnotations(ann)
-					return nil
-				}); err != nil {
-					h.log.Error("RVR patch failed (primary-force)", "name", target.Name, "err", err)
-					return err
+
+		readyCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeReady)
+		if readyCond != nil &&
+			readyCond.Status == metav1.ConditionFalse &&
+			readyCond.Reason == v1alpha2.ReasonWaitingForInitialSync &&
+			action.InitialSyncRequired {
+			h.log.Info("Trigger initial sync via primary-force", "name", target.Name)
+			if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(r *v1alpha2.ReplicatedVolumeReplica) error {
+				ann := r.GetAnnotations()
+				if ann == nil {
+					ann = map[string]string{}
 				}
-				h.log.Debug("Primary-force set, waiting for initial sync to complete", "name", target.Name)
-				if err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
-					if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
-						return false, err
-					}
-					if target.Status == nil {
-						return false, nil
-					}
-					isCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
-					if isCond == nil || isCond.ObservedGeneration < target.Generation {
-						return false, nil
-					}
-					return isCond.Status == metav1.ConditionTrue, nil
-				}); err != nil {
-					h.log.Error("RVR wait failed (initial sync)", "name", target.Name, "err", err)
-					return err
-				}
-				h.log.Debug("Initial sync completed", "name", target.Name)
+				ann[v1alpha2.AnnotationKeyPrimaryForce] = "true"
+				r.SetAnnotations(ann)
+				return nil
+			}); err != nil {
+				h.log.Error("RVR patch failed (primary-force)", "name", target.Name, "err", err)
+				return err
 			}
+			h.log.Info("Primary-force set, waiting for initial sync to complete", "name", target.Name)
+			if err := wait.PollUntilContextTimeout(h.ctx, waitPollInterval, waitPollTimeout, true, func(ctx context.Context) (bool, error) {
+				if err := h.cl.Get(ctx, client.ObjectKeyFromObject(target), target); client.IgnoreNotFound(err) != nil {
+					return false, err
+				}
+				if target.Status == nil {
+					return false, nil
+				}
+				isCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
+				if isCond == nil || isCond.ObservedGeneration < target.Generation {
+					return false, nil
+				}
+				return isCond.Status == metav1.ConditionTrue, nil
+			}); err != nil {
+				h.log.Error("RVR wait failed (initial sync)", "name", target.Name, "err", err)
+				return err
+			}
+			h.log.Info("Initial sync completed", "name", target.Name)
 		}
 		return nil
 	case cluster.DeleteRVR:
@@ -346,7 +308,16 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		target.Name = action.LLV.LLVName()
 		h.log.Debug("LLV patch start", "name", target.Name)
 		if err := api.PatchWithConflictRetry(h.ctx, h.cl, target, func(llv *snc.LVMLogicalVolume) error {
-			return action.PatchLLV(llv)
+			changes, err := action.Writer.WriteToLLV(llv)
+			if err != nil {
+				return err
+			}
+			if len(changes) == 0 {
+				h.log.Info("no changes")
+			} else {
+				h.log.Info("fields changed", "changes", changes.String())
+			}
+			return nil
 		}); err != nil {
 			h.log.Error("LLV patch failed", "name", target.Name, "err", err)
 			return err
@@ -387,7 +358,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 		if err := controllerutil.SetControllerReference(h.rv, target, h.scheme); err != nil {
 			return err
 		}
-		if err := action.InitLLV(target); err != nil {
+		if _, err := action.Writer.WriteToLLV(target); err != nil {
 			h.log.Error("LLV init failed", "err", err)
 			return err
 		}
@@ -499,7 +470,7 @@ func (h *resourceReconcileRequestHandler) buildNodePool(zones map[string]struct{
 			Score:       &replicaScoreBuilder{},
 		}
 		if needTieBreaker {
-			ri.Score.clusterHasDiskless()
+			ri.Score.ClusterHasDiskless()
 		}
 		pool[node.Name] = ri
 	}
@@ -545,9 +516,9 @@ func (h *resourceReconcileRequestHandler) applyLVGs(pool map[string]*replicaInfo
 			return fmt.Errorf("lvg '%s' is on the same node, as lvg '%s'", lvg.Name, repl.LVG.Name)
 		}
 		repl.LVG = lvg
-		repl.Score.nodeWithDisk()
+		repl.Score.NodeWithDisk()
 		if publishRequested {
-			repl.Score.replicaPublishRequested()
+			repl.Score.PublishRequested()
 			repl.PublishRequested = true
 		}
 	}
@@ -568,7 +539,7 @@ func (h *resourceReconcileRequestHandler) ownedRVRsAndPrioritize(pool map[string
 	ownedRvrs := rvrList.Items
 	for i := range ownedRvrs {
 		if repl, ok := pool[ownedRvrs[i].Spec.NodeName]; ok {
-			repl.Score.replicaAlreadyExists()
+			repl.Score.AlreadyExists()
 		}
 	}
 	return ownedRvrs, nil
@@ -678,8 +649,10 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 	if err != nil {
 		return err
 	}
-	if err := h.processAction(action); err != nil {
-		return err
+	if action != nil {
+		if err := h.processAction(action); err != nil {
+			return err
+		}
 	}
 
 	// update ready condition
