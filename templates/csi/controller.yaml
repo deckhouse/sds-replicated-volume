@@ -98,14 +98,14 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 ###
 
 {{- define "csi_node_args" }}
-- --csi-endpoint=unix://$(CSI_ENDPOINT)
+- --csi-address=unix://$(CSI_ADDRESS)
 {{- end }}
 
 {{- define "csi_node_envs" }}
 - name: CSI_ADDRESS
   value: /csi/csi.sock
 - name: DRIVER_REG_SOCK_PATH
-  value: /var/lib/kubelet/plugins/local.csi.storage.deckhouse.io/csi.sock
+  value: /var/lib/kubelet/plugins/replicated.csi.storage.deckhouse.io/csi.sock
 - name: KUBE_NODE_NAME
   valueFrom:
     fieldRef:
