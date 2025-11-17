@@ -105,26 +105,26 @@ func (rec *rvrReconciler) initializeDynamicProps(
 		rec.rvrWriter.SetNodeId(rec.existingRVR.NodeId())
 	}
 
+	// minor
+	vol := v1alpha2.Volume{}
+	if rec.existingRVR == nil || rec.existingRVR.Minor() < 0 {
+		minor, err := rec.nodeMgr.NewNodeMinor()
+		if err != nil {
+			return err
+		}
+		vol.Device = minor
+	} else {
+		vol.Device = uint(rec.existingRVR.Minor())
+	}
+
 	// if diskful
 	if dp != nil {
-		vol := v1alpha2.Volume{}
-
 		// disk
 		vol.Disk = dp.diskPath()
 
-		// minor
-		if rec.existingRVR == nil || rec.existingRVR.Minor() < 0 {
-			minor, err := rec.nodeMgr.NewNodeMinor()
-			if err != nil {
-				return err
-			}
-			vol.Device = minor
-		} else {
-			vol.Device = uint(rec.existingRVR.Minor())
-		}
-
-		rec.rvrWriter.SetVolume(vol)
 	}
+
+	rec.rvrWriter.SetVolume(vol)
 
 	return nil
 }

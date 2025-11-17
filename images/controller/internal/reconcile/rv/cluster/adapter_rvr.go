@@ -83,7 +83,6 @@ func (r *rvrAdapter) Disk() string {
 
 func (r *rvrAdapter) Minor() int {
 	if len(r.rvr.Spec.Volumes) > 0 {
-
 		return int(r.rvr.Spec.Volumes[0].Device)
 	}
 	return -1
