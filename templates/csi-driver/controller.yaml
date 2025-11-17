@@ -98,7 +98,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 ###
 
 {{- define "csi_node_args" }}
-- --csi-address=unix://$(CSI_ADDRESS)
+- --csi-endpoint=unix://$(CSI_ADDRESS)
 {{- end }}
 
 {{- define "csi_node_envs" }}

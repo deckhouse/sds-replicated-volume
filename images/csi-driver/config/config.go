@@ -65,7 +65,7 @@ func NewConfig() (*Options, error) {
 	opts.Version = "dev"
 
 	fl := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	fl.StringVar(&opts.CsiAddress, "csi-address", "unix:///var/lib/kubelet/plugins/"+driver.DefaultDriverName+"/csi.sock", "CSI address")
+	fl.StringVar(&opts.CsiAddress, "csi-endpoint", "unix:///var/lib/kubelet/plugins/"+driver.DefaultDriverName+"/csi.sock", "CSI endpoint")
 	fl.StringVar(&opts.DriverName, "driver-name", driver.DefaultDriverName, "Name for the driver")
 	fl.StringVar(&opts.Address, "address", driver.DefaultAddress, "Address to serve on")
 
