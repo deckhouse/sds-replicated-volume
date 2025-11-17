@@ -73,7 +73,7 @@
 storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- end }}
 
-{{- $csiControllerImage := include "helm_lib_module_image" (list . "csi") }}
+{{- $csiControllerImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiControllerConfig := dict }}
 {{- $_ := set $csiControllerConfig "controllerImage" $csiControllerImage }}
@@ -134,7 +134,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- define "csi_additional_node_volume_mounts" }}
 {{- end }}
 
-{{- $csiNodeImage := include "helm_lib_module_image" (list . "csi") }}
+{{- $csiNodeImage := include "helm_lib_module_image" (list . "csiDriver") }}
 
 {{- $csiNodeConfig := dict }}
 {{- $_ := set $csiNodeConfig "nodeImage" $csiNodeImage }}
