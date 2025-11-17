@@ -9,6 +9,6 @@ spec:
   podInfoOnMount: true
   requiresRepublish: true
   seLinuxMount: true
-  storageCapacity: true
+  storageCapacity: false
   volumeLifecycleModes:
     - Persistent

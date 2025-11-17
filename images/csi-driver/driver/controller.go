@@ -333,16 +333,12 @@ func (d *Driver) ListVolumes(_ context.Context, _ *csi.ListVolumesRequest) (*csi
 }
 
 func (d *Driver) GetCapacity(_ context.Context, _ *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
-	d.log.Info("method GetCapacity")
+	d.log.Info("method GetCapacity - not implemented")
 
-	// todo MaxSize one PV
-	// todo call volumeBindingMode: WaitForFirstConsumer
-
-	return &csi.GetCapacityResponse{
-		AvailableCapacity: 1000000,
-		MaximumVolumeSize: nil,
-		MinimumVolumeSize: nil,
-	}, nil
+	// GetCapacity is not supported. CSIDriver has storageCapacity: false
+	// This prevents Kubernetes from creating CSIStorageCapacity objects
+	// and calling this method for scheduling decisions.
+	return nil, status.Error(codes.Unimplemented, "GetCapacity is not supported")
 }
 
 func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {

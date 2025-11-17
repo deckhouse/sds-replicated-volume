@@ -20,9 +20,9 @@ import (
 	"context"
 	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -31,10 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 var _ = Describe("CreateVolume", func() {
@@ -98,8 +98,8 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.TypeKey:         internal.Replicated,
-					internal.LvmTypeKey:      internal.LVMTypeThick,
+					internal.TypeKey:           internal.Replicated,
+					internal.LvmTypeKey:        internal.LVMTypeThick,
 					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: \"\"",
 				},
 			}
@@ -162,7 +162,7 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.TypeKey:          internal.Replicated,
+					internal.TypeKey:           internal.Replicated,
 					internal.LvmTypeKey:        internal.LVMTypeThin,
 					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: test-pool",
 					ReplicasKey:                "5",
@@ -597,13 +597,14 @@ var _ = Describe("GetCapacity", func() {
 		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
 	})
 
-	It("should return capacity response", func() {
+	It("should return Unimplemented error", func() {
 		request := &csi.GetCapacityRequest{}
 
 		response, err := driver.GetCapacity(ctx, request)
-		Expect(err).NotTo(HaveOccurred())
-		Expect(response).NotTo(BeNil())
-		Expect(response.AvailableCapacity).To(Equal(int64(1000000)))
+		Expect(err).To(HaveOccurred())
+		Expect(response).To(BeNil())
+		Expect(status.Code(err)).To(Equal(codes.Unimplemented))
+		Expect(err.Error()).To(ContainSubstring("GetCapacity is not supported"))
 	})
 })
 
@@ -634,4 +635,3 @@ func createTestLVMVolumeGroup(name, nodeName string) *snc.LVMVolumeGroup {
 		},
 	}
 }
-
