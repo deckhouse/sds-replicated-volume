@@ -103,7 +103,6 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.LvmTypeKey:  internal.LVMTypeThick,
 					internal.StoragePoolKey: "test-pool",
 				},
 			}
@@ -132,7 +131,7 @@ var _ = Describe("CreateVolume", func() {
 					Name: "test-pool",
 				},
 				Spec: srv.ReplicatedStoragePoolSpec{
-					Type: "LVM",
+					Type: "LVMThin",
 					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{
 						{
 							Name:         "test-vg",
@@ -183,13 +182,11 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.LvmTypeKey:  internal.LVMTypeThin,
 					internal.StoragePoolKey: "test-pool",
-					ReplicasKey:          "5",
-					TopologyKey:          "TransZonal",
-					VolumeAccessKey:      "Local",
-					SharedSecretKey:      "custom-secret",
-					ZonesKey:             "zone-1,zone-2,zone-3",
+					ReplicasKey:             "5",
+					TopologyKey:              "TransZonal",
+					VolumeAccessKey:          "Local",
+					ZonesKey:                 "zone-1,zone-2,zone-3",
 				},
 			}
 
@@ -204,7 +201,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.Replicas).To(Equal(byte(5)))
 			Expect(rv.Spec.Topology).To(Equal("TransZonal"))
 			Expect(rv.Spec.VolumeAccess).To(Equal("Local"))
-			Expect(rv.Spec.SharedSecret).To(Equal("custom-secret"))
+			Expect(rv.Spec.SharedSecret).NotTo(BeEmpty()) // sharedSecret is auto-generated UUID
 			Expect(rv.Spec.Zones).To(Equal([]string{"zone-1", "zone-2", "zone-3"}))
 			Expect(rv.Spec.LVM.Type).To(Equal(internal.LVMTypeThin))
 			Expect(rv.Spec.LVM.LVMVolumeGroups).To(HaveLen(1))

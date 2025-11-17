@@ -34,8 +34,7 @@ __pycache__/
 .pytest_cache/
 
 # dev
-images/sds-replicated-volume-controller/dev/Dockerfile-dev
-images/sds-replicated-volume-controller/src/Makefile
 hack.sh
 **/Makefile
+**/Dockerfile-dev
 .secret

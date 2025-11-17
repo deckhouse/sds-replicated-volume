@@ -61,9 +61,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	BindingMode := request.Parameters[internal.BindingModeKey]
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class BindingMode: %s", traceID, volumeID, BindingMode))
 
-	LvmType := request.Parameters[internal.LvmTypeKey]
-	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] storage class LvmType: %s", traceID, volumeID, LvmType))
-
 	// Get LVMVolumeGroups from StoragePool
 	storagePoolName := request.Parameters[internal.StoragePoolKey]
 	if len(storagePoolName) == 0 {
@@ -73,11 +70,18 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	}
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] using StoragePool: %s", traceID, volumeID, storagePoolName))
-	storageClassLVGs, storageClassLVGParametersMap, err := utils.GetLVGsFromStoragePool(ctx, d.cl, d.log, storagePoolName)
+	storagePoolInfo, err := utils.GetStoragePoolInfo(ctx, d.cl, d.log, storagePoolName)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetLVGsFromStoragePool", traceID, volumeID))
-		return nil, status.Errorf(codes.Internal, "error during GetLVGsFromStoragePool: %v", err)
+		d.log.Error(err, fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] error GetStoragePoolInfo", traceID, volumeID))
+		return nil, status.Errorf(codes.Internal, "error during GetStoragePoolInfo: %v", err)
 	}
+
+	LvmType := storagePoolInfo.LVMType
+	if LvmType != internal.LVMTypeThin && LvmType != internal.LVMTypeThick {
+		d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Unknown LVM type from StoragePool: %s, defaulting to Thick", traceID, volumeID, LvmType))
+		LvmType = internal.LVMTypeThick
+	}
+	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] LVM type from StoragePool: %s", traceID, volumeID, LvmType))
 
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
@@ -103,10 +107,8 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		volumeAccess = va
 	}
 
-	sharedSecret := uuid.New().String() // generate UUID as shared secret
-	if secret, ok := request.Parameters[SharedSecretKey]; ok && secret != "" {
-		sharedSecret = secret
-	}
+	// Generate unique shared secret for DRBD
+	sharedSecret := uuid.New().String()
 
 	var zones []string
 	if zonesStr, ok := request.Parameters[ZonesKey]; ok && zonesStr != "" {
@@ -117,12 +119,13 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	}
 
 	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
-	var publishRequested []string
+	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
+	// with key "kubernetes.io/hostname"
+	publishRequested := make([]string, 0)
 	if request.AccessibilityRequirements != nil && len(request.AccessibilityRequirements.Preferred) > 0 {
-		// When WaitForFirstConsumer is used, Kubernetes provides the selected node
-		// in AccessibilityRequirements.Preferred[].Segments
 		for _, preferred := range request.AccessibilityRequirements.Preferred {
-			if nodeName, ok := preferred.Segments[internal.TopologyKey]; ok && nodeName != "" {
+			// Get node name from kubernetes.io/hostname (standard Kubernetes topology key)
+			if nodeName, ok := preferred.Segments["kubernetes.io/hostname"]; ok && nodeName != "" {
 				d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Found preferred node from AccessibilityRequirements: %s", traceID, volumeID, nodeName))
 				publishRequested = append(publishRequested, nodeName)
 				break // Use first preferred node
@@ -130,14 +133,19 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		}
 	}
 
-	// Build LVGRef list from storageClassLVGs
+	// Log if publishRequested is empty (may be required for WaitForFirstConsumer)
+	if len(publishRequested) == 0 {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] publishRequested is empty (may be filled later via ControllerPublishVolume)", traceID, volumeID))
+	}
+
+	// Build LVGRef list from storagePoolInfo
 	var lvgRefs []v1alpha2.LVGRef
-	for _, lvg := range storageClassLVGs {
+	for _, lvg := range storagePoolInfo.LVMVolumeGroups {
 		lvgRef := v1alpha2.LVGRef{
 			Name: lvg.Name,
 		}
 		if LvmType == internal.LVMTypeThin {
-			if thinPoolName, ok := storageClassLVGParametersMap[lvg.Name]; ok {
+			if thinPoolName, ok := storagePoolInfo.LVGToThinPool[lvg.Name]; ok && thinPoolName != "" {
 				lvgRef.ThinPoolName = thinPoolName
 			}
 		}
@@ -152,7 +160,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		replicas,
 		topology,
 		volumeAccess,
-		sharedSecret,
+		sharedSecret,     // unique shared secret for DRBD
 		publishRequested, // publishRequested - contains preferred node for WaitForFirstConsumer
 		zones,
 	)
