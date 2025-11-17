@@ -659,43 +659,46 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 	return h.updateRVStatus(ownedRvrs, ownedLLVs)
 }
 func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.ReplicatedVolumeReplica, ownedLLVs []snc.LVMLogicalVolume) error {
-	allReady := true
+	// calculate readiness details for owned resources
+	var (
+		totalRVRs      = len(ownedRvrs)
+		notReadyRVRs   int
+		totalLLVs      = len(ownedLLVs)
+		notCreatedLLVs int
+	)
+
 	minSizeBytes, sizeFound := h.findMinimalActualSizeBytes(ownedRvrs)
 	publishProvided := h.findPublishProvided(ownedRvrs)
+
+	// RVR readiness
 	for i := range ownedRvrs {
 		rvr := &ownedRvrs[i]
 		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeReady)
 		if cond == nil || cond.Status != metav1.ConditionTrue {
-			allReady = false
-			break
+			notReadyRVRs++
 		}
 	}
 
-	// list owned LLVs
-	if allReady {
-		for i := range ownedLLVs {
-			llv := &ownedLLVs[i]
-			if llv.Status == nil || llv.Status.Phase != "Created" {
-				allReady = false
-				break
-			}
-			specQty, err := resource.ParseQuantity(llv.Spec.Size)
-			if err != nil {
-				return err
-			}
-			if llv.Status.ActualSize.Cmp(specQty) < 0 {
-				allReady = false
-				break
-			}
+	// LLV readiness (Created and sized as requested)
+	for i := range ownedLLVs {
+		llv := &ownedLLVs[i]
+		if llv.Status == nil || llv.Status.Phase != "Created" {
+			notCreatedLLVs++
+			continue
+		}
+		specQty, err := resource.ParseQuantity(llv.Spec.Size)
+		if err != nil {
+			return err
+		}
+		if llv.Status.ActualSize.Cmp(specQty) < 0 {
+			notCreatedLLVs++
 		}
 	}
 
-	if !allReady {
-		return nil
-	}
+	allReady := notReadyRVRs == 0 && notCreatedLLVs == 0
 
 	// set RV Ready=True
-	return api.PatchWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
+	return api.PatchStatusWithConflictRetry(h.ctx, h.cl, h.rv, func(rv *v1alpha2.ReplicatedVolume) error {
 		if rv.Status == nil {
 			rv.Status = &v1alpha2.ReplicatedVolumeStatus{}
 		}
@@ -705,15 +708,29 @@ func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.Re
 		}
 		// update PublishProvided from actual primaries
 		rv.Status.PublishProvided = publishProvided
-		meta.SetStatusCondition(
-			&rv.Status.Conditions,
-			metav1.Condition{
-				Type:               v1alpha2.ConditionTypeReady,
-				Status:             metav1.ConditionTrue,
-				ObservedGeneration: rv.Generation,
-				Reason:             "All resources synced",
-			},
-		)
+
+		if allReady {
+			meta.SetStatusCondition(
+				&rv.Status.Conditions,
+				metav1.Condition{
+					Type:               v1alpha2.ConditionTypeReady,
+					Status:             metav1.ConditionTrue,
+					ObservedGeneration: rv.Generation,
+					Reason:             "OwnedResourcesReady",
+				},
+			)
+		} else {
+			meta.SetStatusCondition(
+				&rv.Status.Conditions,
+				metav1.Condition{
+					Type:               v1alpha2.ConditionTypeReady,
+					Status:             metav1.ConditionFalse,
+					ObservedGeneration: rv.Generation,
+					Reason:             "OwnedResourcesAreNotReady",
+					Message:            fmt.Sprintf("%d/%d RVR are not Ready; %d/%d LLVs are not Created.", notReadyRVRs, totalRVRs, notCreatedLLVs, totalLLVs),
+				},
+			)
+		}
 		return nil
 	})
 }

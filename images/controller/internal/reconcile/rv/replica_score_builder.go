@@ -43,11 +43,17 @@ func (b *replicaScoreBuilder) Build() []topology.Score {
 	}
 
 	if b.disklessPurpose {
-		if b.withDisk {
-			scores = append(scores, baseScore)
+		if b.publishRequested {
+			scores = append(scores, maxScore)
+		} else if b.alreadyExists {
+			scores = append(scores, alreadyExistsScore)
 		} else {
+			scores = append(scores, baseScore)
+		}
+
+		if !b.withDisk {
 			// prefer nodes without disk for diskless purposes
-			scores = append(scores, baseScore*2)
+			scores[len(scores)-1] = scores[len(scores)-1] * 2
 		}
 	}
 	return scores
