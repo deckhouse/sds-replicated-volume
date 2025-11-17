@@ -656,10 +656,12 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 	}
 
 	// update ready condition
-	return h.updateRVReadyCondition(ownedRvrs, ownedLLVs)
+	return h.updateRVStatus(ownedRvrs, ownedLLVs)
 }
-func (h *resourceReconcileRequestHandler) updateRVReadyCondition(ownedRvrs []v1alpha2.ReplicatedVolumeReplica, ownedLLVs []snc.LVMLogicalVolume) error {
+func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.ReplicatedVolumeReplica, ownedLLVs []snc.LVMLogicalVolume) error {
 	allReady := true
+	minSizeBytes, sizeFound := h.findMinimalActualSizeBytes(ownedRvrs)
+	publishProvided := h.findPublishProvided(ownedRvrs)
 	for i := range ownedRvrs {
 		rvr := &ownedRvrs[i]
 		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeReady)
@@ -697,6 +699,12 @@ func (h *resourceReconcileRequestHandler) updateRVReadyCondition(ownedRvrs []v1a
 		if rv.Status == nil {
 			rv.Status = &v1alpha2.ReplicatedVolumeStatus{}
 		}
+		// update ActualSize from minimal DRBD device size, if known
+		if sizeFound && minSizeBytes > 0 {
+			rv.Status.ActualSize = *resource.NewQuantity(minSizeBytes, resource.BinarySI)
+		}
+		// update PublishProvided from actual primaries
+		rv.Status.PublishProvided = publishProvided
 		meta.SetStatusCondition(
 			&rv.Status.Conditions,
 			metav1.Condition{
@@ -708,4 +716,38 @@ func (h *resourceReconcileRequestHandler) updateRVReadyCondition(ownedRvrs []v1a
 		)
 		return nil
 	})
+}
+
+// findPublishProvided returns names of nodes that are in DRBD Primary role (max 2 as per CRD).
+func (h *resourceReconcileRequestHandler) findPublishProvided(ownedRvrs []v1alpha2.ReplicatedVolumeReplica) []string {
+	var publishProvided []string
+	for i := range ownedRvrs {
+		rvr := &ownedRvrs[i]
+		if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Role == "Primary" && rvr.Spec.NodeName != "" {
+			publishProvided = append(publishProvided, rvr.Spec.NodeName)
+		}
+	}
+	return publishProvided
+}
+
+// findMinimalActualSizeBytes returns the minimal DRBD-reported device size in bytes across replicas.
+func (h *resourceReconcileRequestHandler) findMinimalActualSizeBytes(ownedRvrs []v1alpha2.ReplicatedVolumeReplica) (int64, bool) {
+	var minSizeBytes int64
+	var found bool
+	for i := range ownedRvrs {
+		rvr := &ownedRvrs[i]
+		if rvr.Status == nil || rvr.Status.DRBD == nil || len(rvr.Status.DRBD.Devices) == 0 {
+			continue
+		}
+		sizeKB := int64(rvr.Status.DRBD.Devices[0].Size)
+		if sizeKB <= 0 {
+			continue
+		}
+		sizeBytes := sizeKB * 1024
+		if !found || sizeBytes < minSizeBytes {
+			minSizeBytes = sizeBytes
+			found = true
+		}
+	}
+	return minSizeBytes, found
 }
