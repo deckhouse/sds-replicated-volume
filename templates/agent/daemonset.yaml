@@ -66,6 +66,7 @@ spec:
         runAsUser: 0
         runAsNonRoot: false
         runAsGroup: 0
+        # readOnlyRootFilesystem: true
         seLinuxOptions:
           level: s0
           type: spc_t
