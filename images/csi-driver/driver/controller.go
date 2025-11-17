@@ -50,10 +50,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	d.log.Trace(request.String())
 	d.log.Trace(fmt.Sprintf("[CreateVolume][traceID:%s] ========== CreateVolume ============", traceID))
 
-	if request.Parameters[internal.TypeKey] != internal.Replicated {
-		return nil, status.Error(codes.InvalidArgument, "Unsupported Storage Class type")
-	}
-
 	if len(request.Name) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Volume Name cannot be empty")
 	}
@@ -333,12 +329,17 @@ func (d *Driver) ListVolumes(_ context.Context, _ *csi.ListVolumesRequest) (*csi
 }
 
 func (d *Driver) GetCapacity(_ context.Context, _ *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
-	d.log.Info("method GetCapacity - not implemented")
+	d.log.Info("method GetCapacity")
 
-	// GetCapacity is not supported. CSIDriver has storageCapacity: false
-	// This prevents Kubernetes from creating CSIStorageCapacity objects
-	// and calling this method for scheduling decisions.
-	return nil, status.Error(codes.Unimplemented, "GetCapacity is not supported")
+	// Return maximum int64 value to indicate unlimited capacity
+	// This prevents Kubernetes scheduler from rejecting pods due to insufficient storage
+	// Real capacity validation happens during volume creation
+	// Note: CSIDriver has storageCapacity: false, but external-provisioner may still call this method
+	return &csi.GetCapacityResponse{
+		AvailableCapacity: int64(^uint64(0) >> 1), // Max int64: ~9.2 exabytes
+		MaximumVolumeSize: nil,
+		MinimumVolumeSize: nil,
+	}, nil
 }
 
 func (d *Driver) ControllerGetCapabilities(_ context.Context, _ *csi.ControllerGetCapabilitiesRequest) (*csi.ControllerGetCapabilitiesResponse, error) {

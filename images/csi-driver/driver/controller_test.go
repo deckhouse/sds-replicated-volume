@@ -98,7 +98,6 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.TypeKey:           internal.Replicated,
 					internal.LvmTypeKey:        internal.LVMTypeThick,
 					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: \"\"",
 				},
@@ -162,7 +161,6 @@ var _ = Describe("CreateVolume", func() {
 					},
 				},
 				Parameters: map[string]string{
-					internal.TypeKey:           internal.Replicated,
 					internal.LvmTypeKey:        internal.LVMTypeThin,
 					internal.LVMVolumeGroupKey: "- name: test-vg\n  thin:\n    poolName: test-pool",
 					ReplicasKey:                "5",
@@ -193,33 +191,6 @@ var _ = Describe("CreateVolume", func() {
 	})
 
 	Context("when validation fails", func() {
-		It("should return error when type is not replicated", func() {
-			request := &csi.CreateVolumeRequest{
-				Name: "test-volume",
-				CapacityRange: &csi.CapacityRange{
-					RequiredBytes: 1073741824,
-				},
-				VolumeCapabilities: []*csi.VolumeCapability{
-					{
-						AccessType: &csi.VolumeCapability_Mount{
-							Mount: &csi.VolumeCapability_MountVolume{},
-						},
-						AccessMode: &csi.VolumeCapability_AccessMode{
-							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
-						},
-					},
-				},
-				Parameters: map[string]string{
-					internal.TypeKey: "invalid-type",
-				},
-			}
-
-			response, err := driver.CreateVolume(ctx, request)
-			Expect(err).To(HaveOccurred())
-			Expect(response).To(BeNil())
-			Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
-		})
-
 		It("should return error when volume name is empty", func() {
 			request := &csi.CreateVolumeRequest{
 				Name: "",
@@ -236,9 +207,7 @@ var _ = Describe("CreateVolume", func() {
 						},
 					},
 				},
-				Parameters: map[string]string{
-					internal.TypeKey: internal.Replicated,
-				},
+				Parameters: map[string]string{},
 			}
 
 			response, err := driver.CreateVolume(ctx, request)
@@ -254,9 +223,7 @@ var _ = Describe("CreateVolume", func() {
 					RequiredBytes: 1073741824,
 				},
 				VolumeCapabilities: nil,
-				Parameters: map[string]string{
-					internal.TypeKey: internal.Replicated,
-				},
+				Parameters:         map[string]string{},
 			}
 
 			response, err := driver.CreateVolume(ctx, request)
@@ -281,9 +248,7 @@ var _ = Describe("CreateVolume", func() {
 						},
 					},
 				},
-				Parameters: map[string]string{
-					internal.TypeKey: internal.Replicated,
-				},
+				Parameters: map[string]string{},
 			}
 
 			response, err := driver.CreateVolume(ctx, request)
@@ -597,14 +562,15 @@ var _ = Describe("GetCapacity", func() {
 		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
 	})
 
-	It("should return Unimplemented error", func() {
+	It("should return maximum capacity", func() {
 		request := &csi.GetCapacityRequest{}
 
 		response, err := driver.GetCapacity(ctx, request)
-		Expect(err).To(HaveOccurred())
-		Expect(response).To(BeNil())
-		Expect(status.Code(err)).To(Equal(codes.Unimplemented))
-		Expect(err.Error()).To(ContainSubstring("GetCapacity is not supported"))
+		Expect(err).NotTo(HaveOccurred())
+		Expect(response).NotTo(BeNil())
+		Expect(response.AvailableCapacity).To(Equal(int64(^uint64(0) >> 1))) // Max int64
+		Expect(response.MaximumVolumeSize).To(BeNil())
+		Expect(response.MinimumVolumeSize).To(BeNil())
 	})
 })
 
