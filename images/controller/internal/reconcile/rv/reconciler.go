@@ -43,6 +43,15 @@ func (r *Reconciler) Reconcile(
 
 	switch typedReq := req.(type) {
 	case ResourceReconcileRequest:
+
+		if typedReq.PropagatedFromOwnedRVR {
+			r.log.Info("PropagatedFromOwnedRVR")
+		}
+
+		if typedReq.PropagatedFromOwnedLLV {
+			r.log.Info("PropagatedFromOwnedLLV")
+		}
+
 		rvr := &v1alpha2.ReplicatedVolume{}
 		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr)
 		if err != nil {

@@ -94,8 +94,17 @@ func runController(
 
 	// common mapper: enqueue owner RV reconcile for any owned child
 	toOwnerRV := func(ctx context.Context, obj client.Object) []TReq {
+		_, fromRVR := obj.(*v1alpha2.ReplicatedVolumeReplica)
+		_, fromLLV := obj.(*snc.LVMLogicalVolume)
+
 		if name, ok := ownerRVName(obj); ok {
-			return []TReq{rv.ResourceReconcileRequest{Name: name}}
+			return []TReq{
+				rv.ResourceReconcileRequest{
+					Name:                   name,
+					PropagatedFromOwnedRVR: fromRVR,
+					PropagatedFromOwnedLLV: fromLLV,
+				},
+			}
 		}
 		return nil
 	}

@@ -6,7 +6,9 @@ type Request interface {
 
 // single resource was created or spec has changed
 type ResourceReconcileRequest struct {
-	Name string
+	Name                   string
+	PropagatedFromOwnedRVR bool
+	PropagatedFromOwnedLLV bool
 }
 
 func (r ResourceReconcileRequest) _isRequest() {}

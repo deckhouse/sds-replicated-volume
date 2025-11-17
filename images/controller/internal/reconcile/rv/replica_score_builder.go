@@ -28,10 +28,13 @@ func (b *replicaScoreBuilder) PublishRequested() {
 func (b *replicaScoreBuilder) Build() []topology.Score {
 	baseScore := topology.Score(100)
 	maxScore := topology.Score(1000000)
+	alreadyExistsScore := topology.Score(1000)
 	var scores []topology.Score
 	if b.withDisk {
-		if b.publishRequested || b.alreadyExists {
+		if b.publishRequested {
 			scores = append(scores, maxScore)
+		} else if b.alreadyExists {
+			scores = append(scores, alreadyExistsScore)
 		} else {
 			scores = append(scores, baseScore)
 		}
