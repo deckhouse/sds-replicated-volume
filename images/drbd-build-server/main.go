@@ -205,7 +205,7 @@ func (s *server) routes() {
 }
 
 func (s *server) hello() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		if _, err := fmt.Fprintf(w, "Successfully connected to DRBD Build Server ('%s')\n", GitCommit); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -311,7 +311,9 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
 				s.logger.Debug("Returning job ID to client", "remote_addr", remoteAddr, "job_id", jobID)
-				json.NewEncoder(w).Encode(resp)
+				if err := json.NewEncoder(w).Encode(resp); err != nil {
+					s.logger.Error("Failed to encode response", "remote_addr", remoteAddr, "error", err)
+				}
 				return
 			}
 
@@ -322,16 +324,16 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 				job.mu.RUnlock()
 				s.logger.Debug("Job completed, checking cache file", "remote_addr", remoteAddr, "cache_path", cachePath)
 				if cachePath != "" {
-					if info, err := os.Stat(cachePath); err == nil {
+					info, err := os.Stat(cachePath)
+					if err == nil {
 						s.logger.Info("Serving completed build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "completed_at", completedAt, "size_bytes", info.Size())
 						w.Header().Set("Content-Type", "application/gzip")
 						w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"drbd-modules-%s.tar.gz\"", kernelVersion))
 						http.ServeFile(w, r, cachePath)
 						s.logger.Debug("Successfully sent completed build to client", "remote_addr", remoteAddr)
 						return
-					} else {
-						s.logger.Warn("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
 					}
+					s.logger.Warn("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
 				}
 			}
 
@@ -375,7 +377,9 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			s.logger.Error("Failed to encode response", "remote_addr", remoteAddr, "error", err)
+		}
 	}
 }
 
@@ -637,7 +641,9 @@ func (s *server) getStatus() http.HandlerFunc {
 			respData["download_url"] = fmt.Sprintf("/api/v1/download/%s", jobID)
 		}
 
-		json.NewEncoder(w).Encode(respData)
+		if err := json.NewEncoder(w).Encode(respData); err != nil {
+			s.logger.Error("Failed to encode response", "remote_addr", remoteAddr, "error", err)
+		}
 	}
 }
 
@@ -701,7 +707,11 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	if err != nil {
 		return fmt.Errorf("failed to get current directory: %v", err)
 	}
-	defer os.Chdir(originalDir)
+	defer func() {
+		if err := os.Chdir(originalDir); err != nil {
+			s.logger.Warn("Failed to restore original directory", "job_id", jobID, "error", err)
+		}
+	}()
 
 	s.logger.Debug("Changing to DRBD directory", "job_id", jobID, "drbd_dir", drbdDir)
 	if err := os.Chdir(drbdDir); err != nil {
