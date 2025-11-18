@@ -83,6 +83,8 @@ const (
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
 	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+	StorageClassParamTopologyKey                  = "replicated.csi.storage.deckhouse.io/topology"
+	StorageClassParamZonesKey                     = "replicated.csi.storage.deckhouse.io/zones"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -516,6 +518,22 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 	case VolumeAccessAny:
 		storageClassParameters[StorageClassParamAllowRemoteVolumeAccessKey] = StorageClassParamAllowRemoteVolumeAccessValue
 		volumeBindingMode = "Immediate"
+	}
+
+	// Add topology parameter
+	storageClassParameters[StorageClassParamTopologyKey] = replicatedSC.Spec.Topology
+
+	// Add zones parameter (serialize array to YAML list format)
+	if len(replicatedSC.Spec.Zones) > 0 {
+		var zonesBuilder strings.Builder
+		for i, zone := range replicatedSC.Spec.Zones {
+			if i > 0 {
+				zonesBuilder.WriteString("\n")
+			}
+			zonesBuilder.WriteString("- ")
+			zonesBuilder.WriteString(zone)
+		}
+		storageClassParameters[StorageClassParamZonesKey] = zonesBuilder.String()
 	}
 
 	switch replicatedSC.Spec.Topology {

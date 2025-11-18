@@ -186,7 +186,7 @@ var _ = Describe("CreateVolume", func() {
 					ReplicasKey:             "5",
 					TopologyKey:             "TransZonal",
 					VolumeAccessKey:         "Local",
-					ZonesKey:                "zone-1,zone-2,zone-3",
+					ZonesKey:                "- zone-1\n- zone-2\n- zone-3",
 				},
 			}
 
@@ -206,6 +206,218 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.LVM.Type).To(Equal(internal.LVMTypeThin))
 			Expect(rv.Spec.LVM.LVMVolumeGroups).To(HaveLen(1))
 			Expect(rv.Spec.LVM.LVMVolumeGroups[0].ThinPoolName).To(Equal("test-pool"))
+		})
+
+		It("should parse zones in YAML format correctly", func() {
+			rsp := &srv.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pool",
+				},
+				Spec: srv.ReplicatedStoragePoolSpec{
+					Type: "LVM",
+					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{
+						{
+							Name: "test-vg",
+						},
+					},
+				},
+			}
+			Expect(cl.Create(ctx, rsp)).To(Succeed())
+
+			lvg := createTestLVMVolumeGroup("test-vg", "node-1")
+			Expect(cl.Create(ctx, lvg)).To(Succeed())
+
+			go func() {
+				defer GinkgoRecover()
+				time.Sleep(200 * time.Millisecond)
+				updatedRV := &v1alpha2.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-yaml"}, updatedRV)).To(Succeed())
+				updatedRV.Status = &v1alpha2.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha2.ConditionTypeReady,
+							Status: metav1.ConditionTrue,
+						},
+					},
+				}
+				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+			}()
+
+			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			request := &csi.CreateVolumeRequest{
+				Name: "test-volume-yaml",
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 1073741824,
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "ext4",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+						},
+					},
+				},
+				Parameters: map[string]string{
+					internal.StoragePoolKey: "test-pool",
+					TopologyKey:             "TransZonal",
+					ZonesKey:                "- zone-a\n- zone-b\n- zone-c",
+				},
+			}
+
+			response, err := driver.CreateVolume(timeoutCtx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeNil())
+
+			rv := &v1alpha2.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-yaml"}, rv)).To(Succeed())
+			Expect(rv.Spec.Zones).To(Equal([]string{"zone-a", "zone-b", "zone-c"}))
+		})
+
+		It("should parse single zone in YAML format correctly", func() {
+			rsp := &srv.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pool",
+				},
+				Spec: srv.ReplicatedStoragePoolSpec{
+					Type: "LVM",
+					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{
+						{
+							Name: "test-vg",
+						},
+					},
+				},
+			}
+			Expect(cl.Create(ctx, rsp)).To(Succeed())
+
+			lvg := createTestLVMVolumeGroup("test-vg", "node-1")
+			Expect(cl.Create(ctx, lvg)).To(Succeed())
+
+			go func() {
+				defer GinkgoRecover()
+				time.Sleep(200 * time.Millisecond)
+				updatedRV := &v1alpha2.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-single"}, updatedRV)).To(Succeed())
+				updatedRV.Status = &v1alpha2.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha2.ConditionTypeReady,
+							Status: metav1.ConditionTrue,
+						},
+					},
+				}
+				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+			}()
+
+			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			request := &csi.CreateVolumeRequest{
+				Name: "test-volume-single",
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 1073741824,
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "ext4",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+						},
+					},
+				},
+				Parameters: map[string]string{
+					internal.StoragePoolKey: "test-pool",
+					TopologyKey:             "TransZonal",
+					ZonesKey:                "- single-zone",
+				},
+			}
+
+			response, err := driver.CreateVolume(timeoutCtx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeNil())
+
+			rv := &v1alpha2.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-single"}, rv)).To(Succeed())
+			Expect(rv.Spec.Zones).To(Equal([]string{"single-zone"}))
+		})
+
+		It("should handle empty zones parameter", func() {
+			rsp := &srv.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-pool",
+				},
+				Spec: srv.ReplicatedStoragePoolSpec{
+					Type: "LVM",
+					LVMVolumeGroups: []srv.ReplicatedStoragePoolLVMVolumeGroups{
+						{
+							Name: "test-vg",
+						},
+					},
+				},
+			}
+			Expect(cl.Create(ctx, rsp)).To(Succeed())
+
+			lvg := createTestLVMVolumeGroup("test-vg", "node-1")
+			Expect(cl.Create(ctx, lvg)).To(Succeed())
+
+			go func() {
+				defer GinkgoRecover()
+				time.Sleep(200 * time.Millisecond)
+				updatedRV := &v1alpha2.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-empty"}, updatedRV)).To(Succeed())
+				updatedRV.Status = &v1alpha2.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{
+						{
+							Type:   v1alpha2.ConditionTypeReady,
+							Status: metav1.ConditionTrue,
+						},
+					},
+				}
+				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+			}()
+
+			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+
+			request := &csi.CreateVolumeRequest{
+				Name: "test-volume-empty",
+				CapacityRange: &csi.CapacityRange{
+					RequiredBytes: 1073741824,
+				},
+				VolumeCapabilities: []*csi.VolumeCapability{
+					{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "ext4",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+						},
+					},
+				},
+				Parameters: map[string]string{
+					internal.StoragePoolKey: "test-pool",
+					TopologyKey:             "Zonal",
+				},
+			}
+
+			response, err := driver.CreateVolume(timeoutCtx, request)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(response).NotTo(BeNil())
+
+			rv := &v1alpha2.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "test-volume-empty"}, rv)).To(Succeed())
+			Expect(rv.Spec.Zones).To(BeEmpty())
 		})
 	})
 

@@ -102,6 +102,8 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 				controller.StorageClassParamReplicasOnDifferentKey:        controller.ZoneLabel,
 				controller.StorageClassParamAllowRemoteVolumeAccessKey:    "false",
 				controller.QuorumMinimumRedundancyWithPrefixSCKey:         "2",
+				controller.StorageClassParamTopologyKey:                   validSpecReplicatedSCTemplate.Spec.Topology,
+				controller.StorageClassParamZonesKey:                      "- first\n- second\n- third",
 			}
 
 			expectedSC = &storagev1.StorageClass{
@@ -136,6 +138,83 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		virtualizationEnabled := false
 		actualSC := controller.GetNewStorageClass(&replicatedSC, virtualizationEnabled)
 		Expect(actualSC).To(Equal(expectedSC))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_and_zones_parameters", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamTopologyKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamTopologyKey]).To(Equal(controller.TopologyTransZonal))
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamZonesKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- first\n- second\n- third"))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Does_not_add_zones_when_empty", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.Zones = []string{}
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamTopologyKey))
+		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Formats_single_zone_correctly", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.Zones = []string{"single-zone"}
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamZonesKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- single-zone"))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Formats_multiple_zones_correctly", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.Zones = []string{"zone-a", "zone-b", "zone-c", "zone-d"}
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamZonesKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- zone-a\n- zone-b\n- zone-c\n- zone-d"))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Zonal", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.Topology = controller.TopologyZonal
+		replicatedSC.Spec.Zones = []string{}
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamTopologyKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamTopologyKey]).To(Equal(controller.TopologyZonal))
+		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
+	})
+
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Ignored", func() {
+		testName := generateTestName()
+		replicatedSC := validSpecReplicatedSCTemplate
+		replicatedSC.Name = testName
+		replicatedSC.Spec.Topology = controller.TopologyIgnored
+		replicatedSC.Spec.Zones = []string{}
+
+		storageClass := controller.GenerateStorageClassFromReplicatedStorageClass(&replicatedSC)
+
+		Expect(storageClass.Parameters).To(HaveKey(controller.StorageClassParamTopologyKey))
+		Expect(storageClass.Parameters[controller.StorageClassParamTopologyKey]).To(Equal(controller.TopologyIgnored))
+		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
 	})
 
 	It("GetStorageClass_Returns_storage_class_and_no_error", func() {

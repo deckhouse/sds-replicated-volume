@@ -112,9 +112,29 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	var zones []string
 	if zonesStr, ok := request.Parameters[ZonesKey]; ok && zonesStr != "" {
-		// Parse zones from comma-separated string
-		for _, zone := range strings.Split(zonesStr, ",") {
-			zones = append(zones, strings.TrimSpace(zone))
+		// Parse zones from YAML list format (multi-line with "- " prefix)
+		// Format: "- zone1\n- zone2\n- zone3"
+		lines := strings.Split(zonesStr, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Remove "- " prefix if present
+			if strings.HasPrefix(line, "- ") {
+				zone := strings.TrimSpace(line[2:])
+				if zone != "" {
+					zones = append(zones, zone)
+				}
+			} else {
+				// Fallback: support comma-separated format for backward compatibility
+				for _, zone := range strings.Split(line, ",") {
+					zone = strings.TrimSpace(zone)
+					if zone != "" {
+						zones = append(zones, zone)
+					}
+				}
+			}
 		}
 	}
 
