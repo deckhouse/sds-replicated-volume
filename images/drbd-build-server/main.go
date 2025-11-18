@@ -729,10 +729,13 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	// Use system environment variables as base and add DRBD-specific ones
 	// This ensures PATH and other important variables are available
 	env := os.Environ()
-	env = append(env, fmt.Sprintf("KVER=%s", kernelVersion))
-	env = append(env, fmt.Sprintf("KDIR=%s", kernelBuildDir))
-	env = append(env, fmt.Sprintf("SPAAS_URL=%s", s.spaasURL))
-	env = append(env, "SPAAS=true")
+	env = append(
+		env,
+		fmt.Sprintf("KVER=%s", kernelVersion),
+		fmt.Sprintf("KDIR=%s", kernelBuildDir),
+		fmt.Sprintf("SPAAS_URL=%s", s.spaasURL),
+		"SPAAS=true",
+	)
 	s.logger.Debug("Environment variables set", "job_id", jobID, "KVER", kernelVersion, "KDIR", kernelBuildDir, "SPAAS_URL", s.spaasURL)
 
 	// Clean previous build
