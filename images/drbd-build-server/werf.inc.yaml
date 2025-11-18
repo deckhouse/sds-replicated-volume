@@ -36,7 +36,7 @@ mount:
 
 shell:
   setup:
-    - cd /src/images/{{ $.ImageName }}
+    - cd /src
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-build-server main.go
     - chmod +x /drbd-build-server
 
@@ -84,9 +84,9 @@ shell:
 
 docker:
   WORKDIR: /drbd
-  EXPOSE: "2020"
+  EXPOSE: "2021"
   ENTRYPOINT: ["/usr/local/bin/drbd-build-server"]
-  CMD: ["-addr", ":2020"]
+  CMD: ["-addr", ":2021"]
   LABEL:
     distro: debian
     version: all
