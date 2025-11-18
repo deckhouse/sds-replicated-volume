@@ -60,7 +60,7 @@ func (w *LLVWriterImpl) WriteToLLV(llv *snc.LVMLogicalVolume) (ChangeSet, error)
 			&llv.Spec.Thick,
 			&snc.LVMLogicalVolumeThickSpec{
 				// TODO: make this configurable
-				Contiguous: utils.Ptr(true),
+				Contiguous: utils.Ptr(false),
 			},
 		)
 	default:

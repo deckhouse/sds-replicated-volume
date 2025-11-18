@@ -116,7 +116,7 @@ func TestClusterReconcile(t *testing.T) {
 							Type:                  "Thick",
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
-							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(false)},
 						},
 					},
 					CreateRVRMatcher{
@@ -178,7 +178,7 @@ func TestClusterReconcile(t *testing.T) {
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
 							Type:                  "Thick",
-							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(false)},
 						},
 					},
 					CreateRVRMatcher{
@@ -254,7 +254,7 @@ func TestClusterReconcile(t *testing.T) {
 							Type:                  "Thick",
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
-							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(true)},
+							Thick:                 &snc.LVMLogicalVolumeThickSpec{Contiguous: utils.Ptr(false)},
 						},
 					},
 					CreateRVRMatcher{
@@ -326,7 +326,7 @@ func TestClusterReconcile(t *testing.T) {
 							Size:                  testSizeStr,
 							LVMVolumeGroupName:    testVGName,
 							Thick: &snc.LVMLogicalVolumeThickSpec{
-								Contiguous: utils.Ptr(true),
+								Contiguous: utils.Ptr(false),
 							},
 						},
 					},

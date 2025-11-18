@@ -14,6 +14,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+	cstrings "github.com/deckhouse/sds-replicated-volume/lib/go/common/strings"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -59,6 +60,21 @@ type replicaInfo struct {
 
 func (h *resourceReconcileRequestHandler) Handle() error {
 	h.log.Info("controller: reconcile resource", "name", h.rv.Name)
+
+	// ensure finalizer present during normal reconcile
+	err := api.PatchWithConflictRetry(
+		h.ctx, h.cl, h.rv,
+		func(rvr *v1alpha2.ReplicatedVolume) error {
+			if slices.Contains(rvr.Finalizers, ControllerFinalizerName) {
+				return nil
+			}
+			rvr.Finalizers = append(rvr.Finalizers, ControllerFinalizerName)
+			return nil
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("ensuring finalizer: %w", err)
+	}
 
 	// Build RV adapter once
 	rvAdapter, err := cluster.NewRVAdapter(h.rv)
@@ -721,6 +737,14 @@ func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.Re
 				},
 			)
 		} else {
+			var rvrMsg, llvMsg string
+			if notReadyRVRs > 0 {
+				rvrMsg = fmt.Sprintf("%d/%d RVR are not Ready", notReadyRVRs, totalRVRs)
+			}
+			if notCreatedLLVs > 0 {
+				llvMsg = fmt.Sprintf("%d/%d LLVs are not Created.", notCreatedLLVs, totalLLVs)
+			}
+
 			meta.SetStatusCondition(
 				&rv.Status.Conditions,
 				metav1.Condition{
@@ -728,7 +752,7 @@ func (h *resourceReconcileRequestHandler) updateRVStatus(ownedRvrs []v1alpha2.Re
 					Status:             metav1.ConditionFalse,
 					ObservedGeneration: rv.Generation,
 					Reason:             "OwnedResourcesAreNotReady",
-					Message:            fmt.Sprintf("%d/%d RVR are not Ready; %d/%d LLVs are not Created.", notReadyRVRs, totalRVRs, notCreatedLLVs, totalLLVs),
+					Message:            cstrings.JoinNonEmpty("; ", rvrMsg, llvMsg),
 				},
 			)
 		}

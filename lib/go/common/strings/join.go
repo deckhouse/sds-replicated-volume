@@ -24,3 +24,14 @@ func JoinNames[T GetNamer](items []T, sep string) string {
 		sep,
 	)
 }
+
+func JoinNonEmpty(sep string, elems ...string) string {
+	return strings.Join(
+		slices.Collect(
+			uiter.Filter(
+				slices.Values(elems),
+				func(s string) bool { return s != "" }),
+		),
+		sep,
+	)
+}
