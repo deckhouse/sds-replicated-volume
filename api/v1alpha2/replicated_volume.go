@@ -11,7 +11,8 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
-// +kubebuilder:printcolumn:name="Size",type=integer,format=int64,JSONPath=".spec.size"
+// +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
+// +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=".spec.replicas"
 // +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=".spec.topology"
 type ReplicatedVolume struct {
