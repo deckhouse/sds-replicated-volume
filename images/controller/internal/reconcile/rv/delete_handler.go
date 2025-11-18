@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -72,5 +73,59 @@ func (h *resourceDeleteRequestHandler) Handle() error {
 		return fmt.Errorf("remove finalizer: %w", err)
 	}
 
+	//
+	{
+		var rvrList v1alpha2.ReplicatedVolumeReplicaList
+		if err := h.cl.List(h.ctx, &rvrList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+			return fmt.Errorf("listing rvrs: %w", err)
+		}
+
+		for i := range rvrList.Items {
+			rvr := &rvrList.Items[i]
+			err := api.PatchWithConflictRetry(
+				h.ctx, h.cl, rvr,
+				func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
+					var out []string
+					for _, f := range rvr.Finalizers {
+						if f != ControllerFinalizerName {
+							out = append(out, f)
+						}
+					}
+					rvr.Finalizers = out
+					return nil
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("removing finalizer: %w", err)
+			}
+		}
+	}
+
+	{
+		var llvList snc.LVMLogicalVolumeList
+		if err := h.cl.List(h.ctx, &llvList, client.MatchingFields{"index.rvOwnerName": h.rv.Name}); err != nil {
+			return fmt.Errorf("listing llvs: %w", err)
+		}
+
+		for i := range llvList.Items {
+			llv := &llvList.Items[i]
+			err := api.PatchWithConflictRetry(
+				h.ctx, h.cl, llv,
+				func(rvr *snc.LVMLogicalVolume) error {
+					var out []string
+					for _, f := range rvr.Finalizers {
+						if f != ControllerFinalizerName {
+							out = append(out, f)
+						}
+					}
+					rvr.Finalizers = out
+					return nil
+				},
+			)
+			if err != nil {
+				return fmt.Errorf("removing finalizer: %w", err)
+			}
+		}
+	}
 	return nil
 }
