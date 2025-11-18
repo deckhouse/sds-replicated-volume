@@ -1,10 +1,8 @@
 module github.com/deckhouse/sds-replicated-volume/api
 
-go 1.24.0
+go 1.24.9
 
-toolchain go1.24.2
-
-require k8s.io/apimachinery v0.34.1
+require k8s.io/apimachinery v0.34.2
 
 require (
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect

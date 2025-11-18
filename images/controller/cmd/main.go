@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
-	nodecfgv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"golang.org/x/sync/errgroup"
 
@@ -98,6 +98,15 @@ func newManager(
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress,
 		},
+		// Cache: cache.Options{
+		// 	ByObject: map[client.Object]cache.ByObject{
+		// 		&v1alpha2.ReplicatedVolumeReplica{}: {
+		// 			// only watch current node's replicas
+		// 			Field: (&v1alpha2.ReplicatedVolumeReplica{}).
+		// 				NodeNameSelector(envConfig.NodeName),
+		// 		},
+		// 	},
+		// },
 	}
 
 	mgr, err := manager.New(config, mgrOpts)
@@ -123,7 +132,7 @@ func newScheme() (*runtime.Scheme, error) {
 		corev1.AddToScheme,
 		storagev1.AddToScheme,
 		v1alpha2.AddToScheme,
-		nodecfgv1alpha1.AddToScheme,
+		snc.AddToScheme,
 	}
 
 	for i, f := range schemeFuncs {

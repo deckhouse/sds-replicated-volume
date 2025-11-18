@@ -24,3 +24,9 @@ Change csi endpoint from `linstor.csi.linbit.com` to `replicated.csi.storage.dec
 ### 004-csi-add-new-topology-logic.patch
 
 Add new topology logic
+
+### 005-add-filesystem-creation-on-mount-failure.patch
+
+Add Filesystem Creation on Mount Failure
+
+This patch introduces a mechanism to automatically create a filesystem on a volume if mounting fails due to a "wrong fs type" error. Specifically, if the filesystem type is `ext4` and the mount operation returns an error indicating a mismatch in filesystem type, the system will attempt to create an `ext4` filesystem on the volume. If the filesystem creation is successful, it will retry mounting the volume. This ensures that volumes are correctly formatted and mounted, reducing manual intervention in case of such errors.

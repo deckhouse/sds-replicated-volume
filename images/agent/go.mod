@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/agent
 
-go 1.24.6
+go 1.24.9
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
@@ -73,7 +73,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	k8s.io/api v0.34.0
-	k8s.io/apimachinery v0.34.1
+	k8s.io/apimachinery v0.34.2
 	k8s.io/client-go v0.34.0
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250909170358-d67c058d9372 // indirect

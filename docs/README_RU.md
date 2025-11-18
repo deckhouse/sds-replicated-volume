@@ -13,20 +13,26 @@ moduleStatus: preview
 
 Модуль позволяет создавать `Storage Pool` и `StorageClass` через создание [пользовательских ресурсов Kubernetes](./cr.html).
 
-Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
+Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVMVolumeGroup`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/).
 
-> **Внимание.** Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
->
-> **Внимание.** Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
->
-> **Внимание.** Если в кластере используется только одна нода, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
-> Для использования `sds-replicated-volume` необходимо иметь минимально 3 ноды. Рекомендуется использовать 4 и более на случай выхода нод из строя.
+{{< alert level="warning" >}}
+Перед включением модуля `sds-replicated-volume` необходимо включить модуль `sds-node-configurator`.
+
+Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
+
+Если в кластере используется только один узел, то вместо `sds-replicated-volume` рекомендуется использовать `sds-local-volume`.
+Для использования `sds-replicated-volume` необходимо иметь минимум 3 узла. Рекомендуется использовать 4 и более на случай выхода узлов из строя.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+Доступные режимы работы для модуля: RWO; RWX — только в DVP.
+{{< /alert >}}
 
 После включения модуля `sds-replicated-volume` в конфигурации Deckhouse, останется только создать [ReplicatedStoragePool и ReplicatedStorageClass](./usage.html#конфигурация-бэкенда-linstor).
 
 Для корректной работы модуля `sds-replicated-volume` выполните следующие шаги:
 
-- Включите модуль [sds-node-configurator](../../sds-node-configurator/stable/).
+- Включите модуль [sds-node-configurator](/modules/sds-node-configurator/).
 
   Убедитесь, что модуль `sds-node-configurator` включен **до** включения модуля `sds-replicated-volume`.
 
@@ -35,16 +41,12 @@ moduleStatus: preview
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Синхронизация данных при репликации томов происходит только в синхронном режиме, асинхронный режим не поддерживается.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-Для работы с снапшотами требуется подключенный модуль [snapshot-controller](../../snapshot-controller/).
+Для работы со снимками требуется подключенный модуль [snapshot-controller](/modules/snapshot-controller/).
 {{< /alert >}}
 
 - Настройте LVMVolumeGroup.
   
-  Перед созданием StorageClass необходимо создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) модуля `sds-node-configurator` на узлах кластера.
+  Перед созданием StorageClass необходимо создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) модуля `sds-node-configurator` на узлах кластера.
 
 - Создайте пулы хранения и соответствующие StorageClass'ы.
 
@@ -77,15 +79,15 @@ moduleStatus: preview
    EOF
    ```
 
-2. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
+1. Дождитесь, пока модуль `sds-node-configurator` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-node-configurator -w
    ```
 
-3. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
+1. Активируйте модуль `sds-replicated-volume`. Перед включением рекомендуется ознакомиться [с доступными настройками](./configuration.html).
 
-  Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегестрирует CSI драйвер:
+   Пример ниже запускает модуль с настройками по умолчанию, что приведет к созданию служебных подов компонента `sds-replicated-volume` на всех узлах кластера, установит модуль ядра DRBD и зарегистрирует CSI драйвер:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -99,13 +101,13 @@ moduleStatus: preview
    EOF
    ```
 
-4. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
+1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-5. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
+1. Убедитесь, что в пространствах имен `d8-sds-replicated-volume` и `d8-sds-node-configurator` все поды находятся в статусе `Running` или `Completed` и запущены на всех узлах, где планируется использовать ресурсы DRBD.
 
    ```shell
    kubectl -n d8-sds-replicated-volume get pod -o wide -w
@@ -118,7 +120,7 @@ moduleStatus: preview
 
 Приступим к настройке хранилища:
 
-- Получить все ресурсы [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice), которые доступны в вашем кластере:
+- Получить все ресурсы [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice), которые доступны в вашем кластере:
 
 ```shell
 kubectl get bd
@@ -131,7 +133,7 @@ dev-75d455a9c59858cf2b571d196ffd9883f1349d2e   worker-2   true         35Gi     
 dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi       /dev/vdb
 ```
 
-- Создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-0`:
+- Создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-0`:
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -162,7 +164,7 @@ kubectl get lvg vg-1-on-worker-0 -w
 
 - Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-0` из блочных устройств `/dev/vdd` и `/dev/vdb` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-1`:
+- Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-1`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -192,7 +194,7 @@ kubectl get lvg vg-1-on-worker-1 -w
 
 - Если ресурс перешел в состояние `Ready`, то это значит, что на узле `worker-1` из блочного устройства `/dev/vde` была создана LVM VG с именем `vg-1`.
 
-- Далее создать ресурс [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) для узла `worker-2`:
+- Далее создать ресурс [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) для узла `worker-2`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -303,7 +305,7 @@ kubectl get sc replicated-storage-class
 
 - Используйте стоковые ядра, поставляемые вместе [с поддерживаемыми дистрибутивами](https://deckhouse.ru/documentation/v1/supported_versions.html#linux).
 - Для сетевого соединения необходимо использовать инфраструктуру с пропускной способностью 10 Gbps или выше.
-- Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс.
+- Чтобы достичь максимальной производительности, сетевая задержка между узлами должна находиться в пределах 0,5–1 мс. При задержках более 5 мс будут возникать серьезные проблемы с производительностью.
 - Не используйте другой SDS (Software defined storage) для предоставления дисков SDS Deckhouse.
 
 ### Рекомендации

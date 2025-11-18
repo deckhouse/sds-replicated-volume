@@ -1,0 +1,4 @@
+Changes:
+  - Added release notes
+  - Hooks switched from python to golang
+  - Docs improved

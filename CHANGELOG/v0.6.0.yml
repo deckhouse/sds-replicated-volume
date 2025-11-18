@@ -1,0 +1,2 @@
+Changes:
+  - Updated DRBD to version v9.2.12, solving a number of problems (particularly improving DRBD diskless replica stability)

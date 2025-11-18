@@ -1,0 +1,11 @@
+Changes:
+  - Multiple fixes and improvements in evict.sh and replicas_managers.sh (also, they are now automatically installed in /opt/deckhouse/sbin)
+  - DRBD now correctly builds on ALT Linux and with Linux kernel 6.5+
+  - Added anti-affinity rules for controller pods
+  - Multiple fixes in dashboard and alerts
+  - isDefault parameter removed; use standard k8s annotation instead
+  - Added liveness and readiness checks for controllers
+  - Backup switched to dedicated CR instead of using secrets in module namespace
+  - Prohibited creation of pools on ephemeral nodes
+  - Multiple documentation fixes
+  - CSI endpoint migrates from linstor.csi.linbit.com to replicated.csi.deckhouse.io

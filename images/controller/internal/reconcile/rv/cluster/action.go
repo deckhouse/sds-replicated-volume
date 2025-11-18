@@ -17,16 +17,24 @@ func cleanAction(a Action) Action {
 	switch t := a.(type) {
 	case Actions:
 		t = cleanActions(t)
-		if len(t) == 1 {
+		switch len(t) {
+		case 0:
+			return nil
+		case 1:
 			return t[0]
+		default:
+			return t
 		}
-		return t
 	case ParallelActions:
 		t = cleanActions(t)
-		if len(t) == 1 {
+		switch len(t) {
+		case 0:
+			return nil
+		case 1:
 			return t[0]
+		default:
+			return t
 		}
-		return t
 	default:
 		return a
 	}
@@ -48,74 +56,65 @@ func cleanActions[T ~[]Action](actions T) (result T) {
 	return
 }
 
-// RVRPatch represents a patch to be applied to a specific ReplicatedVolumeReplica
-type RVRPatch struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
-	Apply                   func(*v1alpha2.ReplicatedVolumeReplica) error
+type RVRWriter interface {
+	WriteToRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (ChangeSet, error)
 }
 
-// LLVPatch represents a patch to be applied to a specific LVMLogicalVolume
-type LLVPatch struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
-	Apply            func(*snc.LVMLogicalVolume) error
+type LLVWriter interface {
+	WriteToLLV(llv *snc.LVMLogicalVolume) (ChangeSet, error)
 }
 
-type CreateReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+type PatchRVR struct {
+	RVR    RVRAdapter
+	Writer RVRWriter
 }
 
-type WaitReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+type PatchLLV struct {
+	LLV    LLVAdapter
+	Writer LLVWriter
 }
 
-type DeleteReplicatedVolumeReplica struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
+// Creates RVR and waits for Ready=True status
+// It should also initialize it, if needed
+type CreateRVR struct {
+	InitialSyncRequired bool
+	Writer              RVRWriter
 }
 
-type CreateLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type DeleteRVR struct {
+	RVR RVRAdapter
 }
 
-type WaitLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type CreateLLV struct {
+	Writer LLVWriter
 }
 
-type DeleteLVMLogicalVolume struct {
-	LVMLogicalVolume *snc.LVMLogicalVolume
+type DeleteLLV struct {
+	LLV LLVAdapter
 }
 
-type WaitAndTriggerInitialSync struct {
-	ReplicatedVolumeReplicas []*v1alpha2.ReplicatedVolumeReplica
+type ResizeRVR struct {
+	RVR RVRAdapter
 }
 
-type TriggerRVRResize struct {
-	ReplicatedVolumeReplica *v1alpha2.ReplicatedVolumeReplica
-}
-
-func (Actions) _action()                       {}
-func (ParallelActions) _action()               {}
-func (RVRPatch) _action()                      {}
-func (LLVPatch) _action()                      {}
-func (CreateReplicatedVolumeReplica) _action() {}
-func (WaitReplicatedVolumeReplica) _action()   {}
-func (DeleteReplicatedVolumeReplica) _action() {}
-func (CreateLVMLogicalVolume) _action()        {}
-func (WaitLVMLogicalVolume) _action()          {}
-func (DeleteLVMLogicalVolume) _action()        {}
-func (WaitAndTriggerInitialSync) _action()     {}
-func (TriggerRVRResize) _action()              {}
+func (Actions) _action()         {}
+func (ParallelActions) _action() {}
+func (PatchRVR) _action()        {}
+func (PatchLLV) _action()        {}
+func (CreateRVR) _action()       {}
+func (DeleteRVR) _action()       {}
+func (CreateLLV) _action()       {}
+func (DeleteLLV) _action()       {}
+func (ResizeRVR) _action()       {}
 
 var _ Action = Actions{}
 var _ Action = ParallelActions{}
 
 // ensure interface conformance
-var _ Action = RVRPatch{}
-var _ Action = LLVPatch{}
-var _ Action = CreateReplicatedVolumeReplica{}
-var _ Action = WaitReplicatedVolumeReplica{}
-var _ Action = DeleteReplicatedVolumeReplica{}
-var _ Action = CreateLVMLogicalVolume{}
-var _ Action = WaitLVMLogicalVolume{}
-var _ Action = DeleteLVMLogicalVolume{}
-var _ Action = WaitAndTriggerInitialSync{}
-var _ Action = TriggerRVRResize{}
+var _ Action = PatchRVR{}
+var _ Action = PatchLLV{}
+var _ Action = CreateRVR{}
+var _ Action = DeleteRVR{}
+var _ Action = CreateLLV{}
+var _ Action = DeleteLLV{}
+var _ Action = ResizeRVR{}

@@ -43,6 +43,15 @@ func (r *Reconciler) Reconcile(
 
 	switch typedReq := req.(type) {
 	case ResourceReconcileRequest:
+
+		if typedReq.PropagatedFromOwnedRVR {
+			r.log.Info("PropagatedFromOwnedRVR")
+		}
+
+		if typedReq.PropagatedFromOwnedLLV {
+			r.log.Info("PropagatedFromOwnedLLV")
+		}
+
 		rvr := &v1alpha2.ReplicatedVolume{}
 		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rvr)
 		if err != nil {
@@ -68,41 +77,27 @@ func (r *Reconciler) Reconcile(
 
 		return reconcile.Result{}, h.Handle()
 
-	case ResourceStatusReconcileRequest:
+	case ResourceDeleteRequest:
 		rv := &v1alpha2.ReplicatedVolume{}
 		err := r.cl.Get(ctx, client.ObjectKey{Name: typedReq.Name}, rv)
 		if err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				r.log.Warn(
-					"rv 'name' not found for status reconcile, it might be deleted, ignore",
+					"rv 'name' not found for delete reconcile, it might be deleted, ignore",
 					"name", typedReq.Name,
 				)
 				return reconcile.Result{}, nil
 			}
-			return reconcile.Result{}, fmt.Errorf("getting rv %s for status reconcile: %w", typedReq.Name, err)
+			return reconcile.Result{}, fmt.Errorf("getting rv %s for delete reconcile: %w", typedReq.Name, err)
 		}
 
-		sh := &resourceStatusReconcileRequestHandler{
+		h := &resourceDeleteRequestHandler{
 			ctx: ctx,
 			log: r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
 			cl:  r.cl,
-			rdr: r.rdr,
-			// scheme is not needed for status handler
-			rv: rv,
+			rv:  rv,
 		}
-		return reconcile.Result{}, sh.Handle()
-
-	case ResourceDeleteRequest:
-		// h := &resourceDeleteRequestHandler{
-		// 	ctx:                  ctx,
-		// 	log:                  r.log.WithGroup(reqTypeName).With("name", typedReq.Name),
-		// 	cl:                   r.cl,
-		// 	nodeName:             r.nodeName,
-		// 	replicatedVolumeName: typedReq.ReplicatedVolumeName,
-		// }
-
-		// return reconcile.Result{}, h.Handle()
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, h.Handle()
 
 	default:
 		r.log.Error("unknown req type", "type", reqTypeName)

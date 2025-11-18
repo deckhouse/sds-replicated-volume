@@ -1,0 +1,5 @@
+Changes:
+  - Multiple minor fixes in templates, monitoring alerts and documentation
+  - Transition from linstor scheduler-extender to internal Deckhouse mechanisms (KubeSchedulerWebhookConfiguration)
+  - Migration of images to distroless
+  - Fixed and enhanced script for outputting drbd resources from node

@@ -32,7 +32,7 @@ kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
-type: LVM
+  type: LVM
   lvmVolumeGroups:
   - name: lvg-1
   - name: lvg-2
@@ -93,14 +93,14 @@ kind: ReplicatedStorageClass
 metadata:
 name: haclass
 spec:
-storagePool: storage-pool-name
-volumeAccess: Local
-reclaimPolicy: Delete
-topology: TransZonal
-zones:
-- zone-a
-- zone-b
-- zone-c
+  storagePool: storage-pool-name
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  topology: TransZonal
+  zones:
+  - zone-a
+  - zone-b
+  - zone-c
 ```
 
 Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.
