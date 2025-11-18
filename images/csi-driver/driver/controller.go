@@ -225,19 +225,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Volume created successfully. volumeCtx: %+v", traceID, volumeID, volumeCtx))
 
-	// Build response with topology information if preferred node was found
-	var accessibleTopology []*csi.Topology
-	if len(publishRequested) > 0 {
-		// Return topology for the preferred node so Kubernetes knows where the volume was created
-		accessibleTopology = []*csi.Topology{
-			{
-				Segments: map[string]string{
-					internal.TopologyKey: publishRequested[0],
-				},
-			},
-		}
-		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Returning accessible topology for node: %s", traceID, volumeID, publishRequested[0]))
-	}
+	// Don't set AccessibleTopology - let scheduler-extender handle pod scheduling
 
 	return &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
@@ -245,7 +233,7 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 			VolumeId:           request.Name,
 			VolumeContext:      volumeCtx,
 			ContentSource:      request.VolumeContentSource,
-			AccessibleTopology: accessibleTopology,
+			AccessibleTopology: nil, // No nodeAffinity - scheduling handled by scheduler-extender
 		},
 	}, nil
 }

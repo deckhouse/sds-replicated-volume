@@ -468,11 +468,8 @@ func (d *Driver) NodeGetInfo(_ context.Context, _ *csi.NodeGetInfoRequest) (*csi
 	return &csi.NodeGetInfoResponse{
 		NodeId: d.hostID,
 		//MaxVolumesPerNode: 10,
-		AccessibleTopology: &csi.Topology{
-			Segments: map[string]string{
-				internal.TopologyKey: d.hostID,
-			},
-		},
+		// Don't set AccessibleTopology - scheduling handled by scheduler-extender
+		AccessibleTopology: nil,
 	}, nil
 }
 
