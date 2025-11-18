@@ -1,8 +1,8 @@
 ---
 name: TODO
-about: What needs to be done
-title: ''
-labels: ''
+about: Describe what needs to be done
+title: 'Do what?'
+labels: 'TODO'
 assignees: ''
 
 ---
