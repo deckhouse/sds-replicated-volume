@@ -21,9 +21,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/container-storage-interface/spec/lib/go/csi"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -33,8 +33,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 func TestControllerPublish(t *testing.T) {
@@ -279,4 +279,3 @@ func createTestReplicatedVolumeForDriver(name string, publishRequested []string)
 		},
 	}
 }
-

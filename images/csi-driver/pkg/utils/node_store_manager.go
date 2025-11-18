@@ -25,8 +25,8 @@ import (
 	mountutils "k8s.io/mount-utils"
 	utilexec "k8s.io/utils/exec"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 type NodeStoreManager interface {

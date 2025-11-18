@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 func TestPublishUtils(t *testing.T) {
@@ -40,9 +40,9 @@ func TestPublishUtils(t *testing.T) {
 
 var _ = Describe("AddPublishRequested", func() {
 	var (
-		ctx    context.Context
-		cl     client.Client
-		log    *logger.Logger
+		ctx     context.Context
+		cl      client.Client
+		log     *logger.Logger
 		traceID string
 	)
 
@@ -143,9 +143,9 @@ var _ = Describe("AddPublishRequested", func() {
 
 var _ = Describe("RemovePublishRequested", func() {
 	var (
-		ctx    context.Context
-		cl     client.Client
-		log    *logger.Logger
+		ctx     context.Context
+		cl      client.Client
+		log     *logger.Logger
 		traceID string
 	)
 
@@ -224,9 +224,9 @@ var _ = Describe("RemovePublishRequested", func() {
 
 var _ = Describe("WaitForPublishProvided", func() {
 	var (
-		ctx    context.Context
-		cl     client.Client
-		log    *logger.Logger
+		ctx     context.Context
+		cl      client.Client
+		log     *logger.Logger
 		traceID string
 	)
 
@@ -318,9 +318,9 @@ var _ = Describe("WaitForPublishProvided", func() {
 
 var _ = Describe("WaitForPublishRemoved", func() {
 	var (
-		ctx    context.Context
-		cl     client.Client
-		log    *logger.Logger
+		ctx     context.Context
+		cl      client.Client
+		log     *logger.Logger
 		traceID string
 	)
 
@@ -460,4 +460,3 @@ func createTestReplicatedVolume(name string, publishRequested []string) *v1alpha
 		},
 	}
 }
-

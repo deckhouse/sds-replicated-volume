@@ -31,8 +31,8 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
 
 const (

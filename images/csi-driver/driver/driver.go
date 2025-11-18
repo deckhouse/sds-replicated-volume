@@ -34,9 +34,9 @@ import (
 	"google.golang.org/grpc"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
 
 const (

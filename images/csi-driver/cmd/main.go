@@ -33,13 +33,13 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/config"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/driver"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/kubutils"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/config"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/kubutils"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 var (

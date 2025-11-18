@@ -34,8 +34,8 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 var _ = Describe("CreateVolume", func() {
@@ -184,9 +184,9 @@ var _ = Describe("CreateVolume", func() {
 				Parameters: map[string]string{
 					internal.StoragePoolKey: "test-pool",
 					ReplicasKey:             "5",
-					TopologyKey:              "TransZonal",
-					VolumeAccessKey:          "Local",
-					ZonesKey:                 "zone-1,zone-2,zone-3",
+					TopologyKey:             "TransZonal",
+					VolumeAccessKey:         "Local",
+					ZonesKey:                "zone-1,zone-2,zone-3",
 				},
 			}
 

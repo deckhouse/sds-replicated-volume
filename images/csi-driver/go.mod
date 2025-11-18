@@ -1,6 +1,6 @@
-module github.com/deckhouse/sds-replicated-volume/images/csi
+module github.com/deckhouse/sds-replicated-volume/images/csi-driver
 
-go 1.24.6
+go 1.24.9
 
 require (
 	github.com/container-storage-interface/spec v1.10.0
@@ -18,7 +18,7 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.34.0
 	k8s.io/apiextensions-apiserver v0.34.0
-	k8s.io/apimachinery v0.34.1
+	k8s.io/apimachinery v0.34.2
 	k8s.io/client-go v0.34.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/mount-utils v0.31.0

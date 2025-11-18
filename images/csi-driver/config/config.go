@@ -21,8 +21,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi/driver"
-	"github.com/deckhouse/sds-replicated-volume/images/csi/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
+	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 )
 
 const (
