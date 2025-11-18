@@ -12,6 +12,8 @@ type NodeManager interface {
 	NodeName() string
 	NewNodePort() (uint, error)
 	NewNodeMinor() (uint, error)
+	ReserveNodeMinor(nodeMinor uint) error
+	ReserveNodePort(port uint) error
 }
 
 type nodeManager struct {

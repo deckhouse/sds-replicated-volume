@@ -1,8 +1,19 @@
 package cluster
 
 import (
+	"strings"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
+
+// isDuplicateError checks if error is about duplicate minor/port
+func isDuplicateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "duplicate nodeMinor") || strings.Contains(errStr, "duplicate port")
+}
 
 type diskPath interface {
 	diskPath() string
@@ -65,6 +76,26 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 			"expected one RVR on the node, got: %s, %s",
 			rec.existingRVR.Name(), rvr.Name(),
 		)
+	}
+
+	// Reserve minor and port from existing RVR to prevent conflicts
+	// Note: minor/port might already be reserved during nodeManager initialization,
+	// so we ignore duplicate errors
+	if rvr.Minor() >= 0 {
+		if err := rec.nodeMgr.ReserveNodeMinor(uint(rvr.Minor())); err != nil {
+			// Ignore duplicate errors - minor might already be reserved during initialization
+			if !isDuplicateError(err) {
+				return err
+			}
+		}
+	}
+	if rvr.Port() > 0 {
+		if err := rec.nodeMgr.ReserveNodePort(rvr.Port()); err != nil {
+			// Ignore duplicate errors - port might already be reserved during initialization
+			if !isDuplicateError(err) {
+				return err
+			}
+		}
 	}
 
 	rec.existingRVR = rvr

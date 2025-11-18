@@ -585,6 +585,47 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 	var rvNodes []cluster.RVNodeAdapter
 	var nodeMgrs []cluster.NodeManager
 
+	// Collect all node names that will be used
+	allNodeNames := make([]string, 0, len(diskfulNames)+1)
+	allNodeNames = append(allNodeNames, diskfulNames...)
+	if tieNodeName != nil {
+		allNodeNames = append(allNodeNames, *tieNodeName)
+	}
+
+	// Initialize node managers with existing RVR minors and ports to prevent conflicts
+	nodeMgrsMap := make(map[string]cluster.NodeManager, len(allNodeNames))
+	for _, nodeName := range allNodeNames {
+		nodeMgr := cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName)
+
+		// Load all existing RVRs on this node to reserve their minors and ports
+		var allRvrsOnNode v1alpha2.ReplicatedVolumeReplicaList
+		if err := h.cl.List(h.ctx, &allRvrsOnNode, client.MatchingFields{"spec.nodeName": nodeName}); err != nil {
+			return fmt.Errorf("listing RVRs on node %s: %w", nodeName, err)
+		}
+
+		// Reserve minors and ports from all existing RVRs on this node
+		for i := range allRvrsOnNode.Items {
+			rvr := &allRvrsOnNode.Items[i]
+			if len(rvr.Spec.Volumes) > 0 {
+				minor := rvr.Spec.Volumes[0].Device
+				// Minor can be 0, so check >= 0 (but skip if not set, which would be 0 by default)
+				// Actually, we should reserve all minors, including 0
+				if err := nodeMgr.ReserveNodeMinor(minor); err != nil {
+					// Log warning but continue - minor might be reserved already from another RVR
+					h.log.Warn("failed to reserve minor for existing RVR", "node", nodeName, "rvr", rvr.Name, "minor", minor, "error", err)
+				}
+			}
+			if rvr.Spec.NodeAddress.Port > 0 {
+				if err := nodeMgr.ReserveNodePort(rvr.Spec.NodeAddress.Port); err != nil {
+					// Log warning but continue - port might be reserved already from another RVR
+					h.log.Warn("failed to reserve port for existing RVR", "node", nodeName, "rvr", rvr.Name, "port", rvr.Spec.NodeAddress.Port, "error", err)
+				}
+			}
+		}
+
+		nodeMgrsMap[nodeName] = nodeMgr
+	}
+
 	// diskful nodes
 	for _, nodeName := range diskfulNames {
 		repl := pool[nodeName]
@@ -593,7 +634,7 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 			return err
 		}
 		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, nodeName))
+		nodeMgrs = append(nodeMgrs, nodeMgrsMap[nodeName])
 	}
 	// optional diskless tie-breaker
 	if tieNodeName != nil {
@@ -603,7 +644,7 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 			return err
 		}
 		rvNodes = append(rvNodes, rvNode)
-		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, *tieNodeName))
+		nodeMgrs = append(nodeMgrs, nodeMgrsMap[*tieNodeName])
 	}
 
 	// build cluster
