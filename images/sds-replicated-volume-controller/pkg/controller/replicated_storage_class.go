@@ -665,10 +665,19 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	// We can recreate StorageClass only if the following parameters are not equal.
 	// If other parameters are not equal, we can't recreate StorageClass and
 	// users must delete ReplicatedStorageClass resource and create it again manually.
+	// Ignore these parameters during comparison as they may be missing in old StorageClass:
+	// - QuorumMinimumRedundancyWithPrefixSCKey: optional parameter
+	// - ReplicatedStorageClassParamNameKey: optional parameter
+	// - StorageClassParamTopologyKey: new parameter, may be missing in old StorageClass
+	// - StorageClassParamZonesKey: new parameter, may be missing in old StorageClass
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(newSCCopy.Parameters, StorageClassParamTopologyKey)
+	delete(newSCCopy.Parameters, StorageClassParamZonesKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(oldSCCopy.Parameters, StorageClassParamTopologyKey)
+	delete(oldSCCopy.Parameters, StorageClassParamZonesKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 
