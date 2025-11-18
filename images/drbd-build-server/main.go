@@ -367,7 +367,7 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 
 		// Start build in background
 		s.logger.Debug("Launching async build goroutine", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
-		go s.buildModule(job, headersData, remoteAddr)
+		go s.buildModule(job, headersData)
 
 		// Return job ID immediately
 		resp := BuildResponse{
@@ -383,7 +383,7 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 	}
 }
 
-func (s *server) buildModule(job *BuildJob, headersData []byte, remoteAddr string) {
+func (s *server) buildModule(job *BuildJob, headersData []byte) {
 	jobID := job.Key[:16]
 	s.logger.Debug("Async build started", "job_id", jobID, "kernel_version", job.KernelVersion)
 
@@ -780,7 +780,8 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	// Install modules to output directory
 	s.logger.Debug("Installing modules to output directory", "job_id", jobID, "output_dir", outputDir)
 	cmd = exec.Command("make", "install")
-	cmd.Env = append(env, fmt.Sprintf("DESTDIR=%s", outputDir))
+	env = append(env, fmt.Sprintf("DESTDIR=%s", outputDir))
+	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Dir = drbdDir

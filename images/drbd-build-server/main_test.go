@@ -434,8 +434,12 @@ func TestBuildModuleEndpoint_RaceCondition(t *testing.T) {
 	headersArchive.Reset()
 	gzWriter = gzip.NewWriter(&headersArchive)
 	tarWriter = tar.NewWriter(gzWriter)
-	tarWriter.WriteHeader(header)
-	tarWriter.Write(headersData)
+	if err := tarWriter.WriteHeader(header); err != nil {
+		t.Fatalf("Failed to write tar header: %v", err)
+	}
+	if _, err := tarWriter.Write(headersData); err != nil {
+		t.Fatalf("Failed to write tar content: %v", err)
+	}
 	tarWriter.Close()
 	gzWriter.Close()
 
