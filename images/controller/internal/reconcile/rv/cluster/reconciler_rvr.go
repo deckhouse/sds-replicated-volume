@@ -8,6 +8,9 @@ type diskPath interface {
 	diskPath() string
 }
 
+// TODO FIX
+const ResizeThreshold = 32 * 1024 * 1024
+
 type rvrReconciler struct {
 	RVNodeAdapter
 	nodeMgr NodeManager
@@ -168,7 +171,7 @@ func (rec *rvrReconciler) reconcile() (Action, error) {
 		existingRVRSize := rec.existingRVR.Size()
 		targetSize := rec.Size()
 
-		if existingRVRSize < targetSize {
+		if targetSize-existingRVRSize > ResizeThreshold {
 			res = append(
 				res,
 				ResizeRVR{
