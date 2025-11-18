@@ -280,7 +280,7 @@ func (h *resourceReconcileRequestHandler) processAction(untypedAction any) error
 					return false, nil
 				}
 				isCond := meta.FindStatusCondition(target.Status.Conditions, v1alpha2.ConditionTypeInitialSync)
-				if isCond == nil || isCond.ObservedGeneration < target.Generation {
+				if isCond == nil {
 					return false, nil
 				}
 				return isCond.Status == metav1.ConditionTrue, nil
