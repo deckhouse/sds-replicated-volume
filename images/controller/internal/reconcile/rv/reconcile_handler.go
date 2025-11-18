@@ -590,6 +590,49 @@ func (h *resourceReconcileRequestHandler) buildNodeSelector(pool map[string]*rep
 	}
 }
 
+func (h *resourceReconcileRequestHandler) reserveResourcesInNodeManagers(nodeMgrs []cluster.NodeManager) error {
+	if len(nodeMgrs) == 0 {
+		return nil
+	}
+
+	// Build an index of node managers by node name
+	nodeMgrByName := make(map[string]cluster.NodeManager, len(nodeMgrs))
+	for _, nm := range nodeMgrs {
+		nodeMgrByName[nm.NodeName()] = nm
+	}
+
+	// List all RVRs cluster-wide
+	var rvrList v1alpha2.ReplicatedVolumeReplicaList
+	if err := h.rdr.List(h.ctx, &rvrList); err != nil {
+		return fmt.Errorf("listing RVRs: %w", err)
+	}
+
+	// Reserve resources per corresponding node manager
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		nm, ok := nodeMgrByName[rvr.Spec.NodeName]
+		if !ok {
+			continue
+		}
+
+		// Reserve port if set (>0)
+		if rvr.Spec.NodeAddress.Port > 0 {
+			if err := nm.ReserveNodePort(rvr.Spec.NodeAddress.Port); err != nil {
+				return err
+			}
+		}
+
+		// Reserve minor for the first volume if present
+		if len(rvr.Spec.Volumes) > 0 {
+			if err := nm.ReserveNodeMinor(rvr.Spec.Volumes[0].Device); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
 // reconcileWithSelection builds cluster from provided selection and reconciles existing/desired state.
 // pool may be nil when no nodes are needed (replicas=0). diskfulNames may be empty. tieNodeName is optional.
 func (h *resourceReconcileRequestHandler) reconcileWithSelection(
@@ -620,6 +663,11 @@ func (h *resourceReconcileRequestHandler) reconcileWithSelection(
 		}
 		rvNodes = append(rvNodes, rvNode)
 		nodeMgrs = append(nodeMgrs, cluster.NewNodeManager(drbdPortRange{min: uint(h.cfg.DRBDMinPort), max: uint(h.cfg.DRBDMaxPort)}, *tieNodeName))
+	}
+
+	//
+	if err := h.reserveResourcesInNodeManagers(nodeMgrs); err != nil {
+		return err
 	}
 
 	// build cluster
