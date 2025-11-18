@@ -121,6 +121,15 @@ func runController(
 				) {
 					log.Debug("CreateFunc", "name", ce.Object.GetName())
 					typedObj := ce.Object.(*v1alpha2.ReplicatedVolume)
+
+					// handle deletion: when deletionTimestamp is set, enqueue delete request
+					if typedObj.DeletionTimestamp != nil {
+						q.Add(rv.ResourceDeleteRequest{
+							Name: typedObj.Name,
+						})
+						return
+					}
+
 					q.Add(rv.ResourceReconcileRequest{Name: typedObj.Name})
 				},
 				UpdateFunc: func(
