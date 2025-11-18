@@ -20,10 +20,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - format: int64
-      jsonPath: .spec.size
+    - jsonPath: .spec.size
       name: Size
-      type: integer
+      type: string
+    - jsonPath: .status.actualSize
+      name: ActualSize
+      type: string
     - jsonPath: .spec.replicas
       name: Replicas
       type: integer
