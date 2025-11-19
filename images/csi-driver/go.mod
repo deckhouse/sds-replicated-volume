@@ -3,7 +3,7 @@ module github.com/deckhouse/sds-replicated-volume/images/csi-driver
 go 1.24.9
 
 require (
-	github.com/container-storage-interface/spec v1.10.0
+	github.com/container-storage-interface/spec v1.12.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250917090813-2f0c8b6a607f
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/go-logr/logr v1.4.3
@@ -29,6 +29,7 @@ require (
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect

@@ -341,7 +341,12 @@ func removeRVFinalizerIfExist(ctx context.Context, kc client.Client, log *logger
 // GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
 func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*v1alpha2.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
-	err := kc.List(ctx, rvrList, client.MatchingFields{"spec.replicatedVolumeName": volumeName})
+	err := kc.List(
+		ctx,
+		rvrList,
+		client.MatchingFields{"spec.replicatedVolumeName": volumeName},
+		client.MatchingFields{"spec.nodeName": nodeName},
+	)
 	if err != nil {
 		return nil, err
 	}

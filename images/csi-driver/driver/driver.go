@@ -54,8 +54,7 @@ var (
 )
 
 type Driver struct {
-	name                  string
-	publishInfoVolumeName string
+	name string
 
 	csiAddress        string
 	address           string

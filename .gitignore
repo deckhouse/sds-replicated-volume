@@ -35,6 +35,5 @@ __pycache__/
 
 # dev
 hack.sh
-**/Makefile
 **/Dockerfile-dev
 .secret

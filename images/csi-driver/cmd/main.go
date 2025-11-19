@@ -27,31 +27,16 @@ import (
 	v1 "k8s.io/api/core/v1"
 	sv1 "k8s.io/api/storage/v1"
 	extv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/deckhouse/sds-common-lib/kubeclient"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/config"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/kubutils"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
-)
-
-var (
-	resourcesSchemeFuncs = []func(*apiruntime.Scheme) error{
-		snc.AddToScheme,
-		v1alpha1.AddToScheme,
-		v1alpha2.AddToScheme,
-		clientgoscheme.AddToScheme,
-		extv1.AddToScheme,
-		v1.AddToScheme,
-		sv1.AddToScheme,
-	}
 )
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {
@@ -64,6 +49,15 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
+
+	defer cancel()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-c
+		cancel()
+	}()
 
 	cfgParams, err := config.NewConfig()
 	if err != nil {
@@ -79,26 +73,19 @@ func main() {
 
 	log.Info("version = ", cfgParams.Version)
 
-	kConfig, err := kubutils.KubernetesDefaultConfigCreate()
+	cl, err := kubeclient.New(
+		snc.AddToScheme,
+		v1alpha1.AddToScheme,
+		v1alpha2.AddToScheme,
+		clientgoscheme.AddToScheme,
+		extv1.AddToScheme,
+		v1.AddToScheme,
+		sv1.AddToScheme,
+	)
 	if err != nil {
-		log.Error(err, "[main] unable to KubernetesDefaultConfigCreate")
+		log.Error(err, "[main] unable to create kubeclient")
 		os.Exit(1)
 	}
-	log.Info("[main] kubernetes config has been successfully created.")
-
-	scheme := runtime.NewScheme()
-	for _, f := range resourcesSchemeFuncs {
-		err := f(scheme)
-		if err != nil {
-			log.Error(err, "[main] unable to add scheme to func")
-			os.Exit(1)
-		}
-	}
-	log.Info("[main] successfully read scheme CR")
-
-	cl, err := client.New(kConfig, client.Options{
-		Scheme: scheme,
-	})
 
 	http.HandleFunc("/healthz", healthHandler)
 	http.HandleFunc("/readyz", healthHandler)
@@ -113,15 +100,6 @@ func main() {
 	if err != nil {
 		log.Error(err, "[main] create NewDriver")
 	}
-
-	defer cancel()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-c
-		cancel()
-	}()
 
 	if err := drv.Run(ctx); err != nil {
 		log.Error(err, "[dev.Run]")
