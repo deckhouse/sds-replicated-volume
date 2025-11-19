@@ -14,21 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package reconcile_helper
+package driver
 
-import (
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+import "context"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
-)
+// HealthCheck is the interface that must be implemented to be compatible with
+// `HealthChecker`.
+type HealthCheck interface {
+	Name() string
+	Check(ctx context.Context)
+}
 
-type ReconcilerOptions struct {
-	Client   client.Client
-	Cache    cache.Cache
-	Recorder record.EventRecorder
-	Scheme   *runtime.Scheme
-	Log      logger.Logger
+// HealthChecker helps with writing multi component health checkers.
+type HealthChecker struct {
+	checks []HealthCheck
+}
+
+// NewHealthChecker configures a new health checker with the passed in checks.
+func NewHealthChecker(checks ...HealthCheck) *HealthChecker {
+	return &HealthChecker{
+		checks: checks,
+	}
 }

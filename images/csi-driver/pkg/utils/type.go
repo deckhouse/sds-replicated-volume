@@ -14,24 +14,13 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package kubutils
+package utils
 
-import (
-	"fmt"
-
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-)
-
-func KubernetesDefaultConfigCreate() (*rest.Config, error) {
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		clientcmd.NewDefaultClientConfigLoadingRules(),
-		&clientcmd.ConfigOverrides{},
-	)
-	// Get a config to talk to API server
-	config, err := clientConfig.ClientConfig()
-	if err != nil {
-		return nil, fmt.Errorf("config kubernetes error %w", err)
-	}
-	return config, nil
+type VolumeGroup struct {
+	Name string `yaml:"name"`
+	Thin struct {
+		PoolName string `yaml:"poolName"`
+	} `yaml:"thin"`
 }
+
+type LVMVolumeGroups []VolumeGroup

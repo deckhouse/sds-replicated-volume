@@ -14,21 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package reconcile_helper
+package kubutils
 
 import (
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
-	"sigs.k8s.io/controller-runtime/pkg/client"
+	"fmt"
 
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
-type ReconcilerOptions struct {
-	Client   client.Client
-	Cache    cache.Cache
-	Recorder record.EventRecorder
-	Scheme   *runtime.Scheme
-	Log      logger.Logger
+func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	config, err := rest.InClusterConfig()
+	if err == nil {
+		return config, nil
+	}
+
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+
+	// Get a config to talk to API server
+	config, err = clientConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("config kubernetes error %w", err)
+	}
+	return config, nil
 }
