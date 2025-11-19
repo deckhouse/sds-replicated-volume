@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	mountutils "k8s.io/mount-utils"
 
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func TestNodeStoreManager(t *testing.T) {

@@ -6,7 +6,6 @@ require (
 	github.com/container-storage-interface/spec v1.12.0
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250917090813-2f0c8b6a607f
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
-	github.com/go-logr/logr v1.4.3
 	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
 	github.com/onsi/ginkgo/v2 v2.27.2
@@ -26,10 +25,13 @@ require (
 	sigs.k8s.io/controller-runtime v0.22.1
 )
 
+require github.com/go-logr/logr v1.4.3 // indirect
+
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/deckhouse/sds-common-lib v0.6.3
+	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
@@ -67,7 +69,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/oauth2 v0.31.0 // indirect

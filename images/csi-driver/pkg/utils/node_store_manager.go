@@ -26,7 +26,7 @@ import (
 	utilexec "k8s.io/utils/exec"
 
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 type NodeStoreManager interface {

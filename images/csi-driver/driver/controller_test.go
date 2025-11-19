@@ -35,7 +35,7 @@ import (
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 var _ = Describe("CreateVolume", func() {

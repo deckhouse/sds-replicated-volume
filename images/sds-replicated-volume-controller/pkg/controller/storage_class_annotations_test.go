@@ -34,7 +34,7 @@ import (
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {

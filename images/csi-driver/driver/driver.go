@@ -35,8 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (

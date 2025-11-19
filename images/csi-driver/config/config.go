@@ -22,7 +22,7 @@ import (
 	"os"
 
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (

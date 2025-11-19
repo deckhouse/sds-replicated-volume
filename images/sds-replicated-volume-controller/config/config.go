@@ -20,7 +20,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 // ScanInterval Scan block device interval seconds

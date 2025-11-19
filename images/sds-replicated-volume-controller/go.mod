@@ -6,7 +6,7 @@ require (
 	github.com/LINBIT/golinstor v0.56.2
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250909074120-7c523870bc2b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
-	github.com/go-logr/logr v1.4.3
+	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/onsi/ginkgo/v2 v2.25.3
 	github.com/onsi/gomega v1.38.2
 	gopkg.in/yaml.v3 v3.0.1
@@ -17,11 +17,10 @@ require (
 	sigs.k8s.io/controller-runtime v0.22.1
 )
 
-replace github.com/deckhouse/sds-replicated-volume/api => ../../api
-
 require (
 	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect
+	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-openapi/swag/cmdutils v0.24.0 // indirect
 	github.com/go-openapi/swag/conv v0.24.0 // indirect
 	github.com/go-openapi/swag/fileutils v0.24.0 // indirect
@@ -93,3 +92,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
+
+replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
+
+replace github.com/deckhouse/sds-replicated-volume/api => ../../api

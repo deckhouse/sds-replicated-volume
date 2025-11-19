@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func TestPublishUtils(t *testing.T) {

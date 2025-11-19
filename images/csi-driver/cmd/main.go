@@ -36,7 +36,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/config"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
-	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func healthHandler(w http.ResponseWriter, _ *http.Request) {
