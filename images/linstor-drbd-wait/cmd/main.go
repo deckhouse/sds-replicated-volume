@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/sds-replicated-volume/images/linstor-drbd-wait/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (

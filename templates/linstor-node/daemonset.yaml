@@ -96,6 +96,9 @@ spec:
         name: wait-drbd-ver-9-2
         securityContext:
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -111,6 +114,9 @@ spec:
         name: linstor-resources-cleaner
         securityContext:
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         resources:
           requests:
             {{- include "helm_lib_module_ephemeral_storage_only_logs" . | nindent 12 }}
@@ -130,11 +136,17 @@ spec:
           - {{ .Values.sdsReplicatedVolume.logLevel }}
           - --log-level-linstor
           - {{ .Values.sdsReplicatedVolume.logLevel }}
+          - --bind-address
+          - $(NODE_IP)
         env:
           - name: SPAAS_URL
             value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
           - name: LB_SELINUX_AS
             value: modules_object_t
+          - name: NODE_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
         image: {{ include "helm_lib_module_image" (list . "linstorServer") }}
         imagePullPolicy: IfNotPresent
         name: linstor-satellite
@@ -159,6 +171,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: true
+          seccompProfile:
+            type: RuntimeDefault
           seLinuxOptions:
             level: s0
             type: spc_t
@@ -241,7 +256,7 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
             {{- include "helm_lib_container_kube_rbac_proxy_resources" . | nindent 12 }}
 {{- end }}
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
       - image: {{ include "helm_lib_module_image" (list . "drbdReactor") }}
@@ -270,6 +285,9 @@ spec:
 {{- end }}
         securityContext:
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         terminationMessagePath: /dev/termination-log
         terminationMessagePolicy: File
         volumeMounts:

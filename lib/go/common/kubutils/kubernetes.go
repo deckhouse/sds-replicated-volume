@@ -14,19 +14,30 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package kubutils
 
 import (
-	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+	"fmt"
 
-	"github.com/deckhouse/module-sdk/pkg/app"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/050-label-expiring-certs"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/060-manual-cert-renewal"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/070-generate-certs"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/080-discover-data-nodes-checksum"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/090-on-start-checks"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
-func main() {
-	app.Run()
+func KubernetesDefaultConfigCreate() (*rest.Config, error) {
+	config, err := rest.InClusterConfig()
+	if err == nil {
+		return config, nil
+	}
+
+	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		clientcmd.NewDefaultClientConfigLoadingRules(),
+		&clientcmd.ConfigOverrides{},
+	)
+
+	// Get a config to talk to API server
+	config, err = clientConfig.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("config kubernetes error %w", err)
+	}
+	return config, nil
 }

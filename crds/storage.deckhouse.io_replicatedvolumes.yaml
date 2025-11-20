@@ -20,10 +20,12 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
       type: string
-    - format: int64
-      jsonPath: .spec.size
+    - jsonPath: .spec.size
       name: Size
-      type: integer
+      type: string
+    - jsonPath: .status.actualSize
+      name: ActualSize
+      type: string
     - jsonPath: .spec.replicas
       name: Replicas
       type: integer
@@ -88,7 +90,7 @@ spec:
                 type: array
               replicas:
                 maximum: 8
-                minimum: 1
+                minimum: 0
                 type: integer
               sharedSecret:
                 minLength: 1
@@ -105,6 +107,13 @@ spec:
                 - Zonal
                 - Ignored
                 type: string
+              volumeAccess:
+                enum:
+                - Local
+                - PreferablyLocal
+                - EventuallyLocal
+                - Any
+                type: string
               zones:
                 items:
                   type: string
@@ -117,9 +126,16 @@ spec:
             - sharedSecret
             - size
             - topology
+            - volumeAccess
             type: object
           status:
             properties:
+              actualSize:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -184,8 +200,6 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
-            required:
-            - publishProvided
             type: object
         required:
         - metadata

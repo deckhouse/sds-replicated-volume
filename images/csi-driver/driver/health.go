@@ -14,19 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package driver
 
-import (
-	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+import "context"
 
-	"github.com/deckhouse/module-sdk/pkg/app"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/050-label-expiring-certs"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/060-manual-cert-renewal"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/070-generate-certs"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/080-discover-data-nodes-checksum"
-	_ "github.com/deckhouse/sds-replicated-volume/hooks/go/090-on-start-checks"
-)
+// HealthCheck is the interface that must be implemented to be compatible with
+// `HealthChecker`.
+type HealthCheck interface {
+	Name() string
+	Check(ctx context.Context)
+}
 
-func main() {
-	app.Run()
+// HealthChecker helps with writing multi component health checkers.
+type HealthChecker struct {
+	checks []HealthCheck
+}
+
+// NewHealthChecker configures a new health checker with the passed in checks.
+func NewHealthChecker(checks ...HealthCheck) *HealthChecker {
+	return &HealthChecker{
+		checks: checks,
+	}
 }
