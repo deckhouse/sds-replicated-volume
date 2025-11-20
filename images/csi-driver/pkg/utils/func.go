@@ -31,7 +31,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 	"k8s.io/apimachinery/pkg/api/meta"
 )
@@ -341,16 +341,18 @@ func removeRVFinalizerIfExist(ctx context.Context, kc client.Client, log *logger
 // GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
 func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*v1alpha2.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
+	// Use MatchingFields with only one field selector (spec.replicatedVolumeName)
+	// Then filter by nodeName manually, as client.MatchingFields doesn't support multiple fields
 	err := kc.List(
 		ctx,
 		rvrList,
 		client.MatchingFields{"spec.replicatedVolumeName": volumeName},
-		client.MatchingFields{"spec.nodeName": nodeName},
 	)
 	if err != nil {
 		return nil, err
 	}
 
+	// Filter by nodeName manually
 	for i := range rvrList.Items {
 		if rvrList.Items[i].Spec.NodeName == nodeName {
 			return &rvrList.Items[i], nil
