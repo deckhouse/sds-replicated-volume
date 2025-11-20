@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"reflect"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"

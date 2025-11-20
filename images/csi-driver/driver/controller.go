@@ -30,7 +30,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )

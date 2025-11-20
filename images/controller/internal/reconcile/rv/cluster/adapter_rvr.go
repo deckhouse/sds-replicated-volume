@@ -1,7 +1,7 @@
 package cluster
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 )
 
 type rvrAdapter struct {

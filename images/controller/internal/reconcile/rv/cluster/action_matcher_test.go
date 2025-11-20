@@ -8,7 +8,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	cluster "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 )
 

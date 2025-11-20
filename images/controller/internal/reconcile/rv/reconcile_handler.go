@@ -10,7 +10,7 @@ import (
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"

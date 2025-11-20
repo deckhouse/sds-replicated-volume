@@ -12,7 +12,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"golang.org/x/sync/errgroup"
 
 	. "github.com/deckhouse/sds-common-lib/utils"

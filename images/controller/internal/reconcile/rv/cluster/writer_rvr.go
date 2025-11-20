@@ -3,7 +3,7 @@ package cluster
 import (
 	"maps"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 )
 
 type RVRWriterImpl struct {
