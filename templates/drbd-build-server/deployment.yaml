@@ -1,0 +1,152 @@
+{{- define "drbd_build_server_resources" }}
+cpu: 100m
+memory: 512Mi
+{{- end }}
+
+{{- if (.Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+---
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: drbd-build-server
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "drbd-build-server")) | nindent 2 }}
+spec:
+  targetRef:
+    apiVersion: "apps/v1"
+    kind: Deployment
+    name: drbd-build-server
+  updatePolicy:
+    updateMode: "Auto"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: drbd-build-server
+      minAllowed:
+        {{- include "drbd_build_server_resources" . | nindent 8 }}
+      maxAllowed:
+        cpu: 2000m
+        memory: 4Gi
+{{- end }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: drbd-build-server
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "drbd-build-server")) | nindent 2 }}
+spec:
+  minAvailable: {{ include "helm_lib_is_ha_to_value" (list . 1 0) }}
+  selector:
+    matchLabels:
+      app: drbd-build-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drbd-build-server
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "drbd-build-server" )) | nindent 2 }}
+spec:
+  {{- include "helm_lib_deployment_strategy_and_replicas_for_ha" . | nindent 2 }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: drbd-build-server
+  template:
+    metadata:
+      labels:
+        app: drbd-build-server
+    spec:
+      {{- include "helm_lib_priority_class" (tuple . "cluster-medium") | nindent 6 }}
+      {{- include "helm_lib_node_selector" (tuple . "system") | nindent 6 }}
+      {{- include "helm_lib_tolerations" (tuple . "system") | nindent 6 }}
+      {{- include "helm_lib_module_pod_security_context_run_as_user_nobody" . | nindent 6 }}
+      {{- include "helm_lib_pod_anti_affinity_for_ha" (list . (dict "app" "drbd-build-server")) | nindent 6 }}
+      imagePullSecrets:
+      - name: {{ .Chart.Name }}-module-registry
+      containers:
+      - name: drbd-build-server
+        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        image: {{ include "helm_lib_module_image" (list . "drbd-build-server") }}
+        imagePullPolicy: IfNotPresent
+        args:
+        - --addr=:2021
+        - --cache-dir=/var/cache/drbd-build-server
+        - --drbd-dir=/drbd
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
+        - --drbd-version={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
+        {{- end }}
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
+        - --certfile={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
+        {{- end }}
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.keyFile }}
+        - --keyfile={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.keyFile }}
+        {{- end }}
+        - --log-level={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.logLevel | default "info" }}
+        env:
+        - name: SPAAS_URL
+          value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
+        - name: DRBD_VERSION
+          value: {{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion | quote }}
+        {{- end }}
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdRepo }}
+        - name: DRBD_REPO
+          value: {{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdRepo | quote }}
+        {{- end }}
+        startupProbe:
+          failureThreshold: 24
+          httpGet:
+            path: /api/v1/hello
+            port: 2021
+            scheme: HTTP
+        livenessProbe:
+          failureThreshold: 8
+          httpGet:
+            path: /api/v1/hello
+            port: 2021
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/v1/hello
+            port: 2021
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        ports:
+        - containerPort: 2021
+          protocol: TCP
+          name: http
+        resources:
+          requests:
+            {{- include "helm_lib_module_ephemeral_storage_logs_with_extra" 10 | nindent 12 }}
+            {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
+            {{- include "drbd_build_server_resources" . | nindent 12 }}
+            {{- end }}
+        volumeMounts:
+        - name: cache-dir
+          mountPath: /var/cache/drbd-build-server
+        - name: tmp-dir
+          mountPath: /tmp
+        - name: drbd-dir
+          mountPath: /drbd
+        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
+        - name: certs
+          mountPath: /etc/drbd-build-server/certs
+          readOnly: true
+        {{- end }}
+      volumes:
+      - name: cache-dir
+        emptyDir: {}
+      - name: tmp-dir
+        emptyDir: {}
+      - name: drbd-dir
+        emptyDir: {}
+      {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
+      - name: certs
+        secret:
+          secretName: drbd-build-server-certs
+      {{- end }}
