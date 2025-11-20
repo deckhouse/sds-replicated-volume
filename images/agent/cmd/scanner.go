@@ -18,7 +18,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
-	"github.com/jinzhu/copier"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -202,7 +201,7 @@ func (s *scanner) ConsumeBatches() error {
 				rvr, ok := uiter.Find(
 					uslices.Ptrs(rvrList.Items),
 					func(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
-						return rvr.Spec.ReplicatedVolumeName == resourceName
+						return rvr.Spec.ReplicatedVolumeName == resourceName && rvr.IsConfigured()
 					},
 				)
 				if !ok {
@@ -241,11 +240,9 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 			if rvr.Status.DRBD == nil {
 				rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
 			}
-			if err := copier.Copy(rvr.Status.DRBD, resource); err != nil {
-				return fmt.Errorf("failed to copy status fields: %w", err)
-			}
+			copyStatusFields(rvr.Status.DRBD, resource)
 
-			diskless, err := rvr.Diskless()
+			diskless, err := rvr.Status.Config.Diskless()
 			if err != nil {
 				return err
 			}
@@ -397,4 +394,93 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 		},
 	)
 
+}
+
+func copyStatusFields(
+	target *v1alpha2.DRBDStatus,
+	source *drbdsetup.Resource,
+) {
+	target.Name = source.Name
+	target.NodeId = source.NodeId
+	target.Role = source.Role
+	target.Suspended = source.Suspended
+	target.SuspendedUser = source.SuspendedUser
+	target.SuspendedNoData = source.SuspendedNoData
+	target.SuspendedFencing = source.SuspendedFencing
+	target.SuspendedQuorum = source.SuspendedQuorum
+	target.ForceIOFailures = source.ForceIOFailures
+	target.WriteOrdering = source.WriteOrdering
+
+	// Devices
+	target.Devices = make([]v1alpha2.DeviceStatus, 0, len(source.Devices))
+	for _, d := range source.Devices {
+		target.Devices = append(target.Devices, v1alpha2.DeviceStatus{
+			Volume:       d.Volume,
+			Minor:        d.Minor,
+			DiskState:    d.DiskState,
+			Client:       d.Client,
+			Open:         d.Open,
+			Quorum:       d.Quorum,
+			Size:         d.Size,
+			Read:         d.Read,
+			Written:      d.Written,
+			ALWrites:     d.ALWrites,
+			BMWrites:     d.BMWrites,
+			UpperPending: d.UpperPending,
+			LowerPending: d.LowerPending,
+		})
+	}
+
+	// Connections
+	target.Connections = make([]v1alpha2.ConnectionStatus, 0, len(source.Connections))
+	for _, c := range source.Connections {
+		conn := v1alpha2.ConnectionStatus{
+			PeerNodeId:      c.PeerNodeId,
+			Name:            c.Name,
+			ConnectionState: c.ConnectionState,
+			Congested:       c.Congested,
+			Peerrole:        c.Peerrole,
+			TLS:             c.TLS,
+			APInFlight:      c.APInFlight,
+			RSInFlight:      c.RSInFlight,
+		}
+
+		// Paths
+		conn.Paths = make([]v1alpha2.PathStatus, 0, len(c.Paths))
+		for _, p := range c.Paths {
+			conn.Paths = append(conn.Paths, v1alpha2.PathStatus{
+				ThisHost: v1alpha2.HostStatus{
+					Address: p.ThisHost.Address,
+					Port:    p.ThisHost.Port,
+					Family:  p.ThisHost.Family,
+				},
+				RemoteHost: v1alpha2.HostStatus{
+					Address: p.RemoteHost.Address,
+					Port:    p.RemoteHost.Port,
+					Family:  p.RemoteHost.Family,
+				},
+				Established: p.Established,
+			})
+		}
+
+		// Peer devices
+		conn.PeerDevices = make([]v1alpha2.PeerDeviceStatus, 0, len(c.PeerDevices))
+		for _, pd := range c.PeerDevices {
+			conn.PeerDevices = append(conn.PeerDevices, v1alpha2.PeerDeviceStatus{
+				Volume:                 pd.Volume,
+				ReplicationState:       pd.ReplicationState,
+				PeerDiskState:          pd.PeerDiskState,
+				PeerClient:             pd.PeerClient,
+				ResyncSuspended:        pd.ResyncSuspended,
+				OutOfSync:              pd.OutOfSync,
+				Pending:                pd.Pending,
+				Unacked:                pd.Unacked,
+				HasSyncDetails:         pd.HasSyncDetails,
+				HasOnlineVerifyDetails: pd.HasOnlineVerifyDetails,
+				PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),
+			})
+		}
+
+		target.Connections = append(target.Connections, conn)
+	}
 }

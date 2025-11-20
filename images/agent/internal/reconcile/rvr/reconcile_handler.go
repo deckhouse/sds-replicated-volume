@@ -35,8 +35,13 @@ type resourceReconcileRequestHandler struct {
 }
 
 func (h *resourceReconcileRequestHandler) Handle() error {
+	if !h.rvr.IsConfigured() {
+		h.log.Debug("rvr not configured, skip")
+		return nil
+	}
+
 	// validate
-	diskless, err := h.rvr.Diskless()
+	diskless, err := h.rvr.Status.Config.Diskless()
 	if err != nil {
 		return err
 	}
@@ -231,9 +236,9 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig(initialSyncPass
 		Name: h.rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
 			Protocol:          v9.ProtocolC,
-			SharedSecret:      h.rvr.Spec.SharedSecret,
+			SharedSecret:      h.rvr.Status.Config.SharedSecret,
 			RRConflict:        v9.RRConflictPolicyRetryConnect,
-			AllowTwoPrimaries: h.rvr.Spec.AllowTwoPrimaries,
+			AllowTwoPrimaries: h.rvr.Status.Config.AllowTwoPrimaries,
 		},
 		Options: &v9.Options{
 			OnNoQuorum:                 v9.OnNoQuorumPolicySuspendIO,
@@ -244,10 +249,10 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig(initialSyncPass
 	}
 
 	// current node
-	h.populateResourceForNode(res, h.nodeName, h.rvr.Spec.NodeId, h.rvr.Spec.NodeAddress, nil)
+	h.populateResourceForNode(res, h.nodeName, h.rvr.Status.Config.NodeId, h.rvr.Status.Config.NodeAddress, nil)
 
 	// peers
-	for peerName, peer := range h.rvr.Spec.Peers {
+	for peerName, peer := range h.rvr.Status.Config.Peers {
 		if peerName == h.nodeName {
 			h.log.Warn("Current node appeared in a peer list. Ignored.")
 			continue
@@ -264,19 +269,19 @@ func (h *resourceReconcileRequestHandler) generateResourceConfig(initialSyncPass
 }
 
 func (h *resourceReconcileRequestHandler) updateResourceConfigAfterInitialSync(res *v9.Resource) {
-	if h.rvr.Spec.Quorum == 0 {
+	if h.rvr.Status.Config.Quorum == 0 {
 		res.Options.Quorum = &v9.QuorumOff{}
 	} else {
 		res.Options.Quorum = &v9.QuorumNumeric{
-			Value: int(h.rvr.Spec.Quorum),
+			Value: int(h.rvr.Status.Config.Quorum),
 		}
 	}
 
-	if h.rvr.Spec.QuorumMinimumRedundancy == 0 {
+	if h.rvr.Status.Config.QuorumMinimumRedundancy == 0 {
 		res.Options.QuorumMinimumRedundancy = &v9.QuorumMinimumRedundancyOff{}
 	} else {
 		res.Options.QuorumMinimumRedundancy = &v9.QuorumMinimumRedundancyNumeric{
-			Value: int(h.rvr.Spec.QuorumMinimumRedundancy),
+			Value: int(h.rvr.Status.Config.QuorumMinimumRedundancy),
 		}
 	}
 }
@@ -294,7 +299,7 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	}
 
 	// volumes
-	for _, volume := range h.rvr.Spec.Volumes {
+	for _, volume := range h.rvr.Status.Config.Volumes {
 		vol := &v9.Volume{
 			Number:   Ptr(int(volume.Number)),
 			Device:   Ptr(v9.DeviceMinorNumber(volume.Device)),
@@ -328,7 +333,7 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	if !isCurrentNode {
 		con := &v9.Connection{
 			Hosts: []v9.HostAddress{
-				apiAddressToV9HostAddress(h.nodeName, h.rvr.Spec.NodeAddress),
+				apiAddressToV9HostAddress(h.nodeName, h.rvr.Status.Config.NodeAddress),
 				apiAddressToV9HostAddress(nodeName, nodeAddress),
 			},
 		}
@@ -372,7 +377,7 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 	}
 
 	desiredRole := "Secondary"
-	if h.rvr.Spec.Primary {
+	if h.rvr.Status.Config.Primary {
 		desiredRole = "Primary"
 	}
 
@@ -381,7 +386,7 @@ func (h *resourceReconcileRequestHandler) handlePrimarySecondary() error {
 		return nil
 	}
 
-	if h.rvr.Spec.Primary {
+	if h.rvr.Status.Config.Primary {
 		err := drbdadm.ExecutePrimary(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 
 		if err != nil {

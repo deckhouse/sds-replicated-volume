@@ -29,13 +29,18 @@ func (h *resourcePrimaryForceRequestHandler) Handle() error {
 		return nil
 	}
 
+	if !h.rvr.IsConfigured() {
+		h.log.Warn("can not primary-force non-configured rvrs", "name", h.rvr.Name)
+		return nil
+	}
+
 	if err := drbdadm.ExecutePrimaryForce(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 		h.log.Error("failed to force promote to primary", "error", err)
 		return fmt.Errorf("drbdadm primary --force: %w", err)
 	}
 
 	// demote back to secondary unless desired primary in spec
-	if !h.rvr.Spec.Primary {
+	if !h.rvr.Status.Config.Primary {
 		if err := drbdadm.ExecuteSecondary(h.ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 			h.log.Error("failed to demote to secondary after forced promotion", "error", err)
 			return fmt.Errorf("drbdadm secondary: %w", err)

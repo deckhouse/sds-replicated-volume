@@ -41,18 +41,22 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
 }
 
-func (rvr *ReplicatedVolumeReplica) Diskless() (bool, error) {
-	if len(rvr.Spec.Volumes) == 0 {
+func (cfg *DRBDConfig) Diskless() (bool, error) {
+	if len(cfg.Volumes) == 0 {
 		return true, nil
 	}
-	diskless := rvr.Spec.Volumes[0].Disk == ""
-	for _, v := range rvr.Spec.Volumes[1:] {
+	diskless := cfg.Volumes[0].Disk == ""
+	for _, v := range cfg.Volumes[1:] {
 		if diskless != (v.Disk == "") {
 			// TODO move to validation webhook
 			return false, fmt.Errorf("diskful volumes should not be mixed with diskless volumes")
 		}
 	}
 	return diskless, nil
+}
+
+func (rvr *ReplicatedVolumeReplica) IsConfigured() bool {
+	return rvr.Status != nil && rvr.Status.Config != nil
 }
 
 func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
@@ -138,41 +142,6 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeId is immutable"
-	NodeId uint `json:"nodeId"`
-
-	// +kubebuilder:validation:Required
-	NodeAddress Address `json:"nodeAddress"`
-
-	Peers map[string]Peer `json:"peers,omitempty"`
-
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
-	// +kubebuilder:validation:MaxItems=100
-	// +listType=map
-	// +listMapKey=number
-	Volumes []Volume `json:"volumes"`
-
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinLength=1
-	SharedSecret string `json:"sharedSecret"`
-
-	// +kubebuilder:default=false
-	Primary bool `json:"primary,omitempty"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	Quorum byte `json:"quorum"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
-
-	// +kubebuilder:default=false
-	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -244,6 +213,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 	DRBD       *DRBDStatus        `json:"drbd,omitempty"`
+	Config     *DRBDConfig        `json:"config,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -257,17 +227,55 @@ type ReplicatedVolumeReplicaList struct {
 }
 
 // +k8s:deepcopy-gen=true
+type DRBDConfig struct {
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeId is immutable"
+	NodeId uint `json:"nodeId"`
+
+	// +kubebuilder:validation:Required
+	NodeAddress Address `json:"nodeAddress"`
+
+	Peers map[string]Peer `json:"peers,omitempty"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=100
+	// +listType=map
+	// +listMapKey=number
+	Volumes []Volume `json:"volumes"`
+
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	SharedSecret string `json:"sharedSecret"`
+
+	// +kubebuilder:default=false
+	Primary bool `json:"primary,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	Quorum byte `json:"quorum"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=7
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
+
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
 type DRBDStatus struct {
 	Name             string             `json:"name"`
-	NodeId           int                `json:"node-id"`
+	NodeId           int                `json:"nodeId"`
 	Role             string             `json:"role"`
 	Suspended        bool               `json:"suspended"`
-	SuspendedUser    bool               `json:"suspended-user"`
-	SuspendedNoData  bool               `json:"suspended-no-data"`
-	SuspendedFencing bool               `json:"suspended-fencing"`
-	SuspendedQuorum  bool               `json:"suspended-quorum"`
-	ForceIOFailures  bool               `json:"force-io-failures"`
-	WriteOrdering    string             `json:"write-ordering"`
+	SuspendedUser    bool               `json:"suspendedUser"`
+	SuspendedNoData  bool               `json:"suspendedNoData"`
+	SuspendedFencing bool               `json:"suspendedFencing"`
+	SuspendedQuorum  bool               `json:"suspendedQuorum"`
+	ForceIOFailures  bool               `json:"forceIOFailures"`
+	WriteOrdering    string             `json:"writeOrdering"`
 	Devices          []DeviceStatus     `json:"devices"`
 	Connections      []ConnectionStatus `json:"connections"`
 }
@@ -276,38 +284,38 @@ type DRBDStatus struct {
 type DeviceStatus struct {
 	Volume       int    `json:"volume"`
 	Minor        int    `json:"minor"`
-	DiskState    string `json:"disk-state"`
+	DiskState    string `json:"diskState"`
 	Client       bool   `json:"client"`
 	Open         bool   `json:"open"`
 	Quorum       bool   `json:"quorum"`
 	Size         int    `json:"size"`
 	Read         int    `json:"read"`
 	Written      int    `json:"written"`
-	ALWrites     int    `json:"al-writes"`
-	BMWrites     int    `json:"bm-writes"`
-	UpperPending int    `json:"upper-pending"`
-	LowerPending int    `json:"lower-pending"`
+	ALWrites     int    `json:"alWrites"`
+	BMWrites     int    `json:"bmWrites"`
+	UpperPending int    `json:"upperPending"`
+	LowerPending int    `json:"lowerPending"`
 }
 
 // +k8s:deepcopy-gen=true
 type ConnectionStatus struct {
-	PeerNodeId      int    `json:"peer-node-id"`
+	PeerNodeId      int    `json:"peerNodeId"`
 	Name            string `json:"name"`
-	ConnectionState string `json:"connection-state"`
+	ConnectionState string `json:"connectionState"`
 	Congested       bool   `json:"congested"`
-	Peerrole        string `json:"peer-role"`
+	Peerrole        string `json:"peerRole"`
 	TLS             bool   `json:"tls"`
-	APInFlight      int    `json:"ap-in-flight"`
-	RSInFlight      int    `json:"rs-in-flight"`
+	APInFlight      int    `json:"apInFlight"`
+	RSInFlight      int    `json:"rsInFlight"`
 
 	Paths       []PathStatus       `json:"paths"`
-	PeerDevices []PeerDeviceStatus `json:"peer_devices"`
+	PeerDevices []PeerDeviceStatus `json:"peerDevices"`
 }
 
 // +k8s:deepcopy-gen=true
 type PathStatus struct {
-	ThisHost    HostStatus `json:"this_host"`
-	RemoteHost  HostStatus `json:"remote_host"`
+	ThisHost    HostStatus `json:"thisHost"`
+	RemoteHost  HostStatus `json:"remoteHost"`
 	Established bool       `json:"established"`
 }
 
@@ -321,16 +329,16 @@ type HostStatus struct {
 // +k8s:deepcopy-gen=true
 type PeerDeviceStatus struct {
 	Volume           int    `json:"volume"`
-	ReplicationState string `json:"replication-state"`
-	PeerDiskState    string `json:"peer-disk-state"`
-	PeerClient       bool   `json:"peer-client"`
-	ResyncSuspended  string `json:"resync-suspended"`
+	ReplicationState string `json:"replicationState"`
+	PeerDiskState    string `json:"peerDiskState"`
+	PeerClient       bool   `json:"peerClient"`
+	ResyncSuspended  string `json:"resyncSuspended"`
 	// Received               int     `json:"received"`
 	// Sent                   int     `json:"sent"`
-	OutOfSync              int    `json:"out-of-sync"`
+	OutOfSync              int    `json:"outOfSync"`
 	Pending                int    `json:"pending"`
 	Unacked                int    `json:"unacked"`
-	HasSyncDetails         bool   `json:"has-sync-details"`
-	HasOnlineVerifyDetails bool   `json:"has-online-verify-details"`
-	PercentInSync          string `json:"percent-in-sync"`
+	HasSyncDetails         bool   `json:"hasSyncDetails"`
+	HasOnlineVerifyDetails bool   `json:"hasOnlineVerifyDetails"`
+	PercentInSync          string `json:"percentInSync"`
 }

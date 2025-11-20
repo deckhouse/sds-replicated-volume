@@ -73,29 +73,6 @@ spec:
             type: object
           spec:
             properties:
-              allowTwoPrimaries:
-                default: false
-                type: boolean
-              nodeAddress:
-                properties:
-                  ipv4:
-                    pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-                    type: string
-                  port:
-                    maximum: 65535
-                    minimum: 1025
-                    type: integer
-                required:
-                - ipv4
-                - port
-                type: object
-              nodeId:
-                maximum: 7
-                minimum: 0
-                type: integer
-                x-kubernetes-validations:
-                - message: nodeId is immutable
-                  rule: self == oldSelf
               nodeName:
                 maxLength: 253
                 minLength: 1
@@ -103,47 +80,6 @@ spec:
                 x-kubernetes-validations:
                 - message: nodeName is immutable
                   rule: self == oldSelf
-              peers:
-                additionalProperties:
-                  properties:
-                    address:
-                      properties:
-                        ipv4:
-                          pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-                          type: string
-                        port:
-                          maximum: 65535
-                          minimum: 1025
-                          type: integer
-                      required:
-                      - ipv4
-                      - port
-                      type: object
-                    diskless:
-                      default: false
-                      type: boolean
-                    nodeId:
-                      maximum: 7
-                      minimum: 0
-                      type: integer
-                    sharedSecret:
-                      type: string
-                  required:
-                  - address
-                  - nodeId
-                  type: object
-                type: object
-              primary:
-                default: false
-                type: boolean
-              quorum:
-                maximum: 7
-                minimum: 0
-                type: integer
-              quorumMinimumRedundancy:
-                maximum: 7
-                minimum: 0
-                type: integer
               replicatedVolumeName:
                 maxLength: 127
                 minLength: 1
@@ -152,49 +88,9 @@ spec:
                 x-kubernetes-validations:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
-              sharedSecret:
-                minLength: 1
-                type: string
-              volumes:
-                items:
-                  properties:
-                    device:
-                      maximum: 1048575
-                      minimum: 0
-                      type: integer
-                      x-kubernetes-validations:
-                      - message: volume device is immutable
-                        rule: self == oldSelf
-                    disk:
-                      maxLength: 256
-                      pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                      type: string
-                    number:
-                      maximum: 255
-                      minimum: 0
-                      type: integer
-                      x-kubernetes-validations:
-                      - message: volume number is immutable
-                        rule: self == oldSelf
-                  required:
-                  - device
-                  - number
-                  type: object
-                maxItems: 100
-                minItems: 1
-                type: array
-                x-kubernetes-list-map-keys:
-                - number
-                x-kubernetes-list-type: map
             required:
-            - nodeAddress
-            - nodeId
             - nodeName
-            - quorum
-            - quorumMinimumRedundancy
             - replicatedVolumeName
-            - sharedSecret
-            - volumes
             type: object
           status:
             properties:
@@ -257,16 +153,124 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              config:
+                properties:
+                  allowTwoPrimaries:
+                    default: false
+                    type: boolean
+                  nodeAddress:
+                    properties:
+                      ipv4:
+                        pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                        type: string
+                      port:
+                        maximum: 65535
+                        minimum: 1025
+                        type: integer
+                    required:
+                    - ipv4
+                    - port
+                    type: object
+                  nodeId:
+                    maximum: 7
+                    minimum: 0
+                    type: integer
+                    x-kubernetes-validations:
+                    - message: nodeId is immutable
+                      rule: self == oldSelf
+                  peers:
+                    additionalProperties:
+                      properties:
+                        address:
+                          properties:
+                            ipv4:
+                              pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                              type: string
+                            port:
+                              maximum: 65535
+                              minimum: 1025
+                              type: integer
+                          required:
+                          - ipv4
+                          - port
+                          type: object
+                        diskless:
+                          default: false
+                          type: boolean
+                        nodeId:
+                          maximum: 7
+                          minimum: 0
+                          type: integer
+                        sharedSecret:
+                          type: string
+                      required:
+                      - address
+                      - nodeId
+                      type: object
+                    type: object
+                  primary:
+                    default: false
+                    type: boolean
+                  quorum:
+                    maximum: 7
+                    minimum: 0
+                    type: integer
+                  quorumMinimumRedundancy:
+                    maximum: 7
+                    minimum: 0
+                    type: integer
+                  sharedSecret:
+                    minLength: 1
+                    type: string
+                  volumes:
+                    items:
+                      properties:
+                        device:
+                          maximum: 1048575
+                          minimum: 0
+                          type: integer
+                          x-kubernetes-validations:
+                          - message: volume device is immutable
+                            rule: self == oldSelf
+                        disk:
+                          maxLength: 256
+                          pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
+                          type: string
+                        number:
+                          maximum: 255
+                          minimum: 0
+                          type: integer
+                          x-kubernetes-validations:
+                          - message: volume number is immutable
+                            rule: self == oldSelf
+                      required:
+                      - device
+                      - number
+                      type: object
+                    maxItems: 100
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - number
+                    x-kubernetes-list-type: map
+                required:
+                - nodeAddress
+                - nodeId
+                - quorum
+                - quorumMinimumRedundancy
+                - sharedSecret
+                - volumes
+                type: object
               drbd:
                 properties:
                   connections:
                     items:
                       properties:
-                        ap-in-flight:
+                        apInFlight:
                           type: integer
                         congested:
                           type: boolean
-                        connection-state:
+                        connectionState:
                           type: string
                         name:
                           type: string
@@ -275,7 +279,7 @@ spec:
                             properties:
                               established:
                                 type: boolean
-                              remote_host:
+                              remoteHost:
                                 properties:
                                   address:
                                     type: string
@@ -288,7 +292,7 @@ spec:
                                 - family
                                 - port
                                 type: object
-                              this_host:
+                              thisHost:
                                 properties:
                                   address:
                                     type: string
@@ -303,85 +307,85 @@ spec:
                                 type: object
                             required:
                             - established
-                            - remote_host
-                            - this_host
+                            - remoteHost
+                            - thisHost
                             type: object
                           type: array
-                        peer-node-id:
-                          type: integer
-                        peer-role:
-                          type: string
-                        peer_devices:
+                        peerDevices:
                           items:
                             properties:
-                              has-online-verify-details:
+                              hasOnlineVerifyDetails:
                                 type: boolean
-                              has-sync-details:
+                              hasSyncDetails:
                                 type: boolean
-                              out-of-sync:
+                              outOfSync:
                                 description: |-
                                   Received               int     `json:"received"`
                                   Sent                   int     `json:"sent"`
                                 type: integer
-                              peer-client:
+                              peerClient:
                                 type: boolean
-                              peer-disk-state:
+                              peerDiskState:
                                 type: string
                               pending:
                                 type: integer
-                              percent-in-sync:
+                              percentInSync:
                                 type: string
-                              replication-state:
+                              replicationState:
                                 type: string
-                              resync-suspended:
+                              resyncSuspended:
                                 type: string
                               unacked:
                                 type: integer
                               volume:
                                 type: integer
                             required:
-                            - has-online-verify-details
-                            - has-sync-details
-                            - out-of-sync
-                            - peer-client
-                            - peer-disk-state
+                            - hasOnlineVerifyDetails
+                            - hasSyncDetails
+                            - outOfSync
+                            - peerClient
+                            - peerDiskState
                             - pending
-                            - percent-in-sync
-                            - replication-state
-                            - resync-suspended
+                            - percentInSync
+                            - replicationState
+                            - resyncSuspended
                             - unacked
                             - volume
                             type: object
                           type: array
-                        rs-in-flight:
+                        peerNodeId:
+                          type: integer
+                        peerRole:
+                          type: string
+                        rsInFlight:
                           type: integer
                         tls:
                           type: boolean
                       required:
-                      - ap-in-flight
+                      - apInFlight
                       - congested
-                      - connection-state
+                      - connectionState
                       - name
                       - paths
-                      - peer-node-id
-                      - peer-role
-                      - peer_devices
-                      - rs-in-flight
+                      - peerDevices
+                      - peerNodeId
+                      - peerRole
+                      - rsInFlight
                       - tls
                       type: object
                     type: array
                   devices:
                     items:
                       properties:
-                        al-writes:
+                        alWrites:
                           type: integer
-                        bm-writes:
+                        bmWrites:
                           type: integer
                         client:
                           type: boolean
-                        disk-state:
+                        diskState:
                           type: string
-                        lower-pending:
+                        lowerPending:
                           type: integer
                         minor:
                           type: integer
@@ -393,61 +397,61 @@ spec:
                           type: integer
                         size:
                           type: integer
-                        upper-pending:
+                        upperPending:
                           type: integer
                         volume:
                           type: integer
                         written:
                           type: integer
                       required:
-                      - al-writes
-                      - bm-writes
+                      - alWrites
+                      - bmWrites
                       - client
-                      - disk-state
-                      - lower-pending
+                      - diskState
+                      - lowerPending
                       - minor
                       - open
                       - quorum
                       - read
                       - size
-                      - upper-pending
+                      - upperPending
                       - volume
                       - written
                       type: object
                     type: array
-                  force-io-failures:
+                  forceIOFailures:
                     type: boolean
                   name:
                     type: string
-                  node-id:
+                  nodeId:
                     type: integer
                   role:
                     type: string
                   suspended:
                     type: boolean
-                  suspended-fencing:
+                  suspendedFencing:
                     type: boolean
-                  suspended-no-data:
+                  suspendedNoData:
                     type: boolean
-                  suspended-quorum:
+                  suspendedQuorum:
                     type: boolean
-                  suspended-user:
+                  suspendedUser:
                     type: boolean
-                  write-ordering:
+                  writeOrdering:
                     type: string
                 required:
                 - connections
                 - devices
-                - force-io-failures
+                - forceIOFailures
                 - name
-                - node-id
+                - nodeId
                 - role
                 - suspended
-                - suspended-fencing
-                - suspended-no-data
-                - suspended-quorum
-                - suspended-user
-                - write-ordering
+                - suspendedFencing
+                - suspendedNoData
+                - suspendedQuorum
+                - suspendedUser
+                - writeOrdering
                 type: object
             type: object
         required:
