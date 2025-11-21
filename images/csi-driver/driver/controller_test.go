@@ -590,6 +590,13 @@ var _ = Describe("ControllerExpandVolume", func() {
 					},
 				}
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+
+				// Update actualSize after Ready to simulate controller updating actualSize
+				time.Sleep(200 * time.Millisecond)
+				updatedRV2 := &v1alpha2.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeID}, updatedRV2)).To(Succeed())
+				updatedRV2.Status.ActualSize = resource.MustParse("2Gi")
+				Expect(cl.Update(ctx, updatedRV2)).To(Succeed())
 			}()
 
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -622,6 +629,9 @@ var _ = Describe("ControllerExpandVolume", func() {
 			updatedRV := &v1alpha2.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeID}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Spec.Size.Value()).To(Equal(int64(2147483648)))
+			// Verify that actualSize was set
+			Expect(updatedRV.Status).NotTo(BeNil())
+			Expect(updatedRV.Status.ActualSize.Value()).To(Equal(int64(2147483648)))
 		})
 
 		It("should return success without resize when requested size is less than current size", func() {
@@ -672,6 +682,13 @@ var _ = Describe("ControllerExpandVolume", func() {
 					},
 				}
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
+
+				// Update actualSize after Ready to simulate controller updating actualSize
+				time.Sleep(200 * time.Millisecond)
+				updatedRV2 := &v1alpha2.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeID}, updatedRV2)).To(Succeed())
+				updatedRV2.Status.ActualSize = resource.MustParse("2Gi")
+				Expect(cl.Update(ctx, updatedRV2)).To(Succeed())
 			}()
 
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

@@ -264,6 +264,56 @@ func WaitForReplicatedVolumeReady(
 	}
 }
 
+// WaitForActualSize waits for ReplicatedVolume actualSize to match requested size (within delta)
+func WaitForActualSize(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, name string,
+	requestedSize, delta resource.Quantity,
+) (int, error) {
+	var attemptCounter int
+	log.Info(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] Waiting for actualSize to match requested size %s (delta: %s)", traceID, name, requestedSize.String(), delta.String()))
+	for {
+		attemptCounter++
+		select {
+		case <-ctx.Done():
+			log.Warning(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] context done. Failed to wait for actualSize", traceID, name))
+			return attemptCounter, ctx.Err()
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		rv, err := GetReplicatedVolume(ctx, kc, name)
+		if err != nil {
+			return attemptCounter, err
+		}
+
+		if attemptCounter%10 == 0 {
+			actualSizeStr := "not set"
+			if rv.Status != nil && !rv.Status.ActualSize.IsZero() {
+				actualSizeStr = rv.Status.ActualSize.String()
+			}
+			log.Info(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] Attempt: %d, requestedSize: %s, actualSize: %s", traceID, name, attemptCounter, requestedSize.String(), actualSizeStr))
+		}
+
+		if rv.DeletionTimestamp != nil {
+			return attemptCounter, fmt.Errorf("failed to wait for actualSize for ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
+		}
+
+		if rv.Status != nil && !rv.Status.ActualSize.IsZero() {
+			// Check if actualSize matches requested size within delta
+			if AreSizesEqualWithinDelta(requestedSize, rv.Status.ActualSize, delta) || rv.Status.ActualSize.Value() >= requestedSize.Value() {
+				log.Info(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] actualSize matches requested size: %s", traceID, name, rv.Status.ActualSize.String()))
+				return attemptCounter, nil
+			}
+			log.Trace(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] Attempt %d, actualSize %s does not match requested size %s yet. Waiting...", traceID, name, attemptCounter, rv.Status.ActualSize.String(), requestedSize.String()))
+		} else {
+			log.Trace(fmt.Sprintf("[WaitForActualSize][traceID:%s][volumeID:%s] Attempt %d, actualSize not set yet. Waiting...", traceID, name, attemptCounter))
+		}
+	}
+}
+
 // DeleteReplicatedVolume deletes a ReplicatedVolume resource
 func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.Logger, traceID, name string) error {
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Trying to find ReplicatedVolume", traceID, name))

@@ -449,7 +449,16 @@ func (d *Driver) ControllerExpandVolume(ctx context.Context, request *csi.Contro
 		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForReplicatedVolumeReady", traceID, volumeID))
 		return nil, err
 	}
-	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish resize ReplicatedVolume, attempt counter = %d", traceID, volumeID, attemptCounter))
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish wait for ready, attempt counter = %d", traceID, volumeID, attemptCounter))
+
+	// Wait for actualSize to match requested size (within delta)
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] waiting for actualSize to match requested size", traceID, volumeID))
+	attemptCounter, err = utils.WaitForActualSize(ctx, d.cl, d.log, traceID, volumeID, *requestCapacity, resizeDelta)
+	if err != nil {
+		d.log.Error(err, fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] error WaitForActualSize", traceID, volumeID))
+		return nil, err
+	}
+	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] finish wait for actualSize, attempt counter = %d", traceID, volumeID, attemptCounter))
 
 	d.log.Info(fmt.Sprintf("[ControllerExpandVolume][traceID:%s][volumeID:%s] Volume expanded successfully", traceID, volumeID))
 
