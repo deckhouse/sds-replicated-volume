@@ -74,7 +74,7 @@ spec:
                       message: Value is immutable.
                   description: |
                     The Storage class's replication mode. Might be:
-                    - None (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1')
+                    - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
                     - Availability (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '2'). **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
                     - ConsistencyAndAvailability (in this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '3'). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to read-only mode.
 
