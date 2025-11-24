@@ -70,30 +70,14 @@ spec:
         image: {{ include "helm_lib_module_image" (list . "drbdBuildServer") }}
         imagePullPolicy: IfNotPresent
         args:
-        - --addr=:2021
-        - --cache-dir=/var/cache/drbd-build-server
-        - --drbd-dir=/drbd
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
-        - --drbd-version={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
-        {{- end }}
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
-        - --certfile={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
-        {{- end }}
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.keyFile }}
-        - --keyfile={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.keyFile }}
-        {{- end }}
-        - --log-level={{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.logLevel | default "info" }}
+        - -addr=:2021
+        - -cache-dir=/var/cache/drbd-build-server
+        - -drbd-dir=/drbd
+        - -drbd-version=9.2.12
+        - -log-level=info
         env:
         - name: SPAAS_URL
           value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion }}
-        - name: DRBD_VERSION
-          value: {{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdVersion | quote }}
-        {{- end }}
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdRepo }}
-        - name: DRBD_REPO
-          value: {{ .Values.sdsReplicatedVolume.internal.drbdBuildServer.drbdRepo | quote }}
-        {{- end }}
         startupProbe:
           failureThreshold: 24
           httpGet:
@@ -133,11 +117,6 @@ spec:
           mountPath: /tmp
         - name: drbd-dir
           mountPath: /drbd
-        {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
-        - name: certs
-          mountPath: /etc/drbd-build-server/certs
-          readOnly: true
-        {{- end }}
       volumes:
       - name: cache-dir
         emptyDir: {}
@@ -145,8 +124,3 @@ spec:
         emptyDir: {}
       - name: drbd-dir
         emptyDir: {}
-      {{- if .Values.sdsReplicatedVolume.internal.drbdBuildServer.certFile }}
-      - name: certs
-        secret:
-          secretName: drbd-build-server-certs
-      {{- end }}
