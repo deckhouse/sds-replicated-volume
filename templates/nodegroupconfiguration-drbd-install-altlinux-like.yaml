@@ -22,10 +22,10 @@ spec:
     # See the License for the specific language governing permissions and
     # limitations under the License.
 
-    # data nodes checksum to force bashible execution on nodes list change
+    # Контрольная сумма узлов данных для принудительного выполнения bashible при изменении списка узлов
     # {{ $.Values.sdsReplicatedVolume.internal.dataNodesChecksum }}
 
-    # Unpack package from module image and run install script
+    # Функция для распаковки пакета из образа модуля и запуска скрипта установки
     # bb-rp-from-module-image-install package:digest registry_auth scheme registry_address registry_path
     bb-rp-from-module-image-install() {
       local MODULE_PACKAGE=$1
@@ -37,23 +37,33 @@ spec:
       bb-rp-install $MODULE_PACKAGE
     }
 
+    # Путь к конфигурационному файлу kubelet для доступа к API Kubernetes
     kubeconfig="/etc/kubernetes/kubelet.conf"
 
+    # Получаем версию ядра, которая используется в данный момент
     kernel_version_in_use="$(uname -r)"
 
+    # Адрес DNS-сервера кластера для разрешения имен сервисов
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
+    # Полное доменное имя сервиса SPAAS (Service for Package Assembly and Signing)
+    # SPAAS используется для сборки модулей ядра DRBD
     SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
+    # Настройка параметров доступа к registry модуля для загрузки образов
+    # Декодируем учетные данные из base64 и извлекаем токен аутентификации
     MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registry.scheme }}"
     {{- else }}
     MODULE_SCHEME="{{ .Values.sdsReplicatedVolume.registryScheme }}"
     {{- end }}
+    # Извлекаем адрес и путь registry из базового URL
     MODULE_REGISTRY_ADDRESS=$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 1 -d '/')
     MODULE_REGISTRY_PATH="/"$(echo {{ .Values.sdsReplicatedVolume.registry.base }} | cut -f 2- -d '/')"/sds-replicated-volume"
     MODULE_REPOSITORY="{{ .Values.sdsReplicatedVolume.registry.base }}"
 
+    # Проверяем, является ли текущий узел master-узлом (control-plane)
+    # На master-узлах устанавливаем serviceScripts для управления сервисами
     is_master=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"node-role.kubernetes.io/control-plane": ""})')
     if [ $is_master == "true" ]; then
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
@@ -63,11 +73,16 @@ spec:
       {{- end }}
     fi
 
+    # Проверяем, является ли узел узлом данных LINSTOR
+    # Узлы данных имеют метку storage.deckhouse.io/sds-replicated-volume-node
+    # Только на таких узлах требуется установка DRBD
     is_linstor_data_node=$(bb-kubectl --kubeconfig $kubeconfig  get node "$(hostname)" -o json | jq -c '.metadata.labels | contains({"storage.deckhouse.io/sds-replicated-volume-node":""})')
 
     bb-log-info "we need drbd on node: "$is_linstor_data_node
 
-    # Usermode helper has been disabled according to vendor recommendations. More information can be found here:
+    # Отключаем usermode_helper для модуля DRBD согласно рекомендациям разработчиков
+    # Это предотвращает проблемы с безопасностью и совместимостью
+    # Подробнее:
     # https://github.com/LINBIT/drbd/commit/819285d065f1f81bad7b97e32a64017b5e15948d
     # https://github.com/LINBIT/linstor-server/issues/121
     # https://github.com/piraeusdatastore/piraeus-operator/issues/134
@@ -75,11 +90,16 @@ spec:
     options drbd usermode_helper=disabled
     EOF
 
+    # Если узел не является узлом данных LINSTOR, то DRBD не нужен
+    # Выгружаем модуль DRBD, если он загружен, и завершаем выполнение скрипта
     if [ $is_linstor_data_node == "false" ]; then
+      # Если модуль DRBD загружен, выгружаем его и все связанные модули транспорта
       if [ -e "/proc/drbd" ]; then
+        # Удаляем drbd из списка автозагрузки модулей (старый способ)
         if [ -e "/etc/modules" ]; then
           sed -i 's/^drbd$//' /etc/modules
         fi
+        # Выгружаем модули транспорта и основной модуль DRBD
         rmmod drbd_transport_rdma || true
         rmmod drbd_transport_tcp || true
         rmmod drbd || true
@@ -87,48 +107,65 @@ spec:
       exit 0
     fi
 
-    # DRBD requires the kernel sources to be installed.
-    # Install actual kernel headers. It can be different from current kernel version!
-    # So further we check, if we need new kernel version. It is altlinux feature.
+    # DRBD требует наличия исходных кодов ядра для компиляции модуля
+    # Устанавливаем заголовки ядра (kernel headers)
+    # В AltLinux версия заголовков может отличаться от текущей версии ядра!
+    # Поэтому далее проверяем, нужна ли новая версия ядра (это особенность AltLinux)
     apt-get update
     apt-get -y install kernel-headers-modules-std-def
 
+    # Проверяем наличие директории с исходниками ядра для текущей версии
+    # Если её нет, значит нужно обновить ядро до версии, для которой есть заголовки
     if [ ! -e "/lib/modules/$kernel_version_in_use/build" ]; then
+      # Обновляем ядро и устанавливаем флаг перезагрузки
+      # После перезагрузки скрипт запустится снова с новой версией ядра
       update-kernel -y
       bb-flag-set reboot
       exit 0
     fi
 
+    # Если модуль DRBD уже загружен, проверяем его версию
     if [ -e "/proc/drbd" ]; then
-      # DRBD check version
+      # Проверка версии DRBD
 
+      # Извлекаем текущую версию загруженного модуля DRBD из /proc/drbd
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
+      # Получаем требуемую минимальную версию из конфигурации модуля
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
 
-      # We expect the loaded DRBD module to be version 9.
-      # If version 8 is loaded, it means that for some reason, the in-tree kernel module has been automatically loaded.
-      # (For example, this can happen due to drbd-utils installed on the host, which should not occur in standard scenarios).
-      # We are only interested in the version 9 loaded by our helper script, so unload module and wait until it done.
+      # Ожидаем, что загруженный модуль DRBD будет версии 9
+      # Если загружена версия 8, это означает, что по какой-то причине был автоматически
+      # загружен встроенный модуль ядра (in-tree kernel module)
+      # (Например, это может произойти из-за установленных на хосте drbd-utils,
+      # что не должно происходить в стандартных сценариях)
+      # Нас интересует только версия 9, загруженная нашим скриптом,
+      # поэтому выгружаем модуль и ждем, пока это произойдет
       if [[ ! $current_version =~ ^9.* ]]; then
         rmmod drbd_transport_rdma || true
         rmmod drbd_transport_tcp || true
         rmmod drbd || true
       fi
 
+      # Устанавливаем утилиту semver для сравнения версий
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
       bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
+      # Сравниваем текущую версию с требуемой
+      # Если текущая версия меньше требуемой (результат сравнения == "-1"), нужно пересобрать DRBD
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "DRBD needs to be rebuilt"
       else
+        # Версия DRBD соответствует требованиям, настраиваем автозагрузку модуля
+        # Удаляем старую запись из /etc/modules (старый способ)
         if [ -e "/etc/modules" ]; then
           if grep -q -E '^drbd$' /etc/modules; then
             sed -i '/^drbd$/d' /etc/modules
           fi
         fi
+        # Создаем конфигурацию для systemd modules-load.d (современный способ)
         bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
 
         bb-log-info "Desired drbd version is already loaded, nothing to do"
@@ -136,20 +173,35 @@ spec:
       fi
     fi
 
+    # Устанавливаем инструменты, необходимые для компиляции модуля ядра DRBD:
+    # - make: система сборки
+    # - gcc: компилятор C
+    # - bind-utils: утилиты для работы с DNS (host, dig и т.д.)
+    # - patch: утилита для применения патчей к исходному коду
+    # - mokutil: утилита для проверки состояния SecureBoot
     apt-get update
     apt-get -y install make gcc bind-utils patch mokutil
+    
+    # Проверяем состояние SecureBoot
+    # SecureBoot предотвращает загрузку неподписанных модулей ядра
+    # Если SecureBoot включен, автоматическая установка DRBD невозможна
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
       bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
       exit 0
     fi
 
+    # Устанавливаем исходные коды DRBD из образа модуля
+    # Исходники будут распакованы в /opt/deckhouse/drbd для последующей компиляции
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
     bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
     {{- else }}
     bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
     {{- end }}
 
+    # Ожидаем доступности DNS кластера для разрешения имени сервиса SPAAS
+    # SPAAS (Service for Package Assembly and Signing) используется для сборки модулей ядра
+    # Выполняем до 60 попыток с интервалом 10 секунд (максимум 10 минут ожидания)
     attempt=0
     until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
     do
@@ -165,8 +217,12 @@ spec:
 
     bb-log-info "Cluster DNS responded, got SPAAS service IP"
 
+    # Формируем URL для доступа к SPAAS сервису
     export SPAAS_URL="https://${SPAAS_IP}:2020"
 
+    # Ожидаем доступности SPAAS сервиса
+    # Проверяем доступность через HTTP-запрос к эндпоинту /api/v1/hello
+    # Выполняем до 60 попыток с интервалом 10 секунд
     attempt=0
     until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $SPAAS_URL'/api/v1/hello')" == "200" ]]
     do
@@ -182,30 +238,49 @@ spec:
 
     bb-log-info "SPAAS service is accessible, starting DRBD building"
 
+    # Переходим в директорию с исходными кодами DRBD
     cd /opt/deckhouse/drbd
+    # Очищаем результаты предыдущей сборки (если были)
     make clean || true
+    # Компилируем модуль ядра DRBD
     make
+    # Устанавливаем скомпилированный модуль в систему
     make install
+    
+    # Настраиваем автозагрузку модуля DRBD при старте системы
+    # Удаляем старую запись из /etc/modules (старый способ)
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
         sed -i '/^drbd$/d' /etc/modules
       fi
     fi
+    # Создаем конфигурацию для systemd modules-load.d (современный способ)
     bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
+    
+    # Обновляем зависимости модулей ядра (чтобы modprobe знал о новом модуле)
     depmod
+    # Загружаем модуль DRBD в ядро
     modprobe drbd
+    # Загружаем модуль dm-thin-pool (Device Mapper thin provisioning), необходимый для LVMThin
     modprobe dm-thin-pool
 
+    # Финальная проверка версии загруженного модуля DRBD
+    # После компиляции и установки модуль должен быть загружен
     if [ -e "/proc/drbd" ]; then
+      # Получаем версию только что загруженного модуля
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
       desired_version="{{ $.Values.sdsReplicatedVolume.internal.drbdVersion }}"
 
+      # Устанавливаем утилиту semver для сравнения версий (если еще не установлена)
       {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
       bb-package-module-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
       {{- else }}
       bb-rp-from-module-image-install "semver:{{ include "helm_lib_module_image_digest" (list . "semver" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
       {{- end }}
 
+      # Если версия загруженного модуля меньше требуемой, устанавливаем флаг перезагрузки
+      # Это может произойти, если модуль был собран для другой версии ядра
+      # После перезагрузки модуль будет загружен корректно
       if [ "$(d8-semver compare $current_version $desired_version)" == "-1" ]; then
         bb-log-info "Non-actual version of drbd is loaded (now "$current_version", desired minimum "$desired_version"), setting reboot flag"
         bb-flag-set reboot
