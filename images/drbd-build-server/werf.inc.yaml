@@ -65,8 +65,8 @@ shell:
           gcc \
           make \
           bc \
-          libssl-dev \
-          libelf-dev \
+          libssl-devel \
+          libelf-devel \
           git \
           ca-certificates \
           tar \
