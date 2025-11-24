@@ -63,6 +63,7 @@ shell:
           bison \
           coccinelle \
           gcc \
+          gcc-13 gcc-13-aarch64-linux-gnu \
           make \
           bc \
           libssl-dev \
