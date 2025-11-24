@@ -36,9 +36,9 @@ mount:
 
 shell:
   setup:
-    - cd /src
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-build-server main.go
-    - chmod +x /drbd-build-server
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
+    - chmod +x /{{ $.ImageName }}
 
 ---
 # Runtime image with build tools for DRBD kernel module compilation
@@ -47,7 +47,7 @@ from: {{ $.Root.BASE_ALT_P11 }}
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: /drbd-build-server
+    add: drbd-build-server
     to: /usr/local/bin/drbd-build-server
     before: setup
 
