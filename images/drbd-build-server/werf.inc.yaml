@@ -76,7 +76,7 @@ shell:
           patch \
           perl \
           build-essential \
-          libc6-dev \
+          glibc-devel \
       && ln -sf /usr/bin/python3 /usr/bin/python \
       && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
   setup:
