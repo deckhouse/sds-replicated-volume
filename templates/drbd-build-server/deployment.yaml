@@ -66,7 +66,7 @@ spec:
       - name: {{ .Chart.Name }}-module-registry
       containers:
       - name: drbd-build-server
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_builder/golang-alt-svaceble" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         image: {{ include "helm_lib_module_image" (list . "drbdBuildServer") }}
         imagePullPolicy: IfNotPresent
         args:
