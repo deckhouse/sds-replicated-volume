@@ -50,7 +50,7 @@ spec:
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
-    name: v1alpha2
+    name: v1alpha3
     schema:
       openAPIV3Schema:
         properties:
@@ -155,7 +155,11 @@ spec:
                 x-kubernetes-list-type: map
               config:
                 properties:
-                  allowTwoPrimaries:
+                  disk:
+                    maxLength: 256
+                    pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
+                    type: string
+                  diskless:
                     default: false
                     type: boolean
                   nodeAddress:
@@ -181,7 +185,10 @@ spec:
                   peers:
                     additionalProperties:
                       properties:
-                        address:
+                        diskless:
+                          default: false
+                          type: boolean
+                        nodeAddress:
                           properties:
                             ipv4:
                               pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
@@ -194,72 +201,21 @@ spec:
                           - ipv4
                           - port
                           type: object
-                        diskless:
-                          default: false
-                          type: boolean
                         nodeId:
                           maximum: 7
                           minimum: 0
                           type: integer
-                        sharedSecret:
-                          type: string
                       required:
-                      - address
+                      - nodeAddress
                       - nodeId
                       type: object
                     type: object
                   primary:
                     default: false
                     type: boolean
-                  quorum:
-                    maximum: 7
-                    minimum: 0
-                    type: integer
-                  quorumMinimumRedundancy:
-                    maximum: 7
-                    minimum: 0
-                    type: integer
-                  sharedSecret:
-                    minLength: 1
-                    type: string
-                  volumes:
-                    items:
-                      properties:
-                        device:
-                          maximum: 1048575
-                          minimum: 0
-                          type: integer
-                          x-kubernetes-validations:
-                          - message: volume device is immutable
-                            rule: self == oldSelf
-                        disk:
-                          maxLength: 256
-                          pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                          type: string
-                        number:
-                          maximum: 255
-                          minimum: 0
-                          type: integer
-                          x-kubernetes-validations:
-                          - message: volume number is immutable
-                            rule: self == oldSelf
-                      required:
-                      - device
-                      - number
-                      type: object
-                    maxItems: 100
-                    minItems: 1
-                    type: array
-                    x-kubernetes-list-map-keys:
-                    - number
-                    x-kubernetes-list-type: map
                 required:
                 - nodeAddress
                 - nodeId
-                - quorum
-                - quorumMinimumRedundancy
-                - sharedSecret
-                - volumes
                 type: object
               drbd:
                 properties:
@@ -319,9 +275,6 @@ spec:
                               hasSyncDetails:
                                 type: boolean
                               outOfSync:
-                                description: |-
-                                  Received               int     `json:"received"`
-                                  Sent                   int     `json:"sent"`
                                 type: integer
                               peerClient:
                                 type: boolean
