@@ -74,7 +74,16 @@ spec:
         - -cache-dir=/var/cache/drbd-build-server
         - -drbd-dir=/drbd
         - -drbd-version=9.2.12
-        - -log-level=info
+        - -log-level
+{{- if eq .Values.sdsReplicatedVolume.logLevel "ERROR" }}
+        - error
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "WARN" }}
+        - warn
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "INFO" }}
+        - info
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "DEBUG" }}
+        - debug
+{{- end }}
         env:
         - name: SPAAS_URL
           value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
