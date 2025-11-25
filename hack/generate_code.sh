@@ -32,4 +32,6 @@ cd ..
 # generate mocks and any other go:generate targets across all modules
 ./hack/for-each-mod go generate ./...
 
+# TODO: re-generate spec according to changes in CRDs with AI
+
 echo "OK"

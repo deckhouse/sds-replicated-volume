@@ -54,7 +54,10 @@ type ReplicatedVolumeStatus struct {
 	PublishedOn []string `json:"publishedOn,omitempty"`
 
 	// +optional
-	ActualSize resource.Quantity `json:"actualSize,omitempty"`
+	ActualSize *resource.Quantity `json:"actualSize,omitempty"`
+
+	// +optional
+	Phase string `json:"phase,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -69,9 +72,13 @@ type ReplicatedVolumeList struct {
 
 // +k8s:deepcopy-gen=true
 type DRBDResourceConfig struct {
-	// +kubebuilder:validation:Required
+	// +optional
 	// +kubebuilder:validation:MinLength=1
-	SharedSecret string `json:"sharedSecret"`
+	SharedSecret string `json:"sharedSecret,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:MinLength=1
+	SharedSecretAlg string `json:"sharedSecretAlg,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7

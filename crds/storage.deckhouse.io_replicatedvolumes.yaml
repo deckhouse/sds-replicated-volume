@@ -161,11 +161,15 @@ spec:
                   sharedSecret:
                     minLength: 1
                     type: string
+                  sharedSecretAlg:
+                    minLength: 1
+                    type: string
                 required:
                 - quorum
                 - quorumMinimumRedundancy
-                - sharedSecret
                 type: object
+              phase:
+                type: string
               publishedOn:
                 items:
                   type: string

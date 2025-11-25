@@ -127,6 +127,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
+
+	// +optional
+	Diskless *bool `json:"diskless,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -136,7 +139,7 @@ type Peer struct {
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
-	NodeAddress Address `json:"nodeAddress"`
+	Address Address `json:"address"`
 
 	// +kubebuilder:default=false
 	Diskless bool `json:"diskless,omitempty"`
@@ -179,23 +182,23 @@ type ReplicatedVolumeReplicaList struct {
 type DRBDConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeId is immutable"
-	NodeId uint `json:"nodeId"`
+	// TODO: forbid changing properties more then once
+	// +optional
+	NodeId *uint `json:"nodeId"`
 
-	// +kubebuilder:validation:Required
-	NodeAddress Address `json:"nodeAddress"`
+	// +optional
+	Address *Address `json:"address,omitempty"`
 
+	// +optional
 	Peers map[string]Peer `json:"peers,omitempty"`
 
-	// +kubebuilder:default=false
-	Diskless bool `json:"diskless,omitempty"`
-
+	// +optional
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
 
-	// +kubebuilder:default=false
-	Primary bool `json:"primary,omitempty"`
+	// +optional
+	Primary *bool `json:"primary,omitempty"`
 }
 
 func (v *DRBDConfig) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {

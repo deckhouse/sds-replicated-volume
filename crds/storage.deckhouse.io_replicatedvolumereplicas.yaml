@@ -73,6 +73,8 @@ spec:
             type: object
           spec:
             properties:
+              diskless:
+                type: boolean
               nodeName:
                 maxLength: 253
                 minLength: 1
@@ -155,14 +157,7 @@ spec:
                 x-kubernetes-list-type: map
               config:
                 properties:
-                  disk:
-                    maxLength: 256
-                    pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                    type: string
-                  diskless:
-                    default: false
-                    type: boolean
-                  nodeAddress:
+                  address:
                     properties:
                       ipv4:
                         pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
@@ -175,20 +170,18 @@ spec:
                     - ipv4
                     - port
                     type: object
+                  disk:
+                    maxLength: 256
+                    pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
+                    type: string
                   nodeId:
                     maximum: 7
                     minimum: 0
                     type: integer
-                    x-kubernetes-validations:
-                    - message: nodeId is immutable
-                      rule: self == oldSelf
                   peers:
                     additionalProperties:
                       properties:
-                        diskless:
-                          default: false
-                          type: boolean
-                        nodeAddress:
+                        address:
                           properties:
                             ipv4:
                               pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
@@ -201,21 +194,20 @@ spec:
                           - ipv4
                           - port
                           type: object
+                        diskless:
+                          default: false
+                          type: boolean
                         nodeId:
                           maximum: 7
                           minimum: 0
                           type: integer
                       required:
-                      - nodeAddress
+                      - address
                       - nodeId
                       type: object
                     type: object
                   primary:
-                    default: false
                     type: boolean
-                required:
-                - nodeAddress
-                - nodeId
                 type: object
               drbd:
                 properties:
