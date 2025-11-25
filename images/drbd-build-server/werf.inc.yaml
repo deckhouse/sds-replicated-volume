@@ -43,7 +43,7 @@ shell:
 ---
 # Runtime image with build tools for DRBD kernel module compilation
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_ALT_P11 }}
+from: builder/alt
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
