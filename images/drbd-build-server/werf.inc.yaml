@@ -1,5 +1,5 @@
 ---
-image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+image: {{ $.ImageName }}-src-artifact
 fromImage: builder/src
 final: false
 
