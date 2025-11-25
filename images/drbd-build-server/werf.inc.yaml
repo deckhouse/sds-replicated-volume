@@ -21,7 +21,7 @@ shell:
 ---
 # Build Go application
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_23 }}
+from: builder/golang-alpine
 final: false
 
 import:
