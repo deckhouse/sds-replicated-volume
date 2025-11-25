@@ -37,8 +37,10 @@ mount:
 
 shell:
   setup:
-    - cd /src/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-build-server main.go
+    - cd /src/images/{{ $.ImageName }}/cmd
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0    
+    - go build -ldflags="-s -w" -o /drbd-build-server main.go
     - chmod +x /drbd-build-server
 
 ---
