@@ -4,7 +4,7 @@ fromImage: builder/src
 final: false
 
 git:
-  - add: /src
+  - add: /
     to: /src
     includePaths:
       - api
