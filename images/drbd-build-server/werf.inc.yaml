@@ -1,18 +1,19 @@
 ---
-# Build Go binary
-image: {{ $.ImageName }}-src-artifact
-fromImage: builder/alt
+image: {{ .ModuleNamePrefix }}{{ .ImageName }}-src-artifact
+fromImage: builder/src
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}
+  - add: {{ .ModuleDir }}
     to: /src
-    excludePaths:
-      - werf.inc.yaml
-      - Dockerfile*
+    includePaths:
+      - api
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
         - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:
@@ -36,7 +37,7 @@ mount:
 
 shell:
   setup:
-    - cd /src
+    - cd /src/cmd
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /drbd-build-server main.go
     - chmod +x /drbd-build-server
 
