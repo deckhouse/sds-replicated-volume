@@ -2,6 +2,9 @@
   - [Схема именования акторов](#схема-именования-акторов)
   - [Условное обозначение триггеров](#условное-обозначение-триггеров)
   - [Константы](#константы)
+    - [RVR Ready условия](#rvr-ready-условия)
+    - [RV Ready условия](#rv-ready-условия)
+    - [Алгоритмы хеширования shared secret](#алгоритмы-хеширования-shared-secret)
   - [Настройки](#настройки)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
@@ -45,13 +48,13 @@
     - [Триггер](#триггер-4)
     - [Вывод](#вывод-4)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 3\]](#статус-tbd--priority-5--complexity-3)
+    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
     - [Цель](#цель-5)
     - [Триггер](#триггер-5)
     - [Вывод](#вывод-5)
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4)
     - [Цель](#цель-6)
     - [Триггер](#триггер-6)
     - [Вывод](#вывод-6)
@@ -60,7 +63,7 @@
     - [Триггер](#триггер-7)
     - [Вывод](#вывод-7)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
     - [Цель](#цель-8)
     - [Триггер](#триггер-8)
     - [Вывод](#вывод-8)
@@ -127,7 +130,34 @@
  - `DELETE` - событие окончательного удаления ресурса, происходит после снятия последнего финализатора (может быть потеряно в случае недоступности контроллера)
 
 ## Константы
-TBD
+Константы - это значения, которые должны быть определены в коде во время компиляции программы.
+
+Ссылка на константы в данной спецификации означает необходимость явного определения, либо переиспользования данной константы в коде.
+
+### RVR Ready условия
+Это список предикатов вида `rvr.status.conditions[type=<key>].status=<value>`, объединение которых является критерием
+для выставления значения `rvr.status.conditions[type=Ready].status=True`.
+ - `InitialSync==True`
+ - `DevicesReady==True`
+ - `ConfigurationAdjusted==True`
+ - `Quorum==True`
+ - `DiskIOSuspended==False`
+ - `AddressConfigured==True`
+
+### RV Ready условия
+Это список предикатов вида `rv.status.conditions[type=<key>].status=<value>`, объединение которых является критерием
+для выставления значения `rv.status.conditions[type=Ready].status=True`.
+ - `QuorumConfigured==True`
+ - `DiskfulReplicaCountReached==True`
+ - `AllReplicasReady==True`
+ - `SharedSecretAlgorithmSelected==True`
+
+### Алгоритмы хеширования shared secret
+ - `sha1`
+ - `crc32`
+ - `md5`
+ - `ghash`
+ - `polyval`
 
 ## Настройки
  - `drbdMinPort` - минимальный порт для использования ресурсами
@@ -329,7 +359,7 @@ TBD
 
 ## `rvr-status-config-address-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 3]
+### Статус: [OK | priority: 5 | complexity: 3]
 
 ### Цель 
 Проставить значение свойству `rvr.status.config.address`.
@@ -338,17 +368,20 @@ TBD
 
 В случае, если нет свободного порта, настроек порта, либо IP: повторять реконсайл с ошибкой.
 
+Процесс и результат работы контроллера должен быть отражён в `rvr.status.conditions[type=AddressConfigured]`
+
 ### Триггер 
   - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.config.address)`
 
 ### Вывод 
   - `rvr.status.config.address`
+  - `rvr.status.conditions[type=AddressConfigured]`
 
 # Акторы приложения: `controller`
 
 ## `rvr-diskful-count-controller`
 
-### Статус: [OK | priority: 5 | complexity: 3]
+### Статус: [OK | priority: 5 | complexity: 4]
 
 ### Цель 
 Добавлять привязанные diskful-реплики (RVR) для RV.
@@ -358,6 +391,8 @@ TBD
 Первая реплика должна перейти в полностью работоспособное состояние, прежде чем
 будет создана вторая реплика. Вторая и последующие реплики могут быть созданы
 параллельно.
+
+Процесс и результат работы контроллера должен быть отражён в `rv.status.conditions[type=DiskfulReplicaCountReached]`
 
 ### Триггер
   - `CREATE(RV)`, `UPDATE(RVR[metadata.deletionTimestamp -> !null])`
@@ -370,6 +405,7 @@ TBD
 [RSC->`spec.replication`](https://deckhouse.io/modules/sds-replicated-volume/stable/cr.html#replicatedstorageclass-v1alpha1-spec-replication)
     - `spec.replicatedVolumeName` имеет значение RV `metadata.name`
     - `metadata.ownerReferences` указывает на RV по имени `metadata.name`
+    - `rv.status.conditions[type=DiskfulReplicaCountReached]`
 
 ## `rvr-node-selector-controller`
 
@@ -386,7 +422,7 @@ TBD
 
 ## `rvr-status-config-node-id-controller`
 
-### Статус: [OK | priority: 5 | complexity: 1]
+### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
 Проставить свойству `rvr.status.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
@@ -484,7 +520,9 @@ TBD
 
 Поднять значение кворума до необходимого, после того как кластер станет работоспособным.
 
-Работоспособный кластер - это полностью готовый и доступный, без учёта отсутствия настройки кворума.
+Работоспособный кластер - это RV, у которого все [RV Ready условия](#rv-ready-условия) достигнуты, без учёта условия `QuorumConfigured`.
+
+Процесс и результат работы контроллера должен быть отражён в `rv.status.conditions[type=QuorumConfigured]`
 
 ### Триггер
  - `CREATE/UPDATE(RV, rv.status.conditions[type=Ready].status==True)`
@@ -492,6 +530,7 @@ TBD
 ### Вывод
   - `rv.status.config.quorum`
   - `rv.status.config.quorumMinimumRedundancy`
+  - `rv.status.conditions[type=QuorumConfigured]`
 
 Правильные значения, в зависимости от количества diskful реплик N:
 
@@ -509,7 +548,8 @@ if N > 2 {
 
 ### Цель
 Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
-а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm]`, и поменять его на следующий по списку. Последний проверенный алгоритм должен быть указан в `Message`.
+а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm]`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `Message`.
+
 В случае, если список закончился, выставить для `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False` `reason=UnableToSelectSharedSecretAlgorithm`
 
 ### Триггер
