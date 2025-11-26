@@ -1,18 +1,19 @@
 ---
-# Build Go binary
 image: {{ $.ImageName }}-src-artifact
-fromImage: builder/alt
+fromImage: builder/src
 final: false
 
 git:
-  - add: /images/{{ $.ImageName }}
+  - add: /
     to: /src
-    excludePaths:
-      - werf.inc.yaml
-      - Dockerfile*
+    includePaths:
+      - api
+      - images/{{ $.ImageName }}
     stageDependencies:
       install:
         - '**/*'
+    excludePaths:
+      - images/{{ $.ImageName }}/werf.yaml
 
 shell:
   install:
@@ -21,7 +22,7 @@ shell:
 ---
 # Build Go application
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_23 }}
+from: builder/golang-alpine
 final: false
 
 import:
@@ -37,17 +38,19 @@ mount:
 shell:
   setup:
     - cd /src/images/{{ $.ImageName }}/cmd
-    - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o /{{ $.ImageName }}
-    - chmod +x /{{ $.ImageName }}
+    - GOPROXY=$(cat /run/secrets/GOPROXY) go mod download
+    - export GOOS=linux GOARCH=amd64 CGO_ENABLED=0    
+    - go build -ldflags="-s -w" -o /drbd-build-server main.go
+    - chmod +x /drbd-build-server
 
 ---
 # Runtime image with build tools for DRBD kernel module compilation
 image: {{ $.ImageName }}
-from: {{ $.Root.BASE_ALT_P11 }}
+from: builder/alt
 
 import:
   - image: {{ $.ImageName }}-golang-artifact
-    add: drbd-build-server
+    add: /drbd-build-server
     to: /usr/local/bin/drbd-build-server
     before: setup
 
@@ -76,7 +79,7 @@ shell:
           patch \
           perl \
           build-essential \
-          libc6-dev \
+          glibc-devel \
       && ln -sf /usr/bin/python3 /usr/bin/python \
       && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
   setup:

@@ -66,7 +66,7 @@ spec:
       - name: {{ .Chart.Name }}-module-registry
       containers:
       - name: drbd-build-server
-        {{- include "helm_lib_module_container_security_context_read_only_root_filesystem_capabilities_drop_all" . | nindent 8 }}
+        {{- include "helm_lib_module_container_security_context_pss_restricted_flexible" (dict "ro" true "seccompProfile" true) | nindent 8 }}
         image: {{ include "helm_lib_module_image" (list . "drbdBuildServer") }}
         imagePullPolicy: IfNotPresent
         args:
@@ -74,7 +74,16 @@ spec:
         - -cache-dir=/var/cache/drbd-build-server
         - -drbd-dir=/drbd
         - -drbd-version=9.2.12
-        - -log-level=info
+        - -log-level
+{{- if eq .Values.sdsReplicatedVolume.logLevel "ERROR" }}
+        - error
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "WARN" }}
+        - warn
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "INFO" }}
+        - info
+{{- else if eq .Values.sdsReplicatedVolume.logLevel "DEBUG" }}
+        - debug
+{{- end }}
         env:
         - name: SPAAS_URL
           value: https://spaas.d8-{{ .Chart.Name }}.svc:2020
