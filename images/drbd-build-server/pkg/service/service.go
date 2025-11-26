@@ -408,6 +408,7 @@ func (s *BuildService) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdD
 		fmt.Sprintf("KVER=%s", kernelVersion),
 		fmt.Sprintf("KDIR=%s", kernelBuildDir),
 		fmt.Sprintf("SPAAS_URL=%s", s.spaasURL),
+		fmt.Sprintf("DESTDIR=%s", outputDir),
 		"SPAAS=true",
 	)
 	s.logger.Debug("Environment variables set", "job_id", jobID, "KVER", kernelVersion, "KDIR", kernelBuildDir, "SPAAS_URL", s.spaasURL)
@@ -454,10 +455,20 @@ func (s *BuildService) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdD
 	buildDuration := time.Since(startTime)
 	s.logger.Debug("'make module' completed successfully", "job_id", jobID, "duration", buildDuration)
 
+	s.logger.Debug("MkdirAll", "job_id", jobID, "duration", buildDuration)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create outputDir: %v", err)
+	}
 	// Install modules to output directory
 	s.logger.Debug("Installing modules to output directory", "job_id", jobID, "output_dir", outputDir)
-	cmd = exec.Command("make", "install")
-	env = append(env, fmt.Sprintf("DESTDIR=%s", outputDir))
+	cmd = exec.Command(
+		"make",
+		"install",
+		fmt.Sprintf("DESTDIR=%s", outputDir),
+		fmt.Sprintf("KVER=%s", kernelVersion),
+		fmt.Sprintf("KDIR=%s", kernelBuildDir),
+	)
+
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
