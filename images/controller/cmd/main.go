@@ -36,6 +36,8 @@ func main() {
 	logHandler := &slogh.Handler{}
 	log := slog.New(logHandler).
 		With("startedAt", time.Now().Format(time.RFC3339))
+	slog.SetDefault(log)
+
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
 	log.Info("controller started")
@@ -69,7 +71,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	}
 
 	eg.Go(func() error {
-		return runController(ctx, log, mgr)
+		return runControllers(ctx, log, mgr)
 	})
 
 	return eg.Wait()
@@ -98,15 +100,6 @@ func newManager(
 		Metrics: server.Options{
 			BindAddress: envConfig.MetricsBindAddress,
 		},
-		// Cache: cache.Options{
-		// 	ByObject: map[client.Object]cache.ByObject{
-		// 		&v1alpha2.ReplicatedVolumeReplica{}: {
-		// 			// only watch current node's replicas
-		// 			Field: (&v1alpha2.ReplicatedVolumeReplica{}).
-		// 				NodeNameSelector(envConfig.NodeName),
-		// 		},
-		// 	},
-		// },
 	}
 
 	mgr, err := manager.New(config, mgrOpts)
