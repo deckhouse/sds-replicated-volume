@@ -5,6 +5,10 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/internal/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/model"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/service"
+	"github.com/gorilla/mux"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,11 +16,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/internal/utils"
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/model"
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/service"
-	"github.com/gorilla/mux"
 )
 
 // newTestServer creates a test server with default logger level from flagLogLevel

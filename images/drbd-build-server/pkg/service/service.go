@@ -49,7 +49,6 @@ type BuildService struct {
 }
 
 func NewTestBuildService(cacheDir *string, logger *slog.Logger) *BuildService {
-
 	return &BuildService{
 		cacheDir: *cacheDir,
 		logger:   logger,

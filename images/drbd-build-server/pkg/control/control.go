@@ -4,21 +4,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/internal/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/model"
+	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/service"
+	"github.com/gorilla/mux"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"regexp"
 	"time"
-
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/internal/utils"
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/model"
-	"github.com/deckhouse/sds-replicated-volume/images/drbd-build-server/pkg/service"
-	"github.com/gorilla/mux"
 )
 
 const (
 	buildPath     = "/api/v1/build"
+	getBuildPath  = "/api/v1/builds/{job_id}" // SYNC analog of download API with timeout
 	jobStatusPath = "/api/v1/status/{job_id}"
 	downloadPath  = "/api/v1/download/{job_id}"
 	helloPath     = "/api/v1/hello"
@@ -134,6 +134,7 @@ func (s *BuildServer) registerRoutes() {
 	s.router.HandleFunc(buildPath, s.buildModuleHandler()).Methods("POST")
 	s.router.HandleFunc(jobStatusPath, s.getStatusHandler()).Methods("GET")
 	s.router.HandleFunc(downloadPath, s.downloadModule()).Methods("GET")
+	s.router.HandleFunc(getBuildPath, s.helloHandler()).Methods("GET")
 	s.router.HandleFunc(helloPath, s.helloHandler()).Methods("GET")
 }
 
@@ -144,9 +145,9 @@ func (s *BuildServer) replyErrorFormated(code int, remoteAddr string, w http.Res
 	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", msg)
 }
 
-func (s *BuildServer) replyError(code int, remoteAddr string, w http.ResponseWriter, error error) {
+func (s *BuildServer) replyError(code int, remoteAddr string, w http.ResponseWriter, errorOccurred error) {
 	w.WriteHeader(code)
-	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", error)
+	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", errorOccurred)
 }
 
 func (s *BuildServer) helloHandler() http.HandlerFunc {
@@ -328,6 +329,89 @@ func (s *BuildServer) downloadModule() http.HandlerFunc {
 
 		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", job.Status, "cache_path", job.CachePath)
 
+		if job.Status != model.StatusCompleted {
+			s.logger.Debug("Job not completed", "remote_addr", remoteAddr, "status", job.Status)
+			s.replyErrorFormated(http.StatusBadRequest, remoteAddr, w, "Job is not completed yet. Status: %s", job.Status)
+			return
+		}
+
+		if job.CachePath == "" {
+			s.logger.Debug("Cache path not set for completed job", "remote_addr", remoteAddr)
+			s.replyErrorFormated(http.StatusInternalServerError, remoteAddr, w, "Cache path not set for completed job")
+			return
+		}
+
+		cacheInfo, err := os.Stat(job.CachePath)
+		if os.IsNotExist(err) {
+			s.logger.Debug("Cache file not found", "remote_addr", remoteAddr, "cache_path", job.CachePath)
+			s.replyErrorFormated(http.StatusNotFound, remoteAddr, w, "Cache file not found: %s", job.CachePath)
+			return
+		}
+
+		s.logger.Info("Serving module file", "remote_addr", remoteAddr, "cache_path", job.CachePath, "size_bytes", cacheInfo.Size())
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"drbd-modules-%s.tar.gz\"", job.KernelVersion))
+		http.ServeFile(w, r, job.CachePath)
+		s.logger.Debug("Module file sent successfully", "remote_addr", remoteAddr)
+	}
+}
+
+func (s *BuildServer) getBuiLdModule() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		remoteAddr := r.RemoteAddr
+		vars := mux.Vars(r)
+		jobID := vars["job_id"]
+		s.logger.Debug("Download request for job", "remote_addr", remoteAddr, "job_id", jobID)
+
+		job := s.buildService.GetJob(jobID)
+
+		switch job.Status {
+		case model.StatusNotExist:
+			s.logger.Debug("Job not found", "remote_addr", remoteAddr, "job_id", jobID)
+			s.replyErrorFormated(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
+			return
+		case model.StatusFailed:
+			s.logger.Debug("Job is failed ", "remote_addr", remoteAddr, "job_id", jobID)
+			s.replyErrorFormated(http.StatusInternalServerError, remoteAddr, w, "Job is failed: %s", jobID)
+			return
+		case model.StatusPending:
+			s.logger.Debug("Job is pending ", "remote_addr", remoteAddr, "job_id", jobID)
+			s.replyErrorFormated(http.StatusAccepted, remoteAddr, w, "Job is pending: %s", jobID)
+			return
+		}
+
+		// from this line wait until s.buildService.GetJob(jobID).Status == model.StatusCompleted with check step 5 sec and timeout 5 min
+		const (
+			pollInterval = 5 * time.Second
+			waitTimeout  = 5 * time.Minute
+		)
+
+		deadline := time.Now().Add(waitTimeout)
+		for job.Status != model.StatusCompleted {
+			// Check for client cancellation
+			select {
+			case <-r.Context().Done():
+				s.logger.Debug("Client cancelled download request while waiting for job completion", "remote_addr", remoteAddr, "job_id", jobID)
+				return
+			case <-time.After(pollInterval):
+			}
+
+			if time.Now().After(deadline) {
+				s.logger.Debug("Timed out waiting for job completion", "remote_addr", remoteAddr, "job_id", jobID)
+				s.replyErrorFormated(http.StatusGatewayTimeout, remoteAddr, w, "Timed out waiting for job completion: %s", jobID)
+				return
+			}
+
+			job = s.buildService.GetJob(jobID)
+
+			if job.Status == model.StatusFailed {
+				s.logger.Debug("Job failed while waiting", "remote_addr", remoteAddr, "job_id", jobID)
+				s.replyErrorFormated(http.StatusInternalServerError, remoteAddr, w, "Job failed: %s", jobID)
+				return
+			}
+		}
+
+		s.logger.Debug("Job status", "remote_addr", remoteAddr, "status", job.Status, "cache_path", job.CachePath)
 		if job.Status != model.StatusCompleted {
 			s.logger.Debug("Job not completed", "remote_addr", remoteAddr, "status", job.Status)
 			s.replyErrorFormated(http.StatusBadRequest, remoteAddr, w, "Job is not completed yet. Status: %s", job.Status)
