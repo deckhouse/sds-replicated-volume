@@ -39,6 +39,15 @@ func (s *BuildServer) replyAccepted(w http.ResponseWriter, resp *model.BuildResp
 	return
 }
 
+func (s *BuildServer) replyOk(w http.ResponseWriter, resp *model.BuildResponse) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		s.logger.Error("Failed to encode response", "error", err)
+	}
+	return
+}
+
 type BuildServer struct {
 	router       *mux.Router
 	logger       *slog.Logger // Structured logger
@@ -203,6 +212,7 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 			s.replyAccepted(w, &model.BuildResponse{
 				Status: model.StatusBuilding,
 				JobID:  cacheKey,
+				Error:  "Previous job failed, creating new one",
 			},
 			)
 		case model.StatusBuilding, model.StatusPending:
@@ -216,16 +226,31 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 			return
 		case model.StatusCompleted:
 			s.logger.Debug("Job completed, checking cache file", "remote_addr", remoteAddr, "cache_path", info.CachePath)
+			buildError := ""
 			if info.CachePath != "" {
 				if statInfo, err := os.Stat(info.CachePath); err == nil {
 					s.logger.Info("Serving completed build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "completed_at", info.CompletedAt, "size_bytes", statInfo.Size())
-					s.replyFile(info.CachePath, &kernelVersion, w, r)
+					s.replyOk(w, &model.BuildResponse{
+						Status:      info.Status,
+						JobID:       info.Key,
+						DownloadURL: s.makeDownloadUrl(info.Key),
+					},
+					)
 					s.logger.Debug("Successfully sent completed build to client", "remote_addr", remoteAddr)
 					return
 				}
-				//TODO need error
-				s.logger.Warn("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
+				buildError = "Cache file for completed job not found"
 			}
+			buildError = "Cache path blank or empty"
+			s.logger.Error(buildError, "remote_addr", remoteAddr, "error", err)
+			s.buildService.CreateJob(cacheKey, kernelVersion, headersData, remoteAddr)
+			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
+			s.replyAccepted(w, &model.BuildResponse{
+				Status: model.StatusBuilding,
+				JobID:  cacheKey,
+				Error:  "Previous job has an error, creating new one",
+			},
+			)
 		}
 	}
 }
@@ -270,7 +295,7 @@ func (s *BuildServer) getStatusHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		switch job.Status {
 		case model.StatusCompleted:
-			url := fmt.Sprintf("/api/v1/download/%s", jobID)
+			url := s.makeDownloadUrl(jobID)
 			rs.DownloadURL = url
 			s.logger.Debug("Job completed", "remote_addr", remoteAddr, "download_url", url)
 			w.WriteHeader(http.StatusOK)
@@ -285,6 +310,10 @@ func (s *BuildServer) getStatusHandler() http.HandlerFunc {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 	}
+}
+
+func (s *BuildServer) makeDownloadUrl(jobID string) string {
+	return fmt.Sprintf("/api/v1/download/%s", jobID)
 }
 
 func (s *BuildServer) downloadModule() http.HandlerFunc {
