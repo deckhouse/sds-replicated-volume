@@ -74,6 +74,7 @@ spec:
           spec:
             properties:
               diskless:
+                default: false
                 type: boolean
               nodeName:
                 maxLength: 253

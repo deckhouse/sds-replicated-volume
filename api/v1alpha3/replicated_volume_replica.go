@@ -128,8 +128,8 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
 	NodeName string `json:"nodeName"`
 
-	// +optional
-	Diskless *bool `json:"diskless,omitempty"`
+	// +kubebuilder:default=false
+	Diskless bool `json:"diskless,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
