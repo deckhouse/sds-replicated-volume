@@ -11,6 +11,7 @@ The DRBD Build Server is designed to provide a centralized service for building 
 - **On-Demand Module Building**: Builds DRBD kernel modules for any kernel version
 - **Intelligent Caching**: Caches built modules using SHA256 hash of kernel version and headers
 - **Asynchronous Builds**: Non-blocking build process with job status tracking
+- **Synchronous Download Helper**: Optional `/api/v1/builds/{job_id}` endpoint that waits for completion (with timeout) and returns the built artifact in a single call
 - **Multiple DRBD Source Options**: 
   - Use pre-existing DRBD source directory
   - Clone from Git repository with version specification
@@ -41,14 +42,28 @@ Initiates a build request for DRBD kernel modules.
   - `kernel_version` (optional): Kernel version (alternative to header)
 
 **Response:**
-- `202 Accepted`: Build job created or already in progress
-- `200 OK`: Cached module found, returns module file immediately
+- `200 OK`:
+  - When a cached module is found, returns the module file immediately (`application/gzip`).
+  - When a previously completed job is detected and cache is valid, returns JSON with a `download_url`.
+- `202 Accepted`:
+  - Build job created (or recreated) and scheduled.
+  - Existing job is already in `building` or `pending` state.
 
-**Response Body (JSON):**
+**Response Body (JSON) for `202 Accepted`:**
 ```json
 {
   "status": "building",
-  "job_id": "abc123..."
+  "job_id": "abc123...",
+  "error": "optional error description"
+}
+```
+
+**Response Body (JSON) for `200 OK` (completed job case):**
+```json
+{
+  "status": "completed",
+  "job_id": "abc123...",
+  "download_url": "/api/v1/download/abc123..."
 }
 ```
 
@@ -90,6 +105,19 @@ Health check endpoint.
 
 **Response:**
 - `200 OK`: Server is running
+
+### GET `/api/v1/builds/{job_id}`
+
+Synchronous helper endpoint that waits for a specific build job to complete (with timeout) and then returns the built modules.
+
+**Behavior:**
+- Polls job status every 5 seconds for up to 5 minutes.
+- If the job completes successfully, returns the same `application/gzip` artifact as `/api/v1/download/{job_id}`.
+- If the job fails, returns `500 Internal Server Error`.
+- If the job is not found, returns `404 Not Found`.
+- If the job does not complete within the timeout, returns `504 Gateway Timeout`.
+
+This endpoint is useful for consumers that prefer a synchronous workflow (wait for build to finish and immediately download results) instead of using `/api/v1/status` + `/api/v1/download`.
 
 ## Configuration
 
@@ -172,11 +200,24 @@ curl -X POST \
 curl http://drbd-build-server:2021/api/v1/status/abc123...
 ```
 
-### Download Built Modules
+### Download Built Modules (Async Flow)
 
 ```bash
-# Download completed build
+# Download completed build (after checking status)
 curl -O http://drbd-build-server:2021/api/v1/download/abc123...
+```
+
+### Synchronous Download via `/api/v1/builds/{job_id}`
+
+```bash
+# Request build (may return immediately with cached result or start async job)
+JOB_ID=$(curl -s -X POST \
+  -H "X-Kernel-Version: 5.15.0-86-generic" \
+  --data-binary @kernel-headers.tar.gz \
+  http://drbd-build-server:2021/api/v1/build | jq -r '.job_id')
+
+# Wait for completion and download in a single call (5s poll, 5m timeout)
+curl -O http://drbd-build-server:2021/api/v1/builds/${JOB_ID}
 ```
 
 ### Using Query Parameter for Kernel Version
