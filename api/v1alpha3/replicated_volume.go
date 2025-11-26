@@ -19,8 +19,9 @@ type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   ReplicatedVolumeSpec    `json:"spec"`
-	Status *ReplicatedVolumeStatus `json:"status,omitempty"`
+	Spec ReplicatedVolumeSpec `json:"spec"`
+	// +patchStrategy=merge
+	Status *ReplicatedVolumeStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -46,7 +47,9 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
-	Config *DRBDResourceConfig `json:"config,omitempty"`
+	// +patchStrategy=merge
+	// +optional
+	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}

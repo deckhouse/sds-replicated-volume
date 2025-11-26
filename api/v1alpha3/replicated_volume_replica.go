@@ -33,8 +33,10 @@ type ReplicatedVolumeReplica struct {
 
 	metav1.ObjectMeta `json:"metadata"`
 
-	Spec   ReplicatedVolumeReplicaSpec    `json:"spec"`
-	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty"`
+	Spec ReplicatedVolumeReplicaSpec `json:"spec"`
+
+	// +patchStrategy=merge
+	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
@@ -164,8 +166,9 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
-	Config     *DRBDConfig        `json:"config,omitempty"`
-	DRBD       *DRBDStatus        `json:"drbd,omitempty"`
+	// +patchStrategy=merge
+	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
+	DRBD   *DRBDStatus `json:"drbd,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -180,9 +183,9 @@ type ReplicatedVolumeReplicaList struct {
 
 // +k8s:deepcopy-gen=true
 type DRBDConfig struct {
+	// TODO: forbid changing properties more then once
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
-	// TODO: forbid changing properties more then once
 	// +optional
 	NodeId *uint `json:"nodeId"`
 

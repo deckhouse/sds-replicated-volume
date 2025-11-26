@@ -1,7 +1,8 @@
 - [Основные положения](#основные-положения)
   - [Схема именования акторов](#схема-именования-акторов)
   - [Условное обозначение триггеров](#условное-обозначение-триггеров)
-  - [](#)
+  - [Константы](#константы)
+  - [Настройки](#настройки)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
     - [`size`](#size)
@@ -24,31 +25,89 @@
     - [`drbd`](#drbd)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
+    - [Цель](#цель)
+    - [Триггер](#триггер)
+    - [Вывод](#вывод)
   - [`rvr-delete-controller`](#rvr-delete-controller)
+    - [Цель](#цель-1)
+    - [Триггер](#триггер-1)
+    - [Вывод](#вывод-1)
   - [`drbd-resize-controller`](#drbd-resize-controller)
+    - [Цель](#цель-2)
+    - [Триггер](#триггер-2)
+    - [Вывод](#вывод-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
+    - [Цель](#цель-3)
+    - [Триггер](#триггер-3)
+    - [Вывод](#вывод-3)
   - [`rvr-drbd-status-controller`](#rvr-drbd-status-controller)
+    - [Цель](#цель-4)
+    - [Триггер](#триггер-4)
+    - [Вывод](#вывод-4)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 3\]](#статус-tbd--priority-5--complexity-3)
+    - [Цель](#цель-5)
+    - [Триггер](#триггер-5)
+    - [Вывод](#вывод-5)
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
+    - [Цель](#цель-6)
+    - [Триггер](#триггер-6)
+    - [Вывод](#вывод-6)
   - [`rvr-node-selector-controller`](#rvr-node-selector-controller)
+    - [Цель](#цель-7)
+    - [Триггер](#триггер-7)
+    - [Вывод](#вывод-7)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
+    - [Цель](#цель-8)
+    - [Триггер](#триггер-8)
+    - [Вывод](#вывод-8)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
+    - [Цель](#цель-9)
+    - [Триггер](#триггер-9)
+    - [Вывод](#вывод-9)
   - [`rv-publish-controller`](#rv-publish-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
+    - [Цель](#цель-10)
+    - [Триггер](#триггер-10)
+    - [Вывод](#вывод-10)
   - [`rvr-volume-controller`](#rvr-volume-controller)
+    - [Цель](#цель-11)
+    - [Триггер](#триггер-11)
+    - [Вывод](#вывод-11)
   - [`rvr-gc-controller`](#rvr-gc-controller)
+    - [Цель](#цель-12)
+    - [Триггер](#триггер-12)
+    - [Вывод](#вывод-12)
   - [`rv-status-config-controller`](#rv-status-config-controller)
+    - [Цель](#цель-13)
+    - [Триггер](#триггер-13)
+    - [Вывод](#вывод-13)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
+    - [Цель](#цель-14)
+    - [Триггер](#триггер-14)
+    - [Вывод](#вывод-14)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
-    - [Статус: \[OK | priority: 1 | complexity: 3\]](#статус-ok--priority-1--complexity-3)
-  - [`rv-status-controller` \[OK\]](#rv-status-controller-ok)
+    - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
+    - [Цель](#цель-15)
+    - [Триггер](#триггер-15)
+    - [Вывод](#вывод-15)
+  - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
+    - [Цель](#цель-16)
+    - [Вывод](#вывод-16)
+    - [Триггер](#триггер-16)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
+    - [Цель](#цель-17)
+    - [Триггер](#триггер-17)
+    - [Вывод](#вывод-17)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
+    - [Цель](#цель-18)
+    - [Триггер](#триггер-18)
+    - [Вывод](#вывод-18)
 - [Сценарии](#сценарии)
   - [Ручное создание реплицируемого тома](#ручное-создание-реплицируемого-тома)
 
@@ -67,7 +126,12 @@
  - `UPDATE` - событие обновления ресурса (в т.ч. проставление `metadata.deletionTimestamp`)
  - `DELETE` - событие окончательного удаления ресурса, происходит после снятия последнего финализатора (может быть потеряно в случае недоступности контроллера)
 
-##  
+## Константы
+TBD
+
+## Настройки
+ - `drbdMinPort` - минимальный порт для использования ресурсами
+ - `drbdMaxPort` - максимальный порт для использования ресурсами
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -265,11 +329,20 @@
 
 ## `rvr-status-config-address-controller`
 
+### Статус: [TBD | priority: 5 | complexity: 3]
+
 ### Цель 
+Проставить значение свойству `rvr.status.config.address`.
+ - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
+ - `port` - найти наименьший свободный порт в диапазоне, задаваемом в настройках `drbdMinPort`/`drbdMaxPort`
+
+В случае, если нет свободного порта, настроек порта, либо IP: повторять реконсайл с ошибкой.
+
 ### Триггер 
-  - 
+  - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.config.address)`
+
 ### Вывод 
-  - 
+  - `rvr.status.config.address`
 
 # Акторы приложения: `controller`
 
@@ -289,7 +362,7 @@
 ### Триггер
   - `CREATE(RV)`, `UPDATE(RVR[metadata.deletionTimestamp -> !null])`
     - когда фактическое количество реплик (в том числе неработоспособных, но исключая удаляемые) меньше требуемого
-  - `UPDATE(RVR[status.conditions[type=Ready].Status == True])`
+  - `UPDATE(RVR[status.conditions[type=Ready].status == True])`
     - когда фактическое количество реплик равно 1
 
 ### Вывод
@@ -413,14 +486,18 @@
 
 Работоспособный кластер - это полностью готовый и доступный, без учёта отсутствия настройки кворума.
 
+### Триггер
+ - `CREATE/UPDATE(RV, rv.status.conditions[type=Ready].status==True)`
+
 ### Вывод
   - `rv.status.config.quorum`
   - `rv.status.config.quorumMinimumRedundancy`
 
-Правильные значения, в зависимости от количества реплик N:
+Правильные значения, в зависимости от количества diskful реплик N:
+
 ```
 var quorum byte = N/2 + 1
-var qmr byte
+var qmr byte = 0
 if N > 2 {
 	qmr = quorum
 }
@@ -428,33 +505,33 @@ if N > 2 {
 
 ## `rv-status-config-shared-secret-controller`
 
-### Статус: [OK | priority: 1 | complexity: 3]
+### Статус: [OK | priority: 3 | complexity: 3]
 
 ### Цель
 Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
-а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[Type=ConfigurationAdjusted,Status=False,Reason=UnsupportedAlgorithm]`, и поменять его на следующий по списку. Последний проверенный алгоритм должен быть указан в `Message`.
-В случае, если список закончился, выставить для `rv.status.conditions[Type=SharedSecretAlgorithmSelected].Status=False` `Reason=UnableToSelectSharedSecretAlgorithm`
+а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm]`, и поменять его на следующий по списку. Последний проверенный алгоритм должен быть указан в `Message`.
+В случае, если список закончился, выставить для `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False` `reason=UnableToSelectSharedSecretAlgorithm`
 
 ### Триггер
  - `CREATE(RV, rv.status.config.sharedSecret == "")`
- - `CREATE/UPDATE(RVR, status.conditions[Type=ConfigurationAdjusted,Status=False,Reason=UnsupportedAlgorithm])`
+ - `CREATE/UPDATE(RVR, status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm])`
 
 ### Вывод 
  - `rv.status.config.sharedSecret`
    - генерируется новый
  - `rv.status.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
- - `rv.status.conditions[Type=SharedSecretAlgorithmSelected].Status=False`
- - `rv.status.conditions[Type=SharedSecretAlgorithmSelected].Reason=UnableToSelectSharedSecretAlgorithm`
- - `rv.status.conditions[Type=SharedSecretAlgorithmSelected].Message=[Which node? Which alg failed?]`
+ - `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False`
+ - `rv.status.conditions[type=SharedSecretAlgorithmSelected].reason=UnableToSelectSharedSecretAlgorithm`
+ - `rv.status.conditions[type=SharedSecretAlgorithmSelected].message=[Which node? Which alg failed?]`
 
-## `rv-status-controller` [OK]
+## `rv-status-controller` [TBD]
 
 ### Цель 
 Обновить вычисляемые поля статутса RV. 
 
 ### Вывод 
- - `rv.status.conditions[Type=Ready]`
+ - `rv.status.conditions[type=Ready]`
    - `Status=True` в случае если все подстатусы успешны, иначе `False`
  - `phase`
 

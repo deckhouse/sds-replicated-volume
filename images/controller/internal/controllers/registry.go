@@ -11,7 +11,8 @@ var registry []func(mgr manager.Manager) error
 
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
-	// ...
+
+	// TODO issues/333 register new controllers here
 }
 
 func BuildAll(mgr manager.Manager) error {
