@@ -1,4 +1,4 @@
-package rvradd
+package rvrdiskfulcount
 
 import (
 	"context"
@@ -30,7 +30,7 @@ func BuildController(mgr manager.Manager) error {
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 	err := builder.TypedControllerManagedBy[TReq](mgr).
-		Named("rvr_add_controller").
+		Named("rvr_diskful_count_controller").
 		Watches(
 			&v1alpha3.ReplicatedVolume{},
 			&handler.TypedFuncs[client.Object, TReq]{

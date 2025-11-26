@@ -27,7 +27,7 @@ func main() {
 
 	crlog.SetLogger(logr.FromSlogHandler(logHandler))
 
-	log.Info("app started")
+	log.Info("controller app started")
 
 	err := run(ctx, log)
 	if !errors.Is(err, context.Canceled) || ctx.Err() != context.Canceled {
