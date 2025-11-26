@@ -145,9 +145,7 @@ func (s *BuildService) GetJob(id string) JobInfo {
 }
 
 func (s *BuildService) CreateJob(cacheKey string, kernelVersion string, headersData []byte, remoteAddr string) {
-
 	cachePath := s.createCachePath(cacheKey)
-
 	job := &BuildJob{
 		JobInfo: JobInfo{
 			Key:           cacheKey,

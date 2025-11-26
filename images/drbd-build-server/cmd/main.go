@@ -16,8 +16,8 @@ const (
 	Version string = "0.0.0" // Version TODO: inject version later (19/11/2025)
 
 	maxHeaderBytes int           = 4 * 1024
-	readTimeoutMs  time.Duration = 30 * time.Minute
-	writeTimeoutMs time.Duration = 30 * time.Minute
+	readTimeout    time.Duration = 30 * time.Minute
+	writeTimeout   time.Duration = 30 * time.Minute
 )
 
 var (
@@ -100,8 +100,8 @@ func main() {
 		Addr:           *flagAddr,
 		Handler:        requestHandler,
 		MaxHeaderBytes: maxHeaderBytes,
-		ReadTimeout:    readTimeoutMs,
-		WriteTimeout:   writeTimeoutMs,
+		ReadTimeout:    readTimeout,
+		WriteTimeout:   writeTimeout,
 	}
 
 	if *flagCertFile != "" && *flagKeyFile != "" {

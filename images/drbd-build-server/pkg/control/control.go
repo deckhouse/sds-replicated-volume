@@ -36,7 +36,6 @@ func (s *BuildServer) replyAccepted(w http.ResponseWriter, resp *model.BuildResp
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		s.logger.Error("Failed to encode response", "error", err)
 	}
-	return
 }
 
 func (s *BuildServer) replyOk(w http.ResponseWriter, resp *model.BuildResponse) {
@@ -45,7 +44,6 @@ func (s *BuildServer) replyOk(w http.ResponseWriter, resp *model.BuildResponse) 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		s.logger.Error("Failed to encode response", "error", err)
 	}
-	return
 }
 
 type BuildServer struct {
@@ -91,7 +89,6 @@ func getKernelVersion(r *http.Request, s *BuildServer, remoteAddr string) (strin
 	if !kernelVersionRegex.MatchString(kernelVersion) {
 		s.logger.Error("Invalid kernel version format", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
 		return "", errors.New("Invalid kernel version format. Expected format: X.Y.Z[-flavor] or X.Y.Z[-flavor]-build")
-
 	}
 
 	return kernelVersion, nil
@@ -140,14 +137,14 @@ func (s *BuildServer) registerRoutes() {
 	s.router.HandleFunc(helloPath, s.helloHandler()).Methods("GET")
 }
 
-func (s *BuildServer) errorf(code int, remoteAddr string, w http.ResponseWriter, format string, a ...interface{}) {
+func (s *BuildServer) replyErrorFormated(code int, remoteAddr string, w http.ResponseWriter, format string, a ...interface{}) {
 	w.WriteHeader(code)
 	msg := fmt.Sprintf(format, a...)
 	_, _ = fmt.Fprint(w, msg)
 	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", msg)
 }
 
-func (s *BuildServer) error(code int, remoteAddr string, w http.ResponseWriter, error error) {
+func (s *BuildServer) replyError(code int, remoteAddr string, w http.ResponseWriter, error error) {
 	w.WriteHeader(code)
 	s.logger.Error("HTTP error", "remote_addr", remoteAddr, "code", code, "error", error)
 }
@@ -168,12 +165,12 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 
 		kernelVersion, err := getKernelVersion(r, s, remoteAddr)
 		if err != nil {
-			s.error(http.StatusBadRequest, remoteAddr, w, err)
+			s.replyError(http.StatusBadRequest, remoteAddr, w, err)
 			return
 		}
 		headersData, err := s.readKernelHeadersFromBody(r, remoteAddr)
 		if err != nil {
-			s.error(http.StatusBadRequest, remoteAddr, w, err)
+			s.replyError(http.StatusBadRequest, remoteAddr, w, err)
 			return
 		}
 
@@ -181,7 +178,7 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 		cacheKey := utils.GenerateCacheKey(kernelVersion, headersData)
 		s.logger.Debug("Generated cache key", "remote_addr", remoteAddr, "cache_key", cacheKey)
 
-		//check cache
+		// check cache
 		if cachePath := s.buildService.GetCached(cacheKey, kernelVersion, remoteAddr); cachePath != nil {
 			s.logger.Debug("Serving cached module file", "remote_addr", remoteAddr)
 			s.replyFile(*cachePath, &kernelVersion, w, r)
@@ -191,7 +188,7 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 
 		// Check if build is in progress
 		s.logger.Debug("Checking for existing job", "remote_addr", remoteAddr, "cache_key", cacheKey[:16])
-		//TODO check why active?
+		// TODO check why active?
 		info, activeJobsCount := s.buildService.JobInfo(cacheKey)
 		s.logger.Debug("Total active jobsRepo", "remote_addr", remoteAddr, "count", activeJobsCount)
 
@@ -226,23 +223,21 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 			return
 		case model.StatusCompleted:
 			s.logger.Debug("Job completed, checking cache file", "remote_addr", remoteAddr, "cache_path", info.CachePath)
-			buildError := ""
 			if info.CachePath != "" {
 				if statInfo, err := os.Stat(info.CachePath); err == nil {
 					s.logger.Info("Serving completed build", "remote_addr", remoteAddr, "kernel_version", kernelVersion, "completed_at", info.CompletedAt, "size_bytes", statInfo.Size())
 					s.replyOk(w, &model.BuildResponse{
 						Status:      info.Status,
 						JobID:       info.Key,
-						DownloadURL: s.makeDownloadUrl(info.Key),
+						DownloadURL: s.makeDownloadURL(info.Key),
 					},
 					)
 					s.logger.Debug("Successfully sent completed build to client", "remote_addr", remoteAddr)
 					return
 				}
-				buildError = "Cache file for completed job not found"
+				s.logger.Error("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
 			}
-			buildError = "Cache path blank or empty"
-			s.logger.Error(buildError, "remote_addr", remoteAddr, "error", err)
+			s.logger.Error("Cache path blank or empty", "remote_addr", remoteAddr, "error", err)
 			s.buildService.CreateJob(cacheKey, kernelVersion, headersData, remoteAddr)
 			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", cacheKey[:16])
 			s.replyAccepted(w, &model.BuildResponse{
@@ -265,7 +260,7 @@ func (s *BuildServer) getStatusHandler() http.HandlerFunc {
 
 		if job.Status == model.StatusNotExist {
 			s.logger.Debug("Job not found", "remote_addr", remoteAddr, "job_id", jobID)
-			s.errorf(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
+			s.replyErrorFormated(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
 			return
 		}
 
@@ -295,7 +290,7 @@ func (s *BuildServer) getStatusHandler() http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		switch job.Status {
 		case model.StatusCompleted:
-			url := s.makeDownloadUrl(jobID)
+			url := s.makeDownloadURL(jobID)
 			rs.DownloadURL = url
 			s.logger.Debug("Job completed", "remote_addr", remoteAddr, "download_url", url)
 			w.WriteHeader(http.StatusOK)
@@ -312,7 +307,7 @@ func (s *BuildServer) getStatusHandler() http.HandlerFunc {
 	}
 }
 
-func (s *BuildServer) makeDownloadUrl(jobID string) string {
+func (s *BuildServer) makeDownloadURL(jobID string) string {
 	return fmt.Sprintf("/api/v1/download/%s", jobID)
 }
 
@@ -327,7 +322,7 @@ func (s *BuildServer) downloadModule() http.HandlerFunc {
 
 		if job.Status == model.StatusNotExist {
 			s.logger.Debug("Job not found", "remote_addr", remoteAddr, "job_id", jobID)
-			s.errorf(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
+			s.replyErrorFormated(http.StatusNotFound, remoteAddr, w, "Job not found: %s", jobID)
 			return
 		}
 
@@ -335,20 +330,20 @@ func (s *BuildServer) downloadModule() http.HandlerFunc {
 
 		if job.Status != model.StatusCompleted {
 			s.logger.Debug("Job not completed", "remote_addr", remoteAddr, "status", job.Status)
-			s.errorf(http.StatusBadRequest, remoteAddr, w, "Job is not completed yet. Status: %s", job.Status)
+			s.replyErrorFormated(http.StatusBadRequest, remoteAddr, w, "Job is not completed yet. Status: %s", job.Status)
 			return
 		}
 
 		if job.CachePath == "" {
 			s.logger.Debug("Cache path not set for completed job", "remote_addr", remoteAddr)
-			s.errorf(http.StatusInternalServerError, remoteAddr, w, "Cache path not set for completed job")
+			s.replyErrorFormated(http.StatusInternalServerError, remoteAddr, w, "Cache path not set for completed job")
 			return
 		}
 
 		cacheInfo, err := os.Stat(job.CachePath)
 		if os.IsNotExist(err) {
 			s.logger.Debug("Cache file not found", "remote_addr", remoteAddr, "cache_path", job.CachePath)
-			s.errorf(http.StatusNotFound, remoteAddr, w, "Cache file not found: %s", job.CachePath)
+			s.replyErrorFormated(http.StatusNotFound, remoteAddr, w, "Cache file not found: %s", job.CachePath)
 			return
 		}
 
