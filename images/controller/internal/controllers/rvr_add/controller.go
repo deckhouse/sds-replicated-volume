@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -32,7 +32,7 @@ func BuildController(mgr manager.Manager) error {
 	err := builder.TypedControllerManagedBy[TReq](mgr).
 		Named("rvr_add_controller").
 		Watches(
-			&v1alpha2.ReplicatedVolume{},
+			&v1alpha3.ReplicatedVolume{},
 			&handler.TypedFuncs[client.Object, TReq]{
 				CreateFunc: func(
 					ctx context.Context,
