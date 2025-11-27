@@ -139,7 +139,56 @@ func (r *Reconciler) Reconcile(
 
 ---
 
-## 5. Обработка неиспользуемых параметров
+## 5. Упрощенная структура Reconciler
+
+**⚠️ Не используйте без веской причины:**
+- Неиспользуемые поля (`rdr client.Reader`, `sch *runtime.Scheme`)
+- Неэкспортированные поля (затрудняют тестирование)
+- Функции-конструкторы (`NewReconciler`) - создавайте напрямую в `controller.go`
+
+**✅ Используйте по умолчанию:**
+- Минимальная структура с только необходимыми полями: `Cl`, `Log`, `LogAlt`
+- Экспортированные поля (с заглавной буквы) для использования в тестах
+- Прямое создание структуры в `BuildController`
+
+**Обоснование:** Простая структура легче понимать и поддерживать. Экспортированные поля позволяют создавать reconciler напрямую в тестах без необходимости в конструкторах. Неиспользуемые поля добавляют сложность без пользы.
+
+**Пример:**
+```go
+// ✅ ПРАВИЛЬНО - минимальная структура
+type Reconciler struct {
+	Cl     client.Client
+	Log    *slog.Logger
+	LogAlt logr.Logger
+}
+
+// В controller.go
+rec := &Reconciler{
+	Cl:     mgr.GetClient(),
+	Log:    slog.Default(),
+	LogAlt: mgr.GetLogger(),
+}
+
+// В тестах
+rec := &Reconciler{
+	Cl:     cl,
+	Log:    slog.Default(),
+	LogAlt: logr.Discard(),
+}
+
+// ❌ НЕПРАВИЛЬНО - неиспользуемые поля
+type Reconciler struct {
+	cl     client.Client
+	rdr    client.Reader  // не используется
+	sch    *runtime.Scheme // не используется
+	log    *slog.Logger
+	logAlt logr.Logger
+}
+```
+
+---
+
+## 6. Обработка неиспользуемых параметров
 
 **✅ Используйте:**
 - Заменять неиспользуемые параметры на `_` в predicate functions
@@ -161,6 +210,14 @@ DeleteFunc: func(_ event.DeleteEvent) bool {
 
 ## Структура контроллера
 
+### Принципы упрощения
+
+При создании контроллера следуйте принципу **минимализма**:
+- Используйте только необходимые поля в структуре `Reconciler`
+- Не добавляйте поля "на будущее" - добавляйте их только когда они реально нужны
+- Экспортируйте поля для упрощения тестирования
+- Избегайте функций-конструкторов - создавайте структуру напрямую
+
 ### Файлы контроллера:
 
 1. **`controller.go`** - регистрация контроллера
@@ -169,9 +226,11 @@ DeleteFunc: func(_ event.DeleteEvent) bool {
    - Инициализация Reconciler с зависимостями
 
 2. **`reconciler.go`** - логика reconcile
-   - `Reconciler` struct с зависимостями (`client.Client`, `client.Reader`, `*runtime.Scheme`, `*slog.Logger`, `logr.Logger`)
+   - `Reconciler` struct с минимальными зависимостями (`client.Client`, `*slog.Logger`, `logr.Logger`)
+   - Поля должны быть экспортированы (`Cl`, `Log`, `LogAlt`) для использования в тестах
    - `Reconcile(ctx, req reconcile.Request)` метод
    - Вспомогательные методы для бизнес-логики
+   - **Важно:** Не добавляйте неиспользуемые поля (`rdr`, `sch`) - они добавляют сложность без пользы
 
 3. **`reconciler_test.go`** - unit тесты
    - Тесты с fake Kubernetes client
@@ -199,11 +258,9 @@ import (
 
 func BuildController(mgr manager.Manager) error {
 	rec := &Reconciler{
-		cl:     mgr.GetClient(),
-		rdr:    mgr.GetAPIReader(),
-		sch:    mgr.GetScheme(),
-		log:    slog.Default(),
-		logAlt: mgr.GetLogger(),
+		Cl:     mgr.GetClient(),
+		Log:    slog.Default(),
+		LogAlt: mgr.GetLogger(),
 	}
 
 	err := builder.ControllerManagedBy(mgr).
@@ -229,7 +286,7 @@ func BuildController(mgr manager.Manager) error {
 		Complete(rec)
 
 	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
+		return u.LogError(rec.Log, e.ErrUnknownf("building controller: %w", err))
 	}
 
 	return nil
@@ -242,20 +299,21 @@ package mycontroller
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 )
 
 type Reconciler struct {
-	cl     client.Client
-	rdr    client.Reader
-	sch    *runtime.Scheme
-	log    *slog.Logger
-	logAlt logr.Logger
+	Cl     client.Client
+	Log    *slog.Logger
+	LogAlt logr.Logger
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
@@ -264,20 +322,37 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
-	log := r.logAlt.WithName("Reconcile").WithValues("req", req)
+	log := r.LogAlt.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
-	
+
 	obj := &v1alpha3.SomeResource{}
-	if err := r.cl.Get(ctx, req.NamespacedName, obj); err != nil {
+	if err := r.Cl.Get(ctx, req.NamespacedName, obj); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("resource not found, might be deleted")
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, fmt.Errorf("getting resource %s: %w", req.NamespacedName, err)
 	}
-	
+
 	// бизнес-логика
-	
+	// При обновлении status используйте PatchStatusWithConflictRetry:
+	// objKey := client.ObjectKeyFromObject(obj)
+	// freshObj := &v1alpha3.SomeResource{}
+	// if err := r.Cl.Get(ctx, objKey, freshObj); err != nil {
+	//     return reconcile.Result{}, fmt.Errorf("getting resource for patch: %w", err)
+	// }
+	// if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshObj, func(currentObj *v1alpha3.SomeResource) error {
+	//     // Инициализация status внутри patchFn (не в начале Reconcile)
+	//     if currentObj.Status == nil {
+	//         currentObj.Status = &v1alpha3.SomeResourceStatus{}
+	//     }
+	//     // Обновление status
+	//     currentObj.Status.SomeField = value
+	//     return nil
+	// }); err != nil {
+	//     return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
+	// }
+
 	log.Info("completed successfully")
 	return reconcile.Result{}, nil
 }
@@ -289,27 +364,56 @@ package mycontroller_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
+
+	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	mycontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/my_controller"
 )
+
+func newFakeClient(objs ...client.Object) client.Client {
+	s := scheme.Scheme
+	_ = v1alpha3.AddToScheme(s)
+	return fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha3.SomeResource{}). // Важно для тестирования status updates
+		WithObjects(objs...).
+		Build()
+}
+
+func newReconciler(cl client.Client) *mycontroller.Reconciler {
+	return &mycontroller.Reconciler{
+		Cl:     cl,
+		Log:    slog.Default(),
+		LogAlt: logr.Discard(),
+	}
+}
 
 func TestReconcile(t *testing.T) {
 	ctx := context.Background()
 	obj := &v1alpha3.SomeResource{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-resource"},
+		Spec: v1alpha3.SomeResourceSpec{
+			// спецификация ресурса
+		},
 	}
-	cl := fake.NewClientBuilder().WithObjects(obj).Build()
-	rec := NewReconciler(cl, cl, scheme.Scheme, slog.Default(), logr.Discard())
-	
+	cl := newFakeClient(obj)
+	rec := newReconciler(cl)
+
 	req := reconcile.Request{
 		NamespacedName: types.NamespacedName{Name: "test-resource"},
 	}
 	_, err := rec.Reconcile(ctx, req)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -327,7 +431,12 @@ func TestReconcile(t *testing.T) {
 - [ ] Использовать structured logger с `.WithName()` и `.WithValues()` в Reconcile
 - [ ] Заменять неиспользуемые параметры на `_` в predicate functions
 - [ ] Не использовать сложные handlers без необходимости
-- [ ] Добавить unit тесты с fake client
+- [ ] **Упрощенная структура Reconciler:** только `Cl`, `Log`, `LogAlt` (без неиспользуемых полей)
+- [ ] **Экспортированные поля:** `Cl`, `Log`, `LogAlt` для использования в тестах
+- [ ] **Инициализация status:** внутри `patchFn`, а не в начале `Reconcile`
+- [ ] **Использование PatchStatusWithConflictRetry:** для всех обновлений status
+- [ ] **Идемпотентность:** проверка состояния в начале Reconcile и внутри patchFn
+- [ ] Добавить unit тесты с fake client и `.WithStatusSubresource()`
 - [ ] Использовать `reconcile.Request` в тестах
 - [ ] Зарегистрировать контроллер в `registry.go`
 
@@ -358,13 +467,69 @@ func init() {
 - Логировать ошибки через structured logger
 
 ### Конфликты при обновлении
-- Использовать `api.PatchStatusWithConflictRetry` или `api.PatchWithConflictRetry` для безопасных обновлений
+- **Всегда** используйте `api.PatchStatusWithConflictRetry` или `api.PatchWithConflictRetry` для безопасных обновлений
 - Эти функции обрабатывают конфликты через optimistic locking
+- **Важно:** Инициализация status должна происходить **внутри** `patchFn`, а не в начале `Reconcile`
+- Это гарантирует, что инициализация происходит атомарно вместе с обновлением и предотвращает race conditions
+
+**Пример:**
+```go
+// ❌ НЕПРАВИЛЬНО - инициализация в начале Reconcile
+if obj.Status == nil {
+    obj.Status = &v1alpha3.SomeResourceStatus{}
+}
+// ... обновление status
+
+// ✅ ПРАВИЛЬНО - инициализация внутри patchFn
+objKey := client.ObjectKeyFromObject(obj)
+freshObj := &v1alpha3.SomeResource{}
+if err := r.Cl.Get(ctx, objKey, freshObj); err != nil {
+    return reconcile.Result{}, fmt.Errorf("getting resource for patch: %w", err)
+}
+if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshObj, func(currentObj *v1alpha3.SomeResource) error {
+    // Инициализация status внутри patchFn
+    if currentObj.Status == nil {
+        currentObj.Status = &v1alpha3.SomeResourceStatus{}
+    }
+    // Обновление status
+    currentObj.Status.SomeField = value
+    return nil
+}); err != nil {
+    return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
+}
+```
 
 ### Идемпотентность
 - Reconcile должен быть идемпотентным
-- Проверять текущее состояние перед изменениями
+- Проверять текущее состояние перед изменениями (ранний выход, если уже установлено)
+- Внутри `patchFn` также проверять состояние (на случай, если другой worker уже обновил)
 - Не делать лишних обновлений, если состояние уже корректное
+
+**Пример:**
+```go
+// Проверка в начале Reconcile
+if obj.Status != nil && obj.Status.SomeField != nil {
+    log.V(1).Info("field already set", "field", *obj.Status.SomeField)
+    return reconcile.Result{}, nil
+}
+
+// Внутри patchFn - дополнительная проверка на случай race condition
+if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshObj, func(currentObj *v1alpha3.SomeResource) error {
+    // Проверка еще раз (idempotent check)
+    if currentObj.Status != nil && currentObj.Status.SomeField != nil {
+        log.V(1).Info("field already set by another worker")
+        return nil // Уже установлено, ничего не делаем
+    }
+    // Установка значения
+    if currentObj.Status == nil {
+        currentObj.Status = &v1alpha3.SomeResourceStatus{}
+    }
+    currentObj.Status.SomeField = &value
+    return nil
+}); err != nil {
+    return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
+}
+```
 
 ### Параллельная обработка (обсуждаемо)
 
