@@ -8,25 +8,19 @@ import (
 )
 
 func BuildController(mgr manager.Manager) error {
-
 	nameController := "rvr_diskful_count_controller"
 
 	r := &Reconciler{
 		cl:  mgr.GetClient(),
 		log: mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
 	}
-	h := &Handler{
-		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(nameController).WithName("Handler"),
-	}
 
 	return builder.ControllerManagedBy(mgr).
 		Named(nameController).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(h.HandleReplicatedVolumeReplica)).
-		Watches(
-			&v1alpha3.ReplicatedVolume{},
-			handler.EnqueueRequestsFromMapFunc(h.HandleReplicatedVolume)).
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolumeReplica{})).
+		For(
+			&v1alpha3.ReplicatedVolume{}).
 		Complete(r)
 }
