@@ -1,11 +1,7 @@
 package rvrdiskfulcount // TODO change package if need
 
 import (
-	"log/slog"
-
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -25,7 +21,7 @@ func BuildController(mgr manager.Manager) error {
 	type TReq = Request
 	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
-	err := builder.ControllerManagedBy(mgr).
+	return builder.ControllerManagedBy(mgr).
 		Named("rv_status_config_quorum_controller").
 		For(&v1alpha3.ReplicatedVolume{}).
 		Watches(
@@ -36,12 +32,4 @@ func BuildController(mgr manager.Manager) error {
 				&v1alpha3.ReplicatedVolume{}),
 		).
 		Complete(rec)
-
-	if err != nil {
-		// TODO issues/333 log errors early
-		// TODO issues/333 use typed errors
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
-	}
-
-	return nil
 }
