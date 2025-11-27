@@ -9,7 +9,6 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -19,22 +18,9 @@ import (
 )
 
 type Reconciler struct {
-	cl     client.Client
-	rdr    client.Reader
-	sch    *runtime.Scheme
-	log    *slog.Logger
-	logAlt logr.Logger
-}
-
-// NewReconciler creates a new Reconciler instance (mainly for testing)
-func NewReconciler(cl client.Client, rdr client.Reader, sch *runtime.Scheme, log *slog.Logger, logAlt logr.Logger) *Reconciler {
-	return &Reconciler{
-		cl:     cl,
-		rdr:    rdr,
-		sch:    sch,
-		log:    log,
-		logAlt: logAlt,
-	}
+	Cl     client.Client
+	Log    *slog.Logger
+	LogAlt logr.Logger
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
@@ -48,12 +34,12 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
-	log := r.logAlt.WithName("Reconcile").WithValues("req", req)
+	log := r.LogAlt.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
 	// Get the RVR
 	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
+	if err := r.Cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("RVR not found, might be deleted")
 			return reconcile.Result{}, nil
@@ -69,7 +55,7 @@ func (r *Reconciler) Reconcile(
 
 	// Get all RVRs for the same ReplicatedVolume
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.Cl.List(ctx, rvrList); err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing RVRs: %w", err)
 	}
 
@@ -161,10 +147,10 @@ func (r *Reconciler) Reconcile(
 	// 3. The worst case is we retry with the same nodeID, which is fine (idempotent)
 	// Get fresh RVR for PatchStatusWithConflictRetry (it needs a valid object with correct key)
 	freshRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, freshRVR); err != nil {
+	if err := r.Cl.Get(ctx, req.NamespacedName, freshRVR); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting RVR for patch: %w", err)
 	}
-	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRVR, func(currentRVR *v1alpha3.ReplicatedVolumeReplica) error {
+	if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshRVR, func(currentRVR *v1alpha3.ReplicatedVolumeReplica) error {
 		// Check again if nodeID is already set (handles race condition where another worker set it during retry)
 		if currentRVR.Status != nil && currentRVR.Status.Config != nil && currentRVR.Status.Config.NodeId != nil {
 			log.V(1).Info("nodeID already assigned by another worker", "nodeID", *currentRVR.Status.Config.NodeId)
@@ -209,7 +195,7 @@ func (r *Reconciler) Reconcile(
 
 	// Get final state to log the assigned nodeID
 	finalRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, finalRVR); err == nil {
+	if err := r.Cl.Get(ctx, req.NamespacedName, finalRVR); err == nil {
 		if finalRVR.Status != nil && finalRVR.Status.Config != nil && finalRVR.Status.Config.NodeId != nil {
 			log.Info("assigned nodeID to RVR", "nodeID", *finalRVR.Status.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
 		}
@@ -231,7 +217,7 @@ func (r *Reconciler) Reconcile(
 func (r *Reconciler) setNodeIDErrorCondition(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica, message string) error {
 	// Get RVR again to ensure we have the latest version
 	currentRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, client.ObjectKeyFromObject(rvr), currentRVR); err != nil {
+	if err := r.Cl.Get(ctx, client.ObjectKeyFromObject(rvr), currentRVR); err != nil {
 		return fmt.Errorf("getting RVR for condition update: %w", err)
 	}
 
@@ -254,9 +240,9 @@ func (r *Reconciler) setNodeIDErrorCondition(ctx context.Context, rvr *v1alpha3.
 	meta.SetStatusCondition(&currentRVR.Status.Conditions, cond)
 
 	// Update status
-	if err := r.cl.Status().Update(ctx, currentRVR); err != nil {
+	if err := r.Cl.Status().Update(ctx, currentRVR); err != nil {
 		// Fallback to regular Update for fake client compatibility in tests
-		if updateErr := r.cl.Update(ctx, currentRVR); updateErr != nil {
+		if updateErr := r.Cl.Update(ctx, currentRVR); updateErr != nil {
 			return fmt.Errorf("updating RVR condition: %w (Status().Update failed: %v)", updateErr, err)
 		}
 	}

@@ -35,13 +35,11 @@ func newFakeClient(objs ...client.Object) client.Client {
 }
 
 func newReconciler(cl client.Client) *rvrstatusconfignodeid.Reconciler {
-	return rvrstatusconfignodeid.NewReconciler(
-		cl,
-		cl,
-		scheme.Scheme,
-		slog.Default(),
-		logr.Discard(),
-	)
+	return &rvrstatusconfignodeid.Reconciler{
+		Cl:     cl,
+		Log:    slog.Default(),
+		LogAlt: logr.Discard(),
+	}
 }
 
 func createRVR(name, volumeName, nodeName string) *v1alpha3.ReplicatedVolumeReplica {

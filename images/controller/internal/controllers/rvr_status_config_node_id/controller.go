@@ -15,11 +15,9 @@ import (
 
 func BuildController(mgr manager.Manager) error {
 	var rec = &Reconciler{
-		cl:     mgr.GetClient(),
-		rdr:    mgr.GetAPIReader(),
-		sch:    mgr.GetScheme(),
-		log:    slog.Default(),
-		logAlt: mgr.GetLogger(),
+		Cl:     mgr.GetClient(),
+		Log:    slog.Default(),
+		LogAlt: mgr.GetLogger(),
 	}
 
 	err := builder.ControllerManagedBy(mgr).
@@ -54,7 +52,7 @@ func BuildController(mgr manager.Manager) error {
 		Complete(rec)
 
 	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
+		return u.LogError(rec.Log, e.ErrUnknownf("building controller: %w", err))
 	}
 
 	return nil
