@@ -22,6 +22,10 @@ const (
 
 	// [ConditionTypeDiskIOSuspended] indicates whether replica has achieved quorum
 	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
+	"QuorumConfigured"
+	//DiskfulReplicaCountReached
+	//AllReplicasReady
+	//SharedSecretAlgorithmSelected
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{

@@ -63,6 +63,10 @@ type ReplicatedVolumeStatus struct {
 	Phase string `json:"phase,omitempty"`
 }
 
+func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
+	return s.Conditions
+}
+
 // +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
