@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 
+	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
@@ -10,7 +11,11 @@ import (
 var registry []func(mgr manager.Manager) error
 
 func init() {
-	registry = append(registry, rvrdiskfulcount.BuildController)
+	registry = append(
+		registry,
+		rvrdiskfulcount.BuildController,
+		rvstatusconfigquorum.BuildController,
+	)
 
 	// TODO issues/333 register new controllers here
 }
