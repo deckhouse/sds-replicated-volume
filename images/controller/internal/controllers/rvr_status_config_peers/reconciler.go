@@ -72,15 +72,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return true
 		}
 
-		if _, exist := peers[rvr.Spec.NodeName]; exist {
-			log.Info("Peer on this node already found. Skipping")
-			return true
-		}
 		return false
 	})
 
 	peers := make(map[string]v1alpha3.Peer, len(list.Items))
 	for _, rvr := range list.Items {
+		if _, exist := peers[rvr.Spec.NodeName]; exist {
+			log.Info("Peer on this node already found. Skipping")
+			continue
+		}
 		peers[rvr.Spec.NodeName] = v1alpha3.Peer{
 			NodeId:   *rvr.Status.Config.NodeId,
 			Address:  *rvr.Status.Config.Address,
