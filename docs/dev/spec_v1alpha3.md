@@ -396,10 +396,20 @@
   - `rvr.status.peers`
 
 ## `rv-status-config-device-minor-controller`
-### Цель
-### Триггер
-### Вывод
 
+### Статус: [OK | priority: 5 | complexity: 2]
+
+### Цель
+
+Инициализировать свойство `rv.status.config.deviceMinor` минимальным свободным значением среди всех RV.
+
+По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.config.deviceMinor`.
+
+### Триггер
+  - `CREATE/UPDATE(RV, rv.status.config.deviceMinor != nil)`
+
+### Вывод
+  - `rv.status.config.deviceMinor`
 
 ## `rvr-tie-breaker-controller`
 ### Цель
