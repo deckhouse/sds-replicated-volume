@@ -54,13 +54,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	log.V(4).Info("Calculated diskful replica count", "count", diskfulCount)
 
 	// Get all RVRs for this RV
-	rvrList, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
+	rvrMap, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplicas: %w", err)
 	}
-	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(rvrList.Items))
+	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(rvrMap))
 
-	if len(rvrList.Items) == 0 {
+	if len(rvrMap) == 0 {
 		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
 		if err != nil {
@@ -117,18 +117,25 @@ func getDiskfulReplicaCount(ctx context.Context, cl client.Client, rv *v1alpha3.
 }
 
 // getReplicatedVolumeReplicas gets all ReplicatedVolumeReplica objects for the given ReplicatedVolume
-// by the spec.replicatedVolumeName field.
-func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (*v1alpha3.ReplicatedVolumeReplicaList, error) {
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-	err := cl.List(
-		ctx,
-		rvrList,
-		client.MatchingFields{"spec.replicatedVolumeName": rv.Name},
-	)
+// by the spec.replicatedVolumeName field. Returns a map with RVR name as key and RVR object as value.
+// Returns empty map if no RVRs are found.
+func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (map[string]*v1alpha3.ReplicatedVolumeReplica, error) {
+	allRvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	err := cl.List(ctx, allRvrList)
 	if err != nil {
-		return nil, fmt.Errorf("listing ReplicatedVolumeReplicas for ReplicatedVolume %s: %w", rv.Name, err)
+		return nil, fmt.Errorf("listing all ReplicatedVolumeReplicas: %w", err)
 	}
-	return rvrList, nil
+
+	// Filter by spec.replicatedVolumeName and build map
+	rvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+
+	for i := range allRvrList.Items {
+		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name {
+			rvrMap[allRvrList.Items[i].Name] = &allRvrList.Items[i]
+		}
+	}
+
+	return rvrMap, nil
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume
