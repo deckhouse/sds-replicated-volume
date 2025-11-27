@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
+	utils "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
@@ -120,34 +120,25 @@ func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1al
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume
 // with ownerReference to RV. Uses the first node from spec.publishOn for nodeName.
 func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume, log logr.Logger) error {
-	// Determine nodeName from PublishOn
-	var nodeName string
-	if len(rv.Spec.PublishOn) > 0 {
-		nodeName = rv.Spec.PublishOn[0]
-	} else {
-		return fmt.Errorf("cannot create ReplicatedVolumeReplica: ReplicatedVolume has no PublishOn nodes specified")
+	ownerRef := metav1.OwnerReference{
+		APIVersion:         "storage.deckhouse.io/v1alpha3",
+		Kind:               "ReplicatedVolume",
+		Name:               rv.Name,
+		UID:                rv.UID,
+		Controller:         utils.Ptr(true),
+		BlockOwnerDeletion: utils.Ptr(true),
 	}
-
-	// Create ownerReference
-	gv := schema.GroupVersion{Group: "storage.deckhouse.io", Version: "v1alpha3"}
-	ownerRef := metav1.NewControllerRef(rv, schema.GroupVersionKind{
-		Group:   gv.Group,
-		Version: gv.Version,
-		Kind:    "ReplicatedVolume",
-	})
 
 	generateName := fmt.Sprintf("%s%s", rv.Name, "-")
 	log.V(4).Info("Creating ReplicatedVolumeReplica", "generateName", generateName)
 
-	// Create ReplicatedVolumeReplica object
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName:    generateName,
-			OwnerReferences: []metav1.OwnerReference{*ownerRef},
+			OwnerReferences: []metav1.OwnerReference{ownerRef},
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
-			NodeName:             nodeName,
 			Diskless:             false,
 		},
 	}
