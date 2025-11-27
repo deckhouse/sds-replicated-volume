@@ -19,15 +19,16 @@ package controllers
 import (
 	"fmt"
 
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
+	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
 var registry = []func(mgr manager.Manager) error{
 	rvrdiskfulcount.BuildController,
 	rvr_status_config_peers.BuildController,
+	rvrstatusconfignodeid.BuildController,
 }
 
 func init() {
