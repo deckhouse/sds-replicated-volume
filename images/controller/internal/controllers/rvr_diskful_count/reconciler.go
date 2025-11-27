@@ -7,7 +7,9 @@ import (
 	utils "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -65,6 +67,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
 		log.Info("Created ReplicatedVolumeReplica for ReplicatedVolume")
+
+		// Update condition after creating replica
+		err = setDiskfulReplicaCountReachedCondition(
+			ctx, r.cl, rv,
+			metav1.ConditionFalse,
+			"ReplicasBeingCreated",
+			fmt.Sprintf("Created first replica, need %d diskful replicas", diskfulCount),
+		)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+		}
+
 		return reconcile.Result{}, nil
 	}
 
@@ -149,4 +163,32 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 	}
 
 	return nil
+}
+
+// setDiskfulReplicaCountReachedCondition sets or updates the DiskfulReplicaCountReached condition
+// on the ReplicatedVolume status with the provided status, reason, and message.
+func setDiskfulReplicaCountReachedCondition(
+	ctx context.Context,
+	cl client.Client,
+	rv *v1alpha3.ReplicatedVolume,
+	status metav1.ConditionStatus,
+	reason string,
+	message string,
+) error {
+	return api.PatchStatusWithConflictRetry(ctx, cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
+		if rv.Status == nil {
+			rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		}
+		meta.SetStatusCondition(
+			&rv.Status.Conditions,
+			metav1.Condition{
+				Type:               v1alpha3.ConditionTypeDiskfulReplicaCountReached,
+				Status:             status,
+				Reason:             reason,
+				Message:            message,
+				ObservedGeneration: rv.Generation,
+			},
+		)
+		return nil
+	})
 }

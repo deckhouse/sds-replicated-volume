@@ -91,3 +91,9 @@ const (
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
 )
+
+// Condition types for [ReplicatedVolume] status
+const (
+	// [ConditionTypeDiskfulReplicaCountReached] indicates whether the required number of diskful replicas has been reached
+	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
+)
