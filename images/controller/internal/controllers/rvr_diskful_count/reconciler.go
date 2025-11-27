@@ -49,6 +49,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	}
 	log.V(4).Info("Calculated diskful replica count", "count", diskfulCount)
 
+	// Получаем все RVR для данного RV
+	rvrList, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplicas: %w", err)
+	}
+	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(rvrList.Items))
+
 	return reconcile.Result{}, nil
 }
 
@@ -81,4 +88,19 @@ func getDiskfulReplicaCount(ctx context.Context, cl client.Client, rv *v1alpha3.
 	default:
 		return 0, fmt.Errorf("unknown replication value: %s", rsc.Spec.Replication)
 	}
+}
+
+// getReplicatedVolumeReplicas получает все ReplicatedVolumeReplica для данного ReplicatedVolume
+// по полю spec.replicatedVolumeName.
+func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (*v1alpha3.ReplicatedVolumeReplicaList, error) {
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	err := cl.List(
+		ctx,
+		rvrList,
+		client.MatchingFields{"spec.replicatedVolumeName": rv.Name},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("listing ReplicatedVolumeReplicas for ReplicatedVolume %s: %w", rv.Name, err)
+	}
+	return rvrList, nil
 }
