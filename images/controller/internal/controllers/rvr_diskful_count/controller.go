@@ -19,7 +19,7 @@ func BuildController(mgr manager.Manager) error {
 		Named(nameController).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolumeReplica{})).
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
 		For(
 			&v1alpha3.ReplicatedVolume{}).
 		Complete(r)

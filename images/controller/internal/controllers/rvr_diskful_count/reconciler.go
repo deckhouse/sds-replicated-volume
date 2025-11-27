@@ -18,6 +18,7 @@ type Request = reconcile.Request
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Result, error) {
+	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
