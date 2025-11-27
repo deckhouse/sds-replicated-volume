@@ -66,7 +66,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
-		log.Info("Created ReplicatedVolumeReplica for ReplicatedVolume")
 
 		// Update condition after creating replica
 		err = setDiskfulReplicaCountReachedCondition(
@@ -151,7 +150,6 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 	}
 
 	generateName := fmt.Sprintf("%s%s", rv.Name, "-")
-	log.V(4).Info("Creating ReplicatedVolumeReplica", "generateName", generateName)
 
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
@@ -168,6 +166,8 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 	if err != nil {
 		return fmt.Errorf("creating ReplicatedVolumeReplica with GenerateName %s: %w", generateName, err)
 	}
+
+	log.Info(fmt.Sprintf("Created ReplicatedVolumeReplica %s for ReplicatedVolume", rvr.Name))
 
 	return nil
 }
