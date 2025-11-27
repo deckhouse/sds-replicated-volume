@@ -3,6 +3,7 @@ package rvrdiskfulcount
 import (
 	"context"
 	"fmt"
+	"time"
 
 	utils "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -28,7 +29,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 
 	log := r.log.WithName("Reconcile").WithValues("req", req)
-	log.Info("Reconciling")
+	log.Info("Reconciling started")
+	start := time.Now()
+	defer func() {
+		log.Info("Reconcile finished", "duration", time.Since(start).String())
+	}()
 
 	// Get ReplicatedVolume object
 	rv := &v1alpha3.ReplicatedVolume{}
@@ -60,6 +65,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	}
 	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(rvrMap))
 
+	// If no RVRs found, create one
 	if len(rvrMap) == 0 {
 		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
@@ -79,6 +85,31 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		}
 
 		return reconcile.Result{}, nil
+	}
+
+	// Need to wait until RVR becomes Ready.
+	if len(rvrMap) == 1 {
+		for _, rvr := range rvrMap {
+			// Check Ready condition status
+			if rvr.Status == nil || rvr.Status.Conditions == nil {
+				log.V(4).Info("RVR status or conditions not set yet, waiting", "rvr", rvr.Name)
+				return reconcile.Result{}, nil
+			}
+
+			readyCondition := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+			if readyCondition == nil {
+				log.V(4).Info("Ready condition not found for RVR, waiting", "rvr", rvr.Name)
+				return reconcile.Result{}, nil
+			}
+
+			if readyCondition.Status != metav1.ConditionTrue {
+				log.V(4).Info("RVR Ready condition is not True, waiting", "rvr", rvr.Name, "status", readyCondition.Status)
+				return reconcile.Result{}, nil
+			}
+
+			// Ready condition is True, continue with the code
+			log.V(4).Info("RVR Ready condition is True, continuing", "rvr", rvr.Name)
+		}
 	}
 
 	return reconcile.Result{}, nil
