@@ -37,7 +37,7 @@ func NewReconciler(cl client.Client, rdr client.Reader, sch *runtime.Scheme, log
 	}
 }
 
-var _ reconcile.TypedReconciler[Request] = &Reconciler{}
+var _ reconcile.Reconciler = &Reconciler{}
 
 const (
 	maxNodeID = 7
@@ -46,34 +46,24 @@ const (
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
-	req Request,
+	req reconcile.Request,
 ) (reconcile.Result, error) {
-	switch typedReq := req.(type) {
-	case AssignNodeIDRequest:
-		return r.reconcileAssignNodeID(ctx, typedReq)
-	default:
-		r.log.Error("unknown req type", "typedReq", typedReq)
-		return reconcile.Result{}, e.ErrUnknownf("unknown request type: %T", typedReq)
-	}
-}
+	log := r.logAlt.WithName("Reconcile").WithValues("req", req)
+	log.Info("Reconciling")
 
-func (r *Reconciler) reconcileAssignNodeID(
-	ctx context.Context,
-	req AssignNodeIDRequest,
-) (reconcile.Result, error) {
 	// Get the RVR
 	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rvr); err != nil {
+	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		if client.IgnoreNotFound(err) == nil {
-			r.log.Debug("RVR not found, might be deleted", "name", req.Name)
+			log.V(1).Info("RVR not found, might be deleted")
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("getting RVR %s: %w", req.Name, err)
+		return reconcile.Result{}, fmt.Errorf("getting RVR %s: %w", req.NamespacedName, err)
 	}
 
 	// Check if nodeId is already set
 	if rvr.Status != nil && rvr.Status.Config != nil && rvr.Status.Config.NodeId != nil {
-		r.log.Debug("nodeId already assigned", "name", req.Name, "nodeId", *rvr.Status.Config.NodeId)
+		log.V(1).Info("nodeId already assigned", "nodeId", *rvr.Status.Config.NodeId)
 		return reconcile.Result{}, nil
 	}
 
@@ -117,7 +107,7 @@ func (r *Reconciler) reconcileAssignNodeID(
 			totalReplicas,
 			maxNodeID+1,
 		)); err != nil {
-			r.log.Warn("failed to set error condition", "err", err)
+			log.Info("failed to set error condition", "err", err)
 		}
 
 		return reconcile.Result{}, e.ErrInvalidClusterf(
@@ -148,7 +138,7 @@ func (r *Reconciler) reconcileAssignNodeID(
 			rvr.Spec.ReplicatedVolumeName,
 			maxNodeID+1,
 		)); err != nil {
-			r.log.Warn("failed to set error condition", "err", err)
+			log.Info("failed to set error condition", "err", err)
 		}
 
 		return reconcile.Result{}, e.ErrInvalidClusterf(
@@ -169,16 +159,15 @@ func (r *Reconciler) reconcileAssignNodeID(
 	// 1. We check at the start of the function if nodeID is already set (early exit)
 	// 2. If conflict occurs, we reload and check again inside patchFn
 	// 3. The worst case is we retry with the same nodeID, which is fine (idempotent)
-	rvrKey := client.ObjectKey{Name: req.Name}
 	// Get fresh RVR for PatchStatusWithConflictRetry (it needs a valid object with correct key)
 	freshRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, rvrKey, freshRVR); err != nil {
+	if err := r.cl.Get(ctx, req.NamespacedName, freshRVR); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting RVR for patch: %w", err)
 	}
 	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRVR, func(currentRVR *v1alpha3.ReplicatedVolumeReplica) error {
 		// Check again if nodeID is already set (handles race condition where another worker set it during retry)
 		if currentRVR.Status != nil && currentRVR.Status.Config != nil && currentRVR.Status.Config.NodeId != nil {
-			r.log.Debug("nodeID already assigned by another worker", "name", req.Name, "nodeID", *currentRVR.Status.Config.NodeId)
+			log.V(1).Info("nodeID already assigned by another worker", "nodeID", *currentRVR.Status.Config.NodeId)
 			return nil // Already set, nothing to do (idempotent)
 		}
 
@@ -212,7 +201,7 @@ func (r *Reconciler) reconcileAssignNodeID(
 				rvr.Spec.ReplicatedVolumeName,
 				maxNodeID+1,
 			)); err != nil {
-				r.log.Warn("failed to set error condition", "err", err)
+				log.Info("failed to set error condition", "err", err)
 			}
 		}
 		return reconcile.Result{}, fmt.Errorf("updating RVR status with nodeID: %w", err)
@@ -220,9 +209,9 @@ func (r *Reconciler) reconcileAssignNodeID(
 
 	// Get final state to log the assigned nodeID
 	finalRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, rvrKey, finalRVR); err == nil {
+	if err := r.cl.Get(ctx, req.NamespacedName, finalRVR); err == nil {
 		if finalRVR.Status != nil && finalRVR.Status.Config != nil && finalRVR.Status.Config.NodeId != nil {
-			r.log.Info("assigned nodeID to RVR", "name", req.Name, "nodeID", *finalRVR.Status.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
+			log.Info("assigned nodeID to RVR", "nodeID", *finalRVR.Status.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
 		}
 	}
 

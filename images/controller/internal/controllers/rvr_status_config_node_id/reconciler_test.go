@@ -10,9 +10,11 @@ import (
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
@@ -71,7 +73,7 @@ func TestReconcile_AssignNodeId_FirstReplica(t *testing.T) {
 	cl := newFakeClient(rvr)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-1"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-1"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -101,7 +103,7 @@ func TestReconcile_AssignNodeId_MultipleReplicas(t *testing.T) {
 	cl := newFakeClient(rvr1, rvr2, rvr3)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-3"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-3"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -142,7 +144,7 @@ func TestReconcile_AssignNodeId_UniqueNodeIds(t *testing.T) {
 	cl := newFakeClient(rvrs...)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-6"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-6"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -166,7 +168,7 @@ func TestReconcile_AssignNodeId_AlreadyAssigned(t *testing.T) {
 	cl := newFakeClient(rvr)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-1"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-1"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -201,7 +203,7 @@ func TestReconcile_AssignNodeId_TooManyReplicas(t *testing.T) {
 	cl := newFakeClient(rvrs...)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-9"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-9"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err == nil {
@@ -252,7 +254,7 @@ func TestReconcile_AssignNodeId_AllNodeIdsUsed(t *testing.T) {
 	cl := newFakeClient(rvrs...)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-9"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-9"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err == nil {
@@ -289,7 +291,7 @@ func TestReconcile_AssignNodeId_NonExistentRVR(t *testing.T) {
 	cl := newFakeClient()
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "non-existent"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "non-existent"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -306,7 +308,7 @@ func TestReconcile_AssignNodeId_DifferentVolumes(t *testing.T) {
 	cl := newFakeClient(rvr1, rvr2, rvr3)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-3"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-3"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -334,7 +336,7 @@ func TestReconcile_AssignNodeId_GapInNodeIds(t *testing.T) {
 	cl := newFakeClient(rvr1, rvr2, rvr3, rvr4)
 	rec := newReconciler(cl)
 
-	req := rvrstatusconfignodeid.AssignNodeIDRequest{Name: "rvr-4"}
+	req := reconcile.Request{NamespacedName: types.NamespacedName{Name: "rvr-4"}}
 	_, err := rec.Reconcile(ctx, req)
 
 	if err != nil {
@@ -353,7 +355,7 @@ func TestReconcile_AssignNodeId_GapInNodeIds(t *testing.T) {
 }
 
 func TestReconcile_UnknownRequestType(t *testing.T) {
-	// This test won't compile if we use a type that doesn't implement Request
-	// The type system prevents invalid requests, so we skip this test
-	t.Skip("Type system prevents invalid request types")
+	// With standard reconcile.Reconciler, we always receive reconcile.Request
+	// No custom request types, so this test is no longer applicable
+	t.Skip("Standard reconcile.Reconciler always uses reconcile.Request")
 }

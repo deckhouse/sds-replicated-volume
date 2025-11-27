@@ -1,5 +1,7 @@
 # Соответствие спецификации для `rvr-status-config-node-id-controller`
 
+> **Примечание:** Этот контроллер соответствует стандартам проекта, описанным в [`CONTROLLER_STYLE_GUIDE.md`](../CONTROLLER_STYLE_GUIDE.md).
+
 ## Спецификация (из `docs/dev/spec_v1alpha3.md`)
 
 ### Цель
@@ -20,24 +22,34 @@
 ### ✅ `controller.go` - Триггеры
 
 **Соответствует спецификации:**
-- `CreateFunc` (строки 36-50): Обрабатывает `CREATE(RVR, status.config.nodeId==nil)`
+- Использует `.For(&v1alpha3.ReplicatedVolumeReplica{})` для указания основного ресурса
+- `CreateFunc` в `predicate.Funcs` (строки 29-35): Обрабатывает `CREATE(RVR, status.config.nodeId==nil)`
   - Проверяет, что `nodeId` не установлен
-  - Добавляет запрос в очередь
+  - Возвращает `true` для обработки события
 
 **Добавлено сверх спецификации (стандартная практика controller-runtime):**
-- `GenericFunc` (строки 66-81): Обрабатывает синхронизацию при старте контроллера
+- `GenericFunc` в `predicate.Funcs` (строки 45-51): Обрабатывает синхронизацию при старте контроллера
   - Это стандартная практика для reconciliation на старте
   - Не указано в спецификации, но необходимо для корректной работы
+- Использование `builder.ControllerManagedBy` и `.For()` - соответствует стандартам проекта (см. `CONTROLLER_STYLE_GUIDE.md`)
 
 **Не требуется спецификацией:**
-- `UpdateFunc` (строки 52-58): No-op, так как `nodeId` неизменяем после установки
-- `DeleteFunc` (строки 59-65): No-op, так как удаление не требует присвоения `nodeId`
+- `UpdateFunc` (строки 37-40): No-op, так как `nodeId` неизменяем после установки
+- `DeleteFunc` (строки 41-44): No-op, так как удаление не требует присвоения `nodeId`
 
 ### ✅ `reconciler.go` - Основная логика
 
 **Соответствует спецификации:**
 
-1. **Присвоение уникального `nodeId` в диапазоне [0; 7]** (строки 131-138)
+1. **Использование стандартного `reconcile.Reconciler`** (строки 40, 47-50)
+   - Использует стандартный `reconcile.Request` вместо кастомных типов
+   - Соответствует стандартам проекта (см. `CONTROLLER_STYLE_GUIDE.md`)
+
+2. **Structured logging** (строка 51)
+   - Использует `logr.Logger` с `.WithName()` и `.WithValues()`
+   - Соответствует стандартам проекта
+
+3. **Присвоение уникального `nodeId` в диапазоне [0; 7]** (строки 121-128)
    ```go
    // Find available nodeID
    var availableNodeID *uint
@@ -49,7 +61,7 @@
    }
    ```
 
-2. **Проверка превышения количества реплик** (строки 106-128)
+4. **Проверка превышения количества реплик** (строки 96-118)
    ```go
    if totalReplicas > maxNodeID+1 {
        return reconcile.Result{}, e.ErrInvalidClusterf(...)
@@ -57,15 +69,15 @@
    ```
    - Возвращает ошибку `ErrInvalidCluster`, что приводит к повторному reconcile
 
-3. **Установка `rvr.status.config.nodeId`** (строки 178-207)
+5. **Установка `rvr.status.config.nodeId`** (строки 150-179)
    - Использует `PatchStatusWithConflictRetry` для обновления статуса
    - Устанавливает `currentRVR.Status.Config.NodeId = availableNodeID`
 
-4. **Сбор занятых `nodeId` среди всех реплик одной RV** (строки 80-104)
+6. **Сбор занятых `nodeId` среди всех реплик одной RV** (строки 70-94)
    - Получает все RVR для того же `ReplicatedVolumeName`
    - Собирает занятые `nodeId` в диапазоне [0; 7]
 
-5. **Проверка, что `nodeId` еще не установлен** (строки 74-78)
+7. **Проверка, что `nodeId` еще не установлен** (строки 64-68)
    - Идемпотентность: если уже установлен, выходит без изменений
 
 ---
@@ -74,34 +86,34 @@
 
 ### ⚠️ `setNodeIDErrorCondition` - Улучшение наблюдаемости
 
-**Файл:** `reconciler.go`, строки 232-276
+**Файл:** `reconciler.go`, строки 204-238
 
 **Статус:** НЕ в спецификации, добавлено для улучшения наблюдаемости
 
 **Что делает:**
 - Устанавливает `ConfigurationAdjusted=False` с `reason=ConfigurationFailed` в RVR status conditions
 - Вызывается при ошибках:
-  - Слишком много реплик (строка 114)
-  - Все `nodeId` заняты (строка 146)
-  - Все `nodeId` заняты при retry (строка 210)
+  - Слишком много реплик (строка 104)
+  - Все `nodeId` заняты (строка 136)
+  - Все `nodeId` заняты при retry (строка 182)
 
 **Почему добавлено:**
 - Спецификация требует только возвращать ошибку
 - Добавлено, чтобы администраторы видели проблему в RVR status conditions, а не только в логах контроллера
 
 **Как откатить:**
-- Удалить все вызовы `r.setNodeIDErrorCondition(...)` (строки 114, 146, 210)
-- Удалить функцию `setNodeIDErrorCondition` (строки 232-276)
+- Удалить все вызовы `r.setNodeIDErrorCondition(...)` (строки 104, 136, 182)
+- Удалить функцию `setNodeIDErrorCondition` (строки 204-238)
 - Оставить только `return reconcile.Result{}, e.ErrInvalidClusterf(...)`
 
 **Комментарии в коде:**
-- Строки 109-113: "NOTE: Setting status condition is NOT in the spec..."
-- Строки 141-145: "NOTE: Setting status condition is NOT in the spec..."
-- Строки 235-241: "NOTE: This function and its usage are NOT in the spec..."
+- Строки 99-103: "NOTE: Setting status condition is NOT in the spec..."
+- Строки 131-135: "NOTE: Setting status condition is NOT in the spec..."
+- Строки 207-213: "NOTE: This function and its usage are NOT in the spec..."
 
 ### ⚠️ `PatchStatusWithConflictRetry` - Обработка параллелизма
 
-**Файл:** `reconciler.go`, строки 178-207
+**Файл:** `reconciler.go`, строки 150-179
 
 **Статус:** Техническая деталь реализации, не указана в спецификации
 
@@ -122,7 +134,7 @@
 
 ### ⚠️ `GenericFunc` - Reconciliation на старте
 
-**Файл:** `controller.go`, строки 66-81
+**Файл:** `controller.go`, строки 45-51
 
 **Статус:** Стандартная практика controller-runtime, не указана в спецификации
 
@@ -141,14 +153,17 @@
 
 | Требование спецификации | Статус | Расположение в коде |
 |------------------------|--------|-------------------|
-| Присвоение уникального `nodeId` в диапазоне [0; 7] | ✅ Соответствует | `reconciler.go:131-138` |
-| Проверка превышения количества реплик | ✅ Соответствует | `reconciler.go:106-128` |
-| Возврат ошибки при превышении | ✅ Соответствует | `reconciler.go:123-128` |
-| Триггер `CREATE(RVR, status.config.nodeId==nil)` | ✅ Соответствует | `controller.go:36-50` |
-| Вывод `rvr.status.config.nodeId` | ✅ Соответствует | `reconciler.go:201` |
-| Установка условия ошибки в status | ⚠️ Сверх спецификации | `reconciler.go:232-276` |
-| Обработка параллелизма через retry | ⚠️ Техническая деталь | `reconciler.go:178-207` |
-| Reconciliation на старте | ⚠️ Стандартная практика | `controller.go:66-81` |
+| Присвоение уникального `nodeId` в диапазоне [0; 7] | ✅ Соответствует | `reconciler.go:121-128` |
+| Проверка превышения количества реплик | ✅ Соответствует | `reconciler.go:96-118` |
+| Возврат ошибки при превышении | ✅ Соответствует | `reconciler.go:113-118` |
+| Триггер `CREATE(RVR, status.config.nodeId==nil)` | ✅ Соответствует | `controller.go:29-35` |
+| Вывод `rvr.status.config.nodeId` | ✅ Соответствует | `reconciler.go:171` |
+| Установка условия ошибки в status | ⚠️ Сверх спецификации | `reconciler.go:204-238` |
+| Обработка параллелизма через retry | ⚠️ Техническая деталь | `reconciler.go:150-179` |
+| Reconciliation на старте | ⚠️ Стандартная практика | `controller.go:45-51` |
+| Стандартный reconcile.Reconciler | ✅ Соответствует стандартам | `reconciler.go:40, 47-50` |
+| Использование .For() | ✅ Соответствует стандартам | `controller.go:27` |
+| Structured logging | ✅ Соответствует стандартам | `reconciler.go:51` |
 
 ---
 
