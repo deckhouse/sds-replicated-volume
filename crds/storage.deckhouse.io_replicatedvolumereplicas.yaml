@@ -80,9 +80,6 @@ spec:
                 maxLength: 253
                 minLength: 1
                 type: string
-                x-kubernetes-validations:
-                - message: nodeName is immutable
-                  rule: self == oldSelf
               replicatedVolumeName:
                 maxLength: 127
                 minLength: 1
@@ -92,7 +89,6 @@ spec:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
             required:
-            - nodeName
             - replicatedVolumeName
             type: object
           status:

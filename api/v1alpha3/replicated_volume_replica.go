@@ -124,11 +124,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
-	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
-	NodeName string `json:"nodeName"`
+	NodeName string `json:"nodeName,omitempty"`
 
 	// +kubebuilder:default=false
 	Diskless bool `json:"diskless,omitempty"`

@@ -17,10 +17,10 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(nameController).
+		For(
+			&v1alpha3.ReplicatedVolume{}).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
-		For(
-			&v1alpha3.ReplicatedVolume{}).
 		Complete(r)
 }
