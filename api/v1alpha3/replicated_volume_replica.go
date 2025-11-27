@@ -47,12 +47,6 @@ func (rvr *ReplicatedVolumeReplica) IsConfigured() bool {
 	return rvr.Status != nil && rvr.Status.Config != nil
 }
 
-func (rvr *ReplicatedVolumeReplica) IsReady() bool {
-	return rvr.Spec.NodeName != "" &&
-		rvr.Status != nil && rvr.Status.Config != nil &&
-		rvr.Status.Config.NodeId != nil && rvr.Status.Config.Address != nil
-}
-
 func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
 	if rvr.Status == nil {
 		rvr.Status = &ReplicatedVolumeReplicaStatus{}
