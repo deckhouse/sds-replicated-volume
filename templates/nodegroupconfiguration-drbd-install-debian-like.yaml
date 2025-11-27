@@ -42,7 +42,6 @@ spec:
     kernel_version_in_use="$(uname -r)"
 
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
-    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
     MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
@@ -152,11 +151,16 @@ spec:
     bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
     {{- end }}
 
+    cd /opt/deckhouse/drbd
+    #-----------------------remote drbd modules build------------------------------------------
+    bb-log-info "Get drbd-build-server url"
+
+    DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
     attempt=0
-    until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    until DRBD_BUILD_SERVER_IP="$(host -t A "DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
     do
       if [ $attempt -gt 60 ]; then
-        bb-log-info "Cluster DNS isn't accessible, can't get SPAAS service IP for DRBD building"
+        bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP for DRBD building"
         exit 1
       fi
 
@@ -165,29 +169,126 @@ spec:
       sleep 10
     done
 
-    bb-log-info "Cluster DNS responded, got SPAAS service IP"
+    bb-log-info "Cluster DNS responded, got drbd-build-server service url"
+    DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
 
-    export SPAAS_URL="https://${SPAAS_IP}:2020"
+    KERNEL_VERSION=$kernel_version_in_use
+    KERNEL_VERSION_SHORT="${KERNEL_VERSION%-generic}"
+    bb-log-info "Detected kernel version: $KERNEL_VERSION"
 
-    attempt=0
-    until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $SPAAS_URL'/api/v1/hello')" == "200" ]]
-    do
-      if [ $attempt -gt 60 ]; then
-        bb-log-info "SPAAS service isn't accessible, can't continue DRBD building"
-        exit 1
+    bb-log-info "Uploading kernel headers and starting build..."
+    BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}" "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}-generic"|
+        d8-curl -s -w "\n%{http_code}" -X POST \
+          -H "Content-Type: application/gzip" \
+          --data-binary @- \
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" || echo -e "\n000")
+
+    BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
+    BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed '$d')
+
+    # Accept both 200 OK and 202 Accepted from build endpoint
+    if [ "$BUILD_HTTP_CODE" != "200" ] && [ "$BUILD_HTTP_CODE" != "202" ]; then
+      if [ "$BUILD_HTTP_CODE" -eq 000 ]; then
+        bb-log-error "Error: Failed to connect to build server"
+      else
+        bb-log-error "Error: Build request failed (HTTP $BUILD_HTTP_CODE): $BUILD_BODY"
       fi
+      exit 1
+    fi
 
-      ((attempt=attempt+1))
-      bb-log-info "Waiting for SPAAS service is being accessible (try #$attempt)"
-      sleep 10
-    done
+    STATUS=$(echo "$BUILD_BODY" | jq -r '.status')
+    JOB_ID=$(echo "$BUILD_BODY" | jq -r '.job_id')
+    #DOWNLOAD_URL=null if emty
+    DOWNLOAD_URL=$(echo "$BUILD_BODY" | jq -r '.download_url')
 
-    bb-log-info "SPAAS service is accessible, starting DRBD building"
+    bb-log-info "Downloading build artifacts..."
+    BUILD_ARTIFACTS_TAR="./drbd-modules-${JOB_ID}.tar.gz"
+    DOWNLOAD_RESPONSE=$(d8-curl -s -w "\n%{http_code}" -o "$BUILD_ARTIFACTS_TAR" \
+      "${DRBD_BUILD_SERVER_URL}/api/v1/builds/${JOB_ID}" || echo -e "\n000")
+    DOWNLOAD_HTTP_CODE=$(echo "$DOWNLOAD_RESPONSE" | tail -n1)
 
-    cd /opt/deckhouse/drbd
-    make clean || true
-    make
-    make install
+    if [ "$DOWNLOAD_HTTP_CODE" -ne 200 ]; then
+      if [ "$DOWNLOAD_HTTP_CODE" -eq 000 ]; then
+        bb-log-error "Error: Failed to connect to download endpoint"
+      else
+        bb-log-error "Error: Download failed (HTTP $DOWNLOAD_HTTP_CODE)"
+        if [ -f "$BUILD_ARTIFACTS_TAR" ]; then
+          # Check if the file contains an error message
+          ERROR_MSG=$(head -20 "$BUILD_ARTIFACTS_TAR" 2>/dev/null || echo "")
+          bb-log-error "Response: $ERROR_MSG"
+          rm -f "$BUILD_ARTIFACTS_TAR"
+        fi
+      fi
+      exit 1
+    fi
+
+    TAR_SIZE=$(du -h "$BUILD_ARTIFACTS_TAR" | cut -f1)
+    bb-log-info "Downloaded build artifacts: $BUILD_ARTIFACTS_TAR (size: $TAR_SIZE)"
+
+    # Extract the tar.gz
+    EXTRACT_DIR="drbd-modules-${JOB_ID}"
+    bb-log-info "Extracting to: $EXTRACT_DIR"
+    mkdir -p "$EXTRACT_DIR"
+    tar -xzf "$BUILD_ARTIFACTS_TAR" -C "$EXTRACT_DIR"
+
+    if [ ! -d "$EXTRACT_DIR" ] || [ -z "$(ls -A "$EXTRACT_DIR" 2>/dev/null)" ]; then
+      bb-log-error "Error: Extraction failed or directory is empty"
+      exit 1
+    fi
+    bb-log-info "Extraction completed successfully"
+
+    #for each .ko file exec insmod and report fails
+    bb-log-info "Loading kernel modules..."
+    KO_FILES=$(find "$EXTRACT_DIR" -type f -name "*.ko" | sort)
+
+    if [ -z "$KO_FILES" ]; then
+      bb-log-info "Warning: No .ko files found in $EXTRACT_DIR"
+      exit 1
+    fi
+
+    SUCCESS_COUNT=0
+    FAIL_COUNT=0
+    FAILED_MODULES=()
+
+    while IFS= read -r KO_FILE; do
+      MODULE_NAME=$(basename "$KO_FILE" .ko)
+      bb-log-info -n "Loading $MODULE_NAME... "
+
+      # Try to load the module
+      if echo "$KO_FILE" 2>/dev/null; then
+        # if insmod "$KO_FILE" 2>/dev/null; then
+        bb-log-info "OK"
+        SUCCESS_COUNT=$((SUCCESS_COUNT + 1))
+      else
+        ERROR_MSG=$(insmod "$KO_FILE" 2>&1 || true)
+        bb-log-error "FAILED"
+        bb-log-error "  Error: $ERROR_MSG"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        FAILED_MODULES+=("$MODULE_NAME")
+      fi
+    done <<< "$KO_FILES"
+
+    # Summary
+    bb-log-info "Module loading summary:"
+    bb-log-info "  Successfully loaded: $SUCCESS_COUNT"
+    bb-log-info "  Failed: $FAIL_COUNT"
+
+    if [ $FAIL_COUNT -gt 0 ]; then
+      bb-log-info "Failed modules:"
+      for MODULE in "${FAILED_MODULES[@]}"; do
+        bb-log-info "  - $MODULE"
+      done
+      bb-log-info "Note: Some modules may have failed due to:"
+      bb-log-info "  - Missing dependencies (load dependencies first)"
+      bb-log-info "  - Module already loaded"
+      bb-log-info "  - Insufficient permissions (run as root)"
+      bb-log-info "  - Kernel version mismatch"
+      exit 1
+    else
+      bb-log-info "All modules loaded successfully!"
+    fi
+    #------------------------------------------------------------------------------
+
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
         sed -i '/^drbd$/d' /etc/modules

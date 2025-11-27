@@ -177,18 +177,18 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 		}
 
 		// Generate cache key/job id
-		jobId := utils.GenerateCacheKey(kernelVersion, headersData)
-		s.logger.Debug("Generated cache key", "remote_addr", remoteAddr, "cache_key", jobId)
+		jobID := utils.GenerateCacheKey(kernelVersion, headersData)
+		s.logger.Debug("Generated cache key", "remote_addr", remoteAddr, "cache_key", jobID)
 
 		// Check if build is in progress
-		s.logger.Debug("Checking for existing job", "remote_addr", remoteAddr, "cache_key", jobId[:16])
-		info, registeredJobsCount := s.buildService.JobInfo(jobId)
+		s.logger.Debug("Checking for existing job", "remote_addr", remoteAddr, "cache_key", jobID[:16])
+		info, registeredJobsCount := s.buildService.JobInfo(jobID)
 		s.logger.Debug("Total active jobsRepo", "remote_addr", remoteAddr, "count", registeredJobsCount)
 
 		switch info.Status {
 		case model.StatusNotExist:
 			// TODO cache invalidation
-			//if cachePath := s.buildService.GetCached(jobId, kernelVersion, remoteAddr); cachePath != nil {
+			// if cachePath := s.buildService.GetCached(jobID, kernelVersion, remoteAddr); cachePath != nil {
 			//	s.logger.Debug("Serving cached module file", "remote_addr", remoteAddr)
 			//	s.replyFile(*cachePath, &kernelVersion, w, r)
 			//	s.logger.Debug("Successfully sent cached module to client", "remote_addr", remoteAddr)
@@ -196,20 +196,20 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 			//}
 
 			s.logger.Debug("No existing job found, will create new one", "remote_addr", remoteAddr)
-			s.buildService.CreateJob(jobId, kernelVersion, headersData, remoteAddr)
-			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", jobId[:16])
+			s.buildService.CreateJob(jobID, kernelVersion, headersData, remoteAddr)
+			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", jobID[:16])
 			s.replyAccepted(w, &model.BuildResponse{
 				Status: model.StatusBuilding,
-				JobID:  jobId,
+				JobID:  jobID,
 			},
 			)
 			return
 		case model.StatusFailed:
 			s.logger.Debug("Previous job failed, creating new one", "remote_addr", remoteAddr, "error", info.Error)
-			s.buildService.CreateJob(jobId, kernelVersion, headersData, remoteAddr)
+			s.buildService.CreateJob(jobID, kernelVersion, headersData, remoteAddr)
 			s.replyAccepted(w, &model.BuildResponse{
 				Status: model.StatusBuilding,
-				JobID:  jobId,
+				JobID:  jobID,
 				Error:  "Previous job failed, creating new one",
 			},
 			)
@@ -239,11 +239,11 @@ func (s *BuildServer) buildModuleHandler() http.HandlerFunc {
 				s.logger.Error("Cache file for completed job not found", "remote_addr", remoteAddr, "error", err)
 			}
 			s.logger.Error("Cache path blank or empty", "remote_addr", remoteAddr, "error", err)
-			s.buildService.CreateJob(jobId, kernelVersion, headersData, remoteAddr)
-			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", jobId[:16])
+			s.buildService.CreateJob(jobID, kernelVersion, headersData, remoteAddr)
+			s.logger.Debug("Returning job ID to client with status 202 Accepted", "remote_addr", remoteAddr, "job_id", jobID[:16])
 			s.replyAccepted(w, &model.BuildResponse{
 				Status: model.StatusBuilding,
-				JobID:  jobId,
+				JobID:  jobID,
 				Error:  "Previous job has an error, creating new one",
 			},
 			)

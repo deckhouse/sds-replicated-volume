@@ -71,7 +71,7 @@ func TestBuildModuleEndpoint_NoKernelVersion(t *testing.T) {
 }
 
 // TODO rewrite later
-//func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
+// func TestBuildModuleEndpoint_CacheHit(t *testing.T) {
 //	cacheDir := t.TempDir()
 //	s := newTestServer(&cacheDir)
 //	s.maxBytesBody = 100 * 1024 * 1024
