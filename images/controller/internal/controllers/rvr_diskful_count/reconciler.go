@@ -70,7 +70,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 		// Update condition after creating replica
 		err = setDiskfulReplicaCountReachedCondition(
-			ctx, r.cl, rv,
+			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
 			"ReplicasBeingCreated",
 			fmt.Sprintf("Created first replica, need %d diskful replicas", diskfulCount),
@@ -177,11 +177,13 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 func setDiskfulReplicaCountReachedCondition(
 	ctx context.Context,
 	cl client.Client,
+	log logr.Logger,
 	rv *v1alpha3.ReplicatedVolume,
 	status metav1.ConditionStatus,
 	reason string,
 	message string,
 ) error {
+	log.V(4).Info(fmt.Sprintf("Setting %s condition", v1alpha3.ConditionTypeDiskfulReplicaCountReached), "status", status, "reason", reason, "message", message)
 	return api.PatchStatusWithConflictRetry(ctx, cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
 		if rv.Status == nil {
 			rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
