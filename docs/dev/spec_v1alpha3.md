@@ -5,7 +5,7 @@
     - [RVR Ready условия](#rvr-ready-условия)
     - [RV Ready условия](#rv-ready-условия)
     - [Алгоритмы хеширования shared secret](#алгоритмы-хеширования-shared-secret)
-  - [Настройки](#настройки)
+    - [Порты DRBD](#порты-drbd)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
     - [`size`](#size)
@@ -42,13 +42,15 @@
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
+  - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
+  - [`rvr-tie-breaker-controller`](#rvr-tie-breaker-controller)
   - [`rv-publish-controller`](#rv-publish-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
   - [`rvr-volume-controller`](#rvr-volume-controller)
   - [`rvr-gc-controller`](#rvr-gc-controller)
   - [`rv-status-config-controller`](#rv-status-config-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
   - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
@@ -96,14 +98,11 @@
  - `SharedSecretAlgorithmSelected==True`
 
 ### Алгоритмы хеширования shared secret
+ - `sha256`
  - `sha1`
- - `crc32`
- - `md5`
- - `ghash`
- - `polyval`
 
-## Настройки
- - `drbdMinPort` - минимальный порт для использования ресурсами
+### Порты DRBD
+ - `drbdMinPort` - минимальный порт для использования ресурсами 
  - `drbdMaxPort` - максимальный порт для использования ресурсами
 
 # Контракт данных: `ReplicatedVolume`
@@ -307,7 +306,7 @@
 ### Цель 
 Проставить значение свойству `rvr.status.config.address`.
  - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
- - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [настройках](#настройки) `drbdMinPort`/`drbdMaxPort`
+ - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [портах DRBD](#Порты-DRBD) `drbdMinPort`/`drbdMaxPort`
 
 В случае, если нет свободного порта, настроек порта, либо IP: повторять реконсайл с ошибкой.
 
@@ -396,6 +395,19 @@
 ### Вывод
   - `rvr.status.peers`
 
+## `rv-status-config-device-minor-controller`
+### Цель
+### Триггер
+### Вывод
+
+
+## `rvr-tie-breaker-controller`
+### Цель
+
+### Триггер
+### Вывод
+
+
 ## `rv-publish-controller`
 
 ### Статус: [TBD | priority: 5 | complexity: 5]
@@ -410,6 +422,8 @@
 
 - Если `volumeAccess=Local`, то он может только менять primary на существующей реплике
 - Если `volumeAccess!=Local` - то он может создавать новые реплики сразу с diskless: true -->
+
+<!-- rvr-tempory-diskless-controller -->
 
 ### Триггер 
   - 
@@ -457,13 +471,15 @@
 
 ## `rv-status-config-quorum-controller`
 
-### Статус: [OK | priority: 5 | complexity: 3]
+### Статус: [OK | priority: 5 | complexity: 4]
 
 ### Цель 
 
 Поднять значение кворума до необходимого, после того как кластер станет работоспособным.
 
 Работоспособный кластер - это RV, у которого все [RV Ready условия](#rv-ready-условия) достигнуты, без учёта условия `QuorumConfigured`.
+
+До поднятия кворума нужно поставить финализатор на каждую RVR. Также необходимо обработать проставление rvr.metadata.deletiontimestamp таким образом, чтобы финализатор с RVR был снят после уменьшения кворума.
 
 Процесс и результат работы контроллера должен быть отражён в `rv.status.conditions[type=QuorumConfigured]`
 
@@ -475,13 +491,18 @@
   - `rv.status.config.quorumMinimumRedundancy`
   - `rv.status.conditions[type=QuorumConfigured]`
 
-Правильные значения, в зависимости от количества diskful реплик N:
+Правильные значения:
+
+N - все реплики
+M - diskful реплики
 
 ```
-var quorum byte = N/2 + 1
-var qmr byte = 0
-if N > 2 {
-	qmr = quorum
+if M > 1 {
+  var quorum byte = max(2, N/2 + 1)
+  var qmr byte = max(2, M/2 +1)
+} else {
+  var quorum byte = 0
+  var qmr byte = 0
 }
 ```
 
