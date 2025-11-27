@@ -30,13 +30,11 @@ func newFakeClient(objs ...client.Object) client.Client {
 }
 
 func newReconciler(cl client.Client) *rvstatusconfigsharedsecret.Reconciler {
-	return rvstatusconfigsharedsecret.NewReconciler(
-		cl,
-		cl,
-		scheme.Scheme,
-		slog.Default(),
-		logr.Discard(),
-	)
+	return &rvstatusconfigsharedsecret.Reconciler{
+		Cl:     cl,
+		Log:    slog.Default(),
+		LogAlt: logr.Discard(),
+	}
 }
 
 func createRV(name string) *v1alpha3.ReplicatedVolume { //nolint:unparam // name is used for different test cases

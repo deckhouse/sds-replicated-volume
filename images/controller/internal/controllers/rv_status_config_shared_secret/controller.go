@@ -21,11 +21,9 @@ import (
 
 func BuildController(mgr manager.Manager) error {
 	var rec = &Reconciler{
-		cl:     mgr.GetClient(),
-		rdr:    mgr.GetAPIReader(),
-		sch:    mgr.GetScheme(),
-		log:    slog.Default(),
-		logAlt: mgr.GetLogger(),
+		Cl:     mgr.GetClient(),
+		Log:    slog.Default(),
+		LogAlt: mgr.GetLogger(),
 	}
 
 	err := builder.ControllerManagedBy(mgr).
@@ -65,11 +63,9 @@ func BuildController(mgr manager.Manager) error {
 					return nil
 				}
 				// Check if RVR has UnsupportedAlgorithm error
-				if rvr.Status == nil || rvr.Status.Conditions == nil {
-					return nil
-				}
-				cfgAdj := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeConfigurationAdjusted)
-				if cfgAdj == nil || cfgAdj.Status != metav1.ConditionFalse || cfgAdj.Reason != "UnsupportedAlgorithm" {
+				// NOTE: Using EnqueueRequestsFromMapFunc is necessary because RVR doesn't have owner reference to RV.
+				// They are linked via spec.replicatedVolumeName, so we need manual mapping.
+				if !hasUnsupportedAlgorithmError(rvr) {
 					return nil
 				}
 				// Map RVR to RV
@@ -77,33 +73,11 @@ func BuildController(mgr manager.Manager) error {
 					{NamespacedName: client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}},
 				}
 			}),
-			builder.WithPredicates(predicate.Funcs{
-				CreateFunc: func(ce event.CreateEvent) bool {
-					rvr, ok := ce.Object.(*v1alpha3.ReplicatedVolumeReplica)
-					if !ok {
-						return false
-					}
-					return hasUnsupportedAlgorithmError(rvr)
-				},
-				UpdateFunc: func(ue event.UpdateEvent) bool {
-					rvr, ok := ue.ObjectNew.(*v1alpha3.ReplicatedVolumeReplica)
-					if !ok {
-						return false
-					}
-					return hasUnsupportedAlgorithmError(rvr)
-				},
-				DeleteFunc: func(_ event.DeleteEvent) bool {
-					return false
-				},
-				GenericFunc: func(_ event.GenericEvent) bool {
-					return false
-				},
-			}),
 		).
 		Complete(rec)
 
 	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
+		return u.LogError(rec.Log, e.ErrUnknownf("building controller: %w", err))
 	}
 
 	return nil

@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -18,21 +17,9 @@ import (
 )
 
 type Reconciler struct {
-	cl     client.Client
-	rdr    client.Reader
-	sch    *runtime.Scheme
-	log    *slog.Logger
-	logAlt logr.Logger
-}
-
-func NewReconciler(cl client.Client, rdr client.Reader, sch *runtime.Scheme, log *slog.Logger, logAlt logr.Logger) *Reconciler {
-	return &Reconciler{
-		cl:     cl,
-		rdr:    rdr,
-		sch:    sch,
-		log:    log,
-		logAlt: logAlt,
-	}
+	Cl     client.Client
+	Log    *slog.Logger
+	LogAlt logr.Logger
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
@@ -49,12 +36,12 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
-	log := r.logAlt.WithName("Reconcile").WithValues("req", req)
+	log := r.LogAlt.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
 	// Get the RV
 	rv := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+	if err := r.Cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("RV not found, might be deleted")
 			return reconcile.Result{}, nil
@@ -62,16 +49,8 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, fmt.Errorf("getting RV %s: %w", req.NamespacedName, err)
 	}
 
-	// Initialize status if needed
-	if rv.Status == nil {
-		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
-	}
-	if rv.Status.Config == nil {
-		rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
-	}
-
 	// Check if sharedSecret is not set - generate new one
-	if rv.Status.Config.SharedSecret == "" {
+	if rv.Status == nil || rv.Status.Config == nil || rv.Status.Config.SharedSecret == "" {
 		return r.generateSharedSecret(ctx, rv, log)
 	}
 
@@ -94,11 +73,11 @@ func (r *Reconciler) generateSharedSecret(
 	// Update RV status
 	rvKey := client.ObjectKeyFromObject(rv)
 	freshRV := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, rvKey, freshRV); err != nil {
+	if err := r.Cl.Get(ctx, rvKey, freshRV); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting RV for patch: %w", err)
 	}
 
-	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
+	if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
 		// Check again if sharedSecret is already set (handles race condition)
 		if currentRV.Status != nil && currentRV.Status.Config != nil && currentRV.Status.Config.SharedSecret != "" {
 			log.V(1).Info("sharedSecret already set by another worker")
@@ -150,7 +129,7 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 ) (reconcile.Result, error) {
 	// Get all RVRs for this RV
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.Cl.List(ctx, rvrList); err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing RVRs: %w", err)
 	}
 
@@ -205,11 +184,11 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	// Update RV with new algorithm and regenerate shared secret
 	rvKey := client.ObjectKeyFromObject(rv)
 	freshRV := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, rvKey, freshRV); err != nil {
+	if err := r.Cl.Get(ctx, rvKey, freshRV); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting RV for patch: %w", err)
 	}
 
-	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
+	if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
 		// Initialize status if needed
 		if currentRV.Status == nil {
 			currentRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
@@ -259,11 +238,11 @@ func (r *Reconciler) setAlgorithmSelectionFailed(
 
 	rvKey := client.ObjectKeyFromObject(rv)
 	freshRV := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, rvKey, freshRV); err != nil {
+	if err := r.Cl.Get(ctx, rvKey, freshRV); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting RV for patch: %w", err)
 	}
 
-	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
+	if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
 		// Initialize status if needed
 		if currentRV.Status == nil {
 			currentRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
