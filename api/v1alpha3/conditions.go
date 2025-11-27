@@ -20,12 +20,20 @@ const (
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
 
-	// [ConditionTypeDiskIOSuspended] indicates whether replica has achieved quorum
+	// [ConditionTypeDiskIOSuspended] indicates whether replica IO is suspended
 	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
-	"QuorumConfigured"
-	//DiskfulReplicaCountReached
-	//AllReplicasReady
-	//SharedSecretAlgorithmSelected
+
+	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
+	ConditionTypeQuorumConfigured = "QuorumConfigured"
+
+	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
+	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
+
+	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
+	ConditionTypeAllReplicasReady = "AllReplicasReady"
+
+	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
+	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{

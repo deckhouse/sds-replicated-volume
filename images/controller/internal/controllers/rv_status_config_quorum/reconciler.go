@@ -2,11 +2,9 @@ package rvrdiskfulcount
 
 import (
 	"context"
-	"log/slog"
 	"slices"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -24,6 +22,21 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+// NewReconciler is a small helper constructor that is primarily useful for tests.
+func NewReconciler(
+	cl client.Client,
+	rdr client.Reader,
+	sch *runtime.Scheme,
+	log logr.Logger,
+) *Reconciler {
+	return &Reconciler{
+		cl:  cl,
+		rdr: rdr,
+		sch: sch,
+		log: log,
+	}
+}
+
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
@@ -34,7 +47,10 @@ func (r *Reconciler) Reconcile(
 		log.Error(err, "unable to fetch ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
-	conditions.IsTrue(rv.Status, DiskfulReplicaCountReached)
+	// TODO: use these conditions when reconciliation logic is implemented.
+	_ = conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
+	_ = conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady)
+	_ = conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 	//DiskfulReplicaCountReached==True
 	//AllReplicasReady==True
 	//SharedSecretAlgorithmSelected==True
@@ -55,4 +71,6 @@ func (r *Reconciler) Reconcile(
 		log.Error(err, "unable to fetch ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
+
+	return reconcile.Result{}, nil
 }
