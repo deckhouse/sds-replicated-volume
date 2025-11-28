@@ -52,33 +52,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	}
 
 	// Get diskful replica count
-	diskfulCount, err := getDiskfulReplicaCount(ctx, r.cl, rv)
+	neededNumberOfReplicas, err := getDiskfulReplicaCount(ctx, r.cl, rv)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting diskful replica count: %w", err)
 	}
-	log.V(4).Info("Calculated diskful replica count", "count", diskfulCount)
+	log.V(4).Info("Calculated diskful replica count", "count", neededNumberOfReplicas)
 
 	// Get all RVRs for this RV
-	rvrMap, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
+	totalRvrMap, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplicas: %w", err)
 	}
-	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(rvrMap))
+	totalNumberOfReplicas := len(totalRvrMap)
+	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", totalNumberOfReplicas)
 
 	// If no RVRs found, create one
-	if len(rvrMap) == 0 {
+	if totalNumberOfReplicas == 0 {
 		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
 
-		// Update condition after creating replica
 		err = setDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
-			"ReplicasBeingCreated",
-			fmt.Sprintf("Created first replica, need %d diskful replicas", diskfulCount),
+			"FirstReplicaIsBeingCreated",
+			fmt.Sprintf("Created first replica, need %d diskful replicas", neededNumberOfReplicas),
 		)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
@@ -87,33 +87,68 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return reconcile.Result{}, nil
 	}
 
-	// Count RVRs that are being deleted
-	deletingCount := countDeletingReplicas(rvrMap)
-	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", deletingCount)
+	deletedRvrMap := getDeletedReplicas(totalRvrMap)
+	deletedNumberOfReplicas := len(deletedRvrMap)
+	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", deletedNumberOfReplicas)
+
+	// Count non-deleted ReplicatedVolumeReplicas
+	nonDeletedNumberOfReplicas := totalNumberOfReplicas - deletedNumberOfReplicas
+	log.V(4).Info("Counted non-deleted ReplicatedVolumeReplicas", "count", nonDeletedNumberOfReplicas)
+
+	if nonDeletedNumberOfReplicas == 0 {
+		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
+		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
+		}
+
+		err = setDiskfulReplicaCountReachedCondition(
+			ctx, r.cl, log, rv,
+			metav1.ConditionFalse,
+			"FirstReplicaIsBeingCreated",
+			fmt.Sprintf("Created non-deleted replica, need %d diskful replicas", neededNumberOfReplicas),
+		)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+		}
+
+		return reconcile.Result{}, nil
+	}
 
 	// Need to wait until RVR becomes Ready.
-	if len(rvrMap) == 1 {
-		for _, rvr := range rvrMap {
-			// Check Ready condition status
-			if rvr.Status == nil || rvr.Status.Conditions == nil {
-				log.V(4).Info("RVR status or conditions not set yet, waiting", "rvr", rvr.Name)
-				return reconcile.Result{}, nil
-			}
-
-			readyCondition := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
-			if readyCondition == nil {
-				log.V(4).Info("Ready condition not found for RVR, waiting", "rvr", rvr.Name)
-				return reconcile.Result{}, nil
-			}
-
-			if readyCondition.Status != metav1.ConditionTrue {
-				log.V(4).Info("RVR Ready condition is not True, waiting", "rvr", rvr.Name, "status", readyCondition.Status)
+	if nonDeletedNumberOfReplicas == 1 {
+		for _, rvr := range deletedRvrMap {
+			if !isRvrReady(rvr) {
+				log.V(4).Info("RVR is not ready yet, waiting", "rvr", rvr.Name)
 				return reconcile.Result{}, nil
 			}
 
 			// Ready condition is True, continue with the code
 			log.V(4).Info("RVR Ready condition is True, continuing", "rvr", rvr.Name)
 		}
+	}
+
+	// warning message if more non-deleted RVRs found than needed
+	if nonDeletedNumberOfReplicas > neededNumberOfReplicas {
+		log.V(1).Info("More non-deleted ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", nonDeletedNumberOfReplicas, "neededNumberOfReplicas", neededNumberOfReplicas)
+		return reconcile.Result{}, nil
+	}
+
+	// Calculate number of replicas to create
+	creatingNumberOfReplicas := neededNumberOfReplicas - nonDeletedNumberOfReplicas
+	log.V(4).Info("Calculated number of replicas to create", "creatingNumberOfReplicas", creatingNumberOfReplicas)
+
+	if creatingNumberOfReplicas > 0 {
+		log.Info("Creating replicas", "creatingNumberOfReplicas", creatingNumberOfReplicas)
+		for i := 0; i < creatingNumberOfReplicas; i++ {
+			log.V(4).Info("Creating replica", "replica", i)
+			err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
+			if err != nil {
+				return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
+			}
+		}
+	} else {
+		log.Info("No replicas to create")
 	}
 
 	return reconcile.Result{}, nil
@@ -172,15 +207,30 @@ func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1al
 	return rvrMap, nil
 }
 
-// countDeletingReplicas counts the number of ReplicatedVolumeReplicas that have DeletionTimestamp != nil.
-func countDeletingReplicas(rvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) int {
-	count := 0
-	for _, rvr := range rvrMap {
+// Returns a map with RVR name as key and RVR object as value. Returns empty map if no deleted RVRs are found.
+func getDeletedReplicas(totalRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) map[string]*v1alpha3.ReplicatedVolumeReplica {
+	rvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+	for _, rvr := range totalRvrMap {
 		if rvr.DeletionTimestamp != nil {
-			count++
+			rvrMap[rvr.Name] = rvr
 		}
 	}
-	return count
+	return rvrMap
+}
+
+// isRvrReady checks if the ReplicatedVolumeReplica has Ready condition set to True.
+// Returns false if Status is nil, Conditions is nil, Ready condition is not found, or Ready condition status is not True.
+func isRvrReady(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+	if rvr.Status == nil || rvr.Status.Conditions == nil {
+		return false
+	}
+
+	readyCondition := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+	if readyCondition == nil {
+		return false
+	}
+
+	return readyCondition.Status == metav1.ConditionTrue
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume
