@@ -275,16 +275,6 @@ var _ = Describe("Reconciler", func() {
 			})).To(Equal(reconcile.Result{}))
 		}
 
-		whenReconciledSuccessfully := func(fn func()) {
-			When("reconciled successfully", func() {
-				JustBeforeEach(func(ctx SpecContext) {
-					expectReconcileSuccessfully(ctx)
-				})
-
-				fn()
-			})
-		}
-
 		// Convenience wrapper for RVRs with owner reference setOwnerReference
 		setOwnerReference := func(rvr *v1alpha3.ReplicatedVolumeReplica) {
 			if rv != nil {
@@ -295,33 +285,17 @@ var _ = Describe("Reconciler", func() {
 			whenResourcesCreated(desc, &cl, Resources, fn, setOwnerReference, args...)
 		}
 
-		whenRVRBecomesReady := func(names []string, fn func(), args ...any) {
-			When(fmt.Sprintf("RVR become ready: %v", names), func() {
-				JustBeforeEach(func(ctx SpecContext) {
-					for i, name := range names {
-						rvr, err := Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, types.NamespacedName{Name: name})
-						Expect(err).To(Succeed())
+		makeReady := func(rvr *v1alpha3.ReplicatedVolumeReplica, nodeName string, nodeId uint, address v1alpha3.Address) {
+			if rvr.Status == nil {
+				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			}
 
-						if rvr.Status == nil {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-						}
+			if rvr.Status.Config == nil {
+				rvr.Status.Config = &v1alpha3.DRBDConfig{}
+			}
 
-						if rvr.Status.Config == nil {
-							rvr.Status.Config = &v1alpha3.DRBDConfig{}
-						}
-
-						nodeId := uint(i)
-						address := v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)}
-
-						rvr.Status.Config.NodeId = &nodeId
-						rvr.Status.Config.Address = &address
-
-						Expect(cl.Status().Update(ctx, &rvr)).To(Succeed())
-					}
-				})
-
-				fn()
-			})
+			rvr.Status.Config.NodeId = &nodeId
+			rvr.Status.Config.Address = &address
 		}
 
 		whenRVRCreated("first replica created", []v1alpha3.ReplicatedVolumeReplica{{
@@ -329,17 +303,19 @@ var _ = Describe("Reconciler", func() {
 			Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 			Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 		},
-		}, func(created *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
-			whenReconciledSuccessfully(func() {
-				It("should not have peers", func(ctx SpecContext) {
-					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).
-						To(HaveNoPeers())
-				})
+		}, func(firstCreated *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
+			It("should not have peers", func(ctx SpecContext) {
+				expectReconcileSuccessfully(ctx)
+				Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).
+					To(HaveNoPeers())
 			})
 
-			whenRVRBecomesReady([]string{"rvr-1"}, func() {
-				It("should skip RVR not owned by the ReplicatedVolume", func(ctx SpecContext) {
+			Context("if rvr-1 created is ready", func() {
+				BeforeEach(func() {
+					makeReady(&firstCreated.Resources[0], "node-1", 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+				})
 
+				It("should skip RVR not owned by the ReplicatedVolume", func(ctx SpecContext) {
 					// Create RVR not controlled by test-rv
 					rvr2 := &v1alpha3.ReplicatedVolumeReplica{
 						ObjectMeta: metav1.ObjectMeta{
@@ -367,15 +343,10 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-					_, err := rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})
-					Expect(err).NotTo(HaveOccurred())
+					expectReconcileSuccessfully(ctx)
 
 					// rvr1 should have no peers (rvr2 is not controlled by test-rv)
-					updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-					Expect(updatedRVR1.Status.Config.Peers).To(BeEmpty())
+					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).To(HaveNoPeers())
 				})
 
 				It("should skip RVR without nodeName", func(ctx SpecContext) {
@@ -399,15 +370,10 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-					_, err := rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})
-					Expect(err).NotTo(HaveOccurred())
+					expectReconcileSuccessfully(ctx)
 
-					// rvr1 should have no peers (rvr2 is skipped)
-					updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-					Expect(updatedRVR1.Status.Config.Peers).To(BeEmpty())
+					// rvr1 should have no peers (rvr2 is not controlled by test-rv)
+					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).To(HaveNoPeers())
 				})
 
 				It("should skip RVR without nodeId", func(ctx SpecContext) {
@@ -430,14 +396,9 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-					_, err := rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})
-					Expect(err).NotTo(HaveOccurred())
+					expectReconcileSuccessfully(ctx)
 
-					updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-					Expect(updatedRVR1.Status.Config.Peers).To(BeEmpty())
+					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).To(HaveNoPeers())
 				})
 
 				It("should skip RVR without address", func(ctx SpecContext) {
@@ -460,80 +421,71 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-					_, err := rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})
-					Expect(err).NotTo(HaveOccurred())
+					expectReconcileSuccessfully(ctx)
 
-					updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-					Expect(updatedRVR1.Status.Config.Peers).To(BeEmpty())
+					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).To(HaveNoPeers())
 				})
 
-				whenReconciledSuccessfully(func() {
-					It("should have no peers", func(ctx SpecContext) {
+				It("should have no peers", func(ctx SpecContext) {
+					expectReconcileSuccessfully(ctx)
+					Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).
+						To(HaveNoPeers())
+				})
+
+				whenRVRCreated("second not ready replica created", []v1alpha3.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: "test-rv",
+							NodeName:             "node-2"},
+						Status: &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
+					},
+				}, func(created2 *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
+					It("rvr-1 should have no peers", func(ctx SpecContext) {
 						Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).
 							To(HaveNoPeers())
 					})
 
-					whenRVRCreated("second not ready replica created", []v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-2",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "test-rv",
-								NodeName:             "node-2",
-							},
-						},
-					},
-						func(_ *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
-							It("rvr-1 should have no peers", func(ctx SpecContext) {
-								Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-1"})).
-									To(HaveNoPeers())
-							})
+					It("rvr-2 should have no peers", func(ctx SpecContext) {
+						Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-2"})).
+							To(HaveNoPeers())
+					})
 
-							It("rvr-2 should have no peers", func(ctx SpecContext) {
-								Expect(Get[v1alpha3.ReplicatedVolumeReplica](ctx, cl, client.ObjectKey{Name: "rvr-2"})).
-									To(HaveNoPeers())
-							})
-
-							whenReconciledSuccessfully(func() {
-								whenRVRBecomesReady([]string{"rvr-2"}, func() {
-									whenReconciledSuccessfully(func() {
-										It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
-											Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(SatisfyAll(
-												HaveAllPeersSetForAll(),
-												HaveLen(2)))
-										})
-									})
-								})
-							})
+					Context("if rvr-2 created ready", func() {
+						BeforeEach(func() {
+							makeReady(&created2.Resources[0], "node-2", 2, v1alpha3.Address{IPv4: "192.168.1.4", Port: 7001})
 						})
-
-					whenRVRCreated("second ready replica created", []v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-2",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								NodeName: "node-2",
-							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								Config: &v1alpha3.DRBDConfig{
-									NodeId:  func() *uint { ret := uint(1); return &ret }(),
-									Address: &v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000},
-								},
-							},
-						},
-					}, func(vars2 *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
-						It("should update peers on existing ready RVRs", func(ctx SpecContext) {
+						It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
 							expectReconcileSuccessfully(ctx)
-
 							Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(SatisfyAll(
 								HaveAllPeersSetForAll(),
 								HaveLen(2)))
 						})
+					})
+				})
+
+				whenRVRCreated("second ready replica created", []v1alpha3.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-2",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							NodeName: "node-2",
+						},
+						Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+							Config: &v1alpha3.DRBDConfig{
+								NodeId:  func() *uint { ret := uint(1); return &ret }(),
+								Address: &v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000},
+							},
+						},
+					},
+				}, func(vars2 *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]) {
+					It("should update peers on existing ready RVRs", func(ctx SpecContext) {
+						expectReconcileSuccessfully(ctx)
+
+						Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(SatisfyAll(
+							HaveAllPeersSetForAll(),
+							HaveLen(2)))
 					})
 				})
 			})
@@ -568,39 +520,38 @@ var _ = Describe("Reconciler", func() {
 					}
 				})
 
-				whenReconciledSuccessfully(func() {
-					It("should not have any peers", func(ctx SpecContext) {
-						Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveEach(HaveNoPeers()))
+				It("should not have any peers", func(ctx SpecContext) {
+					expectReconcileSuccessfully(ctx)
+					Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveEach(HaveNoPeers()))
+				})
+
+				When("all the rest becomes ready", func() {
+					JustBeforeEach(func(ctx SpecContext) {
+						for i, rvr := range created.Resources[1:] {
+							By(fmt.Sprintf("Making ready %s", rvr.Name))
+
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvr), &rvr)).To(Succeed())
+							nodeId := uint(i)
+							address := v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)}
+							rvr.Status.Config.NodeId = &nodeId
+							rvr.Status.Config.Address = &address
+							Expect(cl.Status().Update(ctx, &rvr)).To(Succeed())
+						}
+
+						for _, rvr := range created.Resources {
+							By(fmt.Sprintf("Checking %s", rvr.Name))
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvr), &rvr)).To(Succeed())
+							Expect(rvr).To(SatisfyAll(
+								HaveField("Spec.NodeName", Not(BeEmpty())),
+								HaveField("Status.Config.NodeId", Not(BeNil())),
+								HaveField("Status.Config.Address", Not(BeNil())),
+							))
+						}
 					})
 
-					When("all the rest becomes ready", func() {
-						JustBeforeEach(func(ctx SpecContext) {
-							for i, rvr := range created.Resources[1:] {
-								By(fmt.Sprintf("Making ready %s", rvr.Name))
-
-								Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvr), &rvr)).To(Succeed())
-								nodeId := uint(i)
-								address := v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)}
-								rvr.Status.Config.NodeId = &nodeId
-								rvr.Status.Config.Address = &address
-								Expect(cl.Status().Update(ctx, &rvr)).To(Succeed())
-							}
-
-							for _, rvr := range created.Resources {
-								By(fmt.Sprintf("Checking %s", rvr.Name))
-								Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvr), &rvr)).To(Succeed())
-								Expect(rvr).To(SatisfyAll(
-									HaveField("Spec.NodeName", Not(BeEmpty())),
-									HaveField("Status.Config.NodeId", Not(BeNil())),
-									HaveField("Status.Config.Address", Not(BeNil())),
-								))
-							}
-						})
-
-						It("should have all peers set", func(ctx SpecContext) {
-							expectReconcileSuccessfully(ctx)
-							Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveAllPeersSetForAll())
-						})
+					It("should have all peers set", func(ctx SpecContext) {
+						expectReconcileSuccessfully(ctx)
+						Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveAllPeersSetForAll())
 					})
 				})
 			})
@@ -615,140 +566,137 @@ var _ = Describe("Reconciler", func() {
 					}
 				})
 
-				whenReconciledSuccessfully(func() {
-					It("should gave all peers set", func(ctx SpecContext) {
-						Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveAllPeersSetForAll())
+				It("should gave all peers set", func(ctx SpecContext) {
+					expectReconcileSuccessfully(ctx)
+					Expect(List[v1alpha3.ReplicatedVolumeReplica](ctx, cl)).To(HaveAllPeersSetForAll())
+				})
+
+				When("second rvr deleted", func() {
+					JustBeforeEach(func(ctx SpecContext) {
+						// Delete rvr2
+						Expect(cl.Delete(ctx, &created.Resources[1])).To(Succeed())
 					})
 
-					When("second rvr deleted", func() {
-						JustBeforeEach(func(ctx SpecContext) {
-							// Delete rvr2
-							Expect(cl.Delete(ctx, &created.Resources[1])).To(Succeed())
-						})
+					It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
+						expectReconcileSuccessfully(ctx)
+						// Verify rvr1 and rvr3 no longer have node-2 in peers
+						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+						Expect(updatedRVR1.Status.Config.Peers).To(And(
+							Not(HaveKey("node-2")),
+							HaveKey("node-3"),
+						))
 
-						whenReconciledSuccessfully(func() {
-							It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
-								// Verify rvr1 and rvr3 no longer have node-2 in peers
-								updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-								Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-								Expect(updatedRVR1.Status.Config.Peers).To(And(
-									Not(HaveKey("node-2")),
-									HaveKey("node-3"),
-								))
-
-								updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
-								Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
-								Expect(updatedRVR3.Status.Config.Peers).To(And(
-									Not(HaveKey("node-2")),
-									HaveKey("node-1"),
-								))
-							})
-						})
-					})
-
-					When("multiple RVRs exist on same node", func() {
-						BeforeEach(func() {
-							// Use all 3 RVRs, but set node-2 to node-1 for rvr-2
-							created.Resources[1].Spec.NodeName = "node-1" // Same node as rvr-1
-							nodeId1 := uint(1)
-							nodeId2 := uint(2)
-							nodeId3 := uint(3)
-							address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-							address2 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7001} // Same IP, different port
-							address3 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-							created.Resources[0].Status.Config.NodeId = &nodeId1
-							created.Resources[0].Status.Config.Address = &address1
-							created.Resources[1].Status.Config.NodeId = &nodeId2
-							created.Resources[1].Status.Config.Address = &address2
-							created.Resources[2].Status.Config.NodeId = &nodeId3
-							created.Resources[2].Status.Config.Address = &address3
-						})
-
-						It("should only keep one peer entry per node", func(ctx SpecContext) {
-							_, err := rec.Reconcile(ctx, reconcile.Request{
-								NamespacedName: types.NamespacedName{Name: "test-rv"},
-							})
-							Expect(err).NotTo(HaveOccurred())
-
-							// rvr3 should only have one peer entry for node-1 (the first one found)
-							updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
-							Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
-							Expect(updatedRVR3.Status.Config.Peers).To(And(
-								HaveKey("node-1"),
-								HaveLen(1),
-							))
-						})
-					})
-
-					When("peers are already correct", func() {
-						BeforeEach(func() {
-							// Use only first 2 RVRs
-							created.Resources = created.Resources[:2]
-							nodeId1 := uint(1)
-							nodeId2 := uint(2)
-							address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-							address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-							created.Resources[0].Status.Config.NodeId = &nodeId1
-							created.Resources[0].Status.Config.Address = &address1
-							created.Resources[1].Status.Config.NodeId = &nodeId2
-							created.Resources[1].Status.Config.Address = &address2
-						})
-
-						It("should not update if peers are unchanged", func(ctx SpecContext) {
-
-							// First reconcile
-							_, err := rec.Reconcile(ctx, reconcile.Request{
-								NamespacedName: types.NamespacedName{Name: "test-rv"},
-							})
-							Expect(err).NotTo(HaveOccurred())
-
-							// Get the state after first reconcile
-							updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-							Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-							initialPeers := updatedRVR1.Status.Config.Peers
-
-							// Second reconcile - should not change
-							_, err = rec.Reconcile(ctx, reconcile.Request{
-								NamespacedName: types.NamespacedName{Name: "test-rv"},
-							})
-							Expect(err).NotTo(HaveOccurred())
-
-							// Verify peers are unchanged
-							updatedRVR1After := &v1alpha3.ReplicatedVolumeReplica{}
-							Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1After)).To(Succeed())
-							Expect(updatedRVR1After.Status.Config.Peers).To(Equal(initialPeers))
-						})
-					})
-
-					Context("with diskless RVRs", func() {
-						BeforeEach(func() {
-							// Use only first 2 RVRs, set second one as diskless
-							created.Resources = created.Resources[:2]
-							created.Resources[1].Spec.Diskless = true
-							nodeId1 := uint(1)
-							nodeId2 := uint(2)
-							address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-							address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-							created.Resources[0].Status.Config.NodeId = &nodeId1
-							created.Resources[0].Status.Config.Address = &address1
-							created.Resources[1].Status.Config.NodeId = &nodeId2
-							created.Resources[1].Status.Config.Address = &address2
-						})
-
-						It("should include diskless flag in peer information", func(ctx SpecContext) {
-							_, err := rec.Reconcile(ctx, reconcile.Request{
-								NamespacedName: types.NamespacedName{Name: "test-rv"},
-							})
-							Expect(err).NotTo(HaveOccurred())
-
-							// Verify rvr1 has rvr2 with diskless flag
-							updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-							Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-							Expect(updatedRVR1.Status.Config.Peers).To(HaveKeyWithValue("node-2", HaveField("Diskless", BeTrue())))
-						})
+						updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
+						Expect(updatedRVR3.Status.Config.Peers).To(And(
+							Not(HaveKey("node-2")),
+							HaveKey("node-1"),
+						))
 					})
 				})
 
+				When("multiple RVRs exist on same node", func() {
+					BeforeEach(func() {
+						// Use all 3 RVRs, but set node-2 to node-1 for rvr-2
+						created.Resources[1].Spec.NodeName = "node-1" // Same node as rvr-1
+						nodeId1 := uint(1)
+						nodeId2 := uint(2)
+						nodeId3 := uint(3)
+						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
+						address2 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7001} // Same IP, different port
+						address3 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
+						created.Resources[0].Status.Config.NodeId = &nodeId1
+						created.Resources[0].Status.Config.Address = &address1
+						created.Resources[1].Status.Config.NodeId = &nodeId2
+						created.Resources[1].Status.Config.Address = &address2
+						created.Resources[2].Status.Config.NodeId = &nodeId3
+						created.Resources[2].Status.Config.Address = &address3
+					})
+
+					It("should only keep one peer entry per node", func(ctx SpecContext) {
+						_, err := rec.Reconcile(ctx, reconcile.Request{
+							NamespacedName: types.NamespacedName{Name: "test-rv"},
+						})
+						Expect(err).NotTo(HaveOccurred())
+
+						// rvr3 should only have one peer entry for node-1 (the first one found)
+						updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
+						Expect(updatedRVR3.Status.Config.Peers).To(And(
+							HaveKey("node-1"),
+							HaveLen(1),
+						))
+					})
+				})
+
+				When("peers are already correct", func() {
+					BeforeEach(func() {
+						// Use only first 2 RVRs
+						created.Resources = created.Resources[:2]
+						nodeId1 := uint(1)
+						nodeId2 := uint(2)
+						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
+						address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
+						created.Resources[0].Status.Config.NodeId = &nodeId1
+						created.Resources[0].Status.Config.Address = &address1
+						created.Resources[1].Status.Config.NodeId = &nodeId2
+						created.Resources[1].Status.Config.Address = &address2
+					})
+
+					It("should not update if peers are unchanged", func(ctx SpecContext) {
+
+						// First reconcile
+						_, err := rec.Reconcile(ctx, reconcile.Request{
+							NamespacedName: types.NamespacedName{Name: "test-rv"},
+						})
+						Expect(err).NotTo(HaveOccurred())
+
+						// Get the state after first reconcile
+						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+						initialPeers := updatedRVR1.Status.Config.Peers
+
+						// Second reconcile - should not change
+						_, err = rec.Reconcile(ctx, reconcile.Request{
+							NamespacedName: types.NamespacedName{Name: "test-rv"},
+						})
+						Expect(err).NotTo(HaveOccurred())
+
+						// Verify peers are unchanged
+						updatedRVR1After := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1After)).To(Succeed())
+						Expect(updatedRVR1After.Status.Config.Peers).To(Equal(initialPeers))
+					})
+				})
+
+				Context("with diskless RVRs", func() {
+					BeforeEach(func() {
+						// Use only first 2 RVRs, set second one as diskless
+						created.Resources = created.Resources[:2]
+						created.Resources[1].Spec.Diskless = true
+						nodeId1 := uint(1)
+						nodeId2 := uint(2)
+						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
+						address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
+						created.Resources[0].Status.Config.NodeId = &nodeId1
+						created.Resources[0].Status.Config.Address = &address1
+						created.Resources[1].Status.Config.NodeId = &nodeId2
+						created.Resources[1].Status.Config.Address = &address2
+					})
+
+					It("should include diskless flag in peer information", func(ctx SpecContext) {
+						_, err := rec.Reconcile(ctx, reconcile.Request{
+							NamespacedName: types.NamespacedName{Name: "test-rv"},
+						})
+						Expect(err).NotTo(HaveOccurred())
+
+						// Verify rvr1 has rvr2 with diskless flag
+						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+						Expect(updatedRVR1.Status.Config.Peers).To(HaveKeyWithValue("node-2", HaveField("Diskless", BeTrue())))
+					})
+				})
 			})
 		})
 	})
