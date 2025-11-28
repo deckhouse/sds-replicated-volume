@@ -13,6 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const finalizer = "quorum-reconf"
+
 type Reconciler struct {
 	cl  client.Client
 	rdr client.Reader
@@ -37,42 +39,10 @@ func NewReconciler(
 	}
 }
 
-func (r *Reconciler) Reconcile(
-	ctx context.Context,
-	req reconcile.Request,
-) (reconcile.Result, error) {
-	log := r.log.WithValues("request", req.NamespacedName).WithName("Reconcile")
-	var rv v1alpha3.ReplicatedVolume
-	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
-		log.Error(err, "unable to fetch ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
-	var rvrList v1alpha3.ReplicatedVolumeReplicaList
-	if err := r.cl.List(ctx, &rvrList); err != nil {
-		log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
-		return reconcile.Result{}, err
-	}
-
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-		return !metav1.IsControlledBy(&rvr, &rv)
-	})
-
-	if conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
+func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
+	return conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
 		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected) {
-
-		diskfulCount, all := countDiskfulAndDisklessReplicas(&rvrList)
-		log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
-
-		from := prepareQuorumPatch(&rv, diskfulCount, all)
-		if err := r.cl.Patch(ctx, &rv, from); err != nil {
-			log.Error(err, "unable to fetch ReplicatedVolume")
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-	}
-
-	return reconcile.Result{}, nil
+		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
 
 // countDiskfulAndDisklessReplicas returns the number of diskful and diskless replicas
@@ -87,12 +57,108 @@ func countDiskfulAndDisklessReplicas(list *v1alpha3.ReplicatedVolumeReplicaList)
 	return
 }
 
+func (r *Reconciler) Reconcile(
+	ctx context.Context,
+	req reconcile.Request,
+) (reconcile.Result, error) {
+	log := r.log.WithValues("request", req.NamespacedName).WithName("Reconcile")
+
+	var rv v1alpha3.ReplicatedVolume
+	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		log.Error(err, "unable to fetch ReplicatedVolume")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if isRvReady(&rv) {
+		rvrList, err := r.getRvrList(&ctx, &rv)
+		if err != nil {
+			log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
+			return reconcile.Result{}, err
+		}
+
+		diskfulCount, all := countDiskfulAndDisklessReplicas(&rvrList)
+		log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
+
+		cnt, err := r.setFinalizers(&ctx, &rvrList)
+		log.Info("added finalizers to rvr", "finalizer", finalizer, "count", cnt)
+		if err != nil {
+			log.Error(err, "unable to add finalizers")
+			return reconcile.Result{}, err
+		}
+
+		if err := r.quorumPatch(&ctx, &rv, diskfulCount, all); err != nil {
+			log.Error(err, "unable to fetch ReplicatedVolume")
+			return reconcile.Result{}, client.IgnoreNotFound(err)
+		}
+
+		cnt, err = r.unsetFinalizers(&ctx, &rvrList)
+		log.Info("remove finalizers from rvr", "finalizer", finalizer, "count", cnt)
+		if err != nil {
+			log.Error(err, "unable to remove finalizers")
+			return reconcile.Result{}, err
+		}
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *Reconciler) getRvrList(ctx *context.Context, rv *v1alpha3.ReplicatedVolume) (v1alpha3.ReplicatedVolumeReplicaList, error) {
+	var rvrList v1alpha3.ReplicatedVolumeReplicaList
+	if err := r.cl.List(*ctx, &rvrList); err != nil {
+		return v1alpha3.ReplicatedVolumeReplicaList{}, err
+	}
+
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+		return !metav1.IsControlledBy(&rvr, rv)
+	})
+	return rvrList, nil
+}
+
+func (r *Reconciler) setFinalizers(
+	ctx *context.Context,
+	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
+) (cnt int32, err error) {
+	for _, rvr := range rvrList.Items {
+		if !slices.Contains(rvr.Finalizers, finalizer) {
+			oldRvr := rvr.DeepCopy()
+			rvr.Finalizers = append(rvr.Finalizers, finalizer)
+			from := client.MergeFrom(oldRvr)
+			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
+				return cnt, err
+			}
+			cnt++
+		}
+	}
+	return cnt, nil
+}
+
+func (r *Reconciler) unsetFinalizers(
+	ctx *context.Context,
+	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
+) (cnt int32, err error) {
+	for _, rvr := range rvrList.Items {
+		if slices.Contains(rvr.Finalizers, finalizer) && rvr.GetObjectMeta().GetDeletionTimestamp() != nil {
+			oldRvr := rvr.DeepCopy()
+			rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
+				return f == finalizer
+			})
+			from := client.MergeFrom(oldRvr)
+			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
+				return cnt, err
+			}
+			cnt++
+		}
+	}
+	return cnt, nil
+}
+
 // prepareQuorumPatch calculates quorum fields and returns a MergeFrom patch baseline.
-func prepareQuorumPatch(
+func (r *Reconciler) quorumPatch(
+	ctx *context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	diskfulCount,
 	all int,
-) client.Patch {
+) error {
 	// ensure status structs are initialized before writing into them
 	if rv.Status == nil {
 		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
@@ -119,5 +185,9 @@ func prepareQuorumPatch(
 		Message:            "Quorum configuration completed",
 	})
 
-	return client.MergeFrom(old)
+	from := client.MergeFrom(old)
+	if err := r.cl.Patch(*ctx, rv, from); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return nil
 }
