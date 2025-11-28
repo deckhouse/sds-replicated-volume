@@ -25,11 +25,6 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = &Reconciler{}
 
-const (
-	maxNodeID = 7
-	minNodeID = 0
-)
-
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
