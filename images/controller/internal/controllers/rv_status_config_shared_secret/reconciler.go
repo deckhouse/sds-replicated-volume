@@ -24,14 +24,6 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = &Reconciler{}
 
-const (
-	// Shared secret hashing algorithms in order of preference
-	algorithmSHA256 = "sha256"
-	algorithmSHA1   = "sha1"
-)
-
-var algorithms = []string{algorithmSHA256, algorithmSHA1}
-
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
