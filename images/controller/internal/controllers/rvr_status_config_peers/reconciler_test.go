@@ -159,8 +159,8 @@ type whenResourcesCreatedVars[T any] struct {
 	Resources []T
 }
 
-// whenResourcesCreated is a generic helper to create resources in a test context
-func whenResourcesCreated[T any](desc string, cl *client.Client, resources []T, fn func(vars *whenResourcesCreatedVars[T]), setup func(*T), args ...any) {
+// whenCreated is a generic helper to create resources in a test context
+func whenCreated[T any](desc string, cl *client.Client, setup func(*T), resources []T, fn func(vars *whenResourcesCreatedVars[T]), args ...any) {
 	When(desc, args, func() {
 		var vars whenResourcesCreatedVars[T]
 
@@ -247,7 +247,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolume created", func() {
-		var rv *v1alpha3.ReplicatedVolume
+		var rv, otherRv *v1alpha3.ReplicatedVolume
 
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
@@ -259,12 +259,24 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: "test-storage-class",
 				},
 			}
+
+			otherRv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "other-rv",
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("1Gi"),
+					ReplicatedStorageClassName: "test-storage-class",
+				},
+			}
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rv)).To(Succeed())
-			// Get RV to retrieve its UID
-			Expect(cl.Get(ctx, client.ObjectKey{Name: "test-rv"}, rv)).To(Succeed())
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
+
+			Expect(cl.Create(ctx, otherRv)).To(Succeed())
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRv), otherRv)).To(Succeed())
 		})
 
 		expectReconcileSuccessfully := func(ctx SpecContext) {
@@ -281,9 +293,6 @@ var _ = Describe("Reconciler", func() {
 				Expect(controllerutil.SetControllerReference(rv, rvr, scheme)).To(Succeed())
 			}
 		}
-		whenRVRCreated := func(desc string, Resources []v1alpha3.ReplicatedVolumeReplica, fn func(vars *whenResourcesCreatedVars[v1alpha3.ReplicatedVolumeReplica]), args ...any) {
-			whenResourcesCreated(desc, &cl, Resources, fn, setOwnerReference, args...)
-		}
 
 		makeReady := func(rvr *v1alpha3.ReplicatedVolumeReplica, nodeName string, nodeId uint, address v1alpha3.Address) {
 			if rvr.Status == nil {
@@ -298,7 +307,7 @@ var _ = Describe("Reconciler", func() {
 			rvr.Status.Config.Address = &address
 		}
 
-		whenRVRCreated("first replica created", []v1alpha3.ReplicatedVolumeReplica{{
+		whenCreated("first replica created", &cl, setOwnerReference, []v1alpha3.ReplicatedVolumeReplica{{
 			ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 			Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 			Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
@@ -432,7 +441,7 @@ var _ = Describe("Reconciler", func() {
 						To(HaveNoPeers())
 				})
 
-				whenRVRCreated("second not ready replica created", []v1alpha3.ReplicatedVolumeReplica{
+				whenCreated("second not ready replica created", &cl, setOwnerReference, []v1alpha3.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
 						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
@@ -464,7 +473,7 @@ var _ = Describe("Reconciler", func() {
 					})
 				})
 
-				whenRVRCreated("second ready replica created", []v1alpha3.ReplicatedVolumeReplica{
+				whenCreated("second ready replica created", &cl, setOwnerReference, []v1alpha3.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "rvr-2",
@@ -491,7 +500,7 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		whenRVRCreated("three replicas created", []v1alpha3.ReplicatedVolumeReplica{
+		whenCreated("three replicas created", &cl, setOwnerReference, []v1alpha3.ReplicatedVolumeReplica{
 			{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 				Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
