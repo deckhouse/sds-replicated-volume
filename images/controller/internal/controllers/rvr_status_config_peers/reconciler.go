@@ -108,13 +108,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			continue
 		}
 
-		from := client.MergeFrom(rvr.DeepCopy())
-		rvr.Status.Config.Peers = peers
-		if err := r.cl.Patch(ctx, &rv, from); err != nil {
-			log.Error(err, "Patching ReplicatedVolume")
+		from := client.MergeFrom(&rvr)
+		changedRvr := rvr.DeepCopy()
+		changedRvr.Status.Config.Peers = peersWithoutSelf
+		if err := r.cl.Status().Patch(ctx, changedRvr, from); err != nil {
+			log.Error(err, "Patching ReplicatedVolumeReplica")
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
-		log.Info("Patched with new peers", "peers", peers)
+		log.Info("Patched with new peers", "peers", peersWithoutSelf)
 	}
 
 	return reconcile.Result{}, nil
