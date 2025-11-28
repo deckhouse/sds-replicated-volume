@@ -53,7 +53,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	NodeName string `json:"nodeName"`
+	NodeName string `json:"nodeName,omitempty"`
 
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	Type string `json:"type,omitempty"`
