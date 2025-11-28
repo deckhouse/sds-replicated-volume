@@ -165,6 +165,9 @@ spec:
                 properties:
                   actual:
                     properties:
+                      allowTwoPrimaries:
+                        default: false
+                        type: boolean
                       disk:
                         maxLength: 256
                         pattern: ^(/[a-zA-Z0-9/.+_-]+)?$

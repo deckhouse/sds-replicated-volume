@@ -49,7 +49,7 @@ type ReplicatedVolumeStatus struct {
 
 	// +patchStrategy=merge
 	// +optional
-	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
+	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
@@ -64,6 +64,17 @@ type ReplicatedVolumeStatus struct {
 }
 
 // +k8s:deepcopy-gen=true
+type DRBDResource struct {
+	// +patchStrategy=merge
+	// +optional
+	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
+	// // +patchStrategy=merge
+	// Actual *DRBDResourceActual `json:"actual,omitempty" patchStrategy:"merge"`
+	// // +patchStrategy=merge
+	// Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
@@ -72,6 +83,11 @@ type ReplicatedVolumeList struct {
 	metav1.ListMeta `json:"metadata"`
 	Items           []ReplicatedVolume `json:"items"`
 }
+
+// // +k8s:deepcopy-gen=true
+// type DRBDResourceActual struct {
+
+// }
 
 // +k8s:deepcopy-gen=true
 type DRBDResourceConfig struct {
