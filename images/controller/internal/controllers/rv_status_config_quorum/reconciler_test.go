@@ -21,10 +21,57 @@ func newFakeClient() client.Client {
 	scheme := runtime.NewScheme()
 	_ = v1alpha3.AddToScheme(scheme)
 
-	return fake.NewClientBuilder().
+	baseClient := fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
 		Build()
+
+	// Wrap client to apply PatchWithConflictRetry changes directly via Update
+	// This allows testing the logic of PatchWithConflictRetry callbacks
+	return &patchApplyingClient{Client: baseClient}
+}
+
+// patchApplyingClient wraps a fake client and applies PatchWithConflictRetry changes via Update
+// PatchWithConflictRetry modifies the object in the callback, then calls Patch.
+// Since fake client doesn't apply MergeFrom patches correctly, we use Update instead.
+type patchApplyingClient struct {
+	client.Client
+}
+
+func (c *patchApplyingClient) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+	// For MergeFrom patches (used by PatchWithConflictRetry), the object has already been
+	// modified by the callback function. We can apply it directly via Update.
+	// This simulates what would happen in a real cluster.
+	// Check if it's a MergeFrom patch by checking the patch type name
+	patchType := fmt.Sprintf("%T", patch)
+	// PatchWithConflictRetry uses MergeFromWithOptions which creates a *client.MergeFrom
+	// The string representation should be "*client.MergeFrom"
+	// For any patch that looks like MergeFrom, apply via Update
+	if patchType == "*client.MergeFrom" {
+		// The object has already been modified by patchFn in PatchWithConflictRetry
+		// Just update it directly (ignore PatchOptions as they're not applicable to Update)
+		return c.Client.Update(ctx, obj)
+	}
+	// For other patch types, use the base client
+	return c.Client.Patch(ctx, obj, patch, opts...)
+}
+
+func (c *patchApplyingClient) Status() client.StatusWriter {
+	return &patchApplyingStatusWriter{StatusWriter: c.Client.Status(), baseClient: c.Client}
+}
+
+type patchApplyingStatusWriter struct {
+	client.StatusWriter
+	baseClient client.Client
+}
+
+func (w *patchApplyingStatusWriter) Patch(ctx context.Context, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+	// For MergeFrom patches in status, also apply via Update
+	patchType := fmt.Sprintf("%T", patch)
+	if patchType == "*client.MergeFrom" {
+		return w.baseClient.Status().Update(ctx, obj)
+	}
+	return w.StatusWriter.Patch(ctx, obj, patch, opts...)
 }
 
 func createReplicatedVolume(name string, ready bool) *v1alpha3.ReplicatedVolume {
@@ -148,6 +195,14 @@ var _ = Describe("Reconciler", func() {
 			updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
 			Expect(updatedRVR1.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+
+			// Verify QuorumConfigured condition is set
+			updatedRV := &v1alpha3.ReplicatedVolume{}
+			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+			cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			Expect(cond.Reason).To(Equal("QuorumConfigured"))
 		})
 
 		It("should handle multiple replicas with diskful and diskless", func() {
@@ -199,13 +254,17 @@ var _ = Describe("Reconciler", func() {
 			})
 			Expect(err).NotTo(HaveOccurred())
 
-			// Verify quorum is 0 (not set)
+			// Verify quorum is 0 (not set) and QuorumConfigured condition is still set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Status).NotTo(BeNil())
 			Expect(updatedRV.Status.Config).NotTo(BeNil())
 			Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(0)))
 			Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(0)))
+			// Even with diskfulCount <= 1, condition should be set (quorumPatch is called)
+			cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+			Expect(cond).NotTo(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 		})
 
 		Context("Quorum and QuorumMinimumRedundancy calculations", func() {
@@ -227,8 +286,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
-				// The calculation logic is: quorum = max(2, all/2+1), qmr = max(2, diskfulCount/2+1)
+				// Verify QuorumConfigured condition is set
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=2, qmr=2 for 3 diskful replicas", func() {
@@ -251,7 +319,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=3, qmr=3 for 4 diskful replicas", func() {
@@ -276,7 +354,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
 			})
 
 			It("should calculate quorum=3, qmr=3 for 5 diskful replicas", func() {
@@ -302,7 +390,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
 			})
 
 			It("should calculate quorum=2, qmr=2 for 2 diskful + 1 diskless replicas", func() {
@@ -325,7 +423,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=3, qmr=2 for 3 diskful + 2 diskless replicas", func() {
@@ -352,7 +460,17 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=4, qmr=4 for 7 diskful replicas", func() {
@@ -378,12 +496,22 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: quorum values are calculated but patch may not apply correctly in fake client
+				// Verify QuorumConfigured condition is set and quorum values are applied
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+				cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
+				Expect(cond).NotTo(BeNil())
+				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+
+				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
+				Expect(updatedRV.Status.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(4)))
+				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(4)))
 			})
 		})
 
 		Context("unsetFinalizers", func() {
-			It("should attempt to remove finalizer from RVR with DeletionTimestamp", func() {
+			It("should remove finalizer from RVR with DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -400,8 +528,11 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: unsetFinalizers is called and should process RVR with DeletionTimestamp
-				// The patch may not apply correctly in fake client, but the logic is tested
+				// Verify finalizer was removed
+				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+				Expect(updatedRVR1.Finalizers).To(ContainElement("other-finalizer"))
 			})
 
 			It("should not remove finalizer from RVR without DeletionTimestamp", func() {
@@ -419,8 +550,10 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: unsetFinalizers should skip RVR without DeletionTimestamp
-				// The finalizer should remain because unsetFinalizers only processes RVRs with DeletionTimestamp
+				// Verify finalizer is still present (unsetFinalizers should skip RVR without DeletionTimestamp)
+				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+				Expect(updatedRVR1.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
 			It("should not process RVR that doesn't have quorum-reconf finalizer", func() {
@@ -440,8 +573,11 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: unsetFinalizers should skip RVR that doesn't have quorum-reconf finalizer
-				// Only RVRs with both quorum-reconf finalizer AND DeletionTimestamp are processed
+				// Verify other finalizer is still present (unsetFinalizers should skip RVR without quorum-reconf finalizer)
+				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+				Expect(updatedRVR1.Finalizers).To(ContainElement("other-finalizer"))
+				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
 			It("should process multiple RVRs with DeletionTimestamp", func() {
@@ -471,9 +607,20 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: unsetFinalizers should process rvr1 and rvr2 (both have DeletionTimestamp and quorum-reconf)
-				// but skip rvr3 (no DeletionTimestamp)
-				// The patch may not apply correctly in fake client, but the logic is tested
+				// Verify finalizers removed from RVRs with DeletionTimestamp
+				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+
+				updatedRVR2 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-2"}, updatedRVR2)).To(Succeed())
+				Expect(updatedRVR2.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+				Expect(updatedRVR2.Finalizers).To(ContainElement("other-finalizer"))
+
+				// Verify finalizer kept for RVR without DeletionTimestamp
+				updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
+				Expect(updatedRVR3.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
 			It("should handle RVR with only quorum-reconf finalizer and DeletionTimestamp", func() {
@@ -493,9 +640,11 @@ var _ = Describe("Reconciler", func() {
 				})
 				Expect(err).NotTo(HaveOccurred())
 
-				// Note: unsetFinalizers should process this RVR and remove quorum-reconf finalizer
-				// After removal, finalizers list should be empty
-				// The patch may not apply correctly in fake client, but the logic is tested
+				// Verify finalizer was removed (after removal, finalizers list should be empty)
+				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+				Expect(updatedRVR1.Finalizers).To(BeEmpty())
 			})
 		})
 	})
@@ -509,3 +658,53 @@ func findCondition(conditions []metav1.Condition, conditionType string) *metav1.
 	}
 	return nil
 }
+
+var _ = Describe("CalculateQuorum", func() {
+	It("should return 0,0 for diskfulCount <= 1", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(1, 1)
+		Expect(quorum).To(Equal(byte(0)))
+		Expect(qmr).To(Equal(byte(0)))
+	})
+
+	It("should calculate quorum=2, qmr=2 for 2 diskful replicas", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(2, 2)
+		Expect(quorum).To(Equal(byte(2))) // max(2, 2/2+1) = max(2, 2) = 2
+		Expect(qmr).To(Equal(byte(2)))    // max(2, 2/2+1) = max(2, 2) = 2
+	})
+
+	It("should calculate quorum=2, qmr=2 for 3 diskful replicas", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(3, 3)
+		Expect(quorum).To(Equal(byte(2))) // max(2, 3/2+1) = max(2, 2) = 2
+		Expect(qmr).To(Equal(byte(2)))    // max(2, 3/2+1) = max(2, 2) = 2
+	})
+
+	It("should calculate quorum=3, qmr=3 for 4 diskful replicas", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(4, 4)
+		Expect(quorum).To(Equal(byte(3))) // max(2, 4/2+1) = max(2, 3) = 3
+		Expect(qmr).To(Equal(byte(3)))    // max(2, 4/2+1) = max(2, 3) = 3
+	})
+
+	It("should calculate quorum=3, qmr=3 for 5 diskful replicas", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(5, 5)
+		Expect(quorum).To(Equal(byte(3))) // max(2, 5/2+1) = max(2, 3) = 3
+		Expect(qmr).To(Equal(byte(3)))    // max(2, 5/2+1) = max(2, 3) = 3
+	})
+
+	It("should calculate quorum=2, qmr=2 for 2 diskful + 1 diskless", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(2, 3)
+		Expect(quorum).To(Equal(byte(2))) // max(2, 3/2+1) = max(2, 2) = 2
+		Expect(qmr).To(Equal(byte(2)))    // max(2, 2/2+1) = max(2, 2) = 2
+	})
+
+	It("should calculate quorum=3, qmr=2 for 3 diskful + 2 diskless", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(3, 5)
+		Expect(quorum).To(Equal(byte(3))) // max(2, 5/2+1) = max(2, 3) = 3
+		Expect(qmr).To(Equal(byte(2)))    // max(2, 3/2+1) = max(2, 2) = 2
+	})
+
+	It("should calculate quorum=4, qmr=4 for 7 diskful replicas", func() {
+		quorum, qmr := rvquorumcontroller.CalculateQuorum(7, 7)
+		Expect(quorum).To(Equal(byte(4))) // max(2, 7/2+1) = max(2, 4) = 4
+		Expect(qmr).To(Equal(byte(4)))    // max(2, 7/2+1) = max(2, 4) = 4
+	})
+})
