@@ -13,7 +13,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
-const finalizer = "quorum-reconf"
+// QuorumReconfFinalizer is the name of the finalizer used to manage quorum reconfiguration.
+const QuorumReconfFinalizer = "quorum-reconf"
 
 type Reconciler struct {
 	cl  client.Client
@@ -89,7 +90,7 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 	log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
 
 	cnt, err := r.setFinalizers(ctx, &rvrList)
-	log.Info("added finalizers to rvr", "finalizer", finalizer, "count", cnt)
+	log.Info("added finalizers to rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
 	if err != nil {
 		log.Error(err, "unable to add finalizers")
 		return err
@@ -101,7 +102,7 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 	}
 
 	cnt, err = r.unsetFinalizers(ctx, &rvrList)
-	log.Info("remove finalizers from rvr", "finalizer", finalizer, "count", cnt)
+	log.Info("remove finalizers from rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
 	if err != nil {
 		log.Error(err, "unable to remove finalizers")
 		return err
@@ -126,9 +127,9 @@ func (r *Reconciler) setFinalizers(
 	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
 ) (cnt int32, err error) {
 	for _, rvr := range rvrList.Items {
-		if !slices.Contains(rvr.Finalizers, finalizer) {
+		if !slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) {
 			oldRvr := rvr.DeepCopy()
-			rvr.Finalizers = append(rvr.Finalizers, finalizer)
+			rvr.Finalizers = append(rvr.Finalizers, QuorumReconfFinalizer)
 			from := client.MergeFrom(oldRvr)
 			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
 				return cnt, err
@@ -144,10 +145,10 @@ func (r *Reconciler) unsetFinalizers(
 	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
 ) (cnt int32, err error) {
 	for _, rvr := range rvrList.Items {
-		if slices.Contains(rvr.Finalizers, finalizer) && rvr.GetObjectMeta().GetDeletionTimestamp() != nil {
+		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) && rvr.GetObjectMeta().GetDeletionTimestamp() != nil {
 			oldRvr := rvr.DeepCopy()
 			rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
-				return f == finalizer
+				return f == QuorumReconfFinalizer
 			})
 			from := client.MergeFrom(oldRvr)
 			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
