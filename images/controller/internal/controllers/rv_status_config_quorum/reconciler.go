@@ -163,26 +163,22 @@ func (r *Reconciler) unsetFinalizers(
 ) (cnt int32, err error) {
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
-		// Check condition on list item first (quick check to avoid unnecessary Get)
-		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) && rvr.GetObjectMeta().GetDeletionTimestamp() != nil {
+		// Check condition: must have finalizer and DeletionTimestamp
+		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) && rvr.DeletionTimestamp != nil {
 			// Load the object fresh for PatchWithConflictRetry
 			target := &v1alpha3.ReplicatedVolumeReplica{}
 			if err := r.cl.Get(*ctx, client.ObjectKeyFromObject(rvr), target); err != nil {
 				return cnt, err
 			}
-			// Re-check condition after loading (object might have changed)
-			// This ensures we only process objects that still meet the criteria
-			if slices.Contains(target.Finalizers, QuorumReconfFinalizer) && target.GetObjectMeta().GetDeletionTimestamp() != nil {
-				if err := api.PatchWithConflictRetry(*ctx, r.cl, target, func(rvr *v1alpha3.ReplicatedVolumeReplica) error {
-					rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
-						return f == QuorumReconfFinalizer
-					})
-					return nil
-				}); err != nil {
-					return cnt, err
-				}
-				cnt++
+			if err := api.PatchWithConflictRetry(*ctx, r.cl, target, func(rvr *v1alpha3.ReplicatedVolumeReplica) error {
+				rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
+					return f == QuorumReconfFinalizer
+				})
+				return nil
+			}); err != nil {
+				return cnt, err
 			}
+			cnt++
 		}
 	}
 	return cnt, nil
