@@ -1,4 +1,4 @@
-package rvrdiskfulcount
+package rvr_status_config_peers
 
 import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"

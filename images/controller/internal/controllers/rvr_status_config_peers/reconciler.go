@@ -1,4 +1,4 @@
-package rvrdiskfulcount
+package rvr_status_config_peers
 
 import (
 	"context"
@@ -21,7 +21,14 @@ type Request = reconcile.Request
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-func shouldBeListedInPeers(rvr *ReplicatedVolumeReplica) bool {
+func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+	return &Reconciler{
+		cl:  cl,
+		log: log,
+	}
+}
+
+func shouldBeListedInPeers(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	return rvr.Spec.NodeName != "" &&
 		rvr.Status != nil && rvr.Status.Config != nil &&
 		rvr.Status.Config.NodeId != nil && rvr.Status.Config.Address != nil
