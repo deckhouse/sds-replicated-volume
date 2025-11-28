@@ -121,7 +121,7 @@ var _ = Describe("Reconciler", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	Context("when ReplicatedVolume is being deleted", func() {
+	When("ReplicatedVolume is being deleted", func() {
 		It("should do nothing and return no error", func() {
 			// Create RSC to avoid errors, even though it shouldn't be accessed
 			rsc := createReplicatedStorageClass("test-rsc", "None")
@@ -142,7 +142,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when ReplicatedVolume has empty ReplicatedStorageClassName", func() {
+	When("ReplicatedVolume has empty ReplicatedStorageClassName", func() {
 		It("should return an error", func() {
 			rv := createReplicatedVolume("test-rv", "")
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -153,12 +153,11 @@ var _ = Describe("Reconciler", func() {
 					Namespace: "",
 				},
 			})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("empty ReplicatedStorageClassName"))
+			Expect(err).To(MatchError(ContainSubstring("empty ReplicatedStorageClassName")))
 		})
 	})
 
-	Context("when ReplicatedStorageClass does not exist", func() {
+	When("ReplicatedStorageClass does not exist", func() {
 		It("should return an error", func() {
 			rv := createReplicatedVolume("test-rv", "non-existent-rsc")
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -169,12 +168,11 @@ var _ = Describe("Reconciler", func() {
 					Namespace: "",
 				},
 			})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("getting ReplicatedStorageClass"))
+			Expect(err).To(MatchError(ContainSubstring("getting ReplicatedStorageClass")))
 		})
 	})
 
-	Context("when ReplicatedStorageClass has unknown replication value", func() {
+	When("ReplicatedStorageClass has unknown replication value", func() {
 		It("should return an error", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "Unknown")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -188,12 +186,11 @@ var _ = Describe("Reconciler", func() {
 					Namespace: "",
 				},
 			})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("unknown replication value"))
+			Expect(err).To(MatchError(ContainSubstring("unknown replication value")))
 		})
 	})
 
-	Context("when no ReplicatedVolumeReplicas exist", func() {
+	When("no ReplicatedVolumeReplicas exist", func() {
 		It("should create one replica for None replication", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "None")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -268,7 +265,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when all ReplicatedVolumeReplicas are being deleted", func() {
+	When("all ReplicatedVolumeReplicas are being deleted", func() {
 		It("should create one new replica", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "Availability")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -314,7 +311,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when there is one non-deleted ReplicatedVolumeReplica that is not ready", func() {
+	When("there is one non-deleted ReplicatedVolumeReplica that is not ready", func() {
 		It("should wait and return no error", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "None")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -340,7 +337,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when there are more non-deleted ReplicatedVolumeReplicas than needed", func() {
+	When("there are more non-deleted ReplicatedVolumeReplicas than needed", func() {
 		It("should log warning and return no error", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "None")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -368,7 +365,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when there are fewer non-deleted ReplicatedVolumeReplicas than needed", func() {
+	When("there are fewer non-deleted ReplicatedVolumeReplicas than needed", func() {
 		It("should create missing replicas for Availability replication", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "Availability")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -467,7 +464,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when the required number of non-deleted ReplicatedVolumeReplicas is reached", func() {
+	When("the required number of non-deleted ReplicatedVolumeReplicas is reached", func() {
 		It("should set condition to True for None replication", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "None")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
@@ -556,7 +553,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	Context("when there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
+	When("there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
 		It("should only count non-deleted replicas", func() {
 			rsc := createReplicatedStorageClass("test-rsc", "Availability")
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
