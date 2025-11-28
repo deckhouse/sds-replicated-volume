@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
+	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 )
 
 func newFakeClient() client.Client {
@@ -80,13 +80,13 @@ func createReplicatedVolumeReplica(name, rvName, nodeName string, diskless bool)
 
 var _ = Describe("Reconciler", func() {
 	var cl client.Client
-	var rec *rvcontroller.Reconciler
+	var rec *rvquorumcontroller.Reconciler
 	var ctx context.Context
 
 	BeforeEach(func() {
 		ctx = context.Background()
 		cl = newFakeClient()
-		rec = rvcontroller.NewReconciler(
+		rec = rvquorumcontroller.NewReconciler(
 			cl,
 			cl,
 			nil,
@@ -147,7 +147,7 @@ var _ = Describe("Reconciler", func() {
 			// Verify finalizers were added to RVRs
 			updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-			Expect(updatedRVR1.Finalizers).To(ContainElement(rvcontroller.QuorumReconfFinalizer))
+			Expect(updatedRVR1.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 		})
 
 		It("should handle multiple replicas with diskful and diskless", func() {
@@ -177,7 +177,7 @@ var _ = Describe("Reconciler", func() {
 			for _, name := range []string{"rvr-1", "rvr-2", "rvr-3", "rvr-4"} {
 				rvr := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, types.NamespacedName{Name: name}, rvr)).To(Succeed())
-				Expect(rvr.Finalizers).To(ContainElement(rvcontroller.QuorumReconfFinalizer))
+				Expect(rvr.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			}
 		})
 
@@ -391,7 +391,7 @@ var _ = Describe("Reconciler", func() {
 				// Create RVR with finalizer and DeletionTimestamp
 				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
-				rvr1.Finalizers = []string{rvcontroller.QuorumReconfFinalizer, "other-finalizer"}
+				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
 				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
@@ -411,7 +411,7 @@ var _ = Describe("Reconciler", func() {
 
 				// Create RVR with finalizer but no DeletionTimestamp
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
-				rvr1.Finalizers = []string{rvcontroller.QuorumReconfFinalizer}
+				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
 				_, err := rec.Reconcile(ctx, reconcile.Request{
@@ -452,18 +452,18 @@ var _ = Describe("Reconciler", func() {
 				// Create multiple RVRs with finalizers and DeletionTimestamp
 				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
-				rvr1.Finalizers = []string{rvcontroller.QuorumReconfFinalizer}
+				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
 				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
 				rvr2 := createReplicatedVolumeReplica("rvr-2", "test-rv", "node-2", false)
-				rvr2.Finalizers = []string{rvcontroller.QuorumReconfFinalizer, "other-finalizer"}
+				rvr2.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
 				rvr2.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
 				// Create RVR without DeletionTimestamp (should not be processed by unsetFinalizers)
 				rvr3 := createReplicatedVolumeReplica("rvr-3", "test-rv", "node-3", false)
-				rvr3.Finalizers = []string{rvcontroller.QuorumReconfFinalizer}
+				rvr3.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
 				Expect(cl.Create(ctx, rvr3)).To(Succeed())
 
 				_, err := rec.Reconcile(ctx, reconcile.Request{
@@ -484,7 +484,7 @@ var _ = Describe("Reconciler", func() {
 				// Create RVR with only quorum-reconf finalizer and DeletionTimestamp
 				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
-				rvr1.Finalizers = []string{rvcontroller.QuorumReconfFinalizer}
+				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
 				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
