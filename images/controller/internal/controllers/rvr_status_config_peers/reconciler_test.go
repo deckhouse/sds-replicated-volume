@@ -212,7 +212,6 @@ var _ = Describe("Reconciler", func() {
 				firstRvr = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
-					Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 				}
 				Expect(controllerutil.SetControllerReference(rv, &firstRvr, scheme)).To(Succeed())
 			})
@@ -266,7 +265,6 @@ var _ = Describe("Reconciler", func() {
 							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2"},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 						}
 						Expect(controllerutil.SetControllerReference(rv, &secondRvr, scheme)).To(Succeed())
 					})
@@ -391,17 +389,14 @@ var _ = Describe("Reconciler", func() {
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
-						Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
 						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
-						Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
 						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-3"},
-						Status:     &v1alpha3.ReplicatedVolumeReplicaStatus{Config: &v1alpha3.DRBDConfig{}},
 					},
 				}
 
