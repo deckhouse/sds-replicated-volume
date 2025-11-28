@@ -87,6 +87,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return reconcile.Result{}, nil
 	}
 
+	// Count RVRs that are being deleted
+	deletingCount := countDeletingReplicas(rvrMap)
+	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", deletingCount)
+
 	// Need to wait until RVR becomes Ready.
 	if len(rvrMap) == 1 {
 		for _, rvr := range rvrMap {
@@ -166,6 +170,17 @@ func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1al
 	}
 
 	return rvrMap, nil
+}
+
+// countDeletingReplicas counts the number of ReplicatedVolumeReplicas that have DeletionTimestamp != nil.
+func countDeletingReplicas(rvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) int {
+	count := 0
+	for _, rvr := range rvrMap {
+		if rvr.DeletionTimestamp != nil {
+			count++
+		}
+	}
+	return count
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume
