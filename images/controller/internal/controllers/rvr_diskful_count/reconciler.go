@@ -131,6 +131,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	// warning message if more non-deleted RVRs found than needed
 	if nonDeletedNumberOfReplicas > neededNumberOfReplicas {
 		log.V(1).Info("More non-deleted ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", nonDeletedNumberOfReplicas, "neededNumberOfReplicas", neededNumberOfReplicas)
+
+		// TODO: should we set a condition here that there are more replicas than needed?
+
 		return reconcile.Result{}, nil
 	}
 
@@ -147,8 +150,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 				return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 			}
 		}
+
+		// Set condition that required number of replicas is reached
+		err = setDiskfulReplicaCountReachedCondition(
+			ctx, r.cl, log, rv,
+			metav1.ConditionTrue,
+			"CreatedRequiredNumberOfReplicas",
+			fmt.Sprintf("Created %d replica(s), required number of diskful replicas is reached: %d", creatingNumberOfReplicas, neededNumberOfReplicas),
+		)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+		}
 	} else {
 		log.Info("No replicas to create")
+		// Set condition that required number of replicas is reached
+		err = setDiskfulReplicaCountReachedCondition(
+			ctx, r.cl, log, rv,
+			metav1.ConditionTrue,
+			"RequiredNumberOfReplicasIsAvailable",
+			fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
+		)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+		}
 	}
 
 	return reconcile.Result{}, nil
