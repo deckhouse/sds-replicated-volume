@@ -77,7 +77,7 @@ func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTime
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rvName,
-			Diskless:             false,
+			Type:                 "Diskful",
 		},
 	}
 
@@ -214,7 +214,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.List(ctx, rvrList)).To(Succeed())
 			Expect(rvrList.Items).To(HaveLen(1))
 			Expect(rvrList.Items[0].Spec.ReplicatedVolumeName).To(Equal("test-rv"))
-			Expect(rvrList.Items[0].Spec.Diskless).To(BeFalse())
+			Expect(rvrList.Items[0].Spec.Type).To(Equal("Diskful"))
 
 			// Verify condition was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
