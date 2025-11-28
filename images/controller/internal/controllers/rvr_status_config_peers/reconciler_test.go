@@ -25,8 +25,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	gomegatypes "github.com/onsi/gomega/types"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	gomegatypes "github.com/onsi/gomega/types"     // cspell:words gomegatypes
+	apierrors "k8s.io/apimachinery/pkg/api/errors" // cspell:words apierrors
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil" // cspell:words controllerutil
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -45,26 +45,9 @@ import (
 // HaveNoPeers is a Gomega matcher that checks a single RVR has no peers
 func HaveNoPeers() gomegatypes.GomegaMatcher {
 	return SatisfyAny(
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) *v1alpha3.ReplicatedVolumeReplicaStatus {
-			return rvr.Status
-		}, BeNil()),
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) *v1alpha3.DRBDConfig {
-			if rvr.Status == nil {
-				return nil
-			}
-			return rvr.Status.Config
-		}, BeNil()),
-		SatisfyAll(
-			WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-				return rvr.Status != nil && rvr.Status.Config != nil
-			}, BeTrue()),
-			WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
-				if rvr.Status == nil || rvr.Status.Config == nil {
-					return nil
-				}
-				return rvr.Status.Config.Peers
-			}, BeEmpty()),
-		),
+		HaveField("Status", BeNil()),
+		HaveField("Status.Config", BeNil()),
+		HaveField("Status.Config.Peers", BeEmpty()),
 	)
 }
 
@@ -105,7 +88,7 @@ func HaveAllPeersSetForAll() gomegatypes.GomegaMatcher {
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and Config with NodeId and Address
-func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeName string, nodeId uint, address v1alpha3.Address) {
+func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeId uint, address v1alpha3.Address) {
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
@@ -263,7 +246,7 @@ var _ = Describe("Reconciler", func() {
 
 			Context("if rvr-1 is ready", func() {
 				BeforeEach(func() {
-					makeReady(&firstRvr, "node-1", 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+					makeReady(&firstRvr, 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
 				})
 
 				It("should have no peers", func(ctx SpecContext) {
@@ -303,7 +286,7 @@ var _ = Describe("Reconciler", func() {
 
 					Context("if rvr-2 ready", func() {
 						BeforeEach(func() {
-							makeReady(&secondRvr, "node-2", 2, v1alpha3.Address{IPv4: "192.168.1.4", Port: 7001})
+							makeReady(&secondRvr, 2, v1alpha3.Address{IPv4: "192.168.1.4", Port: 7001})
 						})
 
 						It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
@@ -435,7 +418,7 @@ var _ = Describe("Reconciler", func() {
 					if len(rvrList) == 0 {
 						Skip("empty rvrList")
 					}
-					makeReady(&rvrList[0], "node-1", uint(1), v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+					makeReady(&rvrList[0], uint(1), v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
 				})
 
 				It("should not have any peers", func(ctx SpecContext) {
@@ -450,7 +433,6 @@ var _ = Describe("Reconciler", func() {
 							By(fmt.Sprintf("Making ready %s", rvr.Name))
 							makeReady(
 								&rvr,
-								rvr.Spec.NodeName,
 								uint(i),
 								v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
 							)
@@ -471,7 +453,6 @@ var _ = Describe("Reconciler", func() {
 					for i := range rvrList {
 						makeReady(
 							&rvrList[i],
-							fmt.Sprintf("node-%d", i+1),
 							uint(i),
 							v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
 						)
