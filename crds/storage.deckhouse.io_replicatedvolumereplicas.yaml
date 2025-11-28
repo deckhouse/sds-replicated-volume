@@ -73,16 +73,10 @@ spec:
             type: object
           spec:
             properties:
-              diskless:
-                default: false
-                type: boolean
               nodeName:
                 maxLength: 253
                 minLength: 1
                 type: string
-                x-kubernetes-validations:
-                - message: nodeName is immutable
-                  rule: self == oldSelf
               replicatedVolumeName:
                 maxLength: 127
                 minLength: 1
@@ -91,12 +85,23 @@ spec:
                 x-kubernetes-validations:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
+              type:
+                enum:
+                - Diskful
+                - Access
+                - TieBreaker
+                type: string
             required:
-            - nodeName
             - replicatedVolumeName
             type: object
           status:
             properties:
+              actualType:
+                enum:
+                - Diskful
+                - Access
+                - TieBreaker
+                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -156,248 +161,258 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              config:
-                properties:
-                  address:
-                    properties:
-                      ipv4:
-                        pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-                        type: string
-                      port:
-                        maximum: 65535
-                        minimum: 1025
-                        type: integer
-                    required:
-                    - ipv4
-                    - port
-                    type: object
-                  disk:
-                    maxLength: 256
-                    pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                    type: string
-                  nodeId:
-                    maximum: 7
-                    minimum: 0
-                    type: integer
-                  peers:
-                    additionalProperties:
-                      properties:
-                        address:
-                          properties:
-                            ipv4:
-                              pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
-                              type: string
-                            port:
-                              maximum: 65535
-                              minimum: 1025
-                              type: integer
-                          required:
-                          - ipv4
-                          - port
-                          type: object
-                        diskless:
-                          default: false
-                          type: boolean
-                        nodeId:
-                          maximum: 7
-                          minimum: 0
-                          type: integer
-                      required:
-                      - address
-                      - nodeId
-                      type: object
-                    type: object
-                  primary:
-                    type: boolean
-                type: object
               drbd:
                 properties:
-                  connections:
-                    items:
-                      properties:
-                        apInFlight:
-                          type: integer
-                        congested:
-                          type: boolean
-                        connectionState:
-                          type: string
-                        name:
-                          type: string
-                        paths:
-                          items:
-                            properties:
-                              established:
-                                type: boolean
-                              remoteHost:
+                  actual:
+                    properties:
+                      disk:
+                        maxLength: 256
+                        pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
+                        type: string
+                    type: object
+                  config:
+                    properties:
+                      address:
+                        properties:
+                          ipv4:
+                            pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                            type: string
+                          port:
+                            maximum: 65535
+                            minimum: 1025
+                            type: integer
+                        required:
+                        - ipv4
+                        - port
+                        type: object
+                      disk:
+                        maxLength: 256
+                        pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
+                        type: string
+                      nodeId:
+                        maximum: 7
+                        minimum: 0
+                        type: integer
+                      peers:
+                        additionalProperties:
+                          properties:
+                            address:
+                              properties:
+                                ipv4:
+                                  pattern: ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$
+                                  type: string
+                                port:
+                                  maximum: 65535
+                                  minimum: 1025
+                                  type: integer
+                              required:
+                              - ipv4
+                              - port
+                              type: object
+                            diskless:
+                              default: false
+                              type: boolean
+                            nodeId:
+                              maximum: 7
+                              minimum: 0
+                              type: integer
+                          required:
+                          - address
+                          - nodeId
+                          type: object
+                        type: object
+                      primary:
+                        type: boolean
+                    type: object
+                  status:
+                    properties:
+                      connections:
+                        items:
+                          properties:
+                            apInFlight:
+                              type: integer
+                            congested:
+                              type: boolean
+                            connectionState:
+                              type: string
+                            name:
+                              type: string
+                            paths:
+                              items:
                                 properties:
-                                  address:
+                                  established:
+                                    type: boolean
+                                  remoteHost:
+                                    properties:
+                                      address:
+                                        type: string
+                                      family:
+                                        type: string
+                                      port:
+                                        type: integer
+                                    required:
+                                    - address
+                                    - family
+                                    - port
+                                    type: object
+                                  thisHost:
+                                    properties:
+                                      address:
+                                        type: string
+                                      family:
+                                        type: string
+                                      port:
+                                        type: integer
+                                    required:
+                                    - address
+                                    - family
+                                    - port
+                                    type: object
+                                required:
+                                - established
+                                - remoteHost
+                                - thisHost
+                                type: object
+                              type: array
+                            peerDevices:
+                              items:
+                                properties:
+                                  hasOnlineVerifyDetails:
+                                    type: boolean
+                                  hasSyncDetails:
+                                    type: boolean
+                                  outOfSync:
+                                    type: integer
+                                  peerClient:
+                                    type: boolean
+                                  peerDiskState:
                                     type: string
-                                  family:
+                                  pending:
+                                    type: integer
+                                  percentInSync:
                                     type: string
-                                  port:
+                                  replicationState:
+                                    type: string
+                                  resyncSuspended:
+                                    type: string
+                                  unacked:
+                                    type: integer
+                                  volume:
                                     type: integer
                                 required:
-                                - address
-                                - family
-                                - port
+                                - hasOnlineVerifyDetails
+                                - hasSyncDetails
+                                - outOfSync
+                                - peerClient
+                                - peerDiskState
+                                - pending
+                                - percentInSync
+                                - replicationState
+                                - resyncSuspended
+                                - unacked
+                                - volume
                                 type: object
-                              thisHost:
-                                properties:
-                                  address:
-                                    type: string
-                                  family:
-                                    type: string
-                                  port:
-                                    type: integer
-                                required:
-                                - address
-                                - family
-                                - port
-                                type: object
-                            required:
-                            - established
-                            - remoteHost
-                            - thisHost
-                            type: object
-                          type: array
-                        peerDevices:
-                          items:
-                            properties:
-                              hasOnlineVerifyDetails:
-                                type: boolean
-                              hasSyncDetails:
-                                type: boolean
-                              outOfSync:
-                                type: integer
-                              peerClient:
-                                type: boolean
-                              peerDiskState:
-                                type: string
-                              pending:
-                                type: integer
-                              percentInSync:
-                                type: string
-                              replicationState:
-                                type: string
-                              resyncSuspended:
-                                type: string
-                              unacked:
-                                type: integer
-                              volume:
-                                type: integer
-                            required:
-                            - hasOnlineVerifyDetails
-                            - hasSyncDetails
-                            - outOfSync
-                            - peerClient
-                            - peerDiskState
-                            - pending
-                            - percentInSync
-                            - replicationState
-                            - resyncSuspended
-                            - unacked
-                            - volume
-                            type: object
-                          type: array
-                        peerNodeId:
-                          type: integer
-                        peerRole:
-                          type: string
-                        rsInFlight:
-                          type: integer
-                        tls:
-                          type: boolean
-                      required:
-                      - apInFlight
-                      - congested
-                      - connectionState
-                      - name
-                      - paths
-                      - peerDevices
-                      - peerNodeId
-                      - peerRole
-                      - rsInFlight
-                      - tls
-                      type: object
-                    type: array
-                  devices:
-                    items:
-                      properties:
-                        alWrites:
-                          type: integer
-                        bmWrites:
-                          type: integer
-                        client:
-                          type: boolean
-                        diskState:
-                          type: string
-                        lowerPending:
-                          type: integer
-                        minor:
-                          type: integer
-                        open:
-                          type: boolean
-                        quorum:
-                          type: boolean
-                        read:
-                          type: integer
-                        size:
-                          type: integer
-                        upperPending:
-                          type: integer
-                        volume:
-                          type: integer
-                        written:
-                          type: integer
-                      required:
-                      - alWrites
-                      - bmWrites
-                      - client
-                      - diskState
-                      - lowerPending
-                      - minor
-                      - open
-                      - quorum
-                      - read
-                      - size
-                      - upperPending
-                      - volume
-                      - written
-                      type: object
-                    type: array
-                  forceIOFailures:
-                    type: boolean
-                  name:
-                    type: string
-                  nodeId:
-                    type: integer
-                  role:
-                    type: string
-                  suspended:
-                    type: boolean
-                  suspendedFencing:
-                    type: boolean
-                  suspendedNoData:
-                    type: boolean
-                  suspendedQuorum:
-                    type: boolean
-                  suspendedUser:
-                    type: boolean
-                  writeOrdering:
-                    type: string
-                required:
-                - connections
-                - devices
-                - forceIOFailures
-                - name
-                - nodeId
-                - role
-                - suspended
-                - suspendedFencing
-                - suspendedNoData
-                - suspendedQuorum
-                - suspendedUser
-                - writeOrdering
+                              type: array
+                            peerNodeId:
+                              type: integer
+                            peerRole:
+                              type: string
+                            rsInFlight:
+                              type: integer
+                            tls:
+                              type: boolean
+                          required:
+                          - apInFlight
+                          - congested
+                          - connectionState
+                          - name
+                          - paths
+                          - peerDevices
+                          - peerNodeId
+                          - peerRole
+                          - rsInFlight
+                          - tls
+                          type: object
+                        type: array
+                      devices:
+                        items:
+                          properties:
+                            alWrites:
+                              type: integer
+                            bmWrites:
+                              type: integer
+                            client:
+                              type: boolean
+                            diskState:
+                              type: string
+                            lowerPending:
+                              type: integer
+                            minor:
+                              type: integer
+                            open:
+                              type: boolean
+                            quorum:
+                              type: boolean
+                            read:
+                              type: integer
+                            size:
+                              type: integer
+                            upperPending:
+                              type: integer
+                            volume:
+                              type: integer
+                            written:
+                              type: integer
+                          required:
+                          - alWrites
+                          - bmWrites
+                          - client
+                          - diskState
+                          - lowerPending
+                          - minor
+                          - open
+                          - quorum
+                          - read
+                          - size
+                          - upperPending
+                          - volume
+                          - written
+                          type: object
+                        type: array
+                      forceIOFailures:
+                        type: boolean
+                      name:
+                        type: string
+                      nodeId:
+                        type: integer
+                      role:
+                        type: string
+                      suspended:
+                        type: boolean
+                      suspendedFencing:
+                        type: boolean
+                      suspendedNoData:
+                        type: boolean
+                      suspendedQuorum:
+                        type: boolean
+                      suspendedUser:
+                        type: boolean
+                      writeOrdering:
+                        type: string
+                    required:
+                    - connections
+                    - devices
+                    - forceIOFailures
+                    - name
+                    - nodeId
+                    - role
+                    - suspended
+                    - suspendedFencing
+                    - suspendedNoData
+                    - suspendedQuorum
+                    - suspendedUser
+                    - writeOrdering
+                    type: object
                 type: object
             type: object
         required:

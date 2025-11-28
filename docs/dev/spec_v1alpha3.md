@@ -1,6 +1,8 @@
 - [Основные положения](#основные-положения)
   - [Схема именования акторов](#схема-именования-акторов)
   - [Условное обозначение триггеров](#условное-обозначение-триггеров)
+  - [Алгоритмы](#алгоритмы)
+    - [Типы реплик и целевое количество реплик](#типы-реплик-и-целевое-количество-реплик)
   - [Константы](#константы)
     - [RVR Ready условия](#rvr-ready-условия)
     - [RV Ready условия](#rv-ready-условия)
@@ -37,16 +39,19 @@
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4)
-  - [`rvr-node-selector-controller`](#rvr-node-selector-controller)
+  - [`rvr-scheduling-controller`](#rvr-scheduling-controller)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
   - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
-  - [`rvr-tie-breaker-controller`](#rvr-tie-breaker-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
+  - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
   - [`rv-publish-controller`](#rv-publish-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
   - [`rvr-volume-controller`](#rvr-volume-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 4\]](#статус-tbd--priority-5--complexity-4)
   - [`rvr-gc-controller`](#rvr-gc-controller)
   - [`rv-status-config-controller`](#rv-status-config-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
@@ -58,6 +63,10 @@
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
 - [Сценарии](#сценарии)
   - [Ручное создание реплицируемого тома](#ручное-создание-реплицируемого-тома)
+  - [](#)
+  - [](#-1)
+  - [](#-2)
+  - [](#-3)
 
 # Основные положения
 
@@ -73,6 +82,38 @@
  - `CREATE` - событие создания и синхронизации ресурса; синхронизация происходит для каждого ресурса, при старте контроллера, а также на регулярной основе (раз в 20 часов)
  - `UPDATE` - событие обновления ресурса (в т.ч. проставление `metadata.deletionTimestamp`)
  - `DELETE` - событие окончательного удаления ресурса, происходит после снятия последнего финализатора (может быть потеряно в случае недоступности контроллера)
+
+## Алгоритмы
+
+### Типы реплик и целевое количество реплик
+
+Существуют три вида реплик по предназначению:
+ - \[DF\] diskful - чтобы воспользоваться диском
+ - \[DL-AP\] diskless (access point) - чтобы воспользоваться быстрым доступом к данным, не ожидая долгой синхронизации, либо при отсутствии диска
+ - \[DL-TB\] diskless (tie-breaker) - чтобы участвовать в кворуме при чётном количестве других реплик
+
+В зависимости от значения свойства `ReplicatedStorageClass` `spec.replication`, количество реплик разных типов следующее:
+ - `None`
+   - \[DF\]: 1
+   - \[DL-AP\]: 0 / 1 / 2
+ - `Availability`
+   - \[DF\]: 2
+   - \[DL-TB\]: 1 / 0 / 1
+   - \[DL-AP\]: 0 / 1 / 2
+ - `ConsistencyAndAvailability`
+   - \[DF\]: 3
+   - \[DL-AP\]: 1
+
+Для миграции надо две primary.
+
+Виртуалка может подключится к TB либо запросить себе AP. 
+
+В случае если `spec.volumeAcess!=Local` AP не может быть Primary.
+
+TB в любой ситуации поддерживает нечетное, и сама может превратится в AP. Превращение происходит с помощью удаления.
+
+TODO
+
 
 ## Константы
 Константы - это значения, которые должны быть определены в коде во время компиляции программы.
@@ -349,9 +390,11 @@
     - `metadata.ownerReferences` указывает на RV по имени `metadata.name`
     - `rv.status.conditions[type=DiskfulReplicaCountReached]`
 
-## `rvr-node-selector-controller`
+## `rvr-scheduling-controller`
 
 ### Цель
+
+
 
 Исключать закордоненные ноды (см. `rvr-node-cordon-controller`)
 
@@ -411,12 +454,29 @@
 ### Вывод
   - `rv.status.config.deviceMinor`
 
-## `rvr-tie-breaker-controller`
+## `rvr-tie-breaker-count-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 2]
+
 ### Цель
+TODO: `TieBreaker`, `Access`, `Diskful`
+
+Создавать и удалять RVR с `rvr.spec.type==TieBreaker`, чтобы держать нечётное количество реплик с учётом зональности: 
+
+ - если кол-во реплик чётное и ни одна из них не является `rvr.spec.type==tiebreaker`, то надо создать
+ - если количество реплик чётное и две из них tiebreaker, то удалить ту реплику, в зоне которой больше всего реплик
+ - если кол-во реплик чётное и одна из них является `rvr.spec.type==tiebreaker`, то надо
+   - создать вторую, если включены зоны (`rsc.spec.topology=TransZonal`)
+   - иначе - удалить
+
+См. [Целевое количество реплик](#типы-реплик-и-целевое-количество-реплик)
+
+TODO: пока не решили как предотвратить переезд с зоны, которая нужна для транзональности.
 
 ### Триггер
-### Вывод
 
+### Вывод
+  - Новая rvr с `rvr.spec.diskless==true`
 
 ## `rv-publish-controller`
 
@@ -442,12 +502,22 @@
 
 ## `rvr-volume-controller`
 
-### Цель 
+### Статус: [TBD | priority: 5 | complexity: 4]
 
-### Триггер 
-  - 
+### Цель
+1. Обеспечить наличие LLV для каждой реплики, у которой
+   - `rvr.spec.type==Diskful`
+   - `rvr.metadata.deletionTimestamp==nil`
+  Всем LLV под управлением проставляется `metadata.ownerReference`, указывающий на RVR.
+2. Обеспечить проставление значения в свойства `rvr.status.lvmLogicalVolumeName`, указывающее на соответствующую LLV, готовую к использованию.
+3. Обеспечить отсутствие LLV диска у RVR с `rvr.spec.type!=Diskful`, но только когда
+фактический тип (`rvr.status.actualType`) соответствует целевому `rvr.spec.type`.
+4. Обеспечить сброс свойства `rvr.status.lvmLogicalVolumeName` после удаления LLV.
+
 ### Вывод 
-  - 
+  - Новое `llv`
+  - Обновление для уже существующих: `llv.metadata.ownerReference`
+  - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
 ## `rvr-gc-controller`
 
@@ -489,7 +559,7 @@
 
 Работоспособный кластер - это RV, у которого все [RV Ready условия](#rv-ready-условия) достигнуты, без учёта условия `QuorumConfigured`.
 
-До поднятия кворума нужно поставить финализатор на каждую RVR. Также необходимо обработать проставление rvr.metadata.deletiontimestamp таким образом, чтобы финализатор с RVR был снят после уменьшения кворума.
+До поднятия кворума нужно поставить финализатор на каждую RVR. Также необходимо обработать проставление rvr.`metadata.deletiontimestamp` таким образом, чтобы финализатор с RVR был снят после фактического уменьшения кворума.
 
 Процесс и результат работы контроллера должен быть отражён в `rv.status.conditions[type=QuorumConfigured]`
 
@@ -608,3 +678,84 @@ if M > 1 {
 7. На узле срабатывает `rvr-create-controller`
    1. Выполняются необходимые операции в drbd (drbdadm create-md, up, adjust, primary --force)
 
+##
+- Zone A
+  - DF1 (Primary)
+- Zone B
+  - DF2
+- Zone C
+  - TB1
+
+q=2
+qmr=2
+
+
+##
+- Zone A
+  - DF1
+  - TB2
+- Zone B
+  - DF2
+  - AP1 (Primary)
+- Zone C
+  - TB1
+
+q=3
+
+qmr=2
+
+
+##
+- Zone A
+  - DF1
+  - TB2
+- Zone B
+  - DF2
+  <!-- - AP1 (Primary) -->
+- Zone C
+  - TB1
+
+
+##
+- Zone A
+  - DF1
+  - TB1
+- Zone B
+  - DF2
+  - TB2
+- Zone C
+  - DF3
+  - AP1
+  - AP2
+
+3
+2
+
+C=3
+B=1
+A=1
+
+- требование: failure domain=node
+- требование: failure domain=zone (только когда TransZonal)
+- требование: отказ любого одного FD не должен приводить к потере кворума
+- требование: отказ большинства FD должен приводить к потере кворума
+- поэтому надо тай-брейкерами доводить количество нод на всех FD до минимального числа, чтобы осблюсти:
+  -  отличие не больше чем на 1
+  -  общее количество нечётное
+
+
+
+Правильные значения:
+
+N - все реплики
+M - diskful реплики
+
+```
+if M > 1 {
+  var quorum byte = max(2, N/2 + 1)
+  var qmr byte = max(2, M/2 +1)
+} else {
+  var quorum byte = 0
+  var qmr byte = 0
+}
+```
