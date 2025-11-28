@@ -70,36 +70,43 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if isRvReady(&rv) {
-		rvrList, err := r.getRvrList(&ctx, &rv)
-		if err != nil {
-			log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
-			return reconcile.Result{}, err
-		}
-
-		diskfulCount, all := countDiskfulAndDisklessReplicas(&rvrList)
-		log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
-
-		cnt, err := r.setFinalizers(&ctx, &rvrList)
-		log.Info("added finalizers to rvr", "finalizer", finalizer, "count", cnt)
-		if err != nil {
-			log.Error(err, "unable to add finalizers")
-			return reconcile.Result{}, err
-		}
-
-		if err := r.quorumPatch(&ctx, &rv, diskfulCount, all); err != nil {
-			log.Error(err, "unable to fetch ReplicatedVolume")
-			return reconcile.Result{}, client.IgnoreNotFound(err)
-		}
-
-		cnt, err = r.unsetFinalizers(&ctx, &rvrList)
-		log.Info("remove finalizers from rvr", "finalizer", finalizer, "count", cnt)
-		if err != nil {
-			log.Error(err, "unable to remove finalizers")
+		if err := r.recalculateQuorum(&ctx, &rv, log); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
 
 	return reconcile.Result{}, nil
+}
+
+func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.ReplicatedVolume, log logr.Logger) error {
+	rvrList, err := r.getRvrList(ctx, rv)
+	if err != nil {
+		log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
+		return err
+	}
+
+	diskfulCount, all := countDiskfulAndDisklessReplicas(&rvrList)
+	log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
+
+	cnt, err := r.setFinalizers(ctx, &rvrList)
+	log.Info("added finalizers to rvr", "finalizer", finalizer, "count", cnt)
+	if err != nil {
+		log.Error(err, "unable to add finalizers")
+		return err
+	}
+
+	if err := r.quorumPatch(ctx, rv, diskfulCount, all); err != nil {
+		log.Error(err, "unable to fetch ReplicatedVolume")
+		return client.IgnoreNotFound(err)
+	}
+
+	cnt, err = r.unsetFinalizers(ctx, &rvrList)
+	log.Info("remove finalizers from rvr", "finalizer", finalizer, "count", cnt)
+	if err != nil {
+		log.Error(err, "unable to remove finalizers")
+		return err
+	}
+	return nil
 }
 
 func (r *Reconciler) getRvrList(ctx *context.Context, rv *v1alpha3.ReplicatedVolume) (v1alpha3.ReplicatedVolumeReplicaList, error) {
@@ -181,7 +188,7 @@ func (r *Reconciler) quorumPatch(
 		Type:               v1alpha3.ConditionTypeQuorumConfigured,
 		Status:             metav1.ConditionTrue,
 		LastTransitionTime: metav1.Now(),
-		Reason:             "QuorumConfigured",
+		Reason:             "QuorumConfigured", // TODO: change reason
 		Message:            "Quorum configuration completed",
 	})
 
