@@ -5,39 +5,33 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/go-logr/logr"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
 )
 
-func newFakeClient(objs ...client.Object) client.Client {
-	s := scheme.Scheme
-	_ = v1alpha3.AddToScheme(s)
+func newFakeClient() client.Client {
+	scheme := runtime.NewScheme()
+	_ = v1alpha3.AddToScheme(scheme)
+
 	return fake.NewClientBuilder().
-		WithScheme(s).
+		WithScheme(scheme).
 		WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
-		WithObjects(objs...).
 		Build()
 }
 
-func newReconciler(cl client.Client) *rvstatusconfigsharedsecret.Reconciler {
-	return &rvstatusconfigsharedsecret.Reconciler{
-		Cl:     cl,
-		Log:    slog.Default(),
-		LogAlt: logr.Discard(),
-	}
-}
-
-func createRV(name string) *v1alpha3.ReplicatedVolume { //nolint:unparam // name is used for different test cases
+//nolint:unparam // name is used for different test cases
+func createRV(name string) *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -83,203 +77,154 @@ func parseQuantity(s string) resource.Quantity {
 	return q
 }
 
-func TestReconcile_GenerateSharedSecret_Initial(t *testing.T) {
-	ctx := context.Background()
-	rv := createRV("test-rv")
-	cl := newFakeClient(rv)
-	rec := newReconciler(cl)
+var _ = Describe("Reconciler", func() {
+	var cl client.Client
+	var rec *rvstatusconfigsharedsecret.Reconciler
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-rv"},
-	}
+	BeforeEach(func() {
+		cl = newFakeClient()
+		rec = &rvstatusconfigsharedsecret.Reconciler{
+			Cl:     cl,
+			Log:    slog.Default(),
+			LogAlt: GinkgoLogr,
+		}
+	})
 
-	result, err := rec.Reconcile(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.RequeueAfter > 0 {
-		t.Error("unexpected requeue")
-	}
+	It("generates shared secret initially", func(ctx context.Context) {
+		// Arrange
+		rv := createRV("test-rv")
+		Expect(cl.Create(ctx, rv)).To(Succeed())
 
-	// Verify shared secret was generated
-	updatedRV := &v1alpha3.ReplicatedVolume{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV); err != nil {
-		t.Fatalf("failed to get RV: %v", err)
-	}
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-rv"},
+		})
 
-	if updatedRV.Status == nil || updatedRV.Status.Config == nil {
-		t.Fatal("status.config is nil")
-	}
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
 
-	if updatedRV.Status.Config.SharedSecret == "" {
-		t.Error("sharedSecret was not generated")
-	}
+		// Verify shared secret was generated
+		updatedRV := &v1alpha3.ReplicatedVolume{}
+		Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+		Expect(updatedRV.Status).NotTo(BeNil())
+		Expect(updatedRV.Status.Config).NotTo(BeNil())
+		Expect(updatedRV.Status.Config.SharedSecret).NotTo(BeEmpty())
+		Expect(updatedRV.Status.Config.SharedSecretAlg).To(Equal("sha256"))
 
-	if updatedRV.Status.Config.SharedSecretAlg != "sha256" {
-		t.Errorf("expected algorithm sha256, got %s", updatedRV.Status.Config.SharedSecretAlg)
-	}
+		// Verify condition
+		cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Reason).To(Equal("AlgorithmSelected"))
+	})
 
-	// Verify condition
-	cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
-	if cond == nil {
-		t.Fatal("SharedSecretAlgorithmSelected condition not found")
-	}
-	if cond.Status != metav1.ConditionTrue {
-		t.Errorf("expected condition status True, got %s", cond.Status)
-	}
-	if cond.Reason != "AlgorithmSelected" {
-		t.Errorf("expected reason AlgorithmSelected, got %s", cond.Reason)
-	}
-}
+	It("switches to next algorithm when UnsupportedAlgorithm error occurs", func(ctx context.Context) {
+		// Arrange
+		rv := createRV("test-rv")
+		rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			Config: &v1alpha3.DRBDResourceConfig{
+				SharedSecret:    "test-secret",
+				SharedSecretAlg: "sha256",
+			},
+		}
+		Expect(cl.Create(ctx, rv)).To(Succeed())
 
-func TestReconcile_HandleUnsupportedAlgorithm_SwitchToNext(t *testing.T) {
-	ctx := context.Background()
-	rv := createRV("test-rv")
-	rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-		Config: &v1alpha3.DRBDResourceConfig{
-			SharedSecret:    "test-secret",
-			SharedSecretAlg: "sha256",
-		},
-	}
+		rvr := createRVRWithUnsupportedAlgorithm("test-rvr", "test-rv", "node-1")
+		Expect(cl.Create(ctx, rvr)).To(Succeed())
 
-	rvr := createRVRWithUnsupportedAlgorithm("test-rvr", "test-rv", "node-1")
-	cl := newFakeClient(rv, rvr)
-	rec := newReconciler(cl)
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-rv"},
+		})
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-rv"},
-	}
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
 
-	result, err := rec.Reconcile(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.RequeueAfter > 0 {
-		t.Error("unexpected requeue")
-	}
+		// Verify algorithm was switched
+		updatedRV := &v1alpha3.ReplicatedVolume{}
+		Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+		Expect(updatedRV.Status.Config.SharedSecretAlg).To(Equal("sha1"))
+		Expect(updatedRV.Status.Config.SharedSecret).NotTo(Equal("test-secret"))
 
-	// Verify algorithm was switched
-	updatedRV := &v1alpha3.ReplicatedVolume{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV); err != nil {
-		t.Fatalf("failed to get RV: %v", err)
-	}
+		// Verify condition
+		cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+	})
 
-	if updatedRV.Status.Config.SharedSecretAlg != "sha1" {
-		t.Errorf("expected algorithm sha1, got %s", updatedRV.Status.Config.SharedSecretAlg)
-	}
+	It("sets condition to False when all algorithms are exhausted", func(ctx context.Context) {
+		// Arrange
+		rv := createRV("test-rv")
+		rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			Config: &v1alpha3.DRBDResourceConfig{
+				SharedSecret:    "test-secret",
+				SharedSecretAlg: "sha1", // Last algorithm
+			},
+		}
+		Expect(cl.Create(ctx, rv)).To(Succeed())
 
-	if updatedRV.Status.Config.SharedSecret == "test-secret" {
-		t.Error("shared secret should be regenerated")
-	}
+		rvr := createRVRWithUnsupportedAlgorithm("test-rvr", "test-rv", "node-1")
+		Expect(cl.Create(ctx, rvr)).To(Succeed())
 
-	// Verify condition
-	cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
-	if cond == nil {
-		t.Fatal("SharedSecretAlgorithmSelected condition not found")
-	}
-	if cond.Status != metav1.ConditionTrue {
-		t.Errorf("expected condition status True, got %s", cond.Status)
-	}
-}
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-rv"},
+		})
 
-func TestReconcile_AllAlgorithmsExhausted(t *testing.T) {
-	ctx := context.Background()
-	rv := createRV("test-rv")
-	rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-		Config: &v1alpha3.DRBDResourceConfig{
-			SharedSecret:    "test-secret",
-			SharedSecretAlg: "sha1", // Last algorithm
-		},
-	}
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
 
-	rvr := createRVRWithUnsupportedAlgorithm("test-rvr", "test-rv", "node-1")
-	cl := newFakeClient(rv, rvr)
-	rec := newReconciler(cl)
+		// Verify condition is set to False
+		updatedRV := &v1alpha3.ReplicatedVolume{}
+		Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-rv"},
-	}
+		cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Reason).To(Equal("UnableToSelectSharedSecretAlgorithm"))
+	})
 
-	result, err := rec.Reconcile(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.RequeueAfter > 0 {
-		t.Error("unexpected requeue")
-	}
+	It("does nothing when no UnsupportedAlgorithm errors are present", func(ctx context.Context) {
+		// Arrange
+		rv := createRV("test-rv")
+		rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			Config: &v1alpha3.DRBDResourceConfig{
+				SharedSecret:    "test-secret",
+				SharedSecretAlg: "sha256",
+			},
+		}
+		Expect(cl.Create(ctx, rv)).To(Succeed())
 
-	// Verify condition is set to False
-	updatedRV := &v1alpha3.ReplicatedVolume{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV); err != nil {
-		t.Fatalf("failed to get RV: %v", err)
-	}
+		rvr := createRVR("test-rvr", "test-rv", "node-1")
+		Expect(cl.Create(ctx, rvr)).To(Succeed())
 
-	cond := meta.FindStatusCondition(updatedRV.Status.Conditions, "SharedSecretAlgorithmSelected")
-	if cond == nil {
-		t.Fatal("SharedSecretAlgorithmSelected condition not found")
-	}
-	if cond.Status != metav1.ConditionFalse {
-		t.Errorf("expected condition status False, got %s", cond.Status)
-	}
-	if cond.Reason != "UnableToSelectSharedSecretAlgorithm" {
-		t.Errorf("expected reason UnableToSelectSharedSecretAlgorithm, got %s", cond.Reason)
-	}
-}
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-rv"},
+		})
 
-func TestReconcile_NoUnsupportedAlgorithmErrors(t *testing.T) {
-	ctx := context.Background()
-	rv := createRV("test-rv")
-	rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-		Config: &v1alpha3.DRBDResourceConfig{
-			SharedSecret:    "test-secret",
-			SharedSecretAlg: "sha256",
-		},
-	}
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
 
-	rvr := createRVR("test-rvr", "test-rv", "node-1")
-	cl := newFakeClient(rv, rvr)
-	rec := newReconciler(cl)
+		// Verify nothing changed
+		updatedRV := &v1alpha3.ReplicatedVolume{}
+		Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+		Expect(updatedRV.Status.Config.SharedSecret).To(Equal("test-secret"))
+		Expect(updatedRV.Status.Config.SharedSecretAlg).To(Equal("sha256"))
+	})
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-rv"},
-	}
+	It("returns no error when ReplicatedVolume does not exist", func(ctx context.Context) {
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "non-existent"},
+		})
 
-	result, err := rec.Reconcile(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.RequeueAfter > 0 {
-		t.Error("unexpected requeue")
-	}
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
+	})
+})
 
-	// Verify nothing changed
-	updatedRV := &v1alpha3.ReplicatedVolume{}
-	if err := cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV); err != nil {
-		t.Fatalf("failed to get RV: %v", err)
-	}
-
-	if updatedRV.Status.Config.SharedSecret != "test-secret" {
-		t.Error("shared secret should not be changed")
-	}
-	if updatedRV.Status.Config.SharedSecretAlg != "sha256" {
-		t.Error("algorithm should not be changed")
-	}
-}
-
-func TestReconcile_NonExistentRV(t *testing.T) {
-	ctx := context.Background()
-	cl := newFakeClient()
-	rec := newReconciler(cl)
-
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "non-existent"},
-	}
-
-	result, err := rec.Reconcile(ctx, req)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if result.RequeueAfter > 0 {
-		t.Error("unexpected requeue")
-	}
+func TestReconciler(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "Reconciler Suite")
 }
