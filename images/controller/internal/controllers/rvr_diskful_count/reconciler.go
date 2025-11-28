@@ -25,6 +25,14 @@ type Request = reconcile.Request
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+// NewReconciler is a small helper constructor that is primarily useful for tests.
+func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+	return &Reconciler{
+		cl:  cl,
+		log: log,
+	}
+}
+
 func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Result, error) {
 	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 
