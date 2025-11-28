@@ -20,14 +20,17 @@ package rvr_status_config_peers_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	gomegatypes "github.com/onsi/gomega/types"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -133,6 +136,7 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+		interceptorFuncs = interceptor.Funcs{}
 	})
 
 	JustBeforeEach(func() {
@@ -153,6 +157,26 @@ var _ = Describe("Reconciler", func() {
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
+	})
+
+	When("Get fails with non-NotFound error", func() {
+		internalServerError := errors.New("internal server error")
+		BeforeEach(func() {
+			interceptorFuncs = interceptor.Funcs{
+				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+					if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						return internalServerError
+					}
+					return client.Get(ctx, key, obj, opts...)
+				},
+			}
+		})
+
+		It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
+			Expect(rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "test-rv"},
+			})).Error().To(MatchError(internalServerError))
+		})
 	})
 
 	When("ReplicatedVolume created", func() {
@@ -217,6 +241,26 @@ var _ = Describe("Reconciler", func() {
 				Expect(firstRvr).To(HaveNoPeers())
 			})
 
+			When("List fails", func() {
+				listError := errors.New("failed to list replicas")
+				BeforeEach(func() {
+					interceptorFuncs = interceptor.Funcs{
+						List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+								return listError
+							}
+							return client.List(ctx, list, opts...)
+						},
+					}
+				})
+
+				It("should fail if listing replicas failed", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, reconcile.Request{
+						NamespacedName: types.NamespacedName{Name: rv.Name},
+					})).Error().To(MatchError(listError))
+				})
+			})
+
 			Context("if rvr-1 is ready", func() {
 				BeforeEach(func() {
 					makeReady(&firstRvr, "node-1", 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
@@ -270,7 +314,52 @@ var _ = Describe("Reconciler", func() {
 							Expect([]v1alpha3.ReplicatedVolumeReplica{firstRvr, secondRvr}).To(HaveAllPeersSetForAll())
 						})
 
+						When("Patch fails with non-NotFound error", func() {
+							patchError := errors.New("failed to patch status")
+							BeforeEach(func() {
+								interceptorFuncs = interceptor.Funcs{
+									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+										if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+											if subResourceName == "status" {
+												return patchError
+											}
+										}
+										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+									},
+								}
+							})
+
+							It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, reconcile.Request{
+									NamespacedName: types.NamespacedName{Name: rv.Name},
+								})).Error().To(MatchError(patchError))
+							})
+						})
+
+						When("Patch fails with NotFound error", func() {
+							BeforeEach(func() {
+								interceptorFuncs = interceptor.Funcs{
+									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+										if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+											if subResourceName == "status" && rvr.Name == "rvr-1" {
+												return apierrors.NewNotFound(schema.GroupResource{Resource: "replicatedvolumereplicas"}, rvr.Name)
+											}
+										}
+										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+									},
+								}
+							})
+
+							It("should return no error if patching ReplicatedVolumeReplica status failed with NotFound error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, reconcile.Request{
+									NamespacedName: types.NamespacedName{Name: rv.Name},
+								})).To(Equal(reconcile.Result{}))
+							})
+						})
+
 						DescribeTableSubtree("if rvr-2 is",
+							Entry("without status", func() { secondRvr.Status = nil }),
+							Entry("without status.config", func() { secondRvr.Status.Config = nil }),
 							Entry("without address", func() { secondRvr.Status.Config.Address = nil }),
 							Entry("without nodeId", func() { secondRvr.Status.Config.NodeId = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
