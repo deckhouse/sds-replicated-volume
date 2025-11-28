@@ -65,18 +65,21 @@ err := builder.ControllerManagedBy(mgr).
 
 ---
 
-## 3. Не использовать сложные handlers без необходимости
+## 3. Использование handlers для маппинга событий
 
-**⚠️ Не используйте без веской причины:**
-- `handler.EnqueueRequestForOwner`
-- `handler.EnqueueRequestsFromMapFunc`
+**✅ Используйте в первую очередь:**
+- `.For(&ResourceType{})` - для основного ресурса, который контроллер управляет
+- `handler.EnqueueRequestForOwner` - когда нужно реагировать на изменения дочерних ресурсов, которые имеют owner reference на основной ресурс
+
+**⚠️ Используйте только если не хватает функционала выше:**
+- `handler.EnqueueRequestsFromMapFunc` - когда нужно маппить события одного ресурса на reconcile другого ресурса, но нет owner reference
+  - Пример: меняется ConfigMap, и надо реконсайлить поды с этим ConfigMap, при этом под owner'ом ConfigMap стать не может
+
+**❌ Не используйте на данном этапе:**
 - `handler.TypedFuncs` с кастомными типами
+- Другие сложные handlers - они для оптимизации производительности, используйте только после обсуждения с командой или если нет других вариантов. 
 
-**✅ Используйте по умолчанию:**
-- Простые event handlers через `predicate.Funcs` для фильтрации событий
-- `handler.EnqueueRequestForObject{}` если нужен простой enqueue (но обычно `.For()` достаточно)
-
-**Обоснование:** Сложные handlers добавляют ненужную сложность. В большинстве случаев достаточно `.For()` с `predicate.Funcs` для фильтрации. Используйте сложные handlers только если есть реальная необходимость (например, для обработки owner references или сложной логики маппинга).
+**Обоснование:** `.For()` и `EnqueueRequestForOwner` покрывают 99% случаев. `EnqueueRequestsFromMapFunc` используется только когда нет owner reference, но нужен маппинг событий. Остальные handlers добавляют сложность и используются только для оптимизации производительности.
 
 **Пример:**
 ```go
@@ -247,10 +250,11 @@ package mycontroller
 
 import (
 	"log/slog"
+
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	u "github.com/deckhouse/sds-common-lib/utils"
@@ -265,24 +269,15 @@ func BuildController(mgr manager.Manager) error {
 
 	err := builder.ControllerManagedBy(mgr).
 		Named("my_controller").
-		For(&v1alpha3.SomeResource{}).
-		WithEventFilter(predicate.Funcs{
-			CreateFunc: func(ce event.CreateEvent) bool {
-				obj := ce.Object.(*v1alpha3.SomeResource)
-				// логика фильтрации
-				return obj.Spec.SomeField != ""
-			},
-			UpdateFunc: func(_ event.UpdateEvent) bool {
-				return false // если не нужно обрабатывать
-			},
-			DeleteFunc: func(_ event.DeleteEvent) bool {
-				return false // если не нужно обрабатывать
-			},
-			GenericFunc: func(ge event.GenericEvent) bool {
-				obj := ge.Object.(*v1alpha3.SomeResource)
-				return obj.Spec.SomeField != ""
-			},
-		}).
+		For(&v1alpha3.ReplicatedVolume{}).
+		Watches(
+			&v1alpha3.ReplicatedVolumeReplica{},
+			handler.EnqueueRequestForOwner(
+				mgr.GetScheme(),
+				mgr.GetRESTMapper(),
+				&v1alpha3.ReplicatedVolume{},
+			),
+		).
 		Complete(rec)
 
 	if err != nil {
@@ -291,6 +286,14 @@ func BuildController(mgr manager.Manager) error {
 
 	return nil
 }
+```
+
+**Примечание:** Если нужно только отслеживать основной ресурс без маппинга дочерних, используйте только `.For()`:
+```go
+err := builder.ControllerManagedBy(mgr).
+	Named("my_controller").
+	For(&v1alpha3.SomeResource{}).
+	Complete(rec)
 ```
 
 ### reconciler.go
@@ -364,60 +367,68 @@ package mycontroller_test
 
 import (
 	"context"
-	"log/slog"
-	"testing"
 
-	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	mycontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/my_controller"
 )
 
-func newFakeClient(objs ...client.Object) client.Client {
-	s := scheme.Scheme
-	_ = v1alpha3.AddToScheme(s)
+func newFakeClient() client.Client {
+	scheme := runtime.NewScheme()
+	_ = v1alpha3.AddToScheme(scheme)
+
 	return fake.NewClientBuilder().
-		WithScheme(s).
-		WithStatusSubresource(&v1alpha3.SomeResource{}). // Важно для тестирования status updates
-		WithObjects(objs...).
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha3.SomeResource{}).
 		Build()
 }
 
-func newReconciler(cl client.Client) *mycontroller.Reconciler {
-	return &mycontroller.Reconciler{
-		Cl:     cl,
-		Log:    slog.Default(),
-		LogAlt: logr.Discard(),
-	}
-}
+var _ = Describe("Reconciler", func() {
+	var cl client.Client
+	var rec *mycontroller.Reconciler
 
-func TestReconcile(t *testing.T) {
-	ctx := context.Background()
-	obj := &v1alpha3.SomeResource{
-		ObjectMeta: metav1.ObjectMeta{Name: "test-resource"},
-		Spec: v1alpha3.SomeResourceSpec{
-			// спецификация ресурса
-		},
-	}
-	cl := newFakeClient(obj)
-	rec := newReconciler(cl)
+	BeforeEach(func() {
+		cl = newFakeClient()
+		rec = &mycontroller.Reconciler{
+			Cl:     cl,
+			Log:    slog.Default(),
+			LogAlt: GinkgoLogr,
+		}
+	})
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-resource"},
-	}
-	_, err := rec.Reconcile(ctx, req)
+	It("returns no error when resource does not exist", func(ctx context.Context) {
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name: "test-resource",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
+	It("handles happy path scenario", func(ctx context.Context) {
+		// Arrange
+		obj := &v1alpha3.SomeResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-resource"},
+		}
+		Expect(cl.Create(ctx, obj)).To(Succeed())
+
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-resource"},
+		})
+
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
+		// проверки результата
+	})
+})
 ```
 
 ---
@@ -427,16 +438,18 @@ func TestReconcile(t *testing.T) {
 - [ ] Использовать стандартный `reconcile.Reconciler` (не TypedReconciler)
 - [ ] Использовать `builder.ControllerManagedBy` (не TypedControllerManagedBy)
 - [ ] Использовать `.For(&ResourceType{})` для основного ресурса
-- [ ] Использовать `predicate.Funcs` для фильтрации событий
+- [ ] Использовать `.For()` для основного ресурса
+- [ ] Использовать `EnqueueRequestForOwner` если нужно реагировать на дочерние ресурсы с owner reference
+- [ ] Использовать `EnqueueRequestsFromMapFunc` только если нет owner reference, но нужен маппинг
 - [ ] Использовать structured logger с `.WithName()` и `.WithValues()` в Reconcile
-- [ ] Заменять неиспользуемые параметры на `_` в predicate functions
-- [ ] Не использовать сложные handlers без необходимости
+- [ ] Использовать `predicate.Funcs` для фильтрации событий при необходимости
 - [ ] **Упрощенная структура Reconciler:** только `Cl`, `Log`, `LogAlt` (без неиспользуемых полей)
 - [ ] **Экспортированные поля:** `Cl`, `Log`, `LogAlt` для использования в тестах
 - [ ] **Инициализация status:** внутри `patchFn`, а не в начале `Reconcile`
 - [ ] **Использование PatchStatusWithConflictRetry:** для всех обновлений status
 - [ ] **Идемпотентность:** проверка состояния в начале Reconcile и внутри patchFn
-- [ ] Добавить unit тесты с fake client и `.WithStatusSubresource()`
+- [ ] Добавить unit тесты с **Ginkgo/Gomega**
+- [ ] Использовать fake client с `.WithStatusSubresource()`
 - [ ] Использовать `reconcile.Request` в тестах
 - [ ] Зарегистрировать контроллер в `registry.go`
 
@@ -585,10 +598,86 @@ for err := range errCh {
 - Это обсуждено с командой перед реализацией
 
 ### Тестирование
-- Покрывать основные сценарии (happy path)
-- Покрывать edge cases (ошибки, граничные условия)
-- Использовать fake client для изоляции тестов
-- Тестировать идемпотентность
+
+**✅ Используйте по умолчанию:**
+- **Ginkgo/Gomega** для структурированных тестов
+- Fake client для изоляции тестов
+- `.WithStatusSubresource()` для корректного тестирования status updates
+
+**Структура тестов:**
+```go
+package mycontroller_test
+
+import (
+	"context"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	mycontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/my_controller"
+)
+
+func newFakeClient() client.Client {
+	scheme := runtime.NewScheme()
+	_ = v1alpha3.AddToScheme(scheme)
+
+	return fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&v1alpha3.SomeResource{}).
+		Build()
+}
+
+var _ = Describe("Reconciler", func() {
+	var cl client.Client
+	var rec *mycontroller.Reconciler
+
+	BeforeEach(func() {
+		cl = newFakeClient()
+		rec = &mycontroller.Reconciler{
+			Cl:     cl,
+			Log:    slog.Default(),
+			LogAlt: GinkgoLogr,
+		}
+	})
+
+	It("returns no error when resource does not exist", func(ctx context.Context) {
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name: "test-resource",
+			},
+		})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
+	It("handles happy path scenario", func(ctx context.Context) {
+		// Arrange
+		obj := &v1alpha3.SomeResource{
+			ObjectMeta: metav1.ObjectMeta{Name: "test-resource"},
+		}
+		Expect(cl.Create(ctx, obj)).To(Succeed())
+
+		// Act
+		_, err := rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "test-resource"},
+		})
+
+		// Assert
+		Expect(err).NotTo(HaveOccurred())
+		// проверки результата
+	})
+})
+```
+
+**Покрытие:**
+- Основные сценарии (happy path)
+- Edge cases (ошибки, граничные условия)
+- Идемпотентность
 
 ---
 
