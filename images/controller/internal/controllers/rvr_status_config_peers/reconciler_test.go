@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -124,19 +125,23 @@ func BeReady() gomegatypes.GomegaMatcher {
 }
 
 var _ = Describe("Reconciler", func() {
-	var cl client.Client
+	var cl client.WithWatch
 	var rec *rvr_status_config_peers.Reconciler
 	var scheme *runtime.Scheme
+	var interceptorFuncs interceptor.Funcs
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	})
 
+	JustBeforeEach(func() {
 		cl = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha3.ReplicatedVolumeReplica{},
 				&v1alpha3.ReplicatedVolume{}).
+			WithInterceptorFuncs(interceptorFuncs).
 			Build()
 		rec = rvr_status_config_peers.NewReconciler(cl, GinkgoLogr)
 	})
