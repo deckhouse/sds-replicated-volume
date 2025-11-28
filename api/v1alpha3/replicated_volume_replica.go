@@ -165,6 +165,9 @@ type DRBDActual struct {
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
+
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
