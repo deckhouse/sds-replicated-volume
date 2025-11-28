@@ -22,12 +22,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
 )
 
-func newScheme() *runtime.Scheme {
-	scheme := runtime.NewScheme()
-	_ = v1alpha3.AddToScheme(scheme)
-	return scheme
-}
-
 // HaveNoPeers is a Gomega matcher that checks a single RVR has no peers
 func HaveNoPeers() gomegatypes.GomegaMatcher {
 	return SatisfyAny(
@@ -116,9 +110,12 @@ func BeReady() gomegatypes.GomegaMatcher {
 var _ = Describe("Reconciler", func() {
 	var cl client.Client
 	var rec *rvr_status_config_peers.Reconciler
-	var scheme = newScheme()
+	var scheme *runtime.Scheme
 
 	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+
 		cl = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
@@ -191,7 +188,6 @@ var _ = Describe("Reconciler", func() {
 
 			JustBeforeEach(func(ctx SpecContext) {
 				Expect(cl.Create(ctx, &firstRvr)).To(Succeed())
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 			})
 
 			It("should not have peers", func(ctx SpecContext) {
@@ -229,11 +225,13 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("rvr-1 should have no peers", func(ctx SpecContext) {
+						expectReconcileSuccessfully(ctx)
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 						Expect(firstRvr).To(HaveNoPeers())
 					})
 
 					It("rvr-2 should have no peers", func(ctx SpecContext) {
+						expectReconcileSuccessfully(ctx)
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
 						Expect(secondRvr).To(HaveNoPeers())
 					})
@@ -322,7 +320,7 @@ var _ = Describe("Reconciler", func() {
 				}
 			})
 
-			Context("if first replica was ready", func() {
+			Context("if first replica ready", func() {
 				BeforeEach(func() {
 					if len(rvrList) == 0 {
 						Skip("empty rvrList")
@@ -358,7 +356,7 @@ var _ = Describe("Reconciler", func() {
 				})
 			})
 
-			Context("if all replicas were ready", func() {
+			Context("if all replicas ready", func() {
 				BeforeEach(func() {
 					for i := range rvrList {
 						makeReady(
@@ -376,18 +374,15 @@ var _ = Describe("Reconciler", func() {
 					Expect(rvrList).To(HaveAllPeersSetForAll())
 				})
 
-				When("first rvr deleted", func() {
-					JustBeforeEach(func(ctx SpecContext) {
-						Expect(cl.Delete(ctx, &rvrList[0])).To(Succeed())
-					})
+				It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
+					expectReconcileSuccessfully(ctx)
+					Expect(cl.Delete(ctx, &rvrList[0])).To(Succeed())
 
-					It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
-						list := rvrList[1:]
+					expectReconcileSuccessfully(ctx)
+					list := rvrList[1:]
 
-						getAll(ctx, list)
-						Expect(list).To(HaveAllPeersSetForAll())
-					})
+					getAll(ctx, list)
+					Expect(list).To(HaveAllPeersSetForAll())
 				})
 
 				When("multiple RVRs exist on same node", func() {
@@ -425,14 +420,6 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						// Use only first 2 RVRs
 						rvrList = rvrList[:2]
-						nodeId1 := uint(1)
-						nodeId2 := uint(2)
-						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-						address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-						rvrList[0].Status.Config.NodeId = &nodeId1
-						rvrList[0].Status.Config.Address = &address1
-						rvrList[1].Status.Config.NodeId = &nodeId2
-						rvrList[1].Status.Config.Address = &address2
 					})
 
 					It("should not update if peers are unchanged", func(ctx SpecContext) {
@@ -460,14 +447,6 @@ var _ = Describe("Reconciler", func() {
 						// Use only first 2 RVRs, set second one as diskless
 						rvrList = rvrList[:2]
 						rvrList[1].Spec.Diskless = true
-						nodeId1 := uint(1)
-						nodeId2 := uint(2)
-						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-						address2 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-						rvrList[0].Status.Config.NodeId = &nodeId1
-						rvrList[0].Status.Config.Address = &address1
-						rvrList[1].Status.Config.NodeId = &nodeId2
-						rvrList[1].Status.Config.Address = &address2
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {
