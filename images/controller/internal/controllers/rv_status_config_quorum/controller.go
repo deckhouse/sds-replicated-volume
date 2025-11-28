@@ -11,8 +11,6 @@ func BuildController(mgr manager.Manager) error {
 
 	rec := &Reconciler{
 		cl:  mgr.GetClient(),
-		rdr: mgr.GetAPIReader(),
-		sch: mgr.GetScheme(),
 		log: mgr.GetLogger().WithName("controller_rv_status_config_quorum"),
 	}
 
