@@ -28,12 +28,6 @@ func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 	}
 }
 
-func shouldBeListedInPeers(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
-	return rvr.Spec.NodeName != "" &&
-		rvr.Status != nil && rvr.Status.Config != nil &&
-		rvr.Status.Config.NodeId != nil && rvr.Status.Config.Address != nil
-}
-
 func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
@@ -54,6 +48,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	log.V(2).Info("Removing unrelated items")
 	list.Items = slices.DeleteFunc(list.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
 		if !metav1.IsControlledBy(&rvr, &rv) {
+			log.V(4).Info("Not controlled by this ReplicatedVolume")
 			return true
 		}
 
