@@ -52,8 +52,11 @@ func HaveNoPeers() gomegatypes.GomegaMatcher {
 }
 
 // HaveAllPeersSet is a matcher factory that returns a Gomega matcher for a single RVR
-// It checks that the RVR has all other RVRs from expectedResources as peers
+// It checks that the RVR has all other RVRs from expectedResources as peers but his own
 func HaveAllPeersSet(expectedResources []v1alpha3.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
+	if len(expectedResources) < 2 {
+		return HaveNoPeers()
+	}
 	return SatisfyAll(
 		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
 			return Not(HaveKey(rvr.Spec.NodeName)).Match(rvr.Status.Config.Peers)
