@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,6 +16,34 @@ import (
 
 // QuorumReconfFinalizer is the name of the finalizer used to manage quorum reconfiguration.
 const QuorumReconfFinalizer = "quorum-reconf"
+
+// CalculateQuorum calculates quorum and quorum minimum redundancy values
+// based on the number of diskful and total replicas.
+func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
+	if diskfulCount > 1 {
+		quorum = byte(max(2, all/2+1))
+		qmr = byte(max(2, diskfulCount/2+1))
+	}
+	return
+}
+
+func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
+	return conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
+		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady) &&
+		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
+}
+
+// countDiskfulAndDisklessReplicas returns the number of diskful and diskless replicas
+// among the provided ReplicatedVolumeReplica list.
+func countDiskfulAndDisklessReplicas(list *v1alpha3.ReplicatedVolumeReplicaList) (diskful, all int) {
+	all = len(list.Items)
+	for _, rvr := range list.Items {
+		if !rvr.Spec.Diskless {
+			diskful++
+		}
+	}
+	return
+}
 
 type Reconciler struct {
 	cl  client.Client
@@ -38,24 +67,6 @@ func NewReconciler(
 		sch: sch,
 		log: log,
 	}
-}
-
-func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
-	return conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
-}
-
-// countDiskfulAndDisklessReplicas returns the number of diskful and diskless replicas
-// among the provided ReplicatedVolumeReplica list.
-func countDiskfulAndDisklessReplicas(list *v1alpha3.ReplicatedVolumeReplicaList) (diskful, all int) {
-	all = len(list.Items)
-	for _, rvr := range list.Items {
-		if !rvr.Spec.Diskless {
-			diskful++
-		}
-	}
-	return
 }
 
 func (r *Reconciler) Reconcile(
@@ -126,12 +137,18 @@ func (r *Reconciler) setFinalizers(
 	ctx *context.Context,
 	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
 ) (cnt int32, err error) {
-	for _, rvr := range rvrList.Items {
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
 		if !slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) {
-			oldRvr := rvr.DeepCopy()
-			rvr.Finalizers = append(rvr.Finalizers, QuorumReconfFinalizer)
-			from := client.MergeFrom(oldRvr)
-			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
+			// Load the object fresh for PatchWithConflictRetry
+			target := &v1alpha3.ReplicatedVolumeReplica{}
+			if err := r.cl.Get(*ctx, client.ObjectKeyFromObject(rvr), target); err != nil {
+				return cnt, err
+			}
+			if err := api.PatchWithConflictRetry(*ctx, r.cl, target, func(rvr *v1alpha3.ReplicatedVolumeReplica) error {
+				rvr.Finalizers = append(rvr.Finalizers, QuorumReconfFinalizer)
+				return nil
+			}); err != nil {
 				return cnt, err
 			}
 			cnt++
@@ -144,58 +161,60 @@ func (r *Reconciler) unsetFinalizers(
 	ctx *context.Context,
 	rvrList *v1alpha3.ReplicatedVolumeReplicaList,
 ) (cnt int32, err error) {
-	for _, rvr := range rvrList.Items {
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		// Check condition on list item first (quick check to avoid unnecessary Get)
 		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) && rvr.GetObjectMeta().GetDeletionTimestamp() != nil {
-			oldRvr := rvr.DeepCopy()
-			rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
-				return f == QuorumReconfFinalizer
-			})
-			from := client.MergeFrom(oldRvr)
-			if err := r.cl.Patch(*ctx, &rvr, from); err != nil {
+			// Load the object fresh for PatchWithConflictRetry
+			target := &v1alpha3.ReplicatedVolumeReplica{}
+			if err := r.cl.Get(*ctx, client.ObjectKeyFromObject(rvr), target); err != nil {
 				return cnt, err
 			}
-			cnt++
+			// Re-check condition after loading (object might have changed)
+			// This ensures we only process objects that still meet the criteria
+			if slices.Contains(target.Finalizers, QuorumReconfFinalizer) && target.GetObjectMeta().GetDeletionTimestamp() != nil {
+				if err := api.PatchWithConflictRetry(*ctx, r.cl, target, func(rvr *v1alpha3.ReplicatedVolumeReplica) error {
+					rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
+						return f == QuorumReconfFinalizer
+					})
+					return nil
+				}); err != nil {
+					return cnt, err
+				}
+				cnt++
+			}
 		}
 	}
 	return cnt, nil
 }
 
-// prepareQuorumPatch calculates quorum fields and returns a MergeFrom patch baseline.
+// quorumPatch calculates quorum fields and patches the status using PatchStatusWithConflictRetry.
 func (r *Reconciler) quorumPatch(
 	ctx *context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	diskfulCount,
 	all int,
 ) error {
-	// ensure status structs are initialized before writing into them
-	if rv.Status == nil {
-		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
-	}
-	if rv.Status.Config == nil {
-		rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
-	}
+	quorum, qmr := CalculateQuorum(diskfulCount, all)
 
-	var quorum, qmr byte
-	if diskfulCount > 1 {
-		quorum = byte(max(2, all/2+1))
-		qmr = byte(max(2, diskfulCount/2+1))
-	}
+	return api.PatchStatusWithConflictRetry(*ctx, r.cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
+		// ensure status structs are initialized before writing into them
+		if rv.Status == nil {
+			rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		}
+		if rv.Status.Config == nil {
+			rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+		}
 
-	// capture the original object state for a merge patch before making any changes
-	old := rv.DeepCopy()
-	old.Status.Config.Quorum = quorum
-	old.Status.Config.QuorumMinimumRedundancy = qmr
-	old.Status.Conditions = append(old.Status.Conditions, metav1.Condition{
-		Type:               v1alpha3.ConditionTypeQuorumConfigured,
-		Status:             metav1.ConditionTrue,
-		LastTransitionTime: metav1.Now(),
-		Reason:             "QuorumConfigured", // TODO: change reason
-		Message:            "Quorum configuration completed",
+		rv.Status.Config.Quorum = quorum
+		rv.Status.Config.QuorumMinimumRedundancy = qmr
+		rv.Status.Conditions = append(rv.Status.Conditions, metav1.Condition{
+			Type:               v1alpha3.ConditionTypeQuorumConfigured,
+			Status:             metav1.ConditionTrue,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "QuorumConfigured", // TODO: change reason
+			Message:            "Quorum configuration completed",
+		})
+		return nil
 	})
-
-	from := client.MergeFrom(old)
-	if err := r.cl.Patch(*ctx, rv, from); err != nil {
-		return client.IgnoreNotFound(err)
-	}
-	return nil
 }
