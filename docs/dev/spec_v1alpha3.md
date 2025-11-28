@@ -51,11 +51,11 @@
   - [`rv-publish-controller`](#rv-publish-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
   - [`rvr-volume-controller`](#rvr-volume-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
+    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
   - [`rvr-gc-controller`](#rvr-gc-controller)
   - [`rv-status-config-controller`](#rv-status-config-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-2)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
   - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
@@ -502,7 +502,7 @@ TODO: пока не решили как предотвратить переез�
 
 ## `rvr-volume-controller`
 
-### Статус: [OK | priority: 5 | complexity: 4]
+### Статус: [OK | priority: 5 | complexity: 3]
 
 ### Цель
 1. Обеспечить наличие LLV для каждой реплики, у которой
