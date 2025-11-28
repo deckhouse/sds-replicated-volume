@@ -286,7 +286,7 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
-			Diskless:             false,
+			Type:                 "Diskful",
 		},
 	}
 
