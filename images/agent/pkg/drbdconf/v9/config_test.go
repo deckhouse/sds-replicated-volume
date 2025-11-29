@@ -21,8 +21,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 )
 
 func TestMarshalUnmarshal(t *testing.T) {
@@ -215,5 +216,4 @@ func TestUnmarshalReal(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("\n", sb.String())
-
 }

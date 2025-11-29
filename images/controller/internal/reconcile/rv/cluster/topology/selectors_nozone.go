@@ -31,13 +31,13 @@ func NewMultiPurposeNodeSelector(purposeCount int) *MultiPurposeNodeSelector {
 	return &MultiPurposeNodeSelector{purposeCount: purposeCount}
 }
 
-func (s *MultiPurposeNodeSelector) SetNode(nodeId string, scores []Score) {
+func (s *MultiPurposeNodeSelector) SetNode(nodeID string, scores []Score) {
 	if len(scores) != s.purposeCount {
 		panic(fmt.Sprintf("expected len(scores) to be %d (purposeCount), got %d", s.purposeCount, len(scores)))
 	}
 
 	node := &node{
-		nodeId: nodeId,
+		nodeID: nodeID,
 	}
 	node.scores = scores
 

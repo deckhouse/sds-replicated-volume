@@ -25,7 +25,7 @@ import (
 type RVRWriterImpl struct {
 	RVNodeAdapter
 	port   uint
-	nodeId uint
+	nodeID uint
 	volume *v1alpha2.Volume
 	peers  map[string]v1alpha2.Peer
 }
@@ -49,8 +49,8 @@ func (w *RVRWriterImpl) SetPort(port uint) {
 	w.port = port
 }
 
-func (w *RVRWriterImpl) SetNodeId(nodeId uint) {
-	w.nodeId = nodeId
+func (w *RVRWriterImpl) SetNodeID(nodeID uint) {
+	w.nodeID = nodeID
 }
 
 func (w *RVRWriterImpl) SetVolume(volume v1alpha2.Volume) {
@@ -63,7 +63,7 @@ func (w *RVRWriterImpl) SetPeer(nodeName string, peer v1alpha2.Peer) {
 
 func (w *RVRWriterImpl) ToPeer() v1alpha2.Peer {
 	return v1alpha2.Peer{
-		NodeId: uint(w.nodeId),
+		NodeId: w.nodeID,
 		Address: v1alpha2.Address{
 			IPv4: w.NodeIP(),
 			Port: w.port,
@@ -80,7 +80,7 @@ func (w *RVRWriterImpl) WriteToRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Chang
 
 	cs = Change(cs, "replicatedVolumeName", &rvrSpec.ReplicatedVolumeName, w.RVName())
 	cs = Change(cs, "nodeName", &rvrSpec.NodeName, w.NodeName())
-	cs = Change(cs, "nodeId", &rvrSpec.NodeId, w.nodeId)
+	cs = Change(cs, "nodeId", &rvrSpec.NodeId, w.nodeID)
 	cs = Change(cs, "nodeAddress.ipv4", &rvrSpec.NodeAddress.IPv4, w.NodeIP())
 	cs = Change(cs, "nodeAddress.port", &rvrSpec.NodeAddress.Port, w.port)
 

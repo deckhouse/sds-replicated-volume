@@ -20,11 +20,12 @@ import (
 	"context"
 	"log/slog"
 
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 type Reconciler struct {
@@ -38,7 +39,7 @@ type Reconciler struct {
 var _ reconcile.TypedReconciler[Request] = &Reconciler{}
 
 func (r *Reconciler) Reconcile(
-	ctx context.Context,
+	_ context.Context,
 	req Request,
 ) (reconcile.Result, error) {
 	// TODO issues/333 reconcile requests here

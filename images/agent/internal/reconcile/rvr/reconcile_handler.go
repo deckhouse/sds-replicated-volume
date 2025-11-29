@@ -27,6 +27,10 @@ import (
 	"path/filepath"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	. "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -34,9 +38,6 @@ import (
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/agent"
@@ -304,14 +305,14 @@ func (h *resourceReconcileRequestHandler) updateResourceConfigAfterInitialSync(r
 
 func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	res *v9.Resource,
-	nodeName string, nodeId uint, nodeAddress v1alpha2.Address,
+	nodeName string, nodeID uint, nodeAddress v1alpha2.Address,
 	peerOptions *v1alpha2.Peer, // nil for current node
 ) {
 	isCurrentNode := nodeName == h.nodeName
 
 	onSection := &v9.On{
 		HostNames: []string{nodeName},
-		NodeID:    Ptr(nodeId),
+		NodeID:    Ptr(nodeID),
 	}
 
 	// volumes

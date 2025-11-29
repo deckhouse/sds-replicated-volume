@@ -19,8 +19,9 @@ package cluster
 import (
 	"slices"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 type rvNodeAdapter struct {
@@ -50,7 +51,7 @@ func NewRVNodeAdapter(
 	rv RVAdapter,
 	node *corev1.Node,
 	lvg *snc.LVMVolumeGroup,
-) (*rvNodeAdapter, error) {
+) (RVNodeAdapter, error) {
 	if rv == nil {
 		return nil, errArgNil("rv")
 	}

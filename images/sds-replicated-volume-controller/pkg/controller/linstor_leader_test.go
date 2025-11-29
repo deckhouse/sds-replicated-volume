@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"testing"
 
@@ -33,7 +32,7 @@ import (
 func TestLinstorLeaderController(t *testing.T) {
 	var (
 		cl                = newFakeClient()
-		ctx               = context.Background()
+		ctx               = t.Context()
 		log               = logger.Logger{}
 		namespace         = "test-ns"
 		leaseName         = "test-lease"

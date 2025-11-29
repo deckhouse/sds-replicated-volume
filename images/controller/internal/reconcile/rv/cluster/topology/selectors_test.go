@@ -23,8 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 )
 
 //go:embed testdata/selectors_tests.txt
@@ -233,31 +234,33 @@ func TestSelectors(t *testing.T) {
 				t.Fatalf("no arrange entries")
 			}
 			var nozone, transzonal, zonal bool
-			if strings.HasPrefix(suite.Name, "nozone") {
+			switch {
+			case strings.HasPrefix(suite.Name, "nozone"):
 				nozone = true
-			} else if strings.HasPrefix(suite.Name, "transzonal") {
+			case strings.HasPrefix(suite.Name, "transzonal"):
 				transzonal = true
-			} else if strings.HasPrefix(suite.Name, "zonal") {
+			case strings.HasPrefix(suite.Name, "zonal"):
 				zonal = true
-			} else {
+			default:
 				// default to nozone for backward compatibility
 				nozone = true
 			}
 
 			var selectFunc func(counts []int) ([][]string, error)
-			if nozone {
+			switch {
+			case nozone:
 				s := topology.NewMultiPurposeNodeSelector(len(suite.Arrange[0].Scores))
 				for _, a := range suite.Arrange {
 					s.SetNode(a.Node, a.Scores)
 				}
 				selectFunc = s.SelectNodes
-			} else if transzonal {
+			case transzonal:
 				s := topology.NewTransZonalMultiPurposeNodeSelector(len(suite.Arrange[0].Scores))
 				for _, a := range suite.Arrange {
 					s.SetNode(a.Node, a.Zone, a.Scores)
 				}
 				selectFunc = s.SelectNodes
-			} else if zonal {
+			case zonal:
 				s := topology.NewZonalMultiPurposeNodeSelector(len(suite.Arrange[0].Scores))
 				for _, a := range suite.Arrange {
 					s.SetNode(a.Node, a.Zone, a.Scores)

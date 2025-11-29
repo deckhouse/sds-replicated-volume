@@ -92,7 +92,7 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 }
 
 func (rec *rvrReconciler) initializeDynamicProps(
-	nodeIdMgr NodeIdManager,
+	nodeIDMgr NodeIDManager,
 	dp diskPath,
 ) error {
 	if rec.Diskless() != (dp == nil) {
@@ -112,16 +112,16 @@ func (rec *rvrReconciler) initializeDynamicProps(
 
 	// nodeid
 	if rec.existingRVR == nil {
-		nodeId, err := nodeIdMgr.NewNodeId()
+		nodeID, err := nodeIDMgr.NewNodeID()
 		if err != nil {
 			return err
 		}
-		rec.rvrWriter.SetNodeId(nodeId)
-		if nodeId == 0 {
+		rec.rvrWriter.SetNodeID(nodeID)
+		if nodeID == 0 {
 			rec.firstReplicaInCluster = true
 		}
 	} else {
-		rec.rvrWriter.SetNodeId(rec.existingRVR.NodeId())
+		rec.rvrWriter.SetNodeID(rec.existingRVR.NodeID())
 	}
 
 	// minor
@@ -140,7 +140,6 @@ func (rec *rvrReconciler) initializeDynamicProps(
 	if dp != nil {
 		// disk
 		vol.Disk = dp.diskPath()
-
 	}
 
 	rec.rvrWriter.SetVolume(vol)
@@ -164,7 +163,7 @@ func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler)
 	return nil
 }
 
-func (rec *rvrReconciler) reconcile() (Action, error) {
+func (rec *rvrReconciler) Reconcile() (Action, error) {
 	var res Actions
 	if rec.existingRVR == nil {
 		res = append(

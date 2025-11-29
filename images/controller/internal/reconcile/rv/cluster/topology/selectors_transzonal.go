@@ -35,15 +35,15 @@ func NewTransZonalMultiPurposeNodeSelector(purposeCount int) *TransZonalMultiPur
 	return &TransZonalMultiPurposeNodeSelector{purposeCount: purposeCount}
 }
 
-func (s *TransZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, scores []Score) {
+func (s *TransZonalMultiPurposeNodeSelector) SetNode(nodeID string, zoneID string, scores []Score) {
 	if len(scores) != s.purposeCount {
 		panic(fmt.Sprintf("expected len(scores) to be %d (purposeCount), got %d", s.purposeCount, len(scores)))
 	}
 
 	idx, found := slices.BinarySearchFunc(
 		s.zones,
-		zoneId,
-		func(z *zone, id string) int { return cmp.Compare(z.zoneId, id) },
+		zoneID,
+		func(z *zone, id string) int { return cmp.Compare(z.zoneID, id) },
 	)
 
 	var z *zone
@@ -51,20 +51,20 @@ func (s *TransZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId strin
 		z = s.zones[idx]
 	} else {
 		z = &zone{
-			zoneId:                zoneId,
+			zoneID:                zoneID,
 			bestNodesForPurposes:  make([]*node, s.purposeCount),
 			bestScoresForPurposes: make([]int64, s.purposeCount),
 		}
 		s.zones = slices.Insert(s.zones, idx, z)
 	}
 
-	idx, found = slices.BinarySearchFunc(z.nodes, nodeId, func(n *node, id string) int { return cmp.Compare(n.nodeId, id) })
+	idx, found = slices.BinarySearchFunc(z.nodes, nodeID, func(n *node, id string) int { return cmp.Compare(n.nodeID, id) })
 	var n *node
 	if found {
 		n = z.nodes[idx]
 	} else {
 		n = &node{
-			nodeId: nodeId,
+			nodeID: nodeID,
 		}
 		z.nodes = slices.Insert(z.nodes, idx, n)
 	}
@@ -121,7 +121,7 @@ func (s *TransZonalMultiPurposeNodeSelector) SelectNodes(counts []int) ([][]stri
 			uiter.Map(
 				slices.Values(bestZones),
 				func(z *zone) string {
-					return z.bestNodesForPurposes[purposeIdx].nodeId
+					return z.bestNodesForPurposes[purposeIdx].nodeID
 				},
 			),
 		)

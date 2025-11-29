@@ -28,7 +28,7 @@ type Cluster struct {
 
 	rvrsByNodeName map[string]*rvrReconciler
 	llvsByLVGName  map[string]*llvReconciler
-	nodeIdMgr      nodeIdManager
+	nodeIDMgr      nodeIDManager
 
 	rvrsToDelete []RVRAdapter
 	llvsToDelete []LLVAdapter
@@ -122,14 +122,14 @@ func (c *Cluster) AddExistingRVR(rvr RVRAdapter) (err error) {
 		return errArgNil("rvr")
 	}
 
-	nodeId := rvr.NodeId()
+	nodeID := rvr.NodeID()
 
-	if err = c.nodeIdMgr.ReserveNodeId(nodeId); err != nil {
+	if err = c.nodeIDMgr.ReserveNodeID(nodeID); err != nil {
 		return err
 	}
 	defer func() {
 		if err != nil {
-			c.nodeIdMgr.FreeNodeId(nodeId)
+			c.nodeIDMgr.FreeNodeID(nodeID)
 		}
 	}()
 
@@ -185,7 +185,7 @@ func (c *Cluster) initializeReconcilers() error {
 			dp = c.llvsByLVGName[rvrRec.LVGName()]
 		}
 
-		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr, dp); err != nil {
+		if err := rvrRec.initializeDynamicProps(&c.nodeIDMgr, dp); err != nil {
 			return err
 		}
 	}
@@ -215,18 +215,19 @@ func (c *Cluster) Reconcile() (Action, error) {
 	{
 		llvsToDelete := c.llvsToDelete
 		for _, llvRec := range c.llvsByLVGName {
-			reconcileAction, err := llvRec.reconcile()
+			reconcileAction, err := llvRec.Reconcile()
 			if err != nil {
 				return nil, err
 			}
 
-			if llvRec.hasExisting() {
+			switch {
+			case llvRec.hasExisting():
 				existingResourcesActions = append(existingResourcesActions, reconcileAction)
-			} else if len(llvsToDelete) > 0 {
+			case len(llvsToDelete) > 0:
 				addWithDeleteLLVActions = append(addWithDeleteLLVActions, reconcileAction)
 				addWithDeleteLLVActions = append(addWithDeleteLLVActions, c.deleteLLV(llvsToDelete[0]))
 				llvsToDelete = llvsToDelete[1:]
-			} else {
+			default:
 				addOrDeleteLLVActions = append(addOrDeleteLLVActions, reconcileAction)
 			}
 		}
@@ -242,18 +243,19 @@ func (c *Cluster) Reconcile() (Action, error) {
 	{
 		rvrsToDelete := c.rvrsToDelete
 		for _, rvrRec := range c.rvrsByNodeName {
-			reconcileAction, err := rvrRec.reconcile()
+			reconcileAction, err := rvrRec.Reconcile()
 			if err != nil {
 				return nil, err
 			}
 
-			if rvrRec.hasExisting() {
+			switch {
+			case rvrRec.hasExisting():
 				existingResourcesActions = append(existingResourcesActions, reconcileAction)
-			} else if len(rvrsToDelete) > 0 {
+			case len(rvrsToDelete) > 0:
 				addWithDeleteRVRActions = append(addWithDeleteRVRActions, reconcileAction)
 				addWithDeleteRVRActions = append(addWithDeleteRVRActions, c.deleteRVR(rvrsToDelete[0]))
 				rvrsToDelete = rvrsToDelete[1:]
-			} else {
+			default:
 				addOrDeleteRVRActions = append(addOrDeleteRVRActions, reconcileAction)
 			}
 		}

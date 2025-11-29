@@ -19,9 +19,10 @@ package cluster
 import (
 	"fmt"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type LLVWriterImpl struct {
@@ -51,7 +52,6 @@ func (w *LLVWriterImpl) SetActualLVNameOnTheNode(actualLVNameOnTheNode string) {
 }
 
 func (w *LLVWriterImpl) WriteToLLV(llv *snc.LVMLogicalVolume) (ChangeSet, error) {
-
 	cs := ChangeSet{}
 
 	cs = Change(cs, "actualLVNameOnTheNode", &llv.Spec.ActualLVNameOnTheNode, w.actualLVNameOnTheNode)

@@ -114,23 +114,24 @@ func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
 		ObservedGeneration: rvr.Generation,
 	}
 
-	if cfgAdjCondition != nil &&
+	switch {
+	case cfgAdjCondition != nil &&
 		cfgAdjCondition.Status == metav1.ConditionFalse &&
-		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync {
+		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync:
 		readyCond.Reason = ReasonWaitingForInitialSync
 		readyCond.Message = "Configuration adjustment waits for InitialSync"
-	} else if cfgAdjCondition == nil ||
-		cfgAdjCondition.Status != metav1.ConditionTrue {
+	case cfgAdjCondition == nil ||
+		cfgAdjCondition.Status != metav1.ConditionTrue:
 		readyCond.Reason = ReasonAdjustmentFailed
 		readyCond.Message = "Resource adjustment failed"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
+	case !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady):
 		readyCond.Reason = ReasonDevicesAreNotReady
 		readyCond.Message = "Devices are not ready"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum) {
+	case !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum):
 		readyCond.Reason = ReasonNoQuorum
-	} else if meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended) {
+	case meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended):
 		readyCond.Reason = ReasonDiskIOSuspended
-	} else {
+	default:
 		readyCond.Status = metav1.ConditionTrue
 		readyCond.Reason = ReasonReady
 		readyCond.Message = "Replica is configured and operational"
@@ -158,6 +159,7 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeId is immutable"
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -195,6 +197,7 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -274,7 +277,8 @@ type ReplicatedVolumeReplicaList struct {
 
 // +k8s:deepcopy-gen=true
 type DRBDStatus struct {
-	Name             string             `json:"name"`
+	Name string `json:"name"`
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId           int                `json:"node-id"`
 	Role             string             `json:"role"`
 	Suspended        bool               `json:"suspended"`
@@ -307,6 +311,7 @@ type DeviceStatus struct {
 
 // +k8s:deepcopy-gen=true
 type ConnectionStatus struct {
+	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int    `json:"peer-node-id"`
 	Name            string `json:"name"`
 	ConnectionState string `json:"connection-state"`

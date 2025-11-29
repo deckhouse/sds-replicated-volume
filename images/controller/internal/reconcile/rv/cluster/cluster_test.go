@@ -22,13 +22,14 @@ import (
 	"log/slog"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	cluster "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 type LLVPhysicalKey struct {
@@ -460,11 +461,12 @@ func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 		t.Errorf("expected reconile error '%v', got '%v'", tc.expectedErr, err)
 	}
 
-	if action == nil && tc.expectedAction != nil {
+	switch {
+	case action == nil && tc.expectedAction != nil:
 		t.Errorf("expected '%T', got no actions", tc.expectedAction)
-	} else if action != nil && tc.expectedAction == nil {
+	case action != nil && tc.expectedAction == nil:
 		t.Errorf("expected no actions, got '%T'", action)
-	} else if tc.expectedAction != nil {
+	case tc.expectedAction != nil:
 		err := tc.expectedAction.Match(action)
 		if err != nil {
 			t.Error(err)
@@ -493,7 +495,6 @@ func generateIPv4(nodeName string) string {
 		o4 = 1 + o4%253
 	}
 	return fmt.Sprintf("10.%d.%d.%d", o2, o3, o4)
-
 }
 
 type testVolumeConfig struct {
