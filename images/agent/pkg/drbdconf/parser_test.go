@@ -19,6 +19,7 @@ package drbdconf
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -35,6 +36,10 @@ func TestConf(t *testing.T) {
 
 	err = cfg.WalkConfigs(func(conf *Root) error {
 		filename := "./testdata/out/" + conf.Filename
+		dir := filepath.Dir(filename)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("create directory %s: %w", dir, err)
+		}
 		file, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR|os.O_TRUNC, 0644)
 		if err != nil {
 			return fmt.Errorf("open file %s: %w", filename, err)
