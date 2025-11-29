@@ -4,6 +4,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    module: sds-replicated-volume
   name: replicatedvolumes.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
@@ -141,32 +143,35 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              config:
+              drbd:
                 properties:
-                  allowTwoPrimaries:
-                    default: false
-                    type: boolean
-                  deviceMinor:
-                    maximum: 1048575
-                    minimum: 0
-                    type: integer
-                  quorum:
-                    maximum: 7
-                    minimum: 0
-                    type: integer
-                  quorumMinimumRedundancy:
-                    maximum: 7
-                    minimum: 0
-                    type: integer
-                  sharedSecret:
-                    minLength: 1
-                    type: string
-                  sharedSecretAlg:
-                    minLength: 1
-                    type: string
-                required:
-                - quorum
-                - quorumMinimumRedundancy
+                  config:
+                    properties:
+                      allowTwoPrimaries:
+                        default: false
+                        type: boolean
+                      deviceMinor:
+                        maximum: 1048575
+                        minimum: 0
+                        type: integer
+                      quorum:
+                        maximum: 7
+                        minimum: 0
+                        type: integer
+                      quorumMinimumRedundancy:
+                        maximum: 7
+                        minimum: 0
+                        type: integer
+                      sharedSecret:
+                        minLength: 1
+                        type: string
+                      sharedSecretAlg:
+                        minLength: 1
+                        type: string
+                    required:
+                    - quorum
+                    - quorumMinimumRedundancy
+                    type: object
                 type: object
               phase:
                 type: string

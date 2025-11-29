@@ -48,8 +48,9 @@ import (
 func HaveNoPeers() gomegatypes.GomegaMatcher {
 	return SatisfyAny(
 		HaveField("Status", BeNil()),
-		HaveField("Status.Config", BeNil()),
-		HaveField("Status.Config.Peers", BeEmpty()),
+		HaveField("Status.DRBD", BeNil()),
+		HaveField("Status.DRBD.Config", BeNil()),
+		HaveField("Status.DRBD.Config.Peers", BeEmpty()),
 	)
 }
 
@@ -66,50 +67,56 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) go
 				WithMessage("expected rvr to have status, but it's nil")
 		}
 
-		if rvr.Status.Config == nil {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
-				WithMessage("expected rvr to have status.config, but it's nil")
+				WithMessage("expected rvr to have status.drbd.config, but it's nil")
 		}
+		diskless := rvr.Status.DRBD.Config.Disk == ""
 		expectedPeers[rvr.Spec.NodeName] = v1alpha3.Peer{
-			NodeId:   *rvr.Status.Config.NodeId,
-			Address:  *rvr.Status.Config.Address,
-			Diskless: rvr.Spec.Diskless,
+			NodeId:   *rvr.Status.DRBD.Config.NodeId,
+			Address:  *rvr.Status.DRBD.Config.Address,
+			Diskless: diskless,
 		}
 	}
 	return SatisfyAll(
-		HaveField("Status.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
+		HaveField("Status.DRBD.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
 		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
-			ret := maps.Clone(rvr.Status.Config.Peers)
+			ret := maps.Clone(rvr.Status.DRBD.Config.Peers)
+			diskless := rvr.Status.DRBD.Config.Disk == ""
 			ret[rvr.Spec.NodeName] = v1alpha3.Peer{
-				NodeId:   *rvr.Status.Config.NodeId,
-				Address:  *rvr.Status.Config.Address,
-				Diskless: rvr.Spec.Diskless,
+				NodeId:   *rvr.Status.DRBD.Config.NodeId,
+				Address:  *rvr.Status.DRBD.Config.Address,
+				Diskless: diskless,
 			}
 			return ret
 		}, Equal(expectedPeers)),
 	)
 }
 
-// makeReady sets up an RVR to be in ready state by initializing Status and Config with NodeId and Address
-func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeId uint, address v1alpha3.Address) {
+// makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
+func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeID uint, address v1alpha3.Address) {
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
 
-	if rvr.Status.Config == nil {
-		rvr.Status.Config = &v1alpha3.DRBDConfig{}
+	if rvr.Status.DRBD == nil {
+		rvr.Status.DRBD = &v1alpha3.DRBD{}
 	}
 
-	rvr.Status.Config.NodeId = &nodeId
-	rvr.Status.Config.Address = &address
+	if rvr.Status.DRBD.Config == nil {
+		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+	}
+
+	rvr.Status.DRBD.Config.NodeId = &nodeID
+	rvr.Status.DRBD.Config.Address = &address
 }
 
 // BeReady returns a matcher that checks if an RVR is in ready state (has NodeName, NodeId, and Address)
 func BeReady() gomegatypes.GomegaMatcher {
 	return SatisfyAll(
 		HaveField("Spec.NodeName", Not(BeEmpty())),
-		HaveField("Status.Config.NodeId", Not(BeNil())),
-		HaveField("Status.Config.Address", Not(BeNil())),
+		HaveField("Status.DRBD.Config.NodeId", Not(BeNil())),
+		HaveField("Status.DRBD.Config.Address", Not(BeNil())),
 	)
 }
 
@@ -208,7 +215,7 @@ var _ = Describe("Reconciler", func() {
 		When("first replica created", func() {
 			var firstRvr v1alpha3.ReplicatedVolumeReplica
 
-			BeforeEach(func(ctx SpecContext) {
+			BeforeEach(func() {
 				firstRvr = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
@@ -344,9 +351,10 @@ var _ = Describe("Reconciler", func() {
 
 						DescribeTableSubtree("if rvr-2 is",
 							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.config", func() { secondRvr.Status.Config = nil }),
-							Entry("without address", func() { secondRvr.Status.Config.Address = nil }),
-							Entry("without nodeId", func() { secondRvr.Status.Config.NodeId = nil }),
+							Entry("without status.drbd", func() { secondRvr.Status.DRBD = nil }),
+							Entry("without status.drbd.config", func() { secondRvr.Status.DRBD.Config = nil }),
+							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
+							Entry("without nodeId", func() { secondRvr.Status.DRBD.Config.NodeId = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
 							Entry("without owner reference", func() { secondRvr.OwnerReferences = []metav1.OwnerReference{} }),
 							Entry("with other owner reference", func() {
@@ -479,18 +487,45 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						// Use all 3 RVRs, but set node-2 to node-1 for rvr-2
 						rvrList[1].Spec.NodeName = "node-1" // Same node as rvr-1
-						nodeId1 := uint(1)
-						nodeId2 := uint(2)
-						nodeId3 := uint(3)
+						nodeID1 := uint(1)
+						nodeID2 := uint(2)
+						nodeID3 := uint(3)
 						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
 						address2 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7001} // Same IP, different port
 						address3 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-						rvrList[0].Status.Config.NodeId = &nodeId1
-						rvrList[0].Status.Config.Address = &address1
-						rvrList[1].Status.Config.NodeId = &nodeId2
-						rvrList[1].Status.Config.Address = &address2
-						rvrList[2].Status.Config.NodeId = &nodeId3
-						rvrList[2].Status.Config.Address = &address3
+						if rvrList[0].Status == nil {
+							rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						}
+						if rvrList[0].Status.DRBD == nil {
+							rvrList[0].Status.DRBD = &v1alpha3.DRBD{}
+						}
+						if rvrList[0].Status.DRBD.Config == nil {
+							rvrList[0].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						}
+						if rvrList[1].Status == nil {
+							rvrList[1].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						}
+						if rvrList[1].Status.DRBD == nil {
+							rvrList[1].Status.DRBD = &v1alpha3.DRBD{}
+						}
+						if rvrList[1].Status.DRBD.Config == nil {
+							rvrList[1].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						}
+						if rvrList[2].Status == nil {
+							rvrList[2].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						}
+						if rvrList[2].Status.DRBD == nil {
+							rvrList[2].Status.DRBD = &v1alpha3.DRBD{}
+						}
+						if rvrList[2].Status.DRBD.Config == nil {
+							rvrList[2].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						}
+						rvrList[0].Status.DRBD.Config.NodeId = &nodeID1
+						rvrList[0].Status.DRBD.Config.Address = &address1
+						rvrList[1].Status.DRBD.Config.NodeId = &nodeID2
+						rvrList[1].Status.DRBD.Config.Address = &address2
+						rvrList[2].Status.DRBD.Config.NodeId = &nodeID3
+						rvrList[2].Status.DRBD.Config.Address = &address3
 					})
 
 					It("should only keep one peer entry per node", func(ctx SpecContext) {
@@ -499,7 +534,7 @@ var _ = Describe("Reconciler", func() {
 						// rvr3 should only have one peer entry for node-1 (the first one found)
 						updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
-						Expect(updatedRVR3.Status.Config.Peers).To(And(
+						Expect(updatedRVR3.Status.DRBD.Config.Peers).To(And(
 							HaveKey("node-1"),
 							HaveLen(1),
 						))
@@ -519,7 +554,7 @@ var _ = Describe("Reconciler", func() {
 						// Get the state after first reconcile
 						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-						initialPeers := updatedRVR1.Status.Config.Peers
+						initialPeers := updatedRVR1.Status.DRBD.Config.Peers
 
 						// Second reconcile - should not change
 						expectReconcileSuccessfully(ctx)
@@ -527,16 +562,26 @@ var _ = Describe("Reconciler", func() {
 						// Verify peers are unchanged
 						updatedRVR1After := &v1alpha3.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1After)).To(Succeed())
-						Expect(updatedRVR1After.Status.Config.Peers).To(Equal(initialPeers))
+						Expect(updatedRVR1After.Status.DRBD.Config.Peers).To(Equal(initialPeers))
 						Expect(updatedRVR1After.Generation).To(Equal(updatedRVR1.Generation))
 					})
 				})
 
 				Context("with diskless RVRs", func() {
 					BeforeEach(func() {
-						// Use only first 2 RVRs, set second one as diskless
+						// Use only first 2 RVRs, set second one as diskless (empty disk)
 						rvrList = rvrList[:2]
-						rvrList[1].Spec.Diskless = true
+						if rvrList[1].Status == nil {
+							rvrList[1].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						}
+						if rvrList[1].Status.DRBD == nil {
+							rvrList[1].Status.DRBD = &v1alpha3.DRBD{}
+						}
+						if rvrList[1].Status.DRBD.Config == nil {
+							rvrList[1].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						}
+						// Empty disk means diskless
+						rvrList[1].Status.DRBD.Config.Disk = ""
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {
@@ -545,7 +590,7 @@ var _ = Describe("Reconciler", func() {
 						// Verify rvr1 has rvr2 with diskless flag
 						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-						Expect(updatedRVR1.Status.Config.Peers).To(HaveKeyWithValue("node-2", HaveField("Diskless", BeTrue())))
+						Expect(updatedRVR1.Status.DRBD.Config.Peers).To(HaveKeyWithValue("node-2", HaveField("Diskless", BeTrue())))
 					})
 				})
 			})

@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package v9
 
 import (
@@ -584,7 +600,7 @@ var knownValuesRRConflictPolicy = map[RRConflictPolicy]struct{}{
 const (
 	// No automatic resynchronization, simply disconnect.
 	RRConflictPolicyDisconnect RRConflictPolicy = "disconnect"
-	// Disconnect now, and retry to connect immediatly afterwards.
+	// Disconnect now, and retry to connect immediately afterwards.
 	RRConflictPolicyRetryConnect RRConflictPolicy = "retry-connect"
 	// Resync to the primary node is allowed, violating the assumption that data
 	// on a block device are stable for one of the nodes. Do not use this

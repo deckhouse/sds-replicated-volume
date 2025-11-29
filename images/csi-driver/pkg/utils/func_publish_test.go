@@ -40,28 +40,26 @@ func TestPublishUtils(t *testing.T) {
 
 var _ = Describe("AddPublishRequested", func() {
 	var (
-		ctx     context.Context
 		cl      client.Client
-		log     *logger.Logger
+		log     logger.Logger
 		traceID string
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClient()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		traceID = "test-trace-id"
 	})
 
 	Context("when adding node to empty publishRequested", func() {
-		It("should successfully add the node", func() {
+		It("should successfully add the node", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -72,7 +70,7 @@ var _ = Describe("AddPublishRequested", func() {
 	})
 
 	Context("when adding second node", func() {
-		It("should successfully add the second node", func() {
+		It("should successfully add the second node", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName1 := "node-1"
 			nodeName2 := "node-2"
@@ -80,7 +78,7 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, log, traceID, volumeName, nodeName2)
+			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName2)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -92,14 +90,14 @@ var _ = Describe("AddPublishRequested", func() {
 	})
 
 	Context("when node already exists", func() {
-		It("should return nil without error", func() {
+		It("should return nil without error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -110,7 +108,7 @@ var _ = Describe("AddPublishRequested", func() {
 	})
 
 	Context("when maximum nodes already present", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName1 := "node-1"
 			nodeName2 := "node-2"
@@ -119,7 +117,7 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, log, traceID, volumeName, nodeName3)
+			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName3)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("maximum of 2 nodes already present"))
 
@@ -130,11 +128,11 @@ var _ = Describe("AddPublishRequested", func() {
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := AddPublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("get ReplicatedVolume"))
 		})
@@ -143,28 +141,26 @@ var _ = Describe("AddPublishRequested", func() {
 
 var _ = Describe("RemovePublishRequested", func() {
 	var (
-		ctx     context.Context
 		cl      client.Client
-		log     *logger.Logger
+		log     logger.Logger
 		traceID string
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClient()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		traceID = "test-trace-id"
 	})
 
 	Context("when removing existing node", func() {
-		It("should successfully remove the node", func() {
+		It("should successfully remove the node", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -175,7 +171,7 @@ var _ = Describe("RemovePublishRequested", func() {
 	})
 
 	Context("when removing one node from two", func() {
-		It("should successfully remove one node and keep the other", func() {
+		It("should successfully remove one node and keep the other", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName1 := "node-1"
 			nodeName2 := "node-2"
@@ -183,7 +179,7 @@ var _ = Describe("RemovePublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, log, traceID, volumeName, nodeName1)
+			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName1)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -195,14 +191,14 @@ var _ = Describe("RemovePublishRequested", func() {
 	})
 
 	Context("when node does not exist", func() {
-		It("should return nil without error", func() {
+		It("should return nil without error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha2.ReplicatedVolume{}
@@ -212,11 +208,11 @@ var _ = Describe("RemovePublishRequested", func() {
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return nil (considered success)", func() {
+		It("should return nil (considered success)", func(ctx SpecContext) {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := RemovePublishRequested(ctx, cl, log, traceID, volumeName, nodeName)
+			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -224,21 +220,19 @@ var _ = Describe("RemovePublishRequested", func() {
 
 var _ = Describe("WaitForPublishProvided", func() {
 	var (
-		ctx     context.Context
 		cl      client.Client
-		log     *logger.Logger
+		log     logger.Logger
 		traceID string
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClient()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		traceID = "test-trace-id"
 	})
 
 	Context("when node already in publishProvided", func() {
-		It("should return immediately", func() {
+		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -248,13 +242,13 @@ var _ = Describe("WaitForPublishProvided", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishProvided(ctx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when node appears in publishProvided", func() {
-		It("should wait and return successfully", func() {
+		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -279,24 +273,24 @@ var _ = Describe("WaitForPublishProvided", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishProvided(timeoutCtx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishProvided(ctx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedVolume"))
 		})
 	})
 
 	Context("when context is cancelled", func() {
-		It("should return context error", func() {
+		It("should return context error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -309,7 +303,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishProvided(cancelledCtx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})
@@ -318,21 +312,19 @@ var _ = Describe("WaitForPublishProvided", func() {
 
 var _ = Describe("WaitForPublishRemoved", func() {
 	var (
-		ctx     context.Context
 		cl      client.Client
-		log     *logger.Logger
+		log     logger.Logger
 		traceID string
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClient()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		traceID = "test-trace-id"
 	})
 
 	Context("when node already not in publishProvided", func() {
-		It("should return immediately", func() {
+		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -342,13 +334,13 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when node is removed from publishProvided", func() {
-		It("should wait and return successfully", func() {
+		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -373,23 +365,23 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishRemoved(timeoutCtx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return nil (considered success)", func() {
+		It("should return nil (considered success)", func(ctx SpecContext) {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishRemoved(ctx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when status is nil", func() {
-		It("should return nil (considered success)", func() {
+		It("should return nil (considered success)", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -397,13 +389,13 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			rv.Status = nil
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
 	Context("when context is cancelled", func() {
-		It("should return context error", func() {
+		It("should return context error", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
@@ -416,7 +408,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishRemoved(cancelledCtx, cl, log, traceID, volumeName, nodeName)
+			err := WaitForPublishRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})

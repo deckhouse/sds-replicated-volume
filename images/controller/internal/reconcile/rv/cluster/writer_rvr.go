@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cluster
 
 import (
@@ -9,7 +25,7 @@ import (
 type RVRWriterImpl struct {
 	RVNodeAdapter
 	port   uint
-	nodeId uint
+	nodeID uint
 	volume *v1alpha2.Volume
 	peers  map[string]v1alpha2.Peer
 }
@@ -33,8 +49,8 @@ func (w *RVRWriterImpl) SetPort(port uint) {
 	w.port = port
 }
 
-func (w *RVRWriterImpl) SetNodeId(nodeId uint) {
-	w.nodeId = nodeId
+func (w *RVRWriterImpl) SetNodeID(nodeID uint) {
+	w.nodeID = nodeID
 }
 
 func (w *RVRWriterImpl) SetVolume(volume v1alpha2.Volume) {
@@ -47,7 +63,7 @@ func (w *RVRWriterImpl) SetPeer(nodeName string, peer v1alpha2.Peer) {
 
 func (w *RVRWriterImpl) ToPeer() v1alpha2.Peer {
 	return v1alpha2.Peer{
-		NodeId: uint(w.nodeId),
+		NodeId: w.nodeID,
 		Address: v1alpha2.Address{
 			IPv4: w.NodeIP(),
 			Port: w.port,
@@ -64,7 +80,7 @@ func (w *RVRWriterImpl) WriteToRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Chang
 
 	cs = Change(cs, "replicatedVolumeName", &rvrSpec.ReplicatedVolumeName, w.RVName())
 	cs = Change(cs, "nodeName", &rvrSpec.NodeName, w.NodeName())
-	cs = Change(cs, "nodeId", &rvrSpec.NodeId, w.nodeId)
+	cs = Change(cs, "nodeId", &rvrSpec.NodeId, w.nodeID)
 	cs = Change(cs, "nodeAddress.ipv4", &rvrSpec.NodeAddress.IPv4, w.NodeIP())
 	cs = Change(cs, "nodeAddress.port", &rvrSpec.NodeAddress.Port, w.port)
 

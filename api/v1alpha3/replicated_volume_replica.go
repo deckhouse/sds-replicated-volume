@@ -1,11 +1,25 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package v1alpha3
 
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 )
@@ -15,6 +29,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rvr
+// +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
@@ -43,78 +58,6 @@ func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Sel
 	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
 }
 
-func (rvr *ReplicatedVolumeReplica) IsConfigured() bool {
-	return rvr.Status != nil && rvr.Status.Config != nil
-}
-
-func (rvr *ReplicatedVolumeReplica) InitializeStatusConditions() {
-	if rvr.Status == nil {
-		rvr.Status = &ReplicatedVolumeReplicaStatus{}
-	}
-
-	if rvr.Status.Conditions == nil {
-		rvr.Status.Conditions = []metav1.Condition{}
-	}
-
-	for t, opts := range ReplicatedVolumeReplicaConditions {
-		if meta.FindStatusCondition(rvr.Status.Conditions, t) != nil {
-			continue
-		}
-		cond := metav1.Condition{
-			Type:               t,
-			Status:             metav1.ConditionUnknown,
-			Reason:             "Initializing",
-			Message:            "",
-			LastTransitionTime: metav1.NewTime(time.Now()),
-		}
-		if opts.UseObservedGeneration {
-			cond.ObservedGeneration = rvr.Generation
-		}
-		rvr.Status.Conditions = append(rvr.Status.Conditions, cond)
-	}
-}
-
-func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
-	if rvr.Status == nil || rvr.Status.Conditions == nil {
-		return
-	}
-
-	cfgAdjCondition := meta.FindStatusCondition(
-		rvr.Status.Conditions,
-		ConditionTypeConfigurationAdjusted,
-	)
-
-	readyCond := metav1.Condition{
-		Type:               ConditionTypeReady,
-		Status:             metav1.ConditionFalse,
-		ObservedGeneration: rvr.Generation,
-	}
-
-	if cfgAdjCondition != nil &&
-		cfgAdjCondition.Status == metav1.ConditionFalse &&
-		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync {
-		readyCond.Reason = ReasonWaitingForInitialSync
-		readyCond.Message = "Configuration adjustment waits for InitialSync"
-	} else if cfgAdjCondition == nil ||
-		cfgAdjCondition.Status != metav1.ConditionTrue {
-		readyCond.Reason = ReasonAdjustmentFailed
-		readyCond.Message = "Resource adjustment failed"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
-		readyCond.Reason = ReasonDevicesAreNotReady
-		readyCond.Message = "Devices are not ready"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum) {
-		readyCond.Reason = ReasonNoQuorum
-	} else if meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended) {
-		readyCond.Reason = ReasonDiskIOSuspended
-	} else {
-		readyCond.Status = metav1.ConditionTrue
-		readyCond.Reason = ReasonReady
-		readyCond.Message = "Replica is configured and operational"
-	}
-
-	meta.SetStatusCondition(&rvr.Status.Conditions, readyCond)
-}
-
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
@@ -124,20 +67,20 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
 
-	// +kubebuilder:validation:Required
+	// +optional
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
-	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeName is immutable"
-	NodeName string `json:"nodeName"`
+	NodeName string `json:"nodeName,omitempty"`
 
-	// +kubebuilder:default=false
-	Diskless bool `json:"diskless,omitempty"`
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	Type string `json:"type,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -166,9 +109,12 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
+	ActualType string `json:"actualType,omitempty"`
+
 	// +patchStrategy=merge
-	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
-	DRBD   *DRBDStatus `json:"drbd,omitempty"`
+	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -187,6 +133,7 @@ type DRBDConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
 	// +optional
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId *uint `json:"nodeId"`
 
 	// +optional
@@ -224,8 +171,30 @@ func (v *DRBDConfig) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode s
 }
 
 // +k8s:deepcopy-gen=true
+type DRBD struct {
+	// +patchStrategy=merge
+	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDActual struct {
+	// +optional
+	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
+	// +kubebuilder:validation:MaxLength=256
+	Disk string `json:"disk,omitempty"`
+
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
 type DRBDStatus struct {
-	Name             string             `json:"name"`
+	Name string `json:"name"`
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId           int                `json:"nodeId"`
 	Role             string             `json:"role"`
 	Suspended        bool               `json:"suspended"`
@@ -258,6 +227,7 @@ type DeviceStatus struct {
 
 // +k8s:deepcopy-gen=true
 type ConnectionStatus struct {
+	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int                `json:"peerNodeId"`
 	Name            string             `json:"name"`
 	ConnectionState string             `json:"connectionState"`

@@ -76,7 +76,7 @@ func NewLinstorResourcesWatcher(
 	log logger.Logger,
 ) {
 	cl := mgr.GetClient()
-	ctx := context.Background()
+	ctx := context.Background() // TODO: should use external context to make it cancelable
 
 	log.Info(fmt.Sprintf("[NewLinstorResourcesWatcher] the controller %s starts the work", linstorResourcesWatcherCtrlName))
 

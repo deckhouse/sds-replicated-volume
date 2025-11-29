@@ -1,11 +1,13 @@
 - [Основные положения](#основные-положения)
   - [Схема именования акторов](#схема-именования-акторов)
   - [Условное обозначение триггеров](#условное-обозначение-триггеров)
+  - [Алгоритмы](#алгоритмы)
+    - [Типы реплик и целевое количество реплик](#типы-реплик-и-целевое-количество-реплик)
   - [Константы](#константы)
     - [RVR Ready условия](#rvr-ready-условия)
     - [RV Ready условия](#rv-ready-условия)
     - [Алгоритмы хеширования shared secret](#алгоритмы-хеширования-shared-secret)
-  - [Настройки](#настройки)
+    - [Порты DRBD](#порты-drbd)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
     - [`size`](#size)
@@ -37,18 +39,25 @@
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4)
-  - [`rvr-node-selector-controller`](#rvr-node-selector-controller)
+  - [`rvr-scheduling-controller`](#rvr-scheduling-controller)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
+  - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
+  - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
+  - [`rvr-access-count-controller`](#rvr-access-count-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
   - [`rv-publish-controller`](#rv-publish-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-2)
   - [`rvr-volume-controller`](#rvr-volume-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
   - [`rv-status-config-controller`](#rv-status-config-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
+    - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
   - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
@@ -56,6 +65,10 @@
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
 - [Сценарии](#сценарии)
   - [Ручное создание реплицируемого тома](#ручное-создание-реплицируемого-тома)
+  - [](#)
+  - [](#-1)
+  - [](#-2)
+  - [](#-3)
 
 # Основные положения
 
@@ -71,6 +84,38 @@
  - `CREATE` - событие создания и синхронизации ресурса; синхронизация происходит для каждого ресурса, при старте контроллера, а также на регулярной основе (раз в 20 часов)
  - `UPDATE` - событие обновления ресурса (в т.ч. проставление `metadata.deletionTimestamp`)
  - `DELETE` - событие окончательного удаления ресурса, происходит после снятия последнего финализатора (может быть потеряно в случае недоступности контроллера)
+
+## Алгоритмы
+
+### Типы реплик и целевое количество реплик
+
+Существуют три вида реплик по предназначению:
+ - \[DF\] diskful - чтобы воспользоваться диском
+ - \[DL-AP\] diskless (access point) - чтобы воспользоваться быстрым доступом к данным, не ожидая долгой синхронизации, либо при отсутствии диска
+ - \[DL-TB\] diskless (tie-breaker) - чтобы участвовать в кворуме при чётном количестве других реплик
+
+В зависимости от значения свойства `ReplicatedStorageClass` `spec.replication`, количество реплик разных типов следующее:
+ - `None`
+   - \[DF\]: 1
+   - \[DL-AP\]: 0 / 1 / 2
+ - `Availability`
+   - \[DF\]: 2
+   - \[DL-TB\]: 1 / 0 / 1
+   - \[DL-AP\]: 0 / 1 / 2
+ - `ConsistencyAndAvailability`
+   - \[DF\]: 3
+   - \[DL-AP\]: 1
+
+Для миграции надо две primary.
+
+Виртуалка может подключится к TB либо запросить себе AP. 
+
+В случае если `spec.volumeAcess!=Local` AP не может быть Primary.
+
+TB в любой ситуации поддерживает нечетное, и сама может превратится в AP. Превращение происходит с помощью удаления.
+
+TODO
+
 
 ## Константы
 Константы - это значения, которые должны быть определены в коде во время компиляции программы.
@@ -96,14 +141,11 @@
  - `SharedSecretAlgorithmSelected==True`
 
 ### Алгоритмы хеширования shared secret
+ - `sha256`
  - `sha1`
- - `crc32`
- - `md5`
- - `ghash`
- - `polyval`
 
-## Настройки
- - `drbdMinPort` - минимальный порт для использования ресурсами
+### Порты DRBD
+ - `drbdMinPort` - минимальный порт для использования ресурсами 
  - `drbdMaxPort` - максимальный порт для использования ресурсами
 
 # Контракт данных: `ReplicatedVolume`
@@ -307,7 +349,7 @@
 ### Цель 
 Проставить значение свойству `rvr.status.config.address`.
  - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
- - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [настройках](#настройки) `drbdMinPort`/`drbdMaxPort`
+ - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [портах DRBD](#Порты-DRBD) `drbdMinPort`/`drbdMaxPort`
 
 В случае, если нет свободного порта, настроек порта, либо IP: повторять реконсайл с ошибкой.
 
@@ -344,15 +386,17 @@
     - когда фактическое количество реплик равно 1
 
 ### Вывод
-  - создаёт RVR вплоть до RV->
+  - создаёт diskful RVR (`rvr.spec.type==Diskful`) вплоть до RV->
 [RSC->`spec.replication`](https://deckhouse.io/modules/sds-replicated-volume/stable/cr.html#replicatedstorageclass-v1alpha1-spec-replication)
     - `spec.replicatedVolumeName` имеет значение RV `metadata.name`
     - `metadata.ownerReferences` указывает на RV по имени `metadata.name`
     - `rv.status.conditions[type=DiskfulReplicaCountReached]`
 
-## `rvr-node-selector-controller`
+## `rvr-scheduling-controller`
 
 ### Цель
+
+
 
 Исключать закордоненные ноды (см. `rvr-node-cordon-controller`)
 
@@ -396,34 +440,113 @@
 ### Вывод
   - `rvr.status.peers`
 
+## `rv-status-config-device-minor-controller`
+### Статус: [OK | priority: 5 | complexity: 2]
+
+### Цель
+
+Инициализировать свойство `rv.status.config.deviceMinor` минимальным свободным значением среди всех RV.
+
+По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.config.deviceMinor`.
+
+### Триггер
+  - `CREATE/UPDATE(RV, rv.status.config.deviceMinor != nil)`
+
+### Вывод
+  - `rv.status.config.deviceMinor`
+
+## `rvr-tie-breaker-count-controller`
+
+### Статус: [OK | priority: 5 | complexity: 4]
+
+### Цель
+
+Failure domain (FD) - либо - нода, либо, в случае, если `rsc.spec.topology==TransZonal`, то - и нода, и зона.
+
+Создавать и удалять RVR с `rvr.spec.type==TieBreaker`, чтобы поддерживались требования: 
+
+- отказ любого одного FD не должен приводить к потере кворума
+- отказ большинства FD должен приводить к потере кворума
+- поэтому надо тай-брейкерами доводить количество реплик на всех FD до минимального
+числа, при котором будут соблюдаться условия:
+  -  отличие в количестве реплик между FD не больше чем на 1
+  -  общее количество реплик - нечётное
+
+
+### Вывод
+  - Новая rvr с `rvr.spec.type==TieBreaker`
+  - `rvr.metadata.deletionTimestamp==true`
+
+## `rvr-access-count-controller`
+
+### Статус: [OK | priority: 5 | complexity: 3]
+
+### Цель 
+Поддерживать нужное количество `rvr.spec.type==Access` реплик для всех режимов
+`rsc.spec.volumeAccess`, кроме `Local`.
+
+`Access` реплики требуются для доступа к данным на тех узлах, где нет `Diskful` реплики.
+
+В случае, если на узле есть `TieBreaker` реплика, вместо создания новой `Access`,
+нужно поменять её тип на `Access`.
+
+Список запрашиваемых для доступа узлов обновляется в `rv.spec.publishOn`.
+
+Когда узел больше не в `rv.spec.publishOn`, а также не в `rv.status.publishedOn`,
+`Access` реплика на нём должна быть удалена.
+
+### Вывод
+  - создает, обновляет, удаляет `rvr`
+
 ## `rv-publish-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 5]
+### Статус: [OK | priority: 5 | complexity: 4]
 
 ### Цель 
 
-Следить за `rv.spec.publishOn`, менять `rv.status.allowTwoPrimaries`, дожидаться фактического применения настройки, и обновлять `rvr.status.config.primary` 
+Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в запросе на публикацию `rv.spec.publishOn` и приводить в соответствие реплики на этой ноде, проставляя им `rvr.status.drbd.config.primary`. 
 
-Должен учитывать фактическое состояние `rvr.status.drbd.connections[].peerRole` и не допускать более двух Primary. Два допустимы только во время включенной настройки `allowTwoPrimaries`.
+В случае, если `rsc.spec.volumeAccess==Local`, но реплика не `rvr.spec.type==Diskful`,
+либо её нет вообще, промоут невозможен, и требуется обновить rvr и прекратить реконсайл:
+   - `rv.status.conditions[type=PublishSucceeded].status=False`
+   - `rv.status.conditions[type=PublishSucceeded].reason=UnableToProvideLocalVolumeAccess`
+   - `rv.status.conditions[type=PublishSucceeded].message=<сообщение для пользователя>`
 
-<!-- Работает только когда RV имеет `status.condition[Type=Ready].status=True`.
+В `rv.spec.publishOn` может быть указано 2 узла. Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
+ - поменяв `rv.status.drbd.config.allowTwoPrimaries=true`
+ - дождаться фактического применения настройки на каждой rvr `rvr.status.drbd.actual.allowTwoPrimaries`
+ - и только потом обновлять `rvr.status.drbd.config.primary`
 
-- Если `volumeAccess=Local`, то он может только менять primary на существующей реплике
-- Если `volumeAccess!=Local` - то он может создавать новые реплики сразу с diskless: true -->
+В случае, когда в `rv.spec.publishOn` менее двух нод, нужно убедиться, что настройка `rv.status.drbd.config.allowTwoPrimaries=false`.
 
-### Триггер 
-  - 
+Также требуется поддерживать свойство `rv.status.publishedOn`, указывая там список нод, на которых
+фактически произошёл переход реплики в состояние Primary. Это состояние публикуется в `rvr.status.drbd.status.role` (значение `Primary`).
+
+Контроллер работает только когда RV имеет `status.condition[Type=Ready].status=True`
+
 ### Вывод 
   - `rvr.status.config.primary`
+  - `rv.status.publishedOn`
+  - `rv.status.conditions[type=PublishSucceeded]`
 
 ## `rvr-volume-controller`
 
-### Цель 
+### Статус: [OK | priority: 5 | complexity: 3]
 
-### Триггер 
-  - 
+### Цель
+1. Обеспечить наличие LLV для каждой реплики, у которой
+   - `rvr.spec.type==Diskful`
+   - `rvr.metadata.deletionTimestamp==nil`
+  Всем LLV под управлением проставляется `metadata.ownerReference`, указывающий на RVR.
+2. Обеспечить проставление значения в свойства `rvr.status.lvmLogicalVolumeName`, указывающее на соответствующую LLV, готовую к использованию.
+3. Обеспечить отсутствие LLV диска у RVR с `rvr.spec.type!=Diskful`, но только когда
+фактический тип (`rvr.status.actualType`) соответствует целевому `rvr.spec.type`.
+4. Обеспечить сброс свойства `rvr.status.lvmLogicalVolumeName` после удаления LLV.
+
 ### Вывод 
-  - 
+  - Новое `llv`
+  - Обновление для уже существующих: `llv.metadata.ownerReference`
+  - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
 ## `rvr-gc-controller`
 
@@ -457,13 +580,15 @@
 
 ## `rv-status-config-quorum-controller`
 
-### Статус: [OK | priority: 5 | complexity: 3]
+### Статус: [OK | priority: 5 | complexity: 4]
 
 ### Цель 
 
 Поднять значение кворума до необходимого, после того как кластер станет работоспособным.
 
 Работоспособный кластер - это RV, у которого все [RV Ready условия](#rv-ready-условия) достигнуты, без учёта условия `QuorumConfigured`.
+
+До поднятия кворума нужно поставить финализатор на каждую RVR. Также необходимо обработать проставление rvr.`metadata.deletionTimestamp` таким образом, чтобы финализатор с RVR был снят после фактического уменьшения кворума.
 
 Процесс и результат работы контроллера должен быть отражён в `rv.status.conditions[type=QuorumConfigured]`
 
@@ -475,13 +600,18 @@
   - `rv.status.config.quorumMinimumRedundancy`
   - `rv.status.conditions[type=QuorumConfigured]`
 
-Правильные значения, в зависимости от количества diskful реплик N:
+Правильные значения:
+
+N - все реплики
+M - diskful реплики
 
 ```
-var quorum byte = N/2 + 1
-var qmr byte = 0
-if N > 2 {
-	qmr = quorum
+if M > 1 {
+  var quorum byte = max(2, N/2 + 1)
+  var qmr byte = max(2, M/2 +1)
+} else {
+  var quorum byte = 0
+  var qmr byte = 0
 }
 ```
 
@@ -577,3 +707,84 @@ if N > 2 {
 7. На узле срабатывает `rvr-create-controller`
    1. Выполняются необходимые операции в drbd (drbdadm create-md, up, adjust, primary --force)
 
+##
+- Zone A
+  - DF1 (Primary)
+- Zone B
+  - DF2
+- Zone C
+  - TB1
+
+q=2
+qmr=2
+
+
+##
+- Zone A
+  - DF1
+  - TB2
+- Zone B
+  - DF2
+  - AP1 (Primary)
+- Zone C
+  - TB1
+
+q=3
+
+qmr=2
+
+
+##
+- Zone A
+  - DF1
+  - TB2
+- Zone B
+  - DF2
+  <!-- - AP1 (Primary) -->
+- Zone C
+  - TB1
+
+
+##
+- Zone A
+  - DF1
+  - TB1
+- Zone B
+  - DF2
+  - TB2
+- Zone C
+  - DF3
+  - AP1
+  - AP2
+
+3
+2
+
+C=3
+B=1
+A=1
+
+- требование: failure domain=node
+- требование: failure domain=zone (только когда TransZonal)
+- требование: отказ любого одного FD не должен приводить к потере кворума
+- требование: отказ большинства FD должен приводить к потере кворума
+- поэтому надо тай-брейкерами доводить количество нод на всех FD до минимального числа, чтобы осблюсти:
+  -  отличие не больше чем на 1
+  -  общее количество нечётное
+
+
+
+Правильные значения:
+
+N - все реплики
+M - diskful реплики
+
+```
+if M > 1 {
+  var quorum byte = max(2, N/2 + 1)
+  var qmr byte = max(2, M/2 +1)
+} else {
+  var quorum byte = 0
+  var qmr byte = 0
+}
+```

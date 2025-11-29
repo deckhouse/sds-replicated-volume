@@ -124,7 +124,7 @@ func RSPValidate(ctx context.Context, _ *model.AdmissionReview, obj metav1.Objec
 		}
 
 		if thinPoolExists {
-			ctx := context.Background()
+			ctx := context.Background() // TODO: can't we use previous context or derive from it?
 			cl, err := NewKubeClient("")
 			if err != nil {
 				klog.Fatal(err.Error())

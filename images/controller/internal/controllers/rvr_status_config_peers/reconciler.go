@@ -21,11 +21,12 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
@@ -75,18 +76,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return true
 		}
 
-		if rvr.Status == nil || rvr.Status.Config == nil {
-			log.V(2).Info("No status.config. Skipping")
+		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+			log.V(2).Info("No status.drbd.config. Skipping")
 			return true
 		}
 
-		if rvr.Status.Config.NodeId == nil {
-			log.V(2).Info("No status.config.nodId. Skipping")
+		if rvr.Status.DRBD.Config.NodeId == nil {
+			log.V(2).Info("No status.drbd.config.nodId. Skipping")
 			return true
 		}
 
-		if rvr.Status.Config.Address == nil {
-			log.V(2).Info("No status.config.address. Skipping")
+		if rvr.Status.DRBD.Config.Address == nil {
+			log.V(2).Info("No status.drbd.config.address. Skipping")
 			return true
 		}
 
@@ -99,10 +100,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			log.Info("Peer on this node already found. Skipping")
 			continue
 		}
+		diskless := rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.Disk == ""
 		peers[rvr.Spec.NodeName] = v1alpha3.Peer{
-			NodeId:   *rvr.Status.Config.NodeId,
-			Address:  *rvr.Status.Config.Address,
-			Diskless: rvr.Spec.Diskless,
+			NodeId:   *rvr.Status.DRBD.Config.NodeId,
+			Address:  *rvr.Status.DRBD.Config.Address,
+			Diskless: diskless,
 		}
 	}
 
@@ -114,14 +116,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		peersWithoutSelf := maps.Clone(peers)
 		delete(peersWithoutSelf, rvr.Spec.NodeName)
 
-		if maps.Equal(peersWithoutSelf, rvr.Status.Config.Peers) {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+			log.V(1).Info("No status.drbd.config. Skipping")
+			continue
+		}
+
+		if maps.Equal(peersWithoutSelf, rvr.Status.DRBD.Config.Peers) {
 			log.V(1).Info("not changed")
 			continue
 		}
 
 		from := client.MergeFrom(&rvr)
 		changedRvr := rvr.DeepCopy()
-		changedRvr.Status.Config.Peers = peersWithoutSelf
+		if changedRvr.Status.DRBD == nil {
+			changedRvr.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if changedRvr.Status.DRBD.Config == nil {
+			changedRvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		}
+		changedRvr.Status.DRBD.Config.Peers = peersWithoutSelf
 		if err := r.cl.Status().Patch(ctx, changedRvr, from); err != nil {
 			log.Error(err, "Patching ReplicatedVolumeReplica")
 			return reconcile.Result{}, client.IgnoreNotFound(err)

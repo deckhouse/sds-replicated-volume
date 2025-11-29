@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,7 +28,7 @@ import (
 )
 
 func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := newFakeClient()
 	log := logger.Logger{}
 
@@ -160,7 +159,7 @@ func TestReconcileCSINodeLabelsIfDiffExists(t *testing.T) {
 }
 
 func TestReconcileCSINodeLabelsIfDiffDoesNotExists(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := newFakeClient()
 	log := logger.Logger{}
 
@@ -293,7 +292,7 @@ func TestRenameLinbitLabels(t *testing.T) {
 		SdsDfltDisklessStorPoolLabelKey    = "storage.deckhouse.io/sds-replicated-volume-sp-DfltDisklessStorPool"
 		LinbitDfltDisklessStorPoolLabelKey = "linbit.com/sp-DfltDisklessStorPool"
 	)
-	ctx := context.Background()
+	ctx := t.Context()
 	cl := newFakeClient()
 	nodes := []v1.Node{
 		{
