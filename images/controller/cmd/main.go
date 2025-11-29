@@ -24,12 +24,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/deckhouse/sds-common-lib/slogh"
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/go-logr/logr"
 	"golang.org/x/sync/errgroup"
 	crlog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
+
+	"github.com/deckhouse/sds-common-lib/slogh"
+	u "github.com/deckhouse/sds-common-lib/utils"
 )
 
 func main() {

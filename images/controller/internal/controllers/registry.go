@@ -19,8 +19,9 @@ package controllers
 import (
 	"fmt"
 
-	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 )
 
 var registry []func(mgr manager.Manager) error

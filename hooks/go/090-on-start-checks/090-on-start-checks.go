@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/registry"
 )
 
 var _ = registry.RegisterFunc(
@@ -65,7 +66,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		propValue, _, _ := unstructured.NestedString(spec, "prop_value")
 
 		if propKey == "DrbdOptions/AutoEvictAllowEviction" && propValue == "True" {
-
 			patch := map[string]interface{}{
 				"spec": map[string]interface{}{
 					"prop_value": "False",
@@ -105,7 +105,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 		err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
 		if err != nil {
-
 			if client.IgnoreNotFound(err) == nil {
 				input.Logger.Info("ModuleConfig not found, creating new one")
 			} else {
@@ -157,7 +156,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		}
 
 		return nil
-
 	} else {
 		input.Logger.Info("No thin pool granularity found, checking if thin provisioning should be disabled")
 
@@ -183,7 +181,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 			enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
 
 			if found && enableThinProvisioning {
-
 				// Disable thin provisioning
 
 				input.Logger.Info("Thin provisioning in moduleconfig set to True - disabling")

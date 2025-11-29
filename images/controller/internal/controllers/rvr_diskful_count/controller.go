@@ -20,19 +20,19 @@ import (
 	"context"
 	"log/slog"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 func BuildController(mgr manager.Manager) error {
-
 	// TODO issues/333 your global dependencies
 	var rec = &Reconciler{
 		cl:     mgr.GetClient(),

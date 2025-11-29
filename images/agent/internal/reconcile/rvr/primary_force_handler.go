@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"log/slog"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type resourcePrimaryForceRequestHandler struct {
