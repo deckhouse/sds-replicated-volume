@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -34,7 +33,7 @@ import (
 )
 
 func TestLinstorPortRangeWatcher(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.Logger{}
 	cl := newFakeClient()
 

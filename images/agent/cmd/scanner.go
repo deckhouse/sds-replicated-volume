@@ -78,7 +78,7 @@ func (s *scanner) retryUntilCancel(fn func() error) error {
 			Cap:      5 * time.Second,
 			Jitter:   0.1,
 		},
-		func(err error) bool {
+		func(_ error) bool {
 			// retry any error until parent context is done
 			return s.ctx.Err() == nil
 		},
@@ -156,14 +156,14 @@ func (s *scanner) processEvents(
 				s.log.Debug("events online")
 			}
 
-			if resourceName, ok := typedEvent.State["name"]; !ok {
+			resourceName, ok := typedEvent.State["name"]
+			if !ok {
 				s.log.Debug("skipping event without name")
 				continue
-			} else {
-				s.log.Debug("yielding event", "event", typedEvent)
-				if !yield(updatedResourceName(resourceName)) {
-					return
-				}
+			}
+			s.log.Debug("yielding event", "event", typedEvent)
+			if !yield(updatedResourceName(resourceName)) {
+				return
 			}
 		}
 	}
@@ -273,9 +273,8 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				func(d *drbdsetup.Device) bool {
 					if diskless {
 						return d.DiskState != "Diskless"
-					} else {
-						return d.DiskState != "UpToDate"
 					}
+					return d.DiskState != "UpToDate"
 				},
 			)
 
@@ -296,7 +295,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
 
 			if !allReady && condDevicesReady.Status != metav1.ConditionFalse {
-				var msg string = "No devices found"
+				msg := "No devices found"
 				if len(resource.Devices) > 0 {
 					msg = fmt.Sprintf(
 						"Device %d volume %d is %s",

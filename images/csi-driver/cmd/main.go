@@ -49,7 +49,6 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-
 	defer cancel()
 
 	c := make(chan os.Signal, 1)
@@ -82,7 +81,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to create kubeclient")
-		os.Exit(1)
+		klog.Fatalf("unable to create kubeclient, err: %v", err)
 	}
 
 	http.HandleFunc("/healthz", healthHandler)

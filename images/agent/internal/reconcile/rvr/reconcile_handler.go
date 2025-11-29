@@ -305,14 +305,14 @@ func (h *resourceReconcileRequestHandler) updateResourceConfigAfterInitialSync(r
 
 func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	res *v9.Resource,
-	nodeName string, nodeId uint, nodeAddress v1alpha2.Address,
+	nodeName string, nodeID uint, nodeAddress v1alpha2.Address,
 	peerOptions *v1alpha2.Peer, // nil for current node
 ) {
 	isCurrentNode := nodeName == h.nodeName
 
 	onSection := &v9.On{
 		HostNames: []string{nodeName},
-		NodeID:    Ptr(nodeId),
+		NodeID:    Ptr(nodeID),
 	}
 
 	// volumes

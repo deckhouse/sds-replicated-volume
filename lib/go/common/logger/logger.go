@@ -58,8 +58,8 @@ func NewLogger(level Verbosity) (*Logger, error) {
 	return &Logger{log: log}, nil
 }
 
-func WrapLorg(log logr.Logger) *Logger {
-	return &Logger{log: log}
+func WrapLorg(log logr.Logger) Logger {
+	return Logger{log: log}
 }
 
 func (l Logger) GetLogger() logr.Logger {

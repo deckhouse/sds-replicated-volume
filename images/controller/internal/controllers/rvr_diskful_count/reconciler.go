@@ -39,7 +39,7 @@ type Reconciler struct {
 var _ reconcile.TypedReconciler[Request] = &Reconciler{}
 
 func (r *Reconciler) Reconcile(
-	ctx context.Context,
+	_ context.Context,
 	req Request,
 ) (reconcile.Result, error) {
 	// TODO issues/333 reconcile requests here
