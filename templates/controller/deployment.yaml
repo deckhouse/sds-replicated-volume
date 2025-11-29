@@ -93,6 +93,9 @@ spec:
           securityContext:
             privileged: true
             readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
             seLinuxOptions:
               level: s0
               type: spc_t

@@ -101,6 +101,9 @@ spec:
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
         volumeMounts:
         - mountPath: /dev/
           name: host-device-dir
