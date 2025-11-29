@@ -22,6 +22,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -54,46 +55,39 @@ func HaveNoPeers() gomegatypes.GomegaMatcher {
 
 // HaveAllPeersSet is a matcher factory that returns a Gomega matcher for a single RVR
 // It checks that the RVR has all other RVRs from expectedResources as peers but his own
-func HaveAllPeersSet(expectedResources []v1alpha3.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
-	if len(expectedResources) < 2 {
+func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
+	if len(expectedPeerReplicas) < 2 {
 		return HaveNoPeers()
 	}
+	expectedPeers := make(map[string]v1alpha3.Peer, len(expectedPeerReplicas)-1)
+	for _, rvr := range expectedPeerReplicas {
+		if rvr.Status == nil {
+			return gcustom.MakeMatcher(func(_ any) bool { return false }).
+				WithMessage("expected rvr to have status, but it's nil")
+		}
+
+		if rvr.Status.Config == nil {
+			return gcustom.MakeMatcher(func(_ any) bool { return false }).
+				WithMessage("expected rvr to have status.config, but it's nil")
+		}
+		expectedPeers[rvr.Spec.NodeName] = v1alpha3.Peer{
+			NodeId:   *rvr.Status.Config.NodeId,
+			Address:  *rvr.Status.Config.Address,
+			Diskless: rvr.Spec.Diskless,
+		}
+	}
 	return SatisfyAll(
-		gcustom.MakeMatcher(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
-			return Not(HaveKey(rvr.Spec.NodeName)).Match(rvr.Status.Config.Peers)
-		}),
-		HaveField("Status.Config.Peers", HaveLen(len(expectedResources)-1)),
-		gcustom.MakeMatcher(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
-			for _, other := range expectedResources {
-				if other.Spec.NodeName == rvr.Spec.NodeName {
-					continue // Skip self
-				}
-				if ret, err := SatisfyAll(
-					HaveField("Status.Config.NodeId", Not(BeNil())),
-					HaveField("Status.Config.Address", Not(BeNil())),
-				).Match(other); !ret || err != nil {
-					return ret, err
-				}
-				expectedPeer := v1alpha3.Peer{
-					NodeId:   *other.Status.Config.NodeId,
-					Address:  *other.Status.Config.Address,
-					Diskless: other.Spec.Diskless,
-				}
-
-				if ret, err := HaveKeyWithValue(other.Spec.NodeName, Equal(expectedPeer)).Match(rvr.Status.Config.Peers); !ret || err != nil {
-					return ret, err
-				}
+		HaveField("Status.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
+		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
+			ret := maps.Clone(rvr.Status.Config.Peers)
+			ret[rvr.Spec.NodeName] = v1alpha3.Peer{
+				NodeId:   *rvr.Status.Config.NodeId,
+				Address:  *rvr.Status.Config.Address,
+				Diskless: rvr.Spec.Diskless,
 			}
-			return true, nil
-		}),
+			return ret
+		}, Equal(expectedPeers)),
 	)
-}
-
-// HaveAllPeersSetForAll is a Gomega matcher that checks all RVRs in a list have all peers set
-func HaveAllPeersSetForAll() gomegatypes.GomegaMatcher {
-	return gcustom.MakeMatcher(func(rvrList []v1alpha3.ReplicatedVolumeReplica) (bool, error) {
-		return HaveEach(HaveAllPeersSet(rvrList)).Match(rvrList)
-	})
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and Config with NodeId and Address
@@ -301,7 +295,8 @@ var _ = Describe("Reconciler", func() {
 
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
-							Expect([]v1alpha3.ReplicatedVolumeReplica{firstRvr, secondRvr}).To(HaveAllPeersSetForAll())
+							list := []v1alpha3.ReplicatedVolumeReplica{firstRvr, secondRvr}
+							Expect(list).To(HaveEach(HaveAllPeersSet(list)))
 						})
 
 						When("Patch fails with non-NotFound error", func() {
@@ -447,7 +442,7 @@ var _ = Describe("Reconciler", func() {
 					It("should have all peers set", func(ctx SpecContext) {
 						expectReconcileSuccessfully(ctx)
 						getAll(ctx, rvrList)
-						Expect(rvrList).To(HaveAllPeersSetForAll())
+						Expect(rvrList).To(HaveEach(HaveAllPeersSet(rvrList)))
 					})
 				})
 			})
@@ -466,7 +461,7 @@ var _ = Describe("Reconciler", func() {
 				It("should have all peers set", func(ctx SpecContext) {
 					expectReconcileSuccessfully(ctx)
 					getAll(ctx, rvrList)
-					Expect(rvrList).To(HaveAllPeersSetForAll())
+					Expect(rvrList).To(HaveEach(HaveAllPeersSet(rvrList)))
 				})
 
 				It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
@@ -477,7 +472,7 @@ var _ = Describe("Reconciler", func() {
 					list := rvrList[1:]
 
 					getAll(ctx, list)
-					Expect(list).To(HaveAllPeersSetForAll())
+					Expect(list).To(HaveEach(HaveAllPeersSet(list)))
 				})
 
 				When("multiple RVRs exist on same node", func() {
