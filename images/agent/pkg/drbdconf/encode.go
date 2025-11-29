@@ -46,7 +46,7 @@ To add marshaling/unmarshaling support for another primitive type, consider the
 following options:
   - implement [ParameterTypeCodec] and register it with
     [RegisterParameterTypeCodec]. It will be used for every usage of that type,
-    with highest priority. It will even take precendence over built-in slice
+    with highest priority. It will even take precedence over built-in slice
     support. This method is useful for fields of "marker" interface types.
   - implement [ParameterCodec]. This marshaling method is last-effort method,
     it is used when there's no [ParameterTypeCodec] for a type

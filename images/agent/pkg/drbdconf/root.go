@@ -147,7 +147,7 @@ func (*Parameter) _sectionElement()     {}
 func (p *Parameter) Location() Location { return p.Key[0].Location }
 
 type Word struct {
-	// means that token is definetely not a keyword, but a value
+	// means that token is definitely not a keyword, but a value
 	IsQuoted bool
 	// Unquoted value
 	Value    string
