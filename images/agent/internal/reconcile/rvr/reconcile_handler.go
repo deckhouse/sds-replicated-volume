@@ -90,7 +90,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 
 	if !diskless {
-		exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+		exists, err := drbdadm.ExecuteDumpMDMetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 		if err != nil {
 			return h.failAdjustmentWithReason(
 				"failed to check metadata existence",
@@ -146,7 +146,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		}
 	}
 
-	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+	isUp, err := drbdadm.ExecuteStatusIsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		return h.failAdjustmentWithReason(
 			"failed to check resource status",
@@ -311,7 +311,7 @@ func (h *resourceReconcileRequestHandler) populateResourceForNode(
 
 	onSection := &v9.On{
 		HostNames: []string{nodeName},
-		NodeId:    Ptr(nodeId),
+		NodeID:    Ptr(nodeId),
 	}
 
 	// volumes
