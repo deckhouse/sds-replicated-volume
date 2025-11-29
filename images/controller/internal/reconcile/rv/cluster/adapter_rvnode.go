@@ -19,8 +19,9 @@ package cluster
 import (
 	"slices"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 )
 
 type rvNodeAdapter struct {

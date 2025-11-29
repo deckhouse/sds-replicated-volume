@@ -24,10 +24,11 @@ import (
 	"path/filepath"
 	"slices"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type resourceDeleteRequestHandler struct {
