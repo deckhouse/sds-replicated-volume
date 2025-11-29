@@ -110,7 +110,7 @@ func TestMarshalUnmarshal(t *testing.T) {
 				},
 				Floating: []*Floating{
 					{
-						NodeId: ptr(123),
+						NodeID: ptr(123),
 						Address: &AddressWithPort{
 							Address: "0.0.0.0",
 							Port:    222,
@@ -180,7 +180,6 @@ func TestMarshalUnmarshal(t *testing.T) {
 			cmp.Diff(inCfg, outCfg),
 		)
 	}
-
 }
 
 func TestUnmarshalReal(t *testing.T) {
