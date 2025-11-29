@@ -116,7 +116,6 @@ func TestClusterReconcile(t *testing.T) {
 
 	t.Run("empty cluster - 1 replica - 1 create llv & create rvr",
 		func(t *testing.T) {
-			t.Skip("Skipping: requires quorum calculation and peers nil handling fixes")
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				replicaConfigs: []testReplicaConfig{
 					{
@@ -166,7 +165,6 @@ func TestClusterReconcile(t *testing.T) {
 
 	t.Run("existing small LLV - 1 replica - resize llv & create rvr",
 		func(t *testing.T) {
-			t.Skip("Skipping: requires quorum calculation and peers nil handling fixes")
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingLLVs: map[LLVPhysicalKey]*snc.LVMLogicalVolume{
 					{nodeName: testNodeName, actualLVNameOnTheNode: testRVName}: {
@@ -229,7 +227,6 @@ func TestClusterReconcile(t *testing.T) {
 
 	t.Run("add 1 diskful and fix existing diskless - (parallel) create llv + patch rvr; then create rvr",
 		func(t *testing.T) {
-			t.Skip("Skipping: requires quorum calculation fixes")
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
 					{
@@ -311,7 +308,6 @@ func TestClusterReconcile(t *testing.T) {
 
 	t.Run("add 1 diskful and delete 1 orphan rvr - (parallel) create llv; then create rvr and delete orphan",
 		func(t *testing.T) {
-			t.Skip("Skipping: requires quorum calculation and peers nil handling fixes")
 			runClusterReconcileTestCase(t, &reconcileTestCase{
 				existingRVRs: []v1alpha2.ReplicatedVolumeReplica{
 					{

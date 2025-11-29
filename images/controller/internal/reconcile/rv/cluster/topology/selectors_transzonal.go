@@ -106,22 +106,22 @@ func (s *TransZonalMultiPurposeNodeSelector) SelectNodes(counts []int) ([][]stri
 		alwaysSelectZones := alwaysSelectZonesByPurpose[purposeIdx]
 		if len(alwaysSelectZones) > 0 {
 			// Check if AlwaysSelect zones are in the same zone (same zoneId)
-			zoneIds := make(map[string]int)
+			zoneIDs := make(map[string]int)
 			for _, z := range alwaysSelectZones {
-				zoneIds[z.zoneId]++
+				zoneIDs[z.zoneID]++
 			}
-			
+
 			// In transzonal mode, each zone can only be selected once per purpose
 			// If we have multiple AlwaysSelect nodes in the same zone, we can only get 1 node from that zone
 			// So if count > number of distinct zones with AlwaysSelect, it's impossible
-			distinctAlwaysSelectZones := len(zoneIds)
+			distinctAlwaysSelectZones := len(zoneIDs)
 			if count > distinctAlwaysSelectZones {
 				return nil, fmt.Errorf("can not select slot, which is required for selection")
 			}
-			
+
 			// If AlwaysSelect nodes are in different zones, we need at least that many zones
 			// But in transzonal mode, we can only select each zone once, so if count < len(alwaysSelectZones), it's impossible
-			if len(zoneIds) > 1 && count < len(alwaysSelectZones) {
+			if len(zoneIDs) > 1 && count < len(alwaysSelectZones) {
 				return nil, fmt.Errorf("can not select slot, which is required for selection")
 			}
 		}
@@ -142,7 +142,7 @@ func (s *TransZonalMultiPurposeNodeSelector) SelectNodes(counts []int) ([][]stri
 			}
 		}
 		if hasValidScore {
-			validZones[z.zoneId] = true
+			validZones[z.zoneID] = true
 		}
 	}
 	if len(validZones) < totalCount {

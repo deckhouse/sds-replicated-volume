@@ -270,9 +270,6 @@ func TestSelectors(t *testing.T) {
 			for _, run := range suite.Runs {
 				t.Run(fmt.Sprintf("%v", run.Act.Counts), func(t *testing.T) {
 					// Skip failing transzonal negative tests
-					if transzonal && strings.Contains(suite.Name, "negative") {
-						t.Skip("Skipping: requires selector validation fixes")
-					}
 					nodes, err := selectFunc(run.Act.Counts)
 
 					if run.Assert.ExpectedError != "" {
