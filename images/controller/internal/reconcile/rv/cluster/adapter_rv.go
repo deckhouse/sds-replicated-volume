@@ -49,7 +49,7 @@ type RVAdapter interface {
 
 var _ RVAdapter = &rvAdapter{}
 
-func NewRVAdapter(rv *v1alpha2.ReplicatedVolume) (*rvAdapter, error) {
+func NewRVAdapter(rv *v1alpha2.ReplicatedVolume) (RVAdapter, error) {
 	if rv == nil {
 		return nil, errArgNil("rv")
 	}

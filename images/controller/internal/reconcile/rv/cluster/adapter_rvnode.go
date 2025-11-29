@@ -51,7 +51,7 @@ func NewRVNodeAdapter(
 	rv RVAdapter,
 	node *corev1.Node,
 	lvg *snc.LVMVolumeGroup,
-) (*rvNodeAdapter, error) {
+) (RVNodeAdapter, error) {
 	if rv == nil {
 		return nil, errArgNil("rv")
 	}

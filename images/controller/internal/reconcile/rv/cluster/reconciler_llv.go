@@ -89,7 +89,7 @@ func (rec *llvReconciler) actualLVNameOnTheNode() string {
 	return rec.existingLLV.LLVActualLVNameOnTheNode()
 }
 
-func (rec *llvReconciler) reconcile() (Action, error) {
+func (rec *llvReconciler) Reconcile() (Action, error) {
 	var res Actions
 
 	if rec.existingLLV == nil {

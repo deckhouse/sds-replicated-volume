@@ -63,7 +63,7 @@ func (w *RVRWriterImpl) SetPeer(nodeName string, peer v1alpha2.Peer) {
 
 func (w *RVRWriterImpl) ToPeer() v1alpha2.Peer {
 	return v1alpha2.Peer{
-		NodeId: uint(w.nodeID),
+		NodeId: w.nodeID,
 		Address: v1alpha2.Address{
 			IPv4: w.NodeIP(),
 			Port: w.port,

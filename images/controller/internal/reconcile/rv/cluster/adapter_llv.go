@@ -32,7 +32,7 @@ type LLVAdapter interface {
 
 var _ LLVAdapter = &llvAdapter{}
 
-func NewLLVAdapter(llv *snc.LVMLogicalVolume) (*llvAdapter, error) {
+func NewLLVAdapter(llv *snc.LVMLogicalVolume) (LLVAdapter, error) {
 	if llv == nil {
 		return nil, errArgNil("llv")
 	}
