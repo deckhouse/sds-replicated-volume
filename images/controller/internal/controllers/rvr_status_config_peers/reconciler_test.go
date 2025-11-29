@@ -25,6 +25,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gcustom"
 	gomegatypes "github.com/onsi/gomega/types"     // cspell:words gomegatypes
 	apierrors "k8s.io/apimachinery/pkg/api/errors" // cspell:words apierrors
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -58,36 +59,41 @@ func HaveAllPeersSet(expectedResources []v1alpha3.ReplicatedVolumeReplica) gomeg
 		return HaveNoPeers()
 	}
 	return SatisfyAll(
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
+		gcustom.MakeMatcher(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
 			return Not(HaveKey(rvr.Spec.NodeName)).Match(rvr.Status.Config.Peers)
-		}, BeTrue()),
+		}),
 		HaveField("Status.Config.Peers", HaveLen(len(expectedResources)-1)),
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+		gcustom.MakeMatcher(func(rvr v1alpha3.ReplicatedVolumeReplica) (bool, error) {
 			for _, other := range expectedResources {
 				if other.Spec.NodeName == rvr.Spec.NodeName {
 					continue // Skip self
 				}
-				Expect(other).To(SatisfyAll(
+				if ret, err := SatisfyAll(
 					HaveField("Status.Config.NodeId", Not(BeNil())),
 					HaveField("Status.Config.Address", Not(BeNil())),
-				))
+				).Match(other); !ret || err != nil {
+					return ret, err
+				}
 				expectedPeer := v1alpha3.Peer{
 					NodeId:   *other.Status.Config.NodeId,
 					Address:  *other.Status.Config.Address,
 					Diskless: other.Spec.Diskless,
 				}
-				Expect(rvr.Status.Config.Peers).To(HaveKeyWithValue(other.Spec.NodeName, Equal(expectedPeer)))
+
+				if ret, err := HaveKeyWithValue(other.Spec.NodeName, Equal(expectedPeer)).Match(rvr.Status.Config.Peers); !ret || err != nil {
+					return ret, err
+				}
 			}
-			return true
-		}, BeTrue()),
+			return true, nil
+		}),
 	)
 }
 
 // HaveAllPeersSetForAll is a Gomega matcher that checks all RVRs in a list have all peers set
 func HaveAllPeersSetForAll() gomegatypes.GomegaMatcher {
-	return WithTransform(func(rvrList []v1alpha3.ReplicatedVolumeReplica) (bool, error) {
+	return gcustom.MakeMatcher(func(rvrList []v1alpha3.ReplicatedVolumeReplica) (bool, error) {
 		return HaveEach(HaveAllPeersSet(rvrList)).Match(rvrList)
-	}, BeTrue())
+	})
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and Config with NodeId and Address
