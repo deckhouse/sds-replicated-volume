@@ -22,9 +22,10 @@ import (
 	"log/slog"
 	"reflect"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 )
 
 var resourcesDir = "/var/lib/sds-replicated-volume-agent.d/"

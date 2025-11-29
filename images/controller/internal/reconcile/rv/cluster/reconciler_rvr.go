@@ -140,7 +140,6 @@ func (rec *rvrReconciler) initializeDynamicProps(
 	if dp != nil {
 		// disk
 		vol.Disk = dp.diskPath()
-
 	}
 
 	rec.rvrWriter.SetVolume(vol)

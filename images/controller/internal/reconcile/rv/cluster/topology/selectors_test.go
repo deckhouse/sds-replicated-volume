@@ -23,8 +23,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
 )
 
 //go:embed testdata/selectors_tests.txt
