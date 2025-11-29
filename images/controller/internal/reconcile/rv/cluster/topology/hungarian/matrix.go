@@ -67,12 +67,12 @@ func (m *ScoreMatrix[T]) Solve() ([]T, int64) {
 
 	rowCols := munkres.ComputeMunkresMax(mx)
 
-	resultRowIds := make([]T, m.n)
+	resultRowIDs := make([]T, m.n)
 	var totalScore int64
 	for _, rowCol := range rowCols {
-		resultRowIds[rowCol.Col] = m.rows[rowCol.Row]
+		resultRowIDs[rowCol.Col] = m.rows[rowCol.Row]
 		totalScore += m.scores[rowCol.Row][rowCol.Col]
 	}
 
-	return resultRowIds, totalScore
+	return resultRowIDs, totalScore
 }

@@ -28,7 +28,7 @@ type Cluster struct {
 
 	rvrsByNodeName map[string]*rvrReconciler
 	llvsByLVGName  map[string]*llvReconciler
-	nodeIdMgr      nodeIdManager
+	nodeIDMgr      nodeIDManager
 
 	rvrsToDelete []RVRAdapter
 	llvsToDelete []LLVAdapter
@@ -122,14 +122,14 @@ func (c *Cluster) AddExistingRVR(rvr RVRAdapter) (err error) {
 		return errArgNil("rvr")
 	}
 
-	nodeId := rvr.NodeId()
+	nodeID := rvr.NodeID()
 
-	if err = c.nodeIdMgr.ReserveNodeId(nodeId); err != nil {
+	if err = c.nodeIDMgr.ReserveNodeID(nodeID); err != nil {
 		return err
 	}
 	defer func() {
 		if err != nil {
-			c.nodeIdMgr.FreeNodeId(nodeId)
+			c.nodeIDMgr.FreeNodeID(nodeID)
 		}
 	}()
 
@@ -185,7 +185,7 @@ func (c *Cluster) initializeReconcilers() error {
 			dp = c.llvsByLVGName[rvrRec.LVGName()]
 		}
 
-		if err := rvrRec.initializeDynamicProps(&c.nodeIdMgr, dp); err != nil {
+		if err := rvrRec.initializeDynamicProps(&c.nodeIDMgr, dp); err != nil {
 			return err
 		}
 	}

@@ -40,11 +40,11 @@ func GetEnvConfig() (*EnvConfig, error) {
 
 	cfg.NodeName = os.Getenv(NodeNameEnvVar)
 	if cfg.NodeName == "" {
-		if hostName, err := os.Hostname(); err != nil {
+		hostName, err := os.Hostname()
+		if err != nil {
 			return nil, fmt.Errorf("getting hostname: %w", err)
-		} else {
-			cfg.NodeName = hostName
 		}
+		cfg.NodeName = hostName
 	}
 
 	cfg.HealthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)

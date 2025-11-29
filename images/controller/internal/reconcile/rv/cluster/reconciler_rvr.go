@@ -92,7 +92,7 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 }
 
 func (rec *rvrReconciler) initializeDynamicProps(
-	nodeIdMgr NodeIdManager,
+	nodeIDMgr NodeIDManager,
 	dp diskPath,
 ) error {
 	if rec.Diskless() != (dp == nil) {
@@ -112,16 +112,16 @@ func (rec *rvrReconciler) initializeDynamicProps(
 
 	// nodeid
 	if rec.existingRVR == nil {
-		nodeId, err := nodeIdMgr.NewNodeId()
+		nodeID, err := nodeIDMgr.NewNodeID()
 		if err != nil {
 			return err
 		}
-		rec.rvrWriter.SetNodeId(nodeId)
-		if nodeId == 0 {
+		rec.rvrWriter.SetNodeID(nodeID)
+		if nodeID == 0 {
 			rec.firstReplicaInCluster = true
 		}
 	} else {
-		rec.rvrWriter.SetNodeId(rec.existingRVR.NodeId())
+		rec.rvrWriter.SetNodeID(rec.existingRVR.NodeID())
 	}
 
 	// minor

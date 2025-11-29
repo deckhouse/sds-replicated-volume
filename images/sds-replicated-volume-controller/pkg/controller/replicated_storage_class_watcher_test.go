@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"testing"
 
 	client2 "github.com/LINBIT/golinstor/client"
@@ -37,7 +36,7 @@ import (
 func TestReplicatedStorageClassWatcher(t *testing.T) {
 	var (
 		cl        = newFakeClient()
-		ctx       = context.Background()
+		ctx       = t.Context()
 		log       = logger.Logger{}
 		namespace = "test_namespace"
 	)
