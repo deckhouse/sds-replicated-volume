@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
-	"k8s.io/apimachinery/pkg/api/meta"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
