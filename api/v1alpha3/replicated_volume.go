@@ -26,6 +26,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
+// +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"

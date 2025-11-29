@@ -28,6 +28,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rvr
+// +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
