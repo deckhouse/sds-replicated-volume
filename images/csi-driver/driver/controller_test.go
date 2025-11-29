@@ -61,7 +61,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
 
 			// Create test LVMVolumeGroup
-			lvg := createTestLVMVolumeGroup("node-1")
+			lvg := createTestLVMVolumeGroup()
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
 			// Update status in background to simulate controller making volume ready
@@ -142,7 +142,7 @@ var _ = Describe("CreateVolume", func() {
 			}
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
 
-			lvg := createTestLVMVolumeGroup("node-1")
+			lvg := createTestLVMVolumeGroup()
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
 			go func() {
@@ -224,7 +224,7 @@ var _ = Describe("CreateVolume", func() {
 			}
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
 
-			lvg := createTestLVMVolumeGroup("node-1")
+			lvg := createTestLVMVolumeGroup()
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
 			go func() {
@@ -295,7 +295,7 @@ var _ = Describe("CreateVolume", func() {
 			}
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
 
-			lvg := createTestLVMVolumeGroup("node-1")
+			lvg := createTestLVMVolumeGroup()
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
 			go func() {
@@ -366,7 +366,7 @@ var _ = Describe("CreateVolume", func() {
 			}
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
 
-			lvg := createTestLVMVolumeGroup("node-1")
+			lvg := createTestLVMVolumeGroup()
 			Expect(cl.Create(ctx, lvg)).To(Succeed())
 
 			go func() {
@@ -838,18 +838,9 @@ func createTestReplicatedStoragePool(name string, lvgNames []string) *srv.Replic
 	}
 }
 
-func createTestLVMVolumeGroup(nodeName string) *snc.LVMVolumeGroup {
+func createTestLVMVolumeGroup() *snc.LVMVolumeGroup {
 	return &snc.LVMVolumeGroup{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-vg",
-		},
-		Spec: snc.LVMVolumeGroupSpec{},
+		ObjectMeta: metav1.ObjectMeta{Name: "test-vg"},
 		Status: snc.LVMVolumeGroupStatus{
-			Nodes: []snc.LVMVolumeGroupNode{
-				{
-					Name: nodeName,
-				},
-			},
-		},
-	}
+			Nodes: []snc.LVMVolumeGroupNode{{Name: "node-1"}}}}
 }

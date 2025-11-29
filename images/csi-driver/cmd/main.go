@@ -66,8 +66,7 @@ func main() {
 
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		fmt.Printf("unable to create NewLogger, err: %v\n", err)
-		os.Exit(1)
+		klog.Fatalf("unable to create NewLogger, err: %v", err)
 	}
 
 	log.Info("version = ", cfgParams.Version)
