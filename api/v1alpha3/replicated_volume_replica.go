@@ -192,6 +192,8 @@ type DRBDConfig struct {
 	// +optional
 	Address *Address `json:"address,omitempty"`
 
+	// Peers contains information about other replicas in the same ReplicatedVolume.
+	// The key in this map is the node name where the peer replica is located.
 	// +optional
 	Peers map[string]Peer `json:"peers,omitempty"`
 

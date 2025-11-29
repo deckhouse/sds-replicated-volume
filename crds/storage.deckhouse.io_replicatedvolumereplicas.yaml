@@ -206,6 +206,9 @@ spec:
                       - address
                       - nodeId
                       type: object
+                    description: |-
+                      Peers contains information about other replicas in the same ReplicatedVolume.
+                      The key in this map is the node name where the peer replica is located.
                     type: object
                   primary:
                     type: boolean
