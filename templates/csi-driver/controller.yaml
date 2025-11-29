@@ -183,7 +183,7 @@ storage.deckhouse.io/sds-replicated-volume-node: ""
 {{- $_ := set $csiNodeConfig "driverFQDN" "replicated.csi.storage.deckhouse.io" }}
 {{- $_ := set $csiNodeConfig "livenessProbePort" 4262 }}
 {{- $_ := set $csiNodeConfig "setSysAdminCapability" true }}
-{{- $_ := set $csiNodeConfig "serviceAccount" "csi" }}
+{{- $_ := set $csiNodeConfig "serviceAccount" "csi-driver" }}
 {{- $_ := set $csiNodeConfig "additionalNodeArgs" (include "csi_node_args" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "additionalNodeEnvs" (include "csi_node_envs" . | fromYamlArray) }}
 {{- $_ := set $csiNodeConfig "additionalNodeVolumes" (include "csi_additional_node_volumes" . | fromYamlArray) }}

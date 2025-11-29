@@ -17,7 +17,7 @@ metadata:
   {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
-    name: csi
+    name: csi-driver
     namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
@@ -41,7 +41,7 @@ metadata:
   {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
-    name: csi
+    name: csi-driver
     namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
@@ -65,7 +65,7 @@ metadata:
   {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
-    name: csi
+    name: csi-driver
     namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
@@ -89,7 +89,7 @@ metadata:
   {{- include "helm_lib_module_labels" (list . ) | nindent 2 }}
 subjects:
   - kind: ServiceAccount
-    name: csi
+    name: csi-driver
     namespace: d8-{{ .Chart.Name }}
 roleRef:
   kind: ClusterRole
