@@ -461,11 +461,12 @@ func runClusterReconcileTestCase(t *testing.T, tc *reconcileTestCase) {
 		t.Errorf("expected reconile error '%v', got '%v'", tc.expectedErr, err)
 	}
 
-	if action == nil && tc.expectedAction != nil {
+	switch {
+	case action == nil && tc.expectedAction != nil:
 		t.Errorf("expected '%T', got no actions", tc.expectedAction)
-	} else if action != nil && tc.expectedAction == nil {
+	case action != nil && tc.expectedAction == nil:
 		t.Errorf("expected no actions, got '%T'", action)
-	} else if tc.expectedAction != nil {
+	case tc.expectedAction != nil:
 		err := tc.expectedAction.Match(action)
 		if err != nil {
 			t.Error(err)

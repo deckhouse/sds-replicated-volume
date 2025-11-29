@@ -32,7 +32,7 @@ type EnvConfig struct {
 	MetricsBindAddress     string
 }
 
-func GetEnvConfig() (*EnvConfig, error) {
+func GetEnvConfig() *EnvConfig {
 	cfg := &EnvConfig{}
 
 	cfg.HealthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)
@@ -45,5 +45,5 @@ func GetEnvConfig() (*EnvConfig, error) {
 		cfg.MetricsBindAddress = DefaultMetricsBindAddress
 	}
 
-	return cfg, nil
+	return cfg
 }

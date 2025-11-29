@@ -63,10 +63,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)
 
-	envConfig, err := GetEnvConfig()
-	if err != nil {
-		return u.LogError(log, fmt.Errorf("getting env config: %w", err))
-	}
+	envConfig := GetEnvConfig()
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
