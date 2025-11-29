@@ -40,9 +40,9 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 	)
 
 	var (
-		cl     = newFakeClient()
-		log    = logger.WrapLorg(GinkgoLogr)
-		lc, _  = lapi.NewClient(lapi.Log(log))
+		cl    = newFakeClient()
+		log   = logger.WrapLorg(GinkgoLogr)
+		lc, _ = lapi.NewClient(lapi.Log(log))
 
 		testReplicatedSP = &srv.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{
