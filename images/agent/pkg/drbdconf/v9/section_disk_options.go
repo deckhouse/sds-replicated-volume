@@ -226,7 +226,7 @@ type DiskOptions struct {
 	// VMware's virtual disks.
 	//
 	// When disable-write-same is set to yes, WRITE_SAME detection is manually
-	// overriden and support is disabled.
+	// overridden and support is disabled.
 	//
 	// The default value of disable-write-same is no. This option is available
 	// since 8.4.7.
