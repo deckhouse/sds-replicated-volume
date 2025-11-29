@@ -284,7 +284,7 @@ type DRBDConfig struct {
 
 // +k8s:deepcopy-gen=true
 type DRBDStatus struct {
-	Name             string             `json:"name"`
+	Name string `json:"name"`
 	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId           int                `json:"nodeId"`
 	Role             string             `json:"role"`
