@@ -84,7 +84,11 @@ func (w *RVRWriterImpl) WriteToRVR(rvr *v1alpha2.ReplicatedVolumeReplica) (Chang
 	cs = Change(cs, "nodeAddress.ipv4", &rvrSpec.NodeAddress.IPv4, w.NodeIP())
 	cs = Change(cs, "nodeAddress.port", &rvrSpec.NodeAddress.Port, w.port)
 
-	cs = ChangeDeepEqual(cs, "peers", &rvrSpec.Peers, maps.Clone(w.peers))
+	var peers map[string]v1alpha2.Peer
+	if len(w.peers) > 0 {
+		peers = maps.Clone(w.peers)
+	}
+	cs = ChangeDeepEqual(cs, "peers", &rvrSpec.Peers, peers)
 
 	var volumes []v1alpha2.Volume
 	if w.volume != nil {

@@ -54,14 +54,11 @@ func NewRVAdapter(rv *v1alpha2.ReplicatedVolume) (*rvAdapter, error) {
 		return nil, errArgNil("rv")
 	}
 
-	// TODO: fix
-	quorum := byte(0)
-	qmr := quorum
-	// var quorum byte = rv.Spec.Replicas/2 + 1
-	// var qmr byte
-	// if rv.Spec.Replicas > 2 {
-	// 	qmr = quorum
-	// }
+	var quorum byte = rv.Spec.Replicas/2 + 1
+	var qmr byte
+	if rv.Spec.Replicas > 2 {
+		qmr = quorum
+	}
 
 	res := &rvAdapter{
 		name:                    rv.Name,
