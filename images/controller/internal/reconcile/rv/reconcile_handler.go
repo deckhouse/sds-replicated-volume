@@ -23,14 +23,6 @@ import (
 	"slices"
 	"time"
 
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	cstrings "github.com/deckhouse/sds-replicated-volume/lib/go/common/strings"
 	"golang.org/x/sync/errgroup"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -40,6 +32,15 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+
+	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv/cluster/topology"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+	cstrings "github.com/deckhouse/sds-replicated-volume/lib/go/common/strings"
 )
 
 // drbdPortRange implements cluster.DRBDPortRange backed by controller config
