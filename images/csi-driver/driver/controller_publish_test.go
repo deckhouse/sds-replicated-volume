@@ -53,7 +53,7 @@ var _ = Describe("ControllerPublishVolume", func() {
 	BeforeEach(func() {
 		ctx = context.Background()
 		cl = newFakeClientForDriver()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
 		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
 	})
