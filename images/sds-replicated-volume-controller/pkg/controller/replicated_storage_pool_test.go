@@ -80,7 +80,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(updatedreplicatedSP.Labels[testLblKey]).To(Equal(testLblValue))
 	})
 
-	It("UpdateMapValue", func(ctx SpecContext) {
+	It("UpdateMapValue", func() {
 		m := make(map[string]string)
 
 		// Test adding a new key-value pair
