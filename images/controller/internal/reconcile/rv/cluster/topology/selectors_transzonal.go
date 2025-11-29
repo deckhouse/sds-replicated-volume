@@ -88,88 +88,9 @@ func (s *TransZonalMultiPurposeNodeSelector) SelectNodes(counts []int) ([][]stri
 		return nil, err
 	}
 
-<<<<<<< HEAD
 	// TODO: validate: no zones with >1 AlwaysSelect
 	// TODO: prefill: all AlwaysSelect zones
 	// TODO: validate if there's a never select score
-=======
-	// Validate AlwaysSelect first: check if AlwaysSelect nodes can be selected
-	// This must be checked before the general "not enough slots" check
-	alwaysSelectZonesByPurpose := make([][]*zone, s.purposeCount)
-	for purposeIdx := range counts {
-		for _, z := range s.zones {
-			if z.bestNodesForPurposes[purposeIdx] != nil {
-				score := z.bestScoresForPurposes[purposeIdx]
-				if score == int64(AlwaysSelect) {
-					alwaysSelectZonesByPurpose[purposeIdx] = append(alwaysSelectZonesByPurpose[purposeIdx], z)
-				}
-			}
-		}
-	}
-
-	for purposeIdx, count := range counts {
-		alwaysSelectZones := alwaysSelectZonesByPurpose[purposeIdx]
-		if len(alwaysSelectZones) > 0 {
-			// Check if AlwaysSelect zones are in the same zone (same zoneID)
-			zoneIDs := make(map[string]int)
-			for _, z := range alwaysSelectZones {
-				zoneIDs[z.zoneID]++
-			}
-
-			// In transzonal mode, each zone can only be selected once per purpose
-			// If we have multiple AlwaysSelect nodes in the same zone, we can only get 1 node from that zone
-			// So if count > number of distinct zones with AlwaysSelect, it's impossible
-			distinctAlwaysSelectZones := len(zoneIDs)
-			if count > distinctAlwaysSelectZones {
-				return nil, fmt.Errorf("can not select slot, which is required for selection")
-			}
-
-			// If AlwaysSelect nodes are in different zones, we need at least that many zones
-			// But in transzonal mode, we can only select each zone once, so if count < len(alwaysSelectZones), it's impossible
-			if len(zoneIDs) > 1 && count < len(alwaysSelectZones) {
-				return nil, fmt.Errorf("can not select slot, which is required for selection")
-			}
-		}
-	}
-
-	// Validate NeverSelect: check if there are enough valid zones total
-	// In transzonal mode, we need totalCount zones, and each zone must be valid for at least one purpose
-	validZones := make(map[string]bool)
-	for _, z := range s.zones {
-		hasValidScore := false
-		for purposeIdx := range counts {
-			if z.bestNodesForPurposes[purposeIdx] != nil {
-				score := z.bestScoresForPurposes[purposeIdx]
-				if score != int64(NeverSelect) {
-					hasValidScore = true
-					break
-				}
-			}
-		}
-		if hasValidScore {
-			validZones[z.zoneID] = true
-		}
-	}
-	if len(validZones) < totalCount {
-		return nil, fmt.Errorf("not enough slots for selection")
-	}
-
-	// Validate NeverSelect per purpose: check if there are enough valid zones for each purpose
-	for purposeIdx, count := range counts {
-		validZonesCount := 0
-		for _, z := range s.zones {
-			if z.bestNodesForPurposes[purposeIdx] != nil {
-				score := z.bestScoresForPurposes[purposeIdx]
-				if score != int64(NeverSelect) {
-					validZonesCount++
-				}
-			}
-		}
-		if validZonesCount < count {
-			return nil, fmt.Errorf("not enough slots for selection")
-		}
-	}
->>>>>>> ca585b9 (Refactor node ID naming for consistency and clarity)
 
 	var bestZones []*zone
 	var bestTotalScore int64
