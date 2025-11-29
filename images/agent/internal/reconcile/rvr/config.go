@@ -31,7 +31,7 @@ type ReconcilerClusterConfig struct {
 	// TODO: updatable configuration will be there
 }
 
-func GetClusterConfig(ctx context.Context, cl client.Client) (*ReconcilerClusterConfig, error) {
+func GetClusterConfig(_ context.Context, _ client.Client) (*ReconcilerClusterConfig, error) {
 	cfg := &ReconcilerClusterConfig{}
 
 	// TODO: updatable configuration will be there

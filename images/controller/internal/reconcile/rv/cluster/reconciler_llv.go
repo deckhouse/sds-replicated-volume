@@ -85,9 +85,8 @@ func (rec *llvReconciler) initializeDynamicProps() error {
 func (rec *llvReconciler) actualLVNameOnTheNode() string {
 	if rec.existingLLV == nil {
 		return rec.RVName()
-	} else {
-		return rec.existingLLV.LLVActualLVNameOnTheNode()
 	}
+	return rec.existingLLV.LLVActualLVNameOnTheNode()
 }
 
 func (rec *llvReconciler) reconcile() (Action, error) {

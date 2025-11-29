@@ -17,7 +17,6 @@ limitations under the License.
 package controller_test
 
 import (
-	"context"
 	"fmt"
 
 	linstor "github.com/LINBIT/golinstor/client"
@@ -38,7 +37,6 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 	)
 
 	var (
-		ctx       = context.Background()
 		cl        = newFakeClient()
 		cfgSecret *v1.Secret
 
@@ -50,7 +48,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		}
 	)
 
-	It("GetKubernetesSecretByName", func() {
+	It("GetKubernetesSecretByName", func(ctx SpecContext) {
 		err := cl.Create(ctx, testSecret)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -65,7 +63,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		testLblVal = "test_label_value"
 	)
 
-	It("GetNodeSelectorFromConfig", func() {
+	It("GetNodeSelectorFromConfig", func(ctx SpecContext) {
 		cfgSecret.Data = make(map[string][]byte)
 		cfgSecret.Data["config"] = []byte(fmt.Sprintf("{\"nodeSelector\":{\"%s\":\"%s\"}}", testLblKey, testLblVal))
 
@@ -82,7 +80,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		selectedKubeNodes *v1.NodeList
 	)
 
-	It("GetKubernetesNodesBySelector", func() {
+	It("GetKubernetesNodesBySelector", func(ctx SpecContext) {
 		cfgNodeSelector := map[string]string{}
 		testLabels := map[string]string{testLblKey: testLblVal}
 		testNode := v1.Node{
@@ -112,7 +110,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(actualNode.Status.Addresses[0].Address).To(Equal(testNodeAddress))
 	})
 
-	It("GetAllKubernetesNodes", func() {
+	It("GetAllKubernetesNodes", func(ctx SpecContext) {
 		allKubsNodes, err := controller.GetAllKubernetesNodes(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(allKubsNodes.Items)).To(Equal(1))
@@ -121,7 +119,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(kubNode.Name).To(Equal(testNodeName))
 	})
 
-	It("ContainsNode", func() {
+	It("ContainsNode", func(ctx SpecContext) {
 		const (
 			existName = "exist"
 		)
@@ -148,7 +146,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(absent).To(BeFalse())
 	})
 
-	It("DiffNodeLists", func() {
+	It("DiffNodeLists", func(ctx SpecContext) {
 		nodeList1 := &v1.NodeList{}
 		nodeList1.Items = []v1.Node{
 			{
@@ -197,7 +195,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		mockLc *linstor.Client
 	)
 
-	It("AddOrConfigureDRBDNodes", func() {
+	It("AddOrConfigureDRBDNodes", func(ctx SpecContext) {
 		mockLc, err := NewLinstorClientWithMockNodes()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -214,7 +212,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		drbdNodeProps map[string]string
 	)
 
-	It("KubernetesNodeLabelsToProperties", func() {
+	It("KubernetesNodeLabelsToProperties", func(ctx SpecContext) {
 		const (
 			testValue1 = "test_value1"
 			testValue2 = "test_value2"
@@ -236,7 +234,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(drbdNodeProps["Aux/"+testKey2]).To(Equal(testValue2))
 	})
 
-	It("ConfigureDRBDNode", func() {
+	It("ConfigureDRBDNode", func(ctx SpecContext) {
 		err := controller.ConfigureDRBDNode(ctx, mockLc, linstor.Node{}, drbdNodeProps)
 		Expect(err).NotTo(HaveOccurred())
 	})

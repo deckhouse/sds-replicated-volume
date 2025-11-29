@@ -108,9 +108,8 @@ var _ ParameterTypeCodec = &boolPtrParameterCodec{}
 func (*boolPtrParameterCodec) MarshalParameter(v any) ([]string, error) {
 	if *(v.(*bool)) {
 		return []string{"yes"}, nil
-	} else {
-		return []string{"no"}, nil
 	}
+	return []string{"no"}, nil
 }
 
 func (*boolPtrParameterCodec) UnmarshalParameter(par []Word) (any, error) {

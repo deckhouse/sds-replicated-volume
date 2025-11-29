@@ -32,23 +32,23 @@ func NewZonalMultiPurposeNodeSelector(purposeCount int) *ZonalMultiPurposeNodeSe
 	return &ZonalMultiPurposeNodeSelector{purposeCount: purposeCount}
 }
 
-func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, scores []Score) {
+func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeID string, zoneID string, scores []Score) {
 	if len(scores) != s.purposeCount {
 		panic(fmt.Sprintf("expected len(scores) to be %d (purposeCount), got %d", s.purposeCount, len(scores)))
 	}
 
-	// find or create zone (keep zones sorted by zoneId for determinism)
+	// find or create zone (keep zones sorted by zoneID for determinism)
 	zoneIdx, found := slices.BinarySearchFunc(
 		s.zones,
-		zoneId,
-		func(z *zone, id string) int { return cmp.Compare(z.zoneId, id) },
+		zoneID,
+		func(z *zone, id string) int { return cmp.Compare(z.zoneID, id) },
 	)
 	var z *zone
 	if found {
 		z = s.zones[zoneIdx]
 	} else {
 		z = &zone{
-			zoneId: zoneId,
+			zoneID: zoneID,
 		}
 		// insert new zone in order
 		s.zones = slices.Insert(s.zones, zoneIdx, z)
@@ -60,7 +60,7 @@ func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, sc
 			for _, n := range other.nodes {
 				if isAllMinusOne(n.scores) {
 					// insert if absent
-					nIdx, nFound := slices.BinarySearchFunc(z.nodes, n.nodeId, func(x *node, id string) int { return cmp.Compare(x.nodeId, id) })
+					nIdx, nFound := slices.BinarySearchFunc(z.nodes, n.nodeID, func(x *node, id string) int { return cmp.Compare(x.nodeID, id) })
 					if !nFound {
 						// use biased scores to prefer assigning fillers to the last purpose group
 						biased := make([]Score, len(n.scores))
@@ -69,7 +69,7 @@ func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, sc
 							biased[i] = Score(-1 << 60)
 						}
 						z.nodes = slices.Insert(z.nodes, nIdx, &node{
-							nodeId: n.nodeId,
+							nodeID: n.nodeID,
 							scores: biased,
 						})
 					}
@@ -78,10 +78,10 @@ func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, sc
 		}
 	}
 
-	// insert the node into its own zone (keep nodes sorted by nodeId)
-	nIdx, nFound := slices.BinarySearchFunc(z.nodes, nodeId, func(n *node, id string) int { return cmp.Compare(n.nodeId, id) })
+	// insert the node into its own zone (keep nodes sorted by nodeID)
+	nIdx, nFound := slices.BinarySearchFunc(z.nodes, nodeID, func(n *node, id string) int { return cmp.Compare(n.nodeID, id) })
 	if !nFound {
-		n := &node{nodeId: nodeId}
+		n := &node{nodeID: nodeID}
 		n.scores = scores
 		z.nodes = slices.Insert(z.nodes, nIdx, n)
 	} else {
@@ -96,7 +96,7 @@ func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, sc
 			if other == z {
 				continue
 			}
-			idx, exists := slices.BinarySearchFunc(other.nodes, nodeId, func(n *node, id string) int { return cmp.Compare(n.nodeId, id) })
+			idx, exists := slices.BinarySearchFunc(other.nodes, nodeID, func(n *node, id string) int { return cmp.Compare(n.nodeID, id) })
 			if !exists {
 				// reuse the same node reference; scores are already -1 for all purposes
 				// but use biased scores to steer assignment to the last purpose group
@@ -106,7 +106,7 @@ func (s *ZonalMultiPurposeNodeSelector) SetNode(nodeId string, zoneId string, sc
 					biased[i] = Score(-1 << 60)
 				}
 				other.nodes = slices.Insert(other.nodes, idx, &node{
-					nodeId: nodeId,
+					nodeID: nodeID,
 					scores: biased,
 				})
 			}

@@ -51,30 +51,30 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha3.ReplicatedVolume{},
 			&handler.TypedFuncs[client.Object, TReq]{
 				CreateFunc: func(
-					ctx context.Context,
-					ce event.TypedCreateEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedCreateEvent[client.Object],
+					_ TQueue,
 				) {
 					// TODO issues/333 filter events here
 				},
 				UpdateFunc: func(
-					ctx context.Context,
-					ue event.TypedUpdateEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedUpdateEvent[client.Object],
+					_ TQueue,
 				) {
 					// TODO issues/333 filter events here
 				},
 				DeleteFunc: func(
-					ctx context.Context,
-					de event.TypedDeleteEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedDeleteEvent[client.Object],
+					_ TQueue,
 				) {
 					// TODO issues/333 filter events here
 				},
 				GenericFunc: func(
-					ctx context.Context,
-					ge event.TypedGenericEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedGenericEvent[client.Object],
+					_ TQueue,
 				) {
 					// TODO issues/333 filter events here
 				},

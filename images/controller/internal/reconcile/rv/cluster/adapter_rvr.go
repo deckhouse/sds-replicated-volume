@@ -32,7 +32,7 @@ type RVRAdapter interface {
 	Minor() int
 	// empty string for diskless rvr
 	Disk() string
-	NodeId() uint
+	NodeID() uint
 	Size() int
 
 	// Reconcile(rvNode RVNodeAdapter, props RVRTargetPropsAdapter) (RequiredAction, error)
@@ -104,7 +104,7 @@ func (r *rvrAdapter) Minor() int {
 	return -1
 }
 
-func (r *rvrAdapter) NodeId() uint {
+func (r *rvrAdapter) NodeID() uint {
 	return r.rvr.Spec.NodeId
 }
 

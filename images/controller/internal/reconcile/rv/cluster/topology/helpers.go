@@ -45,12 +45,12 @@ type NodeSelector interface {
 }
 
 type node struct {
-	nodeId string
+	nodeID string
 	scores []Score
 }
 
 type zone struct {
-	zoneId string
+	zoneID string
 
 	nodes []*node
 
@@ -108,7 +108,7 @@ func solveZone(nodes []*node, totalCount int, counts []int) ([]string, int64) {
 	return slices.Collect(
 			uiter.Map(
 				slices.Values(bestNodes),
-				func(n *node) string { return n.nodeId },
+				func(n *node) string { return n.nodeID },
 			),
 		),
 		bestTotalScore
