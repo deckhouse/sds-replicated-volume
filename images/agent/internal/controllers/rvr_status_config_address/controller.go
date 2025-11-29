@@ -57,7 +57,7 @@ func BuildController(mgr manager.Manager) error {
 				},
 				UpdateFunc: func(
 					_ context.Context,
-					ue event.TypedUpdateEvent[client.Object],
+					_ event.TypedUpdateEvent[client.Object],
 					_ TQueue,
 				) {
 					// ...

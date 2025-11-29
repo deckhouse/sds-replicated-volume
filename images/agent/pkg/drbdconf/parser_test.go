@@ -44,11 +44,11 @@ func TestConf(t *testing.T) {
 		if err != nil {
 			return fmt.Errorf("open file %s: %w", filename, err)
 		}
-		if n, err := conf.WriteTo(file); err != nil {
+		n, err := conf.WriteTo(file)
+		if err != nil {
 			return fmt.Errorf("writing to file %s: %w", filename, err)
-		} else {
-			t.Logf("wrote %d bytes to %s", n, filename)
 		}
+		t.Logf("wrote %d bytes to %s", n, filename)
 		return nil
 	})
 	if err != nil {

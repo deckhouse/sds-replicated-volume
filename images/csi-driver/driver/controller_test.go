@@ -40,22 +40,20 @@ import (
 
 var _ = Describe("CreateVolume", func() {
 	var (
-		ctx    context.Context
 		cl     client.Client
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClientForController()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
 	Context("when creating volume successfully", func() {
-		It("should create ReplicatedVolume and return success", func() {
+		It("should create ReplicatedVolume and return success", func(ctx SpecContext) {
 			// Create test ReplicatedStoragePool
 			rsp := createTestReplicatedStoragePool("test-pool", []string{"test-vg"})
 			Expect(cl.Create(ctx, rsp)).To(Succeed())
@@ -124,7 +122,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.Topology).To(Equal("Zonal")) // default
 		})
 
-		It("should parse custom parameters correctly", func() {
+		It("should parse custom parameters correctly", func(ctx SpecContext) {
 			// Create test ReplicatedStoragePool with thin pool
 			rsp := &srv.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{
@@ -208,7 +206,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.LVM.LVMVolumeGroups[0].ThinPoolName).To(Equal("test-pool"))
 		})
 
-		It("should parse zones in YAML format correctly", func() {
+		It("should parse zones in YAML format correctly", func(ctx SpecContext) {
 			rsp := &srv.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-pool",
@@ -279,7 +277,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.Zones).To(Equal([]string{"zone-a", "zone-b", "zone-c"}))
 		})
 
-		It("should parse single zone in YAML format correctly", func() {
+		It("should parse single zone in YAML format correctly", func(ctx SpecContext) {
 			rsp := &srv.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-pool",
@@ -350,7 +348,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(rv.Spec.Zones).To(Equal([]string{"single-zone"}))
 		})
 
-		It("should handle empty zones parameter", func() {
+		It("should handle empty zones parameter", func(ctx SpecContext) {
 			rsp := &srv.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-pool",
@@ -422,7 +420,7 @@ var _ = Describe("CreateVolume", func() {
 	})
 
 	Context("when validation fails", func() {
-		It("should return error when volume name is empty", func() {
+		It("should return error when volume name is empty", func(ctx SpecContext) {
 			request := &csi.CreateVolumeRequest{
 				Name: "",
 				CapacityRange: &csi.CapacityRange{
@@ -447,7 +445,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
 		})
 
-		It("should return error when volume capabilities are empty", func() {
+		It("should return error when volume capabilities are empty", func(ctx SpecContext) {
 			request := &csi.CreateVolumeRequest{
 				Name: "test-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -463,7 +461,7 @@ var _ = Describe("CreateVolume", func() {
 			Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
 		})
 
-		It("should return error when StoragePool is empty", func() {
+		It("should return error when StoragePool is empty", func(ctx SpecContext) {
 			request := &csi.CreateVolumeRequest{
 				Name: "test-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -492,22 +490,20 @@ var _ = Describe("CreateVolume", func() {
 
 var _ = Describe("DeleteVolume", func() {
 	var (
-		ctx    context.Context
 		cl     client.Client
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClientForController()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
 	Context("when deleting volume successfully", func() {
-		It("should delete ReplicatedVolume and return success", func() {
+		It("should delete ReplicatedVolume and return success", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			rv := createTestReplicatedVolumeForDriver(volumeID, []string{})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -527,7 +523,7 @@ var _ = Describe("DeleteVolume", func() {
 			Expect(client.IgnoreNotFound(err)).To(Succeed())
 		})
 
-		It("should return success when volume does not exist", func() {
+		It("should return success when volume does not exist", func(ctx SpecContext) {
 			request := &csi.DeleteVolumeRequest{
 				VolumeId: "non-existent-volume",
 			}
@@ -539,7 +535,7 @@ var _ = Describe("DeleteVolume", func() {
 	})
 
 	Context("when validation fails", func() {
-		It("should return error when VolumeId is empty", func() {
+		It("should return error when VolumeId is empty", func(ctx SpecContext) {
 			request := &csi.DeleteVolumeRequest{
 				VolumeId: "",
 			}
@@ -554,22 +550,20 @@ var _ = Describe("DeleteVolume", func() {
 
 var _ = Describe("ControllerExpandVolume", func() {
 	var (
-		ctx    context.Context
 		cl     client.Client
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClientForController()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
 	Context("when expanding volume successfully", func() {
-		It("should expand ReplicatedVolume and return success", func() {
+		It("should expand ReplicatedVolume and return success", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			rv := createTestReplicatedVolumeForDriver(volumeID, []string{})
 			rv.Spec.Size = resource.MustParse("1Gi")
@@ -624,7 +618,7 @@ var _ = Describe("ControllerExpandVolume", func() {
 			Expect(updatedRV.Spec.Size.Value()).To(Equal(int64(2147483648)))
 		})
 
-		It("should return success without resize when requested size is less than current size", func() {
+		It("should return success without resize when requested size is less than current size", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			rv := createTestReplicatedVolumeForDriver(volumeID, []string{})
 			rv.Spec.Size = resource.MustParse("2Gi")
@@ -652,7 +646,7 @@ var _ = Describe("ControllerExpandVolume", func() {
 			Expect(response.NodeExpansionRequired).To(BeTrue())
 		})
 
-		It("should set NodeExpansionRequired to false for block volumes", func() {
+		It("should set NodeExpansionRequired to false for block volumes", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			rv := createTestReplicatedVolumeForDriver(volumeID, []string{})
 			rv.Spec.Size = resource.MustParse("1Gi")
@@ -700,7 +694,7 @@ var _ = Describe("ControllerExpandVolume", func() {
 	})
 
 	Context("when validation fails", func() {
-		It("should return error when VolumeId is empty", func() {
+		It("should return error when VolumeId is empty", func(ctx SpecContext) {
 			request := &csi.ControllerExpandVolumeRequest{
 				VolumeId: "",
 				CapacityRange: &csi.CapacityRange{
@@ -714,7 +708,7 @@ var _ = Describe("ControllerExpandVolume", func() {
 			Expect(status.Code(err)).To(Equal(codes.InvalidArgument))
 		})
 
-		It("should return error when ReplicatedVolume does not exist", func() {
+		It("should return error when ReplicatedVolume does not exist", func(ctx SpecContext) {
 			request := &csi.ControllerExpandVolumeRequest{
 				VolumeId: "non-existent-volume",
 				CapacityRange: &csi.CapacityRange{
@@ -740,20 +734,18 @@ var _ = Describe("ControllerExpandVolume", func() {
 
 var _ = Describe("ControllerGetCapabilities", func() {
 	var (
-		ctx    context.Context
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl := newFakeClientForController()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
-	It("should return correct capabilities", func() {
+	It("should return correct capabilities", func(ctx SpecContext) {
 		request := &csi.ControllerGetCapabilitiesRequest{}
 
 		response, err := driver.ControllerGetCapabilities(ctx, request)
@@ -780,20 +772,18 @@ var _ = Describe("ControllerGetCapabilities", func() {
 
 var _ = Describe("GetCapacity", func() {
 	var (
-		ctx    context.Context
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl := newFakeClientForController()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
-	It("should return maximum capacity", func() {
+	It("should return maximum capacity", func(ctx SpecContext) {
 		request := &csi.GetCapacityRequest{}
 
 		response, err := driver.GetCapacity(ctx, request)

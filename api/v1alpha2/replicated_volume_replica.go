@@ -164,6 +164,7 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -247,6 +248,7 @@ type DRBDConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="nodeId is immutable"
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -283,6 +285,7 @@ type DRBDConfig struct {
 // +k8s:deepcopy-gen=true
 type DRBDStatus struct {
 	Name             string             `json:"name"`
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId           int                `json:"nodeId"`
 	Role             string             `json:"role"`
 	Suspended        bool               `json:"suspended"`
@@ -315,6 +318,7 @@ type DeviceStatus struct {
 
 // +k8s:deepcopy-gen=true
 type ConnectionStatus struct {
+	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int    `json:"peerNodeId"`
 	Name            string `json:"name"`
 	ConnectionState string `json:"connectionState"`

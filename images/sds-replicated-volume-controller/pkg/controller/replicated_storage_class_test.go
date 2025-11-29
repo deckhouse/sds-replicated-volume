@@ -17,7 +17,6 @@ limitations under the License.
 package controller_test
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"slices"
@@ -42,9 +41,8 @@ import (
 var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 	var (
-		ctx         = context.Background()
 		cl          = newFakeClient()
-		log         = logger.Logger{}
+		log         = logger.WrapLorg(GinkgoLogr)
 		validCFG, _ = config.NewConfig()
 
 		validZones                    = []string{"first", "second", "third"}
@@ -78,7 +76,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 	)
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Generates_expected_StorageClass", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Generates_expected_StorageClass", func(ctx SpecContext) {
 		var (
 			testName                    = generateTestName()
 			allowVolumeExpansion   bool = true
@@ -140,7 +138,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(actualSC).To(Equal(expectedSC))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_and_zones_parameters", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_and_zones_parameters", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -153,7 +151,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- first\n- second\n- third"))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Does_not_add_zones_when_empty", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Does_not_add_zones_when_empty", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -165,7 +163,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Formats_single_zone_correctly", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Formats_single_zone_correctly", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -177,7 +175,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- single-zone"))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Formats_multiple_zones_correctly", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Formats_multiple_zones_correctly", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -189,7 +187,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters[controller.StorageClassParamZonesKey]).To(Equal("- zone-a\n- zone-b\n- zone-c\n- zone-d"))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Zonal", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Zonal", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -203,7 +201,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
 	})
 
-	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Ignored", func() {
+	It("GenerateStorageClassFromReplicatedStorageClass_Adds_topology_for_Ignored", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -217,7 +215,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Parameters).NotTo(HaveKey(controller.StorageClassParamZonesKey))
 	})
 
-	It("GetStorageClass_Returns_storage_class_and_no_error", func() {
+	It("GetStorageClass_Returns_storage_class_and_no_error", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -240,7 +238,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(sc.Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("DeleteStorageClass_Deletes_needed_one_Returns_no_error", func() {
+	It("DeleteStorageClass_Deletes_needed_one_Returns_no_error", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -274,7 +272,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(sc).To(BeNil())
 	})
 
-	It("CreateStorageClass_Creates_one_Returns_no_error", func() {
+	It("CreateStorageClass_Creates_one_Returns_no_error", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -297,7 +295,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(sc.Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("UpdateReplicatedStorageClass_Updates_resource", func() {
+	It("UpdateReplicatedStorageClass_Updates_resource", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -338,7 +336,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(updatedResource.Status.Reason).To(Equal(updatedMessage))
 	})
 
-	It("RemoveString_removes_correct_one", func() {
+	It("RemoveString_removes_correct_one", func(ctx SpecContext) {
 		strs := [][]string{
 			{
 				"first", "second",
@@ -361,7 +359,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		}
 	})
 
-	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_created_StorageClass_is_absent_Deletes_Resource_Successfully", func() {
+	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_created_StorageClass_is_absent_Deletes_Resource_Successfully", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -407,7 +405,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_created_StorageClass_exists_Deletes_resource_and_storage_class_successfully", func() {
+	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_created_StorageClass_exists_Deletes_resource_and_storage_class_successfully", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -470,7 +468,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(sc).To(BeNil())
 	})
 
-	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_failed_StorageClass_exists_Does_NOT_delete_StorageClass_Deletes_resource", func() {
+	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_not_nil_Status_failed_StorageClass_exists_Does_NOT_delete_StorageClass_Deletes_resource", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -527,7 +525,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_is_nil_returns_false_no_error_Doesnt_delete_resource", func() {
+	It("ReconcileReplicatedStorageClassEvent_Resource_exists_DeletionTimestamp_is_nil_returns_false_no_error_Doesnt_delete_resource", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -560,7 +558,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(resources[testName].Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("ReconcileReplicatedStorageClassEvent_Resource_does_not_exist_Returns_false_no_error", func() {
+	It("ReconcileReplicatedStorageClassEvent_Resource_does_not_exist_Returns_false_no_error", func(ctx SpecContext) {
 		testName := generateTestName()
 		req := reconcile.Request{NamespacedName: types.NamespacedName{
 			Namespace: testNamespaceConst,
@@ -576,7 +574,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(reflect.ValueOf(resources[testName]).IsZero()).To(BeTrue())
 	})
 
-	It("ValidateReplicatedStorageClass_Incorrect_spec_Returns_false_and_messages", func() {
+	It("ValidateReplicatedStorageClass_Incorrect_spec_Returns_false_and_messages", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := invalidReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -589,7 +587,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(mes).To(Equal("Validation of ReplicatedStorageClass failed: StoragePool is empty; ReclaimPolicy is empty; Selected unacceptable amount of zones for replication type: ConsistencyAndAvailability; correct number of zones should be 3; "))
 	})
 
-	It("ValidateReplicatedStorageClass_Correct_spec_Returns_true", func() {
+	It("ValidateReplicatedStorageClass_Correct_spec_Returns_true", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -603,7 +601,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(validation).Should(BeTrue())
 	})
 
-	It("GetClusterZones_nodes_in_zones_returns_correct_zones", func() {
+	It("GetClusterZones_nodes_in_zones_returns_correct_zones", func(ctx SpecContext) {
 		const (
 			testZone = "zone1"
 		)
@@ -650,7 +648,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(zones).To(Equal(expectedZones))
 	})
 
-	It("GetClusterZones_nodes_NOT_in_zones_returns_correct_zones", func() {
+	It("GetClusterZones_nodes_NOT_in_zones_returns_correct_zones", func(ctx SpecContext) {
 		nodeNotInZone1 := v1.Node{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   "nodeNotInZone1",
@@ -690,7 +688,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(len(zones)).To(Equal(0))
 	})
 
-	It("ReconcileReplicatedStorageClass_Validation_failed_Updates_status_to_failed_and_reason", func() {
+	It("ReconcileReplicatedStorageClass_Validation_failed_Updates_status_to_failed_and_reason", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := invalidReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -745,7 +743,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(resource.Status.Reason).To(Equal(failedMessage))
 	})
 
-	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_not_found_Creates_one_Adds_finalizers_and_Returns_no_error", func() {
+	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_not_found_Creates_one_Adds_finalizers_and_Returns_no_error", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -807,7 +805,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_already_exists_Resource_and_StorageClass_ARE_EQUAL_Resource.Status.Phase_equals_Created", func() {
+	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_already_exists_Resource_and_StorageClass_ARE_EQUAL_Resource.Status.Phase_equals_Created", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -854,7 +852,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_founded_Resource_and_StorageClass_ARE_NOT_EQUAL_Updates_resource_status_to_failed_and_reason", func() {
+	It("ReconcileReplicatedStorageClass_Validation_passed_StorageClass_founded_Resource_and_StorageClass_ARE_NOT_EQUAL_Updates_resource_status_to_failed_and_reason", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -912,7 +910,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Namespace).To(Equal(testNamespaceConst))
 	})
 
-	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_equal_Returns_true", func() {
+	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_equal_Returns_true", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -923,7 +921,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(equal).To(BeTrue())
 	})
 
-	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_NOT_equal_Returns_false_and_message", func() {
+	It("CompareReplicatedStorageClassAndStorageClass_Resource_and_StorageClass_ARE_NOT_equal_Returns_false_and_message", func(ctx SpecContext) {
 		var (
 			diffRecPolicy v1.PersistentVolumeReclaimPolicy = "not-equal"
 			diffVBM       storagev1.VolumeBindingMode      = "not-equal"
@@ -948,7 +946,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(message).NotTo(Equal(""))
 	})
 
-	It("LabelNodes_set_labels", func() {
+	It("LabelNodes_set_labels", func(ctx SpecContext) {
 		testName := generateTestName()
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -996,7 +994,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 	})
 
 	// Annotation tests
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_does_not_exist", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_does_not_exist", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1048,7 +1046,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_does_not_exist", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_does_not_exist", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1100,7 +1098,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_without_data", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_without_data", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1165,7 +1163,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_without_data", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_without_data", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1230,7 +1228,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1270,7 +1268,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
 	})
 
-	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_false_to_true", func() {
+	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_false_to_true", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 
 		request := reconcile.Request{
@@ -1341,7 +1339,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_false", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1382,7 +1380,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 
 	})
 
-	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_false_to_true", func() {
+	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_false_to_true", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 
 		request := reconcile.Request{
@@ -1455,7 +1453,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1495,7 +1493,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations).To(Equal(map[string]string{controller.RSCStorageClassVolumeSnapshotClassAnnotationKey: controller.RSCStorageClassVolumeSnapshotClassAnnotationValue}))
 	})
 
-	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func() {
+	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessPreferablyLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 
 		request := reconcile.Request{
@@ -1566,7 +1564,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1617,7 +1615,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 	})
 
-	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func() {
+	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 
 		request := reconcile.Request{
@@ -1703,7 +1701,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 
-	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_StorageClass_already_exists_with_default_annotation_only_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func() {
+	It("ReconcileReplicatedStorageClass_new_with_valid_config_VolumeAccessLocal_StorageClass_already_exists_with_default_annotation_only_ConfigMap_exist_with_virtualization_key_and_virtualization_value_is_true", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 		replicatedSC := validSpecReplicatedSCTemplate
 		replicatedSC.Name = testName
@@ -1779,7 +1777,7 @@ var _ = Describe(controller.ReplicatedStorageClassControllerName, func() {
 		Expect(storageClass.Annotations[controller.RSCStorageClassVolumeSnapshotClassAnnotationKey]).To(Equal(controller.RSCStorageClassVolumeSnapshotClassAnnotationValue))
 	})
 
-	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_StorageClass_already_exists_with_default_and_vritualization_annotations_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func() {
+	It("ReconcileReplicatedStorageClass_already_exists_with_valid_config_VolumeAccessLocal_StorageClass_already_exists_with_default_and_vritualization_annotations_ConfigMap_exist_with_virtualization_key_and_virtualization_value_updated_from_true_to_false", func(ctx SpecContext) {
 		testName := testNameForAnnotationTests
 
 		request := reconcile.Request{
