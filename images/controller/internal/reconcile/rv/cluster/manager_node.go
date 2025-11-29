@@ -41,7 +41,7 @@ type nodeManager struct {
 
 var _ NodeManager = &nodeManager{}
 
-func NewNodeManager(portRange DRBDPortRange, nodeName string) *nodeManager {
+func NewNodeManager(portRange DRBDPortRange, nodeName string) NodeManager {
 	return &nodeManager{
 		nodeName:  nodeName,
 		portRange: portRange,

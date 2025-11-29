@@ -63,7 +63,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		testLblVal = "test_label_value"
 	)
 
-	It("GetNodeSelectorFromConfig", func(ctx SpecContext) {
+	It("GetNodeSelectorFromConfig", func() {
 		cfgSecret.Data = make(map[string][]byte)
 		cfgSecret.Data["config"] = []byte(fmt.Sprintf("{\"nodeSelector\":{\"%s\":\"%s\"}}", testLblKey, testLblVal))
 
@@ -119,7 +119,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(kubNode.Name).To(Equal(testNodeName))
 	})
 
-	It("ContainsNode", func(ctx SpecContext) {
+	It("ContainsNode", func() {
 		const (
 			existName = "exist"
 		)
@@ -146,7 +146,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(absent).To(BeFalse())
 	})
 
-	It("DiffNodeLists", func(ctx SpecContext) {
+	It("DiffNodeLists", func() {
 		nodeList1 := &v1.NodeList{}
 		nodeList1.Items = []v1.Node{
 			{
@@ -212,7 +212,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		drbdNodeProps map[string]string
 	)
 
-	It("KubernetesNodeLabelsToProperties", func(ctx SpecContext) {
+	It("KubernetesNodeLabelsToProperties", func() {
 		const (
 			testValue1 = "test_value1"
 			testValue2 = "test_value2"

@@ -46,24 +46,24 @@ func (b *replicaScoreBuilder) Build() []topology.Score {
 	maxScore := topology.Score(1000000)
 	alreadyExistsScore := topology.Score(1000)
 	var scores []topology.Score
-	if b.withDisk {
-		if b.publishRequested {
-			scores = append(scores, maxScore)
-		} else if b.alreadyExists {
-			scores = append(scores, alreadyExistsScore)
-		} else {
-			scores = append(scores, baseScore)
-		}
-	} else {
+	switch {
+	case !b.withDisk:
 		scores = append(scores, topology.NeverSelect)
+	case b.publishRequested:
+		scores = append(scores, maxScore)
+	case b.alreadyExists:
+		scores = append(scores, alreadyExistsScore)
+	default:
+		scores = append(scores, baseScore)
 	}
 
 	if b.disklessPurpose {
-		if b.publishRequested {
+		switch {
+		case b.publishRequested:
 			scores = append(scores, maxScore)
-		} else if b.alreadyExists {
+		case b.alreadyExists:
 			scores = append(scores, alreadyExistsScore)
-		} else {
+		default:
 			scores = append(scores, baseScore)
 		}
 

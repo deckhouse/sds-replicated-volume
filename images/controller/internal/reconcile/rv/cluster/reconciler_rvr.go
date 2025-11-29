@@ -163,7 +163,7 @@ func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler)
 	return nil
 }
 
-func (rec *rvrReconciler) reconcile() (Action, error) {
+func (rec *rvrReconciler) Reconcile() (Action, error) {
 	var res Actions
 	if rec.existingRVR == nil {
 		res = append(

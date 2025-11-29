@@ -114,23 +114,24 @@ func (rvr *ReplicatedVolumeReplica) RecalculateStatusConditionReady() {
 		ObservedGeneration: rvr.Generation,
 	}
 
-	if cfgAdjCondition != nil &&
+	switch {
+	case cfgAdjCondition != nil &&
 		cfgAdjCondition.Status == metav1.ConditionFalse &&
-		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync {
+		cfgAdjCondition.Reason == ReasonConfigurationAdjustmentPausedUntilInitialSync:
 		readyCond.Reason = ReasonWaitingForInitialSync
 		readyCond.Message = "Configuration adjustment waits for InitialSync"
-	} else if cfgAdjCondition == nil ||
-		cfgAdjCondition.Status != metav1.ConditionTrue {
+	case cfgAdjCondition == nil ||
+		cfgAdjCondition.Status != metav1.ConditionTrue:
 		readyCond.Reason = ReasonAdjustmentFailed
 		readyCond.Message = "Resource adjustment failed"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady) {
+	case !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDevicesReady):
 		readyCond.Reason = ReasonDevicesAreNotReady
 		readyCond.Message = "Devices are not ready"
-	} else if !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum) {
+	case !meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeQuorum):
 		readyCond.Reason = ReasonNoQuorum
-	} else if meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended) {
+	case meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDiskIOSuspended):
 		readyCond.Reason = ReasonDiskIOSuspended
-	} else {
+	default:
 		readyCond.Status = metav1.ConditionTrue
 		readyCond.Reason = ReasonReady
 		readyCond.Message = "Replica is configured and operational"
