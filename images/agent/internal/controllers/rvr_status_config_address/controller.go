@@ -21,14 +21,15 @@ import (
 	"log/slog"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -48,30 +49,30 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha3.ReplicatedVolume{},
 			&handler.TypedFuncs[client.Object, TReq]{
 				CreateFunc: func(
-					ctx context.Context,
-					ce event.TypedCreateEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedCreateEvent[client.Object],
+					_ TQueue,
 				) {
 					// ...
 				},
 				UpdateFunc: func(
-					ctx context.Context,
+					_ context.Context,
 					ue event.TypedUpdateEvent[client.Object],
-					q TQueue,
+					_ TQueue,
 				) {
 					// ...
 				},
 				DeleteFunc: func(
-					ctx context.Context,
-					de event.TypedDeleteEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedDeleteEvent[client.Object],
+					_ TQueue,
 				) {
 					// ...
 				},
 				GenericFunc: func(
-					ctx context.Context,
-					ge event.TypedGenericEvent[client.Object],
-					q TQueue,
+					_ context.Context,
+					_ event.TypedGenericEvent[client.Object],
+					_ TQueue,
 				) {
 					// ...
 				},

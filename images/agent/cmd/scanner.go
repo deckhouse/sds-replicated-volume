@@ -91,7 +91,9 @@ func (s *scanner) Run() error {
 
 		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
 			s.log.Debug("added resource update event", "resource", ev)
-			s.batcher.Add(ev)
+			if err := s.batcher.Add(ev); err != nil {
+				return LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
+			}
 		}
 
 		if err != nil && s.ctx.Err() == nil {
@@ -373,7 +375,6 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				quorumCond.Status = metav1.ConditionTrue
 				quorumCond.Reason = v1alpha2.ReasonQuorumStatus
 				quorumCond.Message = "All devices are in quorum"
-
 			}
 			meta.SetStatusCondition(&rvr.Status.Conditions, quorumCond)
 
@@ -417,7 +418,7 @@ func copyStatusFields(
 	source *drbdsetup.Resource,
 ) {
 	target.Name = source.Name
-	target.NodeId = source.NodeId
+	target.NodeId = source.NodeID
 	target.Role = source.Role
 	target.Suspended = source.Suspended
 	target.SuspendedUser = source.SuspendedUser
@@ -451,7 +452,7 @@ func copyStatusFields(
 	target.Connections = make([]v1alpha2.ConnectionStatus, 0, len(source.Connections))
 	for _, c := range source.Connections {
 		conn := v1alpha2.ConnectionStatus{
-			PeerNodeId:      c.PeerNodeId,
+			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
 			ConnectionState: c.ConnectionState,
 			Congested:       c.Congested,

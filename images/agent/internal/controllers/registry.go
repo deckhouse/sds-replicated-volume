@@ -19,8 +19,9 @@ package controllers
 import (
 	"fmt"
 
-	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
 var registry []func(mgr manager.Manager) error

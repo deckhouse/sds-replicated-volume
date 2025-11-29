@@ -59,7 +59,7 @@ type On struct {
 	//
 	// The node-id parameter exists since DRBD 9. Its value ranges from 0 to 16;
 	// there is no default.
-	NodeId *uint `drbd:"node-id"`
+	NodeID *uint `drbd:"node-id"`
 
 	Volumes []*Volume
 }
@@ -105,7 +105,7 @@ type Floating struct {
 	//
 	// The node-id parameter exists since DRBD 9. Its value ranges from 0 to 16;
 	// there is no default.
-	NodeId *int `drbd:"node-id"`
+	NodeID *int `drbd:"node-id"`
 }
 
 func (o *Floating) SectionKeyword() string {

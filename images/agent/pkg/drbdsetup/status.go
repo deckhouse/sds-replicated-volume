@@ -27,7 +27,7 @@ type StatusResult []Resource
 
 type Resource struct {
 	Name             string       `json:"name"`
-	NodeId           int          `json:"node-id"`
+	NodeID           int          `json:"node-id"`
 	Role             string       `json:"role"`
 	Suspended        bool         `json:"suspended"`
 	SuspendedUser    bool         `json:"suspended-user"`
@@ -57,7 +57,7 @@ type Device struct {
 }
 
 type Connection struct {
-	PeerNodeId      int    `json:"peer-node-id"`
+	PeerNodeID      int    `json:"peer-node-id"`
 	Name            string `json:"name"`
 	ConnectionState string `json:"connection-state"`
 	Congested       bool   `json:"congested"`
