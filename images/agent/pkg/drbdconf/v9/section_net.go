@@ -600,7 +600,7 @@ var knownValuesRRConflictPolicy = map[RRConflictPolicy]struct{}{
 const (
 	// No automatic resynchronization, simply disconnect.
 	RRConflictPolicyDisconnect RRConflictPolicy = "disconnect"
-	// Disconnect now, and retry to connect immediatly afterwards.
+	// Disconnect now, and retry to connect immediately afterwards.
 	RRConflictPolicyRetryConnect RRConflictPolicy = "retry-connect"
 	// Resync to the primary node is allowed, violating the assumption that data
 	// on a block device are stable for one of the nodes. Do not use this
