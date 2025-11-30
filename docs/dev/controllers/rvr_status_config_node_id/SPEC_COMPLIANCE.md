@@ -25,13 +25,16 @@
 | Уникальный `nodeId` в диапазоне [0; 7] | ✅ | ✅ `assigns nodeID to first replica`, `assigns nodeID sequentially` |
 | Проверка превышения количества реплик | ✅ | ✅ `returns error when all nodeIDs are used` |
 | Возврат ошибки при превышении | ✅ | ✅ `returns error when all nodeIDs are used` |
-| Триггер `CREATE(RVR, status.drbd.config.nodeId==nil)` | ✅ | ✅ Все тесты с созданием RVR |
+| Триггер `CREATE(RVR, status.drbd.config.nodeId==nil)` | ✅ | ✅ Все тесты с созданием RVR, `when rvr has nil Status/DRBD/Config/NodeId` |
 | Вывод `rvr.status.drbd.config.nodeId` | ✅ | ✅ Все тесты проверяют установку nodeID |
 | Заполнение пустых мест | ✅ | ✅ `fills gaps in nodeIDs` |
 | Не переприсваивать если уже установлено | ✅ | ✅ `does not reassign nodeID if already assigned` |
 | Разные volumes независимы | ✅ | ✅ `isolates nodeIDs by volume` |
-| Сброс невалидного nodeID | ⚠️ | ✅ `logs error and reassigns`, `ignores nodeID outside valid range` |
-| Логирование ошибок | ⚠️ | ✅ Все тесты с ошибками |
+| Сброс невалидного nodeID | ⚠️ | ✅ `logs error and reassigns`, `ignores nodeID outside valid range`, `resets invalid nodeID and reassigns valid one` |
+| Обработка ошибок Get | ⚠️ | ✅ `should fail if getting ReplicatedVolumeReplica failed with non-NotFound error` |
+| Обработка ошибок List | ⚠️ | ✅ `should fail if listing replicas failed` |
+| Обработка ошибок Patch | ⚠️ | ✅ `should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error` |
+| Освобождение nodeID после удаления | ⚠️ | ✅ `returns error when all nodeIDs are used and assigns freed nodeID after deletion` |
 | Работа в несколько потоков | ⚠️ | ✅ Неявно (через PatchStatusWithConflictRetry) |
 
 
@@ -123,4 +126,4 @@
 
 3. **Тестирование:**
    - Используется **Ginkgo/Gomega**
-   - Покрытие кода: 84.8%
+   - Покрытие кода: 89.7%
