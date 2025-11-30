@@ -128,24 +128,15 @@ func Intercept[T client.Object](
 ) interceptor.Funcs {
 	return interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				return err
+			}
 			if targetObj, ok := obj.(T); ok {
-				// Try to intercept before Get - if it returns an error, return it without calling Get
-				// This allows simulating errors before Get is called
 				if err := intercept(targetObj); err != nil {
 					return err
 				}
-				if err := cl.Get(ctx, key, obj, opts...); err != nil {
-					return err
-				}
-				// Re-check after Get since obj might have changed
-				if targetObj, ok := obj.(T); ok {
-					if err := intercept(targetObj); err != nil {
-						return err
-					}
-				}
-				return nil
 			}
-			return cl.Get(ctx, key, obj, opts...)
+			return nil
 		},
 		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 			v := reflect.ValueOf(list).Elem()
@@ -159,7 +150,7 @@ func Intercept[T client.Object](
 			// Intercept items after List populates them
 			for i := 0; i < itemsField.Len(); i++ {
 				item := itemsField.Index(i).Addr().Interface().(client.Object)
-				if targetObj, ok := any(item).(T); ok {
+				if targetObj, ok := item.(T); ok {
 					if err := intercept(targetObj); err != nil {
 						return err
 					}
