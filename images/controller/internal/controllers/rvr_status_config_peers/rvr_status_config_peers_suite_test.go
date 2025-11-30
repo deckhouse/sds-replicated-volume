@@ -25,6 +25,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gcustom"
 	gomegatypes "github.com/onsi/gomega/types" // cspell:words gomegatypes
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 func TestRvrStatusConfigPeers(t *testing.T) {
@@ -106,4 +108,12 @@ func BeReady() gomegatypes.GomegaMatcher {
 		HaveField("Status.DRBD.Config.NodeId", Not(BeNil())),
 		HaveField("Status.DRBD.Config.Address", Not(BeNil())),
 	)
+}
+
+func Requeue() gomegatypes.GomegaMatcher {
+	return Not(Equal(reconcile.Result{}))
+}
+
+func RequestFor(object client.Object) reconcile.Request {
+	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }

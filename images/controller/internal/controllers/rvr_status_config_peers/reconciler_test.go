@@ -130,15 +130,6 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 			Expect(cl.Create(ctx, otherRv)).To(Succeed())
 		})
-
-		expectReconcileSuccessfully := func(ctx SpecContext) {
-			Expect(rec.Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{
-					Name: rv.Name,
-				},
-			})).To(Equal(reconcile.Result{}))
-		}
-
 		When("first replica created", func() {
 			var firstRvr v1alpha3.ReplicatedVolumeReplica
 
@@ -155,7 +146,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should not have peers", func(ctx SpecContext) {
-				expectReconcileSuccessfully(ctx)
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 				Expect(firstRvr).To(HaveNoPeers())
 			})
@@ -186,7 +177,7 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should have no peers", func(ctx SpecContext) {
-					expectReconcileSuccessfully(ctx)
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 					Expect(firstRvr).To(HaveNoPeers())
 				})
@@ -208,13 +199,13 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("rvr-1 should have no peers", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 						Expect(firstRvr).To(HaveNoPeers())
 					})
 
 					It("rvr-2 should have no peers", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
 						Expect(secondRvr).To(HaveNoPeers())
 					})
@@ -225,7 +216,7 @@ var _ = Describe("Reconciler", func() {
 						})
 
 						It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
-							expectReconcileSuccessfully(ctx)
+							Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
@@ -293,7 +284,7 @@ var _ = Describe("Reconciler", func() {
 								})
 
 								JustBeforeEach(func(ctx SpecContext) {
-									expectReconcileSuccessfully(ctx)
+									Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 								})
 
 								It("rvr-1 should have no peers", func(ctx SpecContext) {
@@ -356,7 +347,7 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should not have any peers", func(ctx SpecContext) {
-					expectReconcileSuccessfully(ctx)
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					getAll(ctx, rvrList)
 					Expect(rvrList).To(HaveEach(HaveNoPeers()))
 				})
@@ -375,7 +366,7 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("should have all peers set", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 						getAll(ctx, rvrList)
 						Expect(rvrList).To(HaveEach(HaveAllPeersSet(rvrList)))
 					})
@@ -394,16 +385,16 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should have all peers set", func(ctx SpecContext) {
-					expectReconcileSuccessfully(ctx)
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					getAll(ctx, rvrList)
 					Expect(rvrList).To(HaveEach(HaveAllPeersSet(rvrList)))
 				})
 
 				It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
-					expectReconcileSuccessfully(ctx)
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					Expect(cl.Delete(ctx, &rvrList[0])).To(Succeed())
 
-					expectReconcileSuccessfully(ctx)
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					list := rvrList[1:]
 
 					getAll(ctx, list)
@@ -456,7 +447,7 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("should only keep one peer entry per node", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 						// rvr3 should only have one peer entry for node-1 (the first one found)
 						updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
@@ -476,7 +467,7 @@ var _ = Describe("Reconciler", func() {
 
 					It("should not update if peers are unchanged", func(ctx SpecContext) {
 						// First reconcile
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 						// Get the state after first reconcile
 						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
@@ -484,7 +475,7 @@ var _ = Describe("Reconciler", func() {
 						initialPeers := updatedRVR1.Status.DRBD.Config.Peers
 
 						// Second reconcile - should not change
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 						// Verify peers are unchanged
 						updatedRVR1After := &v1alpha3.ReplicatedVolumeReplica{}
@@ -512,7 +503,7 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {
-						expectReconcileSuccessfully(ctx)
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 						// Verify rvr1 has rvr2 with diskless flag
 						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
