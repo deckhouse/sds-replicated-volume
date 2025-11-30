@@ -17,7 +17,6 @@ limitations under the License.
 package controller_test
 
 import (
-	"context"
 	"fmt"
 
 	linstor "github.com/LINBIT/golinstor/client"
@@ -38,7 +37,6 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 	)
 
 	var (
-		ctx       = context.Background()
 		cl        = newFakeClient()
 		cfgSecret *v1.Secret
 
@@ -50,7 +48,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		}
 	)
 
-	It("GetKubernetesSecretByName", func() {
+	It("GetKubernetesSecretByName", func(ctx SpecContext) {
 		err := cl.Create(ctx, testSecret)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -82,7 +80,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		selectedKubeNodes *v1.NodeList
 	)
 
-	It("GetKubernetesNodesBySelector", func() {
+	It("GetKubernetesNodesBySelector", func(ctx SpecContext) {
 		cfgNodeSelector := map[string]string{}
 		testLabels := map[string]string{testLblKey: testLblVal}
 		testNode := v1.Node{
@@ -112,7 +110,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(actualNode.Status.Addresses[0].Address).To(Equal(testNodeAddress))
 	})
 
-	It("GetAllKubernetesNodes", func() {
+	It("GetAllKubernetesNodes", func(ctx SpecContext) {
 		allKubsNodes, err := controller.GetAllKubernetesNodes(ctx, cl)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(len(allKubsNodes.Items)).To(Equal(1))
@@ -197,7 +195,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		mockLc *linstor.Client
 	)
 
-	It("AddOrConfigureDRBDNodes", func() {
+	It("AddOrConfigureDRBDNodes", func(ctx SpecContext) {
 		mockLc, err := NewLinstorClientWithMockNodes()
 		Expect(err).NotTo(HaveOccurred())
 
@@ -236,7 +234,7 @@ var _ = Describe(controller.LinstorNodeControllerName, func() {
 		Expect(drbdNodeProps["Aux/"+testKey2]).To(Equal(testValue2))
 	})
 
-	It("ConfigureDRBDNode", func() {
+	It("ConfigureDRBDNode", func(ctx SpecContext) {
 		err := controller.ConfigureDRBDNode(ctx, mockLc, linstor.Node{}, drbdNodeProps)
 		Expect(err).NotTo(HaveOccurred())
 	})

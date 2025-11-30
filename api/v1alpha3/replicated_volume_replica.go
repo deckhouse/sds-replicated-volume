@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package v1alpha3
 
 import (
@@ -13,6 +29,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rvr
+// +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:selectablefield:JSONPath=.spec.nodeName
 // +kubebuilder:selectablefield:JSONPath=.spec.replicatedVolumeName
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
@@ -63,6 +80,7 @@ type ReplicatedVolumeReplicaSpec struct {
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId uint `json:"nodeId"`
 
 	// +kubebuilder:validation:Required
@@ -115,6 +133,7 @@ type DRBDConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
 	// +optional
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId *uint `json:"nodeId"`
 
 	// +optional
@@ -165,11 +184,15 @@ type DRBDActual struct {
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
+
+	// +kubebuilder:default=false
+	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
 type DRBDStatus struct {
-	Name             string             `json:"name"`
+	Name string `json:"name"`
+	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
 	NodeId           int                `json:"nodeId"`
 	Role             string             `json:"role"`
 	Suspended        bool               `json:"suspended"`
@@ -202,6 +225,7 @@ type DeviceStatus struct {
 
 // +k8s:deepcopy-gen=true
 type ConnectionStatus struct {
+	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int                `json:"peerNodeId"`
 	Name            string             `json:"name"`
 	ConnectionState string             `json:"connectionState"`

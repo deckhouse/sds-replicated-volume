@@ -20,12 +20,13 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/deckhouse/module-sdk/pkg"
-	"github.com/deckhouse/module-sdk/pkg/registry"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/deckhouse/module-sdk/pkg"
+	"github.com/deckhouse/module-sdk/pkg/registry"
 )
 
 var _ = registry.RegisterFunc(
@@ -65,7 +66,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		propValue, _, _ := unstructured.NestedString(spec, "prop_value")
 
 		if propKey == "DrbdOptions/AutoEvictAllowEviction" && propValue == "True" {
-
 			patch := map[string]interface{}{
 				"spec": map[string]interface{}{
 					"prop_value": "False",
@@ -105,7 +105,6 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 
 		err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
 		if err != nil {
-
 			if client.IgnoreNotFound(err) == nil {
 				input.Logger.Info("ModuleConfig not found, creating new one")
 			} else {
@@ -157,59 +156,58 @@ func onStartChecks(ctx context.Context, input *pkg.HookInput) error {
 		}
 
 		return nil
+	}
 
-	} else {
-		input.Logger.Info("No thin pool granularity found, checking if thin provisioning should be disabled")
+	input.Logger.Info("No thin pool granularity found, checking if thin provisioning should be disabled")
 
-		// Check existing ModuleConfig for enableThinProvisioning setting
-		modCfg := &unstructured.Unstructured{}
-		modCfg.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   "deckhouse.io",
-			Version: "v1alpha1",
-			Kind:    "ModuleConfig",
-		})
-		modCfg.SetName("sds-replicated-volume")
+	// Check existing ModuleConfig for enableThinProvisioning setting
+	modCfg := &unstructured.Unstructured{}
+	modCfg.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "deckhouse.io",
+		Version: "v1alpha1",
+		Kind:    "ModuleConfig",
+	})
+	modCfg.SetName("sds-replicated-volume")
 
-		err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
-		if err != nil {
-			if client.IgnoreNotFound(err) == nil {
-				input.Logger.Info("ModuleConfig not found, nothing to disable")
-			} else {
-				input.Logger.Error("Failed to get ModuleConfig", "err", err)
-				return err
-			}
+	err := cl.Get(ctx, client.ObjectKey{Name: "sds-replicated-volume"}, modCfg)
+	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			input.Logger.Info("ModuleConfig not found, nothing to disable")
 		} else {
-			// Check if enableThinProvisioning is currently true
-			enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
+			input.Logger.Error("Failed to get ModuleConfig", "err", err)
+			return err
+		}
+		return nil
+	}
 
-			if found && enableThinProvisioning {
+	// Check if enableThinProvisioning is currently true
+	enableThinProvisioning, found, _ := unstructured.NestedBool(modCfg.Object, "spec", "settings", "enableThinProvisioning")
 
-				// Disable thin provisioning
+	if found && enableThinProvisioning {
+		// Disable thin provisioning
 
-				input.Logger.Info("Thin provisioning in moduleconfig set to True - disabling")
+		input.Logger.Info("Thin provisioning in moduleconfig set to True - disabling")
 
-				patch := map[string]interface{}{
-					"spec": map[string]interface{}{
-						"settings": map[string]interface{}{
-							"enableThinProvisioning": false,
-						},
-					},
-				}
+		patch := map[string]interface{}{
+			"spec": map[string]interface{}{
+				"settings": map[string]interface{}{
+					"enableThinProvisioning": false,
+				},
+			},
+		}
 
-				patchBytes, err := json.Marshal(patch)
-				if err != nil {
-					input.Logger.Info("Failed to marshal patch for moduleconfig", "err", err)
-				} else {
-					if err := cl.Patch(ctx, modCfg, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
-						input.Logger.Info("Failed to patch moduleconfig", "err", err)
-					} else {
-						input.Logger.Info("Patched moduleconfig with thin provisioning disabled")
-					}
-				}
+		patchBytes, err := json.Marshal(patch)
+		if err != nil {
+			input.Logger.Info("Failed to marshal patch for moduleconfig", "err", err)
+		} else {
+			if err := cl.Patch(ctx, modCfg, client.RawPatch(types.MergePatchType, patchBytes)); err != nil {
+				input.Logger.Info("Failed to patch moduleconfig", "err", err)
 			} else {
-				input.Logger.Info("Thin provisioning already disabled or not set")
+				input.Logger.Info("Patched moduleconfig with thin provisioning disabled")
 			}
 		}
+	} else {
+		input.Logger.Info("Thin provisioning already disabled or not set")
 	}
 
 	return nil

@@ -4,6 +4,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    module: sds-replicated-volume
   name: replicatedvolumereplicas.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
@@ -165,6 +167,9 @@ spec:
                 properties:
                   actual:
                     properties:
+                      allowTwoPrimaries:
+                        default: false
+                        type: boolean
                       disk:
                         maxLength: 256
                         pattern: ^(/[a-zA-Z0-9/.+_-]+)?$

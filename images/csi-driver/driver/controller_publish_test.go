@@ -44,22 +44,20 @@ func TestControllerPublish(t *testing.T) {
 
 var _ = Describe("ControllerPublishVolume", func() {
 	var (
-		ctx    context.Context
 		cl     client.Client
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClientForDriver()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
 	Context("when publishing volume successfully", func() {
-		It("should return success with correct PublishContext", func() {
+		It("should return success with correct PublishContext", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			nodeID := "node-1"
 
@@ -100,7 +98,7 @@ var _ = Describe("ControllerPublishVolume", func() {
 	})
 
 	Context("when VolumeId is empty", func() {
-		It("should return InvalidArgument error", func() {
+		It("should return InvalidArgument error", func(ctx SpecContext) {
 			request := &csi.ControllerPublishVolumeRequest{
 				VolumeId: "",
 				NodeId:   "node-1",
@@ -114,7 +112,7 @@ var _ = Describe("ControllerPublishVolume", func() {
 	})
 
 	Context("when NodeId is empty", func() {
-		It("should return InvalidArgument error", func() {
+		It("should return InvalidArgument error", func(ctx SpecContext) {
 			request := &csi.ControllerPublishVolumeRequest{
 				VolumeId: "test-volume",
 				NodeId:   "",
@@ -128,7 +126,7 @@ var _ = Describe("ControllerPublishVolume", func() {
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return Internal error", func() {
+		It("should return Internal error", func(ctx SpecContext) {
 			request := &csi.ControllerPublishVolumeRequest{
 				VolumeId: "non-existent-volume",
 				NodeId:   "node-1",
@@ -144,22 +142,20 @@ var _ = Describe("ControllerPublishVolume", func() {
 
 var _ = Describe("ControllerUnpublishVolume", func() {
 	var (
-		ctx    context.Context
 		cl     client.Client
-		log    *logger.Logger
+		log    logger.Logger
 		driver *Driver
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClientForDriver()
-		log, _ = logger.NewLogger(logger.InfoLevel)
+		log = logger.WrapLorg(GinkgoLogr)
 		nodeName := "test-node"
-		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, log, cl)
+		driver, _ = NewDriver("unix:///tmp/test.sock", "test-driver", "127.0.0.1:12302", &nodeName, &log, cl)
 	})
 
 	Context("when unpublishing volume successfully", func() {
-		It("should return success", func() {
+		It("should return success", func(ctx SpecContext) {
 			volumeID := "test-volume"
 			nodeID := "node-1"
 
@@ -201,7 +197,7 @@ var _ = Describe("ControllerUnpublishVolume", func() {
 	})
 
 	Context("when VolumeId is empty", func() {
-		It("should return InvalidArgument error", func() {
+		It("should return InvalidArgument error", func(ctx SpecContext) {
 			request := &csi.ControllerUnpublishVolumeRequest{
 				VolumeId: "",
 				NodeId:   "node-1",
@@ -215,7 +211,7 @@ var _ = Describe("ControllerUnpublishVolume", func() {
 	})
 
 	Context("when NodeId is empty", func() {
-		It("should return InvalidArgument error", func() {
+		It("should return InvalidArgument error", func(ctx SpecContext) {
 			request := &csi.ControllerUnpublishVolumeRequest{
 				VolumeId: "test-volume",
 				NodeId:   "",
@@ -229,7 +225,7 @@ var _ = Describe("ControllerUnpublishVolume", func() {
 	})
 
 	Context("when ReplicatedVolume does not exist", func() {
-		It("should return success (considered as already unpublished)", func() {
+		It("should return success (considered as already unpublished)", func(ctx SpecContext) {
 			request := &csi.ControllerUnpublishVolumeRequest{
 				VolumeId: "non-existent-volume",
 				NodeId:   "node-1",

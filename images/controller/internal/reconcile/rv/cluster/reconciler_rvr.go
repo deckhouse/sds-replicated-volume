@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package cluster
 
 import (
@@ -76,7 +92,7 @@ func (rec *rvrReconciler) setExistingRVR(rvr RVRAdapter) error {
 }
 
 func (rec *rvrReconciler) initializeDynamicProps(
-	nodeIdMgr NodeIdManager,
+	nodeIDMgr NodeIDManager,
 	dp diskPath,
 ) error {
 	if rec.Diskless() != (dp == nil) {
@@ -96,16 +112,16 @@ func (rec *rvrReconciler) initializeDynamicProps(
 
 	// nodeid
 	if rec.existingRVR == nil {
-		nodeId, err := nodeIdMgr.NewNodeId()
+		nodeID, err := nodeIDMgr.NewNodeID()
 		if err != nil {
 			return err
 		}
-		rec.rvrWriter.SetNodeId(nodeId)
-		if nodeId == 0 {
+		rec.rvrWriter.SetNodeID(nodeID)
+		if nodeID == 0 {
 			rec.firstReplicaInCluster = true
 		}
 	} else {
-		rec.rvrWriter.SetNodeId(rec.existingRVR.NodeId())
+		rec.rvrWriter.SetNodeID(rec.existingRVR.NodeID())
 	}
 
 	// minor
@@ -124,7 +140,6 @@ func (rec *rvrReconciler) initializeDynamicProps(
 	if dp != nil {
 		// disk
 		vol.Disk = dp.diskPath()
-
 	}
 
 	rec.rvrWriter.SetVolume(vol)
@@ -148,7 +163,7 @@ func (rec *rvrReconciler) initializePeers(allReplicas map[string]*rvrReconciler)
 	return nil
 }
 
-func (rec *rvrReconciler) reconcile() (Action, error) {
+func (rec *rvrReconciler) Reconcile() (Action, error) {
 	var res Actions
 	if rec.existingRVR == nil {
 		res = append(
