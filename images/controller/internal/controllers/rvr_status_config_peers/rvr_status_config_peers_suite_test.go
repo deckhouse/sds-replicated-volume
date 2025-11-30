@@ -122,9 +122,9 @@ func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
 
-// Intercept creates an interceptor that modifies objects in both Get and List operations.
+// InterceptGet creates an interceptor that modifies objects in both Get and List operations.
 // If Get or List returns an error, intercept is called with a nil (zero) value of type T allowing alternating the error.
-func Intercept[T client.Object](
+func InterceptGet[T client.Object](
 	intercept func(T) error,
 ) interceptor.Funcs {
 	return interceptor.Funcs{
