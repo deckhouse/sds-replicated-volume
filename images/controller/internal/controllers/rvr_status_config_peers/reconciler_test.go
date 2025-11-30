@@ -22,12 +22,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
-	"github.com/onsi/gomega/gcustom"
-	gomegatypes "github.com/onsi/gomega/types"     // cspell:words gomegatypes
 	apierrors "k8s.io/apimachinery/pkg/api/errors" // cspell:words apierrors
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -44,102 +41,32 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
 )
 
-// HaveNoPeers is a Gomega matcher that checks a single RVR has no peers
-func HaveNoPeers() gomegatypes.GomegaMatcher {
-	return SatisfyAny(
-		HaveField("Status", BeNil()),
-		HaveField("Status.DRBD", BeNil()),
-		HaveField("Status.DRBD.Config", BeNil()),
-		HaveField("Status.DRBD.Config.Peers", BeEmpty()),
-	)
-}
-
-// HaveAllPeersSet is a matcher factory that returns a Gomega matcher for a single RVR
-// It checks that the RVR has all other RVRs from expectedResources as peers but his own
-func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
-	if len(expectedPeerReplicas) < 2 {
-		return HaveNoPeers()
-	}
-	expectedPeers := make(map[string]v1alpha3.Peer, len(expectedPeerReplicas)-1)
-	for _, rvr := range expectedPeerReplicas {
-		if rvr.Status == nil {
-			return gcustom.MakeMatcher(func(_ any) bool { return false }).
-				WithMessage("expected rvr to have status, but it's nil")
-		}
-
-		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
-			return gcustom.MakeMatcher(func(_ any) bool { return false }).
-				WithMessage("expected rvr to have status.drbd.config, but it's nil")
-		}
-		diskless := rvr.Status.DRBD.Config.Disk == ""
-		expectedPeers[rvr.Spec.NodeName] = v1alpha3.Peer{
-			NodeId:   *rvr.Status.DRBD.Config.NodeId,
-			Address:  *rvr.Status.DRBD.Config.Address,
-			Diskless: diskless,
-		}
-	}
-	return SatisfyAll(
-		HaveField("Status.DRBD.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
-			ret := maps.Clone(rvr.Status.DRBD.Config.Peers)
-			diskless := rvr.Status.DRBD.Config.Disk == ""
-			ret[rvr.Spec.NodeName] = v1alpha3.Peer{
-				NodeId:   *rvr.Status.DRBD.Config.NodeId,
-				Address:  *rvr.Status.DRBD.Config.Address,
-				Diskless: diskless,
-			}
-			return ret
-		}, Equal(expectedPeers)),
-	)
-}
-
-// makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
-func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeID uint, address v1alpha3.Address) {
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-	}
-
-	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
-	}
-
-	if rvr.Status.DRBD.Config == nil {
-		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-	}
-
-	rvr.Status.DRBD.Config.NodeId = &nodeID
-	rvr.Status.DRBD.Config.Address = &address
-}
-
-// BeReady returns a matcher that checks if an RVR is in ready state (has NodeName, NodeId, and Address)
-func BeReady() gomegatypes.GomegaMatcher {
-	return SatisfyAll(
-		HaveField("Spec.NodeName", Not(BeEmpty())),
-		HaveField("Status.DRBD.Config.NodeId", Not(BeNil())),
-		HaveField("Status.DRBD.Config.Address", Not(BeNil())),
-	)
-}
-
 var _ = Describe("Reconciler", func() {
-	var cl client.WithWatch
-	var rec *rvr_status_config_peers.Reconciler
-	var scheme *runtime.Scheme
-	var interceptorFuncs interceptor.Funcs
+	// Available in BeforeEach
+	var (
+		clientBuilder *fake.ClientBuilder
+		scheme        *runtime.Scheme
+	)
 
+	// Available in JustBeforeEach
+	var (
+		cl  client.WithWatch
+		rec *rvr_status_config_peers.Reconciler
+	)
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
-		interceptorFuncs = interceptor.Funcs{}
-	})
-
-	JustBeforeEach(func() {
-		cl = fake.NewClientBuilder().
+		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{}).
-			WithInterceptorFuncs(interceptorFuncs).
-			Build()
+				&v1alpha3.ReplicatedVolume{})
+		cl = nil
+		rec = nil
+	})
+
+	JustBeforeEach(func() {
+		cl = clientBuilder.Build()
 		rec = rvr_status_config_peers.NewReconciler(cl, GinkgoLogr)
 	})
 
@@ -155,14 +82,14 @@ var _ = Describe("Reconciler", func() {
 	When("Get fails with non-NotFound error", func() {
 		internalServerError := errors.New("internal server error")
 		BeforeEach(func() {
-			interceptorFuncs = interceptor.Funcs{
+			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 					if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
 						return internalServerError
 					}
 					return client.Get(ctx, key, obj, opts...)
 				},
-			}
+			})
 		})
 
 		It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
@@ -236,14 +163,14 @@ var _ = Describe("Reconciler", func() {
 			When("List fails", func() {
 				listError := errors.New("failed to list replicas")
 				BeforeEach(func() {
-					interceptorFuncs = interceptor.Funcs{
+					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
 								return listError
 							}
 							return client.List(ctx, list, opts...)
 						},
-					}
+					})
 				})
 
 				It("should fail if listing replicas failed", func(ctx SpecContext) {
@@ -309,7 +236,7 @@ var _ = Describe("Reconciler", func() {
 						When("Patch fails with non-NotFound error", func() {
 							patchError := errors.New("failed to patch status")
 							BeforeEach(func() {
-								interceptorFuncs = interceptor.Funcs{
+								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 										if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
 											if subResourceName == "status" {
@@ -318,7 +245,7 @@ var _ = Describe("Reconciler", func() {
 										}
 										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
 									},
-								}
+								})
 							})
 
 							It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
@@ -330,7 +257,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("Patch fails with NotFound error", func() {
 							BeforeEach(func() {
-								interceptorFuncs = interceptor.Funcs{
+								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 										if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
 											if subResourceName == "status" && rvr.Name == "rvr-1" {
@@ -339,7 +266,7 @@ var _ = Describe("Reconciler", func() {
 										}
 										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
 									},
-								}
+								})
 							})
 
 							It("should return no error if patching ReplicatedVolumeReplica status failed with NotFound error", func(ctx SpecContext) {
