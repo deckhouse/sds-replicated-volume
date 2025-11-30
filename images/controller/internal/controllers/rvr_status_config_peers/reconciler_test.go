@@ -82,14 +82,9 @@ var _ = Describe("Reconciler", func() {
 	When("Get fails with non-NotFound error", func() {
 		internalServerError := errors.New("internal server error")
 		BeforeEach(func() {
-			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-				Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
-						return internalServerError
-					}
-					return client.Get(ctx, key, obj, opts...)
-				},
-			})
+			clientBuilder = clientBuilder.WithInterceptorFuncs(InterceptRV(func(_ *v1alpha3.ReplicatedVolume) error {
+				return internalServerError
+			}))
 		})
 
 		It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
@@ -130,6 +125,20 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 			Expect(cl.Create(ctx, otherRv)).To(Succeed())
 		})
+
+		DescribeTableSubtree("when rv has",
+			Entry("nil Status", func() { rv.Status = nil }),
+			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: &v1alpha3.DRBDResource{Config: nil}} }),
+			func(setup func()) {
+				BeforeEach(func() {
+					setup()
+				})
+
+				It("should reconcile successfully", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				})
+			})
 		When("first replica created", func() {
 			var firstRvr v1alpha3.ReplicatedVolumeReplica
 
@@ -263,8 +272,8 @@ var _ = Describe("Reconciler", func() {
 
 						DescribeTableSubtree("if rvr-2 is",
 							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.drbd", func() { secondRvr.Status.DRBD = nil }),
-							Entry("without status.drbd.config", func() { secondRvr.Status.DRBD.Config = nil }),
+							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeId", func() { secondRvr.Status.DRBD.Config.NodeId = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),

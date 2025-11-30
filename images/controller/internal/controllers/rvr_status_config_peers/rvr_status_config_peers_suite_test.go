@@ -17,16 +17,19 @@ limitations under the License.
 package rvr_status_config_peers_test
 
 import (
+	"context"
 	"maps"
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/gcustom"
 	gomegatypes "github.com/onsi/gomega/types" // cspell:words gomegatypes
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func TestRvrStatusConfigPeers(t *testing.T) {
@@ -116,4 +119,96 @@ func Requeue() gomegatypes.GomegaMatcher {
 
 func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
+}
+
+// InterceptObject creates an interceptor that modifies objects in both Get and List operations
+func InterceptObject[T any](
+	checkObj func(client.Object) (T, bool),
+	getListItems func(client.ObjectList) []client.Object,
+	intercept func(T) error,
+) interceptor.Funcs {
+	return interceptor.Funcs{
+		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if targetObj, ok := checkObj(obj); ok {
+				// Try to intercept before Get - if it returns an error, return it without calling Get
+				// This allows simulating errors before Get is called
+				if err := intercept(targetObj); err != nil {
+					return err
+				}
+				if err := cl.Get(ctx, key, obj, opts...); err != nil {
+					return err
+				}
+				// Re-check after Get since obj might have changed
+				if targetObj, ok := checkObj(obj); ok {
+					if err := intercept(targetObj); err != nil {
+						return err
+					}
+				}
+				return nil
+			}
+			return cl.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			items := getListItems(list)
+			if items == nil {
+				return cl.List(ctx, list, opts...)
+			}
+			if err := cl.List(ctx, list, opts...); err != nil {
+				return err
+			}
+			// Intercept items after List populates them
+			for _, item := range getListItems(list) {
+				if targetObj, ok := checkObj(item); ok {
+					if err := intercept(targetObj); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		},
+	}
+}
+
+// InterceptRV creates an interceptor that modifies ReplicatedVolume status in both Get and List operations
+func InterceptRV(intercept func(*v1alpha3.ReplicatedVolume) error) interceptor.Funcs {
+	return InterceptObject(
+		func(obj client.Object) (*v1alpha3.ReplicatedVolume, bool) {
+			rv, ok := obj.(*v1alpha3.ReplicatedVolume)
+			return rv, ok
+		},
+		func(list client.ObjectList) []client.Object {
+			rvList, ok := list.(*v1alpha3.ReplicatedVolumeList)
+			if !ok {
+				return nil
+			}
+			items := make([]client.Object, len(rvList.Items))
+			for i := range rvList.Items {
+				items[i] = &rvList.Items[i]
+			}
+			return items
+		},
+		intercept,
+	)
+}
+
+// InterceptRVR creates an interceptor that modifies ReplicatedVolumeReplica status in both Get and List operations
+func InterceptRVR(intercept func(*v1alpha3.ReplicatedVolumeReplica) error) interceptor.Funcs {
+	return InterceptObject(
+		func(obj client.Object) (*v1alpha3.ReplicatedVolumeReplica, bool) {
+			rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
+			return rvr, ok
+		},
+		func(list client.ObjectList) []client.Object {
+			rvrList, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList)
+			if !ok {
+				return nil
+			}
+			items := make([]client.Object, len(rvrList.Items))
+			for i := range rvrList.Items {
+				items[i] = &rvrList.Items[i]
+			}
+			return items
+		},
+		intercept,
+	)
 }
