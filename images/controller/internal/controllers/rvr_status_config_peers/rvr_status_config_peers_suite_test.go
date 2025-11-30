@@ -122,19 +122,26 @@ func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
 
-// Intercept creates an interceptor that modifies objects in both Get and List operations
+// Intercept creates an interceptor that modifies objects in both Get and List operations.
+// If Get or List returns an error, intercept is called with a nil (zero) value of type T allowing alternating the error.
 func Intercept[T client.Object](
 	intercept func(T) error,
 ) interceptor.Funcs {
 	return interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if err := cl.Get(ctx, key, obj, opts...); err != nil {
-				return err
+			targetObj, ok := obj.(T)
+			if !ok {
+				return cl.Get(ctx, key, obj, opts...)
 			}
-			if targetObj, ok := obj.(T); ok {
-				if err := intercept(targetObj); err != nil {
+			if err := cl.Get(ctx, key, obj, opts...); err != nil {
+				var zero T
+				if err := intercept(zero); err != nil {
 					return err
 				}
+				return err
+			}
+			if err := intercept(targetObj); err != nil {
+				return err
 			}
 			return nil
 		},
@@ -145,6 +152,13 @@ func Intercept[T client.Object](
 				return cl.List(ctx, list, opts...)
 			}
 			if err := cl.List(ctx, list, opts...); err != nil {
+				var zero T
+				// Check if any items in the list would be of type T
+				// We can't know for sure without the list, but we can try to intercept with nil
+				// This allows intercept to handle the error case
+				if err := intercept(zero); err != nil {
+					return err
+				}
 				return err
 			}
 			// Intercept items after List populates them
