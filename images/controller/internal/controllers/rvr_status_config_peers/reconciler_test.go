@@ -165,9 +165,7 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should fail if listing replicas failed", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: rv.Name},
-					})).Error().To(MatchError(listError))
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(listError))
 				})
 			})
 
@@ -240,9 +238,7 @@ var _ = Describe("Reconciler", func() {
 							})
 
 							It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
-								Expect(rec.Reconcile(ctx, reconcile.Request{
-									NamespacedName: types.NamespacedName{Name: rv.Name},
-								})).Error().To(MatchError(patchError))
+								Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(patchError))
 							})
 						})
 
@@ -261,9 +257,7 @@ var _ = Describe("Reconciler", func() {
 							})
 
 							It("should return no error if patching ReplicatedVolumeReplica status failed with NotFound error", func(ctx SpecContext) {
-								Expect(rec.Reconcile(ctx, reconcile.Request{
-									NamespacedName: types.NamespacedName{Name: rv.Name},
-								})).To(Equal(reconcile.Result{}))
+								Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 							})
 						})
 
