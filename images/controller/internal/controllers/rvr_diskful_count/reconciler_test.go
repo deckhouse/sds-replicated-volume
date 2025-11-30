@@ -63,6 +63,10 @@ func createReplicatedVolume(name, rscName string) *v1alpha3.ReplicatedVolume {
 }
 
 func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
+	return createReplicatedVolumeReplicaWithType(name, rvName, "Diskful", ready, deletionTimestamp)
+}
+
+func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -77,7 +81,7 @@ func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTime
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rvName,
-			Type:                 "Diskful",
+			Type:                 rvrType,
 		},
 	}
 
@@ -599,6 +603,88 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			// The reason depends on whether replicas were created or already available
 			Expect(condition.Reason).To(BeElementOf("CreatedRequiredNumberOfReplicas", "RequiredNumberOfReplicasIsAvailable"))
+		})
+	})
+
+	When("there are non-Diskful ReplicatedVolumeReplicas", func() {
+		It("should ignore non-Diskful replicas and only count Diskful ones", func() {
+			rsc := createReplicatedStorageClass("test-rsc", "None")
+			Expect(cl.Create(ctx, rsc)).To(Succeed())
+
+			rv := createReplicatedVolume("test-rv", "test-rsc")
+			Expect(cl.Create(ctx, rv)).To(Succeed())
+
+			// Create a non-Diskful replica (e.g., "Diskless")
+			rvrNonDiskful := createReplicatedVolumeReplicaWithType("rvr-non-diskful", "test-rv", "Diskless", true, nil)
+			Expect(cl.Create(ctx, rvrNonDiskful)).To(Succeed())
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-rv",
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify a new Diskful replica was created (because non-Diskful was ignored)
+			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			// Should have 2 replicas: 1 non-Diskful + 1 new Diskful
+			Expect(rvrList.Items).To(HaveLen(2))
+
+			// Verify that the new replica is Diskful
+			var diskfulReplicas []v1alpha3.ReplicatedVolumeReplica
+			for _, rvr := range rvrList.Items {
+				if rvr.Spec.Type == "Diskful" {
+					diskfulReplicas = append(diskfulReplicas, rvr)
+				}
+			}
+			Expect(diskfulReplicas).To(HaveLen(1))
+			Expect(diskfulReplicas[0].Spec.ReplicatedVolumeName).To(Equal("test-rv"))
+
+			// Verify condition was set
+			updatedRV := &v1alpha3.ReplicatedVolume{}
+			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
+			Expect(condition.Reason).To(Equal("FirstReplicaIsBeingCreated"))
+		})
+
+		It("should only count Diskful replicas when calculating required count", func() {
+			rsc := createReplicatedStorageClass("test-rsc", "None")
+			Expect(cl.Create(ctx, rsc)).To(Succeed())
+
+			rv := createReplicatedVolume("test-rv", "test-rsc")
+			Expect(cl.Create(ctx, rv)).To(Succeed())
+
+			// Create 1 Diskful and 1 non-Diskful replica
+			// Need 1 Diskful total, so should not create more
+			rvrDiskful := createReplicatedVolumeReplica("rvr-diskful", "test-rv", true, nil)
+			rvrNonDiskful := createReplicatedVolumeReplicaWithType("rvr-non-diskful", "test-rv", "Diskless", true, nil)
+			Expect(cl.Create(ctx, rvrDiskful)).To(Succeed())
+			Expect(cl.Create(ctx, rvrNonDiskful)).To(Succeed())
+
+			_, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-rv",
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			// Verify no new replica was created (we already have 1 Diskful, which is enough)
+			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(2))
+
+			// Verify condition was set to True (required number reached)
+			updatedRV := &v1alpha3.ReplicatedVolume{}
+			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
+			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
+			Expect(condition).NotTo(BeNil())
+			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condition.Reason).To(Equal("RequiredNumberOfReplicasIsAvailable"))
 		})
 	})
 })

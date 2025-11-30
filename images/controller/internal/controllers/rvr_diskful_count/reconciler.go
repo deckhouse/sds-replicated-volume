@@ -67,7 +67,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	log.V(4).Info("Calculated diskful replica count", "count", neededNumberOfReplicas)
 
 	// Get all RVRs for this RV
-	totalRvrMap, err := getReplicatedVolumeReplicas(ctx, r.cl, rv)
+	totalRvrMap, err := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplicas: %w", err)
 	}
@@ -217,10 +217,10 @@ func getDiskfulReplicaCount(ctx context.Context, cl client.Client, rv *v1alpha3.
 	}
 }
 
-// getReplicatedVolumeReplicas gets all ReplicatedVolumeReplica objects for the given ReplicatedVolume
-// by the spec.replicatedVolumeName field. Returns a map with RVR name as key and RVR object as value.
+// getDiskfulReplicatedVolumeReplicas gets all Diskful ReplicatedVolumeReplica objects for the given ReplicatedVolume
+// by the spec.replicatedVolumeName and spec.type fields. Returns a map with RVR name as key and RVR object as value.
 // Returns empty map if no RVRs are found.
-func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (map[string]*v1alpha3.ReplicatedVolumeReplica, error) {
+func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (map[string]*v1alpha3.ReplicatedVolumeReplica, error) {
 	allRvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	err := cl.List(ctx, allRvrList)
 	if err != nil {
@@ -231,7 +231,7 @@ func getReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1al
 	rvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
 
 	for i := range allRvrList.Items {
-		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name {
+		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name && allRvrList.Items[i].Spec.Type == "Diskful" {
 			rvrMap[allRvrList.Items[i].Name] = &allRvrList.Items[i]
 		}
 	}
