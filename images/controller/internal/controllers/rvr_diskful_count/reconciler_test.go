@@ -36,6 +36,7 @@ func newFakeClient() client.Client {
 		Build()
 }
 
+//nolint:unparam // name and replication parameters are kept for flexibility in tests
 func createReplicatedStorageClass(name, replication string) *v1alpha1.ReplicatedStorageClass {
 	return &v1alpha1.ReplicatedStorageClass{
 		ObjectMeta: metav1.ObjectMeta{
@@ -47,6 +48,7 @@ func createReplicatedStorageClass(name, replication string) *v1alpha1.Replicated
 	}
 }
 
+//nolint:unparam // name and rscName parameters are kept for flexibility in tests
 func createReplicatedVolume(name, rscName string) *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -62,6 +64,7 @@ func createReplicatedVolume(name, rscName string) *v1alpha3.ReplicatedVolume {
 	}
 }
 
+//nolint:unparam // name and rvName parameters are kept for flexibility in tests
 func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	return createReplicatedVolumeReplicaWithType(name, rvName, "Diskful", ready, deletionTimestamp)
 }
@@ -689,6 +692,7 @@ var _ = Describe("Reconciler", func() {
 	})
 })
 
+//nolint:unparam // conditionType parameter is kept for flexibility in tests
 func findCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
 	for i := range conditions {
 		if conditions[i].Type == conditionType {
