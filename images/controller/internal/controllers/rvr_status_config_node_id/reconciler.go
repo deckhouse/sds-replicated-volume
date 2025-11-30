@@ -53,8 +53,8 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Check if nodeId is already set
-	if rvr.Status != nil && rvr.Status.Config != nil && rvr.Status.Config.NodeId != nil {
-		nodeID := *rvr.Status.Config.NodeId
+	if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.NodeId != nil {
+		nodeID := *rvr.Status.DRBD.Config.NodeId
 		// Validate nodeID range if it's set
 		if nodeID < MinNodeID || nodeID > MaxNodeID {
 			// NOTE: Logging invalid nodeID is NOT in the spec.
@@ -65,7 +65,7 @@ func (r *Reconciler) Reconcile(
 				"rvr", req.NamespacedName,
 			)
 			// Reset invalid nodeID - will continue processing to assign valid nodeID
-			rvr.Status.Config.NodeId = nil
+			rvr.Status.DRBD.Config.NodeId = nil
 		} else {
 			log.V(1).Info("nodeId already assigned", "nodeId", nodeID)
 			return reconcile.Result{}, nil
@@ -86,8 +86,8 @@ func (r *Reconciler) Reconcile(
 	// Collect used nodeIDs
 	usedNodeIDs := make(map[uint]struct{})
 	for _, item := range rvrList.Items {
-		if item.Status != nil && item.Status.Config != nil && item.Status.Config.NodeId != nil {
-			nodeID := *item.Status.Config.NodeId
+		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
+			nodeID := *item.Status.DRBD.Config.NodeId
 			if nodeID >= MinNodeID && nodeID <= MaxNodeID {
 				usedNodeIDs[nodeID] = struct{}{}
 			} else {
@@ -159,8 +159,8 @@ func (r *Reconciler) Reconcile(
 	}
 	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRVR, func(currentRVR *v1alpha3.ReplicatedVolumeReplica) error {
 		// Check again if nodeID is already set (handles race condition where another worker set it during retry)
-		if currentRVR.Status != nil && currentRVR.Status.Config != nil && currentRVR.Status.Config.NodeId != nil {
-			currentNodeID := *currentRVR.Status.Config.NodeId
+		if currentRVR.Status != nil && currentRVR.Status.DRBD != nil && currentRVR.Status.DRBD.Config != nil && currentRVR.Status.DRBD.Config.NodeId != nil {
+			currentNodeID := *currentRVR.Status.DRBD.Config.NodeId
 			// Validate nodeID range - if invalid, reset it
 			if currentNodeID < MinNodeID || currentNodeID > MaxNodeID {
 				// NOTE: Logging invalid nodeID is NOT in the spec.
@@ -171,7 +171,7 @@ func (r *Reconciler) Reconcile(
 					"validRange", formatValidRange(),
 					"rvr", req.NamespacedName,
 				)
-				currentRVR.Status.Config.NodeId = nil
+				currentRVR.Status.DRBD.Config.NodeId = nil
 				// Continue to assign valid nodeID
 			} else {
 				log.V(1).Info("nodeID already assigned by another worker", "nodeID", currentNodeID)
@@ -190,12 +190,15 @@ func (r *Reconciler) Reconcile(
 		if currentRVR.Status == nil {
 			currentRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 		}
-		if currentRVR.Status.Config == nil {
-			currentRVR.Status.Config = &v1alpha3.DRBDConfig{}
+		if currentRVR.Status.DRBD == nil {
+			currentRVR.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if currentRVR.Status.DRBD.Config == nil {
+			currentRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
 		}
 
 		// Set the pre-calculated nodeID
-		currentRVR.Status.Config.NodeId = availableNodeID
+		currentRVR.Status.DRBD.Config.NodeId = availableNodeID
 
 		return nil
 	}); err != nil {
@@ -205,8 +208,8 @@ func (r *Reconciler) Reconcile(
 	// Get final state to log the assigned nodeID
 	finalRVR := &v1alpha3.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, req.NamespacedName, finalRVR); err == nil {
-		if finalRVR.Status != nil && finalRVR.Status.Config != nil && finalRVR.Status.Config.NodeId != nil {
-			log.Info("assigned nodeID to RVR", "nodeID", *finalRVR.Status.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
+		if finalRVR.Status != nil && finalRVR.Status.DRBD != nil && finalRVR.Status.DRBD.Config != nil && finalRVR.Status.DRBD.Config.NodeId != nil {
+			log.Info("assigned nodeID to RVR", "nodeID", *finalRVR.Status.DRBD.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
 		}
 	}
 

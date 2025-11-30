@@ -52,8 +52,10 @@ func createRVR(name, volumeName, nodeName string) *v1alpha3.ReplicatedVolumeRepl
 func createRVRWithNodeID(name, nodeName string, nodeID uint) *v1alpha3.ReplicatedVolumeReplica {
 	rvr := createRVR(name, "volume-1", nodeName)
 	rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-		Config: &v1alpha3.DRBDConfig{
-			NodeId: &nodeID,
+		DRBD: &v1alpha3.DRBD{
+			Config: &v1alpha3.DRBDConfig{
+				NodeId: &nodeID,
+			},
 		},
 	}
 	return rvr
@@ -92,8 +94,8 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
 			})
 
 			// Test case: Sequential assignment and uniqueness (spec: unique nodeId among all replicas of one RV)
@@ -120,8 +122,8 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-6"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 5)))
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 5)))
 			})
 
 			// Test case: Volume isolation (spec: unique nodeId among all replicas of one RV)
@@ -144,8 +146,8 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID))) // volume-2 is independent
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID))) // volume-2 is independent
 			})
 
 			// Test case: Gap filling algorithm (spec: unique nodeId in range [0; 7])
@@ -167,8 +169,8 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-4"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 1))) // filled the gap
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 1))) // filled the gap
 			})
 
 			// Test case: Idempotency (spec: trigger CREATE(RVR, status.config.nodeId==nil))
@@ -185,8 +187,8 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(testNodeID))
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(testNodeID))
 
 				// Reconcile again - should be idempotent
 				_, err = rec.Reconcile(ctx, reconcile.Request{
@@ -195,8 +197,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(err).NotTo(HaveOccurred())
 
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(testNodeID)) // still same, not reassigned
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(testNodeID)) // still same, not reassigned
 			})
 
 			// Test case: Invalid nodeID handling (spec: nodeId in range [0; 7])
@@ -218,9 +220,9 @@ var _ = Describe("Reconciler", func() {
 
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
 				// Should get nodeID MinNodeID, because invalid nodeID was ignored
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
 			})
 
 			// Test case: Invalid nodeID already set in RVR (spec: nodeId in range [0; 7])
@@ -240,8 +242,8 @@ var _ = Describe("Reconciler", func() {
 				// Verify RVR got valid nodeID (MinNodeID)
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
+				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
 			})
 
 			// Test case: Invalid nodeID reset when all valid nodeIDs are used
@@ -280,8 +282,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-9"}, updatedRVR9)).To(Succeed())
 				// After error, nodeID is still invalid in API (reset wasn't saved because error was returned)
 				// This is expected behavior - we don't save changes if we're going to return an error
-				Expect(updatedRVR9.Status.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR9.Status.Config.NodeId).To(Equal(invalidNodeID))
+				Expect(updatedRVR9.Status.DRBD.Config.NodeId).NotTo(BeNil())
+				Expect(*updatedRVR9.Status.DRBD.Config.NodeId).To(Equal(invalidNodeID))
 			})
 
 			// Test case: Error handling and reuse of freed nodeID (spec: error on too many replicas, reuse after deletion)
@@ -326,9 +328,10 @@ var _ = Describe("Reconciler", func() {
 					updatedRVR9 := &v1alpha3.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-9"}, updatedRVR9)).To(Succeed())
 					Expect(updatedRVR9.Status).NotTo(BeNil())
-					Expect(updatedRVR9.Status.Config).NotTo(BeNil())
-					Expect(updatedRVR9.Status.Config.NodeId).NotTo(BeNil())
-					Expect(*updatedRVR9.Status.Config.NodeId).To(Equal(freedNodeID))
+					Expect(updatedRVR9.Status.DRBD).NotTo(BeNil())
+					Expect(updatedRVR9.Status.DRBD.Config).NotTo(BeNil())
+					Expect(updatedRVR9.Status.DRBD.Config.NodeId).NotTo(BeNil())
+					Expect(*updatedRVR9.Status.DRBD.Config.NodeId).To(Equal(freedNodeID))
 				})
 			})
 		})

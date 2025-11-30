@@ -5,34 +5,34 @@
 ## Спецификация (из `docs/dev/spec_v1alpha3.md`)
 
 ### Цель
-Проставить свойству `rvr.status.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
+Проставить свойству `rvr.status.drbd.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
 
 В случае превышения количества реплик, повторять реконсайл с ошибкой.
 
 ### Триггер
-- `CREATE(RVR, status.config.nodeId==nil)`
+- `CREATE(RVR, status.drbd.config.nodeId==nil)`
 
 ### Вывод
-- `rvr.status.config.nodeId`
+- `rvr.status.drbd.config.nodeId`
 
 ---
 
 
 ## Таблица соответствия
 
-| Требование | Статус | Код | Тесты |
-|-----------|--------|-----|-------|
-| Уникальный `nodeId` в диапазоне [0; 7] | ✅ | `reconciler.go:113-118, 189` | ✅ `assigns nodeID to first replica`, `assigns nodeID sequentially` |
-| Проверка превышения количества реплик | ✅ | `reconciler.go:95-108` | ✅ `returns error when all nodeIDs are used` |
-| Возврат ошибки при превышении | ✅ | `reconciler.go:103-108` | ✅ `returns error when all nodeIDs are used` |
-| Триггер `CREATE(RVR, status.config.nodeId==nil)` | ✅ | Обработка всех событий, фильтрация в `Reconcile` | ✅ Все тесты с созданием RVR |
-| Вывод `rvr.status.config.nodeId` | ✅ | `reconciler.go:189` | ✅ Все тесты проверяют установку nodeID |
-| Заполнение пустых мест | ✅ | `reconciler.go:113-118` | ✅ `fills gaps in nodeIDs` |
-| Не переприсваивать если уже установлено | ✅ | `reconciler.go:57-58` | ✅ `does not reassign nodeID if already assigned` |
-| Разные volumes независимы | ✅ | `reconciler.go:69-75` | ✅ `isolates nodeIDs by volume` |
-| Сброс невалидного nodeID | ⚠️ | `reconciler.go:46-55, 156-166` | ✅ `logs error and reassigns`, `ignores nodeID outside valid range` |
-| Логирование ошибок | ⚠️ | `reconciler.go:49, 88, 101, 126, 160` | ✅ Все тесты с ошибками |
-| Работа в несколько потоков | ⚠️ | `reconciler.go:151-191` | ✅ Неявно (через PatchStatusWithConflictRetry) |
+| Требование | Статус | Тесты |
+|-----------|--------|-------|
+| Уникальный `nodeId` в диапазоне [0; 7] | ✅ | ✅ `assigns nodeID to first replica`, `assigns nodeID sequentially` |
+| Проверка превышения количества реплик | ✅ | ✅ `returns error when all nodeIDs are used` |
+| Возврат ошибки при превышении | ✅ | ✅ `returns error when all nodeIDs are used` |
+| Триггер `CREATE(RVR, status.drbd.config.nodeId==nil)` | ✅ | ✅ Все тесты с созданием RVR |
+| Вывод `rvr.status.drbd.config.nodeId` | ✅ | ✅ Все тесты проверяют установку nodeID |
+| Заполнение пустых мест | ✅ | ✅ `fills gaps in nodeIDs` |
+| Не переприсваивать если уже установлено | ✅ | ✅ `does not reassign nodeID if already assigned` |
+| Разные volumes независимы | ✅ | ✅ `isolates nodeIDs by volume` |
+| Сброс невалидного nodeID | ⚠️ | ✅ `logs error and reassigns`, `ignores nodeID outside valid range` |
+| Логирование ошибок | ⚠️ | ✅ Все тесты с ошибками |
+| Работа в несколько потоков | ⚠️ | ✅ Неявно (через PatchStatusWithConflictRetry) |
 
 
 ## Схема логики работы контроллера
