@@ -22,13 +22,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
+	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
 var registry []func(mgr manager.Manager) error
 
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
-
+	registry = append(registry, rvrvolume.BuildController)
 	// TODO issues/333 register new controllers here
 }
 
