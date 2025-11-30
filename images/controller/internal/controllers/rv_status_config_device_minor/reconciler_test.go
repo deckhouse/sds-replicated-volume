@@ -43,8 +43,10 @@ func createRV(name string) *v1alpha3.ReplicatedVolume {
 func createRVWithDeviceMinor(name string, deviceMinor uint) *v1alpha3.ReplicatedVolume {
 	rv := createRV(name)
 	rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-		Config: &v1alpha3.DRBDResourceConfig{
-			DeviceMinor: deviceMinor,
+		DRBD: &v1alpha3.DRBDResource{
+			Config: &v1alpha3.DRBDResourceConfig{
+				DeviceMinor: deviceMinor,
+			},
 		},
 	}
 	return rv
@@ -79,8 +81,9 @@ var _ = Describe("Reconciler", func() {
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-1"}, updatedRV)).To(Succeed())
 		Expect(updatedRV.Status).NotTo(BeNil())
-		Expect(updatedRV.Status.Config).NotTo(BeNil())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(0)))
+		Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(0)))
 	})
 
 	It("assigns unique deviceMinors to multiple volumes", func(ctx context.Context) {
@@ -102,7 +105,7 @@ var _ = Describe("Reconciler", func() {
 
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-3"}, updatedRV)).To(Succeed())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(2)))
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(2)))
 	})
 
 	It("assigns unique deviceMinors", func(ctx context.Context) {
@@ -128,8 +131,8 @@ var _ = Describe("Reconciler", func() {
 
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-6"}, updatedRV)).To(Succeed())
-		Expect(updatedRV.Status.Config.DeviceMinor).NotTo(BeZero())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(5)))
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).NotTo(BeZero())
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(5)))
 	})
 
 	It("does not reassign deviceMinor if already assigned", func(ctx context.Context) {
@@ -147,7 +150,7 @@ var _ = Describe("Reconciler", func() {
 
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-1"}, updatedRV)).To(Succeed())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(42)))
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(42)))
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx context.Context) {
@@ -182,8 +185,8 @@ var _ = Describe("Reconciler", func() {
 		// Verify deviceMinor was assigned (should be 1, filling the gap)
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-4"}, updatedRV)).To(Succeed())
-		Expect(updatedRV.Status.Config.DeviceMinor).NotTo(BeZero())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(1)))
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).NotTo(BeZero())
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(1)))
 	})
 
 	It("assigns deviceMinor when status is nil", func(ctx context.Context) {
@@ -208,8 +211,9 @@ var _ = Describe("Reconciler", func() {
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-1"}, updatedRV)).To(Succeed())
 		Expect(updatedRV.Status).NotTo(BeNil())
-		Expect(updatedRV.Status.Config).NotTo(BeNil())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(0)))
+		Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(0)))
 	})
 
 	It("assigns deviceMinor when config is nil", func(ctx context.Context) {
@@ -235,8 +239,9 @@ var _ = Describe("Reconciler", func() {
 
 		updatedRV := &v1alpha3.ReplicatedVolume{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: "volume-1"}, updatedRV)).To(Succeed())
-		Expect(updatedRV.Status.Config).NotTo(BeNil())
-		Expect(updatedRV.Status.Config.DeviceMinor).To(Equal(uint(0)))
+		Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+		Expect(updatedRV.Status.DRBD.Config.DeviceMinor).To(Equal(uint(0)))
 	})
 })
 

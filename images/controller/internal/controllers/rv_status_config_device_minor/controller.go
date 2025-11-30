@@ -32,7 +32,7 @@ func BuildController(mgr manager.Manager) error {
 				// Trigger only if Config doesn't exist (deviceMinor is not set)
 				// Note: Since DeviceMinor is uint (not *uint), we can't check for nil.
 				// We consider deviceMinor set if Config exists (even if value is 0, as 0 is a valid deviceMinor).
-				return rv.Status == nil || rv.Status.Config == nil
+				return rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil
 			},
 			UpdateFunc: func(ue event.UpdateEvent) bool {
 				rv, ok := ue.ObjectNew.(*v1alpha3.ReplicatedVolume)
@@ -42,7 +42,7 @@ func BuildController(mgr manager.Manager) error {
 				// Trigger only if Config doesn't exist (deviceMinor is not set)
 				// Note: Since DeviceMinor is uint (not *uint), we can't check for nil.
 				// We consider deviceMinor set if Config exists (even if value is 0, as 0 is a valid deviceMinor).
-				return rv.Status == nil || rv.Status.Config == nil
+				return rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil
 			},
 			DeleteFunc: func(_ event.DeleteEvent) bool {
 				// No-op: deletion doesn't require deviceMinor assignment
@@ -56,7 +56,7 @@ func BuildController(mgr manager.Manager) error {
 				// Trigger only if Config doesn't exist (for reconciliation on startup)
 				// Note: Since DeviceMinor is uint (not *uint), we can't check for nil.
 				// We consider deviceMinor set if Config exists (even if value is 0, as 0 is a valid deviceMinor).
-				return rv.Status == nil || rv.Status.Config == nil
+				return rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil
 			},
 		}).
 		Complete(rec)

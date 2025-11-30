@@ -42,7 +42,7 @@ func (r *Reconciler) Reconcile(
 	// Note: Since DeviceMinor is uint (not *uint), we can't check for nil.
 	// We consider deviceMinor set if Config exists (even if value is 0, as 0 is a valid deviceMinor).
 	// The controller will only assign deviceMinor if Config doesn't exist or is nil.
-	if rv.Status != nil && rv.Status.Config != nil {
+	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		// Check if this is the same RV we're processing (to avoid skipping our own RV)
 		// If Config exists, deviceMinor is considered set (even if 0)
 		// We'll check if it's actually assigned by looking at all RVs
@@ -61,8 +61,8 @@ func (r *Reconciler) Reconcile(
 	usedDeviceMinors := make(map[uint]bool)
 	currentRVHasDeviceMinor := false
 	for _, item := range rvList.Items {
-		if item.Status != nil && item.Status.Config != nil {
-			deviceMinor := item.Status.Config.DeviceMinor
+		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
+			deviceMinor := item.Status.DRBD.Config.DeviceMinor
 			if deviceMinor >= minDeviceMinor && deviceMinor <= maxDeviceMinor {
 				usedDeviceMinors[deviceMinor] = true
 				// Check if this is the RV we're processing
@@ -75,7 +75,7 @@ func (r *Reconciler) Reconcile(
 
 	// If current RV already has deviceMinor assigned, skip
 	if currentRVHasDeviceMinor {
-		log.V(1).Info("deviceMinor already assigned", "deviceMinor", rv.Status.Config.DeviceMinor)
+		log.V(1).Info("deviceMinor already assigned", "deviceMinor", rv.Status.DRBD.Config.DeviceMinor)
 		return reconcile.Result{}, nil
 	}
 
@@ -107,8 +107,8 @@ func (r *Reconciler) Reconcile(
 	if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshRV, func(currentRV *v1alpha3.ReplicatedVolume) error {
 		// Check again if deviceMinor is already set (handles race condition where another worker set it during retry)
 		// Since DeviceMinor is uint, we check if Config exists and deviceMinor is in valid range
-		if currentRV.Status != nil && currentRV.Status.Config != nil {
-			deviceMinor := currentRV.Status.Config.DeviceMinor
+		if currentRV.Status != nil && currentRV.Status.DRBD != nil && currentRV.Status.DRBD.Config != nil {
+			deviceMinor := currentRV.Status.DRBD.Config.DeviceMinor
 			if deviceMinor >= minDeviceMinor && deviceMinor <= maxDeviceMinor {
 				// Check if this deviceMinor is actually used (not just default 0)
 				// We need to verify it's actually assigned by checking all RVs again
@@ -129,12 +129,15 @@ func (r *Reconciler) Reconcile(
 		if currentRV.Status == nil {
 			currentRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
 		}
-		if currentRV.Status.Config == nil {
-			currentRV.Status.Config = &v1alpha3.DRBDResourceConfig{}
+		if currentRV.Status.DRBD == nil {
+			currentRV.Status.DRBD = &v1alpha3.DRBDResource{}
+		}
+		if currentRV.Status.DRBD.Config == nil {
+			currentRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 		}
 
 		// Set the pre-calculated deviceMinor
-		currentRV.Status.Config.DeviceMinor = availableDeviceMinor
+		currentRV.Status.DRBD.Config.DeviceMinor = availableDeviceMinor
 
 		return nil
 	}); err != nil {
@@ -144,8 +147,8 @@ func (r *Reconciler) Reconcile(
 	// Get final state to log the assigned deviceMinor
 	finalRV := &v1alpha3.ReplicatedVolume{}
 	if err := r.Cl.Get(ctx, req.NamespacedName, finalRV); err == nil {
-		if finalRV.Status != nil && finalRV.Status.Config != nil && finalRV.Status.Config.DeviceMinor != 0 {
-			log.Info("assigned deviceMinor to RV", "deviceMinor", finalRV.Status.Config.DeviceMinor, "volume", rv.Name)
+		if finalRV.Status != nil && finalRV.Status.DRBD != nil && finalRV.Status.DRBD.Config != nil && finalRV.Status.DRBD.Config.DeviceMinor != 0 {
+			log.Info("assigned deviceMinor to RV", "deviceMinor", finalRV.Status.DRBD.Config.DeviceMinor, "volume", rv.Name)
 		}
 	}
 
