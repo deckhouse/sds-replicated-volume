@@ -82,7 +82,7 @@ var _ = Describe("Reconciler", func() {
 	When("Get fails with non-NotFound error", func() {
 		internalServerError := errors.New("internal server error")
 		BeforeEach(func() {
-			clientBuilder = clientBuilder.WithInterceptorFuncs(InterceptRV(func(_ *v1alpha3.ReplicatedVolume) error {
+			clientBuilder = clientBuilder.WithInterceptorFuncs(Intercept[*v1alpha3.ReplicatedVolume](func(_ *v1alpha3.ReplicatedVolume) error {
 				return internalServerError
 			}))
 		})

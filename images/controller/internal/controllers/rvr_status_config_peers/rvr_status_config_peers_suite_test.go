@@ -19,6 +19,7 @@ package rvr_status_config_peers_test
 import (
 	"context"
 	"maps"
+	"reflect"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -121,15 +122,13 @@ func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
 
-// InterceptObject creates an interceptor that modifies objects in both Get and List operations
-func InterceptObject[T any](
-	checkObj func(client.Object) (T, bool),
-	getListItems func(client.ObjectList) []client.Object,
+// Intercept creates an interceptor that modifies objects in both Get and List operations
+func Intercept[T client.Object](
 	intercept func(T) error,
 ) interceptor.Funcs {
 	return interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			if targetObj, ok := checkObj(obj); ok {
+			if targetObj, ok := obj.(T); ok {
 				// Try to intercept before Get - if it returns an error, return it without calling Get
 				// This allows simulating errors before Get is called
 				if err := intercept(targetObj); err != nil {
@@ -139,7 +138,7 @@ func InterceptObject[T any](
 					return err
 				}
 				// Re-check after Get since obj might have changed
-				if targetObj, ok := checkObj(obj); ok {
+				if targetObj, ok := obj.(T); ok {
 					if err := intercept(targetObj); err != nil {
 						return err
 					}
@@ -149,16 +148,18 @@ func InterceptObject[T any](
 			return cl.Get(ctx, key, obj, opts...)
 		},
 		List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-			items := getListItems(list)
-			if items == nil {
+			v := reflect.ValueOf(list).Elem()
+			itemsField := v.FieldByName("Items")
+			if !itemsField.IsValid() || itemsField.Kind() != reflect.Slice {
 				return cl.List(ctx, list, opts...)
 			}
 			if err := cl.List(ctx, list, opts...); err != nil {
 				return err
 			}
 			// Intercept items after List populates them
-			for _, item := range getListItems(list) {
-				if targetObj, ok := checkObj(item); ok {
+			for i := 0; i < itemsField.Len(); i++ {
+				item := itemsField.Index(i).Addr().Interface().(client.Object)
+				if targetObj, ok := any(item).(T); ok {
 					if err := intercept(targetObj); err != nil {
 						return err
 					}
@@ -167,48 +168,4 @@ func InterceptObject[T any](
 			return nil
 		},
 	}
-}
-
-// InterceptRV creates an interceptor that modifies ReplicatedVolume status in both Get and List operations
-func InterceptRV(intercept func(*v1alpha3.ReplicatedVolume) error) interceptor.Funcs {
-	return InterceptObject(
-		func(obj client.Object) (*v1alpha3.ReplicatedVolume, bool) {
-			rv, ok := obj.(*v1alpha3.ReplicatedVolume)
-			return rv, ok
-		},
-		func(list client.ObjectList) []client.Object {
-			rvList, ok := list.(*v1alpha3.ReplicatedVolumeList)
-			if !ok {
-				return nil
-			}
-			items := make([]client.Object, len(rvList.Items))
-			for i := range rvList.Items {
-				items[i] = &rvList.Items[i]
-			}
-			return items
-		},
-		intercept,
-	)
-}
-
-// InterceptRVR creates an interceptor that modifies ReplicatedVolumeReplica status in both Get and List operations
-func InterceptRVR(intercept func(*v1alpha3.ReplicatedVolumeReplica) error) interceptor.Funcs {
-	return InterceptObject(
-		func(obj client.Object) (*v1alpha3.ReplicatedVolumeReplica, bool) {
-			rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
-			return rvr, ok
-		},
-		func(list client.ObjectList) []client.Object {
-			rvrList, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList)
-			if !ok {
-				return nil
-			}
-			items := make([]client.Object, len(rvrList.Items))
-			for i := range rvrList.Items {
-				items[i] = &rvrList.Items[i]
-			}
-			return items
-		},
-		intercept,
-	)
 }
