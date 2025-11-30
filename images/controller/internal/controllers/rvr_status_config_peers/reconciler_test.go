@@ -408,45 +408,25 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						// Use all 3 RVRs, but set node-2 to node-1 for rvr-2
 						rvrList[1].Spec.NodeName = "node-1" // Same node as rvr-1
-						nodeID1 := uint(1)
-						nodeID2 := uint(2)
-						nodeID3 := uint(3)
-						address1 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000}
-						address2 := v1alpha3.Address{IPv4: "192.168.1.1", Port: 7001} // Same IP, different port
-						address3 := v1alpha3.Address{IPv4: "192.168.1.2", Port: 7000}
-						if rvrList[0].Status == nil {
-							rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						addresses := []v1alpha3.Address{
+							{IPv4: "192.168.1.1", Port: 7000},
+							{IPv4: "192.168.1.1", Port: 7001}, // Same IP, different port
+							{IPv4: "192.168.1.2", Port: 7000},
 						}
-						if rvrList[0].Status.DRBD == nil {
-							rvrList[0].Status.DRBD = &v1alpha3.DRBD{}
+						nodeIDs := []uint{1, 2, 3}
+						for i := range rvrList {
+							if rvrList[i].Status == nil {
+								rvrList[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+							}
+							if rvrList[i].Status.DRBD == nil {
+								rvrList[i].Status.DRBD = &v1alpha3.DRBD{}
+							}
+							if rvrList[i].Status.DRBD.Config == nil {
+								rvrList[i].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+							}
+							rvrList[i].Status.DRBD.Config.NodeId = &nodeIDs[i]
+							rvrList[i].Status.DRBD.Config.Address = &addresses[i]
 						}
-						if rvrList[0].Status.DRBD.Config == nil {
-							rvrList[0].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-						}
-						if rvrList[1].Status == nil {
-							rvrList[1].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-						}
-						if rvrList[1].Status.DRBD == nil {
-							rvrList[1].Status.DRBD = &v1alpha3.DRBD{}
-						}
-						if rvrList[1].Status.DRBD.Config == nil {
-							rvrList[1].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-						}
-						if rvrList[2].Status == nil {
-							rvrList[2].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-						}
-						if rvrList[2].Status.DRBD == nil {
-							rvrList[2].Status.DRBD = &v1alpha3.DRBD{}
-						}
-						if rvrList[2].Status.DRBD.Config == nil {
-							rvrList[2].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-						}
-						rvrList[0].Status.DRBD.Config.NodeId = &nodeID1
-						rvrList[0].Status.DRBD.Config.Address = &address1
-						rvrList[1].Status.DRBD.Config.NodeId = &nodeID2
-						rvrList[1].Status.DRBD.Config.Address = &address2
-						rvrList[2].Status.DRBD.Config.NodeId = &nodeID3
-						rvrList[2].Status.DRBD.Config.Address = &address3
 					})
 
 					It("should only keep one peer entry per node", func(ctx SpecContext) {
