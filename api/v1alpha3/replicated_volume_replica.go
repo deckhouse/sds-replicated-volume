@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 )
 
 // +k8s:deepcopy-gen=true
@@ -54,10 +53,6 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
-func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
-	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
-}
-
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
@@ -72,8 +67,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName,omitempty"`
 
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	Type string `json:"type,omitempty"`
+	Type string `json:"type"`
 }
 
 // +k8s:deepcopy-gen=true
