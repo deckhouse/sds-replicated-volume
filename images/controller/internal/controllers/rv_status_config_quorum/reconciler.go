@@ -77,7 +77,7 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 	}
 
 	cnt, err := r.setFinalizers(ctx, &rvrList)
-	log.Info("added finalizers to rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
+	log.V(1).Info("added finalizers to rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
 	if err != nil {
 		log.Error(err, "unable to add finalizers")
 		return err
@@ -85,12 +85,12 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 
 	quorum, qmr := r.calculateQuorum(&rvrList)
 	if err := r.quorumPatch(ctx, rv, quorum, qmr); err != nil {
-		log.Error(err, "unable to fetch ReplicatedVolume")
+		log.Error(err, "unable to patch ReplicatedVolume")
 		return client.IgnoreNotFound(err)
 	}
 
 	cnt, err = r.unsetFinalizers(ctx, &rvrList)
-	log.Info("remove finalizers from rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
+	log.V(1).Info("remove finalizers from rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
 	if err != nil {
 		log.Error(err, "unable to remove finalizers")
 		return err
@@ -110,7 +110,7 @@ func (r *Reconciler) calculateQuorum(rvrList *v1alpha3.ReplicatedVolumeReplicaLi
 			diskfulCount++
 		}
 	}
-	r.log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
+	r.log.V(1).Info("calculated replica counts", "diskful", diskfulCount, "all", all)
 	if diskfulCount > 1 {
 		quorum = byte(max(2, all/2+1))
 		qmr = byte(max(2, diskfulCount/2+1))
