@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 )
 
 // +k8s:deepcopy-gen=true
@@ -54,10 +53,6 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
-func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
-	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
-}
-
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
@@ -72,8 +67,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName,omitempty"`
 
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	Type string `json:"type,omitempty"`
+	Type string `json:"type"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -143,6 +139,9 @@ type DRBDConfig struct {
 	Peers map[string]Peer `json:"peers,omitempty"`
 
 	// +optional
+	PeersInitialized bool `json:"peersInitialized,omitempty"`
+
+	// +optional
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
@@ -176,6 +175,21 @@ type DRBD struct {
 	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	Errors *DRBDErrors `json:"errors,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	Output   string `json:"output,omitempty"`
+	ExitCode int    `json:"exitCode,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDErrors struct {
+	// +patchStrategy=merge
+	LastAdjustmentError *DRBDError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
