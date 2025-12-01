@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvr
 
 //lint:file-ignore ST1001 utils is the only exception
@@ -11,6 +27,10 @@ import (
 	"path/filepath"
 	"slices"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	. "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -18,9 +38,6 @@ import (
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const rvrFinalizerName = "sds-replicated-volume.deckhouse.io/agent"
@@ -74,7 +91,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 	}
 
 	if !diskless {
-		exists, err := drbdadm.ExecuteDumpMD_MetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+		exists, err := drbdadm.ExecuteDumpMDMetadataExists(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 		if err != nil {
 			return h.failAdjustmentWithReason(
 				"failed to check metadata existence",
@@ -130,7 +147,7 @@ func (h *resourceReconcileRequestHandler) Handle() error {
 		}
 	}
 
-	isUp, err := drbdadm.ExecuteStatus_IsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
+	isUp, err := drbdadm.ExecuteStatusIsUp(h.ctx, h.rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		return h.failAdjustmentWithReason(
 			"failed to check resource status",
@@ -288,14 +305,14 @@ func (h *resourceReconcileRequestHandler) updateResourceConfigAfterInitialSync(r
 
 func (h *resourceReconcileRequestHandler) populateResourceForNode(
 	res *v9.Resource,
-	nodeName string, nodeId uint, nodeAddress v1alpha2.Address,
+	nodeName string, nodeID uint, nodeAddress v1alpha2.Address,
 	peerOptions *v1alpha2.Peer, // nil for current node
 ) {
 	isCurrentNode := nodeName == h.nodeName
 
 	onSection := &v9.On{
 		HostNames: []string{nodeName},
-		NodeId:    Ptr(nodeId),
+		NodeID:    Ptr(nodeID),
 	}
 
 	// volumes

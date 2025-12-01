@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 //lint:file-ignore ST1001 utils is the only exception
@@ -10,6 +26,12 @@ import (
 	"slices"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	. "github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
@@ -18,14 +40,9 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/util/retry"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type scanner struct {
+type Scanner struct {
 	log      *slog.Logger
 	hostname string
 	ctx      context.Context
@@ -39,9 +56,9 @@ func NewScanner(
 	log *slog.Logger,
 	cl client.Client,
 	envConfig *EnvConfig,
-) *scanner {
+) *Scanner {
 	ctx, cancel := context.WithCancelCause(ctx)
-	s := &scanner{
+	s := &Scanner{
 		hostname: envConfig.NodeName,
 		ctx:      ctx,
 		cancel:   cancel,
@@ -52,7 +69,7 @@ func NewScanner(
 	return s
 }
 
-func (s *scanner) retryUntilCancel(fn func() error) error {
+func (s *Scanner) retryUntilCancel(fn func() error) error {
 	return retry.OnError(
 		wait.Backoff{
 			Steps:    7,
@@ -61,7 +78,7 @@ func (s *scanner) retryUntilCancel(fn func() error) error {
 			Cap:      5 * time.Second,
 			Jitter:   0.1,
 		},
-		func(err error) bool {
+		func(_ error) bool {
 			// retry any error until parent context is done
 			return s.ctx.Err() == nil
 		},
@@ -69,13 +86,15 @@ func (s *scanner) retryUntilCancel(fn func() error) error {
 	)
 }
 
-func (s *scanner) Run() error {
+func (s *Scanner) Run() error {
 	return s.retryUntilCancel(func() error {
 		var err error
 
 		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
 			s.log.Debug("added resource update event", "resource", ev)
-			s.batcher.Add(ev)
+			if err := s.batcher.Add(ev); err != nil {
+				return LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
+			}
 		}
 
 		if err != nil && s.ctx.Err() == nil {
@@ -104,7 +123,7 @@ func appendUpdatedResourceNameToBatch(batch []updatedResourceName, newItem updat
 	return batch
 }
 
-func (s *scanner) processEvents(
+func (s *Scanner) processEvents(
 	allEvents iter.Seq[drbdsetup.Events2Result],
 ) iter.Seq[updatedResourceName] {
 	return func(yield func(updatedResourceName) bool) {
@@ -137,20 +156,20 @@ func (s *scanner) processEvents(
 				s.log.Debug("events online")
 			}
 
-			if resourceName, ok := typedEvent.State["name"]; !ok {
+			resourceName, ok := typedEvent.State["name"]
+			if !ok {
 				s.log.Debug("skipping event without name")
 				continue
-			} else {
-				s.log.Debug("yielding event", "event", typedEvent)
-				if !yield(updatedResourceName(resourceName)) {
-					return
-				}
+			}
+			s.log.Debug("yielding event", "event", typedEvent)
+			if !yield(updatedResourceName(resourceName)) {
+				return
 			}
 		}
 	}
 }
 
-func (s *scanner) ConsumeBatches() error {
+func (s *Scanner) ConsumeBatches() error {
 	return s.retryUntilCancel(func() error {
 		cd := cooldown.NewExponentialCooldown(
 			50*time.Millisecond,
@@ -227,7 +246,7 @@ func (s *scanner) ConsumeBatches() error {
 	})
 }
 
-func (s *scanner) updateReplicaStatusIfNeeded(
+func (s *Scanner) updateReplicaStatusIfNeeded(
 	rvr *v1alpha2.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
@@ -254,9 +273,8 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				func(d *drbdsetup.Device) bool {
 					if diskless {
 						return d.DiskState != "Diskless"
-					} else {
-						return d.DiskState != "UpToDate"
 					}
+					return d.DiskState != "UpToDate"
 				},
 			)
 
@@ -277,7 +295,7 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
 
 			if !allReady && condDevicesReady.Status != metav1.ConditionFalse {
-				var msg string = "No devices found"
+				msg := "No devices found"
 				if len(resource.Devices) > 0 {
 					msg = fmt.Sprintf(
 						"Device %d volume %d is %s",
@@ -357,7 +375,6 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 				quorumCond.Status = metav1.ConditionTrue
 				quorumCond.Reason = v1alpha2.ReasonQuorumStatus
 				quorumCond.Message = "All devices are in quorum"
-
 			}
 			meta.SetStatusCondition(&rvr.Status.Conditions, quorumCond)
 
@@ -393,7 +410,6 @@ func (s *scanner) updateReplicaStatusIfNeeded(
 			return nil
 		},
 	)
-
 }
 
 func copyStatusFields(
@@ -401,7 +417,7 @@ func copyStatusFields(
 	source *drbdsetup.Resource,
 ) {
 	target.Name = source.Name
-	target.NodeId = source.NodeId
+	target.NodeId = source.NodeID
 	target.Role = source.Role
 	target.Suspended = source.Suspended
 	target.SuspendedUser = source.SuspendedUser
@@ -435,7 +451,7 @@ func copyStatusFields(
 	target.Connections = make([]v1alpha2.ConnectionStatus, 0, len(source.Connections))
 	for _, c := range source.Connections {
 		conn := v1alpha2.ConnectionStatus{
-			PeerNodeId:      c.PeerNodeId,
+			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
 			ConnectionState: c.ConnectionState,
 			Congested:       c.Congested,

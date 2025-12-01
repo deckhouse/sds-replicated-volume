@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package v1alpha3
 
 import (
@@ -10,6 +26,7 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
+// +kubebuilder:metadata:labels=module=sds-replicated-volume
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"
@@ -49,7 +66,7 @@ type ReplicatedVolumeStatus struct {
 
 	// +patchStrategy=merge
 	// +optional
-	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
+	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
@@ -68,6 +85,17 @@ func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
 }
 
 // +k8s:deepcopy-gen=true
+type DRBDResource struct {
+	// +patchStrategy=merge
+	// +optional
+	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
+	// // +patchStrategy=merge
+	// Actual *DRBDResourceActual `json:"actual,omitempty" patchStrategy:"merge"`
+	// // +patchStrategy=merge
+	// Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
@@ -76,6 +104,11 @@ type ReplicatedVolumeList struct {
 	metav1.ListMeta `json:"metadata"`
 	Items           []ReplicatedVolume `json:"items"`
 }
+
+// // +k8s:deepcopy-gen=true
+// type DRBDResourceActual struct {
+
+// }
 
 // +k8s:deepcopy-gen=true
 type DRBDResourceConfig struct {
