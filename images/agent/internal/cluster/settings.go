@@ -58,7 +58,15 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 			)
 	}
 
-	DRBDMinPort, err := strconv.ParseUint(cm.Data["drbdMinPort"], 10, 16)
+	parsePort := func(port string) (uint, error) {
+		portUint, err := strconv.ParseUint(port, 10, 16)
+		if err != nil {
+			return 0, fmt.Errorf("parsing %s: %w", port, err)
+		}
+		return uint(portUint), nil
+	}
+
+	settings.DRBDMinPort, err = parsePort(cm.Data["drbdMinPort"])
 	if err != nil {
 		return nil,
 			fmt.Errorf(
@@ -66,9 +74,8 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 				ConfigMapNamespace, ConfigMapName, err,
 			)
 	}
-	settings.DRBDMinPort = uint(DRBDMinPort)
 
-	DRBDMaxPort, err := strconv.ParseUint(cm.Data["drbdMaxPort"], 10, 16)
+	settings.DRBDMaxPort, err = parsePort(cm.Data["drbdMaxPort"])
 	if err != nil {
 		return nil,
 			fmt.Errorf(
@@ -76,7 +83,6 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 				ConfigMapNamespace, ConfigMapName, err,
 			)
 	}
-	settings.DRBDMaxPort = uint(DRBDMaxPort)
 
 	return settings, nil
 }
