@@ -12,6 +12,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 type Reconciler struct {
@@ -230,7 +231,8 @@ func (r *Reconciler) setAlgorithmSelectionFailed(
 	failedNodeNames []string,
 	failedAlgorithm string,
 ) (reconcile.Result, error) {
-	log.Error(nil, "All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
+	err := e.ErrInvalidClusterf("All algorithms exhausted. Last failed algorithm: %s on nodes: %v", failedAlgorithm, failedNodeNames)
+	log.Error(err, "All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
 
 	// Update RV condition to False
 	// If there's a conflict (409), return error - next reconciliation will solve it

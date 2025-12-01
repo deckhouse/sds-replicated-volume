@@ -1,6 +1,8 @@
 package rvstatusconfigsharedsecret_test
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -13,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -58,7 +61,6 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		By("Reconciling non-existent ReplicatedVolume")
 		Expect(rec.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: "non-existent"},
 		})).ToNot(Requeue(), "should ignore NotFound errors")
@@ -199,6 +201,77 @@ var _ = Describe("Reconciler", func() {
 						Expect(cond.Reason).To(Equal("UnableToSelectSharedSecretAlgorithm"), "reason should indicate failure")
 					})
 				})
+			})
+		})
+
+		When("Get fails with non-NotFound error", func() {
+			internalServerError := errors.New("internal server error")
+			BeforeEach(func() {
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+							return internalServerError
+						}
+						return cl.Get(ctx, key, obj, opts...)
+					},
+				})
+			})
+
+			It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: "test-rv"},
+				})).Error().To(MatchError(internalServerError), "should return error when Get fails")
+			})
+		})
+
+		When("List fails", func() {
+			listError := errors.New("failed to list replicas")
+			BeforeEach(func() {
+				// Set sharedSecret so controller will check RVRs (handleUnsupportedAlgorithm)
+				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+					DRBD: &v1alpha3.DRBDResource{
+						Config: &v1alpha3.DRBDResourceConfig{
+							SharedSecret:    "test-secret",
+							SharedSecretAlg: rvstatusconfigsharedsecret.AlgorithmSHA256,
+						},
+					},
+				}
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+							return listError
+						}
+						return cl.List(ctx, list, opts...)
+					},
+				})
+			})
+
+			It("should fail if listing ReplicatedVolumeReplicas failed", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: "test-rv"},
+				})).Error().To(MatchError(listError), "should return error when List fails")
+			})
+		})
+
+		When("Patch fails with non-NotFound error", func() {
+			patchError := errors.New("failed to patch status")
+			BeforeEach(func() {
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+							if subResourceName == "status" {
+								return patchError
+							}
+						}
+						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+					},
+				})
+			})
+
+			It("should fail if patching ReplicatedVolume status failed with non-NotFound error", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, reconcile.Request{
+					NamespacedName: types.NamespacedName{Name: "test-rv"},
+				})).Error().To(MatchError(patchError), "should return error when Patch fails")
 			})
 		})
 	})
