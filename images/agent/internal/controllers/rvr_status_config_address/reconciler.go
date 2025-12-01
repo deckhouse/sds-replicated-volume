@@ -107,15 +107,33 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		// Create a patch from the current state at the beginning
 		patch := client.MergeFrom(rvr.DeepCopy())
 
-		// Find the smallest free port in the range
+		// Check if RVR already has a valid port that we can reuse
 		var freePort uint
 		found := false
-		for port := settings.DRBDMinPort; port <= settings.DRBDMaxPort; port++ {
-			if _, used := usedPorts[port]; !used {
-				freePort = port
+		if rvr.Status != nil &&
+			rvr.Status.DRBD != nil &&
+			rvr.Status.DRBD.Config != nil &&
+			rvr.Status.DRBD.Config.Address != nil {
+			existingPort := rvr.Status.DRBD.Config.Address.Port
+			// Check if existing port is in valid range
+			if existingPort >= settings.DRBDMinPort &&
+				existingPort <= settings.DRBDMaxPort &&
+				existingPort != 0 {
+				freePort = existingPort
 				found = true
-				usedPorts[port] = struct{}{} // Mark as used for next RVR
-				break
+				// Port is already in usedPorts from initial build, no need to add again
+			}
+		}
+
+		// If no valid existing port, find the smallest free port in the range
+		if !found {
+			for port := settings.DRBDMinPort; port <= settings.DRBDMaxPort; port++ {
+				if _, used := usedPorts[port]; !used {
+					freePort = port
+					found = true
+					usedPorts[port] = struct{}{} // Mark as used for next RVR
+					break
+				}
 			}
 		}
 
