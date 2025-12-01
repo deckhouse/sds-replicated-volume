@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/go-logr/logr"
 )
 
@@ -32,9 +33,18 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = &Reconciler{}
 
-func (r *Reconciler) Reconcile(
-	_ context.Context,
-	req reconcile.Request,
-) (reconcile.Result, error) {
-	panic("to implement")
+func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
+	log := r.log.WithName("Reconcile").WithValues("request", request)
+	var rv v1alpha3.ReplicatedVolume
+	if err := r.cl.Get(ctx, request.NamespacedName, &rv); err != nil {
+		log.Error(err, "Can't get ReplicatedVolume")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	var rvrList v1alpha3.ReplicatedVolumeReplicaList
+	if err := r.cl.List(ctx, &rvrList); err != nil {
+		log.Error(err, "Can't list ")
+	}
+
+	panic("not implemented")
 }
