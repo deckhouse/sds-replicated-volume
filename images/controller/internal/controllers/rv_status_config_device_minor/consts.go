@@ -11,4 +11,3 @@ const (
 	// Minor number 0 is valid and will create /dev/drbd0 device.
 	minDeviceMinor = 0
 )
-
