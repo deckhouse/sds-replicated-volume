@@ -254,7 +254,7 @@ var _ = Describe("Reconciler", func() {
 		It("should filter out RVRs on other nodes and not configure addresses", func(ctx SpecContext) {
 			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-			// Verify all RVRs on other nodes were not modified
+			By("verifying all RVRs on other nodes were not modified")
 			for i := range otherNodeRVRList {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &otherNodeRVRList[i])).To(Succeed())
 			}
@@ -281,7 +281,7 @@ var _ = Describe("Reconciler", func() {
 			It("should not interfere with RVRs on other nodes", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-				// Verify RVRs on this node got unique ports (should skip used ports from other nodes)
+				By("verifying RVRs on this node got unique ports (should skip used ports from other nodes)")
 				for i := range rvrList {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
 				}
@@ -292,7 +292,7 @@ var _ = Describe("Reconciler", func() {
 						BeNumerically("<=", 9000),
 					)))))
 
-				// Verify RVRs on other nodes were not modified
+				By("verifying RVRs on other nodes were not modified")
 				for i := range otherNodeRVRList {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &otherNodeRVRList[i])).To(Succeed())
 					Expect(otherNodeRVRList[i].Status.DRBD.Config.Address.Port).To(Equal(uint(7000 + i)))
@@ -301,54 +301,55 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("should configure address with first available port", func(ctx SpecContext) {
-			// Use only first RVR for this test
+			By("using only first RVR for this test")
 			originalList := rvrList
 			rvrList = rvrList[:1]
 			rvList = rvList[:1]
 
 			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-			// Verify address was configured
+			By("verifying address was configured")
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), &rvrList[0])).To(Succeed())
 			Expect(rvrList[0]).To(SatisfyAll(
 				HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")),
 				HaveField("Status.DRBD.Config.Address.Port", Equal(uint(7000))),
 			))
 
-			// Verify condition was set
+			By("verifying condition was set")
 			Expect(rvrList[0]).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
 				HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
 				HaveField("Status", Equal(metav1.ConditionTrue)),
 				HaveField("Reason", Equal(v1alpha3.ReasonAddressConfigurationSucceeded)),
 			))))
 
-			// Restore for other tests
+			By("restoring for other tests")
 			rvrList = originalList
 		})
 
 		DescribeTableSubtree("should assign unique ports",
 			Entry("with no status", func() {
+				rvrList = rvrList[:1]
 				rvrList[0].Status = nil
 			}),
 			Entry("with no DRBD", func() {
+				rvrList = rvrList[:1]
 				rvrList[0].Status.DRBD = nil
 			}),
 			Entry("with no Config", func() {
+				rvrList = rvrList[:1]
 				rvrList[0].Status.DRBD.Config = nil
 			}),
 			Entry("with no Address", func() {
+				rvrList = rvrList[:1]
 				rvrList[0].Status.DRBD.Config.Address = nil
 			}),
 			func(beforeEach func()) {
-				BeforeEach(func() {
-					rvrList = rvrList[:1]
-					beforeEach()
-				})
+				BeforeEach(beforeEach)
 
 				It("should reconcile successfully and assign unique ports", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-					// Verify all RVRs got unique ports in valid range
+					By("verifying all RVRs got unique ports in valid range")
 					for i := range rvrList {
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
 					}
@@ -364,6 +365,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("RVR has wrong IP address", func() {
 			BeforeEach(func() {
+				rvrList = rvrList[:1]
 				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
 						IPv4: "192.168.1.99", // Wrong IP
@@ -372,15 +374,18 @@ var _ = Describe("Reconciler", func() {
 				}
 			})
 
-			It("should update address", func(ctx SpecContext) {
+			It("should update address but not port", func(ctx SpecContext) {
+				originalPort := rvrList[0].Status.DRBD.Config.Address.Port
+
 				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-				// Verify all RVRs have address updated to node IP
-				for i := range rvrList {
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
-				}
+				By("verifying all RVRs have address updated to node IP")
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), &rvrList[0])).To(Succeed())
 
 				Expect(rvrList).To(HaveEach(HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10"))))
+
+				By("verifying port stayed the same for first RVR")
+				Expect(rvrList[0].Status.DRBD.Config.Address.Port).To(Equal(originalPort))
 			})
 		})
 
@@ -407,7 +412,7 @@ var _ = Describe("Reconciler", func() {
 			It("should set condition to false with NoFreePortAvailable reason", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-				// Verify second RVR has error condition
+				By("verifying second RVR has error condition")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), &rvrList[1])).To(Succeed())
 				Expect(rvrList[1].Status.Conditions).To(ContainElement(SatisfyAll(
 					HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
