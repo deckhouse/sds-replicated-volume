@@ -33,8 +33,6 @@ type Reconciler struct {
 	log logr.Logger
 }
 
-type Request = reconcile.Request
-
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
@@ -45,7 +43,7 @@ func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 	}
 }
 
-func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Result, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 
 	log := r.log.WithName("Reconcile").WithValues("req", req)
@@ -66,32 +64,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	}
 
 	if rvr.DeletionTimestamp != nil {
-		return requestToDeleteLlv(ctx, req, log, rvr)
+		return requestToDeleteLLV(ctx, req, log, rvr)
 	}
 
 	if rvr.Spec.Type == "Diskful" {
-		return requestToCreateLlv(ctx, req, log, rvr)
+		return requestToCreateLLV(ctx, req, log, rvr)
 	}
 
-	if rvr.Status != nil && rvr.Spec.Type != "" && rvr.Status.ActualType == rvr.Spec.Type {
-		return requestToDeleteLlv(ctx, req, log, rvr)
+	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
+		return requestToDeleteLLV(ctx, req, log, rvr)
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func requestToDeleteLlv(ctx context.Context, req Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
-	log = log.WithName("RequestToDeleteLlv")
+func requestToDeleteLLV(ctx context.Context, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+	log = log.WithName("RequestToDeleteLLV")
 	log.Info("111111")
 
-	// TODO: rvr.Status.LvmLogicalVolumeName is not defined in the api
 	return reconcile.Result{}, nil
 }
 
-func requestToCreateLlv(ctx context.Context, req Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
-	log = log.WithName("ReconcileCreateLlv")
+func requestToCreateLLV(ctx context.Context, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+	log = log.WithName("ReconcileCreateLLV")
 	log.Info("222222")
 
-	// TODO: rvr.Status.LvmLogicalVolumeName is not defined in the api
 	return reconcile.Result{}, nil
 }

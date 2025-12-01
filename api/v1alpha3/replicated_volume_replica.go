@@ -72,8 +72,9 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	NodeName string `json:"nodeName,omitempty"`
 
+	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	Type string `json:"type,omitempty"`
+	Type string `json:"type"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -115,6 +116,9 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
+
+	// +optional
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
