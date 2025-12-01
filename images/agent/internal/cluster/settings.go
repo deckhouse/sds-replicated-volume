@@ -32,8 +32,8 @@ const (
 
 // TODO issues/333 put run-time settings here
 type Settings struct {
-	DRBDMinPort int
-	DRBDMaxPort int
+	DRBDMinPort uint
+	DRBDMaxPort uint
 }
 
 func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
@@ -58,7 +58,7 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 			)
 	}
 
-	settings.DRBDMinPort, err = strconv.Atoi(cm.Data["drbdMinPort"])
+	DRBDMinPort, err := strconv.ParseUint(cm.Data["drbdMinPort"], 10, 16)
 	if err != nil {
 		return nil,
 			fmt.Errorf(
@@ -66,8 +66,9 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 				ConfigMapNamespace, ConfigMapName, err,
 			)
 	}
+	settings.DRBDMinPort = uint(DRBDMinPort)
 
-	settings.DRBDMaxPort, err = strconv.Atoi(cm.Data["drbdMaxPort"])
+	DRBDMaxPort, err := strconv.ParseUint(cm.Data["drbdMaxPort"], 10, 16)
 	if err != nil {
 		return nil,
 			fmt.Errorf(
@@ -75,6 +76,7 @@ func GetSettings(ctx context.Context, cl client.Client) (*Settings, error) {
 				ConfigMapNamespace, ConfigMapName, err,
 			)
 	}
+	settings.DRBDMaxPort = uint(DRBDMaxPort)
 
 	return settings, nil
 }
