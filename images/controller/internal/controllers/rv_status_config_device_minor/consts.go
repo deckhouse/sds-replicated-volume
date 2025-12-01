@@ -1,6 +1,9 @@
 package rvstatusconfigdeviceminor
 
 const (
+	// RVStatusConfigDeviceMinorControllerName is the controller name for rv_status_config_device_minor controller.
+	RVStatusConfigDeviceMinorControllerName = "rv_status_config_device_minor_controller"
+
 	// MaxDeviceMinor is the maximum valid device minor number for DRBD devices.
 	// This value (1048575 = 2^20 - 1) corresponds to the maximum minor number
 	// supported by modern Linux kernels (2.6+). DRBD devices are named as /dev/drbd<minor>,

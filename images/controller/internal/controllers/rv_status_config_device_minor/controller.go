@@ -10,16 +10,14 @@ import (
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
-const ControllerName = "rv_status_config_device_minor_controller"
-
 func BuildController(mgr manager.Manager) error {
 	rec := NewReconciler(
 		mgr.GetClient(),
-		mgr.GetLogger().WithName(ControllerName).WithName("Reconciler"),
+		mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName).WithName("Reconciler"),
 	)
 
 	err := builder.ControllerManagedBy(mgr).
-		Named(ControllerName).
+		Named(RVStatusConfigDeviceMinorControllerName).
 		For(&v1alpha3.ReplicatedVolume{}).
 		Complete(rec)
 
