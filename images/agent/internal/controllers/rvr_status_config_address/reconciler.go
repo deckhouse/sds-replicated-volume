@@ -70,11 +70,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	// List all RVRs on this node that need address configuration
 	var rvrList v1alpha3.ReplicatedVolumeReplicaList
-	if err := r.cl.List(ctx, &rvrList,
-		client.MatchingFieldsSelector{
-			Selector: (&v1alpha3.ReplicatedVolumeReplica{}).NodeNameSelector(node.Name),
-		},
-	); err != nil {
+	if err := r.cl.List(ctx, &rvrList); err != nil {
 		log.Error(err, "Can't list ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
@@ -123,17 +119,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 				"No free port available",
 			)
 
-			changed := r.setCondition(rvr, metav1.ConditionFalse,
-				v1alpha3.ReasonNoFreePortAvailable,
-				"No free port available",
-			)
-			if changed {
-				if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
-					log.Error(err, "Failed to patch status")
-					return reconcile.Result{}, err
-				}
+			if !r.setCondition(rvr, metav1.ConditionFalse, v1alpha3.ReasonNoFreePortAvailable, "No free port available") {
+				continue
 			}
-			continue
+
+			if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+				log.Error(err, "Failed to patch status")
+				return reconcile.Result{}, err
+			}
 		}
 
 		// Set address and condition
@@ -143,26 +136,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 		log = log.WithValues("address", address)
 
-		changed, err := r.setAddressAndCondition(rvr, address)
-		if err != nil {
-			log.Error(err, "Failed to set address")
+		// Patch status once at the end if anything changed
+		if !r.setAddressAndCondition(rvr, address) {
+			continue
+		}
+
+		if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+			log.Error(err, "Failed to patch status")
 			return reconcile.Result{}, err
 		}
 
-		// Patch status once at the end if anything changed
-		if changed {
-			if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
-				log.Error(err, "Failed to patch status")
-				return reconcile.Result{}, err
-			}
-			log.Info("Address configured")
-		}
+		log.Info("Address configured")
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplica, address *v1alpha3.Address) (bool, error) {
+func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplica, address *v1alpha3.Address) bool {
 	// Check if address is already set correctly
 	addressChanged := rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil ||
 		rvr.Status.DRBD.Config.Address == nil || *rvr.Status.DRBD.Config.Address != *address
@@ -189,7 +179,7 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplic
 		"Address configured",
 	)
 
-	return addressChanged || condChanged, nil
+	return addressChanged || condChanged
 }
 
 func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
