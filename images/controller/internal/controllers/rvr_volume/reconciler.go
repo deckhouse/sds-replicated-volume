@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
@@ -64,7 +65,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if rvr.DeletionTimestamp != nil {
-		return requestToDeleteLLV(ctx, req, log, rvr)
+		return requestToDeleteLLV(ctx, r.cl, req, log, rvr)
 	}
 
 	if rvr.Spec.Type == "Diskful" {
@@ -72,15 +73,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
-		return requestToDeleteLLV(ctx, req, log, rvr)
+		return requestToDeleteLLV(ctx, r.cl, req, log, rvr)
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func requestToDeleteLLV(ctx context.Context, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+func requestToDeleteLLV(ctx context.Context, cl client.Client, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
 	log = log.WithName("RequestToDeleteLLV")
-	log.Info("111111")
+
+	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
+		llv, err := findLLVWithOwnerReference(ctx, cl, rvr.Name)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("checking for llv with ownerReference: %w", err)
+		}
+		if llv == nil {
+			log.V(4).Info("No llv found with ownerReference", "rvrName", rvr.Name)
+		} else {
+			log.V(4).Info("Found llv with ownerReference", "rvrName", rvr.Name, "llvName", llv.Name)
+			// TODO: handle case when llv exists but LVMLogicalVolumeName is empty
+		}
+	} else {
+		// delete llv
+	}
 
 	return reconcile.Result{}, nil
 }
@@ -90,4 +105,25 @@ func requestToCreateLLV(ctx context.Context, req reconcile.Request, log logr.Log
 	log.Info("222222")
 
 	return reconcile.Result{}, nil
+}
+
+// findLLVWithOwnerReference finds a LVMLogicalVolume in the cluster with ownerReference
+// pointing to ReplicatedVolumeReplica with the specified name.
+// Returns the llv object if found, nil otherwise.
+func findLLVWithOwnerReference(ctx context.Context, cl client.Client, rvrName string) (*snc.LVMLogicalVolume, error) {
+	var llvList snc.LVMLogicalVolumeList
+	if err := cl.List(ctx, &llvList); err != nil {
+		return nil, fmt.Errorf("listing LVMLogicalVolumes: %w", err)
+	}
+
+	for i := range llvList.Items {
+		llv := &llvList.Items[i]
+		for _, ownerRef := range llv.OwnerReferences {
+			if ownerRef.Kind == "ReplicatedVolumeReplica" && ownerRef.Name == rvrName {
+				return llv, nil
+			}
+		}
+	}
+
+	return nil, nil
 }
