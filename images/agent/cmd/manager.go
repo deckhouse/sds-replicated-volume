@@ -91,7 +91,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr); err != nil {
+	if err := controllers.BuildAll(mgr, envConfig.NodeName); err != nil {
 		return nil, err
 	}
 
