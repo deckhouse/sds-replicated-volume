@@ -53,6 +53,7 @@ var _ = Describe("Reconciler", func() {
 		cl  client.WithWatch
 		rec *rvr_status_config_peers.Reconciler
 	)
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
@@ -61,6 +62,8 @@ var _ = Describe("Reconciler", func() {
 			WithStatusSubresource(
 				&v1alpha3.ReplicatedVolumeReplica{},
 				&v1alpha3.ReplicatedVolume{})
+
+		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil
 		rec = nil
 	})
@@ -71,12 +74,9 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		_, err := rec.Reconcile(ctx, reconcile.Request{
-			NamespacedName: types.NamespacedName{
-				Name: "not-existing-rv",
-			},
-		})
-		Expect(err).NotTo(HaveOccurred())
+		Expect(rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "not-existing-rv"},
+		})).NotTo(Requeue())
 	})
 
 	When("Get fails with non-NotFound error", func() {
@@ -126,7 +126,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, otherRv)).To(Succeed())
 		})
 
-		DescribeTableSubtree("when rv has",
+		DescribeTableSubtree("when rv does not have config because",
 			Entry("nil Status", func() { rv.Status = nil }),
 			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: nil} }),
 			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: &v1alpha3.DRBDResource{Config: nil}} }),
@@ -139,25 +139,26 @@ var _ = Describe("Reconciler", func() {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 				})
 			})
+
 		When("first replica created", func() {
-			var firstRvr v1alpha3.ReplicatedVolumeReplica
+			var firstReplica v1alpha3.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				firstRvr = v1alpha3.ReplicatedVolumeReplica{
+				firstReplica = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
 					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 				}
-				Expect(controllerutil.SetControllerReference(rv, &firstRvr, scheme)).To(Succeed())
+				Expect(controllerutil.SetControllerReference(rv, &firstReplica, scheme)).To(Succeed())
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
-				Expect(cl.Create(ctx, &firstRvr)).To(Succeed())
+				Expect(cl.Create(ctx, &firstReplica)).To(Succeed())
 			})
 
 			It("should not have peers", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
-				Expect(firstRvr).To(HaveNoPeers())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+				Expect(firstReplica).To(HaveNoPeers())
 			})
 
 			When("List fails", func() {
@@ -180,13 +181,13 @@ var _ = Describe("Reconciler", func() {
 
 			Context("if rvr-1 is ready", func() {
 				BeforeEach(func() {
-					makeReady(&firstRvr, 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+					makeReady(&firstReplica, 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
 				})
 
 				It("should have no peers", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
-					Expect(firstRvr).To(HaveNoPeers())
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+					Expect(firstReplica).To(HaveNoPeers())
 				})
 
 				When("second replica created", func() {
@@ -207,8 +208,8 @@ var _ = Describe("Reconciler", func() {
 
 					It("rvr-1 should have no peers", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
-						Expect(firstRvr).To(HaveNoPeers())
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+						Expect(firstReplica).To(HaveNoPeers())
 					})
 
 					It("rvr-2 should have no peers", func(ctx SpecContext) {
@@ -225,9 +226,9 @@ var _ = Describe("Reconciler", func() {
 						It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
 							Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
-							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
-							list := []v1alpha3.ReplicatedVolumeReplica{firstRvr, secondRvr}
+							list := []v1alpha3.ReplicatedVolumeReplica{firstReplica, secondRvr}
 							Expect(list).To(HaveEach(HaveAllPeersSet(list)))
 						})
 
@@ -270,7 +271,7 @@ var _ = Describe("Reconciler", func() {
 							})
 						})
 
-						DescribeTableSubtree("if rvr-2 is",
+						DescribeTableSubtree("if rvr-2 is not ready because",
 							Entry("without status", func() { secondRvr.Status = nil }),
 							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
 							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: nil}} }),
@@ -291,8 +292,8 @@ var _ = Describe("Reconciler", func() {
 								})
 
 								It("rvr-1 should have no peers", func(ctx SpecContext) {
-									Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstRvr), &firstRvr)).To(Succeed())
-									Expect(firstRvr).To(HaveNoPeers())
+									Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+									Expect(firstReplica).To(HaveNoPeers())
 								})
 
 								It("rvr-2 should have no peers", func(ctx SpecContext) {
