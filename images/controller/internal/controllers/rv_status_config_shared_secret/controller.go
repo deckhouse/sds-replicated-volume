@@ -2,59 +2,29 @@ package rvstatusconfigsharedsecret
 
 import (
 	"context"
-	"log/slog"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 func BuildController(mgr manager.Manager) error {
-	var rec = &Reconciler{
-		Cl:     mgr.GetClient(),
-		Log:    slog.Default(),
-		LogAlt: mgr.GetLogger(),
-	}
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(RVStatusConfigSharedSecretControllerName).WithName("Reconciler"),
+	)
 
 	err := builder.ControllerManagedBy(mgr).
-		Named("rv_status_config_shared_secret_controller").
+		Named(RVStatusConfigSharedSecretControllerName).
 		For(&v1alpha3.ReplicatedVolume{}).
-		WithEventFilter(predicate.Funcs{
-			CreateFunc: func(ce event.CreateEvent) bool {
-				rv, ok := ce.Object.(*v1alpha3.ReplicatedVolume)
-				if !ok {
-					return false
-				}
-				// Trigger only if sharedSecret is not set
-				return rv.Status == nil || rv.Status.Config == nil || rv.Status.Config.SharedSecret == ""
-			},
-			UpdateFunc: func(_ event.UpdateEvent) bool {
-				// No-op: sharedSecret is immutable once set (unless algorithm fails)
-				return false
-			},
-			DeleteFunc: func(_ event.DeleteEvent) bool {
-				// No-op: deletion doesn't require shared secret generation
-				return false
-			},
-			GenericFunc: func(ge event.GenericEvent) bool {
-				rv, ok := ge.Object.(*v1alpha3.ReplicatedVolume)
-				if !ok {
-					return false
-				}
-				// Trigger only if sharedSecret is not set (for reconciliation on startup)
-				return rv.Status == nil || rv.Status.Config == nil || rv.Status.Config.SharedSecret == ""
-			},
-		}).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
@@ -77,7 +47,7 @@ func BuildController(mgr manager.Manager) error {
 		Complete(rec)
 
 	if err != nil {
-		return u.LogError(rec.Log, e.ErrUnknownf("building controller: %w", err))
+		return fmt.Errorf("building controller: %w", e.ErrUnknownf("%w", err))
 	}
 
 	return nil
