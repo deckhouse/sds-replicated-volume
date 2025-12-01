@@ -175,6 +175,21 @@ type DRBD struct {
 	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	Errors *DRBDErrors `json:"errors,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	Output   string `json:"output,omitempty"`
+	ExitCode int    `json:"exitCode,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDErrors struct {
+	// +patchStrategy=merge
+	LastAdjustmentError *DRBDError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
