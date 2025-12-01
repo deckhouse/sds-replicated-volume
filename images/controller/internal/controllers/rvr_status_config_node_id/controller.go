@@ -8,13 +8,13 @@ import (
 )
 
 func BuildController(mgr manager.Manager) error {
-	r := &Reconciler{
-		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(RVRStatusConfigNodeIDControllerName).WithName("Reconciler"),
-	}
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(RVRStatusConfigNodeIDControllerName).WithName("Reconciler"),
+	)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVRStatusConfigNodeIDControllerName).
 		For(&v1alpha3.ReplicatedVolumeReplica{}).
-		Complete(r)
+		Complete(rec)
 }

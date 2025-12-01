@@ -11,12 +11,16 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 )
 
 // formatValidRange returns a formatted string representing the valid nodeID range.
 func formatValidRange() string {
 	return fmt.Sprintf("[%d; %d]", MinNodeID, MaxNodeID)
+}
+
+// isValidNodeID checks if nodeID is within valid range [MinNodeID; MaxNodeID].
+func isValidNodeID(nodeID uint) bool {
+	return nodeID >= MinNodeID && nodeID <= MaxNodeID
 }
 
 type Reconciler struct {
@@ -43,33 +47,28 @@ func (r *Reconciler) Reconcile(
 	log.Info("Reconciling")
 
 	// Get the RVR
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			log.V(1).Info("RVR not found, might be deleted")
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("getting RVR %s: %w", req.NamespacedName, err)
+	var rvr v1alpha3.ReplicatedVolumeReplica
+	if err := r.cl.Get(ctx, req.NamespacedName, &rvr); err != nil {
+		log.Error(err, "Getting ReplicatedVolumeReplica")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Check if nodeId is already set
 	if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.NodeId != nil {
 		nodeID := *rvr.Status.DRBD.Config.NodeId
-		// Validate nodeID range if it's set
-		if nodeID < MinNodeID || nodeID > MaxNodeID {
-			// NOTE: Logging invalid nodeID is NOT in the spec.
-			// This was added to improve observability - administrators can see invalid nodeIDs in logs.
-			log.Error(nil, "nodeID outside valid range, will be reset and reassigned",
-				"nodeID", nodeID,
-				"validRange", formatValidRange(),
-				"rvr", req.NamespacedName,
-			)
-			// Reset invalid nodeID - will continue processing to assign valid nodeID
-			rvr.Status.DRBD.Config.NodeId = nil
-		} else {
+		if isValidNodeID(nodeID) {
 			log.V(1).Info("nodeId already assigned", "nodeId", nodeID)
 			return reconcile.Result{}, nil
 		}
+		// NOTE: Logging invalid nodeID is NOT in the spec.
+		// This was added to improve observability - administrators can see invalid nodeIDs in logs.
+		log.V(0).Info("nodeID outside valid range, will be reset and reassigned",
+			"nodeID", nodeID,
+			"validRange", formatValidRange(),
+			"rvr", req.NamespacedName,
+		)
+		// Reset invalid nodeID - will continue processing to assign valid nodeID
+		rvr.Status.DRBD.Config.NodeId = nil
 	}
 
 	// Get all RVRs for the same ReplicatedVolume
@@ -88,7 +87,7 @@ func (r *Reconciler) Reconcile(
 	for _, item := range rvrList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
 			nodeID := *item.Status.DRBD.Config.NodeId
-			if nodeID >= MinNodeID && nodeID <= MaxNodeID {
+			if isValidNodeID(nodeID) {
 				usedNodeIDs[nodeID] = struct{}{}
 			} else {
 				// NOTE: Logging invalid nodeID is NOT in the spec.
@@ -141,77 +140,26 @@ func (r *Reconciler) Reconcile(
 		)
 	}
 
-	// Update RVR status with nodeID using PatchStatusWithConflictRetry
-	// This handles concurrent updates: if another worker assigned a nodeID while we were processing,
-	// the patch will retry and we'll re-check if nodeID is already set (idempotent check at start of function).
-	//
-	// NOTE: We use the pre-calculated availableNodeID. If there's a conflict (409), PatchStatusWithConflictRetry
-	// will reload the resource and retry. At that point, if nodeID was already set by another worker,
-	// we'll detect it and skip (idempotent). If not, we'll use our pre-calculated nodeID.
-	// This is safe because:
-	// 1. We check at the start of the function if nodeID is already set (early exit)
-	// 2. If conflict occurs, we reload and check again inside patchFn
-	// 3. The worst case is we retry with the same nodeID, which is fine (idempotent)
-	// Get fresh RVR for PatchStatusWithConflictRetry (it needs a valid object with correct key)
-	freshRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, freshRVR); err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting RVR for patch: %w", err)
+	// Update RVR status with nodeID using simple Patch
+	// If there's a conflict (409), error will be returned and next reconciliation will retry
+	from := client.MergeFrom(&rvr)
+	changedRVR := (&rvr).DeepCopy()
+	if changedRVR.Status == nil {
+		changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
-	if err := api.PatchStatusWithConflictRetry(ctx, r.cl, freshRVR, func(currentRVR *v1alpha3.ReplicatedVolumeReplica) error {
-		// Check again if nodeID is already set (handles race condition where another worker set it during retry)
-		if currentRVR.Status != nil && currentRVR.Status.DRBD != nil && currentRVR.Status.DRBD.Config != nil && currentRVR.Status.DRBD.Config.NodeId != nil {
-			currentNodeID := *currentRVR.Status.DRBD.Config.NodeId
-			// Validate nodeID range - if invalid, reset it
-			if currentNodeID < MinNodeID || currentNodeID > MaxNodeID {
-				// NOTE: Logging invalid nodeID is NOT in the spec.
-				// This was added to improve observability - administrators can see invalid nodeIDs in logs.
-				// To revert: remove this log line and the validation check.
-				log.Error(nil, "nodeID outside valid range during patch, resetting",
-					"nodeID", currentNodeID,
-					"validRange", formatValidRange(),
-					"rvr", req.NamespacedName,
-				)
-				currentRVR.Status.DRBD.Config.NodeId = nil
-				// Continue to assign valid nodeID
-			} else {
-				log.V(1).Info("nodeID already assigned by another worker", "nodeID", currentNodeID)
-				return nil // Already set, nothing to do (idempotent)
-			}
-		}
-
-		// Use the pre-calculated availableNodeID
-		// If there was a conflict and we're retrying, the resource was reloaded with fresh data.
-		// But we still use our pre-calculated nodeID because:
-		// - If it's still available, we assign it (correct)
-		// - If it was taken by another worker, we'll get another conflict and retry again
-		// - Eventually, either we succeed or all nodeIDs are taken (handled by initial check)
-
-		// Initialize status if needed
-		if currentRVR.Status == nil {
-			currentRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-		}
-		if currentRVR.Status.DRBD == nil {
-			currentRVR.Status.DRBD = &v1alpha3.DRBD{}
-		}
-		if currentRVR.Status.DRBD.Config == nil {
-			currentRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-		}
-
-		// Set the pre-calculated nodeID
-		currentRVR.Status.DRBD.Config.NodeId = availableNodeID
-
-		return nil
-	}); err != nil {
-		return reconcile.Result{}, fmt.Errorf("updating RVR status with nodeID: %w", err)
+	if changedRVR.Status.DRBD == nil {
+		changedRVR.Status.DRBD = &v1alpha3.DRBD{}
 	}
-
-	// Get final state to log the assigned nodeID
-	finalRVR := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, req.NamespacedName, finalRVR); err == nil {
-		if finalRVR.Status != nil && finalRVR.Status.DRBD != nil && finalRVR.Status.DRBD.Config != nil && finalRVR.Status.DRBD.Config.NodeId != nil {
-			log.Info("assigned nodeID to RVR", "nodeID", *finalRVR.Status.DRBD.Config.NodeId, "volume", rvr.Spec.ReplicatedVolumeName)
-		}
+	if changedRVR.Status.DRBD.Config == nil {
+		changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
 	}
+	changedRVR.Status.DRBD.Config.NodeId = availableNodeID
+
+	if err := r.cl.Status().Patch(ctx, changedRVR, from); err != nil {
+		log.Error(err, "Patching ReplicatedVolumeReplica status with nodeID")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	log.Info("assigned nodeID to RVR", "nodeID", *availableNodeID, "volume", rvr.Spec.ReplicatedVolumeName)
 
 	return reconcile.Result{}, nil
 }

@@ -1,5 +1,3 @@
-// cspell:words Logr Subresource apimachinery gomega metav onsi
-
 package rvrstatusconfignodeid_test
 
 import (
@@ -9,8 +7,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -20,32 +20,6 @@ import (
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
-
-// createRVR creates a basic RVR without nodeID
-func createRVR(name, volumeName, nodeName string) *v1alpha3.ReplicatedVolumeReplica {
-	return &v1alpha3.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: volumeName,
-			NodeName:             nodeName,
-		},
-	}
-}
-
-// createRVRWithNodeID creates an RVR with nodeID already assigned
-func createRVRWithNodeID(name, nodeName string, nodeID uint) *v1alpha3.ReplicatedVolumeReplica {
-	rvr := createRVR(name, "volume-1", nodeName)
-	rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-		DRBD: &v1alpha3.DRBD{
-			Config: &v1alpha3.DRBDConfig{
-				NodeId: &nodeID,
-			},
-		},
-	}
-	return rvr
-}
 
 var _ = Describe("Reconciler", func() {
 	// Available in BeforeEach
@@ -62,7 +36,7 @@ var _ = Describe("Reconciler", func() {
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed(), "should add v1alpha3 to scheme")
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
@@ -76,10 +50,10 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
-		_, err := rec.Reconcile(ctx, reconcile.Request{
-			NamespacedName: client.ObjectKey{Name: "non-existent"},
-		})
-		Expect(err).NotTo(HaveOccurred())
+		By("Reconciling non-existent ReplicatedVolumeReplica")
+		Expect(rec.Reconcile(ctx, reconcile.Request{
+			NamespacedName: types.NamespacedName{Name: "non-existent"},
+		})).NotTo(Requeue(), "should ignore NotFound errors")
 	})
 
 	When("Get fails with non-NotFound error", func() {
@@ -91,23 +65,53 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("should fail if getting ReplicatedVolumeReplica failed with non-NotFound error", func(ctx SpecContext) {
+			By("Reconciling with Get interceptor that returns error")
 			Expect(rec.Reconcile(ctx, reconcile.Request{
-				NamespacedName: client.ObjectKey{Name: "test-rvr"},
-			})).Error().To(MatchError(internalServerError))
+				NamespacedName: types.NamespacedName{Name: "test-rvr"},
+			})).Error().To(MatchError(internalServerError), "should return error when Get fails")
 		})
 	})
 
 	When("RVR created", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
+		// Base RVRs created in BeforeEach, can be modified in child tests
+		var (
+			rvr      *v1alpha3.ReplicatedVolumeReplica
+			rvrList  []v1alpha3.ReplicatedVolumeReplica
+			otherRVR *v1alpha3.ReplicatedVolumeReplica
+		)
 
 		BeforeEach(func() {
-			rvr = createRVR("rvr-1", "volume-1", "node-1")
+			// Base RVR for volume-1 - used in most tests
+			rvr = &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rvr-1",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "volume-1",
+					NodeName:             "node-1",
+				},
+			}
+
+			// Base RVR for volume-2 - used for isolation tests
+			otherRVR = &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rvr-vol2-1",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "volume-2",
+					NodeName:             "node-3",
+				},
+			}
+
+			// Initialize empty list - will be populated in child tests
+			rvrList = nil
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
 			if rvr != nil {
-				Expect(cl.Create(ctx, rvr)).To(Succeed())
+				Expect(cl.Create(ctx, rvr)).To(Succeed(), "should create base RVR")
 			}
+			// rvrList and otherRVR are created only in child tests when needed
 		})
 
 		DescribeTableSubtree("when rvr has",
@@ -127,236 +131,487 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should reconcile successfully and assign nodeID", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+					By("Reconciling ReplicatedVolumeReplica with nil status fields")
+					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue(), "should not requeue after successful assignment")
 
+					By("Verifying nodeID was assigned")
 					updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
-					Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-					Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+					Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "first replica should get nodeID MinNodeID")
 				})
 			})
 
 		When("RVR without nodeID", func() {
+			BeforeEach(func() {
+				rvr.Status = nil
+			})
+
 			It("assigns nodeID to first replica", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+				By("Reconciling first replica without nodeID")
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue(), "should not requeue after successful assignment")
 
+				By("Verifying first replica got nodeID MinNodeID and it is actually assigned")
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+				Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "first replica should get nodeID MinNodeID")
 			})
 
-			It("assigns nodeID sequentially and ensures uniqueness", func(ctx SpecContext) {
-				// Create 5 replicas with nodeIds starting from MinNodeID
-				for i := 0; i < 5; i++ {
-					testRvr := createRVRWithNodeID(
-						fmt.Sprintf("rvr-seq-%d", i+1),
-						fmt.Sprintf("node-%d", i+1),
-						uint(rvrstatusconfignodeid.MinNodeID+i),
-					)
-					Expect(cl.Create(ctx, testRvr)).To(Succeed())
-				}
-				// Add one more without nodeId - should get next sequential nodeID
-				rvr6 := createRVR("rvr-seq-6", "volume-1", "node-6")
-				Expect(cl.Create(ctx, rvr6)).To(Succeed())
+			When("multiple RVRs exist", func() {
+				When("assigning nodeID sequentially", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
 
-				Expect(rec.Reconcile(ctx, RequestFor(rvr6))).ToNot(Requeue())
-
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr6), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 5)))
-			})
-
-			It("isolates nodeIDs by volume", func(ctx SpecContext) {
-				// Create RVRs in volume-1 with nodeIDs MinNodeID, MinNodeID+1
-				rvr1 := createRVRWithNodeID("rvr-vol1-1", "node-1", uint(rvrstatusconfignodeid.MinNodeID))
-				rvr2 := createRVRWithNodeID("rvr-vol1-2", "node-2", uint(rvrstatusconfignodeid.MinNodeID+1))
-				Expect(cl.Create(ctx, rvr1)).To(Succeed())
-				Expect(cl.Create(ctx, rvr2)).To(Succeed())
-
-				// Create RVR in volume-2 - should get nodeID MinNodeID (independent of volume-1)
-				rvr3 := createRVR("rvr-vol2-1", "volume-2", "node-3")
-				Expect(cl.Create(ctx, rvr3)).To(Succeed())
-
-				Expect(rec.Reconcile(ctx, RequestFor(rvr3))).ToNot(Requeue())
-
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr3), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID))) // volume-2 is independent
-			})
-
-			It("fills gaps in nodeIDs", func(ctx SpecContext) {
-				rvr1 := createRVRWithNodeID("rvr-gap-1", "node-1", uint(rvrstatusconfignodeid.MinNodeID))
-				rvr2 := createRVRWithNodeID("rvr-gap-2", "node-2", uint(rvrstatusconfignodeid.MinNodeID+2))
-				rvr3 := createRVRWithNodeID("rvr-gap-3", "node-3", uint(rvrstatusconfignodeid.MinNodeID+3))
-				rvr4 := createRVR("rvr-gap-4", "volume-1", "node-4")
-				Expect(cl.Create(ctx, rvr1)).To(Succeed())
-				Expect(cl.Create(ctx, rvr2)).To(Succeed())
-				Expect(cl.Create(ctx, rvr3)).To(Succeed())
-				Expect(cl.Create(ctx, rvr4)).To(Succeed())
-
-				Expect(rec.Reconcile(ctx, RequestFor(rvr4))).ToNot(Requeue())
-
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr4), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID + 1))) // filled the gap
-			})
-
-			It("does not reassign nodeID if already assigned", func(ctx SpecContext) {
-				testNodeID := uint(rvrstatusconfignodeid.MinNodeID + 3)
-				testRvr := createRVRWithNodeID("rvr-idemp-1", "node-1", testNodeID)
-				Expect(cl.Create(ctx, testRvr)).To(Succeed())
-
-				Expect(rec.Reconcile(ctx, RequestFor(testRvr))).ToNot(Requeue())
-
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRvr), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(testNodeID))
-
-				// Reconcile again - should be idempotent
-				Expect(rec.Reconcile(ctx, RequestFor(testRvr))).ToNot(Requeue())
-
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRvr), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(testNodeID)) // still same, not reassigned
-			})
-
-			It("ignores nodeID outside valid range", func(ctx SpecContext) {
-				// Create RVR with nodeID > MaxNodeID (should be ignored)
-				invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
-				rvr1 := createRVRWithNodeID("rvr-invalid-1", "node-1", invalidNodeID)
-				Expect(cl.Create(ctx, rvr1)).To(Succeed())
-
-				// Create new RVR without nodeID - should get nodeID MinNodeID (invalid nodeID was ignored)
-				rvr2 := createRVR("rvr-invalid-2", "volume-1", "node-2")
-				Expect(cl.Create(ctx, rvr2)).To(Succeed())
-
-				Expect(rec.Reconcile(ctx, RequestFor(rvr2))).ToNot(Requeue())
-
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr2), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				// Should get nodeID MinNodeID, because invalid nodeID was ignored
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
-			})
-
-			It("logs error and reassigns when nodeID outside valid range is already set", func(ctx SpecContext) {
-				// Create RVR with nodeID > MaxNodeID already set
-				invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
-				testRvr := createRVRWithNodeID("rvr-reassign-1", "node-1", invalidNodeID)
-				Expect(cl.Create(ctx, testRvr)).To(Succeed())
-
-				// Reconcile - should log error about invalid nodeID and reassign valid one
-				Expect(rec.Reconcile(ctx, RequestFor(testRvr))).ToNot(Requeue())
-
-				// Verify RVR got valid nodeID (MinNodeID)
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRvr), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(uint(rvrstatusconfignodeid.MinNodeID)))
-			})
-
-			It("resets invalid nodeID and reassigns valid one", func(ctx SpecContext) {
-				// Step 1: Ensure parent rvr-1 has nodeID 0
-				Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
-
-				// Step 2: Create 6 more replicas with valid nodeIDs (1-6), leaving nodeID 7 free
-				for i := 1; i < 7; i++ {
-					testRvr := createRVRWithNodeID(
-						fmt.Sprintf("rvr-reset-%d", i+1),
-						fmt.Sprintf("node-%d", i+1),
-						uint(rvrstatusconfignodeid.MinNodeID+i),
-					)
-					Expect(cl.Create(ctx, testRvr)).To(Succeed())
-					// Reconcile to ensure nodeID is properly set in status
-					Expect(rec.Reconcile(ctx, RequestFor(testRvr))).ToNot(Requeue())
-				}
-
-				// Step 3: Create RVR with invalid nodeID (> MaxNodeID)
-				// Total: 8 replicas (1 parent with nodeID 0 + 6 with nodeID 1-6 + 1 invalid) - within limit
-				// But one has invalid nodeID that should be reset
-				invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
-				rvrInvalid := createRVRWithNodeID("rvr-reset-invalid", "node-invalid", invalidNodeID)
-				Expect(cl.Create(ctx, rvrInvalid)).To(Succeed())
-
-				// Step 4: Reconcile rvr-invalid - should detect invalid nodeID, reset it, and assign free nodeID (7)
-				Expect(rec.Reconcile(ctx, RequestFor(rvrInvalid))).ToNot(Requeue())
-
-				// Verify that rvr-invalid got valid nodeID (7, which was free)
-				expectedNodeID := uint(rvrstatusconfignodeid.MaxNodeID) // nodeID 7
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrInvalid), updatedRVR)).To(Succeed())
-				Expect(updatedRVR.Status.DRBD.Config.NodeId).NotTo(BeNil())
-				Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(Equal(expectedNodeID))
-			})
-
-			When("List fails", func() {
-				listError := errors.New("failed to list replicas")
-				BeforeEach(func() {
-					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-						List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
-								return listError
+					BeforeEach(func() {
+						rvrList = make([]v1alpha3.ReplicatedVolumeReplica, 6)
+						for i := 0; i < 5; i++ {
+							nodeID := uint(rvrstatusconfignodeid.MinNodeID + i)
+							rvrList[i] = v1alpha3.ReplicatedVolumeReplica{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: fmt.Sprintf("rvr-seq-%d", i+1),
+								},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             fmt.Sprintf("node-%d", i+1),
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{
+											NodeId: &nodeID,
+										},
+									},
+								},
 							}
-							return cl.List(ctx, list, opts...)
-						},
+						}
+						// Add one more without nodeId - should get next sequential nodeID
+						rvrList[5] = v1alpha3.ReplicatedVolumeReplica{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "rvr-seq-6",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "volume-1",
+								NodeName:             "node-6",
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
+						}
+					})
+
+					It("assigns nodeID sequentially and ensures uniqueness", func(ctx SpecContext) {
+						By("Reconciling replica without nodeID")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[5]))).ToNot(Requeue(), "should not requeue after successful assignment")
+
+						By("Verifying sequential assignment: next available nodeID after 0-4")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[5]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID+5))), "should assign nodeID MinNodeID+5 as next sequential value")
 					})
 				})
 
-				It("should fail if listing replicas failed", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(listError))
+				When("isolating nodeIDs by volume", func() {
+					BeforeEach(func() {
+						nodeID1 := uint(rvrstatusconfignodeid.MinNodeID)
+						nodeID2 := uint(rvrstatusconfignodeid.MinNodeID + 1)
+						rvrList = []v1alpha3.ReplicatedVolumeReplica{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-vol1-1"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-1",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID1},
+									},
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-vol1-2"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-2",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID2},
+									},
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR for volume-1")
+						}
+						Expect(cl.Create(ctx, otherRVR)).To(Succeed(), "should create RVR for volume-2")
+					})
+
+					It("isolates nodeIDs by volume", func(ctx SpecContext) {
+						By("Reconciling RVR in volume-2")
+						Expect(rec.Reconcile(ctx, RequestFor(otherRVR))).ToNot(Requeue(), "should not requeue after successful assignment")
+
+						By("Verifying volume-2 is independent: should get nodeID MinNodeID")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRVR), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "volume-2 should get nodeID MinNodeID independently of volume-1")
+					})
+				})
+
+				When("filling gaps in nodeIDs", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
+
+					BeforeEach(func() {
+						nodeID0 := uint(rvrstatusconfignodeid.MinNodeID)
+						nodeID2 := uint(rvrstatusconfignodeid.MinNodeID + 2)
+						nodeID3 := uint(rvrstatusconfignodeid.MinNodeID + 3)
+						rvrList = []v1alpha3.ReplicatedVolumeReplica{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-gap-1"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-1",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID0},
+									},
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-gap-2"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-2",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID2},
+									},
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-gap-3"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-3",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID3},
+									},
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-gap-4"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-4",
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
+						}
+					})
+
+					It("fills gaps in nodeIDs", func(ctx SpecContext) {
+						By("Reconciling replica without nodeID to test gap filling")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[3]))).ToNot(Requeue(), "should not requeue after successful assignment")
+
+						By("Verifying gap filling: minimum free nodeID between MinNodeID and MinNodeID+2")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[3]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID+1))), "should assign nodeID MinNodeID+1 to fill gap")
+					})
+				})
+
+				When("nodeID already assigned", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
+					var testNodeID uint
+
+					BeforeEach(func() {
+						testNodeID = uint(rvrstatusconfignodeid.MinNodeID + 3)
+						rvrList = []v1alpha3.ReplicatedVolumeReplica{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-idemp-1"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-1",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &testNodeID},
+									},
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR with nodeID")
+						}
+					})
+
+					It("does not reassign nodeID if already assigned", func(ctx SpecContext) {
+						By("First reconciliation: should not reassign existing nodeID")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[0]))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
+
+						By("Verifying nodeID remains unchanged after first reconciliation")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", testNodeID))), "nodeID should remain unchanged, not be reassigned")
+
+						By("Second reconciliation: should still not reassign (idempotent)")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[0]))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
+
+						By("Verifying nodeID hasn't changed after both reconciliations")
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", testNodeID))), "nodeID should remain unchanged after multiple reconciliations (idempotent)")
+					})
+				})
+
+				When("ignoring invalid nodeID", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
+
+					BeforeEach(func() {
+						invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
+						rvrList = []v1alpha3.ReplicatedVolumeReplica{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-invalid-1"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-1",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &invalidNodeID},
+									},
+								},
+							},
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-invalid-2"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-2",
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
+						}
+					})
+
+					It("ignores nodeID outside valid range", func(ctx SpecContext) {
+						By("Reconciling replica without nodeID")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[1]))).ToNot(Requeue(), "should not requeue after successful assignment")
+
+						By("Verifying invalid nodeID was ignored: should get nodeID MinNodeID")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "should get nodeID MinNodeID because invalid nodeID was ignored")
+					})
+				})
+
+				When("reassigning invalid nodeID", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
+
+					BeforeEach(func() {
+						invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
+						rvrList = []v1alpha3.ReplicatedVolumeReplica{
+							{
+								ObjectMeta: metav1.ObjectMeta{Name: "rvr-reassign-1"},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             "node-1",
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &invalidNodeID},
+									},
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR with invalid nodeID")
+						}
+					})
+
+					It("logs warning and reassigns when nodeID > MaxNodeID is already set", func(ctx SpecContext) {
+						By("Reconciling: should log warning about invalid nodeID and reassign valid one")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[0]))).ToNot(Requeue(), "should not requeue after successful reassignment")
+
+						By("Verifying invalid nodeID was reset and valid nodeID was assigned")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), updatedRVR)).To(Succeed(), "should get updated RVR")
+						By("Checking that assigned nodeID is within valid range")
+						validNodeIDs := []uint{
+							uint(rvrstatusconfignodeid.MinNodeID),
+							uint(rvrstatusconfignodeid.MinNodeID + 1),
+							uint(rvrstatusconfignodeid.MinNodeID + 2),
+						}
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", rvrstatusconfignodeid.MinNodeID))), "should assign valid nodeID >= MinNodeID")
+						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", rvrstatusconfignodeid.MaxNodeID))), "should assign valid nodeID <= MaxNodeID")
+						Expect(*updatedRVR.Status.DRBD.Config.NodeId).To(BeElementOf(validNodeIDs), "should assign one of the first available valid nodeIDs")
+					})
+				})
+
+				When("resetting invalid nodeID", func() {
+					var rvrList []v1alpha3.ReplicatedVolumeReplica
+
+					BeforeEach(func() {
+						// Create 6 replicas with valid nodeIDs (MinNodeID+1 to MinNodeID+6), leaving nodeID MaxNodeID free
+						rvrList = make([]v1alpha3.ReplicatedVolumeReplica, 7)
+						for i := 1; i < 7; i++ {
+							nodeID := uint(rvrstatusconfignodeid.MinNodeID + i)
+							rvrList[i-1] = v1alpha3.ReplicatedVolumeReplica{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: fmt.Sprintf("rvr-reset-%d", i+1),
+								},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: "volume-1",
+									NodeName:             fmt.Sprintf("node-%d", i+1),
+								},
+								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha3.DRBD{
+										Config: &v1alpha3.DRBDConfig{NodeId: &nodeID},
+									},
+								},
+							}
+						}
+						// Create replica with invalid nodeID > MaxNodeID
+						invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
+						rvrList[6] = v1alpha3.ReplicatedVolumeReplica{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-reset-invalid"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "volume-1",
+								NodeName:             "node-invalid",
+							},
+							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha3.DRBD{
+									Config: &v1alpha3.DRBDConfig{NodeId: &invalidNodeID},
+								},
+							},
+						}
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						for i := range rvrList {
+							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
+						}
+						By("Ensuring parent rvr-1 has nodeID MinNodeID")
+						Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue(), "should assign nodeID to parent RVR")
+						By("Reconciling all created RVRs to ensure they have their nodeIDs")
+						for i := 0; i < 6; i++ {
+							Expect(rec.Reconcile(ctx, RequestFor(&rvrList[i]))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
+						}
+					})
+
+					It("resets invalid nodeID and reassigns valid one", func(ctx SpecContext) {
+						By("Reconciling: should detect invalid nodeID, reset it, and assign free nodeID (MaxNodeID)")
+						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[6]))).ToNot(Requeue(), "should not requeue after successful reassignment")
+
+						By("Verifying invalid nodeID was reset and free nodeID MaxNodeID was assigned")
+						expectedNodeIDs := []uint{uint(rvrstatusconfignodeid.MaxNodeID)}
+						updatedRVRInvalid := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[6]), updatedRVRInvalid)).To(Succeed(), "should get updated RVR")
+						Expect(updatedRVRInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeElementOf(expectedNodeIDs))), "should assign free nodeID MaxNodeID after resetting invalid nodeID")
+					})
+				})
+
+				When("List fails", func() {
+					listError := errors.New("failed to list replicas")
+					BeforeEach(func() {
+						clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+							List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+								if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+									return listError
+								}
+								return cl.List(ctx, list, opts...)
+							},
+						})
+					})
+
+					It("should fail if listing replicas failed", func(ctx SpecContext) {
+						By("Reconciling with List interceptor that returns error")
+						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(listError), "should return error when List fails")
+					})
 				})
 			})
 
 			When("all nodeIDs are used", func() {
+				var rvrList []v1alpha3.ReplicatedVolumeReplica
+				var rvr9 v1alpha3.ReplicatedVolumeReplica
+
 				BeforeEach(func() {
 					// Don't create parent rvr for this test - we'll create all RVRs ourselves
 					rvr = nil
-				})
-
-				JustBeforeEach(func(ctx SpecContext) {
 					// Create replicas using all nodeIds from MinNodeID to MaxNodeID
 					totalNodeIDs := rvrstatusconfignodeid.MaxNodeID - rvrstatusconfignodeid.MinNodeID + 1
+					rvrList = make([]v1alpha3.ReplicatedVolumeReplica, totalNodeIDs)
 					for i := 0; i < totalNodeIDs; i++ {
-						testRvr := createRVRWithNodeID(
-							fmt.Sprintf("rvr-allused-%d", i+1),
-							fmt.Sprintf("node-%d", i+1),
-							uint(rvrstatusconfignodeid.MinNodeID+i),
-						)
-						Expect(cl.Create(ctx, testRvr)).To(Succeed())
+						nodeID := uint(rvrstatusconfignodeid.MinNodeID + i)
+						rvrList[i] = v1alpha3.ReplicatedVolumeReplica{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: fmt.Sprintf("rvr-allused-%d", i+1),
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "volume-1",
+								NodeName:             fmt.Sprintf("node-%d", i+1),
+							},
+							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha3.DRBD{
+									Config: &v1alpha3.DRBDConfig{NodeId: &nodeID},
+								},
+							},
+						}
+					}
+					// Create next RVR without nodeID - should fail (all nodeIDs used)
+					rvr9 = v1alpha3.ReplicatedVolumeReplica{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-allused-9",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: "volume-1",
+							NodeName:             "node-9",
+						},
 					}
 				})
 
+				JustBeforeEach(func(ctx SpecContext) {
+					for i := range rvrList {
+						Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR with nodeID")
+					}
+					Expect(cl.Create(ctx, &rvr9)).To(Succeed(), "should create RVR without nodeID")
+				})
+
 				It("returns error when all nodeIDs are used and assigns freed nodeID after deletion", func(ctx SpecContext) {
-					// Step 1: Create next RVR without nodeID - should fail (too many replicas / all nodeIDs used)
-					rvr9 := createRVR("rvr-allused-9", "volume-1", "node-9")
-					Expect(cl.Create(ctx, rvr9)).To(Succeed())
+					By("Reconciling should fail when all nodeIDs are used")
+					Expect(rec.Reconcile(ctx, RequestFor(&rvr9))).Error().To(MatchError(e.ErrInvalidCluster), "should return ErrInvalidCluster when all nodeIDs are used")
 
-					_, err := rec.Reconcile(ctx, RequestFor(rvr9))
-					Expect(err).To(HaveOccurred())
-					Expect(errors.Is(err, e.ErrInvalidCluster)).To(BeTrue())
-
-					// Step 2: Delete one RVR (e.g., rvr-allused-4 with nodeID=MinNodeID+3) - frees that nodeID
+					By("Deleting one RVR to free its nodeID")
 					freedNodeID := uint(rvrstatusconfignodeid.MinNodeID + 3)
-					rvr4 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-allused-4"}, rvr4)).To(Succeed())
-					Expect(cl.Delete(ctx, rvr4)).To(Succeed())
+					Expect(cl.Delete(ctx, &rvrList[3])).To(Succeed(), "should delete RVR successfully")
 
-					// Step 3: Reconcile rvr-9 again - should now get the freed nodeID (lowest available)
-					Expect(rec.Reconcile(ctx, RequestFor(rvr9))).ToNot(Requeue())
+					By("Reconciling again: should now get the freed nodeID")
+					Expect(rec.Reconcile(ctx, RequestFor(&rvr9))).ToNot(Requeue(), "should not requeue after successful assignment")
 
-					// Verify rvr-9 got the freed nodeID (which is the lowest available after deletion)
+					By("Verifying freed nodeID was assigned")
 					updatedRVR9 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr9), updatedRVR9)).To(Succeed())
-					Expect(updatedRVR9.Status).NotTo(BeNil())
-					Expect(updatedRVR9.Status.DRBD).NotTo(BeNil())
-					Expect(updatedRVR9.Status.DRBD.Config).NotTo(BeNil())
-					Expect(updatedRVR9.Status.DRBD.Config.NodeId).NotTo(BeNil())
-					Expect(*updatedRVR9.Status.DRBD.Config.NodeId).To(Equal(freedNodeID))
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvr9), updatedRVR9)).To(Succeed(), "should get updated RVR")
+					Expect(updatedRVR9).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", freedNodeID))), "should assign freed nodeID after deletion")
 				})
 			})
 		})
@@ -377,7 +632,8 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(patchError))
+				By("Reconciling with Patch interceptor that returns error")
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(patchError), "should return error when Patch fails")
 			})
 		})
 
