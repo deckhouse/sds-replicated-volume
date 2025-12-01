@@ -18,13 +18,18 @@ package rvrstatusconfigaddress
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
 )
 
 type Reconciler struct {
@@ -44,22 +49,195 @@ func IsPortValid(c DRBDConfig, port uint) bool {
 
 var _ reconcile.Reconciler = &Reconciler{}
 
+// Reconcile reconciles a Node to configure addresses for all ReplicatedVolumeReplicas on that node.
+// We reconcile the Node (not individual RVRs) to avoid race conditions when finding free ports.
+// This approach allows us to process all RVRs on a node atomically in a single reconciliation loop.
+// Note: This logic could be moved from the agent to the controller in the future if needed.
 func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("request", request)
-	var rv v1alpha3.ReplicatedVolume
-	if err := r.cl.Get(ctx, request.NamespacedName, &rv); err != nil {
-		log.Error(err, "Can't get ReplicatedVolume")
+	log.Info("Reconcile start")
+
+	// Get Node to extract InternalIP
+	var node corev1.Node
+	if err := r.cl.Get(ctx, request.NamespacedName, &node); err != nil {
+		log.Error(err, "Can't get Node")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	// Extract InternalIP from node
+	nodeIP, err := getInternalIP(&node)
+	if err != nil {
+		log.Error(err, "Node missing InternalIP")
+		return reconcile.Result{}, err
+	}
+
+	// Get DRBD port settings
+	settings, err := cluster.GetSettings(ctx, r.cl)
+	if err != nil {
+		log.Error(err, "Can't get DRBD port settings")
+		return reconcile.Result{}, fmt.Errorf("getting DRBD port settings: %w", err)
+	}
+
+	// List all RVRs on this node that need address configuration
 	var rvrList v1alpha3.ReplicatedVolumeReplicaList
-	if err := r.cl.List(ctx, &rvrList); err != nil {
+	if err := r.cl.List(ctx, &rvrList,
+		client.MatchingFieldsSelector{
+			Selector: (&v1alpha3.ReplicatedVolumeReplica{}).NodeNameSelector(node.Name),
+		},
+	); err != nil {
 		log.Error(err, "Can't list ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha3.ReplicatedVolumeReplica) bool {
-		return item.Spec.ReplicatedVolumeName != rv.Name
+	// Just in case if MatchingFilterSelector is not working as expected
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+		return rvr.Spec.NodeName != node.Name
 	})
-	panic("not implemented")
+
+	// Build map of used ports from all RVRs on this node
+	usedPorts := make(map[uint]struct{})
+	for _, rvr := range rvrList.Items {
+		if rvr.Status != nil &&
+			rvr.Status.DRBD != nil &&
+			rvr.Status.DRBD.Config != nil &&
+			rvr.Status.DRBD.Config.Address != nil {
+			usedPorts[rvr.Status.DRBD.Config.Address.Port] = struct{}{}
+		}
+	}
+
+	// Process each RVR that needs address configuration
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+
+		log := log.WithValues("rvr", rvr.Name)
+		// Create a patch from the current state at the beginning
+		patch := client.MergeFrom(rvr.DeepCopy())
+
+		// Find the smallest free port in the range
+		var freePort uint
+		found := false
+		for port := settings.DRBDMinPort; port <= settings.DRBDMaxPort; port++ {
+			if _, used := usedPorts[port]; !used {
+				freePort = port
+				found = true
+				usedPorts[port] = struct{}{} // Mark as used for next RVR
+				break
+			}
+		}
+
+		if !found {
+			log.Error(
+				fmt.Errorf("no free port available in range [%d, %d]",
+					settings.DRBDMinPort, settings.DRBDMaxPort,
+				),
+				"No free port available",
+			)
+
+			changed, err := r.setCondition(rvr, metav1.ConditionFalse,
+				v1alpha3.ReasonNoFreePortAvailable,
+				"No free port available",
+			)
+			if err != nil {
+				return reconcile.Result{}, err
+			}
+			if changed {
+				if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+					log.Error(err, "Failed to patch status")
+					return reconcile.Result{}, err
+				}
+			}
+			continue
+		}
+
+		// Set address and condition
+		address := &v1alpha3.Address{
+			IPv4: nodeIP,
+			Port: freePort,
+		}
+		log = log.WithValues("address", address)
+
+		changed, err := r.setAddressAndCondition(rvr, address)
+		if err != nil {
+			log.Error(err, "Failed to set address")
+			return reconcile.Result{}, err
+		}
+
+		// Patch status once at the end if anything changed
+		if changed {
+			if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+				log.Error(err, "Failed to patch status")
+				return reconcile.Result{}, err
+			}
+			log.Info("Address configured")
+		}
+	}
+
+	return reconcile.Result{}, nil
+}
+
+func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplica, address *v1alpha3.Address) (bool, error) {
+	// Check if address is already set correctly
+	addressChanged := rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil ||
+		rvr.Status.DRBD.Config.Address == nil || *rvr.Status.DRBD.Config.Address != *address
+
+	// Apply address changes if needed
+	if addressChanged {
+		if rvr.Status == nil {
+			rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		}
+		if rvr.Status.DRBD == nil {
+			rvr.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if rvr.Status.DRBD.Config == nil {
+			rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		}
+		rvr.Status.DRBD.Config.Address = address
+	}
+
+	// Set condition using helper function (it checks if condition needs to be updated)
+	condChanged, err := r.setCondition(
+		rvr,
+		metav1.ConditionTrue,
+		v1alpha3.ReasonAddressConfigurationSucceeded,
+		"Address configured",
+	)
+	if err != nil {
+		return false, err
+	}
+
+	return addressChanged || condChanged, nil
+}
+
+func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) (bool, error) {
+	// Check if condition is already set correctly
+	if rvr.Status != nil && rvr.Status.Conditions != nil {
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeAddressConfigured)
+		if cond != nil &&
+			cond.Status == status &&
+			cond.Reason == reason &&
+			cond.Message == message {
+			// Already set correctly, no need to patch
+			return false, nil
+		}
+	}
+
+	// Apply changes
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+	}
+	if rvr.Status.Conditions == nil {
+		rvr.Status.Conditions = []metav1.Condition{}
+	}
+
+	meta.SetStatusCondition(
+		&rvr.Status.Conditions,
+		metav1.Condition{
+			Type:    v1alpha3.ConditionTypeAddressConfigured,
+			Status:  status,
+			Reason:  reason,
+			Message: message,
+		},
+	)
+
+	return true, nil
 }

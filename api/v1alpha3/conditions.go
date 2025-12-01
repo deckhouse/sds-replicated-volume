@@ -39,18 +39,6 @@ const (
 	// [ConditionTypeDiskIOSuspended] indicates whether replica IO is suspended
 	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
 
-	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
-	ConditionTypeQuorumConfigured = "QuorumConfigured"
-
-	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
-	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
-
-	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
-	ConditionTypeAllReplicasReady = "AllReplicasReady"
-
-	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
-	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-
 	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
 	ConditionTypeAddressConfigured = "AddressConfigured"
 )
@@ -122,24 +110,6 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
-)
-
-// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
-const (
-	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
-	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
-)
-
-// Replication values for [ReplicatedStorageClass] spec
-const (
-	ReplicationNone                       = "None"
-	ReplicationAvailability               = "Availability"
-	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
-)
-
-// Replica type values for [ReplicatedVolumeReplica] spec
-const (
-	ReplicaTypeDiskful = "Diskful"
 )
 
 // Condition reasons for [ConditionTypeAddressConfigured] condition
