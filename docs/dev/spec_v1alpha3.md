@@ -49,8 +49,6 @@
   - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
-- [Сценарии](#сценарии)
-  - [Ручное создание реплицируемого тома](#ручное-создание-реплицируемого-тома)
 
 # Основные положения
 
@@ -402,7 +400,7 @@ TODO
     - `TransZonal` - все реплики должны быть в разных зонах
     - `Any` - зоны не учитываются, реплики размещаются по произвольным нодам
   - учитываем место
-    - делаем вызов в scheduler-extender TODO
+    - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
   - если хотя бы на одну ноду из `rv.spec.publishOn` не удалось разместить реплику - ошибка невозможности планирования
 - Размещение `Diskful` (не `Local`)
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
@@ -411,7 +409,7 @@ TODO
     - `TransZonal` - все реплики должны быть в разных зонах
     - `Any` - зоны не учитываются, реплики размещаются по произвольным нодам
   - учитываем место
-    - делаем вызов в scheduler-extender TODO
+    - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
   - пытаемся учесть `rv.spec.publishOn` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
 - Размещение `Access`
   - фаза работает только если `rv.spec.publishOn` задан и не на всех нодах из `rv.spec.publishOn` есть реплики
@@ -473,13 +471,12 @@ TODO
 
 Готовая RVR - та, у которой `spec.nodeName!="", status.nodeId !=nil, status.address != nil`
 
-### Триггер
-  - `CREATE(RV)`
-  - `CREATE/UPDATE(RVR, spec.nodeName!="", status.nodeId !=nil, status.address != nil)`
-  - `DELETE(RVR)`
+После первой инициализации, даже в случае отсутствия пиров, требуется поставить
+`rvr.status.drbd.config.peersInitialized=true` в том же патче. 
+
 ### Вывод
   - `rvr.status.drbd.config.peers`
-  - `rvr.status.drbd.config.peersInitialized` TODO
+  - `rvr.status.drbd.config.peersInitialized`
 
 ## `rv-status-config-device-minor-controller`
 
@@ -561,10 +558,11 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Также требуется поддерживать свойство `rv.status.publishedOn`, указывая там список нод, на которых
 фактически произошёл переход реплики в состояние Primary. Это состояние публикуется в `rvr.status.drbd.status.role` (значение `Primary`).
 
-Контроллер работает только когда RV имеет `status.condition[Type=Ready].status=True`
+Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
 
 ### Вывод 
   - `rvr.status.config.primary`
+  - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.publishedOn`
   - `rv.status.conditions[type=PublishSucceeded]`
 
@@ -699,7 +697,3 @@ if M > 1 {
 
 ### Вывод 
   - delete rvr
-
-# Сценарии
-
-## Ручное создание реплицируемого тома
