@@ -66,6 +66,7 @@ require (
 	github.com/go-openapi/swag/stringutils v0.24.0 // indirect
 	github.com/go-openapi/swag/typeutils v0.24.0 // indirect
 	github.com/go-openapi/swag/yamlutils v0.24.0 // indirect
+	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
 	github.com/go-toolsmith/astcast v1.1.0 // indirect
 	github.com/go-toolsmith/astcopy v1.1.0 // indirect
 	github.com/go-toolsmith/astequal v1.2.0 // indirect
@@ -86,6 +87,7 @@ require (
 	github.com/golangci/revgrep v0.8.0 // indirect
 	github.com/golangci/unconvert v0.0.0-20240309020433-c5143eacb3ed // indirect
 	github.com/google/btree v1.1.3 // indirect
+	github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6 // indirect
 	github.com/gordonklaus/ineffassign v0.1.0 // indirect
 	github.com/gostaticanalysis/analysisutil v0.7.1 // indirect
 	github.com/gostaticanalysis/comment v1.5.0 // indirect
@@ -130,6 +132,7 @@ require (
 	github.com/nishanths/predeclared v0.2.2 // indirect
 	github.com/nunnatsa/ginkgolinter v0.19.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/onsi/ginkgo/v2 v2.27.2 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -250,4 +253,7 @@ require (
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
-tool github.com/golangci/golangci-lint/cmd/golangci-lint
+tool (
+	github.com/golangci/golangci-lint/cmd/golangci-lint
+	github.com/onsi/ginkgo/v2/ginkgo
+)

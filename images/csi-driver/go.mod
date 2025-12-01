@@ -223,7 +223,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/pprof v0.0.0-20250403155104-27863c87afa6 // indirect
+	github.com/google/pprof v0.0.0-20250820193118-f64d9cf942d6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.9.0 // indirect
@@ -264,4 +264,7 @@ replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
-tool github.com/golangci/golangci-lint/cmd/golangci-lint
+tool (
+	github.com/golangci/golangci-lint/cmd/golangci-lint
+	github.com/onsi/ginkgo/v2/ginkgo
+)
