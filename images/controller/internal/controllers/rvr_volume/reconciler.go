@@ -86,21 +86,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 func requestToDeleteLLV(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+	// Thanks to the ownerReference, llv will have a deletionTimestamp, we will only need to remove our finalizer.
 	log = log.WithName("RequestToDeleteLLV")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
-		llv, err := findLLVWithOwnerReference(ctx, cl, rvr.Name)
-		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("checking for llv with ownerReference: %w", err)
-		}
-		if llv == nil {
-			log.V(4).Info("No llv found with ownerReference", "rvrName", rvr.Name)
-		} else {
-			log.V(4).Info("Found llv with ownerReference, deleting it", "rvrName", rvr.Name, "llvName", llv.Name)
-			if err := deleteLLV(ctx, cl, llv, log); err != nil {
-				return reconcile.Result{}, fmt.Errorf("deleting llv: %w", err)
-			}
-		}
+		log.V(4).Info("No LVMLogicalVolumeName in status, skipping delete")
 	} else {
 		llvName := rvr.Status.LVMLogicalVolumeName
 		llv, err := getLLVByName(ctx, cl, llvName)
@@ -108,12 +98,12 @@ func requestToDeleteLLV(ctx context.Context, cl client.Client, log logr.Logger, 
 			return reconcile.Result{}, fmt.Errorf("checking if llv exists: %w", err)
 		}
 		if llv == nil {
-			log.V(4).Info("LLV not found in cluster, clearing status", "llvName", llvName)
+			log.V(4).Info("LVMLogicalVolume not found in cluster, clearing status", "llvName", llvName)
 			if err := setLVMLogicalVolumeNameInStatus(ctx, cl, rvr, ""); err != nil {
 				return reconcile.Result{}, fmt.Errorf("clearing LVMLogicalVolumeName from status: %w", err)
 			}
 		} else {
-			log.V(4).Info("LLV found in cluster, deleting it", "llvName", llvName)
+			log.V(4).Info("LVMLogicalVolume found in cluster, deleting it", "llvName", llvName)
 			if err := deleteLLV(ctx, cl, llv, log); err != nil {
 				return reconcile.Result{}, fmt.Errorf("deleting llv: %w", err)
 			}
@@ -132,15 +122,15 @@ func requestToCreateLLV(ctx context.Context, cl client.Client, log logr.Logger, 
 			return reconcile.Result{}, fmt.Errorf("checking for llv with ownerReference: %w", err)
 		}
 		if llv == nil {
-			log.V(4).Info("No llv found with ownerReference, creating it", "rvrName", rvr.Name)
+			log.V(4).Info("No LVMLogicalVolume found with ownerReference, creating it", "rvrName", rvr.Name)
 			_, err = createLLV(ctx, cl, rvr, log)
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("creating llv: %w", err)
 			}
 		} else {
-			log.V(4).Info("Found llv with ownerReference", "rvrName", rvr.Name, "llvName", llv.Name)
+			log.V(4).Info("Found LVMLogicalVolume with ownerReference", "rvrName", rvr.Name, "llvName", llv.Name)
 			if isLLVCreated(llv) {
-				log.V(4).Info("LLV is already created", "llvName", llv.Name)
+				log.V(4).Info("LVMLogicalVolume is already created", "llvName", llv.Name)
 				// Update status with llv name if not set
 				if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName != llv.Name {
 					if err := setLVMLogicalVolumeNameInStatus(ctx, cl, rvr, llv.Name); err != nil {
@@ -148,7 +138,7 @@ func requestToCreateLLV(ctx context.Context, cl client.Client, log logr.Logger, 
 					}
 				}
 			} else {
-				log.V(4).Info("LLV is not yet created, waiting", "llvName", llv.Name, "phase", getLLVPhase(llv))
+				log.V(4).Info("LVMLogicalVolume is not yet created, waiting", "llvName", llv.Name, "phase", getLLVPhase(llv))
 				//return reconcile.Result{RequeueAfter: 5 * time.Second}, nil
 			}
 		}
@@ -383,16 +373,38 @@ func ensureLLVOwnerReference(ctx context.Context, cl client.Client, llv *snc.LVM
 }
 
 // deleteLLV deletes a LVMLogicalVolume from the cluster.
-// If the object is already marked for deletion (has DeletionTimestamp), it returns nil without attempting deletion.
+// If the object is already marked for deletion (has DeletionTimestamp), it removes only our finalizer.
 func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, log logr.Logger) error {
-	if llv.DeletionTimestamp != nil {
-		log.V(4).Info("LLV is already marked for deletion, skipping delete", "llvName", llv.Name)
-		return nil
+	if llv.DeletionTimestamp == nil {
+		if err := cl.Delete(ctx, llv); client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("deleting LVMLogicalVolume %s: %w", llv.Name, err)
+		}
+		log.Info("LVMLogicalVolume marked for deletion", "llvName", llv.Name)
 	}
-	if err := cl.Delete(ctx, llv); client.IgnoreNotFound(err) != nil {
-		return fmt.Errorf("deleting LVMLogicalVolume %s: %w", llv.Name, err)
+
+	// Remove only our finalizer, leaving others intact
+	hasOurFinalizer := false
+	newFinalizers := make([]string, 0, len(llv.Finalizers))
+	for _, finalizer := range llv.Finalizers {
+		if finalizer == finalizerName {
+			hasOurFinalizer = true
+		} else {
+			newFinalizers = append(newFinalizers, finalizer)
+		}
 	}
-	log.Info("LLV deleted successfully", "llvName", llv.Name)
+
+	if hasOurFinalizer {
+		log.V(4).Info("LVMLogicalVolume is marked for deletion, removing our finalizer", "llvName", llv.Name)
+		patch := client.MergeFrom(llv.DeepCopy())
+		llv.Finalizers = newFinalizers
+		if err := cl.Patch(ctx, llv, patch); err != nil {
+			return fmt.Errorf("removing finalizer from LVMLogicalVolume %s: %w", llv.Name, err)
+		}
+		log.Info("Finalizer removed successfully", "llvName", llv.Name)
+	} else {
+		log.V(4).Info("LVMLogicalVolume is marked for deletion, but our finalizer is not present", "llvName", llv.Name)
+	}
+
 	return nil
 }
 
