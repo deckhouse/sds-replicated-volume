@@ -38,7 +38,9 @@ func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
 func countDiskfulAndDisklessReplicas(list *v1alpha3.ReplicatedVolumeReplicaList) (diskful, all int) {
 	all = len(list.Items)
 	for _, rvr := range list.Items {
-		if !rvr.Spec.Diskless {
+		// Type can be "Diskful", "Access", or "TieBreaker"
+		// Diskful replicas have Type == "Diskful", others are diskless
+		if rvr.Spec.Type == "Diskful" {
 			diskful++
 		}
 	}
@@ -197,12 +199,15 @@ func (r *Reconciler) quorumPatch(
 		if rv.Status == nil {
 			rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
 		}
-		if rv.Status.Config == nil {
-			rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+		if rv.Status.DRBD == nil {
+			rv.Status.DRBD = &v1alpha3.DRBDResource{}
+		}
+		if rv.Status.DRBD.Config == nil {
+			rv.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 		}
 
-		rv.Status.Config.Quorum = quorum
-		rv.Status.Config.QuorumMinimumRedundancy = qmr
+		rv.Status.DRBD.Config.Quorum = quorum
+		rv.Status.DRBD.Config.QuorumMinimumRedundancy = qmr
 		rv.Status.Conditions = append(rv.Status.Conditions, metav1.Condition{
 			Type:               v1alpha3.ConditionTypeQuorumConfigured,
 			Status:             metav1.ConditionTrue,
