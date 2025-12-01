@@ -106,6 +106,10 @@ func createReplicatedVolume(name string, ready bool) *v1alpha3.ReplicatedVolume 
 }
 
 func createReplicatedVolumeReplica(name, rvName, nodeName string, diskless bool) *v1alpha3.ReplicatedVolumeReplica {
+	replicaType := "Diskful"
+	if diskless {
+		replicaType = "Access" // Access or TieBreaker are diskless types
+	}
 	return &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -121,7 +125,7 @@ func createReplicatedVolumeReplica(name, rvName, nodeName string, diskless bool)
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rvName,
 			NodeName:             nodeName,
-			Diskless:             diskless,
+			Type:                 replicaType,
 		},
 	}
 }
@@ -168,14 +172,16 @@ var _ = Describe("Reconciler", func() {
 			// Verify no quorum config was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Status.Config).To(BeNil())
+			Expect(updatedRV.Status.DRBD).To(BeNil())
 		})
 	})
 
 	Context("when ReplicatedVolume is ready", func() {
 		It("should reconcile successfully when RV is ready with RVRs", func() {
 			rv := createReplicatedVolume("test-rv", true)
-			rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+			rv.Status.DRBD = &v1alpha3.DRBDResource{
+				Config: &v1alpha3.DRBDResourceConfig{},
+			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Create diskful replicas
@@ -208,7 +214,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("should handle multiple replicas with diskful and diskless", func() {
 			rv := createReplicatedVolume("test-rv", true)
-			rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+			rv.Status.DRBD = &v1alpha3.DRBDResource{
+				Config: &v1alpha3.DRBDResourceConfig{},
+			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Create 3 diskful and 1 diskless replica
@@ -239,8 +247,10 @@ var _ = Describe("Reconciler", func() {
 
 		It("should not set quorum when diskfulCount <= 1", func() {
 			rv := createReplicatedVolume("test-rv", true)
-			// Initialize Status.Config to ensure patch works correctly
-			rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+			// Initialize Status.DRBD.Config to ensure patch works correctly
+			rv.Status.DRBD = &v1alpha3.DRBDResource{
+				Config: &v1alpha3.DRBDResourceConfig{},
+			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Create only 1 diskful replica
@@ -259,9 +269,10 @@ var _ = Describe("Reconciler", func() {
 			updatedRV := &v1alpha3.ReplicatedVolume{}
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Status).NotTo(BeNil())
-			Expect(updatedRV.Status.Config).NotTo(BeNil())
-			Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(0)))
-			Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(0)))
+			Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+			Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+			Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(0)))
+			Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(0)))
 			// Even with diskfulCount <= 1, condition should be set (quorumPatch is called)
 			cond := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeQuorumConfigured)
 			Expect(cond).NotTo(BeNil())
@@ -271,7 +282,9 @@ var _ = Describe("Reconciler", func() {
 		Context("Quorum and QuorumMinimumRedundancy calculations", func() {
 			It("should calculate quorum=2, qmr=2 for 2 diskful replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 2 diskful replicas: all=2, diskful=2
@@ -295,14 +308,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=2, qmr=2 for 3 diskful replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 3 diskful replicas: all=3, diskful=3
@@ -328,14 +344,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=3, qmr=3 for 4 diskful replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 4 diskful replicas: all=4, diskful=4
@@ -363,14 +382,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
 			})
 
 			It("should calculate quorum=3, qmr=3 for 5 diskful replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 5 diskful replicas: all=5, diskful=5
@@ -399,14 +421,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(3)))
 			})
 
 			It("should calculate quorum=2, qmr=2 for 2 diskful + 1 diskless replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 2 diskful + 1 diskless: all=3, diskful=2
@@ -432,14 +457,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(2)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=3, qmr=2 for 3 diskful + 2 diskless replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 3 diskful + 2 diskless: all=5, diskful=3
@@ -469,14 +497,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(3)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(3)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(2)))
 			})
 
 			It("should calculate quorum=4, qmr=4 for 7 diskful replicas", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create 7 diskful replicas: all=7, diskful=7
@@ -505,16 +536,19 @@ var _ = Describe("Reconciler", func() {
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 
 				// Verify quorum values are applied correctly via PatchStatusWithConflictRetry
-				Expect(updatedRV.Status.Config).NotTo(BeNil())
-				Expect(updatedRV.Status.Config.Quorum).To(Equal(byte(4)))
-				Expect(updatedRV.Status.Config.QuorumMinimumRedundancy).To(Equal(byte(4)))
+				Expect(updatedRV.Status.DRBD).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config).NotTo(BeNil())
+				Expect(updatedRV.Status.DRBD.Config.Quorum).To(Equal(byte(4)))
+				Expect(updatedRV.Status.DRBD.Config.QuorumMinimumRedundancy).To(Equal(byte(4)))
 			})
 		})
 
 		Context("unsetFinalizers", func() {
 			It("should remove finalizer from RVR with DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with finalizer and DeletionTimestamp
@@ -538,7 +572,9 @@ var _ = Describe("Reconciler", func() {
 
 			It("should not remove finalizer from RVR without DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with finalizer but no DeletionTimestamp
@@ -559,7 +595,9 @@ var _ = Describe("Reconciler", func() {
 
 			It("should not process RVR that doesn't have quorum-reconf finalizer", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with DeletionTimestamp but no quorum-reconf finalizer
@@ -583,7 +621,9 @@ var _ = Describe("Reconciler", func() {
 
 			It("should process multiple RVRs with DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create multiple RVRs with finalizers and DeletionTimestamp
@@ -624,7 +664,9 @@ var _ = Describe("Reconciler", func() {
 
 			It("should handle RVR with only quorum-reconf finalizer and DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
-				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
+				rv.Status.DRBD = &v1alpha3.DRBDResource{
+					Config: &v1alpha3.DRBDResourceConfig{},
+				}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with only quorum-reconf finalizer and DeletionTimestamp
