@@ -90,11 +90,28 @@ func requestToDeleteLLV(ctx context.Context, cl client.Client, req reconcile.Req
 		if llv == nil {
 			log.V(4).Info("No llv found with ownerReference", "rvrName", rvr.Name)
 		} else {
-			log.V(4).Info("Found llv with ownerReference", "rvrName", rvr.Name, "llvName", llv.Name)
-			// TODO: handle case when llv exists but LVMLogicalVolumeName is empty
+			log.V(4).Info("Found llv with ownerReference, deleting it", "rvrName", rvr.Name, "llvName", llv.Name)
+			if err := deleteLLV(ctx, cl, llv, log); err != nil {
+				return reconcile.Result{}, fmt.Errorf("deleting llv: %w", err)
+			}
 		}
 	} else {
-		// delete llv
+		llvName := rvr.Status.LVMLogicalVolumeName
+		llv, err := getLLVByName(ctx, cl, llvName)
+		if err != nil {
+			return reconcile.Result{}, fmt.Errorf("checking if llv exists: %w", err)
+		}
+		if llv == nil {
+			log.V(4).Info("LLV not found in cluster, clearing status", "llvName", llvName)
+			if err := clearLVMLogicalVolumeNameFromStatus(ctx, cl, rvr); err != nil {
+				return reconcile.Result{}, fmt.Errorf("clearing LVMLogicalVolumeName from status: %w", err)
+			}
+		} else {
+			log.V(4).Info("LLV found in cluster, deleting it", "llvName", llvName)
+			if err := deleteLLV(ctx, cl, llv, log); err != nil {
+				return reconcile.Result{}, fmt.Errorf("deleting llv: %w", err)
+			}
+		}
 	}
 
 	return reconcile.Result{}, nil
@@ -126,4 +143,42 @@ func findLLVWithOwnerReference(ctx context.Context, cl client.Client, rvrName st
 	}
 
 	return nil, nil
+}
+
+// getLLVByName gets a LVMLogicalVolume from the cluster by name.
+// Returns the llv object if found, nil if not found, or an error.
+func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.LVMLogicalVolume, error) {
+	llv := &snc.LVMLogicalVolume{}
+	key := client.ObjectKey{Name: llvName}
+	if err := cl.Get(ctx, key, llv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("getting LVMLogicalVolume %s: %w", llvName, err)
+	}
+	return llv, nil
+}
+
+// clearLVMLogicalVolumeNameFromStatus clears the LVMLogicalVolumeName field from RVR status.
+func clearLVMLogicalVolumeNameFromStatus(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+	patch := client.MergeFrom(rvr.DeepCopy())
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+	}
+	rvr.Status.LVMLogicalVolumeName = ""
+	return cl.Status().Patch(ctx, rvr, patch)
+}
+
+// deleteLLV deletes a LVMLogicalVolume from the cluster.
+// If the object is already marked for deletion (has DeletionTimestamp), it returns nil without attempting deletion.
+func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, log logr.Logger) error {
+	if llv.DeletionTimestamp != nil {
+		log.V(4).Info("LLV is already marked for deletion, skipping delete", "llvName", llv.Name)
+		return nil
+	}
+	if err := cl.Delete(ctx, llv); client.IgnoreNotFound(err) != nil {
+		return fmt.Errorf("deleting LVMLogicalVolume %s: %w", llv.Name, err)
+	}
+	log.Info("LLV deleted successfully", "llvName", llv.Name)
+	return nil
 }
