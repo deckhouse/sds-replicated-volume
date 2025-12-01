@@ -13,10 +13,10 @@ import (
 const ControllerName = "rv_status_config_device_minor_controller"
 
 func BuildController(mgr manager.Manager) error {
-	rec := &Reconciler{
-		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(ControllerName).WithName("Reconciler"),
-	}
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(ControllerName).WithName("Reconciler"),
+	)
 
 	err := builder.ControllerManagedBy(mgr).
 		Named(ControllerName).

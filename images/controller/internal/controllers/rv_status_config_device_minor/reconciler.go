@@ -37,11 +37,8 @@ func (r *Reconciler) Reconcile(
 	// Get the RV
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			log.V(1).Info("RV not found, might be deleted")
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("getting RV %s: %w", req.NamespacedName, err)
+		log.Error(err, "Getting ReplicatedVolume")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// Check if deviceMinor is already set
@@ -69,7 +66,7 @@ func (r *Reconciler) Reconcile(
 	for _, item := range rvList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
 			deviceMinor := item.Status.DRBD.Config.DeviceMinor
-			if deviceMinor >= minDeviceMinor && deviceMinor <= maxDeviceMinor {
+			if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
 				usedDeviceMinors[deviceMinor] = struct{}{}
 				// Check if this is the RV we're processing
 				if item.Name == rv.Name {
@@ -87,7 +84,7 @@ func (r *Reconciler) Reconcile(
 
 	// Find available deviceMinor (minimum free value)
 	var availableDeviceMinor uint
-	for i := uint(minDeviceMinor); i <= uint(maxDeviceMinor); i++ {
+	for i := uint(MinDeviceMinor); i <= uint(MaxDeviceMinor); i++ {
 		if _, used := usedDeviceMinors[i]; !used {
 			availableDeviceMinor = i
 			break
