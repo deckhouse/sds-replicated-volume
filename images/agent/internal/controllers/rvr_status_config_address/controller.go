@@ -37,9 +37,10 @@ import (
 func BuildController(mgr manager.Manager, nodeName string) error {
 	const controllerName = "rvr-status-config-address-controller"
 
+	log := mgr.GetLogger().WithName(controllerName)
 	var rec = &Reconciler{
 		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(controllerName),
+		log: log,
 	}
 
 	return builder.ControllerManagedBy(mgr).
@@ -47,37 +48,47 @@ func BuildController(mgr manager.Manager, nodeName string) error {
 		For(
 			&corev1.Node{},
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				if node, ok := obj.(*corev1.Node); ok {
+				if node, ok := obj.(*corev1.Node); !ok {
 					return node.Name == nodeName
 				}
+
+				log.WithName("For").Error(nil, "Can't cast Node to *corev1.Node")
 				return false
 			}))).
 		Watches(
 			&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				watchesLog := log.WithName("Watches").WithValues("type", "ConfigMap")
 				cm, ok := obj.(*corev1.ConfigMap)
 				if !ok {
+					watchesLog.Error(nil, "Can't cast ConfigMap to *corev1.ConfigMap")
 					return nil
 				}
 				// Only watch the agent-config ConfigMap
 				if cm.Namespace != cluster.ConfigMapNamespace || cm.Name != cluster.ConfigMapName {
+					watchesLog.V(4).Info("Another ConfigMap. Skip.")
 					return nil
 				}
+				watchesLog.V(3).Info("Agent-config ConfigMap. Enqueue.")
 				// Enqueue the current node
 				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: nodeName}}}
 			}),
 			builder.WithPredicates(predicate.Funcs{
 				UpdateFunc: func(e event.UpdateEvent) bool {
+					predicateLog := log.WithName("Predicate").WithValues("type", "ConfigMap")
 					oldCM, ok1 := e.ObjectOld.(*corev1.ConfigMap)
 					newCM, ok2 := e.ObjectNew.(*corev1.ConfigMap)
 					if !ok1 || !ok2 {
+						predicateLog.V(4).Info("Can't cast ConfigMap to *corev1.ConfigMap")
 						return false
 					}
 					// Only watch the agent-config ConfigMap
 					if newCM.Namespace != cluster.ConfigMapNamespace || newCM.Name != cluster.ConfigMapName {
+						predicateLog.V(4).Info("Another ConfigMap. Skip.")
 						return false
 					}
 					// Only enqueue if port settings changed
+					predicateLog.V(3).Info("Port settings changed. Not filtering out.")
 					return oldCM.Data["drbdMinPort"] != newCM.Data["drbdMinPort"] ||
 						oldCM.Data["drbdMaxPort"] != newCM.Data["drbdMaxPort"]
 				},
@@ -85,18 +96,33 @@ func BuildController(mgr manager.Manager, nodeName string) error {
 		).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
-				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: nodeName}}}
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				watchesLog := log.WithName("Watches").WithValues("type", "ReplicatedVolumeReplica")
+				if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+					// Only watch RVRs on the current node
+					// Enqueue the current node
+					if rvr.Spec.NodeName == nodeName {
+						watchesLog.V(3).Info("RVR on the current node. Enqueue.")
+						return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: nodeName}}}
+					}
+					watchesLog.V(4).Info("RVR not on the current node. Skip.")
+				} else {
+					watchesLog.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha3.ReplicatedVolumeReplica")
+				}
+				return nil
 			}),
 			builder.WithPredicates(predicate.Funcs{
 				UpdateFunc: func(e event.UpdateEvent) bool {
+					predicateLog := log.WithName("Predicate").WithValues("type", "Node")
 					oldNode, ok1 := e.ObjectOld.(*corev1.Node)
 					newNode, ok2 := e.ObjectNew.(*corev1.Node)
 					if !ok1 || !ok2 {
+						predicateLog.V(4).Info("Can't cast Node to *corev1.Node")
 						return false
 					}
 					// Only watch the current node
 					if newNode.Name != nodeName {
+						predicateLog.V(4).Info("Node not on the current node. Skip.")
 						return false
 					}
 					// Check if InternalIP changed
@@ -106,6 +132,7 @@ func BuildController(mgr manager.Manager, nodeName string) error {
 					if oldErr != nil || newErr != nil {
 						return oldErr != nil || newErr != nil
 					}
+					predicateLog.V(3).Info("InternalIP changed. Not filtering out.")
 					return oldIP != newIP
 				},
 			}),
