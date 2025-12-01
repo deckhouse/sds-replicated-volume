@@ -18,6 +18,7 @@ package rvrstatusconfigaddress
 
 import (
 	"context"
+	"slices"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -43,8 +44,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 	var rvrList v1alpha3.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &rvrList); err != nil {
-		log.Error(err, "Can't list ")
+		log.Error(err, "Can't list ReplicatedVolumeReplicas")
+		return reconcile.Result{}, err
 	}
 
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha3.ReplicatedVolumeReplica) bool {
+		return item.Spec.ReplicatedVolumeName != rv.Name
+	})
 	panic("not implemented")
 }
