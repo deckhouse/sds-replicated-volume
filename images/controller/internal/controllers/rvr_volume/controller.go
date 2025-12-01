@@ -25,16 +25,19 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-func BuildController(mgr manager.Manager) error {
-	nameController := "rvr_volume_controller"
+const (
+	controllerName = "rvr_volume_controller"
+	finalizerName  = "sds-replicated-volume.deckhouse.io/rvr-volume-controller"
+)
 
+func BuildController(mgr manager.Manager) error {
 	r := &Reconciler{
 		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		log: mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
 	}
 
 	return builder.ControllerManagedBy(mgr).
-		Named(nameController).
+		Named(controllerName).
 		For(
 			&v1alpha3.ReplicatedVolumeReplica{}).
 		Watches(
