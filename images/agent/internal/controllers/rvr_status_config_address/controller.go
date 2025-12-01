@@ -18,19 +18,26 @@ package rvrstatusconfigaddress
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func BuildController(mgr manager.Manager) error {
+	const controllerName = "rvr-status-config-address-controller"
+
 	var rec = &Reconciler{
 		cl:  mgr.GetClient(),
-		log: mgr.GetLogger(),
+		log: mgr.GetLogger().WithName(controllerName),
 	}
 
 	return builder.ControllerManagedBy(mgr).
-		Named("rvr_status_config_address_controller").
+		Named(controllerName).
 		For(&v1alpha3.ReplicatedVolume{}).
+		Watches(
+			&v1alpha3.ReplicatedVolumeReplica{},
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{}),
+		).
 		Complete(rec)
 }
