@@ -10,8 +10,8 @@ require (
 	github.com/deckhouse/sds-common-lib v0.6.3
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/go-logr/logr v1.4.3
-	github.com/onsi/ginkgo/v2 v2.23.4
-	github.com/onsi/gomega v1.38.0
+	github.com/onsi/ginkgo/v2 v2.27.2
+	github.com/onsi/gomega v1.38.2
 	github.com/stretchr/testify v1.11.1
 	golang.org/x/sync v0.17.0
 	k8s.io/api v0.34.0
@@ -33,7 +33,7 @@ require (
 	github.com/Crocmagnon/fatcontext v0.7.1 // indirect
 	github.com/Djarvur/go-err113 v0.0.0-20210108212216-aea10b59be24 // indirect
 	github.com/GaijinEntertainment/go-exhaustruct/v3 v3.3.1 // indirect
-	github.com/Masterminds/semver/v3 v3.3.0 // indirect
+	github.com/Masterminds/semver/v3 v3.4.0 // indirect
 	github.com/OpenPeeDeeP/depguard/v2 v2.2.1 // indirect
 	github.com/alecthomas/go-check-sumtype v0.3.1 // indirect
 	github.com/alexkohler/nakedret/v2 v2.0.5 // indirect
@@ -257,4 +257,7 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-tool github.com/golangci/golangci-lint/cmd/golangci-lint
+tool (
+	github.com/golangci/golangci-lint/cmd/golangci-lint
+	github.com/onsi/ginkgo/v2/ginkgo
+)
