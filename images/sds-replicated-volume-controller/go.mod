@@ -7,7 +7,7 @@ require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250909074120-7c523870bc2b
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20250907192450-6e1330e9e380
 	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
-	github.com/onsi/ginkgo/v2 v2.25.3
+	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.34.0
@@ -259,4 +259,7 @@ replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
-tool github.com/golangci/golangci-lint/cmd/golangci-lint
+tool (
+	github.com/golangci/golangci-lint/cmd/golangci-lint
+	github.com/onsi/ginkgo/v2/ginkgo
+)
