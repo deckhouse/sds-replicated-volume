@@ -115,7 +115,10 @@ var _ = Describe("Reconciler", func() {
 		ctx = context.Background()
 		cl = newFakeClient()
 		logger := zap.New(zap.UseDevMode(true))
-		rec = rvrdiskfulcount.NewReconciler(cl, logger)
+		scheme := runtime.NewScheme()
+		_ = v1alpha1.AddToScheme(scheme)
+		_ = v1alpha3.AddToScheme(scheme)
+		rec = rvrdiskfulcount.NewReconciler(cl, logger, scheme)
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func() {

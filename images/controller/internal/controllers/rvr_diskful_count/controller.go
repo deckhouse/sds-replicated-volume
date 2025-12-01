@@ -28,8 +28,9 @@ func BuildController(mgr manager.Manager) error {
 	nameController := "rvr_diskful_count_controller"
 
 	r := &Reconciler{
-		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		cl:     mgr.GetClient(),
+		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		scheme: mgr.GetScheme(),
 	}
 
 	return builder.ControllerManagedBy(mgr).

@@ -22,35 +22,36 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	utils "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 )
 
 type Reconciler struct {
-	cl  client.Client
-	log logr.Logger
+	cl     client.Client
+	log    logr.Logger
+	scheme *runtime.Scheme
 }
-
-type Request = reconcile.Request
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
-func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
 	return &Reconciler{
-		cl:  cl,
-		log: log,
+		cl:     cl,
+		log:    log,
+		scheme: scheme,
 	}
 }
 
-func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Result, error) {
+func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 
 	log := r.log.WithName("Reconcile").WithValues("req", req)
@@ -62,9 +63,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 	// Get ReplicatedVolume object
 	rv := &v1alpha3.ReplicatedVolume{}
-	err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rv)
+	err := r.cl.Get(ctx, req.NamespacedName, rv)
 	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if apierrors.IsNotFound(err) {
 			log.Info("ReplicatedVolume not found, ignoring reconcile request")
 			return reconcile.Result{}, nil
 		}
@@ -94,7 +95,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	// If no RVRs found, create one
 	if totalNumberOfReplicas == 0 {
 		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
-		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
+		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
@@ -122,7 +123,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 	if nonDeletedNumberOfReplicas == 0 {
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
-		err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
+		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
@@ -170,7 +171,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		log.Info("Creating replicas", "creatingNumberOfReplicas", creatingNumberOfReplicas)
 		for i := 0; i < creatingNumberOfReplicas; i++ {
 			log.V(4).Info("Creating replica", "replica", i)
-			err = createReplicatedVolumeReplica(ctx, r.cl, rv, log)
+			err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 			if err != nil {
 				return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 			}
@@ -273,33 +274,16 @@ func isRvrReady(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	if rvr.Status == nil || rvr.Status.Conditions == nil {
 		return false
 	}
-
-	readyCondition := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
-	if readyCondition == nil {
-		return false
-	}
-
-	return readyCondition.Status == metav1.ConditionTrue
+	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
 }
 
-// createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume
-// with ownerReference to RV. Uses the first node from spec.publishOn for nodeName.
-func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume, log logr.Logger) error {
-	ownerRef := metav1.OwnerReference{
-		APIVersion:         "storage.deckhouse.io/v1alpha3",
-		Kind:               "ReplicatedVolume",
-		Name:               rv.Name,
-		UID:                rv.UID,
-		Controller:         utils.Ptr(true),
-		BlockOwnerDeletion: utils.Ptr(true),
-	}
-
-	generateName := fmt.Sprintf("%s%s", rv.Name, "-")
+// createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.
+func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv *v1alpha3.ReplicatedVolume, log logr.Logger) error {
+	generateName := fmt.Sprintf("%s-", rv.Name)
 
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName:    generateName,
-			OwnerReferences: []metav1.OwnerReference{ownerRef},
+			GenerateName: generateName,
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
@@ -307,12 +291,16 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, rv *v1
 		},
 	}
 
+	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
+		return fmt.Errorf("setting controller reference: %w", err)
+	}
+
 	err := cl.Create(ctx, rvr)
 	if err != nil {
 		return fmt.Errorf("creating ReplicatedVolumeReplica with GenerateName %s: %w", generateName, err)
 	}
 
-	log.Info(fmt.Sprintf("Created ReplicatedVolumeReplica %s for ReplicatedVolume", rvr.Name))
+	log.Info("Created ReplicatedVolumeReplica", "name", rvr.Name)
 
 	return nil
 }
@@ -329,20 +317,22 @@ func setDiskfulReplicaCountReachedCondition(
 	message string,
 ) error {
 	log.V(4).Info(fmt.Sprintf("Setting %s condition", v1alpha3.ConditionTypeDiskfulReplicaCountReached), "status", status, "reason", reason, "message", message)
-	return api.PatchStatusWithConflictRetry(ctx, cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
-		if rv.Status == nil {
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
-		}
-		meta.SetStatusCondition(
-			&rv.Status.Conditions,
-			metav1.Condition{
-				Type:               v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-				Status:             status,
-				Reason:             reason,
-				Message:            message,
-				ObservedGeneration: rv.Generation,
-			},
-		)
-		return nil
-	})
+
+	patch := client.MergeFrom(rv.DeepCopy())
+
+	if rv.Status == nil {
+		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+	}
+	meta.SetStatusCondition(
+		&rv.Status.Conditions,
+		metav1.Condition{
+			Type:               v1alpha3.ConditionTypeDiskfulReplicaCountReached,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			ObservedGeneration: rv.Generation,
+		},
+	)
+
+	return cl.Status().Patch(ctx, rv, patch)
 }
