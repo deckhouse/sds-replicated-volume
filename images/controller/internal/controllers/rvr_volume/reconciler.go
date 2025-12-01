@@ -70,22 +70,22 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if rvr.DeletionTimestamp != nil {
-		return requestToDeleteLLV(ctx, r.cl, req, log, rvr)
+		return requestToDeleteLLV(ctx, r.cl, log, rvr)
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
 	if rvr.Spec.Type == "Diskful" && rvr.Spec.NodeName != "" {
-		return requestToCreateLLV(ctx, r.cl, req, log, rvr)
+		return requestToCreateLLV(ctx, r.cl, log, rvr)
 	}
 
 	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
-		return requestToDeleteLLV(ctx, r.cl, req, log, rvr)
+		return requestToDeleteLLV(ctx, r.cl, log, rvr)
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func requestToDeleteLLV(ctx context.Context, cl client.Client, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+func requestToDeleteLLV(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
 	log = log.WithName("RequestToDeleteLLV")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
@@ -123,7 +123,7 @@ func requestToDeleteLLV(ctx context.Context, cl client.Client, req reconcile.Req
 	return reconcile.Result{}, nil
 }
 
-func requestToCreateLLV(ctx context.Context, cl client.Client, req reconcile.Request, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+func requestToCreateLLV(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
 	log = log.WithName("ReconcileCreateLLV")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
