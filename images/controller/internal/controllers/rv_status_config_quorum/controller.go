@@ -1,14 +1,14 @@
 package rvrdiskfulcount // TODO change package if need
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func BuildController(mgr manager.Manager) error {
-
 	rec := &Reconciler{
 		cl:  mgr.GetClient(),
 		log: mgr.GetLogger().WithName("controller_rv_status_config_quorum"),
