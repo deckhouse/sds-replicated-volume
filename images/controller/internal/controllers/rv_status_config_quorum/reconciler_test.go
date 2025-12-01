@@ -6,6 +6,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -511,34 +512,17 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		Context("unsetFinalizers", func() {
-			// TODO: These tests are currently disabled because fake client doesn't properly apply
-			// finalizer patches via PatchWithConflictRetry. The patchApplyingClient wrapper attempts
-			// to work around this by using Update instead of Patch for MergeFrom patches, but the
-			// tests still fail because:
-			// 1. unsetFinalizers returns count=0, meaning the condition check fails after Get
-			// 2. Fake client may not preserve DeletionTimestamp correctly after Get operations
-			// 3. The patchApplyingClient may not correctly identify MergeFrom patch types
-			//
-			// To fix these tests, we need to:
-			// 1. Verify that fake client preserves DeletionTimestamp after Get operations
-			// 2. Check if patchApplyingClient correctly identifies and handles MergeFrom patches
-			// 3. Consider using a different testing approach (e.g., envtest) for finalizer logic
-			// 4. Or modify unsetFinalizers to re-check condition after Get (if reconciler.go changes are allowed)
-			//
-			// The logic in unsetFinalizers is correct for production use - PatchWithConflictRetry
-			// works correctly with real Kubernetes clusters. The issue is only with fake client testing.
-
-			PIt("should remove finalizer from RVR with DeletionTimestamp", func() {
+			It("should remove finalizer from RVR with DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with finalizer and DeletionTimestamp
-				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
 				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
-				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr1), rvr1)).To(Succeed())
+				Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 
 				_, err := rec.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: "test-rv"},
@@ -552,7 +536,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(updatedRVR1.Finalizers).To(ContainElement("other-finalizer"))
 			})
 
-			PIt("should not remove finalizer from RVR without DeletionTimestamp", func() {
+			It("should not remove finalizer from RVR without DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -573,17 +557,17 @@ var _ = Describe("Reconciler", func() {
 				Expect(updatedRVR1.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
-			PIt("should not process RVR that doesn't have quorum-reconf finalizer", func() {
+			It("should not process RVR that doesn't have quorum-reconf finalizer", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with DeletionTimestamp but no quorum-reconf finalizer
-				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
 				rvr1.Finalizers = []string{"other-finalizer"}
-				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr1), rvr1)).To(Succeed())
+				Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 
 				_, err := rec.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: "test-rv"},
@@ -597,22 +581,21 @@ var _ = Describe("Reconciler", func() {
 				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
-			PIt("should process multiple RVRs with DeletionTimestamp", func() {
+			It("should process multiple RVRs with DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create multiple RVRs with finalizers and DeletionTimestamp
-				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
 				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
-				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
+				Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 
 				rvr2 := createReplicatedVolumeReplica("rvr-2", "test-rv", "node-2", false)
 				rvr2.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
-				rvr2.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr2)).To(Succeed())
+				Expect(cl.Delete(ctx, rvr2)).To(Succeed())
 
 				// Create RVR without DeletionTimestamp (should not be processed by unsetFinalizers)
 				rvr3 := createReplicatedVolumeReplica("rvr-3", "test-rv", "node-3", false)
@@ -626,8 +609,7 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify finalizers removed from RVRs with DeletionTimestamp
 				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Satisfy(apierrors.IsNotFound))
 
 				updatedRVR2 := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-2"}, updatedRVR2)).To(Succeed())
@@ -640,17 +622,16 @@ var _ = Describe("Reconciler", func() {
 				Expect(updatedRVR3.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 			})
 
-			PIt("should handle RVR with only quorum-reconf finalizer and DeletionTimestamp", func() {
+			It("should handle RVR with only quorum-reconf finalizer and DeletionTimestamp", func() {
 				rv := createReplicatedVolume("test-rv", true)
 				rv.Status.Config = &v1alpha3.DRBDResourceConfig{}
 				Expect(cl.Create(ctx, rv)).To(Succeed())
 
 				// Create RVR with only quorum-reconf finalizer and DeletionTimestamp
-				now := metav1.Now()
 				rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", "node-1", false)
 				rvr1.Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
-				rvr1.DeletionTimestamp = &now
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
+				Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 
 				_, err := rec.Reconcile(ctx, reconcile.Request{
 					NamespacedName: types.NamespacedName{Name: "test-rv"},
@@ -659,9 +640,8 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify finalizer was removed (after removal, finalizers list should be empty)
 				updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-				Expect(updatedRVR1.Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
-				Expect(updatedRVR1.Finalizers).To(BeEmpty())
+				Expect(cl.Get(ctx, types.NamespacedName{Name: "rvr-1"}, updatedRVR1)).To(Satisfy(apierrors.IsNotFound))
+
 			})
 		})
 	})

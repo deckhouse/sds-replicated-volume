@@ -164,12 +164,11 @@ func (r *Reconciler) unsetFinalizers(
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
 		// Check condition: must have finalizer and DeletionTimestamp
-		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) && rvr.DeletionTimestamp != nil {
-			// Load the object fresh for PatchWithConflictRetry
-			target := &v1alpha3.ReplicatedVolumeReplica{}
-			if err := r.cl.Get(*ctx, client.ObjectKeyFromObject(rvr), target); err != nil {
-				return cnt, err
-			}
+		target := &v1alpha3.ReplicatedVolumeReplica{}
+		if err := r.cl.Get(*ctx, client.ObjectKeyFromObject(rvr), target); err != nil {
+			return cnt, err
+		}
+		if slices.Contains(target.Finalizers, QuorumReconfFinalizer) && target.DeletionTimestamp != nil {
 			if err := api.PatchWithConflictRetry(*ctx, r.cl, target, func(rvr *v1alpha3.ReplicatedVolumeReplica) error {
 				rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(f string) bool {
 					return f == QuorumReconfFinalizer
