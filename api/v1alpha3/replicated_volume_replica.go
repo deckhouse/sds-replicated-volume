@@ -139,6 +139,9 @@ type DRBDConfig struct {
 	Peers map[string]Peer `json:"peers,omitempty"`
 
 	// +optional
+	PeersInitialized bool `json:"peersInitialized,omitempty"`
+
+	// +optional
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
