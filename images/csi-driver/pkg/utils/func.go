@@ -25,6 +25,7 @@ import (
 
 	"gopkg.in/yaml.v2"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -33,7 +34,6 @@ import (
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
-	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 const (
@@ -541,10 +541,8 @@ func WaitForPublishProvided(
 					return nil
 				}
 			}
-		} else {
-			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
-			}
+		} else if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
 		}
 
 		log.Trace(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in publishProvided yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))

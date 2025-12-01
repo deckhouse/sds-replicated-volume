@@ -1,4 +1,19 @@
-// Copyright 2014 clypd, inc.
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package munkres
 
 import (
@@ -75,21 +90,21 @@ type Step4 struct{}
 type Step5 struct{}
 type Step6 struct{}
 
-func min(a ...int64) int64 {
-	min := int64(math.MaxInt64)
+func minInt64(a ...int64) int64 {
+	result := int64(math.MaxInt64)
 	for _, i := range a {
-		if i < min {
-			min = i
+		if i < result {
+			result = i
 		}
 	}
-	return min
+	return result
 }
 
 func (Step1) Compute(ctx *Context) (Step, bool) {
 	n := ctx.m.n
 	for i := 0; i < n; i++ {
 		row := ctx.m.A[i*n : (i+1)*n]
-		minval := min(row...)
+		minval := minInt64(row...)
 		for idx := range row {
 			row[idx] -= minval
 		}
@@ -171,7 +186,6 @@ func findStarInRow(ctx *Context, row int) int {
 }
 
 func (Step4) Compute(ctx *Context) (Step, bool) {
-	starCol := -1
 	for {
 		row, col := findAZero(ctx)
 		if row < 0 {
@@ -180,7 +194,7 @@ func (Step4) Compute(ctx *Context) (Step, bool) {
 		n := ctx.m.n
 		pos := row*n + col
 		ctx.marked[pos] = Primed
-		starCol = findStarInRow(ctx, row)
+		starCol := findStarInRow(ctx, row)
 		if starCol >= 0 {
 			col = starCol
 			ctx.rowCovered[row] = true
@@ -338,7 +352,7 @@ func (ctx *Context) String() string {
 }
 
 var (
-	Debugger func(Step, *Context) = func(Step, *Context) {}
+	Debugger = func(Step, *Context) {}
 )
 
 func computeMunkres(m *Matrix, minimize bool) []RowCol {
