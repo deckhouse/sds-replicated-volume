@@ -187,7 +187,6 @@ func (r *Reconciler) quorumPatch(
 	quorum,
 	qmr byte,
 ) error {
-
 	return api.PatchStatusWithConflictRetry(*ctx, r.cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
 		// ensure status structs are initialized before writing into them
 		if rv.Status == nil {
