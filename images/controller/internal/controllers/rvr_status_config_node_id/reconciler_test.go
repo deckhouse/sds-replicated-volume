@@ -50,7 +50,6 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
-		By("Reconciling non-existent ReplicatedVolumeReplica")
 		Expect(rec.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: "non-existent"},
 		})).NotTo(Requeue(), "should ignore NotFound errors")
@@ -65,7 +64,6 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("should fail if getting ReplicatedVolumeReplica failed with non-NotFound error", func(ctx SpecContext) {
-			By("Reconciling with Get interceptor that returns error")
 			Expect(rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{Name: "test-rvr"},
 			})).Error().To(MatchError(internalServerError), "should return error when Get fails")
@@ -76,7 +74,6 @@ var _ = Describe("Reconciler", func() {
 		// Base RVRs created in BeforeEach, can be modified in child tests
 		var (
 			rvr      *v1alpha3.ReplicatedVolumeReplica
-			rvrList  []v1alpha3.ReplicatedVolumeReplica
 			otherRVR *v1alpha3.ReplicatedVolumeReplica
 		)
 
@@ -103,15 +100,13 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 
-			// Initialize empty list - will be populated in child tests
-			rvrList = nil
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
 			if rvr != nil {
 				Expect(cl.Create(ctx, rvr)).To(Succeed(), "should create base RVR")
 			}
-			// rvrList and otherRVR are created only in child tests when needed
+			// otherRVR is created only in child tests when needed
 		})
 
 		DescribeTableSubtree("when rvr has",
@@ -157,8 +152,15 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			When("multiple RVRs exist", func() {
+				var rvrList []v1alpha3.ReplicatedVolumeReplica
+
+				JustBeforeEach(func(ctx SpecContext) {
+					for i := range rvrList {
+						Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
+					}
+				})
+
 				When("assigning nodeID sequentially", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
 
 					BeforeEach(func() {
 						rvrList = make([]v1alpha3.ReplicatedVolumeReplica, 6)
@@ -190,12 +192,6 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "volume-1",
 								NodeName:             "node-6",
 							},
-						}
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
 						}
 					})
 
@@ -243,9 +239,6 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR for volume-1")
-						}
 						Expect(cl.Create(ctx, otherRVR)).To(Succeed(), "should create RVR for volume-2")
 					})
 
@@ -254,15 +247,12 @@ var _ = Describe("Reconciler", func() {
 						Expect(rec.Reconcile(ctx, RequestFor(otherRVR))).ToNot(Requeue(), "should not requeue after successful assignment")
 
 						By("Verifying volume-2 is independent: should get nodeID MinNodeID")
-						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRVR), updatedRVR)).To(Succeed(), "should get updated RVR")
-						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "volume-2 should get nodeID MinNodeID independently of volume-1")
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRVR), otherRVR)).To(Succeed(), "should get updated RVR")
+						Expect(otherRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", rvrstatusconfignodeid.MinNodeID))), "volume-2 should get nodeID MinNodeID independently of volume-1")
 					})
 				})
 
 				When("filling gaps in nodeIDs", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
-
 					BeforeEach(func() {
 						nodeID0 := uint(rvrstatusconfignodeid.MinNodeID)
 						nodeID2 := uint(rvrstatusconfignodeid.MinNodeID + 2)
@@ -314,12 +304,6 @@ var _ = Describe("Reconciler", func() {
 						}
 					})
 
-					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
-						}
-					})
-
 					It("fills gaps in nodeIDs", func(ctx SpecContext) {
 						By("Reconciling replica without nodeID to test gap filling")
 						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[3]))).ToNot(Requeue(), "should not requeue after successful assignment")
@@ -332,7 +316,6 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("nodeID already assigned", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
 					var testNodeID uint
 
 					BeforeEach(func() {
@@ -350,12 +333,6 @@ var _ = Describe("Reconciler", func() {
 									},
 								},
 							},
-						}
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR with nodeID")
 						}
 					})
 
@@ -378,8 +355,6 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("ignoring invalid nodeID", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
-
 					BeforeEach(func() {
 						invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
 						rvrList = []v1alpha3.ReplicatedVolumeReplica{
@@ -405,12 +380,6 @@ var _ = Describe("Reconciler", func() {
 						}
 					})
 
-					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
-						}
-					})
-
 					It("ignores nodeID outside valid range", func(ctx SpecContext) {
 						By("Reconciling replica without nodeID")
 						Expect(rec.Reconcile(ctx, RequestFor(&rvrList[1]))).ToNot(Requeue(), "should not requeue after successful assignment")
@@ -423,8 +392,6 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("reassigning invalid nodeID", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
-
 					BeforeEach(func() {
 						invalidNodeID := uint(rvrstatusconfignodeid.MaxNodeID + 1)
 						rvrList = []v1alpha3.ReplicatedVolumeReplica{
@@ -440,12 +407,6 @@ var _ = Describe("Reconciler", func() {
 									},
 								},
 							},
-						}
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR with invalid nodeID")
 						}
 					})
 
@@ -469,8 +430,6 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("resetting invalid nodeID", func() {
-					var rvrList []v1alpha3.ReplicatedVolumeReplica
-
 					BeforeEach(func() {
 						// Create 6 replicas with valid nodeIDs (MinNodeID+1 to MinNodeID+6), leaving nodeID MaxNodeID free
 						rvrList = make([]v1alpha3.ReplicatedVolumeReplica, 7)
@@ -508,9 +467,6 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					JustBeforeEach(func(ctx SpecContext) {
-						for i := range rvrList {
-							Expect(cl.Create(ctx, &rvrList[i])).To(Succeed(), "should create RVR successfully")
-						}
 						By("Ensuring parent rvr-1 has nodeID MinNodeID")
 						Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue(), "should assign nodeID to parent RVR")
 						By("Reconciling all created RVRs to ensure they have their nodeIDs")
@@ -534,6 +490,7 @@ var _ = Describe("Reconciler", func() {
 				When("List fails", func() {
 					listError := errors.New("failed to list replicas")
 					BeforeEach(func() {
+						rvrList = nil // Reset rvrList for this test
 						clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 							List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 								if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
@@ -545,7 +502,6 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("should fail if listing replicas failed", func(ctx SpecContext) {
-						By("Reconciling with List interceptor that returns error")
 						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(listError), "should return error when List fails")
 					})
 				})
@@ -632,7 +588,6 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
-				By("Reconciling with Patch interceptor that returns error")
 				Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(patchError), "should return error when Patch fails")
 			})
 		})

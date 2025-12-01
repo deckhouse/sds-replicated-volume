@@ -106,14 +106,14 @@ func (r *Reconciler) Reconcile(
 		// This would make the problem visible in RVR status conditions, not just in controller logs.
 		// However, for now we keep it simple and only log the error.
 		// The error will be logged by controller-runtime and visible in controller logs.
-		log.Error(nil, "too many replicas for volume", "volume", rvr.Spec.ReplicatedVolumeName, "replicas", totalReplicas, "max", MaxNodeID+1)
-
-		return reconcile.Result{}, e.ErrInvalidClusterf(
+		err := e.ErrInvalidClusterf(
 			"too many replicas for volume %s: %d (maximum is %d)",
 			rvr.Spec.ReplicatedVolumeName,
 			totalReplicas,
 			MaxNodeID+1,
 		)
+		log.Error(err, "too many replicas for volume", "volume", rvr.Spec.ReplicatedVolumeName, "replicas", totalReplicas, "max", MaxNodeID+1)
+		return reconcile.Result{}, err
 	}
 
 	// Find available nodeID
@@ -131,13 +131,13 @@ func (r *Reconciler) Reconcile(
 		// This would make the problem visible in RVR status conditions, not just in controller logs.
 		// However, for now we keep it simple and only log the error.
 		// The error will be logged by controller-runtime and visible in controller logs.
-		log.Error(nil, "no available nodeID for volume", "volume", rvr.Spec.ReplicatedVolumeName, "maxNodeIDs", MaxNodeID+1)
-
-		return reconcile.Result{}, e.ErrInvalidClusterf(
+		err := e.ErrInvalidClusterf(
 			"no available nodeID for volume %s (all %d nodeIDs are used)",
 			rvr.Spec.ReplicatedVolumeName,
 			MaxNodeID+1,
 		)
+		log.Error(err, "no available nodeID for volume", "volume", rvr.Spec.ReplicatedVolumeName, "maxNodeIDs", MaxNodeID+1)
+		return reconcile.Result{}, err
 	}
 
 	// Update RVR status with nodeID using simple Patch
