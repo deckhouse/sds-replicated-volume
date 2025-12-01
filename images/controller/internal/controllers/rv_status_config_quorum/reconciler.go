@@ -18,34 +18,10 @@ import (
 // QuorumReconfFinalizer is the name of the finalizer used to manage quorum reconfiguration.
 const QuorumReconfFinalizer = "quorum-reconf"
 
-// CalculateQuorum calculates quorum and quorum minimum redundancy values
-// based on the number of diskful and total replicas.
-func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
-	if diskfulCount > 1 {
-		quorum = byte(max(2, all/2+1))
-		qmr = byte(max(2, diskfulCount/2+1))
-	}
-	return
-}
-
 func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
 	return conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
 		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady) &&
 		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
-}
-
-// countDiskfulAndDisklessReplicas returns the number of diskful and diskless replicas
-// among the provided ReplicatedVolumeReplica list.
-func countDiskfulAndDisklessReplicas(list *v1alpha3.ReplicatedVolumeReplicaList) (diskful, all int) {
-	all = len(list.Items)
-	for _, rvr := range list.Items {
-		// Type can be "Diskful", "Access", or "TieBreaker"
-		// Diskful replicas have Type == "Diskful", others are diskless
-		if rvr.Spec.Type == "Diskful" {
-			diskful++
-		}
-	}
-	return
 }
 
 type Reconciler struct {
@@ -100,9 +76,6 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 		return err
 	}
 
-	diskfulCount, all := countDiskfulAndDisklessReplicas(&rvrList)
-	log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
-
 	cnt, err := r.setFinalizers(ctx, &rvrList)
 	log.Info("added finalizers to rvr", "finalizer", QuorumReconfFinalizer, "count", cnt)
 	if err != nil {
@@ -110,7 +83,8 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 		return err
 	}
 
-	if err := r.quorumPatch(ctx, rv, diskfulCount, all); err != nil {
+	quorum, qmr := r.calculateQuorum(&rvrList)
+	if err := r.quorumPatch(ctx, rv, quorum, qmr); err != nil {
 		log.Error(err, "unable to fetch ReplicatedVolume")
 		return client.IgnoreNotFound(err)
 	}
@@ -122,6 +96,26 @@ func (r *Reconciler) recalculateQuorum(ctx *context.Context, rv *v1alpha3.Replic
 		return err
 	}
 	return nil
+}
+
+// CalculateQuorum calculates quorum and quorum minimum redundancy values
+// based on the number of diskful and total replicas.
+func (r *Reconciler) calculateQuorum(rvrList *v1alpha3.ReplicatedVolumeReplicaList) (quorum, qmr byte) {
+	all := len(rvrList.Items)
+	var diskfulCount int
+	for _, rvr := range rvrList.Items {
+		// Type can be "Diskful", "Access", or "TieBreaker"
+		// Diskful replicas have Type == "Diskful", others are diskless
+		if rvr.Spec.Type == "Diskful" {
+			diskfulCount++
+		}
+	}
+	r.log.Info("calculated replica counts", "diskful", diskfulCount, "all", all)
+	if diskfulCount > 1 {
+		quorum = byte(max(2, all/2+1))
+		qmr = byte(max(2, diskfulCount/2+1))
+	}
+	return
 }
 
 func (r *Reconciler) getRvrList(ctx *context.Context, rv *v1alpha3.ReplicatedVolume) (v1alpha3.ReplicatedVolumeReplicaList, error) {
@@ -190,10 +184,9 @@ func (r *Reconciler) unsetFinalizers(
 func (r *Reconciler) quorumPatch(
 	ctx *context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	diskfulCount,
-	all int,
+	quorum,
+	qmr byte,
 ) error {
-	quorum, qmr := CalculateQuorum(diskfulCount, all)
 
 	return api.PatchStatusWithConflictRetry(*ctx, r.cl, rv, func(rv *v1alpha3.ReplicatedVolume) error {
 		// ensure status structs are initialized before writing into them
