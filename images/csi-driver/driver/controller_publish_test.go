@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )

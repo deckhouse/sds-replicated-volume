@@ -36,6 +36,7 @@ __pycache__/
 # dev
 hack.sh
 **/Dockerfile-dev
+images/**/Makefile
 .secret
 
 # test data
