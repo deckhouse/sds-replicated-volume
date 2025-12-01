@@ -17,71 +17,20 @@ limitations under the License.
 package rvrstatusconfigaddress
 
 import (
-	"context"
-	"log/slog"
-
-	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
 )
 
 func BuildController(mgr manager.Manager) error {
 	var rec = &Reconciler{
 		cl:  mgr.GetClient(),
-		rdr: mgr.GetAPIReader(),
-		sch: mgr.GetScheme(),
-		log: slog.Default(),
+		log: mgr.GetLogger(),
 	}
 
-	type TReq = Request
-	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
-
-	err := builder.TypedControllerManagedBy[TReq](mgr).
+	return builder.ControllerManagedBy(mgr).
 		Named("rvr_status_config_address_controller").
-		Watches(
-			&v1alpha3.ReplicatedVolume{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				CreateFunc: func(
-					_ context.Context,
-					_ event.TypedCreateEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				UpdateFunc: func(
-					_ context.Context,
-					_ event.TypedUpdateEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				DeleteFunc: func(
-					_ context.Context,
-					_ event.TypedDeleteEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				GenericFunc: func(
-					_ context.Context,
-					_ event.TypedGenericEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-			}).
+		For(&v1alpha3.ReplicatedVolume{}).
 		Complete(rec)
-
-	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
-	}
-
-	return nil
 }
