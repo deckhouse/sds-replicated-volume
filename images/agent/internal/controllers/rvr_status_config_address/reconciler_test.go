@@ -202,7 +202,7 @@ var _ = Describe("Reconciler", func() {
 	When("RVRs created", func() {
 		var (
 			rvList           []v1alpha3.ReplicatedVolume
-			thisNodeRVRList  []v1alpha3.ReplicatedVolumeReplica
+			rvrList          []v1alpha3.ReplicatedVolumeReplica
 			otherNodeRVRList []v1alpha3.ReplicatedVolumeReplica
 		)
 
@@ -210,7 +210,7 @@ var _ = Describe("Reconciler", func() {
 			const count = 3
 
 			rvList = make([]v1alpha3.ReplicatedVolume, count)
-			thisNodeRVRList = make([]v1alpha3.ReplicatedVolumeReplica, count)
+			rvrList = make([]v1alpha3.ReplicatedVolumeReplica, count)
 			otherNodeRVRList = make([]v1alpha3.ReplicatedVolumeReplica, count)
 
 			for i := range count {
@@ -218,11 +218,18 @@ var _ = Describe("Reconciler", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("test-rv-%d", i+1)},
 				}
 
-				thisNodeRVRList[i] = v1alpha3.ReplicatedVolumeReplica{
+				rvrList[i] = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-this-node", i+1)},
+					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha3.DRBD{
+							Config: &v1alpha3.DRBDConfig{
+								Address: &v1alpha3.Address{},
+							},
+						},
+					},
 				}
-				thisNodeRVRList[i].Spec.NodeName = node.Name
-				Expect(thisNodeRVRList[i].SetReplicatedVolume(&rvList[i], s)).To(Succeed())
+				rvrList[i].Spec.NodeName = node.Name
+				Expect(rvrList[i].SetReplicatedVolume(&rvList[i], s)).To(Succeed())
 
 				otherNodeRVRList[i] = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-other-node", i+1)},
@@ -236,24 +243,11 @@ var _ = Describe("Reconciler", func() {
 			for i := range rvList {
 				Expect(cl.Create(ctx, &rvList[i])).To(Succeed())
 			}
-			for i := range thisNodeRVRList {
-				Expect(cl.Create(ctx, &thisNodeRVRList[i])).To(Succeed())
+			for i := range rvrList {
+				Expect(cl.Create(ctx, &rvrList[i])).To(Succeed())
 			}
 			for i := range otherNodeRVRList {
 				Expect(cl.Create(ctx, &otherNodeRVRList[i])).To(Succeed())
-			}
-		})
-
-		It("should configure addresses for RVRs on this node", func(ctx SpecContext) {
-			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
-
-			// Verify all RVRs on this node were updated
-			for i := range thisNodeRVRList {
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[i]), &thisNodeRVRList[i])).To(Succeed())
-				Expect(thisNodeRVRList[i]).To(SatisfyAll(
-					HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")),
-					HaveField("Status.DRBD.Config.Address.Port", BeNumerically(">=", uint(7000))),
-				))
 			}
 		})
 
@@ -267,59 +261,114 @@ var _ = Describe("Reconciler", func() {
 			Expect(otherNodeRVRList).To(HaveEach(HaveField("Status", BeNil())))
 		})
 
+		When("other node RVRs have ports", func() {
+			BeforeEach(func() {
+				// Set same ports on other node RVRs as will be assigned to this node RVRs
+				for i := range otherNodeRVRList {
+					otherNodeRVRList[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha3.DRBD{
+							Config: &v1alpha3.DRBDConfig{
+								Address: &v1alpha3.Address{
+									IPv4: "192.168.1.99",
+									Port: uint(7000 + i), // Same ports as will be assigned
+								},
+							},
+						},
+					}
+				}
+			})
+
+			It("should not interfere with RVRs on other nodes", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+
+				// Verify RVRs on this node got unique ports (should skip used ports from other nodes)
+				for i := range rvrList {
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
+				}
+				Expect(rvrList).To(SatisfyAll(
+					HaveUniquePorts(),
+					HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
+						BeNumerically(">=", 7000),
+						BeNumerically("<=", 9000),
+					)))))
+
+				// Verify RVRs on other nodes were not modified
+				for i := range otherNodeRVRList {
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &otherNodeRVRList[i])).To(Succeed())
+					Expect(otherNodeRVRList[i].Status.DRBD.Config.Address.Port).To(Equal(uint(7000 + i)))
+				}
+			})
+		})
+
 		It("should configure address with first available port", func(ctx SpecContext) {
 			// Use only first RVR for this test
-			originalList := thisNodeRVRList
-			thisNodeRVRList = thisNodeRVRList[:1]
+			originalList := rvrList
+			rvrList = rvrList[:1]
 			rvList = rvList[:1]
 
 			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
 			// Verify address was configured
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[0]), &thisNodeRVRList[0])).To(Succeed())
-			Expect(thisNodeRVRList[0]).To(SatisfyAll(
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), &rvrList[0])).To(Succeed())
+			Expect(rvrList[0]).To(SatisfyAll(
 				HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")),
 				HaveField("Status.DRBD.Config.Address.Port", Equal(uint(7000))),
 			))
 
 			// Verify condition was set
-			Expect(thisNodeRVRList[0]).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
+			Expect(rvrList[0]).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
 				HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
 				HaveField("Status", Equal(metav1.ConditionTrue)),
 				HaveField("Reason", Equal(v1alpha3.ReasonAddressConfigurationSucceeded)),
 			))))
 
 			// Restore for other tests
-			thisNodeRVRList = originalList
+			rvrList = originalList
 		})
 
-		It("should assign sequential ports", func(ctx SpecContext) {
-			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+		DescribeTableSubtree("should assign unique ports",
+			Entry("with no status", func() {
+				rvrList[0].Status = nil
+			}),
+			Entry("with no DRBD", func() {
+				rvrList[0].Status.DRBD = nil
+			}),
+			Entry("with no Config", func() {
+				rvrList[0].Status.DRBD.Config = nil
+			}),
+			Entry("with no Address", func() {
+				rvrList[0].Status.DRBD.Config.Address = nil
+			}),
+			func(beforeEach func()) {
+				BeforeEach(func() {
+					rvrList = rvrList[:1]
+					beforeEach()
+				})
 
-			// Verify all RVRs got unique ports in valid range
-			for i := range thisNodeRVRList {
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[i]), &thisNodeRVRList[i])).To(Succeed())
-			}
+				It("should reconcile successfully and assign unique ports", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-			Expect(thisNodeRVRList).To(SatisfyAll(
-				HaveUniquePorts(),
-				HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
-					BeNumerically(">=", 7000),
-					BeNumerically("<=", 9000),
-				)))))
-		})
+					// Verify all RVRs got unique ports in valid range
+					for i := range rvrList {
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
+					}
+
+					Expect(rvrList).To(SatisfyAll(
+						HaveUniquePorts(),
+						HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
+							BeNumerically(">=", 7000),
+							BeNumerically("<=", 9000),
+						)))))
+				})
+			})
 
 		When("RVR has wrong IP address", func() {
 			BeforeEach(func() {
-				thisNodeRVRList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{
-						Config: &v1alpha3.DRBDConfig{
-							Address: &v1alpha3.Address{
-								IPv4: "192.168.1.99", // Wrong IP
-								Port: 7500,
-							},
-						},
-					},
+				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
+						IPv4: "192.168.1.99", // Wrong IP
+						Port: 7500,
+					}}},
 				}
 			})
 
@@ -327,57 +376,47 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
 				// Verify all RVRs have address updated to node IP
-				for i := range thisNodeRVRList {
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[i]), &thisNodeRVRList[i])).To(Succeed())
-					Expect(thisNodeRVRList[i].Status.DRBD.Config.Address.IPv4).To(Equal("192.168.1.10"))
+				for i := range rvrList {
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
 				}
+
+				Expect(rvrList).To(HaveEach(HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10"))))
 			})
 		})
 
-		It("should set condition to false with NoFreePortAvailable reason when port range is exhausted", func(ctx SpecContext) {
-			// Update ConfigMap with very small port range
-			smallRangeCM := configMap.DeepCopy()
-			smallRangeCM.Data["drbdMinPort"] = "7000"
-			smallRangeCM.Data["drbdMaxPort"] = "7000" // Only one port available
-			smallRangeCM.ResourceVersion = ""
-			Expect(cl.Delete(ctx, configMap)).To(Succeed())
-			Expect(cl.Create(ctx, smallRangeCM)).To(Succeed())
+		When("port range is exhausted", func() {
+			BeforeEach(func() {
+				// Update ConfigMap with very small port range
+				configMap.Data["drbdMinPort"] = "7000"
+				configMap.Data["drbdMaxPort"] = "7000" // Only one port available
 
-			// Set first RVR to use the only available port
-			thisNodeRVRList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-				DRBD: &v1alpha3.DRBD{
-					Config: &v1alpha3.DRBDConfig{
-						Address: &v1alpha3.Address{
-							IPv4: "192.168.1.10",
-							Port: 7000, // Uses the only available port
+				rvrList = rvrList[:2]
+				// Set first RVR to use the only available port
+				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha3.DRBD{
+						Config: &v1alpha3.DRBDConfig{
+							Address: &v1alpha3.Address{
+								IPv4: "192.168.1.10",
+								Port: 7000, // Uses the only available port
+							},
 						},
 					},
-				},
-			}
-			Expect(cl.Update(ctx, &thisNodeRVRList[0])).To(Succeed())
+				}
+			})
 
-			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+			It("should set condition to false with NoFreePortAvailable reason", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-			// Verify second RVR has error condition
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[1]), &thisNodeRVRList[1])).To(Succeed())
-			Expect(thisNodeRVRList[1].Status.Conditions).To(ContainElement(SatisfyAll(
-				HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
-				HaveField("Status", Equal(metav1.ConditionFalse)),
-				HaveField("Reason", Equal(v1alpha3.ReasonNoFreePortAvailable)),
-			)))
+				// Verify second RVR has error condition
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), &rvrList[1])).To(Succeed())
+				Expect(rvrList[1].Status.Conditions).To(ContainElement(SatisfyAll(
+					HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
+					HaveField("Status", Equal(metav1.ConditionFalse)),
+					HaveField("Reason", Equal(v1alpha3.ReasonNoFreePortAvailable)),
+				)))
+			})
 		})
 
-		It("should create missing status fields", func(ctx SpecContext) {
-			// Remove status from first RVR
-			thisNodeRVRList[0].Status = nil
-			Expect(cl.Update(ctx, &thisNodeRVRList[0])).To(Succeed())
-
-			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
-
-			// Verify status structure was created
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&thisNodeRVRList[0]), &thisNodeRVRList[0])).To(Succeed())
-			Expect(thisNodeRVRList[0].Status.DRBD.Config.Address).NotTo(BeNil())
-		})
 	})
 })
 
