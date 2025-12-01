@@ -49,6 +49,8 @@
   - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
+  - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
 
 # Основные положения
 
@@ -269,15 +271,25 @@ TODO
 
 и "*.res" конфиг в контейнере на диске.
 
-Желаемая конфигурация определяется типом: `rvr.spec.type`.
+Желаемая конфигурация определяется типом: `rvr.spec.type`. Для каждого из типов,
+есть набор обязательных полей, задания которых нужно дожидаться (не менять конфиг,
+пока они не заданы).
+ - `Diskful`
+   - Дождаться полей
+ - `Access`
+ - `TieBreaker`
 
- - `rvr.spec.type`
+`rvr.status.drbd.errors.lastAdjustmentError == nil`
 
-Дождаться полей
-
-
-
-
+- пишем res
+- если мд нет
+  - создаем
+- проверяем необходимость первоначальной синхронизации (AND)
+  - peersInitialized && len(peers)==0
+  - если status != UpToDate
+  - `rvr.status.drbd.initialSycCompleted!=true`
+- если первоначальная синхронизация нужна, делаем `drdbadm primary --force`
+- `rvr.status.drbd.initialSycCompleted=true`
 
 
 Контроллирует DRBD конфиг на ноде для всех rvr (в том числе удалённых, с
@@ -696,3 +708,65 @@ if M > 1 {
 
 ### Вывод 
   - delete rvr
+
+## `rvr-status-conditions-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 2]
+
+### Цель
+
+Поддерживать вычисляемые поля для отображения пользователю.
+
+- `rvr.status.conditions[type=<>]`
+  - `Quorum`
+    - `status`
+      - `True`
+        - `rvr.status.drbd.status.devices[0].quorum=true`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+  - `InSync`
+    - `status`
+      - `True`
+        - `rvr.status.drbd.status.devices[0].diskState=UpToDate`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+  - `Scheduled` - управляется `rvr-scheduling-controller`, не менять
+  - `Configured`
+    - `status`
+      - `True` (AND)
+        - если все поля в `rvr.status.drbd.actual.*` равны соответствующим
+      полям-источникам в `rv.status.drbd.config` или `rvr.status.drbd.config`
+        - `rvr.status.drbd.errors.lastAdjustmentError == nil`
+        - `rvr.status.drbd.errors.lastPromotionError == nil`
+        - `rvr.status.drbd.errors.lastResizeError == nil`
+        - `rvr.status.drbd.errors.last<...>Error == nil`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+        - `message` - сформировать из `rvr.status.drbd.errors.last<...>Error`
+  - `Ready`
+    - `status`
+      - `True` (AND)
+        - `Quorum=True`
+        - `InSync!=False`
+        - `Scheduled=True`
+        - `Configured=True`
+      - `False` - инчае
+        - `reason` - в соответствии с причиной
+  - `VolumeAccessReady` - существует только для `Access` и `Diskful` реплик
+    - `status`
+      - `True` (AND)
+        - `rvr.status.drbd.status.role==Primary`
+        - нет проблем с I/O (см. константы `ReasonDiskIOSuspended<...>`)
+        - `Quorum=True`
+      - `False` - иначе
+        - `reason`
+          - `NotPublished` - если не Primary
+          - `IOSuspendedByQuorum`
+          - `IOSuspendedBy<...>` - (см. константы `ReasonDiskIOSuspended<...>`)
+          - `IOSuspendedBySnapshotter` - добавить константу на будущее
+
+TODO: коннекты между разными узлами
+TODO: что ещё нужно для UI (%sync?)?
+
+### Вывод 
+  - `rvr.status.conditions`
