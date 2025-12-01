@@ -18,33 +18,19 @@ package rvrstatusconfigaddress
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 func BuildController(mgr manager.Manager) error {
-	cfg, err := env.GetConfig()
-	if err != nil {
-		return err
+	var rec = &Reconciler{
+		cl:  mgr.GetClient(),
+		log: mgr.GetLogger(),
 	}
 
-	const controllerName = "rvr-status-config-address-controller"
-
-	log := mgr.GetLogger().WithName(controllerName)
-	var rec = NewReconciler(mgr.GetClient(), log, cfg)
-
 	return builder.ControllerManagedBy(mgr).
-		Named(controllerName).
-		// We reconciling nodes as single unit to make sure we will not assign the same port because of race condition.
-		// We are not watching node updates because internalIP we are using is not expected to change
-		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
-		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName(), log)),
-			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
-		).
+		Named("rvr_status_config_address_controller").
+		For(&v1alpha3.ReplicatedVolume{}).
 		Complete(rec)
 }
