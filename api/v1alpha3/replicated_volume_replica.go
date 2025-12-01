@@ -42,6 +42,7 @@ import (
 // +kubebuilder:printcolumn:name="DevicesReady",type=string,JSONPath=".status.conditions[?(@.type=='DevicesReady')].status"
 // +kubebuilder:printcolumn:name="DiskIOSuspended",type=string,JSONPath=".status.conditions[?(@.type=='DiskIOSuspended')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 0 || (size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 1 && self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))[0].name == self.spec.replicatedVolumeName)",message="If ReplicatedVolumeReplica has any ReplicatedVolume ownerReference, there must be exactly one and spec.replicatedVolumeName must equal the ownerReference name"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
