@@ -22,6 +22,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // +k8s:deepcopy-gen=true
@@ -43,7 +45,7 @@ import (
 // +kubebuilder:printcolumn:name="DevicesReady",type=string,JSONPath=".status.conditions[?(@.type=='DevicesReady')].status"
 // +kubebuilder:printcolumn:name="DiskIOSuspended",type=string,JSONPath=".status.conditions[?(@.type=='DiskIOSuspended')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 0 || (size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 1 && self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))[0].name == self.spec.replicatedVolumeName)",message="If ReplicatedVolumeReplica has any ReplicatedVolume ownerReference, there must be exactly one and spec.replicatedVolumeName must equal the ownerReference name"
+// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+')).all(o, o.controller == true && o.name == self.spec.replicatedVolumeName)",message="All ReplicatedVolume ownerReferences must be ControllerReferences (controller == true) and their name must equal spec.replicatedVolumeName"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -57,6 +59,12 @@ type ReplicatedVolumeReplica struct {
 
 func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
 	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
+}
+
+// SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.
+func (rvr *ReplicatedVolumeReplica) SetReplicatedVolume(rv *ReplicatedVolume, scheme *runtime.Scheme) error {
+	rvr.Spec.ReplicatedVolumeName = rv.Name
+	return controllerutil.SetControllerReference(rv, rvr, scheme)
 }
 
 // +k8s:deepcopy-gen=true

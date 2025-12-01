@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -48,12 +47,12 @@ func BuildController(mgr manager.Manager, nodeName string) error {
 		For(
 			&corev1.Node{},
 			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				if node, ok := obj.(*corev1.Node); !ok {
-					return node.Name == nodeName
+				node, ok := obj.(*corev1.Node)
+				if !ok {
+					log.WithName("For").Error(nil, "Can't cast Node to *corev1.Node")
+					return false
 				}
-
-				log.WithName("For").Error(nil, "Can't cast Node to *corev1.Node")
-				return false
+				return node.Name == nodeName
 			}))).
 		Watches(
 			&corev1.ConfigMap{},
@@ -141,15 +140,12 @@ func BuildController(mgr manager.Manager, nodeName string) error {
 }
 
 // getInternalIP extracts the InternalIP address from a Node.
-// Returns apierrors.NewNotFound if InternalIP is not found.
+// Returns ErrNodeMissingInternalIP if InternalIP is not found.
 func getInternalIP(node *corev1.Node) (string, error) {
 	for _, addr := range node.Status.Addresses {
 		if addr.Type == corev1.NodeInternalIP {
 			return addr.Address, nil
 		}
 	}
-	return "", apierrors.NewNotFound(
-		corev1.Resource("nodes"),
-		fmt.Sprintf("%s: InternalIP", node.Name),
-	)
+	return "", fmt.Errorf("%w: %s", ErrNodeMissingInternalIP, node.Name)
 }
