@@ -67,8 +67,3 @@ func Requeue() gomegatypes.GomegaMatcher {
 func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
-
-// Enqueue checks that handler returns a single request.
-func Enqueue(request reconcile.Request) gomegatypes.GomegaMatcher {
-	return ContainElement(Equal(request))
-}

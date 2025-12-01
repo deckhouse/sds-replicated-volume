@@ -49,6 +49,14 @@ func IsPortValid(c DRBDConfig, port uint) bool {
 
 var _ reconcile.Reconciler = &Reconciler{}
 
+// NewReconciler creates a new Reconciler.
+func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+	return &Reconciler{
+		cl:  cl,
+		log: log,
+	}
+}
+
 // Reconcile reconciles a Node to configure addresses for all ReplicatedVolumeReplicas on that node.
 // We reconcile the Node (not individual RVRs) to avoid race conditions when finding free ports.
 // This approach allows us to process all RVRs on a node atomically in a single reconciliation loop.
@@ -75,7 +83,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	settings, err := cluster.GetSettings(ctx, r.cl)
 	if err != nil {
 		log.Error(err, "Can't get DRBD port settings")
-		return reconcile.Result{}, fmt.Errorf("getting DRBD port settings: %w", err)
+		return reconcile.Result{}, fmt.Errorf("%w: %w", ErrConfigSettings, err)
 	}
 
 	// List all RVRs on this node that need address configuration
@@ -137,6 +145,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 				log.Error(err, "Failed to patch status")
 				return reconcile.Result{}, err
 			}
+			continue
 		}
 
 		// Set address and condition
