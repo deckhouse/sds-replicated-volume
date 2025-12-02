@@ -113,12 +113,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	deletedRvrMap := getDeletedReplicas(totalRvrMap)
+	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
 	deletedNumberOfReplicas := len(deletedRvrMap)
+	nonDeletedNumberOfReplicas := len(nonDeletedRvrMap)
 	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", deletedNumberOfReplicas)
-
-	// Count non-deleted ReplicatedVolumeReplicas
-	nonDeletedNumberOfReplicas := totalNumberOfReplicas - deletedNumberOfReplicas
 	log.V(4).Info("Counted non-deleted ReplicatedVolumeReplicas", "count", nonDeletedNumberOfReplicas)
 
 	if nonDeletedNumberOfReplicas == 0 {
@@ -143,7 +141,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Need to wait until RVR becomes Ready.
 	if nonDeletedNumberOfReplicas == 1 {
-		for _, rvr := range deletedRvrMap {
+		for _, rvr := range nonDeletedRvrMap {
 			if !isRvrReady(rvr) {
 				log.V(4).Info("RVR is not ready yet, waiting", "rvr", rvr.Name)
 				return reconcile.Result{}, nil
@@ -257,15 +255,20 @@ func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, r
 	return rvrMap, nil
 }
 
-// Returns a map with RVR name as key and RVR object as value. Returns empty map if no deleted RVRs are found.
-func getDeletedReplicas(totalRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) map[string]*v1alpha3.ReplicatedVolumeReplica {
-	rvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+// splitReplicasByDeletionStatus splits replicas into two maps: one with replicas that have DeletionTimestamp,
+// and another with replicas that don't have DeletionTimestamp.
+// Returns two maps with RVR name as key and RVR object as value. Returns empty maps if no RVRs are found.
+func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) (deletedRvrMap, nonDeletedRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) {
+	deletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+	nonDeletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica)
 	for _, rvr := range totalRvrMap {
 		if rvr.DeletionTimestamp != nil {
-			rvrMap[rvr.Name] = rvr
+			deletedRvrMap[rvr.Name] = rvr
+		} else {
+			nonDeletedRvrMap[rvr.Name] = rvr
 		}
 	}
-	return rvrMap
+	return deletedRvrMap, nonDeletedRvrMap
 }
 
 // isRvrReady checks if the ReplicatedVolumeReplica has Ready condition set to True.
