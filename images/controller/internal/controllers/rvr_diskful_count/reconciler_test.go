@@ -77,8 +77,7 @@ var _ = Describe("Reconciler", func() {
 	var rec *rvrdiskfulcount.Reconciler
 	var ctx context.Context
 
-	BeforeEach(func() {
-		ctx = context.Background()
+	BeforeEach(func(ctx SpecContext) {
 		cl = newFakeClient()
 		logger := zap.New(zap.UseDevMode(true))
 		scheme := runtime.NewScheme()
