@@ -236,16 +236,20 @@ var _ = Describe("Handlers", func() {
 			}
 		})
 
+		It("should have Update field not nil", func() {
+			Expect(pred.UpdateFunc).ToNot(BeNil())
+		})
+
 		It("should have Create field nil", func() {
-			Expect(pred.Create).To(BeNil())
+			Expect(pred.CreateFunc).To(BeNil())
 		})
 
 		It("should have Delete field nil", func() {
-			Expect(pred.Delete).To(BeNil())
+			Expect(pred.DeleteFunc).To(BeNil())
 		})
 
 		It("should have Generic field nil", func() {
-			Expect(pred.Generic).To(BeNil())
+			Expect(pred.GenericFunc).To(BeNil())
 		})
 
 		DescribeTableSubtree("should return true",
