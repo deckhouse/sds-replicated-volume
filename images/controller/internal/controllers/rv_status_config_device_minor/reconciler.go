@@ -41,15 +41,16 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if deviceMinor is already set
+	// Check if deviceMinor is already set - early exit optimization
 	// Note: Since DeviceMinor is uint (not *uint), we can't check for nil.
 	// We consider deviceMinor set if Config exists (even if value is 0, as 0 is a valid deviceMinor).
-	// The controller will only assign deviceMinor if Config doesn't exist or is nil.
+	// If deviceMinor is already assigned, we can skip List operation entirely.
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
-		// Check if this is the same RV we're processing (to avoid skipping our own RV)
-		// If Config exists, deviceMinor is considered set (even if 0)
-		// We'll check if it's actually assigned by looking at all RVs
-		log.V(1).Info("Config exists, checking if deviceMinor needs assignment")
+		deviceMinor := rv.Status.DRBD.Config.DeviceMinor
+		if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
+			log.V(1).Info("deviceMinor already assigned", "deviceMinor", deviceMinor)
+			return reconcile.Result{}, nil
+		}
 	}
 
 	// Get all RVs to collect used deviceMinors
@@ -59,27 +60,18 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Collect used deviceMinors
-	// Note: Since DeviceMinor is uint (not *uint), we consider it set if Config exists.
-	// We need to check if the current RV already has a deviceMinor assigned.
+	// Note: Race condition handling: If two reconciles run simultaneously and both try to assign
+	// the same deviceMinor, one will get a conflict (409) on Patch. The next reconciliation
+	// will recalculate usedDeviceMinors and assign a different value. This is handled by
+	// returning the error from Patch and letting the reconciliation retry mechanism handle it.
 	usedDeviceMinors := make(map[uint]struct{})
-	currentRVHasDeviceMinor := false
 	for _, item := range rvList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
 			deviceMinor := item.Status.DRBD.Config.DeviceMinor
 			if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
 				usedDeviceMinors[deviceMinor] = struct{}{}
-				// Check if this is the RV we're processing
-				if item.Name == rv.Name {
-					currentRVHasDeviceMinor = true
-				}
 			}
 		}
-	}
-
-	// If current RV already has deviceMinor assigned, skip
-	if currentRVHasDeviceMinor {
-		log.V(1).Info("deviceMinor already assigned", "deviceMinor", rv.Status.DRBD.Config.DeviceMinor)
-		return reconcile.Result{}, nil
 	}
 
 	// Find available deviceMinor (minimum free value)
@@ -92,7 +84,8 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Update RV status with deviceMinor
-	// If there's a conflict (409), return error - next reconciliation will solve it
+	// Note: If there's a conflict (409) due to race condition, return error - next reconciliation will solve it
+	// by recalculating usedDeviceMinors and assigning a different value.
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()
 	if changedRV.Status == nil {

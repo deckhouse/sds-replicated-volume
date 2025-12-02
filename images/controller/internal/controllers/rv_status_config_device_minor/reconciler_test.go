@@ -23,8 +23,10 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -260,9 +262,7 @@ var _ = Describe("Reconciler", func() {
 
 			It("does not reassign deviceMinor and is idempotent", func(ctx SpecContext) {
 				By("First reconciliation: should not reassign existing deviceMinor")
-				result1, err1 := rec.Reconcile(ctx, RequestFor(rv))
-				Expect(err1).NotTo(HaveOccurred(), "reconciliation should succeed")
-				Expect(result1).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
 
 				By("Verifying deviceMinor remains unchanged after first reconciliation")
 				updatedRV1 := &v1alpha3.ReplicatedVolume{}
@@ -270,9 +270,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(updatedRV1).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 42)), "deviceMinor should remain 42, not be reassigned")
 
 				By("Second reconciliation: should still not reassign (idempotent)")
-				result2, err2 := rec.Reconcile(ctx, RequestFor(rv))
-				Expect(err2).NotTo(HaveOccurred(), "reconciliation should succeed")
-				Expect(result2).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
 
 				By("Verifying deviceMinor hasn't changed after both reconciliations")
 				updatedRV2 := &v1alpha3.ReplicatedVolume{}
@@ -282,26 +280,79 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	When("Patch fails", func() {
+	When("Patch fails with non-NotFound error", func() {
+		var rv *v1alpha3.ReplicatedVolume
+		patchError := errors.New("failed to patch status")
+
 		BeforeEach(func() {
-			// Note: Testing Patch errors with fake client is complex because:
-			// 1. Status().Patch() uses SubResourcePatch which may not be intercepted by standard Patch interceptor
-			// 2. Fake client's Status().Patch() implementation doesn't easily allow injecting errors
-			// 3. Would require custom mock or wrapper around fake client, which adds complexity
-			// For now, we test that the controller handles reconciliation correctly with fake client.
-			// In real system, Patch conflicts (409) are handled by reconciliation retry mechanism.
+			rv = createRV("volume-patch-1")
+			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if subResourceName == "status" {
+							return patchError
+						}
+					}
+					return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			})
 		})
 
-		It("should handle patch errors gracefully", func(ctx SpecContext) {
-			By("Creating ReplicatedVolume without deviceMinor")
-			rv := createRV("volume-patch-1")
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+		JustBeforeEach(func(ctx SpecContext) {
+			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+		})
 
-			By("Reconciling: if Patch fails with conflict (409), error will be returned")
-			By("Next reconciliation will retry, which is the expected behavior")
-			result, err := rec.Reconcile(ctx, RequestFor(rv))
-			Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed with fake client")
-			Expect(result).ToNot(Requeue(), "should not requeue after successful patch")
+		It("should fail if patching ReplicatedVolume status failed with non-NotFound error", func(ctx SpecContext) {
+			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(patchError), "should return error when Patch fails")
+		})
+	})
+
+	When("Patch fails with 409 Conflict (race condition)", func() {
+		var rv *v1alpha3.ReplicatedVolume
+		var conflictError error
+		var patchAttempts int
+
+		BeforeEach(func() {
+			rv = createRV("volume-conflict-1")
+			patchAttempts = 0
+			// Simulate 409 Conflict error (race condition scenario)
+			conflictError = kerrors.NewConflict(
+				schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumes"},
+				rv.Name,
+				errors.New("resourceVersion conflict: the object has been modified"),
+			)
+			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					if rvObj, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if subResourceName == "status" && rvObj.Name == rv.Name {
+							patchAttempts++
+							// Simulate conflict on first patch attempt only
+							if patchAttempts == 1 {
+								return conflictError
+							}
+							// Allow subsequent attempts to succeed (simulating retry after conflict)
+						}
+					}
+					return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+				},
+			})
+		})
+
+		JustBeforeEach(func(ctx SpecContext) {
+			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+		})
+
+		It("should return error on 409 Conflict and succeed on retry", func(ctx SpecContext) {
+			By("First reconcile: should fail with 409 Conflict")
+			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
+
+			By("Second reconcile (retry): should succeed after conflict resolved")
+			Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
+
+			By("Verifying deviceMinor was assigned after retry")
+			updatedRV := &v1alpha3.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+			Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", rvstatusconfigdeviceminor.MinDeviceMinor)), "deviceMinor should be assigned")
 		})
 	})
 })
