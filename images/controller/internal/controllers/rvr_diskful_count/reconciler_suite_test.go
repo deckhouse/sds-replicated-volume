@@ -9,5 +9,5 @@ import (
 
 func TestRvrDiskfulCount(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "RvrDiskfulCount Reconciler Suite")
+	RunSpecs(t, "RvrDiskfulCount Suite")
 }

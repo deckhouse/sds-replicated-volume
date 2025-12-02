@@ -19,17 +19,6 @@ import (
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 )
 
-func newFakeClient() client.Client {
-	scheme := runtime.NewScheme()
-	_ = v1alpha1.AddToScheme(scheme)
-	_ = v1alpha3.AddToScheme(scheme)
-
-	return fake.NewClientBuilder().
-		WithScheme(scheme).
-		WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
-		Build()
-}
-
 //nolint:unparam // name and rvName parameters are kept for flexibility in tests
 func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	return createReplicatedVolumeReplicaWithType(name, rvName, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
@@ -78,11 +67,16 @@ var _ = Describe("Reconciler", func() {
 	var ctx context.Context
 
 	BeforeEach(func(ctx SpecContext) {
-		cl = newFakeClient()
-		logger := zap.New(zap.UseDevMode(true))
 		scheme := runtime.NewScheme()
 		_ = v1alpha1.AddToScheme(scheme)
 		_ = v1alpha3.AddToScheme(scheme)
+
+		cl = fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
+			Build()
+
+		logger := zap.New(zap.UseDevMode(true))
 		rec = rvrdiskfulcount.NewReconciler(cl, logger, scheme)
 	})
 
