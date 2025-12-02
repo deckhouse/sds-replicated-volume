@@ -10,24 +10,10 @@
     - [Порты DRBD](#порты-drbd)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
-    - [`size`](#size)
-    - [`replicatedStorageClassName`](#replicatedstorageclassname)
-    - [`publishOn[]`](#publishon)
   - [`status`](#status)
-    - [`conditions[]`](#conditions)
-    - [`config`](#config)
-    - [`publishedOn`](#publishedon)
-    - [`actualSize`](#actualsize)
-    - [`phase`](#phase)
 - [Контракт данных: `ReplicatedVolumeReplica`](#контракт-данных-replicatedvolumereplica)
   - [`spec`](#spec-1)
-    - [`replicatedVolumeName`](#replicatedvolumename)
-    - [`nodeName`](#nodename)
-    - [`diskless`](#diskless)
   - [`status`](#status-1)
-    - [`conditions[]`](#conditions-1)
-    - [`config`](#config-1)
-    - [`drbd`](#drbd)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
   - [`rvr-delete-controller`](#rvr-delete-controller)
@@ -40,6 +26,7 @@
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4)
   - [`rvr-scheduling-controller`](#rvr-scheduling-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
@@ -55,20 +42,14 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-  - [`rv-status-config-controller`](#rv-status-config-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
-  - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
-- [Сценарии](#сценарии)
-  - [Ручное создание реплицируемого тома](#ручное-создание-реплицируемого-тома)
-  - [](#)
-  - [](#-1)
-  - [](#-2)
-  - [](#-3)
+  - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
 
 # Основные положения
 
@@ -150,154 +131,201 @@ TODO
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
-### `size`
-### `replicatedStorageClassName`
-### `publishOn[]`
+- `size`
+  - Тип: Kubernetes `resource.Quantity`.
+  - Обязательное поле.
+- `replicatedStorageClassName`
+  - Обязательное поле.
+  - Используется:
+    - **rvr-diskful-count-controller** — определяет целевое число реплик по `ReplicatedStorageClass`.
+    - **rv-publish-controller** — проверяет `rsc.spec.volumeAccess==Local` для возможности локального доступа.
+- `publishOn[]`
+  - До 2 узлов (MaxItems=2).
+  - Используется:
+    - **rv-publish-controller** — промоут/демоут реплик.
+    - **rvr-access-count-controller** — поддержание количества `Access`-реплик.
 
 ## `status`
-### `conditions[]`
- - `type=Ready`
-### `config`
- - `sharedSecret`
- - `sharedSecretAlg`
- - `quorum`
- - `quorumMinimumRedundancy`
- - `allowTwoPrimaries`
- - `deviceMinor`
-### `publishedOn`
-### `actualSize`
+- `conditions[]`
+  - `type=Ready`
+    - Обновляется: **rv-status-controller**.
+    - Критерий: все [RV Ready условия](#rv-ready-условия) достигнуты.
+  - `type=QuorumConfigured`
+    - Обновляется: **rv-status-config-quorum-controller**.
+  - `type=SharedSecretAlgorithmSelected`
+    - Обновляется: **rv-status-config-shared-secret-controller**.
+    - При исчерпании вариантов: `status=False`, `reason=UnableToSelectSharedSecretAlgorithm`, `message=<node, alg>`.
+  - `type=PublishSucceeded`
+    - Обновляется: **rv-publish-controller**.
+    - При невозможности локального доступа: `status=False`, `reason=UnableToProvideLocalVolumeAccess`, `message=<пояснение>`.
+  - `type=DiskfulReplicaCountReached`
+    - Обновляется: **rvr-diskful-count-controller**.
+- `drbd.config`
+  - Путь в API: `status.drbd.config.*`.
+  - `sharedSecret`
+    - Инициализирует: **rv-status-config-controller**.
+    - Меняет при ошибке алгоритма на реплике: **rv-status-config-shared-secret-controller**.
+  - `sharedSecretAlg`
+    - Выбирает/обновляет: **rv-status-config-controller** / **rv-status-config-shared-secret-controller**.
+  - `quorum`
+    - Обновляет: **rv-status-config-quorum-controller** (см. формулу в описании контроллера).
+  - `quorumMinimumRedundancy`
+    - Обновляет: **rv-status-config-quorum-controller**.
+  - `allowTwoPrimaries`
+    - Обновляет: **rv-publish-controller** (включает при 2 узлах в `spec.publishOn`, выключает иначе).
+  - `deviceMinor`
+    - Обновляет: **rv-status-config-device-minor-controller** (уникален среди всех RV).
+- `publishedOn[]`
+  - Обновляется: **rv-publish-controller**.
+  - Значение: список узлов, где `rvr.status.drbd.status.role==Primary`.
+- `actualSize`
+  - Присутствует в API; источник обновления не описан в спецификации.
+- `phase`
+  - Возможные значения: `Terminating`, `Synchronizing`, `Ready`.
+  - Обновляется: **rv-status-controller**.
 
-### `phase`
- - `Terminating`
- - `Synchronizing`
- - `Ready`
+Поля, упомянутые в спецификации, отсутствующие в API:
+- `status.config.*` — в API используется `status.drbd.config.*`.
+- `status.config.deviceMinors` — отсутствует; в API есть `status.drbd.config.deviceMinor`.
+
+Поля API, не упомянутые в спецификации:
+- нет
 
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
-### `replicatedVolumeName`
-### `nodeName`
-### `diskless`
+- `replicatedVolumeName`
+  - Обязательное; неизменяемое.
+  - Используется всеми контроллерами для привязки RVR к соответствующему RV.
+- `nodeName`
+  - Обновляется/используется: **rvr-scheduling-controller**.
+  - Учитывается: **rvr-missing-node-controller**, **rvr-node-cordon-controller**.
+- `type` (Enum: `Diskful` | `Access` | `TieBreaker`)
+  - Устанавливается/меняется:
+    - **rvr-diskful-count-controller** — создаёт `Diskful`.
+    - **rvr-access-count-controller** — создаёт/переводит `TieBreaker→Access`, удаляет лишние `Access`.
+    - **rvr-tie-breaker-count-controller** — создаёт/удаляет `TieBreaker`.
 
 ## `status`
-### `conditions[]`
- - `type=Ready`
-   - `reason`:
-     - `WaitingForInitialSync`
-     - `DevicesAreNotReady`
-     - `AdjustmentFailed`
-     - `NoQuorum`
-     - `DiskIOSuspended`
-     - `Ready`
- - `type=InitialSync`
-   - `reason`:
-     - `InitialSyncRequiredButNotReady`
-     - `SafeForInitialSync`
-     - `InitialDeviceReadinessReached`
- - `type=Primary`
-   - `reason`:
-     - `ResourceRoleIsPrimary`
-     - `ResourceRoleIsNotPrimary`
- - `type=DevicesReady`
-   - `reason`:
-     - `DeviceIsNotReady`
-     - `DeviceIsReady`
- - `type=ConfigurationAdjusted`
-   - `reason`:
-     - `ConfigurationFailed`
-     - `MetadataCheckFailed`
-     - `MetadataCreationFailed`
-     - `StatusCheckFailed`
-     - `ResourceUpFailed`
-     - `ConfigurationAdjustFailed`
-     - `ConfigurationAdjustmentPausedUntilInitialSync`
-     - `PromotionDemotionFailed`
-     - `ConfigurationAdjustmentSucceeded`
- - `type=Quorum`
-   - `reason`:
-     - `NoQuorumStatus`
-     - `QuorumStatus`
- - `type=DiskIOSuspended`
-   - `reason`:
-     - `DiskIONotSuspendedStatus`
-     - `DiskIOSuspendedUnknownReason`
-     - `DiskIOSuspendedByUser`
-     - `DiskIOSuspendedNoData`
-     - `DiskIOSuspendedFencing`
-     - `DiskIOSuspendedQuorum`
-### `config`
- - `nodeId`
- - `address.ipv4`
- - `address.port`
- - `peers`:
-   - `peer.nodeId`
-   - `peer.address.ipv4`
-   - `peer.address.port`
-   - `peer.diskless`
- - `disk`
- - `primary`
-### `drbd`
- - `name`
- - `nodeId`
- - `role`
- - `suspended`
- - `suspendedUser`
- - `suspendedNoData`
- - `suspendedFencing`
- - `suspendedQuorum`
- - `forceIOFailures`
- - `writeOrdering`
- - `devices[]`:
-   - `volume`
-   - `minor`
-   - `diskState`
-   - `client`
-   - `open`
-   - `quorum`
-   - `size`
-   - `read`
-   - `written`
-   - `alWrites`
-   - `bmWrites`
-   - `upperPending`
-   - `lowerPending`
- - `connections[]`:
-   - `peerNodeId`
-   - `name`
-   - `connectionState`
-   - `congested`
-   - `peerRole`
-   - `tls`
-   - `apInFlight`
-   - `rsInFlight`
-   - `paths[]`:
-     - `thisHost.address`
-     - `thisHost.port`
-     - `thisHost.family`
-     - `remoteHost.address`
-     - `remoteHost.port`
-     - `remoteHost.family`
-     - `established`
-   - `peerDevices[]`:
-     - `volume`
-     - `replicationState`
-     - `peerDiskState`
-     - `peerClient`
-     - `resyncSuspended`
-     - `outOfSync`
-     - `pending`
-     - `unacked`
-     - `hasSyncDetails`
-     - `hasOnlineVerifyDetails`
-     - `percentInSync`
+- `conditions[]`
+  - `type=Ready`
+    - `reason`: `WaitingForInitialSync`, `DevicesAreNotReady`, `AdjustmentFailed`, `NoQuorum`, `DiskIOSuspended`, `Ready`.
+  - `type=InitialSync`
+    - `reason`: `InitialSyncRequiredButNotReady`, `SafeForInitialSync`, `InitialDeviceReadinessReached`.
+  - `type=Primary`
+    - `reason`: `ResourceRoleIsPrimary`, `ResourceRoleIsNotPrimary`.
+  - `type=DevicesReady`
+    - `reason`: `DeviceIsNotReady`, `DeviceIsReady`.
+  - `type=ConfigurationAdjusted`
+    - `reason`: `ConfigurationFailed`, `MetadataCheckFailed`, `MetadataCreationFailed`, `StatusCheckFailed`, `ResourceUpFailed`, `ConfigurationAdjustFailed`, `ConfigurationAdjustmentPausedUntilInitialSync`, `PromotionDemotionFailed`, `ConfigurationAdjustmentSucceeded`.
+    - Примечание: `reason=UnsupportedAlgorithm` упомянут в спецификации, но отсутствует среди API-констант.
+  - `type=Quorum`
+    - `reason`: `NoQuorumStatus`, `QuorumStatus`.
+  - `type=DiskIOSuspended`
+    - `reason`: `DiskIONotSuspendedStatus`, `DiskIOSuspendedUnknownReason`, `DiskIOSuspendedByUser`, `DiskIOSuspendedNoData`, `DiskIOSuspendedFencing`, `DiskIOSuspendedQuorum`.
+- `actualType` (Enum: `Diskful` | `Access` | `TieBreaker`)
+  - Обновляется контроллерами; используется **rvr-volume-controller** для удаления LLV при `spec.type!=Diskful` только когда `actualType==spec.type`.
+- `drbd.config`
+  - `nodeId` (0..7)
+    - Обновляет: **rvr-status-config-node-id-controller** (уникален в пределах RV).
+  - `address.ipv4`, `address.port`
+    - Обновляет: **rvr-status-config-address-controller**; IPv4; порт ∈ [1025;65535]; выбирается свободный порт DRBD.
+  - `peers`
+    - Обновляет: **rvr-status-config-peers-controller** — у каждой готовой RVR перечислены все остальные готовые реплики того же RV.
+  - `disk`
+    - Обеспечивает: **rvr-volume-controller** при `spec.type==Diskful`; формат `/dev/<VG>/<LV>`.
+  - `primary`
+    - Обновляет: **rv-publish-controller** (промоут/демоут).
+- `drbd.actual`
+  - `allowTwoPrimaries`
+    - Используется: **rv-publish-controller** (ожидание применения настройки на каждой RVR).
+  - `disk`
+    - Поле присутствует в API; не используется в спецификации явно.
+- `drbd.status`
+  - Публикуется: **rvr-drbd-status-controller**; далее используется другими контроллерами.
+  - `name`, `nodeId`, `role`, `suspended`, `suspendedUser`, `suspendedNoData`, `suspendedFencing`, `suspendedQuorum`, `forceIOFailures`, `writeOrdering`.
+  - `devices[]`: `volume`, `minor`, `diskState`, `client`, `open`, `quorum`, `size`, `read`, `written`, `alWrites`, `bmWrites`, `upperPending`, `lowerPending`.
+  - `connections[]`: `peerNodeId`, `name`, `connectionState`, `congested`, `peerRole`, `tls`, `apInFlight`, `rsInFlight`,
+    - `paths[]`: `thisHost.address`, `thisHost.port`, `thisHost.family`, `remoteHost.address`, `remoteHost.port`, `remoteHost.family`, `established`,
+    - `peerDevices[]`: `volume`, `replicationState`, `peerDiskState`, `peerClient`, `resyncSuspended`, `outOfSync`, `pending`, `unacked`, `hasSyncDetails`, `hasOnlineVerifyDetails`, `percentInSync`.
+
+Поля, упомянутые в спецификации, отсутствующие в API:
+- `status.lvmLogicalVolumeName` — отсутствует в `ReplicatedVolumeReplicaStatus`.
+
+Поля API, не упомянутые в спецификации:
+- `status.drbd.actual.disk`.
+
+Константы из `api/v1alpha3/`, не упомянутые в спецификации:
+- нет
 
 # Акторы приложения: `agent`
 
 ## `drbd-config-controller`
 
 ### Цель 
+
+Согласовать желаемую конфигурацию в полях ресурсов и конфигурации DRBD.
+
+Обязательные поля. Нельзя приступать к конфигурации, пока значение поля не
+проинициализировано:
+
+- `rv.metadata.name`
+- `rv.status.drbd.config.sharedSecret`
+- `rv.status.drbd.config.sharedSecretAlg`
+- `rv.status.drbd.config.deviceMinor`
+- `rvr.status.drbd.config.nodeId`
+- `rvr.status.drbd.config.address`
+- `rvr.status.drbd.config.peers`
+  - признак инициализации: `rvr.status.drbd.config.peersInitialized`
+- `rvr.status.drbd.config.disk`
+  - обязателен только для `rvr.spec.type=Diskful`
+
+Дополнительные поля. Можно приступать к конфигурации с любыми значениями в них:
+- `rv.status.drbd.config.quorum`
+- `rv.status.drbd.config.quorumMinimumRedundancy`
+- `rv.status.drbd.config.allowTwoPrimaries`
+
+Список ошибок, которые требуется поддерживать (выставлять и снимать) после каждого
+реконсайла:
+  - `rvr.status.drbd.errors.sharedSecretAlgSelectionError` - результат валидации алгоритма
+  - `rvr.status.drbd.errors.lastAdjustmentError` - вывод команды `drbdadm adjust`
+  - `rvr.status.drbd.errors.last<...>Error` - вывод любой другой использованной команды `drbd` (требуется доработать API контракт)
+
+Список полей, которые требуется поддерживать (выставлять и снимать) как результат каждого
+реконсайла:
+  - `rvr.status.drbd.actual.disk` - должно соответствовать `rvr.status.drbd.config.disk`
+  - `rvr.status.drbd.actual.allowTwoPrimaries` - должно соответствовать `rv.status.drbd.config.allowTwoPrimaries`
+
+
+
+
+
+Желаемая конфигурация определяется типом: `rvr.spec.type`.
+
+Для каждого из типов, есть набор *обязательных полей*, назначение которых является обязательным условием
+для начала изменения конфига DRBD - их нужно дождаться, прежде чем начинать конфигурирование ресурса.
+
+Также есть поля, которые нужно игнорировать - *игнорируемые поля*. Несмотря на то, что DRBD позволяет их назначение, требуется
+отложить.
+
+
+
+
+- пишем res
+- если мд нет
+  - создаем
+- проверяем необходимость первоначальной синхронизации (AND)
+  - peersInitialized && len(peers)==0
+  - если status != UpToDate
+  - `rvr.status.drbd.initialSycCompleted!=true`
+- если первоначальная синхронизация нужна, делаем `drdbadm primary --force`
+- `rvr.status.drbd.initialSycCompleted=true`
+
+
 Контроллирует DRBD конфиг на ноде для всех rvr (в том числе удалённых, с
 неснятым финализатором контроллера).
 
+Для работы с форматом конфигурации DRBD предлагается воспользоваться существующими пакетами
+ - см. метод `writeResourceConfig` в `images/agent/internal/reconcile/rvr/reconcile_handler.go`
 
 ### Триггер 
   - 
@@ -327,6 +355,7 @@ TODO
 ## `drbd-primary-controller`
 
 ### Цель 
+- `rvr.status.drbd.config.primary`
 
 ### Триггер 
   - 
@@ -394,18 +423,71 @@ TODO
 
 ## `rvr-scheduling-controller`
 
+### Статус: [OK | priority: 5 | complexity: 5]
+
 ### Цель
 
+Назначить всем rvr каждой rv уникальную ноду, задав поле `rvr.spec.nodeName`.
+Список нод определяется пересечением нод из двух наборов:
+- ноды находящиеся в зонах `rsc.spec.zones`. Если там ничего не указано - все ноды. Если тип `Access` - то все ноды.
+- ноды, на которых размещены LVG `rsp.spec.lvmVolumeGroups` (применимо только для `Diskful` нод, иначе - все ноды)
 
+Четыре последовательные фазы:
 
-Исключать закордоненные ноды (см. `rvr-node-cordon-controller`)
+- Размещение `Diskful` & `Local` (`rsc.spec.volumeAccess==Local`)
+  - фаза работает только если `rsc.spec.volumeAccess==Local`
+  - фаза работает только если `rv.spec.publishOn` задан и не на всех нодах из `rv.spec.publishOn` есть реплики
+  - берём оставшиеся узлы из `rv.spec.publishOn` и пытаемся на них разместить реплики
+  - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
+  - учитываем topology
+    - `Zonal` - все реплики должны быть в рамках одной зоны
+    - `TransZonal` - все реплики должны быть в разных зонах
+    - `Any` - зоны не учитываются, реплики размещаются по произвольным нодам
+  - учитываем место
+    - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
+  - если хотя бы на одну ноду из `rv.spec.publishOn` не удалось разместить реплику - ошибка невозможности планирования
+- Размещение `Diskful` (не `Local`)
+  - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
+  - учитываем topology
+    - `Zonal` - все реплики должны быть в рамках одной зоны
+    - `TransZonal` - все реплики должны быть в разных зонах
+    - `Any` - зоны не учитываются, реплики размещаются по произвольным нодам
+  - учитываем место
+    - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
+  - пытаемся учесть `rv.spec.publishOn` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
+- Размещение `Access`
+  - фаза работает только если `rv.spec.publishOn` задан и не на всех нодах из `rv.spec.publishOn` есть реплики
+  - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
+  - не учитываем topology, место на диске
+  - допустимо иметь ноды в `rv.spec.publishOn`, на которые не хватило реплик
+  - допустимо иметь реплики, которые никуда не запланировались (потому что на всех `rv.spec.publishOn` и так есть
+  реплики какого-то типа)
+- Размещение `TieBreaker`
+  - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
+    - для `rsc.spec.topology=Zonal`
+      - исключаем узлы из других зон
+  - для `rsc.spec.topology=TransZonal`
+    - каждый rvr планируем в зону с самым маленьким количеством реплик
+    - если зон с самым маленьким количество несколько - то в любую из них
+    - если в зонах с самым маленьким количеством реплик нет ни одного свободного узла - 
+    ошибка невозможности планирования
 
-### Триггер
-  - 
+Ошибка невозможности планирования:
+  - в каждой rvr протавляем
+    - `rvr.status.conditions[type=Scheduled].status=False`
+    - `rvr.status.conditions[type=Scheduled].reason=`
+      - `<исходя из сценария неудачи>`
+      - `WaitingForAnotherReplica` - для rvr, к размещению которых ещё не приступали
+    - `rvr.status.conditions[type=Scheduled].message=<для пользователя>`
+
+В случае успешного планирования:
+  - в rvr протавляем
+    - `rvr.status.conditions[type=Scheduled].status=True`
+    - `rvr.status.conditions[type=Scheduled].reason=ReplicaScheduled`
+
 ### Вывод
   - `rvr.spec.nodeName`
-  - `rvr.spec.diskless`
-
+  - `rvr.status.conditions[type=Scheduled]`
 
 ## `rvr-status-config-node-id-controller`
 
@@ -433,12 +515,12 @@ TODO
 
 Готовая RVR - та, у которой `spec.nodeName!="", status.nodeId !=nil, status.address != nil`
 
-### Триггер
-  - `CREATE(RV)`
-  - `CREATE/UPDATE(RVR, spec.nodeName!="", status.nodeId !=nil, status.address != nil)`
-  - `DELETE(RVR)`
+После первой инициализации, даже в случае отсутствия пиров, требуется поставить
+`rvr.status.drbd.config.peersInitialized=true` в том же патче. 
+
 ### Вывод
-  - `rvr.status.peers`
+  - `rvr.status.drbd.config.peers`
+  - `rvr.status.drbd.config.peersInitialized`
 
 ## `rv-status-config-device-minor-controller`
 ### Статус: [OK | priority: 5 | complexity: 2]
@@ -482,16 +564,10 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Статус: [OK | priority: 5 | complexity: 3]
 
 ### Цель 
-Поддерживать нужное количество `rvr.spec.type==Access` реплик для всех режимов
-`rsc.spec.volumeAccess`, кроме `Local`.
-
-`Access` реплики требуются для доступа к данным на тех узлах, где нет `Diskful` реплики.
-
-В случае, если на узле есть `TieBreaker` реплика, вместо создания новой `Access`,
-нужно поменять её тип на `Access`.
-
-Список запрашиваемых для доступа узлов обновляется в `rv.spec.publishOn`.
-
+Поддерживать количество `rvr.spec.type==Access` реплик (для всех режимов
+`rsc.spec.volumeAccess`, кроме `Local`) таким, чтобы их хватало для размещения на тех узлах, где это требуется:
+ - список запрашиваемых для доступа узлов обновляется в `rv.spec.publishOn`
+ - `Access` реплики требуются для доступа к данным на тех узлах, где нет других реплик
 Когда узел больше не в `rv.spec.publishOn`, а также не в `rv.status.publishedOn`,
 `Access` реплика на нём должна быть удалена.
 
@@ -512,6 +588,9 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
    - `rv.status.conditions[type=PublishSucceeded].reason=UnableToProvideLocalVolumeAccess`
    - `rv.status.conditions[type=PublishSucceeded].message=<сообщение для пользователя>`
 
+Не все реплики могут быть primary. Для `rvr.spec.type=TieBreaker` требуется поменять тип на
+`rvr.spec.type=Accees` (в одном патче вместе с `rvr.status.drbd.config.primary`).
+
 В `rv.spec.publishOn` может быть указано 2 узла. Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
  - поменяв `rv.status.drbd.config.allowTwoPrimaries=true`
  - дождаться фактического применения настройки на каждой rvr `rvr.status.drbd.actual.allowTwoPrimaries`
@@ -522,10 +601,11 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Также требуется поддерживать свойство `rv.status.publishedOn`, указывая там список нод, на которых
 фактически произошёл переход реплики в состояние Primary. Это состояние публикуется в `rvr.status.drbd.status.role` (значение `Primary`).
 
-Контроллер работает только когда RV имеет `status.condition[Type=Ready].status=True`
+Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
 
 ### Вывод 
   - `rvr.status.config.primary`
+  - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.publishedOn`
   - `rv.status.conditions[type=PublishSucceeded]`
 
@@ -561,22 +641,6 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   - 
 
 ### Вывод 
-
-## `rv-status-config-controller`
-
-### Цель 
-Сконфигурировать первоначальные общие настройки для всех реплик, указываемые в `rv.status.config`.
-
-### Триггер
- - `CREATE(RV, rv.status.config == nil)`
-
-### Вывод 
-  - `rv.status.config.sharedSecret`
-  - `rv.status.config.sharedSecretAlg`
-  - `rv.status.config.quorum`
-  - `rv.status.config.quorumMinimumRedundancy`
-  - `rv.status.config.allowTwoPrimaries`
-  - `rv.status.config.deviceMinor`
 
 ## `rv-status-config-quorum-controller`
 
@@ -621,35 +685,19 @@ if M > 1 {
 
 ### Цель
 Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
-а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm]`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `Message`.
+а также обработать ошибку применения алгоритма на любой из реплик из `rvr.status.drbd.errors.sharedSecretAlgSelectionError`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `rvr.status.drbd.errors.sharedSecretAlgSelectionError.unsupportedAlg`.
 
-В случае, если список закончился, выставить для `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False` `reason=UnableToSelectSharedSecretAlgorithm`
+В случае, если список закончился - прекратить попытки.
 
 ### Триггер
- - `CREATE(RV, rv.status.config.sharedSecret == "")`
- - `CREATE/UPDATE(RVR, status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm])`
+ - `CREATE(RV)`
+ - `CREATE/UPDATE(RVR)`
 
 ### Вывод 
  - `rv.status.config.sharedSecret`
    - генерируется новый
  - `rv.status.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False`
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].reason=UnableToSelectSharedSecretAlgorithm`
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].message=[Which node? Which alg failed?]`
-
-## `rv-status-controller` [TBD]
-
-### Цель 
-Обновить вычисляемые поля статутса RV. 
-
-### Вывод 
- - `rv.status.conditions[type=Ready]`
-   - `Status=True` в случае если все подстатусы успешны, иначе `False`
- - `phase`
-
-### Триггер 
-Изменение `rv.status.conditions`
 
 ## `rvr-missing-node-controller`
 
@@ -677,114 +725,65 @@ if M > 1 {
 ### Вывод 
   - delete rvr
 
+## `rvr-status-conditions-controller`
 
+### Статус: [TBD | priority: 5 | complexity: 2]
 
+### Цель
 
+Поддерживать вычисляемые поля для отображения пользователю.
 
+- `rvr.status.conditions[type=<>]`
+  - `Quorum`
+    - `status`
+      - `True`
+        - `rvr.status.drbd.status.devices[0].quorum=true`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+  - `InSync`
+    - `status`
+      - `True`
+        - `rvr.status.drbd.status.devices[0].diskState=UpToDate`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+  - `Scheduled` - управляется `rvr-scheduling-controller`, не менять
+  - `Configured`
+    - `status`
+      - `True` (AND)
+        - если все поля в `rvr.status.drbd.actual.*` равны соответствующим
+      полям-источникам в `rv.status.drbd.config` или `rvr.status.drbd.config`
+        - `rvr.status.drbd.errors.lastAdjustmentError == nil`
+        - `rvr.status.drbd.errors.lastPromotionError == nil`
+        - `rvr.status.drbd.errors.lastResizeError == nil`
+        - `rvr.status.drbd.errors.last<...>Error == nil`
+      - `False` - иначе
+        - `reason` - в соответствии с причиной
+        - `message` - сформировать из `rvr.status.drbd.errors.last<...>Error`
+  - `Ready`
+    - `status`
+      - `True` (AND)
+        - `Quorum=True`
+        - `InSync!=False`
+        - `Scheduled=True`
+        - `Configured=True`
+      - `False` - инчае
+        - `reason` - в соответствии с причиной
+  - `VolumeAccessReady` - существует только для `Access` и `Diskful` реплик
+    - `status`
+      - `True` (AND)
+        - `rvr.status.drbd.status.role==Primary`
+        - нет проблем с I/O (см. константы `ReasonDiskIOSuspended<...>`)
+        - `Quorum=True`
+      - `False` - иначе
+        - `reason`
+          - `NotPublished` - если не Primary
+          - `IOSuspendedByQuorum`
+          - `IOSuspendedBy<...>` - (см. константы `ReasonDiskIOSuspended<...>`)
+          - `IOSuspendedBySnapshotter` - добавить константу на будущее
 
+TODO: коннекты между разными узлами
+TODO: что ещё нужно для UI (%sync?)?
+TODO: SharedSecretAlgorithmSelected .reason=UnableToSelectSharedSecretAlgorithm
 
-
-# Сценарии
-
-## Ручное создание реплицируемого тома
-1. Создаётся RV
-   1. `spec.size`
-   1. `spec.replicatedStorageClassName`
-2. Срабатывает `rv-config-controller`
-   1. `rv.status.config.sharedSecret`
-   2. `rv.status.config.replicaCount`
-   3. и т.д.
-3. Срабатывает `rv-replica-count-controller`
-   1. Создаётся первая RVR, ожидается её переход в Ready
-   2. Создаются остальные RVR вплоть до `rv.status.config.replicaCount`
-4. Срабатывает `rvr-node-selector-controller`
-   1. Выбирается нода
-5. Срабатывает `rvr-volume-controller`
-   1. Создается том
-   2. Обновляется том в `rvr.status.config.volumes`
-6. Срабатывает `rvr-config-controller`
-   1. Заполняется `rvr.status.config`
-7. На узле срабатывает `rvr-create-controller`
-   1. Выполняются необходимые операции в drbd (drbdadm create-md, up, adjust, primary --force)
-
-##
-- Zone A
-  - DF1 (Primary)
-- Zone B
-  - DF2
-- Zone C
-  - TB1
-
-q=2
-qmr=2
-
-
-##
-- Zone A
-  - DF1
-  - TB2
-- Zone B
-  - DF2
-  - AP1 (Primary)
-- Zone C
-  - TB1
-
-q=3
-
-qmr=2
-
-
-##
-- Zone A
-  - DF1
-  - TB2
-- Zone B
-  - DF2
-  <!-- - AP1 (Primary) -->
-- Zone C
-  - TB1
-
-
-##
-- Zone A
-  - DF1
-  - TB1
-- Zone B
-  - DF2
-  - TB2
-- Zone C
-  - DF3
-  - AP1
-  - AP2
-
-3
-2
-
-C=3
-B=1
-A=1
-
-- требование: failure domain=node
-- требование: failure domain=zone (только когда TransZonal)
-- требование: отказ любого одного FD не должен приводить к потере кворума
-- требование: отказ большинства FD должен приводить к потере кворума
-- поэтому надо тай-брейкерами доводить количество нод на всех FD до минимального числа, чтобы осблюсти:
-  -  отличие не больше чем на 1
-  -  общее количество нечётное
-
-
-
-Правильные значения:
-
-N - все реплики
-M - diskful реплики
-
-```
-if M > 1 {
-  var quorum byte = max(2, N/2 + 1)
-  var qmr byte = max(2, M/2 +1)
-} else {
-  var quorum byte = 0
-  var qmr byte = 0
-}
-```
+### Вывод 
+  - `rvr.status.conditions`
