@@ -196,13 +196,6 @@ TODO
   - Возможные значения: `Terminating`, `Synchronizing`, `Ready`.
   - Обновляется: **rv-status-controller**.
 
-Поля, упомянутые в спецификации, отсутствующие в API:
-- `status.config.*` — в API используется `status.drbd.config.*`.
-- `status.config.deviceMinors` — отсутствует; в API есть `status.drbd.config.deviceMinor`.
-
-Поля API, не упомянутые в спецификации:
-- нет
-
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
 - `replicatedVolumeName`
@@ -260,14 +253,8 @@ TODO
     - `paths[]`: `thisHost.address`, `thisHost.port`, `thisHost.family`, `remoteHost.address`, `remoteHost.port`, `remoteHost.family`, `established`,
     - `peerDevices[]`: `volume`, `replicationState`, `peerDiskState`, `peerClient`, `resyncSuspended`, `outOfSync`, `pending`, `unacked`, `hasSyncDetails`, `hasOnlineVerifyDetails`, `percentInSync`.
 
-Поля, упомянутые в спецификации, отсутствующие в API:
-- `status.lvmLogicalVolumeName` — отсутствует в `ReplicatedVolumeReplicaStatus`.
-
 Поля API, не упомянутые в спецификации:
 - `status.drbd.actual.disk`.
-
-Константы из `api/v1alpha3/`, не упомянутые в спецификации:
-- нет
 
 # Акторы приложения: `agent`
 
@@ -544,7 +531,7 @@ TODO
 
 Инициализировать свойство `rv.status.drbd.config.deviceMinor` минимальным свободным значением среди всех RV.
 
-По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.config.deviceMinor`.
+По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.drbd.config.deviceMinor`.
 
 ### Триггер
   - `CREATE/UPDATE(RV, rv.status.drbd.config.deviceMinor != nil)`
@@ -619,7 +606,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
 
 ### Вывод 
-  - `rvr.status.config.primary`
+  - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.publishedOn`
   - `rv.status.conditions[type=PublishSucceeded]`
@@ -705,8 +692,8 @@ agent не удаляет ресурс из DRBD, пока есть чужие �
  - `CREATE/UPDATE(RV, rv.status.conditions[type=Ready].status==True)`
 
 ### Вывод
-  - `rv.status.config.quorum`
-  - `rv.status.config.quorumMinimumRedundancy`
+  - `rv.status.drbd.config.quorum`
+  - `rv.status.drbd.config.quorumMinimumRedundancy`
   - `rv.status.conditions[type=QuorumConfigured]`
 
 Правильные значения:
@@ -729,7 +716,7 @@ if M > 1 {
 ### Статус: [OK | priority: 3 | complexity: 3]
 
 ### Цель
-Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
+Проставить первоначальное значения для `rv.status.drbd.config.sharedSecret` и `rv.status.drbd.config.sharedSecretAlg`,
 а также обработать ошибку применения алгоритма на любой из реплик из `rvr.status.drbd.errors.sharedSecretAlgSelectionError`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `rvr.status.drbd.errors.sharedSecretAlgSelectionError.unsupportedAlg`.
 
 В случае, если список закончился - прекратить попытки.
@@ -739,9 +726,9 @@ if M > 1 {
  - `CREATE/UPDATE(RVR)`
 
 ### Вывод 
- - `rv.status.config.sharedSecret`
+ - `rv.status.drbd.config.sharedSecret`
    - генерируется новый
- - `rv.status.config.sharedSecretAlg`
+ - `rv.status.drbd.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
 
 ## `rvr-missing-node-controller`
