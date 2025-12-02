@@ -147,7 +147,6 @@ func (r *Reconciler) reconcileRecalculate(
 		}
 	}
 
-	// by default, no TieBreaker replicas are required
 	desiredTB := desiredTieBreakerTotal(FDReplicaCount)
 
 	// for Replication=Availability with at least two Diskful replicas,
