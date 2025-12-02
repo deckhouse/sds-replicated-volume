@@ -159,6 +159,10 @@ func (r *Reconciler) Reconcile(
 
 	// when there are fewer TieBreakers than required, create the missing ones
 	if currentTB < desiredTB {
+		if r.scheme == nil {
+			return reconcile.Result{}, fmt.Errorf("reconciler scheme is nil")
+		}
+
 		toCreate := desiredTB - currentTB
 		for i := 0; i < toCreate; i++ {
 			rvr := &v1alpha3.ReplicatedVolumeReplica{

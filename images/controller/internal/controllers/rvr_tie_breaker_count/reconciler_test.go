@@ -85,52 +85,16 @@ var _ = Describe("Reconcile", func() {
 			Expect(cl.Create(ctx, &rv)).To(Succeed())
 		})
 
-		It("returns nil when ReplicatedStorageClassName is empty", func(ctx SpecContext) {
-			rv.Spec.ReplicatedStorageClassName = ""
-			Expect(cl.Create(ctx, &rv)).To(Succeed())
-			cl = builder.Build()
-			rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		When("ReplicatedStorageClassName is empty", func() {
+			BeforeEach(func() {
+				rv.Spec.ReplicatedStorageClassName = ""
+			})
 
-			result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result).To(Equal(reconcile.Result{}))
-		})
-
-		It("returns error when SetControllerReference fails", func(ctx SpecContext) {
-			rsc := v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
-				Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
-			}
-			node1 := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}}
-			node2 := corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}}
-			rvr1 := v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: rv.Name,
-					NodeName:             "node-1",
-					Type:                 "Diskful",
-				},
-			}
-			rvr2 := v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-df2"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: rv.Name,
-					NodeName:             "node-2",
-					Type:                 "Diskful",
-				},
-			}
-			Expect(cl.Create(ctx, &rv)).To(Succeed())
-			Expect(cl.Create(ctx, &rsc)).To(Succeed())
-			Expect(cl.Create(ctx, &node1)).To(Succeed())
-			Expect(cl.Create(ctx, &node2)).To(Succeed())
-			Expect(cl.Create(ctx, &rvr1)).To(Succeed())
-			Expect(cl.Create(ctx, &rvr2)).To(Succeed())
-
-			// Create a reconciler with a nil scheme to cause SetControllerReference to fail
-			rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), nil)
-
-			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-			Expect(err).To(HaveOccurred())
+			It("returns nil when ReplicatedStorageClassName is empty", func(ctx SpecContext) {
+				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+			})
 		})
 
 		When("RVRs created", func() {
@@ -212,7 +176,7 @@ var _ = Describe("Reconcile", func() {
 
 			})
 
-			When("", func() {
+			When("SetControllerReference fails", func() {
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
 					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{{
@@ -232,6 +196,8 @@ var _ = Describe("Reconcile", func() {
 					}}
 				})
 				It("returns error when SetControllerReference fails", func(ctx SpecContext) {
+					// recreate reconciler with nil scheme to force SetControllerReference to fail
+					rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), nil)
 					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 					Expect(err).To(HaveOccurred())
 				})
@@ -253,6 +219,8 @@ var _ = Describe("Reconcile", func() {
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 					}
+					// clear initial RVRs so that JustBeforeEach in this context does not create them
+					rvrList.Items = nil
 				})
 
 				It("counts Access replicas in FD distribution", func(ctx SpecContext) {
@@ -271,11 +239,6 @@ var _ = Describe("Reconcile", func() {
 							NodeName:             "node-2",
 							Type:                 "Access",
 						},
-					}
-					Expect(cl.Create(ctx, &rv)).To(Succeed())
-					Expect(cl.Create(ctx, &rsc)).To(Succeed())
-					for i := range nodeList {
-						Expect(cl.Create(ctx, &nodeList[i])).To(Succeed())
 					}
 					Expect(cl.Create(ctx, &rvr1)).To(Succeed())
 					Expect(cl.Create(ctx, &rvr2)).To(Succeed())
@@ -545,6 +508,48 @@ var _ = Describe("Reconcile", func() {
 
 			When("Delete RVR fails", func() {
 				BeforeEach(func() {
+					// prepare state with extra TieBreakers so that Reconcile will try to delete them
+					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "rvr-df1",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             nodeList[0].Name,
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "rvr-df2",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             nodeList[1].Name,
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "rvr-tb1",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								Type:                 "TieBreaker",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "rvr-tb2",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								Type:                 "TieBreaker",
+							},
+						},
+					}
+
 					builder.WithInterceptorFuncs(interceptor.Funcs{
 						Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 							if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
