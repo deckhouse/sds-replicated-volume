@@ -78,7 +78,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Get diskful replica count
-	neededNumberOfReplicas, err := getDiskfulReplicaCount(ctx, r.cl, rv)
+	neededNumberOfReplicas, err := getDiskfulReplicaCountFromReplicatedStorageClass(ctx, r.cl, rv)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting diskful replica count: %w", err)
 	}
@@ -204,11 +204,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-// getDiskfulReplicaCount gets the diskful replica count based on ReplicatedStorageClass.
+// getDiskfulReplicaCountFromReplicatedStorageClass gets the diskful replica count based on ReplicatedStorageClass.
 //
 // If replication = None, returns 1; if replication = Availability, returns 2;
 // if replication = ConsistencyAndAvailability, returns 3.
-func getDiskfulReplicaCount(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (int, error) {
+func getDiskfulReplicaCountFromReplicatedStorageClass(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (int, error) {
 	// Get ReplicatedStorageClass name from ReplicatedVolume
 	rscName := rv.Spec.ReplicatedStorageClassName
 	if rscName == "" {
