@@ -134,6 +134,47 @@ Watches(
 )
 ```
 
+**Важно:** 
+- Если используются кастомные Watch handlers (например, `handler.EnqueueRequestsFromMapFunc` с кастомной логикой), выносите их в отдельный файл `handler.go` в директории контроллера
+- Если вспомогательные функции для handlers находятся в `controller.go` (например, функции для predicate), тесты для них должны быть в `controller_test.go`, а не в отдельном `handler_test.go`
+- **Принцип:** Тесты должны быть рядом с кодом, который они тестируют. Если функция в `controller.go` - тесты в `controller_test.go`. Если функция в `handler.go` - тесты в `handler_test.go`
+- Не создавайте отдельные тестовые файлы без соответствующих исходных файлов
+
+**Пример структуры:**
+```go
+// handler.go
+package mycontroller
+
+import (
+	"context"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+)
+
+func mapRVRToRV(_ context.Context, obj client.Object) []reconcile.Request {
+	rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
+	if !ok {
+		return nil
+	}
+	// Кастомная логика маппинга
+	return []reconcile.Request{
+		{NamespacedName: client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}},
+	}
+}
+
+// handler_test.go
+package mycontroller_test
+
+import (
+	"testing"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	// ... тесты для handlers
+)
+```
+
 ---
 
 ## 5. Использовать structured logger
@@ -248,12 +289,40 @@ DeleteFunc: func(_ event.DeleteEvent) bool {
 
 ---
 
-## 8. Размещение констант (опционально)
+## 8. Размещение констант
 
-**⚠️ Опционально:** Размещение констант в отдельном файле `consts.go`.
+**✅ Константы, связанные с API:**
+- Константы, которые являются частью API (enum значения, алгоритмы, типы) должны быть размещены в API пакете
+- Используйте файлы `api/v1alpha3/replicated_volume_consts.go` или `api/v1alpha3/replicated_volume_replica_consts.go` в зависимости от того, к какому ресурсу относятся константы
+- Константы должны быть экспортированы (с большой буквы) и иметь документацию
+- Если константы используются как список (например, для последовательного перебора), создайте функцию, возвращающую упорядоченный список
+- **Важно:** Порядок в списке имеет значение - документируйте это в комментариях
 
-**✅ Рекомендуется:**
-- Если контроллер использует несколько констант (2+), можно вынести их в отдельный файл `consts.go` в директории контроллера
+**Пример констант в API:**
+```go
+// api/v1alpha3/replicated_volume_consts.go
+package v1alpha3
+
+// Shared secret hashing algorithms
+const (
+	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
+	SharedSecretAlgSHA256 = "sha256"
+	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
+	SharedSecretAlgSHA1 = "sha1"
+)
+
+// SharedSecretAlgorithms returns the ordered list of supported shared secret algorithms.
+// The order matters: algorithms are tried sequentially when one fails on any replica.
+func SharedSecretAlgorithms() []string {
+	return []string{
+		SharedSecretAlgSHA256,
+		SharedSecretAlgSHA1,
+	}
+}
+```
+
+**⚠️ Константы контроллера (опционально):**
+- Если контроллер использует несколько констант, специфичных для логики контроллера (не API), можно вынести их в отдельный файл `consts.go` в директории контроллера
 - Это улучшает читаемость и организацию кода
 - Константы должны быть связаны с логикой контроллера
 
@@ -261,9 +330,9 @@ DeleteFunc: func(_ event.DeleteEvent) bool {
 - Если константа одна или две, можно оставить их в `reconciler.go`
 - Если константы используются только в одном месте, можно оставить их локально
 
-**Обоснование:** Разделение констант в отдельный файл улучшает организацию кода, но не является обязательным требованием. Используйте по необходимости.
+**Обоснование:** Константы API должны быть в API пакете для переиспользования и единообразия. Константы контроллера можно выносить в `consts.go` для улучшения организации кода.
 
-**Пример:**
+**Пример констант контроллера:**
 ```go
 // consts.go
 package mycontroller
@@ -310,16 +379,62 @@ for i := uint(minNodeID); i <= uint(maxNodeID); i++ {
    - Вспомогательные методы для бизнес-логики (например, `formatValidRange()` для повторяющихся строк)
    - **Важно:** Не добавляйте неиспользуемые поля (`rdr`, `sch`) - они добавляют сложность без пользы
    - **Важно:** Используйте только `logr.Logger`, не используйте два logger'а (`slog.Logger` и `logr.Logger`)
+   - **Важно:** Не прячьте работу с клиентом в хелперы. Гораздо удобнее при ревью кода понимать, что вызов работает с клиентом. Если у функции в параметрах нет `ctx context.Context` - это сразу понятно, что она не работает с клиентом
+   - **Исключение:** Когда в `Reconcile` принимается решение какой reconcile делать и потом вызываются разные варианты reconcile. В этом случае должно быть видно `return`, что reconcile не пойдет дальше, и функцию лучше назвать `reconcile<вариант>` (например, `reconcileGenerateSecret`, `reconcileHandleError`). Эти функции должны принимать `ctx context.Context` и работать с клиентом напрямую
 
 3. **`consts.go`** (опционально) - константы контроллера
-   - Константы, используемые в логике контроллера
+   - Константы, специфичные для логики контроллера (не API константы)
    - Рекомендуется, если констант несколько (2+)
    - Не обязательно, если константа одна или две
+   - **Важно:** Константы, связанные с API, должны быть в `api/v1alpha3/replicated_volume_consts.go` или `api/v1alpha3/replicated_volume_replica_consts.go`
 
-4. **`reconciler_test.go`** - unit тесты
+4. **`handler.go`** (опционально) - кастомные Watch handlers
+   - Используется только если нужны кастомные handlers (например, `handler.EnqueueRequestsFromMapFunc` с кастомной логикой)
+   - Выносите логику маппинга событий в отдельные функции
+   - Если функции для handlers находятся в `controller.go`, тесты должны быть в `controller_test.go`, а не в `handler_test.go`
+   - `handler_test.go` создается только если есть отдельный `handler.go`
+
+5. **`reconciler_test.go`** - unit тесты
    - Тесты с fake Kubernetes client
    - Использовать `reconcile.Request{NamespacedName: types.NamespacedName{Name: "name"}}`
    - Покрытие основных сценариев и edge cases
+
+6. **`controller_test.go`** (опционально) - тесты для функций из `controller.go`
+   - Тесты для вспомогательных функций, используемых в `BuildController` (например, функции для predicate)
+   - Создается только если есть функции в `controller.go`, которые требуют тестирования
+   - **Важно:** Если функция находится в `controller.go`, тесты должны быть в `controller_test.go`, а не в отдельном файле
+
+---
+
+## Лицензионные заголовки
+
+**✅ Обязательно:**
+- Все файлы контроллера должны содержать лицензионный заголовок Apache 2.0
+- Это включает все `.go` файлы: `controller.go`, `reconciler.go`, `consts.go`, `handler.go`, а также все тестовые файлы `*_test.go`
+- Лицензионный заголовок должен быть в начале файла, перед `package` декларацией
+
+**Формат лицензионного заголовка:**
+```go
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package mycontroller
+```
+
+**Обоснование:** Лицензионные заголовки требуются Apache License 2.0 и обеспечивают консистентность проекта. Все файлы в проекте должны иметь одинаковый формат лицензионного заголовка.
 
 ---
 
@@ -407,33 +522,53 @@ func (r *Reconciler) Reconcile(
 	
 	obj := &v1alpha3.SomeResource{}
 	if err := r.cl.Get(ctx, req.NamespacedName, obj); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			log.V(1).Info("resource not found, might be deleted")
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("getting resource %s: %w", req.NamespacedName, err)
+		log.Error(err, "Getting SomeResource")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 	
-	// бизнес-логика
-	// При обновлении status используйте PatchStatusWithConflictRetry:
-	// objKey := client.ObjectKeyFromObject(obj)
-	// freshObj := &v1alpha3.SomeResource{}
-	// if err := r.Cl.Get(ctx, objKey, freshObj); err != nil {
-	//     return reconcile.Result{}, fmt.Errorf("getting resource for patch: %w", err)
-	// }
-	// if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshObj, func(currentObj *v1alpha3.SomeResource) error {
-	//     // Инициализация status внутри patchFn (не в начале Reconcile)
-	//     if currentObj.Status == nil {
-	//         currentObj.Status = &v1alpha3.SomeResourceStatus{}
-	//     }
-	//     // Обновление status
-	//     currentObj.Status.SomeField = value
-	//     return nil
-	// }); err != nil {
-	//     return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
-	// }
+	// Принятие решения какой reconcile делать
+	if obj.Status == nil || obj.Status.SomeField == "" {
+		// Видно return - reconcile не пойдет дальше
+		return r.reconcileGenerateField(ctx, obj, log)
+	}
 	
-	log.Info("completed successfully")
+	// Другой вариант reconcile
+	return r.reconcileHandleError(ctx, obj, log)
+}
+
+// reconcileGenerateField генерирует поле для ресурса
+// Название функции показывает, что это вариант reconcile, который не продолжит основной Reconcile
+func (r *Reconciler) reconcileGenerateField(
+	ctx context.Context,
+	obj *v1alpha3.SomeResource,
+	log logr.Logger,
+) (reconcile.Result, error) {
+	// Работа с клиентом напрямую - видно ctx в параметрах
+	from := client.MergeFrom(obj)
+	changedObj := obj.DeepCopy()
+	if changedObj.Status == nil {
+		changedObj.Status = &v1alpha3.SomeResourceStatus{}
+	}
+	changedObj.Status.SomeField = "generated-value"
+	
+	if err := r.cl.Status().Patch(ctx, changedObj, from); err != nil {
+		log.Error(err, "Patching SomeResource status")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+	
+	log.Info("Generated field")
+	return reconcile.Result{}, nil
+}
+
+// reconcileHandleError обрабатывает ошибки
+// Название функции показывает, что это вариант reconcile
+func (r *Reconciler) reconcileHandleError(
+	ctx context.Context,
+	obj *v1alpha3.SomeResource,
+	log logr.Logger,
+) (reconcile.Result, error) {
+	// Работа с клиентом напрямую - видно ctx в параметрах
+	// ...
 	return reconcile.Result{}, nil
 }
 ```
@@ -527,6 +662,9 @@ var _ = Describe("Reconciler", func() {
 - [ ] Использовать fake client с `.WithStatusSubresource()`
 - [ ] Использовать `reconcile.Request` в тестах
 - [ ] Зарегистрировать контроллер в `registry.go`
+- [ ] **Лицензионные заголовки:** Все файлы (включая тестовые) содержат лицензионный заголовок Apache 2.0
+- [ ] **Константы API:** Константы, связанные с API, размещены в `api/v1alpha3/replicated_volume_consts.go` или `api/v1alpha3/replicated_volume_replica_consts.go`
+- [ ] **Тесты рядом с кодом:** Тесты для функций из `controller.go` находятся в `controller_test.go`, а не в отдельных файлах
 
 ---
 
@@ -613,6 +751,45 @@ log.Info("Updated status", "field", value)
 - Снижает нагрузку на API: нет множественных попыток в одном reconciliation
 - Конфликты редки в типичных сценариях, следующий reconciliation быстро решит проблему
 - Соответствует паттерну "fail fast, retry through reconciliation"
+- **Важно:** На retry должен уходить весь reconciliation, а не только Patch. Ресурс может быть удален пока мы его патчим, и это должно быть обработано в следующем reconciliation
+
+**Обработка Race Conditions:**
+- При одновременных reconcile нескольких ресурсов может возникнуть race condition
+- Если два reconcile пытаются установить одинаковое значение (например, deviceMinor), один получит 409 Conflict
+- Это нормальное поведение: следующий reconciliation пересчитает состояние и выберет другое значение
+- **Не нужно** использовать мьютексы или другие механизмы синхронизации - Kubernetes API уже обеспечивает optimistic locking через ResourceVersion
+- **Тестирование:** Симулируйте 409 Conflict через interceptors в тестах для проверки обработки race conditions
+
+**Теоретические проблемы с Optimistic Locking:**
+- **High Contention Scenarios:** При высокой конкуренции (много одновременных обновлений одного ресурса) увеличивается вероятность 409 Conflict
+- **В нашем случае это не проблема:** Конфликты редки, так как каждый контроллер обычно обновляет свой ресурс
+- **Обработка через reconciliation:** При 409 Conflict следующий reconciliation пересчитает состояние и выберет другое значение
+- **Optimistic locking работает надежно:** Kubernetes API гарантирует атомарность проверки ResourceVersion на стороне API сервера
+- **Edge cases:** В очень редких случаях при высокой нагрузке может потребоваться несколько retry, но это нормально и обрабатывается автоматически через reconciliation retry mechanism
+
+**Пример обработки race condition:**
+```go
+// Reconcile 1 и Reconcile 2 одновременно делают List
+rvList := &v1alpha3.ReplicatedVolumeList{}
+if err := r.cl.List(ctx, rvList); err != nil {
+    return reconcile.Result{}, fmt.Errorf("listing RVs: %w", err)
+}
+
+// Оба видят одинаковый список, оба выбирают deviceMinor = 0
+usedDeviceMinors := collectUsedDeviceMinors(rvList)
+availableDeviceMinor := findAvailable(usedDeviceMinors) // = 0
+
+// Reconcile 1 успешно делает Patch → устанавливает deviceMinor = 0
+// Reconcile 2 пытается сделать Patch → получает 409 Conflict (ResourceVersion изменился)
+if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
+    // 409 Conflict вернется как ошибка
+    log.Error(err, "Patching ReplicatedVolume status")
+    return reconcile.Result{}, err // Следующий reconciliation решит проблему
+}
+
+// Reconcile 2 retry → делает Get → видит, что deviceMinor = 0 уже занят
+// → выбирает deviceMinor = 1 → успешно устанавливает
+```
 
 ### Идемпотентность
 - Reconcile должен быть идемпотентным
@@ -628,23 +805,113 @@ if obj.Status != nil && obj.Status.SomeField != nil {
     return reconcile.Result{}, nil
 }
 
-// Внутри patchFn - дополнительная проверка на случай race condition
-if err := api.PatchStatusWithConflictRetry(ctx, r.Cl, freshObj, func(currentObj *v1alpha3.SomeResource) error {
-    // Проверка еще раз (idempotent check)
-    if currentObj.Status != nil && currentObj.Status.SomeField != nil {
-        log.V(1).Info("field already set by another worker")
-        return nil // Уже установлено, ничего не делаем
-    }
-    // Установка значения
-    if currentObj.Status == nil {
-        currentObj.Status = &v1alpha3.SomeResourceStatus{}
-    }
-    currentObj.Status.SomeField = &value
-    return nil
-}); err != nil {
-    return reconcile.Result{}, fmt.Errorf("updating status: %w", err)
+// ✅ ПРАВИЛЬНО - проверка перед Patch (idempotent check)
+from := client.MergeFrom(obj)
+changedObj := obj.DeepCopy()
+if changedObj.Status == nil {
+    changedObj.Status = &v1alpha3.SomeResourceStatus{}
+}
+// Проверка еще раз на случай race condition (если другой reconcile уже установил)
+if changedObj.Status.SomeField != nil {
+    log.V(1).Info("field already set by another worker")
+    return reconcile.Result{}, nil // Уже установлено, ничего не делаем
+}
+changedObj.Status.SomeField = &value
+
+if err := r.cl.Status().Patch(ctx, changedObj, from); err != nil {
+    log.Error(err, "Patching resource status")
+    return reconcile.Result{}, client.IgnoreNotFound(err)
 }
 ```
+
+### Оптимизации кода
+
+**⚠️ Важно:** После написания кода проверьте его на возможные оптимизации, которые остаются в рамках code style. Оптимизации опциональны, но лучше, если ревьюер будет доволен.
+
+**Рекомендации по оптимизации:**
+
+1. **Ранний выход из циклов:**
+   - Если нашли нужный элемент или условие выполнено, выходите из цикла сразу
+   - Не продолжайте итерацию, если результат уже получен
+
+2. **Проверка до дорогих операций:**
+   - Если можно проверить условие до `List` или других дорогих операций, делайте это
+   - Например, если текущий ресурс уже имеет нужное значение, не нужно делать `List` всех ресурсов
+
+3. **Избегание лишних итераций:**
+   - Если собираете данные в цикле, но нашли нужное значение, выходите раньше
+   - Не собирайте все данные, если они не нужны
+
+**Примеры оптимизаций:**
+
+```go
+// ❌ НЕОПТИМАЛЬНО - делаем List, затем проверяем
+rvList := &v1alpha3.ReplicatedVolumeList{}
+if err := r.cl.List(ctx, rvList); err != nil {
+    return reconcile.Result{}, fmt.Errorf("listing RVs: %w", err)
+}
+
+usedDeviceMinors := make(map[uint]struct{})
+currentRVHasDeviceMinor := false
+for _, item := range rvList.Items {
+    if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
+        deviceMinor := item.Status.DRBD.Config.DeviceMinor
+        if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
+            usedDeviceMinors[deviceMinor] = struct{}{}
+            if item.Name == rv.Name {
+                currentRVHasDeviceMinor = true
+            }
+        }
+    }
+}
+
+if currentRVHasDeviceMinor {
+    return reconcile.Result{}, nil
+}
+
+// ✅ ОПТИМАЛЬНО - проверяем до List
+if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
+    deviceMinor := rv.Status.DRBD.Config.DeviceMinor
+    if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
+        log.V(1).Info("deviceMinor already assigned", "deviceMinor", deviceMinor)
+        return reconcile.Result{}, nil // Выходим до List
+    }
+}
+
+// Теперь делаем List только если нужно
+rvList := &v1alpha3.ReplicatedVolumeList{}
+if err := r.cl.List(ctx, rvList); err != nil {
+    return reconcile.Result{}, fmt.Errorf("listing RVs: %w", err)
+}
+```
+
+```go
+// ❌ НЕОПТИМАЛЬНО - собираем все данные, даже если нашли нужное
+for _, item := range items {
+    if item.Name == targetName {
+        found = true
+    }
+    // Продолжаем собирать остальные данные, хотя уже нашли нужное
+    allData[item.Name] = item
+}
+
+if found {
+    return reconcile.Result{}, nil
+}
+
+// ✅ ОПТИМАЛЬНО - выходим сразу после нахождения
+for _, item := range items {
+    if item.Name == targetName {
+        log.V(1).Info("found target", "name", targetName)
+        return reconcile.Result{}, nil // Выходим сразу
+    }
+}
+```
+
+**Когда оптимизировать:**
+- Если оптимизация улучшает читаемость и не усложняет код - делайте
+- Если оптимизация делает код сложнее - обсудите с командой
+- Оптимизации опциональны, но ревьюеры могут попросить их добавить
 
 ### Параллельная обработка (обсуждаемо)
 
@@ -905,9 +1172,8 @@ DescribeTableSubtree("when resource has",
 	Entry("nil Status", func() { obj.Status = nil }),
 	Entry("nil Status.Field", func() { obj.Status = &Status{Field: nil} }),
 	func(setup func()) {
-		BeforeEach(func() {
-			setup()
-		})
+		// ✅ ПРАВИЛЬНО - передаем функцию напрямую
+		BeforeEach(setup)
 		
 		It("should handle nil fields", func(ctx SpecContext) {
 			// Один тест для всех Entry
@@ -915,10 +1181,20 @@ DescribeTableSubtree("when resource has",
 	})
 ```
 
+**Важно:** В `DescribeTableSubtree` передавайте функцию `setup` напрямую в `BeforeEach`, а не оборачивайте её в анонимную функцию:
+- ✅ **ПРАВИЛЬНО:** `BeforeEach(setup)`
+- ❌ **НЕПРАВИЛЬНО:** `BeforeEach(func() { setup() })`
+
+Это делает код более лаконичным и соответствует best practices Ginkgo.
+
 4. **Interceptors для тестирования ошибок API:**
    - Используйте interceptors для симуляции ошибок Get, List, Patch
    - Это позволяет тестировать обработку ошибок без реального Kubernetes
+   - **Важно:** Patch ошибки МОЖНО тестировать через `SubResourcePatch` interceptor
+   - ❌ **НЕПРАВИЛЬНО:** Комментарии типа "Testing Patch errors with fake client is complex" или "Fake client's Status().Patch() doesn't easily allow injecting errors" - это неверно
+   - ✅ **ПРАВИЛЬНО:** Используйте `SubResourcePatch` interceptor для симуляции Patch ошибок, включая 409 Conflict
 
+**Пример теста для Get ошибок:**
 ```go
 When("Get fails", func() {
 	BeforeEach(func() {
@@ -930,9 +1206,101 @@ When("Get fails", func() {
 	})
 	
 	It("should return error", func(ctx SpecContext) {
-		Expect(rec.Reconcile(...)).Error().To(HaveOccurred())
+		Expect(rec.Reconcile(ctx, RequestFor(obj))).Error().To(HaveOccurred())
 	})
 })
+```
+
+**Пример теста для Patch ошибок (обычные ошибки):**
+```go
+When("Patch fails with non-NotFound error", func() {
+	var rv *v1alpha3.ReplicatedVolume
+	patchError := errors.New("failed to patch status")
+
+	BeforeEach(func() {
+		rv = createRV("volume-patch-1")
+		clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+					if subResourceName == "status" {
+						return patchError
+					}
+				}
+				return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+			},
+		})
+	})
+
+	JustBeforeEach(func(ctx SpecContext) {
+		Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+	})
+
+	It("should fail if patching ReplicatedVolume status failed with non-NotFound error", func(ctx SpecContext) {
+		Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(patchError), "should return error when Patch fails")
+	})
+})
+```
+
+**Пример теста для Patch ошибок (409 Conflict - race condition):**
+```go
+When("Patch fails with 409 Conflict (race condition)", func() {
+	var rv *v1alpha3.ReplicatedVolume
+	var conflictError error
+	var patchAttempts int
+
+	BeforeEach(func() {
+		rv = createRV("volume-conflict-1")
+		patchAttempts = 0
+		// Simulate 409 Conflict error (race condition scenario)
+		conflictError = kerrors.NewConflict(
+			schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumes"},
+			rv.Name,
+			errors.New("resourceVersion conflict: the object has been modified"),
+		)
+		clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+			SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+				if rvObj, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+					if subResourceName == "status" && rvObj.Name == rv.Name {
+						patchAttempts++
+						// Simulate conflict on first patch attempt only
+						if patchAttempts == 1 {
+							return conflictError
+						}
+						// Allow subsequent attempts to succeed (simulating retry after conflict)
+					}
+				}
+				return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+			},
+		})
+	})
+
+	JustBeforeEach(func(ctx SpecContext) {
+		Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+	})
+
+	It("should return error on 409 Conflict and succeed on retry", func(ctx SpecContext) {
+		By("First reconcile: should fail with 409 Conflict")
+		Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
+
+		By("Second reconcile (retry): should succeed after conflict resolved")
+		Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
+
+		By("Verifying field was assigned after retry")
+		updatedRV := &v1alpha3.ReplicatedVolume{}
+		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+		Expect(updatedRV).To(HaveField("Status.SomeField", Not(BeEmpty())), "field should be assigned")
+	})
+})
+```
+
+**Импорты для теста 409 Conflict:**
+```go
+import (
+	"errors"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+)
 ```
 
 5. **Отдельный `suite_test.go` с хелперами:**
