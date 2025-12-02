@@ -109,6 +109,10 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	ActualType string `json:"actualType,omitempty"`
 
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 }
