@@ -28,10 +28,11 @@ func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready b
 			Name: name,
 			OwnerReferences: []metav1.OwnerReference{
 				{
-					APIVersion: "storage.deckhouse.io/v1alpha3",
-					Kind:       "ReplicatedVolume",
-					Name:       rvName,
-					Controller: func() *bool { b := true; return &b }(),
+					APIVersion:         "storage.deckhouse.io/v1alpha3",
+					Kind:               "ReplicatedVolume",
+					Name:               rvName,
+					Controller:         func() *bool { b := true; return &b }(),
+					BlockOwnerDeletion: func() *bool { b := true; return &b }(),
 				},
 			},
 		},
@@ -360,6 +361,64 @@ var _ = Describe("Reconciler", func() {
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 			Expect(cl.List(ctx, rvrList)).To(Succeed())
 			Expect(rvrList.Items).To(HaveLen(1))
+		})
+	})
+
+	When("ReplicatedVolumeReplica is created", func() {
+		It("should have OwnerReferences with correct rvName", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rsc",
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication: "None",
+				},
+			}
+			Expect(cl.Create(ctx, rsc)).To(Succeed())
+
+			rvName := "test-rv"
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: rvName,
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("1Gi"),
+					ReplicatedStorageClassName: "test-rsc",
+				},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{},
+				},
+			}
+			Expect(cl.Create(ctx, rv)).To(Succeed())
+
+			result, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      rvName,
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify replica was created
+			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(1))
+
+			rvr := rvrList.Items[0]
+			// Verify OwnerReferences exist
+			Expect(rvr.OwnerReferences).NotTo(BeEmpty())
+			Expect(rvr.OwnerReferences).To(HaveLen(1))
+
+			ownerRef := rvr.OwnerReferences[0]
+			// Verify OwnerReference points to the correct ReplicatedVolume
+			Expect(ownerRef.Name).To(Equal(rvName))
+			Expect(ownerRef.Kind).To(Equal("ReplicatedVolume"))
+			Expect(ownerRef.APIVersion).To(Equal("storage.deckhouse.io/v1alpha3"))
+			Expect(ownerRef.Controller).NotTo(BeNil())
+			Expect(*ownerRef.Controller).To(BeTrue())
+			Expect(ownerRef.BlockOwnerDeletion).NotTo(BeNil())
+			Expect(*ownerRef.BlockOwnerDeletion).To(BeTrue())
 		})
 	})
 
