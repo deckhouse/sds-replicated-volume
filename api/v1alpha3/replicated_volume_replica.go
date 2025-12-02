@@ -180,16 +180,24 @@ type DRBD struct {
 }
 
 // +k8s:deepcopy-gen=true
-type DRBDError struct {
+type CmdError struct {
 	// +kubebuilder:validation:MaxLength=1024
 	Output   string `json:"output,omitempty"`
 	ExitCode int    `json:"exitCode,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
+type SharedSecretUnsupportedAlgError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
 type DRBDErrors struct {
 	// +patchStrategy=merge
-	LastAdjustmentError *DRBDError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
+	LastAdjustmentError *CmdError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	SharedSecretAlgSelectionError *SharedSecretUnsupportedAlgError `json:"sharedSecretAlgSelectionError,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
