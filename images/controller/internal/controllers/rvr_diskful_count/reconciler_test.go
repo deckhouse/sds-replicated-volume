@@ -91,13 +91,14 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		_, err := rec.Reconcile(ctx, reconcile.Request{
+		result, err := rec.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "test-rv",
 				Namespace: "",
 			},
 		})
 		Expect(err).NotTo(HaveOccurred())
+		Expect(result).To(Equal(reconcile.Result{}))
 	})
 
 	When("ReplicatedVolume is being deleted", func() {
@@ -129,13 +130,14 @@ var _ = Describe("Reconciler", func() {
 			rv.DeletionTimestamp = &now
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 		})
 	})
 
@@ -253,13 +255,14 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -302,13 +305,14 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -341,13 +345,14 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -399,13 +404,14 @@ var _ = Describe("Reconciler", func() {
 				}
 			}
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify new replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -469,13 +475,14 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", false, nil)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify no new replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -515,13 +522,14 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 			Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify no new replicas were created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -560,13 +568,14 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", true, nil)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify new replica was created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -611,13 +620,14 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", true, nil)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify new replicas were created
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -659,23 +669,25 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Need 3 total, create 0
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// First reconcile creates 1 replica
 			// Second reconcile should create 2 more
-			_, err = rec.Reconcile(ctx, reconcile.Request{
+			result, err = rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Note: In real scenario, the first replica would need to become ready
 			// before the next ones are created. But for this test, we're just
@@ -712,13 +724,14 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", true, nil)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify condition was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
@@ -759,13 +772,14 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 			Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify condition was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
@@ -808,13 +822,14 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvr2)).To(Succeed())
 			Expect(cl.Create(ctx, rvr3)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify condition was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
@@ -860,13 +875,14 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
 			Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify new replica was created (total should be 3: 1 deleted + 1 non-deleted + 1 new)
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -923,13 +939,14 @@ var _ = Describe("Reconciler", func() {
 			rvrNonDiskful := createReplicatedVolumeReplicaWithType("rvr-non-diskful", "test-rv", "Diskless", true, nil)
 			Expect(cl.Create(ctx, rvrNonDiskful)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify a new Diskful replica was created (because non-Diskful was ignored)
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -988,13 +1005,14 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvrDiskful)).To(Succeed())
 			Expect(cl.Create(ctx, rvrNonDiskful)).To(Succeed())
 
-			_, err := rec.Reconcile(ctx, reconcile.Request{
+			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
 					Name:      "test-rv",
 					Namespace: "",
 				},
 			})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
 
 			// Verify no new replica was created (we already have 1 Diskful, which is enough)
 			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
