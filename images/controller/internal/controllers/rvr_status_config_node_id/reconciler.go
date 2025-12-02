@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvrstatusconfignodeid
 
 import (
@@ -15,12 +31,12 @@ import (
 
 // formatValidRange returns a formatted string representing the valid nodeID range.
 func formatValidRange() string {
-	return fmt.Sprintf("[%d; %d]", MinNodeID, MaxNodeID)
+	return fmt.Sprintf("[%d; %d]", v1alpha3.RVRMinNodeID, v1alpha3.RVRMaxNodeID)
 }
 
-// isValidNodeID checks if nodeID is within valid range [MinNodeID; MaxNodeID].
+// isValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
 func isValidNodeID(nodeID uint) bool {
-	return nodeID >= MinNodeID && nodeID <= MaxNodeID
+	return nodeID >= v1alpha3.RVRMinNodeID && nodeID <= v1alpha3.RVRMaxNodeID
 }
 
 type Reconciler struct {
@@ -100,7 +116,7 @@ func (r *Reconciler) Reconcile(
 
 	// Count total replicas (including the one we're processing)
 	totalReplicas := len(rvrList.Items)
-	if totalReplicas > MaxNodeID+1 {
+	if totalReplicas > int(v1alpha3.RVRMaxNodeID)+1 {
 		// NOTE: It would be a good idea to set ConfigurationAdjusted condition to False here
 		// for better user experience and understanding what's wrong (for administrators, not end users).
 		// This would make the problem visible in RVR status conditions, not just in controller logs.
@@ -110,15 +126,15 @@ func (r *Reconciler) Reconcile(
 			"too many replicas for volume %s: %d (maximum is %d)",
 			rvr.Spec.ReplicatedVolumeName,
 			totalReplicas,
-			MaxNodeID+1,
+			int(v1alpha3.RVRMaxNodeID)+1,
 		)
-		log.Error(err, "too many replicas for volume", "volume", rvr.Spec.ReplicatedVolumeName, "replicas", totalReplicas, "max", MaxNodeID+1)
+		log.Error(err, "too many replicas for volume", "volume", rvr.Spec.ReplicatedVolumeName, "replicas", totalReplicas, "max", int(v1alpha3.RVRMaxNodeID)+1)
 		return reconcile.Result{}, err
 	}
 
 	// Find available nodeID
 	var availableNodeID *uint
-	for i := uint(MinNodeID); i <= uint(MaxNodeID); i++ {
+	for i := v1alpha3.RVRMinNodeID; i <= v1alpha3.RVRMaxNodeID; i++ {
 		if _, exists := usedNodeIDs[i]; !exists {
 			availableNodeID = &i
 			break
@@ -134,9 +150,9 @@ func (r *Reconciler) Reconcile(
 		err := e.ErrInvalidClusterf(
 			"no available nodeID for volume %s (all %d nodeIDs are used)",
 			rvr.Spec.ReplicatedVolumeName,
-			MaxNodeID+1,
+			int(v1alpha3.RVRMaxNodeID)+1,
 		)
-		log.Error(err, "no available nodeID for volume", "volume", rvr.Spec.ReplicatedVolumeName, "maxNodeIDs", MaxNodeID+1)
+		log.Error(err, "no available nodeID for volume", "volume", rvr.Spec.ReplicatedVolumeName, "maxNodeIDs", int(v1alpha3.RVRMaxNodeID)+1)
 		return reconcile.Result{}, err
 	}
 

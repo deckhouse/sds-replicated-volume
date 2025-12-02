@@ -14,8 +14,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrstatusconfignodeid
+package v1alpha3
 
+// DRBD node ID constants for ReplicatedVolumeReplica
 const (
-	RVRStatusConfigNodeIDControllerName = "rvr_status_config_node_id_controller"
+	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
+	RVRMinNodeID = uint(0)
+	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
+	RVRMaxNodeID = uint(7)
 )
