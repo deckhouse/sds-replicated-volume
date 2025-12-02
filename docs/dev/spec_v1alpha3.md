@@ -46,7 +46,6 @@
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
-  - [`rv-status-controller` \[TBD\]](#rv-status-controller-tbd)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
@@ -264,22 +263,52 @@ TODO
 
 ### Цель 
 
-Согласовать желаемую конфигурацию
-  - `rvr.status.drbd.config`
-  - `rvr.spec.type`
-  - `rv.status.drbd.config`
+Согласовать желаемую конфигурацию в полях ресурсов и конфигурации DRBD.
 
-и "*.res" конфиг в контейнере на диске.
+Обязательные поля. Нельзя приступать к конфигурации, пока значение поля не
+проинициализировано:
 
-Желаемая конфигурация определяется типом: `rvr.spec.type`. Для каждого из типов,
-есть набор обязательных полей, задания которых нужно дожидаться (не менять конфиг,
-пока они не заданы).
- - `Diskful`
-   - Дождаться полей
- - `Access`
- - `TieBreaker`
+- `rv.metadata.name`
+- `rv.status.drbd.config.sharedSecret`
+- `rv.status.drbd.config.sharedSecretAlg`
+- `rv.status.drbd.config.deviceMinor`
+- `rvr.status.drbd.config.nodeId`
+- `rvr.status.drbd.config.address`
+- `rvr.status.drbd.config.peers`
+  - признак инициализации: `rvr.status.drbd.config.peersInitialized`
+- `rvr.status.drbd.config.disk`
+  - обязателен только для `rvr.spec.type=Diskful`
 
-`rvr.status.drbd.errors.lastAdjustmentError == nil`
+Дополнительные поля. Можно приступать к конфигурации с любыми значениями в них:
+- `rv.status.drbd.config.quorum`
+- `rv.status.drbd.config.quorumMinimumRedundancy`
+- `rv.status.drbd.config.allowTwoPrimaries`
+
+Список ошибок, которые требуется поддерживать (выставлять и снимать) после каждого
+реконсайла:
+  - `rvr.status.drbd.errors.sharedSecretAlgSelectionError` - результат валидации алгоритма
+  - `rvr.status.drbd.errors.lastAdjustmentError` - вывод команды `drbdadm adjust`
+  - `rvr.status.drbd.errors.last<...>Error` - вывод любой другой использованной команды `drbd` (требуется доработать API контракт)
+
+Список полей, которые требуется поддерживать (выставлять и снимать) как результат каждого
+реконсайла:
+  - `rvr.status.drbd.actual.disk` - должно соответствовать `rvr.status.drbd.config.disk`
+  - `rvr.status.drbd.actual.allowTwoPrimaries` - должно соответствовать `rv.status.drbd.config.allowTwoPrimaries`
+
+
+
+
+
+Желаемая конфигурация определяется типом: `rvr.spec.type`.
+
+Для каждого из типов, есть набор *обязательных полей*, назначение которых является обязательным условием
+для начала изменения конфига DRBD - их нужно дождаться, прежде чем начинать конфигурирование ресурса.
+
+Также есть поля, которые нужно игнорировать - *игнорируемые поля*. Несмотря на то, что DRBD позволяет их назначение, требуется
+отложить.
+
+
+
 
 - пишем res
 - если мд нет
@@ -295,6 +324,8 @@ TODO
 Контроллирует DRBD конфиг на ноде для всех rvr (в том числе удалённых, с
 неснятым финализатором контроллера).
 
+Для работы с форматом конфигурации DRBD предлагается воспользоваться существующими пакетами
+ - см. метод `writeResourceConfig` в `images/agent/internal/reconcile/rvr/reconcile_handler.go`
 
 ### Триггер 
   - 
@@ -324,6 +355,7 @@ TODO
 ## `drbd-primary-controller`
 
 ### Цель 
+- `rvr.status.drbd.config.primary`
 
 ### Триггер 
   - 
@@ -654,35 +686,19 @@ if M > 1 {
 
 ### Цель
 Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
-а также обработать ошибку приминения алгоритма на любой из реплик из `rvr.status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm]`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `Message`.
+а также обработать ошибку применения алгоритма на любой из реплик из `rvr.status.drbd.errors.sharedSecretAlgSelectionError`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `rvr.status.drbd.errors.sharedSecretAlgSelectionError.unsupportedAlg`.
 
-В случае, если список закончился, выставить для `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False` `reason=UnableToSelectSharedSecretAlgorithm`
+В случае, если список закончился - прекратить попытки.
 
 ### Триггер
- - `CREATE(RV, rv.status.config.sharedSecret == "")`
- - `CREATE/UPDATE(RVR, status.conditions[type=ConfigurationAdjusted,status=False,reason=UnsupportedAlgorithm])`
+ - `CREATE(RV)`
+ - `CREATE/UPDATE(RVR)`
 
 ### Вывод 
  - `rv.status.config.sharedSecret`
    - генерируется новый
  - `rv.status.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False`
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].reason=UnableToSelectSharedSecretAlgorithm`
- - `rv.status.conditions[type=SharedSecretAlgorithmSelected].message=[Which node? Which alg failed?]`
-
-## `rv-status-controller` [TBD]
-
-### Цель 
-Обновить вычисляемые поля статутса RV. 
-
-### Вывод 
- - `rv.status.conditions[type=Ready]`
-   - `Status=True` в случае если все подстатусы успешны, иначе `False`
- - `phase`
-
-### Триггер 
-Изменение `rv.status.conditions`
 
 ## `rvr-missing-node-controller`
 
@@ -768,6 +784,7 @@ if M > 1 {
 
 TODO: коннекты между разными узлами
 TODO: что ещё нужно для UI (%sync?)?
+TODO: SharedSecretAlgorithmSelected .reason=UnableToSelectSharedSecretAlgorithm
 
 ### Вывод 
   - `rvr.status.conditions`
