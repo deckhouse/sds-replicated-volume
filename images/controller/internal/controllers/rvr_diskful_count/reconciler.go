@@ -100,7 +100,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
 
-		err = setDiskfulReplicaCountReachedCondition(
+		err = patchDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
 			v1alpha3.ReasonFirstReplicaIsBeingCreated,
@@ -128,7 +128,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
 		}
 
-		err = setDiskfulReplicaCountReachedCondition(
+		err = patchDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
 			v1alpha3.ReasonFirstReplicaIsBeingCreated,
@@ -178,7 +178,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 
 		// Set condition that required number of replicas is reached
-		err = setDiskfulReplicaCountReachedCondition(
+		err = patchDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionTrue,
 			v1alpha3.ReasonCreatedRequiredNumberOfReplicas,
@@ -190,7 +190,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	} else {
 		log.Info("No replicas to create")
 		// Set condition that required number of replicas is reached
-		err = setDiskfulReplicaCountReachedCondition(
+		err = patchDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionTrue,
 			v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
@@ -305,9 +305,9 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme
 	return nil
 }
 
-// setDiskfulReplicaCountReachedCondition sets or updates the DiskfulReplicaCountReached condition
+// patchDiskfulReplicaCountReachedCondition patches the DiskfulReplicaCountReached condition
 // on the ReplicatedVolume status with the provided status, reason, and message.
-func setDiskfulReplicaCountReachedCondition(
+func patchDiskfulReplicaCountReachedCondition(
 	ctx context.Context,
 	cl client.Client,
 	log logr.Logger,
