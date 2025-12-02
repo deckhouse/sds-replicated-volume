@@ -103,7 +103,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		err = setDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
-			"FirstReplicaIsBeingCreated",
+			v1alpha3.ReasonFirstReplicaIsBeingCreated,
 			fmt.Sprintf("Created first replica, need %d diskful replicas", neededNumberOfReplicas),
 		)
 		if err != nil {
@@ -131,7 +131,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		err = setDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionFalse,
-			"FirstReplicaIsBeingCreated",
+			v1alpha3.ReasonFirstReplicaIsBeingCreated,
 			fmt.Sprintf("Created non-deleted replica, need %d diskful replicas", neededNumberOfReplicas),
 		)
 		if err != nil {
@@ -181,7 +181,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		err = setDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionTrue,
-			"CreatedRequiredNumberOfReplicas",
+			v1alpha3.ReasonCreatedRequiredNumberOfReplicas,
 			fmt.Sprintf("Created %d replica(s), required number of diskful replicas is reached: %d", creatingNumberOfReplicas, neededNumberOfReplicas),
 		)
 		if err != nil {
@@ -193,7 +193,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		err = setDiskfulReplicaCountReachedCondition(
 			ctx, r.cl, log, rv,
 			metav1.ConditionTrue,
-			"RequiredNumberOfReplicasIsAvailable",
+			v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
 			fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
 		)
 		if err != nil {
@@ -224,11 +224,11 @@ func getDiskfulReplicaCount(ctx context.Context, cl client.Client, rv *v1alpha3.
 
 	// Determine diskful replica count based on replication
 	switch rsc.Spec.Replication {
-	case "None":
+	case v1alpha3.ReplicationNone:
 		return 1, nil
-	case "Availability":
+	case v1alpha3.ReplicationAvailability:
 		return 2, nil
-	case "ConsistencyAndAvailability":
+	case v1alpha3.ReplicationConsistencyAndAvailability:
 		return 3, nil
 	default:
 		return 0, fmt.Errorf("unknown replication value: %s", rsc.Spec.Replication)
@@ -249,7 +249,7 @@ func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, r
 	rvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
 
 	for i := range allRvrList.Items {
-		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name && allRvrList.Items[i].Spec.Type == "Diskful" {
+		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name && allRvrList.Items[i].Spec.Type == v1alpha3.ReplicaTypeDiskful {
 			rvrMap[allRvrList.Items[i].Name] = &allRvrList.Items[i]
 		}
 	}
@@ -287,7 +287,7 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
-			Type:                 "Diskful",
+			Type:                 v1alpha3.ReplicaTypeDiskful,
 		},
 	}
 

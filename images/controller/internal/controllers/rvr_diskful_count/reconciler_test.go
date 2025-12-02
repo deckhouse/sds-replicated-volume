@@ -66,7 +66,7 @@ func createReplicatedVolume(name, rscName string) *v1alpha3.ReplicatedVolume {
 
 //nolint:unparam // name and rvName parameters are kept for flexibility in tests
 func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
-	return createReplicatedVolumeReplicaWithType(name, rvName, "Diskful", ready, deletionTimestamp)
+	return createReplicatedVolumeReplicaWithType(name, rvName, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
 func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
@@ -221,7 +221,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.List(ctx, rvrList)).To(Succeed())
 			Expect(rvrList.Items).To(HaveLen(1))
 			Expect(rvrList.Items[0].Spec.ReplicatedVolumeName).To(Equal("test-rv"))
-			Expect(rvrList.Items[0].Spec.Type).To(Equal("Diskful"))
+			Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful))
 
 			// Verify condition was set
 			updatedRV := &v1alpha3.ReplicatedVolume{}
@@ -229,7 +229,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(condition.Reason).To(Equal("FirstReplicaIsBeingCreated"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonFirstReplicaIsBeingCreated))
 		})
 
 		It("should create one replica for Availability replication", func() {
@@ -317,7 +317,7 @@ var _ = Describe("Reconciler", func() {
 			// is counted in the next iteration, but in this case we need 2 and only have 1 non-deleted
 			// However, the reconciler sets True after creating replicas. This is expected behavior.
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("CreatedRequiredNumberOfReplicas"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonCreatedRequiredNumberOfReplicas))
 		})
 	})
 
@@ -406,7 +406,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("CreatedRequiredNumberOfReplicas"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonCreatedRequiredNumberOfReplicas))
 		})
 
 		It("should create missing replicas for ConsistencyAndAvailability replication", func() {
@@ -439,7 +439,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("CreatedRequiredNumberOfReplicas"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonCreatedRequiredNumberOfReplicas))
 		})
 
 		It("should create multiple missing replicas", func() {
@@ -499,7 +499,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("RequiredNumberOfReplicasIsAvailable"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 
 		It("should set condition to True for Availability replication", func() {
@@ -528,7 +528,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("RequiredNumberOfReplicasIsAvailable"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 
 		It("should set condition to True for ConsistencyAndAvailability replication", func() {
@@ -559,7 +559,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("RequiredNumberOfReplicasIsAvailable"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 	})
 
@@ -608,7 +608,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
 			// The reason depends on whether replicas were created or already available
-			Expect(condition.Reason).To(BeElementOf("CreatedRequiredNumberOfReplicas", "RequiredNumberOfReplicasIsAvailable"))
+			Expect(condition.Reason).To(BeElementOf(v1alpha3.ReasonCreatedRequiredNumberOfReplicas, v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 	})
 
@@ -641,7 +641,7 @@ var _ = Describe("Reconciler", func() {
 			// Verify that the new replica is Diskful
 			var diskfulReplicas []v1alpha3.ReplicatedVolumeReplica
 			for _, rvr := range rvrList.Items {
-				if rvr.Spec.Type == "Diskful" {
+				if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
 					diskfulReplicas = append(diskfulReplicas, rvr)
 				}
 			}
@@ -654,7 +654,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionFalse))
-			Expect(condition.Reason).To(Equal("FirstReplicaIsBeingCreated"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonFirstReplicaIsBeingCreated))
 		})
 
 		It("should only count Diskful replicas when calculating required count", func() {
@@ -690,7 +690,7 @@ var _ = Describe("Reconciler", func() {
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).NotTo(BeNil())
 			Expect(condition.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condition.Reason).To(Equal("RequiredNumberOfReplicasIsAvailable"))
+			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 	})
 })

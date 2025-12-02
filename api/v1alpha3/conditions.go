@@ -113,3 +113,22 @@ const (
 	// [ConditionTypeDiskfulReplicaCountReached] indicates whether the required number of diskful replicas has been reached
 	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
 )
+
+// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
+const (
+	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
+	ReasonCreatedRequiredNumberOfReplicas     = "CreatedRequiredNumberOfReplicas"
+	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
+)
+
+// Replication values for [ReplicatedStorageClass] spec
+const (
+	ReplicationNone                       = "None"
+	ReplicationAvailability               = "Availability"
+	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
+)
+
+// Replica type values for [ReplicatedVolumeReplica] spec
+const (
+	ReplicaTypeDiskful = "Diskful"
+)
