@@ -42,6 +42,8 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
+    - [Контекст](#контекст)
+  - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
@@ -126,8 +128,8 @@ TODO
  - `sha1`
 
 ### Порты DRBD
- - `drbdMinPort` - минимальный порт для использования ресурсами 
- - `drbdMaxPort` - максимальный порт для использования ресурсами
+ - `drbdMinPort=7000` - минимальный порт для использования ресурсами 
+ - `drbdMaxPort=8000` - максимальный порт для использования ресурсами
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -311,18 +313,18 @@ TODO
 
 
 - пишем res
-- если мд нет
-  - создаем
+- если мд нет `drbdadm dump-md`
+  - создаем `drbdadm create-md`
 - проверяем необходимость первоначальной синхронизации (AND)
   - peersInitialized && len(peers)==0
   - если status != UpToDate
-  - `rvr.status.drbd.initialSycCompleted!=true`
+  - `rvr.status.drbd.initialSyncCompleted!=true`
 - если первоначальная синхронизация нужна, делаем `drdbadm primary --force`
-- `rvr.status.drbd.initialSycCompleted=true`
+- `drdbadm secondary`
+- `rvr.status.drbd.initialSyncCompleted=true`
 
 
-Контроллирует DRBD конфиг на ноде для всех rvr (в том числе удалённых, с
-неснятым финализатором контроллера).
+
 
 Для работы с форматом конфигурации DRBD предлагается воспользоваться существующими пакетами
  - см. метод `writeResourceConfig` в `images/agent/internal/reconcile/rvr/reconcile_handler.go`
@@ -346,6 +348,7 @@ TODO
 
 ### Цель 
 
+- `rvr.status.drbd.initialSyncCompleted=true`
 
 ### Триггер 
   - 
@@ -356,6 +359,7 @@ TODO
 
 ### Цель 
 - `rvr.status.drbd.config.primary`
+- `rvr.status.drbd.initialSyncCompleted=true`
 
 ### Триггер 
   - 
@@ -630,17 +634,47 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
+### Контекст
+
+TODO
+`sds-replicated-volume.storage.deckhouse.io/agent`
+`sds-replicated-volume.storage.deckhouse.io/controller`
+
 ### Цель 
+Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD, и
+удаляет - после.
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
-Нельзя снимать финализатор, пока rvr Primary (де-факто).
+agent не удаляет ресурс из DRBD, пока есть чужие финализаторы (свой финализатор
+всегда снимается последним).
 
-Снять финализатор, когда есть необходимое количество рабочих реплик в кластере,
+Цель `rvr-gc-controller` - снять финализатор, когда есть необходимое количество рабочих реплик в кластере,
 завершим тем самым удаление, вызванное по любой другой причине.
+
+Нельзя снимать финализатор, пока rvr фактически опубликована - `rvr.status.drbd.`
+
 
 ### Триггер 
   - 
 
 ### Вывод 
+
+## `rvr-owner-reference-controller`
+
+### Цель 
+
+Поддерживать `rvr.metada.ownerReference`, указывающий на `rv` по имени
+`rvr.spec.replicatedVolumeName`.
+
+Настройки:
+ - `controller=true`
+ - ``
+
+
+
+### Вывод 
+ - `rvr.metada.ownerReference`
 
 ## `rv-status-config-quorum-controller`
 
