@@ -148,13 +148,13 @@ func (r *Reconciler) reconcileRecalculate(
 	}
 
 	// by default, no TieBreaker replicas are required
-	desiredTB := 0
+	desiredTB := desiredTieBreakerTotal(FDReplicaCount)
 
 	// for Replication=Availability with at least two Diskful replicas,
 	// compute the minimal required number of TieBreakers based on FD distribution
-	if rsc.Spec.Replication == "Availability" && diskfulCount == 2 {
-		desiredTB = desiredTieBreakerTotal(FDReplicaCount)
-	}
+	// if rsc.Spec.Replication == "Availability" && diskfulCount == 2 {
+	// 	desiredTB = desiredTieBreakerTotal(FDReplicaCount)
+	// }
 
 	currentTB := len(tieBreakerCurrent)
 
