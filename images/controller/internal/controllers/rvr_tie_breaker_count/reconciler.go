@@ -18,12 +18,13 @@ package rvrtiebreakercount
 
 import (
 	"context"
-	"log/slog"
+	"errors"
+	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,109 +33,99 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const (
-	nodeZoneLabel = "topology.kubernetes.io/zone"
+	NodeZoneLabel = "topology.kubernetes.io/zone"
 )
 
 type Reconciler struct {
 	cl     client.Client
-	rdr    client.Reader
-	sch    *runtime.Scheme
-	log    *slog.Logger
-	logAlt logr.Logger
+	log    logr.Logger
+	scheme *runtime.Scheme
 }
 
-var _ reconcile.TypedReconciler[Request] = &Reconciler{}
-
-type fdKey string // fd stands for 'Failure Domain'
-
-func (r *Reconciler) Reconcile(
-	ctx context.Context,
-	req Request,
-) (reconcile.Result, error) {
-	switch typed := req.(type) {
-	case RecalculateRequest:
-		var err error
-		err = r.reconcileRecalculate(ctx, typed)
-		return reconcile.Result{}, err
-	default:
-		return reconcile.Result{}, e.ErrUnknownf("unknown request type %T", req)
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
+	return &Reconciler{
+		cl:     cl,
+		log:    log,
+		scheme: scheme,
 	}
 }
 
-func (r *Reconciler) reconcileRecalculate(
+var _ reconcile.Reconciler = &Reconciler{}
+var ErrNoZoneLabel = errors.New("can't find zone label")
+
+func (r *Reconciler) Reconcile(
 	ctx context.Context,
-	req RecalculateRequest,
-) error {
+	req reconcile.Request,
+) (reconcile.Result, error) {
+	log := r.log.WithName("Reconcile").WithValues("request", req)
 	// get target ReplicatedVolume
 	rv := &v1alpha3.ReplicatedVolume{}
-	if err := r.rdr.Get(ctx, client.ObjectKey{Name: req.VolumeName}, rv); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return e.ErrUnknownf("get rv %q: %w", req.VolumeName, err)
+	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		log.Error(err, "Can't get ReplicatedVolume")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// controller logic depends on ReplicatedStorageClass policy; skip if not set
 	if rv.Spec.ReplicatedStorageClassName == "" {
-		return nil
+		log.Info("Empty ReplicatedStorageClassName")
+		return reconcile.Result{}, nil
 	}
 
 	// get ReplicatedStorageClass to read replication and topology settings
 	rsc := &v1alpha1.ReplicatedStorageClass{}
-	if err := r.rdr.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return e.ErrUnknownf("get replicatedStorageClass %q: %w", rv.Spec.ReplicatedStorageClassName, err)
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
+		log.Error(err, "Can't get ReplicatedStorageClass")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
 	// list Nodes to build nodeName -> FD key map according to rsc.Spec.Topology
 	nodes := &corev1.NodeList{}
-	if err := r.rdr.List(ctx, nodes); err != nil {
-		return e.ErrUnknownf("list nodes: %w", err)
+	if err := r.cl.List(ctx, nodes); err != nil {
+		return reconcile.Result{}, err
 	}
 
-	FDKeyByNodeName := map[string]fdKey{}
+	FDKeyByNodeName := make(map[string]string)
 	for _, node := range nodes.Items {
+		log := log.WithValues("node", node.Name)
 		if rsc.Spec.Topology == "TransZonal" {
-			zone := node.Labels[nodeZoneLabel]
-			FDKeyByNodeName[node.Name] = fdKey(zone + "/" + node.Name)
+			zone, ok := node.Labels[NodeZoneLabel]
+			if !ok {
+				log.Error(ErrNoZoneLabel, "No zone label")
+				return reconcile.Result{}, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
+			}
+			FDKeyByNodeName[node.Name] = zone + "/" + node.Name
 		} else {
-			FDKeyByNodeName[node.Name] = fdKey(node.Name)
+			FDKeyByNodeName[node.Name] = node.Name
 		}
 	}
 
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-	if err := r.rdr.List(ctx, rvrList); err != nil {
-		return e.ErrUnknownf("list replicatedVolumeReplicas: %w", err)
+	if err := r.cl.List(ctx, rvrList); err != nil {
+		log.Error(err, "Can't List ReplicatedVolumeReplicaList")
+		return reconcile.Result{}, err
 	}
 
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+		return rv.Name != rvr.Spec.ReplicatedVolumeName || !rvr.DeletionTimestamp.IsZero()
+	})
+
 	// aggregate base replicas (Diskful+Access) per FD and collect existing TieBreaker replicas
-	FDReplicaCount := map[fdKey]int{}
+	FDReplicaCount := make(map[string]int, len(FDKeyByNodeName))
 	var diskfulCount int
 	var tieBreakerCurrent []*v1alpha3.ReplicatedVolumeReplica
 
 	for _, rvr := range rvrList.Items {
-		// only replicas belonging to this RV and not being deleted are considered
-		if rvr.Spec.ReplicatedVolumeName != rv.Name {
-			continue
-		}
-		if !rvr.DeletionTimestamp.IsZero() {
-			continue
-		}
-
 		switch rvr.Spec.Type {
 		case "Diskful":
 			diskfulCount++
 			if rvr.Spec.NodeName != "" {
 				if fd, ok := FDKeyByNodeName[rvr.Spec.NodeName]; ok {
 					FDReplicaCount[fd]++
-				}
+				} // TODO: записать 0 если нет
 			}
 		case "Access":
 			if rvr.Spec.NodeName != "" {
@@ -147,7 +138,10 @@ func (r *Reconciler) reconcileRecalculate(
 		}
 	}
 
-	desiredTB := desiredTieBreakerTotal(FDReplicaCount)
+	desiredTB, err := DesiredTieBreakerTotal(FDReplicaCount)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("calculate desired tie breaker count: %w", err)
+	}
 
 	// for Replication=Availability with at least two Diskful replicas,
 	// compute the minimal required number of TieBreakers based on FD distribution
@@ -159,7 +153,8 @@ func (r *Reconciler) reconcileRecalculate(
 
 	// if the current number of TieBreaker replicas already matches the desired one, nothing to change
 	if currentTB == desiredTB {
-		return nil
+		log.Info("No need to change")
+		return reconcile.Result{}, nil
 	}
 
 	// when there are fewer TieBreakers than required, create the missing ones
@@ -177,42 +172,41 @@ func (r *Reconciler) reconcileRecalculate(
 				},
 			}
 
-			if err := controllerutil.SetControllerReference(rv, rvr, r.sch); err != nil {
-				return e.ErrUnknownf("set controller reference for rvr: %w", err)
+			if err := controllerutil.SetControllerReference(rv, rvr, r.scheme); err != nil {
+				return reconcile.Result{}, err
 			}
 
 			if err := r.cl.Create(ctx, rvr); err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					continue
-				}
-				return e.ErrUnknownf("create rvr: %w", err)
+				return reconcile.Result{}, err
 			}
 		}
-		return nil
+		return reconcile.Result{}, nil
 	}
 
 	// when there are more TieBreakers than required, delete the excess ones
 	toDelete := currentTB - desiredTB
 	for i := 0; i < toDelete; i++ {
 		rvr := tieBreakerCurrent[i]
-		if err := r.cl.Delete(ctx, rvr); err != nil {
-			if apierrors.IsNotFound(err) {
-				continue
-			}
-			return e.ErrUnknownf("delete rvr %q: %w", rvr.Name, err)
+		if err := r.cl.Delete(ctx, rvr); client.IgnoreNotFound(err) != nil {
+			return reconcile.Result{}, err
 		}
 	}
 
-	return nil
+	return reconcile.Result{}, nil
 }
 
-func desiredTieBreakerTotal(FDReplicaCount map[fdKey]int) int {
+func DesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error) {
 	// number of distinct failure domains
 	fdCount := len(FDReplicaCount)
 
+	// function is only guaranteed to work for fdCount < 4
+	if fdCount >= 4 {
+		return 0, fmt.Errorf("DesiredTieBreakerTotal is only supported for less than 4 failure domains, got %d", fdCount)
+	}
+
 	// if there is only one (or zero) failure domain, TieBreakers are not useful
 	if fdCount <= 1 {
-		return 0
+		return 0, nil
 	}
 
 	// count how many base (non-TieBreaker) replicas we already have across all FDs
@@ -222,7 +216,7 @@ func desiredTieBreakerTotal(FDReplicaCount map[fdKey]int) int {
 	}
 	// no base replicas means nothing to protect with TieBreakers
 	if totalBaseReplicas == 0 {
-		return 0
+		return 0, nil
 	}
 
 	// search over TieBreakerCount (number of TieBreakers to add) starting from 0:
@@ -269,9 +263,9 @@ func desiredTieBreakerTotal(FDReplicaCount map[fdKey]int) int {
 		}
 
 		// tieBreakerCount is the minimal number of TieBreakers needed
-		return tieBreakerCount
+		return tieBreakerCount, nil
 	}
 
 	// fall-back: do not add TieBreakers if no suitable distribution was found
-	return 0
+	return 0, nil
 }

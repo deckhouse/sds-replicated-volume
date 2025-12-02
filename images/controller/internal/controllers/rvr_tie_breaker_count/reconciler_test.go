@@ -14,458 +14,304 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrtiebreakercount
+package rvrtiebreakercount_test
 
 import (
-	"context"
-	"testing"
+	"fmt"
+	"strings"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
 
-func TestRvrTieBreakerCountReconciler(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "rvr_tie_breaker_count Reconciler Suite")
-}
-
-func newTestScheme() *runtime.Scheme {
+var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
 	Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
-	return scheme
-}
 
-var _ = Describe("Reconciler.reconcileRecalculate", func() {
 	var (
-		scheme *runtime.Scheme
-		ctx    context.Context
+		builder *fake.ClientBuilder
+		cl      client.WithWatch
+		rec     *rvrtiebreakercount.Reconciler
 	)
 
 	BeforeEach(func() {
-		scheme = newTestScheme()
-		ctx = context.Background()
+		builder = fake.NewClientBuilder().WithScheme(scheme)
+		cl = nil
+		rec = nil
 	})
 
-	// Initial State:
-	//   FD "node-a": [Diskful]
-	//   FD "node-b": [Diskful]
-	//   TB: []
-	//   Replication: Availability
-	// Violates:
-	//   - total replica count must be odd
-	// Desired state:
-	//   FD "node-a": [Diskful]
-	//   FD "node-b": [Diskful, TieBreaker]
-	//   TB total: 1
-	//   replicas total: 3 (odd)
-	It("1. creates one TieBreaker for two Diskful on different FDs", func() {
-		rv := &v1alpha3.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rv1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
-				ReplicatedStorageClassName: "rsc1",
-			},
-		}
-
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rsc1",
-			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				Replication: "Availability",
-				Topology:    "",
-			},
-		}
-
-		nodeA := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-a",
-			},
-		}
-		nodeB := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-b",
-			},
-		}
-
-		rvrDF1 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-a",
-				Type:                 "Diskful",
-			},
-		}
-		rvrDF2 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df2",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-b",
-				Type:                 "Diskful",
-			},
-		}
-
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrDF1, rvrDF2).
-			Build()
-
-		rec := &Reconciler{
-			cl:  cl,
-			rdr: cl,
-			sch: scheme,
-		}
-
-		err := rec.reconcileRecalculate(ctx, RecalculateRequest{VolumeName: "rv1"})
-		Expect(err).NotTo(HaveOccurred())
-
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		Expect(cl.List(ctx, rvrList)).To(Succeed())
-
-		tbCount := 0
-		for _, rvr := range rvrList.Items {
-			if rvr.Spec.ReplicatedVolumeName != "rv1" {
-				continue
-			}
-			if rvr.Spec.Type == "TieBreaker" {
-				tbCount++
-			}
-		}
-
-		Expect(tbCount).To(Equal(1))
+	JustBeforeEach(func() {
+		cl = builder.Build()
+		rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 	})
 
-	// Initial State:
-	//   FD "zone-a/node-a": [Diskful]
-	//   FD "zone-b/node-b": [Diskful]
-	//   TB: []
-	//   Replication: Availability
-	//   Topology: TransZonal
-	// Violates:
-	//   - total replica count must be odd
-	// Desired state:
-	//   FD "zone-a/node-a": [Diskful]
-	//   FD "zone-b/node-b": [Diskful]
-	//   FD "zone-b/node-c": [TieBreaker]
-	//   TB total: 1
-	//   replicas total: 3 (odd)
-	It("2. creates one TieBreaker for two Diskful on different FDs with TransZonal topology", func() {
-		rv := &v1alpha3.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rv1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
-				ReplicatedStorageClassName: "rsc1",
-			},
-		}
+	When("objects created", func() {
+		var (
+			rv       v1alpha3.ReplicatedVolume
+			rvrList  v1alpha3.ReplicatedVolumeReplicaList
+			nodeList []corev1.Node
+			rsc      v1alpha1.ReplicatedStorageClass
+		)
 
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rsc1",
-			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				Replication: "Availability",
-				Topology:    "TransZonal",
-			},
-		}
-
-		nodeA := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "node-a",
-				Labels: map[string]string{nodeZoneLabel: "zone-a"},
-			},
-		}
-		nodeB := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:   "node-b",
-				Labels: map[string]string{nodeZoneLabel: "zone-b"},
-			},
-		}
-
-		rvrDF1 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-a",
-				Type:                 "Diskful",
-			},
-		}
-		rvrDF2 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df2",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-b",
-				Type:                 "Diskful",
-			},
-		}
-
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrDF1, rvrDF2).
-			Build()
-
-		rec := &Reconciler{
-			cl:  cl,
-			rdr: cl,
-			sch: scheme,
-		}
-
-		err := rec.reconcileRecalculate(ctx, RecalculateRequest{VolumeName: "rv1"})
-		Expect(err).NotTo(HaveOccurred())
-
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		Expect(cl.List(ctx, rvrList)).To(Succeed())
-
-		tbCount := 0
-		for _, rvr := range rvrList.Items {
-			if rvr.Spec.ReplicatedVolumeName != "rv1" {
-				continue
+		BeforeEach(func() {
+			rv = v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv1",
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "rsc1",
+				},
 			}
-			if rvr.Spec.Type == "TieBreaker" {
-				tbCount++
+
+			rsc = v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rsc1",
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication: "Availability",
+					Topology:    "",
+				},
 			}
-		}
 
-		Expect(tbCount).To(Equal(1))
-	})
-
-	//   Note: this initial state is not reachable in a real cluster (it violates documented replication rules: "Data is stored in two copies on different nodes"),
-	// but the test verifies that if such a state is ever observed, the controller remains a no-op and does not create a useless TieBreaker.
-	// Initial State:
-	//   FD "node-a": [Diskful, Diskful]
-	//   TB: []
-	//   Replication: Availability
-	// Violates (cluster-level requirement):
-	//   - "one FD failure should not break quorum" cannot be achieved for this layout, because all replicas are in a single FD
-	// Desired state (nothing should be changed):
-	//   FD "node-a": [Diskful, Diskful]
-	//   TB total: 0
-	//   replicas total: 2
-	It("3. does not create TieBreaker when all Diskful are in the same FD", func() {
-		rv := &v1alpha3.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rv1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
-				ReplicatedStorageClassName: "rsc1",
-			},
-		}
-
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rsc1",
-			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				Replication: "Availability",
-				Topology:    "",
-			},
-		}
-
-		nodeA := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-a",
-			},
-		}
-
-		rvrDF1 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-a",
-				Type:                 "Diskful",
-			},
-		}
-		rvrDF2 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df2",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-a",
-				Type:                 "Diskful",
-			},
-		}
-
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(rv, rsc, nodeA, rvrDF1, rvrDF2).
-			Build()
-
-		rec := &Reconciler{
-			cl:  cl,
-			rdr: cl,
-			sch: scheme,
-		}
-
-		err := rec.reconcileRecalculate(ctx, RecalculateRequest{VolumeName: "rv1"})
-		Expect(err).NotTo(HaveOccurred())
-
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		Expect(cl.List(ctx, rvrList)).To(Succeed())
-
-		tbCount := 0
-		for _, rvr := range rvrList.Items {
-			if rvr.Spec.ReplicatedVolumeName != "rv1" {
-				continue
+			nodeList = []corev1.Node{
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+				{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 			}
-			if rvr.Spec.Type == "TieBreaker" {
-				tbCount++
+
+			rvrList = v1alpha3.ReplicatedVolumeReplicaList{
+				Items: []v1alpha3.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-df1",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             nodeList[0].Name,
+							Type:                 "Diskful",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-df2",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             nodeList[1].Name,
+							Type:                 "Diskful",
+						},
+					},
+				},
 			}
-		}
+		})
 
-		Expect(tbCount).To(Equal(0))
-	})
-
-	// Initial State:
-	//   FD "node-a": [Diskful]
-	//   FD "node-b": [Diskful]
-	//   TB: [TieBreaker, TieBreaker]
-	// Violates:
-	//   - minimality of TieBreaker count for given FD distribution and odd total replica requirement
-	// Desired state:
-	//   FD "node-a": [Diskful]
-	//   FD "node-b": [Diskful, TieBreaker]
-	//   TB total: 1
-	//   replicas total: 3 (odd)
-	It("4. deletes extra TieBreakers and leaves one", func() {
-		rv := &v1alpha3.ReplicatedVolume{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rv1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
-				ReplicatedStorageClassName: "rsc1",
-			},
-		}
-
-		rsc := &v1alpha1.ReplicatedStorageClass{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rsc1",
-			},
-			Spec: v1alpha1.ReplicatedStorageClassSpec{
-				Replication: "Availability",
-				Topology:    "",
-			},
-		}
-
-		nodeA := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-a",
-			},
-		}
-		nodeB := &corev1.Node{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "node-b",
-			},
-		}
-
-		rvrDF1 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-a",
-				Type:                 "Diskful",
-			},
-		}
-		rvrDF2 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-df2",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				NodeName:             "node-b",
-				Type:                 "Diskful",
-			},
-		}
-
-		rvrTB1 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-tb1",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				Type:                 "TieBreaker",
-			},
-		}
-		rvrTB2 := &v1alpha3.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "rvr-tb2",
-			},
-			Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "rv1",
-				Type:                 "TieBreaker",
-			},
-		}
-
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrDF1, rvrDF2, rvrTB1, rvrTB2).
-			Build()
-
-		rec := &Reconciler{
-			cl:  cl,
-			rdr: cl,
-			sch: scheme,
-		}
-
-		err := rec.reconcileRecalculate(ctx, RecalculateRequest{VolumeName: "rv1"})
-		Expect(err).NotTo(HaveOccurred())
-
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		Expect(cl.List(ctx, rvrList)).To(Succeed())
-
-		tbCount := 0
-		for _, rvr := range rvrList.Items {
-			if rvr.Spec.ReplicatedVolumeName != "rv1" {
-				continue
+		JustBeforeEach(func(ctx SpecContext) {
+			Expect(cl.Create(ctx, &rv)).To(Succeed())
+			Expect(cl.Create(ctx, &rsc)).To(Succeed())
+			for i := range nodeList {
+				Expect(cl.Create(ctx, &nodeList[i])).To(Succeed())
 			}
-			if rvr.Spec.Type == "TieBreaker" {
-				tbCount++
+			for i := range rvrList.Items {
+				Expect(cl.Create(ctx, &rvrList.Items[i])).To(Succeed())
 			}
-		}
+		})
 
-		Expect(tbCount).To(Equal(1))
+		// Initial State:
+		//   FD "node-1": [Diskful]
+		//   FD "node-2": [Diskful]
+		//   TB: []
+		//   Replication: Availability
+		// Violates:
+		//   - total replica count must be odd
+		// Desired state:
+		//   FD "node-1": [Diskful]
+		//   FD "node-2": [Diskful, TieBreaker]
+		//   TB total: 1
+		//   replicas total: 3 (odd)
+		It("1. creates one TieBreaker for two Diskful on different FDs", func(ctx SpecContext) {
+			Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+			Expect(cl.List(ctx, &rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+
+		})
+
+		When("different zones", func() {
+			BeforeEach(func() {
+				rsc.Spec.Topology = "TransZonal"
+				for i := range nodeList {
+					nodeList[i].Labels = map[string]string{rvrtiebreakercount.NodeZoneLabel: fmt.Sprintf("zone-%d", i)}
+				}
+			})
+			// Initial State:
+			//   FD "zone-a/node-1": [Diskful]
+			//   FD "zone-b/node-2": [Diskful]
+			//   TB: []
+			//   Replication: Availability
+			//   Topology: TransZonal
+			// Violates:
+			//   - total replica count must be odd
+			// Desired state:
+			//   FD "zone-a/node-1": [Diskful]
+			//   FD "zone-b/node-2": [Diskful]
+			//   FD "zone-b/node-3": [TieBreaker]
+			//   TB total: 1
+			//   replicas total: 3 (odd)
+			It("2. creates one TieBreaker for two Diskful on different FDs with TransZonal topology", func(ctx SpecContext) {
+
+				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+				Expect(cl.List(ctx, &rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+			})
+		})
+
+		When("replicas on the same node", func() {
+			BeforeEach(func() {
+				for i := range rvrList.Items {
+					rvrList.Items[i].Spec.NodeName = nodeList[0].Name
+				}
+			})
+
+			//   Note: this initial state is not reachable in a real cluster (it violates documented replication rules: "Data is stored in two copies on different nodes"),
+			// but the test verifies that if such a state is ever observed, the controller remains a no-op and does not create a useless TieBreaker.
+			// Initial State:
+			//   FD "node-1": [Diskful, Diskful]
+			//   TB: []
+			//   Replication: Availability
+			// Violates (cluster-level requirement):
+			//   - "one FD failure should not break quorum" cannot be achieved for this layout, because all replicas are in a single FD
+			// Desired state (nothing should be changed):
+			//   FD "node-1": [Diskful, Diskful]
+			//   TB total: 0
+			//   replicas total: 2
+			It("3. does not create TieBreaker when all Diskful are in the same FD", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+				Expect(cl.List(ctx, &rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(0)))
+			})
+		})
+
+		When("too many tie breakers", func() {
+			BeforeEach(func() {
+				rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-df1",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             nodeList[0].Name,
+							Type:                 "Diskful",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-df2",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: "rv1",
+							NodeName:             "node-2",
+							Type:                 "Diskful",
+						},
+					},
+
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-tb1",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: "rv1",
+							Type:                 "TieBreaker",
+						},
+					},
+					{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rvr-tb2",
+						},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: "rv1",
+							Type:                 "TieBreaker",
+						},
+					},
+				}
+				// Initial State:
+				//   FD "node-1": [Diskful]
+				//   FD "node-2": [Diskful]
+				//   TB: [TieBreaker, TieBreaker]
+				// Violates:
+				//   - minimality of TieBreaker count for given FD distribution and odd total replica requirement
+				// Desired state:
+				//   FD "node-1": [Diskful]
+				//   FD "node-2": [Diskful, TieBreaker]
+				//   TB total: 1
+				//   replicas total: 3 (odd)
+				It("4. deletes extra TieBreakers and leaves one", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+					Expect(cl.List(ctx, &rvrList)).To(Succeed())
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+				})
+			})
+		})
 	})
 })
 
-var _ = Describe("desiredTieBreakerTotal func test", func() {
-	// Initial State:
-	//   FD "a": 1
-	//   FD "b": 1
-	//   TB: 0
-	// Violates:
-	//   - total replica count must be odd
-	// Desired state:
-	//   TB total: 1
-	//   replicas total: 3 (odd)
-	//   one possible layout: FD "a": 2, FD "b": 1
-	It("1. returns 1 for two FDs with one replica", func() {
-		fd := map[fdKey]int{
-			"a": 1,
-			"b": 1,
-		}
-		got := desiredTieBreakerTotal(fd)
-		Expect(got).To(Equal(1))
-	})
+var _ = Describe("DesiredTieBreakerTotal", func() {
+	DescribeTable("returns correct TieBreaker count for fdCount < 4",
+		func(fd map[string]int, expected int) {
+			got, err := rvrtiebreakercount.DesiredTieBreakerTotal(fd)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(got).To(Equal(expected))
+		},
+		func(fd map[string]int, expected int) string {
+			s := []string{}
+			for _, v := range fd {
+				s = append(s, fmt.Sprintf("%d", v))
+			}
+			return fmt.Sprintf("%d FDs, %s replicas -> %d", len(fd), strings.Join(s, "+"), expected)
+		},
+		Entry(nil, map[string]int{}, 0),
+		Entry(nil, map[string]int{"a": 1}, 0),
+		Entry(nil, map[string]int{"a": 0, "b": 0}, 0),
+		Entry(nil, map[string]int{"a": 1, "b": 1}, 1),
+		Entry(nil, map[string]int{"a": 1, "b": 2}, 0),
+		Entry(nil, map[string]int{"a": 2, "b": 2}, 1),
+		Entry(nil, map[string]int{"a": 1, "b": 3}, 1),
+		Entry(nil, map[string]int{"a": 2, "b": 3}, 0),
+		Entry(nil, map[string]int{"a": 3, "b": 3}, 1),
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1}, 0),
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 2}, 1),
+		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2}, 1),
+		Entry(nil, map[string]int{"a": 1, "b": 2, "c": 2}, 0),
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 3}, 2),
+	)
+
+	DescribeTable("returns error for fdCount >= 4",
+		func(fd map[string]int) {
+			_, err := rvrtiebreakercount.DesiredTieBreakerTotal(fd)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("only supported for less than 4 failure domains"))
+		},
+		func(fd map[string]int) string {
+			return fmt.Sprintf("%d FDs -> error", len(fd))
+		},
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 1}),
+		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2, "d": 2}),
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 2}),
+		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}),
+	)
 })
