@@ -236,26 +236,26 @@ var _ = Describe("Handlers", func() {
 			}
 		})
 
-		It("should have Update field not nil", func() {
+		It("should have UpdateFunc not nil", func() {
 			Expect(pred.UpdateFunc).ToNot(BeNil())
 		})
 
-		It("should have Create field nil", func() {
-			Expect(pred.CreateFunc).To(BeNil())
+		It("should have CreateFunc field nil", func() {
+			Expect(pred.CreateFunc).To(BeNil(), "if this failed please add cases for this function")
 		})
 
-		It("should have Delete field nil", func() {
-			Expect(pred.DeleteFunc).To(BeNil())
+		It("should have DeleteFunc field nil", func() {
+			Expect(pred.DeleteFunc).To(BeNil(), "if this failed please add cases for this function")
 		})
 
-		It("should have Generic field nil", func() {
-			Expect(pred.GenericFunc).To(BeNil())
+		It("should have GenericFunc field nil", func() {
+			Expect(pred.GenericFunc).To(BeNil(), "if this failed please add cases for this function")
 		})
 
 		DescribeTableSubtree("should return true",
 			Entry("RVR is on current node", func() {
-				_ = oldRVR
-				_ = newRVR
+				oldRVR.Spec.NodeName = nodeName
+				newRVR.Spec.NodeName = nodeName
 			}),
 			Entry("NodeName changes on current node", func() {
 				oldRVR.Spec.NodeName = "other-node"
