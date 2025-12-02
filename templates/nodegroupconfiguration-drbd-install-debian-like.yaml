@@ -83,7 +83,7 @@ spec:
         rmmod drbd_transport_tcp || true
         rmmod drbd || true
       fi
-      exit 0
+      # exit 0
     fi
 
     # DRBD requires the kernel sources to be installed.
@@ -132,7 +132,7 @@ spec:
         bb-sync-file /etc/modules-load.d/d8_drbd.conf - <<< "drbd"
 
         bb-log-info "Desired drbd version is already loaded, nothing to do"
-        exit 0
+        #exit 0
       fi
     fi
 
@@ -142,7 +142,7 @@ spec:
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
       bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
-      exit 0
+      #exit 0
     fi
 
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
@@ -157,6 +157,7 @@ spec:
 
     DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
     attempt=0
+    bb-log-info "host -t A "DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS"
     until DRBD_BUILD_SERVER_IP="$(host -t A "DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
     do
       if [ $attempt -gt 60 ]; then
