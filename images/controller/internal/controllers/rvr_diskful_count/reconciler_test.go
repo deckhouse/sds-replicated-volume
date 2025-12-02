@@ -1,8 +1,6 @@
 package rvrdiskfulcount_test
 
 import (
-	"context"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -11,7 +9,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -62,25 +59,38 @@ func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready b
 }
 
 var _ = Describe("Reconciler", func() {
-	var cl client.Client
-	var rec *rvrdiskfulcount.Reconciler
-	var ctx context.Context
+	// Available in BeforeEach
+	var (
+		clientBuilder *fake.ClientBuilder
+		scheme        *runtime.Scheme
+	)
 
-	BeforeEach(func(ctx SpecContext) {
-		scheme := runtime.NewScheme()
-		_ = v1alpha1.AddToScheme(scheme)
-		_ = v1alpha3.AddToScheme(scheme)
+	// Available in JustBeforeEach
+	var (
+		cl  client.Client
+		rec *rvrdiskfulcount.Reconciler
+	)
 
-		cl = fake.NewClientBuilder().
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+
+		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
-			Build()
+			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{})
 
-		logger := zap.New(zap.UseDevMode(true))
-		rec = rvrdiskfulcount.NewReconciler(cl, logger, scheme)
+		// To be safe. To make sure we don't use client from previous iterations
+		cl = nil
+		rec = nil
 	})
 
-	It("returns no error when ReplicatedVolume does not exist", func() {
+	JustBeforeEach(func() {
+		cl = clientBuilder.Build()
+		rec = rvrdiskfulcount.NewReconciler(cl, GinkgoLogr, scheme)
+	})
+
+	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
 		_, err := rec.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{
 				Name:      "test-rv",
@@ -91,7 +101,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolume is being deleted", func() {
-		It("should do nothing and return no error", func() {
+		It("should do nothing and return no error", func(ctx SpecContext) {
 			// Create RSC to avoid errors, even though it shouldn't be accessed
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -130,7 +140,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolume has empty ReplicatedStorageClassName", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			rv := &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rv",
@@ -156,7 +166,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedStorageClass does not exist", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			rv := &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rv",
@@ -182,7 +192,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedStorageClass has unknown replication value", func() {
-		It("should return an error", func() {
+		It("should return an error", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -218,7 +228,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("no ReplicatedVolumeReplicas exist", func() {
-		It("should create one replica for None replication", func() {
+		It("should create one replica for None replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -267,7 +277,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonFirstReplicaIsBeingCreated))
 		})
 
-		It("should create one replica for Availability replication", func() {
+		It("should create one replica for Availability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -306,7 +316,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(rvrList.Items).To(HaveLen(1))
 		})
 
-		It("should create one replica for ConsistencyAndAvailability replication", func() {
+		It("should create one replica for ConsistencyAndAvailability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -347,7 +357,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("all ReplicatedVolumeReplicas are being deleted", func() {
-		It("should create one new replica", func() {
+		It("should create one new replica", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -431,7 +441,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("there is one non-deleted ReplicatedVolumeReplica that is not ready", func() {
-		It("should wait and return no error", func() {
+		It("should wait and return no error", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -475,7 +485,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("there are more non-deleted ReplicatedVolumeReplicas than needed", func() {
-		It("should log warning and return no error", func() {
+		It("should log warning and return no error", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -521,7 +531,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("there are fewer non-deleted ReplicatedVolumeReplicas than needed", func() {
-		It("should create missing replicas for Availability replication", func() {
+		It("should create missing replicas for Availability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -572,7 +582,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonCreatedRequiredNumberOfReplicas))
 		})
 
-		It("should create missing replicas for ConsistencyAndAvailability replication", func() {
+		It("should create missing replicas for ConsistencyAndAvailability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -623,7 +633,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonCreatedRequiredNumberOfReplicas))
 		})
 
-		It("should create multiple missing replicas", func() {
+		It("should create multiple missing replicas", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -674,7 +684,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("the required number of non-deleted ReplicatedVolumeReplicas is reached", func() {
-		It("should set condition to True for None replication", func() {
+		It("should set condition to True for None replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -719,7 +729,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 
-		It("should set condition to True for Availability replication", func() {
+		It("should set condition to True for Availability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -766,7 +776,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable))
 		})
 
-		It("should set condition to True for ConsistencyAndAvailability replication", func() {
+		It("should set condition to True for ConsistencyAndAvailability replication", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -817,7 +827,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
-		It("should only count non-deleted replicas", func() {
+		It("should only count non-deleted replicas", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -884,7 +894,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("there are non-Diskful ReplicatedVolumeReplicas", func() {
-		It("should ignore non-Diskful replicas and only count Diskful ones", func() {
+		It("should ignore non-Diskful replicas and only count Diskful ones", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
@@ -946,7 +956,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(condition.Reason).To(Equal(v1alpha3.ReasonFirstReplicaIsBeingCreated))
 		})
 
-		It("should only count Diskful replicas when calculating required count", func() {
+		It("should only count Diskful replicas when calculating required count", func(ctx SpecContext) {
 			rsc := &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rsc",
