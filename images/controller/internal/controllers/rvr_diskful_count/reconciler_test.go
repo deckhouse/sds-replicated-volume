@@ -41,8 +41,10 @@ func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready b
 		},
 	}
 
+	// If deletionTimestamp is provided, add a finalizer so we can delete the object
+	// and it will get DeletionTimestamp set by the fake client
 	if deletionTimestamp != nil {
-		rvr.DeletionTimestamp = deletionTimestamp
+		rvr.Finalizers = []string{"test-finalizer"}
 	}
 
 	if ready {
@@ -115,10 +117,10 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(cl.Create(ctx, rsc)).To(Succeed())
 
-			now := metav1.Now()
 			rv := &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
+					Name:       "test-rv",
+					Finalizers: []string{"test-finalizer"},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -128,8 +130,9 @@ var _ = Describe("Reconciler", func() {
 					Conditions: []metav1.Condition{},
 				},
 			}
-			rv.DeletionTimestamp = &now
 			Expect(cl.Create(ctx, rv)).To(Succeed())
+			// Delete the object to set DeletionTimestamp (it won't be removed due to finalizer)
+			Expect(cl.Delete(ctx, rv)).To(Succeed())
 
 			result, err := rec.Reconcile(ctx, reconcile.Request{
 				NamespacedName: types.NamespacedName{
@@ -386,12 +389,13 @@ var _ = Describe("Reconciler", func() {
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			// Create a replica with DeletionTimestamp set (simulating deletion)
-			// Note: fake client may not fully preserve DeletionTimestamp, but the reconciler
-			// should still handle the case where no non-deleted replicas are found
+			// Create a replica with finalizer and delete it to set DeletionTimestamp (simulating deletion)
 			now := metav1.Now()
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", false, &now)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
+
+			// Delete the object to set DeletionTimestamp (it won't be removed due to finalizer)
+			Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 
 			// Count replicas before reconcile
 			rvrListBefore := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -861,6 +865,8 @@ var _ = Describe("Reconciler", func() {
 			rvr1 := createReplicatedVolumeReplica("rvr-1", "test-rv", true, &now)
 			rvr2 := createReplicatedVolumeReplica("rvr-2", "test-rv", true, nil)
 			Expect(cl.Create(ctx, rvr1)).To(Succeed())
+			// Delete the object to set DeletionTimestamp (it won't be removed due to finalizer)
+			Expect(cl.Delete(ctx, rvr1)).To(Succeed())
 			Expect(cl.Create(ctx, rvr2)).To(Succeed())
 
 			result, err := rec.Reconcile(ctx, reconcile.Request{
