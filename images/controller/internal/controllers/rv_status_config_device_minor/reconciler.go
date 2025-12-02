@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvstatusconfigdeviceminor
 
 import (
@@ -47,7 +63,7 @@ func (r *Reconciler) Reconcile(
 	// If deviceMinor is already assigned, we can skip List operation entirely.
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		deviceMinor := rv.Status.DRBD.Config.DeviceMinor
-		if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
+		if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
 			log.V(1).Info("deviceMinor already assigned", "deviceMinor", deviceMinor)
 			return reconcile.Result{}, nil
 		}
@@ -68,7 +84,7 @@ func (r *Reconciler) Reconcile(
 	for _, item := range rvList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
 			deviceMinor := item.Status.DRBD.Config.DeviceMinor
-			if deviceMinor >= MinDeviceMinor && deviceMinor <= MaxDeviceMinor {
+			if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
 				usedDeviceMinors[deviceMinor] = struct{}{}
 			}
 		}
@@ -76,7 +92,7 @@ func (r *Reconciler) Reconcile(
 
 	// Find available deviceMinor (minimum free value)
 	var availableDeviceMinor uint
-	for i := uint(MinDeviceMinor); i <= uint(MaxDeviceMinor); i++ {
+	for i := v1alpha3.RVMinDeviceMinor; i <= v1alpha3.RVMaxDeviceMinor; i++ {
 		if _, used := usedDeviceMinors[i]; !used {
 			availableDeviceMinor = i
 			break

@@ -58,7 +58,7 @@ func createRVWithDeviceMinor(name string, deviceMinor uint) *v1alpha3.Replicated
 
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
-	// 1. Invalid deviceMinor (outside MinDeviceMinor-MaxDeviceMinor range):
+	// 1. Invalid deviceMinor (outside RVMinDeviceMinor-RVMaxDeviceMinor range):
 	//    - Not needed: API validates values, invalid deviceMinor never reaches controller
 	//    - System limits ensure only valid values exist in real system
 	// 2. All deviceMinors used (1,048,576 objects):
@@ -92,10 +92,7 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		By("Reconciling non-existent ReplicatedVolume")
-		result, err := rec.Reconcile(ctx, RequestFor(createRV("non-existent")))
-		Expect(err).NotTo(HaveOccurred(), "should ignore NotFound errors")
-		Expect(result).ToNot(Requeue(), "should not requeue when resource does not exist")
+		Expect(rec.Reconcile(ctx, RequestFor(createRV("non-existent")))).ToNot(Requeue(), "should ignore NotFound errors")
 	})
 
 	When("Get fails with non-NotFound error", func() {
@@ -183,7 +180,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying deviceMinor was assigned")
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-					Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", rvstatusconfigdeviceminor.MinDeviceMinor)), "first volume should get deviceMinor MinDeviceMinor")
+					Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", v1alpha3.RVMinDeviceMinor)), "first volume should get deviceMinor RVMinDeviceMinor")
 				})
 			},
 		)
@@ -191,8 +188,8 @@ var _ = Describe("Reconciler", func() {
 		When("RV without deviceMinor", func() {
 			It("assigns unique deviceMinors to multiple volumes", func(ctx SpecContext) {
 				By("Creating volumes with deviceMinors 0 and 1, and one without deviceMinor")
-				rv1 := createRVWithDeviceMinor("volume-multi-1", rvstatusconfigdeviceminor.MinDeviceMinor)
-				rv2 := createRVWithDeviceMinor("volume-multi-2", rvstatusconfigdeviceminor.MinDeviceMinor+1)
+				rv1 := createRVWithDeviceMinor("volume-multi-1", v1alpha3.RVMinDeviceMinor)
+				rv2 := createRVWithDeviceMinor("volume-multi-2", v1alpha3.RVMinDeviceMinor+1)
 				rv3 := createRV("volume-multi-3")
 				Expect(cl.Create(ctx, rv1)).To(Succeed(), "should create ReplicatedVolume")
 				Expect(cl.Create(ctx, rv2)).To(Succeed(), "should create ReplicatedVolume")
@@ -352,7 +349,7 @@ var _ = Describe("Reconciler", func() {
 			By("Verifying deviceMinor was assigned after retry")
 			updatedRV := &v1alpha3.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-			Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", rvstatusconfigdeviceminor.MinDeviceMinor)), "deviceMinor should be assigned")
+			Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", v1alpha3.RVMinDeviceMinor)), "deviceMinor should be assigned")
 		})
 	})
 })
