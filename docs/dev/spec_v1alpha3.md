@@ -8,6 +8,7 @@
     - [RV Ready условия](#rv-ready-условия)
     - [Алгоритмы хеширования shared secret](#алгоритмы-хеширования-shared-secret)
     - [Порты DRBD](#порты-drbd)
+    - [Финализаторы ресурсов](#финализаторы-ресурсов)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
   - [`status`](#status)
@@ -130,6 +131,15 @@ TODO
 ### Порты DRBD
  - `drbdMinPort=7000` - минимальный порт для использования ресурсами 
  - `drbdMaxPort=8000` - максимальный порт для использования ресурсами
+
+### Финализаторы ресурсов
+- `rv`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
+- `rvr`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+- `llv`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -380,7 +390,7 @@ TODO
 ### Статус: [OK | priority: 5 | complexity: 3]
 
 ### Цель 
-Проставить значение свойству `rvr.status.config.address`.
+Проставить значение свойству `rvr.status.drbd.config.address`.
  - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
  - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [портах DRBD](#Порты-DRBD) `drbdMinPort`/`drbdMaxPort`
 
@@ -389,10 +399,10 @@ TODO
 Процесс и результат работы контроллера должен быть отражён в `rvr.status.conditions[type=AddressConfigured]`
 
 ### Триггер 
-  - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.config.address)`
+  - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.drbd.config.address)`
 
 ### Вывод 
-  - `rvr.status.config.address`
+  - `rvr.status.drbd.config.address`
   - `rvr.status.conditions[type=AddressConfigured]`
 
 # Акторы приложения: `controller`
@@ -498,15 +508,15 @@ TODO
 ### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
-Проставить свойству `rvr.status.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
+Проставить свойству `rvr.status.drbd.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
 
 В случае превышения количества реплик, повторять реконсайл с ошибкой.
 
 ### Триггер
-  - `CREATE(RVR, status.config.nodeId==nil)`
+  - `CREATE(RVR, status.drbd.config.nodeId==nil)`
 
 ### Вывод
-  - `rvr.status.config.nodeId`
+  - `rvr.status.drbd.config.nodeId`
 
 ## `rvr-status-config-peers-controller`
 
@@ -532,15 +542,15 @@ TODO
 
 ### Цель
 
-Инициализировать свойство `rv.status.config.deviceMinor` минимальным свободным значением среди всех RV.
+Инициализировать свойство `rv.status.drbd.config.deviceMinor` минимальным свободным значением среди всех RV.
 
 По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.config.deviceMinor`.
 
 ### Триггер
-  - `CREATE/UPDATE(RV, rv.status.config.deviceMinor != nil)`
+  - `CREATE/UPDATE(RV, rv.status.drbd.config.deviceMinor != nil)`
 
 ### Вывод
-  - `rv.status.config.deviceMinor`
+  - `rv.status.drbd.config.deviceMinor`
 
 ## `rvr-tie-breaker-count-controller`
 
