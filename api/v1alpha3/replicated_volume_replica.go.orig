@@ -21,8 +21,12 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+<<<<<<< HEAD
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+=======
+>>>>>>> origin/astef-prototype
 )
 
 // +k8s:deepcopy-gen=true
@@ -56,12 +60,19 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
+<<<<<<< HEAD
+func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
+	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
+}
+
 // SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.
 func (rvr *ReplicatedVolumeReplica) SetReplicatedVolume(rv *ReplicatedVolume, scheme *runtime.Scheme) error {
 	rvr.Spec.ReplicatedVolumeName = rv.Name
 	return controllerutil.SetControllerReference(rv, rvr, scheme)
 }
 
+=======
+>>>>>>> origin/astef-prototype
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required

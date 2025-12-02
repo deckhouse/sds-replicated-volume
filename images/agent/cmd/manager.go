@@ -25,7 +25,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
@@ -53,17 +52,8 @@ func newManager(
 	}
 
 	mgrOpts := manager.Options{
-		Scheme:      scheme,
-		BaseContext: func() context.Context { return ctx },
-		Cache: cache.Options{
-			ByObject: map[client.Object]cache.ByObject{
-				&v1alpha3.ReplicatedVolumeReplica{}: {
-					// only watch current node's replicas
-					Field: (&v1alpha3.ReplicatedVolumeReplica{}).
-						NodeNameSelector(envConfig.NodeName),
-				},
-			},
-		},
+		Scheme:                 scheme,
+		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
 		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
 		Metrics: server.Options{
