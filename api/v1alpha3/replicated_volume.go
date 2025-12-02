@@ -117,12 +117,12 @@ type DRBDResourceConfig struct {
 	SharedSecretAlg string `json:"sharedSecretAlg,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	Quorum byte `json:"quorum"`
+	// +kubebuilder:validation:Maximum=8
+	Quorum byte `json:"quorum,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
+	// +kubebuilder:validation:Maximum=8
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
 
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
