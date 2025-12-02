@@ -3,10 +3,11 @@ package rvrtiebreakercount_test
 import (
 	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func TestRvrTieBreakerCount(t *testing.T) {
