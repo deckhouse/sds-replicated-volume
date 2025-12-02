@@ -8,6 +8,7 @@
     - [RV Ready условия](#rv-ready-условия)
     - [Алгоритмы хеширования shared secret](#алгоритмы-хеширования-shared-secret)
     - [Порты DRBD](#порты-drbd)
+    - [Финализаторы ресурсов](#финализаторы-ресурсов)
 - [Контракт данных: `ReplicatedVolume`](#контракт-данных-replicatedvolume)
   - [`spec`](#spec)
   - [`status`](#status)
@@ -16,9 +17,12 @@
   - [`status`](#status-1)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
   - [`rvr-delete-controller`](#rvr-delete-controller)
   - [`drbd-resize-controller`](#drbd-resize-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
   - [`rvr-drbd-status-controller`](#rvr-drbd-status-controller)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
@@ -42,6 +46,9 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
+    - [Контекст](#контекст)
+  - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
@@ -49,7 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
 
 # Основные положения
 
@@ -126,8 +133,17 @@ TODO
  - `sha1`
 
 ### Порты DRBD
- - `drbdMinPort` - минимальный порт для использования ресурсами 
- - `drbdMaxPort` - максимальный порт для использования ресурсами
+ - `drbdMinPort=7000` - минимальный порт для использования ресурсами 
+ - `drbdMaxPort=8000` - максимальный порт для использования ресурсами
+
+### Финализаторы ресурсов
+- `rv`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
+- `rvr`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+- `llv`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -183,13 +199,6 @@ TODO
 - `phase`
   - Возможные значения: `Terminating`, `Synchronizing`, `Ready`.
   - Обновляется: **rv-status-controller**.
-
-Поля, упомянутые в спецификации, отсутствующие в API:
-- `status.config.*` — в API используется `status.drbd.config.*`.
-- `status.config.deviceMinors` — отсутствует; в API есть `status.drbd.config.deviceMinor`.
-
-Поля API, не упомянутые в спецификации:
-- нет
 
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
@@ -248,26 +257,24 @@ TODO
     - `paths[]`: `thisHost.address`, `thisHost.port`, `thisHost.family`, `remoteHost.address`, `remoteHost.port`, `remoteHost.family`, `established`,
     - `peerDevices[]`: `volume`, `replicationState`, `peerDiskState`, `peerClient`, `resyncSuspended`, `outOfSync`, `pending`, `unacked`, `hasSyncDetails`, `hasOnlineVerifyDetails`, `percentInSync`.
 
-Поля, упомянутые в спецификации, отсутствующие в API:
-- `status.lvmLogicalVolumeName` — отсутствует в `ReplicatedVolumeReplicaStatus`.
-
 Поля API, не упомянутые в спецификации:
 - `status.drbd.actual.disk`.
-
-Константы из `api/v1alpha3/`, не упомянутые в спецификации:
-- нет
 
 # Акторы приложения: `agent`
 
 ## `drbd-config-controller`
 
+### Статус: [TBD | priority: 5 | complexity: 5]
+
 ### Цель 
 
-Согласовать желаемую конфигурацию в полях ресурсов и конфигурации DRBD.
+Согласовать желаемую конфигурацию в полях ресурсов и конфигурации DRBD, выполнять
+первоначальную синхронизацию и настройку DRBD ресурсов на ноде. Название ноды 
+`rvr.spec.nodeName` должно соответствовать названию ноды контроллера
+(переменная окружения `NODE_NAME`, см. `images/agent/cmd/env_config.go`)
 
 Обязательные поля. Нельзя приступать к конфигурации, пока значение поля не
 проинициализировано:
-
 - `rv.metadata.name`
 - `rv.status.drbd.config.sharedSecret`
 - `rv.status.drbd.config.sharedSecretAlg`
@@ -276,7 +283,7 @@ TODO
 - `rvr.status.drbd.config.address`
 - `rvr.status.drbd.config.peers`
   - признак инициализации: `rvr.status.drbd.config.peersInitialized`
-- `rvr.status.drbd.config.disk`
+- `rvr.status.lvmLogicalVolumeName`
   - обязателен только для `rvr.spec.type=Diskful`
 
 Дополнительные поля. Можно приступать к конфигурации с любыми значениями в них:
@@ -288,50 +295,71 @@ TODO
 реконсайла:
   - `rvr.status.drbd.errors.sharedSecretAlgSelectionError` - результат валидации алгоритма
   - `rvr.status.drbd.errors.lastAdjustmentError` - вывод команды `drbdadm adjust`
-  - `rvr.status.drbd.errors.last<...>Error` - вывод любой другой использованной команды `drbd` (требуется доработать API контракт)
+  - `rvr.status.drbd.errors.<...>Error` - вывод любой другой использованной команды `drbd` (требуется доработать API контракт)
 
 Список полей, которые требуется поддерживать (выставлять и снимать) как результат каждого
 реконсайла:
-  - `rvr.status.drbd.actual.disk` - должно соответствовать `rvr.status.drbd.config.disk`
+  - `rvr.status.drbd.actual.disk` - должно соответствовать пути к диску `rvr.status.lvmLogicalVolumeName`
+    - только для `rvr.spec.type==Diskful`
+    - формат `/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}`
   - `rvr.status.drbd.actual.allowTwoPrimaries` - должно соответствовать `rv.status.drbd.config.allowTwoPrimaries`
-
-
-
-
-
-Желаемая конфигурация определяется типом: `rvr.spec.type`.
-
-Для каждого из типов, есть набор *обязательных полей*, назначение которых является обязательным условием
-для начала изменения конфига DRBD - их нужно дождаться, прежде чем начинать конфигурирование ресурса.
-
-Также есть поля, которые нужно игнорировать - *игнорируемые поля*. Несмотря на то, что DRBD позволяет их назначение, требуется
-отложить.
-
-
-
-
-- пишем res
-- если мд нет
-  - создаем
-- проверяем необходимость первоначальной синхронизации (AND)
-  - peersInitialized && len(peers)==0
-  - если status != UpToDate
-  - `rvr.status.drbd.initialSycCompleted!=true`
-- если первоначальная синхронизация нужна, делаем `drdbadm primary --force`
-- `rvr.status.drbd.initialSycCompleted=true`
-
-
-Контроллирует DRBD конфиг на ноде для всех rvr (в том числе удалённых, с
-неснятым финализатором контроллера).
+  - `rvr.status.drbd.actual.initialSyncCompleted`
 
 Для работы с форматом конфигурации DRBD предлагается воспользоваться существующими пакетами
- - см. метод `writeResourceConfig` в `images/agent/internal/reconcile/rvr/reconcile_handler.go`
+ - см. метод `writeResourceConfig` в `images/agent/internal/reconcile/rvr/reconcile_handler.go`.
+Также требуется использовать те же самые параметры по умолчанию (`protocol`, `rr-conflict`, и т.д.)
 
-### Триггер 
-  - 
-  
+Существующая реализация поддерживает `Diskful` и `Access` типы реплик. Для
+`TieBreaker` реплик требуется изменить параметры так, чтобы избежать
+синхронизации метаданных на ноду.
+
+Последовательность реконсайла, если не заполнен `rvr.metadata.deletionTimestamp`:
+
+- ставим финализатор на rvr
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+- пишем конфиг во временный файл и проверяем валидность
+  - команда (новая, нужно реализовать аналогично другим): `drbdadm --config-to-test <...>.res_tmp --config-to-exclude <...>.res sh-nop`
+  - в случае невалидного конфига, нужно вывести ошибку в `rvr.status.drbd.errors.<...>` и прекратить реконсайл
+- пишем конфиг в основной файл (можно переместить, либо пересоздать и удалить временный)
+- если `rvr.spec.type==Diskful`
+  - проверяем наличие метаданных
+    - `drbdadm dump-md`
+      - см. существующую реализацию
+    - если метаданных нет - создаем их
+      - `drbdadm create-md`
+        - см. существующую реализацию
+  - проверяем необходимость первоначальной синхронизации (AND)
+    - `rvr.status.drbd.config.peersInitialized`
+    - `len(rvr.status.drbd.config.peers)==0`
+    - `rvr.status.drbd.status.devices[0].diskState != UpToDate`
+    - `rvr.status.drbd.actual.initialSyncCompleted!=true`
+  - если первоначальная синхронизация нужна
+    - выполняем `drdbadm primary --force`
+      - см. существующую реализацию
+  - выполняем `drdbadm secondary`
+    - см. существующую реализацию
+  - выставляем `rvr.status.drbd.actual.initialSyncCompleted=true`
+- если `rvr.spec.type!=Diskful`
+  - выставляем `rvr.status.drbd.actual.initialSyncCompleted=true`
+- выполнить `drbdadm status`, чтобы убедиться, не "поднят" ли ресурс
+  - см. существующую реализацию
+- если ресурс "не поднят", выполнить `drbdadm up`
+  - см. существующую реализацию
+- выполнить `drbdadm adjust`
+  - см. существующую реализацию
+
+Если заполнен `rvr.metadata.deletionTimestamp`:
+- выполнить `drbdadm down`
+  - см. существующую реализацию
+- удалить конфиги ресурса (основной и временный), если они есть
+- снять свой финализатор с rvr, если нет других финализаторов (т.е. наш - последний)
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+
 ### Вывод 
-  - 
+  - `rvr.status.drbd.errors.*`
+  - `rvr.status.drbd.actual.*`
+  - *.res, *.res_tmp файлы на ноде
+
 
 ## `rvr-delete-controller`
 
@@ -344,23 +372,61 @@ TODO
 
 ## `drbd-resize-controller`
 
-### Цель 
+### Статус: [TBD | priority: 5 | complexity: 2]
 
+### Цель
+Выполнить команду `drbdadm resize`, когда желаемый размер диска больше
+фактического.
 
-### Триггер 
-  - 
+Команда должна выполняться на `rvr.spec.type=Diskful` ноде с наименьшим
+`rvr.status.drbd.config.nodeId` для ресурса.
+
+Cм. существующую реализацию `drbdadm resize`.
+
+Предусловия для выполнения команды (AND):
+  - `rv.status.conditions[type=Ready].status=True`
+  - `rvr.status.drbd.initialSyncCompleted=true`
+  - `rv.status.actualSize != nil`
+  - `rv.size - rv.status.actualSize > 0`
+
+Поле `rv.status.actualSize` должно поддерживаться актуальным размером. Когда оно
+незадано - его требуется задать. После успешного изменения размера тома - его
+требуется обновить.
+
+Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
+
 ### Вывод 
-  - 
+ - `rvr.status.drbd.errors.*`
+ - `rv.status.actualSize.*`
 
 ## `drbd-primary-controller`
 
-### Цель 
-- `rvr.status.drbd.config.primary`
+### Статус: [TBD | priority: 5 | complexity: 2]
 
-### Триггер 
-  - 
+### Цель
+Выполнить команду `drbdadm primary`/`drbdadm secondary`, когда желаемая роль ресурса не
+соответствует фактической.
+
+Команда должна выполняться на `rvr.spec.type=Diskful` ноде с наименьшим
+`rvr.status.drbd.config.nodeId` для ресурса.
+
+Cм. существующую реализацию `drbdadm primary` и `drbdadm secondary`.
+
+Предусловия для выполнения команды (AND):
+  - `rv.status.conditions[type=Ready].status=True`
+  - `rvr.status.drbd.initialSyncCompleted=true`
+  - OR
+    - выполняем `drbdadm primary` (AND)
+      - `rvr.status.drbd.config.primary==true`
+      - `rvr.status.drbd.status.role==Primary`
+    - выполняем `drbdadm secondary` (AND)
+      - `rvr.status.drbd.config.primary==false`
+      - `rvr.status.drbd.status.role!=Primary`
+
+Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
+
 ### Вывод 
-  - 
+  - `rvr.status.drbd.errors.*`
 
 ## `rvr-drbd-status-controller`
 
@@ -376,7 +442,7 @@ TODO
 ### Статус: [OK | priority: 5 | complexity: 3]
 
 ### Цель 
-Проставить значение свойству `rvr.status.config.address`.
+Проставить значение свойству `rvr.status.drbd.config.address`.
  - `ipv4` - взять из `node.status.addresses[type=InternalIP]`
  - `port` - найти наименьший свободный порт в диапазоне, задаваемом в [портах DRBD](#Порты-DRBD) `drbdMinPort`/`drbdMaxPort`
 
@@ -385,10 +451,10 @@ TODO
 Процесс и результат работы контроллера должен быть отражён в `rvr.status.conditions[type=AddressConfigured]`
 
 ### Триггер 
-  - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.config.address)`
+  - `CREATE/UPDATE(RVR, rvr.spec.nodeName, !rvr.status.drbd.config.address)`
 
 ### Вывод 
-  - `rvr.status.config.address`
+  - `rvr.status.drbd.config.address`
   - `rvr.status.conditions[type=AddressConfigured]`
 
 # Акторы приложения: `controller`
@@ -494,15 +560,15 @@ TODO
 ### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
-Проставить свойству `rvr.status.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
+Проставить свойству `rvr.status.drbd.config.nodeId` уникальное значение среди всех реплик одной RV, в диапазоне [0; 7].
 
 В случае превышения количества реплик, повторять реконсайл с ошибкой.
 
 ### Триггер
-  - `CREATE(RVR, status.config.nodeId==nil)`
+  - `CREATE(RVR, status.drbd.config.nodeId==nil)`
 
 ### Вывод
-  - `rvr.status.config.nodeId`
+  - `rvr.status.drbd.config.nodeId`
 
 ## `rvr-status-config-peers-controller`
 
@@ -527,15 +593,15 @@ TODO
 
 ### Цель
 
-Инициализировать свойство `rv.status.config.deviceMinor` минимальным свободным значением среди всех RV.
+Инициализировать свойство `rv.status.drbd.config.deviceMinor` минимальным свободным значением среди всех RV.
 
-По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.config.deviceMinor`.
+По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.drbd.config.deviceMinor`.
 
 ### Триггер
-  - `CREATE/UPDATE(RV, rv.status.config.deviceMinor != nil)`
+  - `CREATE/UPDATE(RV, rv.status.drbd.config.deviceMinor != nil)`
 
 ### Вывод
-  - `rv.status.config.deviceMinor`
+  - `rv.status.drbd.config.deviceMinor`
 
 ## `rvr-tie-breaker-count-controller`
 
@@ -604,7 +670,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
 
 ### Вывод 
-  - `rvr.status.config.primary`
+  - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.publishedOn`
   - `rv.status.conditions[type=PublishSucceeded]`
@@ -630,17 +696,49 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
+### Контекст
+
+TODO
+`sds-replicated-volume.storage.deckhouse.io/agent`
+`sds-replicated-volume.storage.deckhouse.io/controller`
+
 ### Цель 
+Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD, и
+удаляет - после.
+  - `sds-replicated-volume.storage.deckhouse.io/agent`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
-Нельзя снимать финализатор, пока rvr Primary (де-факто).
+agent не удаляет ресурс из DRBD, пока есть чужие финализаторы (свой финализатор
+всегда снимается последним).
 
-Снять финализатор, когда есть необходимое количество рабочих реплик в кластере,
+Цель `rvr-gc-controller` - снять финализатор, когда есть необходимое количество рабочих реплик в кластере,
 завершим тем самым удаление, вызванное по любой другой причине.
+
+Нельзя снимать финализатор, пока rvr фактически опубликована - `rvr.status.drbd.`
+
 
 ### Триггер 
   - 
 
 ### Вывод 
+
+## `rvr-owner-reference-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 1]
+
+### Цель 
+
+Поддерживать `rvr.metada.ownerReference`, указывающий на `rv` по имени
+`rvr.spec.replicatedVolumeName`.
+
+Настройки:
+ - `controller=true`
+ - ``
+
+
+
+### Вывод 
+ - `rvr.metada.ownerReference`
 
 ## `rv-status-config-quorum-controller`
 
@@ -660,8 +758,8 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
  - `CREATE/UPDATE(RV, rv.status.conditions[type=Ready].status==True)`
 
 ### Вывод
-  - `rv.status.config.quorum`
-  - `rv.status.config.quorumMinimumRedundancy`
+  - `rv.status.drbd.config.quorum`
+  - `rv.status.drbd.config.quorumMinimumRedundancy`
   - `rv.status.conditions[type=QuorumConfigured]`
 
 Правильные значения:
@@ -684,7 +782,7 @@ if M > 1 {
 ### Статус: [OK | priority: 3 | complexity: 3]
 
 ### Цель
-Проставить первоначальное значения для `rv.status.config.sharedSecret` и `rv.status.config.sharedSecretAlg`,
+Проставить первоначальное значения для `rv.status.drbd.config.sharedSecret` и `rv.status.drbd.config.sharedSecretAlg`,
 а также обработать ошибку применения алгоритма на любой из реплик из `rvr.status.drbd.errors.sharedSecretAlgSelectionError`, и поменять его на следующий по [списку алгоритмов хеширования](Алгоритмы хеширования shared secret). Последний проверенный алгоритм должен быть указан в `rvr.status.drbd.errors.sharedSecretAlgSelectionError.unsupportedAlg`.
 
 В случае, если список закончился - прекратить попытки.
@@ -694,9 +792,9 @@ if M > 1 {
  - `CREATE/UPDATE(RVR)`
 
 ### Вывод 
- - `rv.status.config.sharedSecret`
+ - `rv.status.drbd.config.sharedSecret`
    - генерируется новый
- - `rv.status.config.sharedSecretAlg`
+ - `rv.status.drbd.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
 
 ## `rvr-missing-node-controller`

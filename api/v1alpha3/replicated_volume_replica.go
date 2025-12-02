@@ -109,6 +109,10 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	ActualType string `json:"actualType,omitempty"`
 
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 }
@@ -142,29 +146,7 @@ type DRBDConfig struct {
 	PeersInitialized bool `json:"peersInitialized,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
-	// +kubebuilder:validation:MaxLength=256
-	Disk string `json:"disk,omitempty"`
-
-	// +optional
 	Primary *bool `json:"primary,omitempty"`
-}
-
-func (v *DRBDConfig) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
-	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
-}
-
-func (v *DRBDConfig) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
-	parts := strings.Split(v.Disk, "/")
-	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
-		len(parts[2]) == 0 || len(parts[3]) == 0 {
-		return "", "",
-			fmt.Errorf(
-				"parsing Volume Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-				v.Disk,
-			)
-	}
-	return parts[2], parts[3], nil
 }
 
 // +k8s:deepcopy-gen=true
@@ -207,8 +189,30 @@ type DRBDActual struct {
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
 
+	// +optional
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+
+	// +optional
+	// +kubebuilder:default=false
+	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
+}
+
+func (v *DRBDActual) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
+	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
+}
+
+func (v *DRBDActual) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
+	parts := strings.Split(v.Disk, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
+		len(parts[2]) == 0 || len(parts[3]) == 0 {
+		return "", "",
+			fmt.Errorf(
+				"parsing Volume Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
+				v.Disk,
+			)
+	}
+	return parts[2], parts[3], nil
 }
 
 // +k8s:deepcopy-gen=true
