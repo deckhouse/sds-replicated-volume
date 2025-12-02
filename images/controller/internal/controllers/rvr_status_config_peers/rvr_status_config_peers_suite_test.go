@@ -65,22 +65,20 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) go
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
 				WithMessage("expected rvr to have status.drbd.config, but it's nil")
 		}
-		diskless := rvr.Status.DRBD.Config.Disk == ""
 		expectedPeers[rvr.Spec.NodeName] = v1alpha3.Peer{
 			NodeId:   *rvr.Status.DRBD.Config.NodeId,
 			Address:  *rvr.Status.DRBD.Config.Address,
-			Diskless: diskless,
+			Diskless: rvr.Spec.IsDiskless(),
 		}
 	}
 	return SatisfyAll(
 		HaveField("Status.DRBD.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
 		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
 			ret := maps.Clone(rvr.Status.DRBD.Config.Peers)
-			diskless := rvr.Status.DRBD.Config.Disk == ""
 			ret[rvr.Spec.NodeName] = v1alpha3.Peer{
 				NodeId:   *rvr.Status.DRBD.Config.NodeId,
 				Address:  *rvr.Status.DRBD.Config.Address,
-				Diskless: diskless,
+				Diskless: rvr.Spec.IsDiskless(),
 			}
 			return ret
 		}, Equal(expectedPeers)),

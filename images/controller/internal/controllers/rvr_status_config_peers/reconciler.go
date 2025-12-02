@@ -100,11 +100,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			log.Info("Peer on this node already found. Skipping")
 			continue
 		}
-		diskless := rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.Disk == ""
 		peers[rvr.Spec.NodeName] = v1alpha3.Peer{
 			NodeId:   *rvr.Status.DRBD.Config.NodeId,
 			Address:  *rvr.Status.DRBD.Config.Address,
-			Diskless: diskless,
+			Diskless: rvr.Spec.IsDiskless(),
 		}
 	}
 
@@ -121,7 +120,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			continue
 		}
 
-		if maps.Equal(peersWithoutSelf, rvr.Status.DRBD.Config.Peers) {
+		peersChanged := !maps.Equal(peersWithoutSelf, rvr.Status.DRBD.Config.Peers)
+		if !peersChanged && rvr.Status.DRBD.Config.PeersInitialized {
 			log.V(1).Info("not changed")
 			continue
 		}
@@ -135,11 +135,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			changedRvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
 		}
 		changedRvr.Status.DRBD.Config.Peers = peersWithoutSelf
+		// After first initialization, even if there are no peers, set peersInitialized=true
+		changedRvr.Status.DRBD.Config.PeersInitialized = true
 		if err := r.cl.Status().Patch(ctx, changedRvr, from); err != nil {
 			log.Error(err, "Patching ReplicatedVolumeReplica")
 			return reconcile.Result{}, client.IgnoreNotFound(err)
 		}
-		log.Info("Patched with new peers", "peers", peersWithoutSelf)
+		log.Info("Patched with new peers", "peers", peersWithoutSelf, "peersInitialized", changedRvr.Status.DRBD.Config.PeersInitialized)
 	}
 
 	return reconcile.Result{}, nil

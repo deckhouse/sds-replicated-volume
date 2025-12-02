@@ -25,7 +25,7 @@ import (
 )
 
 func BuildController(mgr manager.Manager) error {
-	controllerName := "rvr_status_config_peers_controller"
+	controllerName := "rvr-status-config-peers-controller"
 	r := &Reconciler{
 		cl:  mgr.GetClient(),
 		log: mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),

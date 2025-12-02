@@ -72,6 +72,10 @@ type ReplicatedVolumeReplicaSpec struct {
 	Type string `json:"type"`
 }
 
+func (s *ReplicatedVolumeReplicaSpec) IsDiskless() bool {
+	return s.Type != "Diskful"
+}
+
 // +k8s:deepcopy-gen=true
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
@@ -144,6 +148,8 @@ type DRBDConfig struct {
 	// +optional
 	Peers map[string]Peer `json:"peers,omitempty"`
 
+	// PeersInitialized indicates that Peers has been calculated.
+	// This field is used to distinguish between no peers and not yet calculated.
 	// +optional
 	PeersInitialized bool `json:"peersInitialized,omitempty"`
 

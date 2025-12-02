@@ -190,6 +190,18 @@ var _ = Describe("Reconciler", func() {
 					Expect(firstReplica).To(HaveNoPeers())
 				})
 
+				It("should set peersInitialized=true even when there are no peers", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+					Expect(firstReplica.Status.DRBD.Config.PeersInitialized).To(BeTrue())
+				})
+
+				It("should set peersInitialized=true on first initialization", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+					Expect(firstReplica.Status.DRBD.Config.PeersInitialized).To(BeTrue())
+				})
+
 				When("second replica created", func() {
 					var secondRvr v1alpha3.ReplicatedVolumeReplica
 					BeforeEach(func() {
@@ -230,6 +242,15 @@ var _ = Describe("Reconciler", func() {
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
 							list := []v1alpha3.ReplicatedVolumeReplica{firstReplica, secondRvr}
 							Expect(list).To(HaveEach(HaveAllPeersSet(list)))
+						})
+
+						It("should set peersInitialized=true when peers are updated for the first time", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
+							Expect(firstReplica.Status.DRBD.Config.PeersInitialized).To(BeTrue())
+							Expect(secondRvr.Status.DRBD.Config.PeersInitialized).To(BeTrue())
 						})
 
 						When("Patch fails with non-NotFound error", func() {
@@ -394,6 +415,12 @@ var _ = Describe("Reconciler", func() {
 					Expect(rvrList).To(HaveEach(HaveAllPeersSet(rvrList)))
 				})
 
+				It("should set peersInitialized=true for all replicas when peers are set", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					getAll(ctx, rvrList)
+					Expect(rvrList).To(HaveEach(HaveField("Status.DRBD.Config.PeersInitialized", BeTrue())))
+				})
+
 				It("should remove deleted RVR from peers of remaining RVRs", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					Expect(cl.Delete(ctx, &rvrList[0])).To(Succeed())
@@ -453,37 +480,42 @@ var _ = Describe("Reconciler", func() {
 						// First reconcile
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
+						getAll(ctx, rvrList)
 						// Get the state after first reconcile
-						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
+						updatedRVR1 := rvrList[0].DeepCopy()
 						initialPeers := updatedRVR1.Status.DRBD.Config.Peers
-
 						// Second reconcile - should not change
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+						getAll(ctx, rvrList)
 
 						// Verify peers are unchanged
-						updatedRVR1After := &v1alpha3.ReplicatedVolumeReplica{}
+						updatedRVR1After := &rvrList[0]
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1After)).To(Succeed())
 						Expect(updatedRVR1After.Status.DRBD.Config.Peers).To(Equal(initialPeers))
+						Expect(updatedRVR1After.Status.DRBD.Config.PeersInitialized).To(BeTrue())
 						Expect(updatedRVR1After.Generation).To(Equal(updatedRVR1.Generation))
+					})
+
+					When("peersInitialized if it was already set", func() {
+						BeforeEach(func() {
+							for i := range rvrList {
+								rvrList[i].Status.DRBD.Config.PeersInitialized = true
+							}
+						})
+						It("should not change ", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+							getAll(ctx, rvrList)
+							Expect(rvrList).To(HaveEach(HaveField("Status.DRBD.Config.PeersInitialized", BeTrue())))
+						})
 					})
 				})
 
 				Context("with diskless RVRs", func() {
 					BeforeEach(func() {
-						// Use only first 2 RVRs, set second one as diskless (empty disk)
+						// Use only first 2 RVRs, set second one as diskless (Type != "Diskful")
 						rvrList = rvrList[:2]
-						if rvrList[1].Status == nil {
-							rvrList[1].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-						}
-						if rvrList[1].Status.DRBD == nil {
-							rvrList[1].Status.DRBD = &v1alpha3.DRBD{}
-						}
-						if rvrList[1].Status.DRBD.Config == nil {
-							rvrList[1].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-						}
-						// Empty disk means diskless
-						rvrList[1].Status.DRBD.Config.Disk = ""
+						rvrList[1].Spec.Type = "Access"
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {
