@@ -1,18 +1,32 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvstatusconfigsharedsecret
 
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/go-logr/logr"
 	"github.com/google/uuid"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 type Reconciler struct {
@@ -63,51 +77,31 @@ func (r *Reconciler) generateSharedSecret(
 ) (reconcile.Result, error) {
 	// Generate new shared secret
 	sharedSecret := uuid.New().String()
-	algorithm := algorithms[0] // Start with first algorithm (sha256)
+	algorithm := v1alpha3.SharedSecretAlgorithms()[0] // Start with first algorithm (sha256)
 
 	log.Info("Generating new shared secret", "algorithm", algorithm)
 
 	// Update RV status with shared secret
 	// If there's a conflict (409), return error - next reconciliation will solve it
+	// Race condition handling: If two reconciles run simultaneously, one will get 409 Conflict on Patch.
+	// The next reconciliation will check if sharedSecret is already set and skip generation.
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()
 
-	// Check again if sharedSecret is already set (handles race condition)
+	// Check if sharedSecret is already set (idempotent check after DeepCopy)
+	// Note: This check is on the copy, but if there's a race condition, Patch will return 409 Conflict
+	// and the next reconciliation will handle it correctly.
 	if changedRV.Status != nil && changedRV.Status.DRBD != nil && changedRV.Status.DRBD.Config != nil && changedRV.Status.DRBD.Config.SharedSecret != "" {
-		log.V(1).Info("sharedSecret already set by another worker")
+		log.V(1).Info("sharedSecret already set", "algorithm", changedRV.Status.DRBD.Config.SharedSecretAlg)
 		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
 	}
 
 	// Initialize status if needed
-	if changedRV.Status == nil {
-		changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
-	}
-	if changedRV.Status.DRBD == nil {
-		changedRV.Status.DRBD = &v1alpha3.DRBDResource{}
-	}
-	if changedRV.Status.DRBD.Config == nil {
-		changedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
-	}
+	ensureRVStatusInitialized(changedRV)
 
 	// Set shared secret and algorithm
 	changedRV.Status.DRBD.Config.SharedSecret = sharedSecret
 	changedRV.Status.DRBD.Config.SharedSecretAlg = algorithm
-
-	// Initialize conditions if needed
-	if changedRV.Status.Conditions == nil {
-		changedRV.Status.Conditions = []metav1.Condition{}
-	}
-
-	// Set SharedSecretAlgorithmSelected condition to True
-	cond := metav1.Condition{
-		Type:               "SharedSecretAlgorithmSelected",
-		Status:             metav1.ConditionTrue,
-		Reason:             "AlgorithmSelected",
-		Message:            fmt.Sprintf("Selected algorithm: %s", algorithm),
-		ObservedGeneration: changedRV.Generation,
-		LastTransitionTime: metav1.Now(),
-	}
-	meta.SetStatusCondition(&changedRV.Status.Conditions, cond)
 
 	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
 		log.Error(err, "Patching ReplicatedVolume status with shared secret")
@@ -137,11 +131,12 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 		if rvr.Spec.ReplicatedVolumeName != rv.Name {
 			continue
 		}
-		if hasUnsupportedAlgorithmError(&rvr) {
+		if HasUnsupportedAlgorithmError(&rvr) {
 			failedNodeNames = append(failedNodeNames, rvr.Spec.NodeName)
-			// Get the current algorithm from RV
-			if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
-				failedAlgorithm = rv.Status.DRBD.Config.SharedSecretAlg
+			// Get the unsupported algorithm from RVR error
+			if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil &&
+				rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil {
+				failedAlgorithm = rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg
 			}
 		}
 	}
@@ -154,14 +149,9 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	log.Info("Found UnsupportedAlgorithm errors", "nodes", failedNodeNames, "algorithm", failedAlgorithm)
 
 	// Find current algorithm index
+	algorithms := v1alpha3.SharedSecretAlgorithms()
 	currentAlg := rv.Status.DRBD.Config.SharedSecretAlg
-	currentIndex := -1
-	for i, alg := range algorithms {
-		if alg == currentAlg {
-			currentIndex = i
-			break
-		}
-	}
+	currentIndex := slices.Index(algorithms, currentAlg)
 
 	// If current algorithm not found, start from first
 	if currentIndex == -1 {
@@ -171,8 +161,9 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	// Try next algorithm
 	nextIndex := currentIndex + 1
 	if nextIndex >= len(algorithms) {
-		// All algorithms exhausted
-		return r.setAlgorithmSelectionFailed(ctx, rv, log, failedNodeNames, failedAlgorithm)
+		// All algorithms exhausted - stop trying
+		log.Error(nil, "All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
+		return reconcile.Result{}, nil
 	}
 
 	nextAlgorithm := algorithms[nextIndex]
@@ -184,35 +175,11 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	changedRV := rv.DeepCopy()
 
 	// Initialize status if needed
-	if changedRV.Status == nil {
-		changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
-	}
-	if changedRV.Status.DRBD == nil {
-		changedRV.Status.DRBD = &v1alpha3.DRBDResource{}
-	}
-	if changedRV.Status.DRBD.Config == nil {
-		changedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
-	}
+	ensureRVStatusInitialized(changedRV)
 
 	// Generate new shared secret
 	changedRV.Status.DRBD.Config.SharedSecret = uuid.New().String()
 	changedRV.Status.DRBD.Config.SharedSecretAlg = nextAlgorithm
-
-	// Initialize conditions if needed
-	if changedRV.Status.Conditions == nil {
-		changedRV.Status.Conditions = []metav1.Condition{}
-	}
-
-	// Set SharedSecretAlgorithmSelected condition to True
-	cond := metav1.Condition{
-		Type:               "SharedSecretAlgorithmSelected",
-		Status:             metav1.ConditionTrue,
-		Reason:             "AlgorithmSelected",
-		Message:            fmt.Sprintf("Selected algorithm: %s (previous %s failed on nodes: %v)", nextAlgorithm, failedAlgorithm, failedNodeNames),
-		ObservedGeneration: changedRV.Generation,
-		LastTransitionTime: metav1.Now(),
-	}
-	meta.SetStatusCondition(&changedRV.Status.Conditions, cond)
 
 	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
 		log.Error(err, "Patching ReplicatedVolume status with new algorithm")
@@ -223,46 +190,15 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	return reconcile.Result{}, nil
 }
 
-// setAlgorithmSelectionFailed sets SharedSecretAlgorithmSelected condition to False
-func (r *Reconciler) setAlgorithmSelectionFailed(
-	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
-	log logr.Logger,
-	failedNodeNames []string,
-	failedAlgorithm string,
-) (reconcile.Result, error) {
-	err := e.ErrInvalidClusterf("All algorithms exhausted. Last failed algorithm: %s on nodes: %v", failedAlgorithm, failedNodeNames)
-	log.Error(err, "All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
-
-	// Update RV condition to False
-	// If there's a conflict (409), return error - next reconciliation will solve it
-	from := client.MergeFrom(rv)
-	changedRV := rv.DeepCopy()
-
-	// Initialize status if needed
-	if changedRV.Status == nil {
-		changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+// ensureRVStatusInitialized ensures that RV status structure is initialized
+func ensureRVStatusInitialized(rv *v1alpha3.ReplicatedVolume) {
+	if rv.Status == nil {
+		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
 	}
-	if changedRV.Status.Conditions == nil {
-		changedRV.Status.Conditions = []metav1.Condition{}
+	if rv.Status.DRBD == nil {
+		rv.Status.DRBD = &v1alpha3.DRBDResource{}
 	}
-
-	// Set SharedSecretAlgorithmSelected condition to False
-	message := fmt.Sprintf("All algorithms exhausted. Last failed algorithm: %s on nodes: %v", failedAlgorithm, failedNodeNames)
-	cond := metav1.Condition{
-		Type:               "SharedSecretAlgorithmSelected",
-		Status:             metav1.ConditionFalse,
-		Reason:             "UnableToSelectSharedSecretAlgorithm",
-		Message:            message,
-		ObservedGeneration: changedRV.Generation,
-		LastTransitionTime: metav1.Now(),
+	if rv.Status.DRBD.Config == nil {
+		rv.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 	}
-	meta.SetStatusCondition(&changedRV.Status.Conditions, cond)
-
-	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
-		log.Error(err, "Patching ReplicatedVolume condition")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
-	}
-
-	return reconcile.Result{}, nil
 }
