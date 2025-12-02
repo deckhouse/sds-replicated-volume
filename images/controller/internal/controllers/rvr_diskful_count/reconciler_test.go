@@ -3,6 +3,7 @@ package rvrdiskfulcount_test
 import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -1006,6 +1007,112 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, updatedRV)).To(Succeed())
 			condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
 			Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
+		})
+	})
+
+	When("ReplicatedVolume has ConsistencyAndAvailability replication", func() {
+		It("should create one replica, wait for it to become ready, then create remaining replicas", func(ctx SpecContext) {
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rsc",
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					Replication: "ConsistencyAndAvailability",
+				},
+			}
+			Expect(cl.Create(ctx, rsc)).To(Succeed())
+
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rv",
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("1Gi"),
+					ReplicatedStorageClassName: "test-rsc",
+				},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{},
+				},
+			}
+			Expect(cl.Create(ctx, rv)).To(Succeed())
+
+			// First reconcile: should create 1 replica
+			result, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-rv",
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify 1 replica was created with Ready condition false or missing
+			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(1))
+
+			rvr := &rvrList.Items[0]
+			Expect(rvr.Spec.ReplicatedVolumeName).To(Equal("test-rv"))
+			Expect(rvr.Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful))
+
+			// Check that Ready condition is false or missing
+			if rvr.Status != nil && rvr.Status.Conditions != nil {
+				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+				if readyCond != nil {
+					Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
+				}
+			} else {
+				// Status is nil or Conditions is nil, which means Ready is effectively false
+				Expect(rvr.Status).To(BeNil())
+			}
+
+			// Second reconcile: should still have 1 replica (waiting for it to become ready)
+			result, err = rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-rv",
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify still 1 replica
+			rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(1))
+
+			// Set Ready condition to True on the existing replica
+			rvr = &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, types.NamespacedName{Name: rvrList.Items[0].Name}, rvr)).To(Succeed())
+
+			patch := client.MergeFrom(rvr.DeepCopy())
+			if rvr.Status == nil {
+				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			}
+			meta.SetStatusCondition(
+				&rvr.Status.Conditions,
+				metav1.Condition{
+					Type:   v1alpha3.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+					Reason: v1alpha3.ReasonReady,
+				},
+			)
+			Expect(cl.Status().Patch(ctx, rvr, patch)).To(Succeed())
+
+			// Third reconcile: should create 2 more replicas (total 3)
+			result, err = rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      "test-rv",
+					Namespace: "",
+				},
+			})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result).To(Equal(reconcile.Result{}))
+
+			// Verify 3 replicas exist
+			rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
+			Expect(cl.List(ctx, rvrList)).To(Succeed())
+			Expect(rvrList.Items).To(HaveLen(3))
 		})
 	})
 })
