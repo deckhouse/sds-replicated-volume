@@ -91,12 +91,24 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Find available deviceMinor (minimum free value)
-	var availableDeviceMinor uint
+	var availableDeviceMinor *uint
 	for i := v1alpha3.RVMinDeviceMinor; i <= v1alpha3.RVMaxDeviceMinor; i++ {
 		if _, used := usedDeviceMinors[i]; !used {
-			availableDeviceMinor = i
+			availableDeviceMinor = &i
 			break
 		}
+	}
+
+	if availableDeviceMinor == nil {
+		// All deviceMinors are used - this is extremely unlikely (1,048,576 volumes),
+		// but we should handle it gracefully
+		err := fmt.Errorf(
+			"no available deviceMinor for volume %s (all %d deviceMinors are used)",
+			rv.Name,
+			int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1,
+		)
+		log.Error(err, "no available deviceMinor for volume", "volume", rv.Name, "maxDeviceMinors", int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1)
+		return reconcile.Result{}, err
 	}
 
 	// Update RV status with deviceMinor
@@ -113,14 +125,14 @@ func (r *Reconciler) Reconcile(
 	if changedRV.Status.DRBD.Config == nil {
 		changedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 	}
-	changedRV.Status.DRBD.Config.DeviceMinor = availableDeviceMinor
+	changedRV.Status.DRBD.Config.DeviceMinor = *availableDeviceMinor
 
 	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
 		log.Error(err, "Patching ReplicatedVolume status with deviceMinor")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("assigned deviceMinor to RV", "deviceMinor", availableDeviceMinor, "volume", rv.Name)
+	log.Info("assigned deviceMinor to RV", "deviceMinor", *availableDeviceMinor, "volume", rv.Name)
 
 	return reconcile.Result{}, nil
 }
