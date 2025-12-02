@@ -8,8 +8,10 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
+	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -121,9 +123,7 @@ var _ = Describe("Reconciler", func() {
 				}
 			}),
 			func(setup func()) {
-				BeforeEach(func() {
-					setup()
-				})
+				BeforeEach(setup)
 
 				It("should reconcile successfully and assign nodeID", func(ctx SpecContext) {
 					By("Reconciling ReplicatedVolumeReplica with nil status fields")
@@ -589,6 +589,49 @@ var _ = Describe("Reconciler", func() {
 
 			It("should fail if patching ReplicatedVolumeReplica status failed with non-NotFound error", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(patchError), "should return error when Patch fails")
+			})
+		})
+
+		When("Patch fails with 409 Conflict (race condition)", func() {
+			var conflictError error
+			var patchAttempts int
+
+			BeforeEach(func() {
+				patchAttempts = 0
+				// Simulate 409 Conflict error (race condition scenario)
+				conflictError = kerrors.NewConflict(
+					schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumereplicas"},
+					rvr.Name,
+					errors.New("resourceVersion conflict: the object has been modified"),
+				)
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+						if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+							if subResourceName == "status" && rvrObj.Name == rvr.Name {
+								patchAttempts++
+								// Simulate conflict on first patch attempt only
+								if patchAttempts == 1 {
+									return conflictError
+								}
+								// Allow subsequent attempts to succeed (simulating retry after conflict)
+							}
+						}
+						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+					},
+				})
+			})
+
+			It("should return error on 409 Conflict and succeed on retry", func(ctx SpecContext) {
+				By("First reconcile: should fail with 409 Conflict")
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
+
+				By("Second reconcile (retry): should succeed after conflict resolved")
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue(), "retry reconciliation should succeed")
+
+				By("Verifying nodeID was assigned after retry")
+				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+				Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", rvrstatusconfignodeid.MinNodeID))), "nodeID should be assigned")
 			})
 		})
 
