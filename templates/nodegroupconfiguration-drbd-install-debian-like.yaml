@@ -200,10 +200,17 @@ spec:
           "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '')
 
     # Extract HTTP code using jq (parse JSON metadata)
-    CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
-    BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r '.http_code' 2>/dev/null || echo "000")
-    # Extract body (everything before the metadata separator)
-    BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
+    if echo "$BUILD_RESPONSE" | grep -q '|||CURL_METADATA|||'; then
+      CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
+      BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r '.http_code' 2>/dev/null || echo "000")
+      # Extract body (everything before the metadata separator)
+      BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
+    else
+      # Fallback if metadata format is missing
+      BUILD_HTTP_CODE="000"
+      BUILD_BODY="$BUILD_RESPONSE"
+    fi
+    
     bb-log-info "Build response: $BUILD_RESPONSE"
     bb-log-info "Build body: $BUILD_BODY"
     bb-log-info "Build HTTP code: $BUILD_HTTP_CODE"
