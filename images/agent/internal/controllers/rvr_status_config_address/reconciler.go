@@ -29,19 +29,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 )
 
 type Reconciler struct {
 	cl      client.Client
 	log     logr.Logger
-	drbdCfg cluster.DRBDConfig
+	drbdCfg config.DRBDConfig
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, log logr.Logger, drbdConfig cluster.DRBDConfig) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, drbdConfig config.DRBDConfig) *Reconciler {
 	return &Reconciler{
 		cl:      cl,
 		log:     log,
