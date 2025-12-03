@@ -20,10 +20,8 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"sync"
 
 	"github.com/go-logr/logr"
-	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -61,9 +59,9 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Get all RVRs for this ReplicatedVolume
-	// Note: Filtering by replicatedVolumeName instead of owner reference to avoid requiring
-	// a custom index field setup in the manager.
+	// List all RVRs and filter by replicatedVolumeName
+	// Note: We list all RVRs and filter in memory instead of using owner reference index
+	// to avoid requiring a custom index field setup in the manager.
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "listing RVRs")
@@ -86,6 +84,7 @@ func (r *Reconciler) Reconcile(
 	var rvrsNeedingNodeID []v1alpha3.ReplicatedVolumeReplica
 
 	for _, item := range rvrList.Items {
+		// Check if Config exists and has valid nodeID
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
 			nodeID := *item.Status.DRBD.Config.NodeId
 			if v1alpha3.IsValidNodeID(nodeID) {
@@ -97,7 +96,7 @@ func (r *Reconciler) Reconcile(
 			// To revert: remove this log line.
 			log.V(1).Info("ignoring nodeID outside valid range, will reassign", "nodeID", nodeID, "validRange", v1alpha3.FormatValidNodeIDRange(), "rvr", item.Name)
 		}
-		// RVR needs nodeID assignment (either nil or invalid)
+		// RVR needs nodeID assignment (either nil Status/DRBD/Config or invalid nodeID)
 		rvrsNeedingNodeID = append(rvrsNeedingNodeID, item)
 	}
 
@@ -140,65 +139,45 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	// Assign nodeIDs to RVRs that need them
-	// Use goroutines for parallel Patch operations
-	var mu sync.Mutex
+	// Assign nodeIDs to RVRs that need them sequentially
+	// Note: We use ResourceVersion from List. Since we reconcile RV (not RVR) and process RVRs sequentially
+	// for each RV, no one can edit the same RVR simultaneously within our controller. This makes the code
+	// simple and solid, though not the fastest (no parallel processing of RVRs).
 	nodeIDIndex := 0
-
-	eg, egCtx := errgroup.WithContext(ctx)
 	for i := range rvrsNeedingNodeID {
 		rvr := &rvrsNeedingNodeID[i]
-		eg.Go(func() error {
-			// Get next available nodeID (thread-safe)
-			mu.Lock()
-			if nodeIDIndex >= len(availableNodeIDs) {
-				mu.Unlock()
-				return fmt.Errorf("no more available nodeIDs")
-			}
-			nodeID := availableNodeIDs[nodeIDIndex]
-			nodeIDIndex++
-			mu.Unlock()
 
-			// Get fresh RVR to avoid conflicts
-			var freshRVR v1alpha3.ReplicatedVolumeReplica
-			if err := r.cl.Get(egCtx, client.ObjectKeyFromObject(rvr), &freshRVR); err != nil {
-				if client.IgnoreNotFound(err) == nil {
-					// RVR was deleted, skip
-					return nil
-				}
-				return err
-			}
+		// Get next available nodeID
+		if nodeIDIndex >= len(availableNodeIDs) {
+			return reconcile.Result{}, fmt.Errorf("no more available nodeIDs")
+		}
+		nodeID := availableNodeIDs[nodeIDIndex]
+		nodeIDIndex++
 
-			// Prepare patch
-			from := client.MergeFrom(&freshRVR)
-			changedRVR := freshRVR.DeepCopy()
-			if changedRVR.Status == nil {
-				changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-			}
-			if changedRVR.Status.DRBD == nil {
-				changedRVR.Status.DRBD = &v1alpha3.DRBD{}
-			}
-			if changedRVR.Status.DRBD.Config == nil {
-				changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-			}
-			changedRVR.Status.DRBD.Config.NodeId = &nodeID
+		// Prepare patch using ResourceVersion from List
+		from := client.MergeFrom(rvr)
+		changedRVR := rvr.DeepCopy()
+		if changedRVR.Status == nil {
+			changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		}
+		if changedRVR.Status.DRBD == nil {
+			changedRVR.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if changedRVR.Status.DRBD.Config == nil {
+			changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		}
+		changedRVR.Status.DRBD.Config.NodeId = &nodeID
 
-			// Patch RVR status
-			if err := r.cl.Status().Patch(egCtx, changedRVR, from); err != nil {
-				if client.IgnoreNotFound(err) == nil {
-					// RVR was deleted, skip
-					return nil
-				}
-				log.Error(err, "Patching ReplicatedVolumeReplica status with nodeID", "rvr", freshRVR.Name, "nodeID", nodeID)
-				return err
+		// Patch RVR status
+		if err := r.cl.Status().Patch(ctx, changedRVR, from); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				// RVR was deleted, skip
+				continue
 			}
-			log.Info("assigned nodeID to RVR", "nodeID", nodeID, "rvr", freshRVR.Name, "volume", rv.Name)
-			return nil
-		})
-	}
-
-	if err := eg.Wait(); err != nil {
-		return reconcile.Result{}, err
+			log.Error(err, "Patching ReplicatedVolumeReplica status with nodeID", "rvr", rvr.Name, "nodeID", nodeID)
+			return reconcile.Result{}, err
+		}
+		log.Info("assigned nodeID to RVR", "nodeID", nodeID, "rvr", rvr.Name, "volume", rv.Name)
 	}
 
 	return reconcile.Result{}, nil

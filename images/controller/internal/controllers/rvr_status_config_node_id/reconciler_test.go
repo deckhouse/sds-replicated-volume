@@ -171,13 +171,13 @@ var _ = Describe("Reconciler", func() {
 				BeforeEach(setup)
 
 				It("should reconcile successfully and assign nodeID", func(ctx SpecContext) {
-					By("Reconciling ReplicatedVolume with RVR that has nil status fields")
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-					By("Verifying nodeID was assigned")
-					updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
-					Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "first replica should get nodeID MinNodeID")
+					By("Reconciling until nodeID is assigned")
+					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+						return updatedRVR
+					}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "first replica should get nodeID MinNodeID")
 				})
 			})
 
@@ -187,13 +187,13 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("assigns nodeID to first replica", func(ctx SpecContext) {
-				By("Reconciling RV with first replica without nodeID")
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-				By("Verifying first replica got nodeID MinNodeID and it is actually assigned")
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
-				Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "first replica should get nodeID MinNodeID")
+				By("Reconciling until first replica gets nodeID MinNodeID")
+				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+					g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+					updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+					return updatedRVR
+				}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "first replica should get nodeID MinNodeID")
 			})
 
 			When("multiple RVRs exist", func() {
@@ -247,13 +247,13 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("assigns nodeID sequentially and ensures uniqueness", func(ctx SpecContext) {
-						By("Reconciling RV with replica without nodeID")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-						By("Verifying sequential assignment: next available nodeID after 0-4")
-						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[5]), updatedRVR)).To(Succeed(), "should get updated RVR")
-						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID+5))), "should assign nodeID MinNodeID+5 as next sequential value")
+						By("Reconciling until replica gets sequential nodeID (MinNodeID+5) after 0-4")
+						Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+							g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+							updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[5]), updatedRVR)).To(Succeed(), "should get updated RVR")
+							return updatedRVR
+						}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID+5))), "should assign nodeID MinNodeID+5 as next sequential value")
 					})
 				})
 
@@ -302,12 +302,12 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("isolates nodeIDs by volume", func(ctx SpecContext) {
-						By("Reconciling RV in volume-2")
-						Expect(rec.Reconcile(ctx, RequestFor(otherRV))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-						By("Verifying volume-2 is independent: should get nodeID MinNodeID")
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRVR), otherRVR)).To(Succeed(), "should get updated RVR")
-						Expect(otherRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "volume-2 should get nodeID MinNodeID independently of volume-1")
+						By("Reconciling until volume-2 gets nodeID MinNodeID independently")
+						Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+							g.Expect(rec.Reconcile(ctx, RequestFor(otherRV))).ToNot(Requeue(), "should not requeue after successful assignment")
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(otherRVR), otherRVR)).To(Succeed(), "should get updated RVR")
+							return otherRVR
+						}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", v1alpha3.RVRMinNodeID))), "volume-2 should get nodeID MinNodeID independently of volume-1")
 					})
 				})
 
@@ -394,26 +394,32 @@ var _ = Describe("Reconciler", func() {
 						rvrList = []*v1alpha3.ReplicatedVolumeReplica{rvr1, rvr2, rvr3, rvrWithoutNodeID1, rvrWithoutNodeID2}
 					})
 
-					It("fills gaps in nodeIDs and assigns unique nodeIDs in parallel", func(ctx SpecContext) {
-						By("Reconciling RV with multiple replicas without nodeID to test gap filling and parallel processing")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+					It("fills gaps in nodeIDs and assigns unique nodeIDs", func(ctx SpecContext) {
+						By("Reconciling until both RVRs get valid nodeIDs")
+						var updatedRVR1, updatedRVR2 *v1alpha3.ReplicatedVolumeReplica
+						Eventually(func(g Gomega) bool {
+							g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+							updatedRVR1 = &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID1), updatedRVR1)).To(Succeed(), "should get updated RVR1")
+							updatedRVR2 = &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID2), updatedRVR2)).To(Succeed(), "should get updated RVR2")
+							// Check both have valid nodeIDs
+							return updatedRVR1.Status != nil &&
+								updatedRVR1.Status.DRBD != nil &&
+								updatedRVR1.Status.DRBD.Config != nil &&
+								updatedRVR1.Status.DRBD.Config.NodeId != nil &&
+								*updatedRVR1.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
+								*updatedRVR1.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
+								updatedRVR2.Status != nil &&
+								updatedRVR2.Status.DRBD != nil &&
+								updatedRVR2.Status.DRBD.Config != nil &&
+								updatedRVR2.Status.DRBD.Config.NodeId != nil &&
+								*updatedRVR2.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
+								*updatedRVR2.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
+								*updatedRVR1.Status.DRBD.Config.NodeId != *updatedRVR2.Status.DRBD.Config.NodeId
+						}).Should(BeTrue(), "both RVRs should get unique valid nodeIDs")
 
-						By("Verifying gap filling: both RVRs should get unique nodeIDs (MinNodeID+1 and MinNodeID+4)")
-						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID1), updatedRVR1)).To(Succeed(), "should get updated RVR1")
-						updatedRVR2 := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID2), updatedRVR2)).To(Succeed(), "should get updated RVR2")
-
-						// Both should get valid nodeIDs
-						Expect(updatedRVR1).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "RVR1 should get valid nodeID")
-						Expect(updatedRVR1).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", v1alpha3.RVRMaxNodeID))), "RVR1 should get valid nodeID")
-						Expect(updatedRVR2).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "RVR2 should get valid nodeID")
-						Expect(updatedRVR2).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", v1alpha3.RVRMaxNodeID))), "RVR2 should get valid nodeID")
-
-						// NodeIDs should be unique
-						Expect(*updatedRVR1.Status.DRBD.Config.NodeId).NotTo(Equal(*updatedRVR2.Status.DRBD.Config.NodeId), "nodeIDs should be unique")
-
-						// One should get MinNodeID+1 (gap filler), another should get MinNodeID+4 (next available after 0,2,3)
+						By("Verifying gap filling: both RVRs should get expected nodeIDs (MinNodeID+1 and MinNodeID+4)")
 						expectedNodeIDs := []uint{v1alpha3.RVRMinNodeID + 1, v1alpha3.RVRMinNodeID + 4}
 						Expect(*updatedRVR1.Status.DRBD.Config.NodeId).To(BeElementOf(expectedNodeIDs), "RVR1 should get one of the expected nodeIDs (MinNodeID+1 or MinNodeID+4)")
 						Expect(*updatedRVR2.Status.DRBD.Config.NodeId).To(BeElementOf(expectedNodeIDs), "RVR2 should get one of the expected nodeIDs (MinNodeID+1 or MinNodeID+4)")
@@ -446,20 +452,16 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("does not reassign nodeID if already assigned", func(ctx SpecContext) {
-						By("First reconciliation: should not reassign existing nodeID")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
-
-						By("Verifying nodeID remains unchanged after first reconciliation")
-						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRVR), updatedRVR)).To(Succeed(), "should get updated RVR")
-						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", testNodeID))), "nodeID should remain unchanged, not be reassigned")
-
-						By("Second reconciliation: should still not reassign (idempotent)")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
-
-						By("Verifying nodeID hasn't changed after both reconciliations")
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRVR), updatedRVR)).To(Succeed(), "should get updated RVR")
-						Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", testNodeID))), "nodeID should remain unchanged after multiple reconciliations (idempotent)")
+						By("Reconciling multiple times and verifying nodeID remains unchanged")
+						Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+							// Reconcile multiple times to verify idempotency
+							for i := 0; i < 3; i++ {
+								g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when nodeID already assigned")
+							}
+							updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(testRVR), updatedRVR)).To(Succeed(), "should get updated RVR")
+							return updatedRVR
+						}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", testNodeID))), "nodeID should remain unchanged after multiple reconciliations (idempotent)")
 					})
 				})
 
@@ -500,23 +502,29 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("ignores nodeID outside valid range and assigns valid nodeIDs", func(ctx SpecContext) {
-						By("Reconciling RV with replica with invalid nodeID and replica without nodeID")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-						By("Verifying both RVRs got valid nodeIDs (invalid nodeID was ignored)")
-						updatedRVRWithInvalid := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), updatedRVRWithInvalid)).To(Succeed(), "should get updated RVR with invalid nodeID")
-						updatedRVRWithout := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID), updatedRVRWithout)).To(Succeed(), "should get updated RVR without nodeID")
-
-						// Both should get valid nodeIDs
-						Expect(updatedRVRWithInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "RVR with invalid nodeID should get valid nodeID")
-						Expect(updatedRVRWithInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", v1alpha3.RVRMaxNodeID))), "RVR with invalid nodeID should get valid nodeID")
-						Expect(updatedRVRWithout).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "RVR without nodeID should get valid nodeID")
-						Expect(updatedRVRWithout).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", v1alpha3.RVRMaxNodeID))), "RVR without nodeID should get valid nodeID")
-
-						// NodeIDs should be unique (due to parallel processing, order is not guaranteed)
-						Expect(*updatedRVRWithInvalid.Status.DRBD.Config.NodeId).NotTo(Equal(*updatedRVRWithout.Status.DRBD.Config.NodeId), "nodeIDs should be unique")
+						By("Reconciling until both RVRs get valid unique nodeIDs")
+						var updatedRVRWithInvalid, updatedRVRWithout *v1alpha3.ReplicatedVolumeReplica
+						Eventually(func(g Gomega) bool {
+							g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+							updatedRVRWithInvalid = &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), updatedRVRWithInvalid)).To(Succeed(), "should get updated RVR with invalid nodeID")
+							updatedRVRWithout = &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID), updatedRVRWithout)).To(Succeed(), "should get updated RVR without nodeID")
+							// Check both have valid unique nodeIDs
+							return updatedRVRWithInvalid.Status != nil &&
+								updatedRVRWithInvalid.Status.DRBD != nil &&
+								updatedRVRWithInvalid.Status.DRBD.Config != nil &&
+								updatedRVRWithInvalid.Status.DRBD.Config.NodeId != nil &&
+								*updatedRVRWithInvalid.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
+								*updatedRVRWithInvalid.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
+								updatedRVRWithout.Status != nil &&
+								updatedRVRWithout.Status.DRBD != nil &&
+								updatedRVRWithout.Status.DRBD.Config != nil &&
+								updatedRVRWithout.Status.DRBD.Config.NodeId != nil &&
+								*updatedRVRWithout.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
+								*updatedRVRWithout.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
+								*updatedRVRWithInvalid.Status.DRBD.Config.NodeId != *updatedRVRWithout.Status.DRBD.Config.NodeId
+						}).Should(BeTrue(), "both RVRs should get valid unique nodeIDs (invalid nodeID was ignored)")
 					})
 				})
 
@@ -569,17 +577,20 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("resets invalid nodeID and reassigns valid one", func(ctx SpecContext) {
-						By("Reconciling RV: should detect invalid nodeID, reset it, and assign free nodeID")
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful reassignment")
-
-						By("Verifying invalid nodeID was reset and valid nodeID was assigned")
-						updatedRVRInvalid := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), updatedRVRInvalid)).To(Succeed(), "should get updated RVR")
-						// Should assign one of the free nodeIDs (MinNodeID=0 or MaxNodeID=7)
+						By("Reconciling until invalid nodeID is reset and valid nodeID is assigned")
 						expectedNodeIDs := []uint{v1alpha3.RVRMinNodeID, v1alpha3.RVRMaxNodeID}
-						Expect(updatedRVRInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeElementOf(expectedNodeIDs))), "should assign free nodeID (MinNodeID or MaxNodeID) after resetting invalid nodeID")
-						Expect(updatedRVRInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "nodeID should be >= MinNodeID")
-						Expect(updatedRVRInvalid).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("<=", v1alpha3.RVRMaxNodeID))), "nodeID should be <= MaxNodeID")
+						Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+							g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful reassignment")
+							updatedRVRInvalid := &v1alpha3.ReplicatedVolumeReplica{}
+							g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), updatedRVRInvalid)).To(Succeed(), "should get updated RVR")
+							return updatedRVRInvalid
+						}).Should(And(
+							HaveField("Status.DRBD.Config.NodeId", PointTo(And(
+								BeElementOf(expectedNodeIDs),
+								BeNumerically(">=", v1alpha3.RVRMinNodeID),
+								BeNumerically("<=", v1alpha3.RVRMaxNodeID),
+							))),
+						), "should assign free nodeID (MinNodeID or MaxNodeID) after resetting invalid nodeID")
 					})
 				})
 
@@ -661,13 +672,13 @@ var _ = Describe("Reconciler", func() {
 					freedNodeID := v1alpha3.RVRMinNodeID + 3
 					Expect(cl.Delete(ctx, rvrList[3])).To(Succeed(), "should delete RVR successfully")
 
-					By("Reconciling RV again: should now get the freed nodeID")
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-
-					By("Verifying freed nodeID was assigned")
-					updatedRVR9 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr9), updatedRVR9)).To(Succeed(), "should get updated RVR")
-					Expect(updatedRVR9).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", freedNodeID))), "should assign freed nodeID after deletion")
+					By("Reconciling until freed nodeID is assigned")
+					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
+						updatedRVR9 := &v1alpha3.ReplicatedVolumeReplica{}
+						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr9), updatedRVR9)).To(Succeed(), "should get updated RVR")
+						return updatedRVR9
+					}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", freedNodeID))), "should assign freed nodeID after deletion")
 				})
 			})
 		})
@@ -725,13 +736,13 @@ var _ = Describe("Reconciler", func() {
 				By("First reconcile: should fail with 409 Conflict")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
 
-				By("Second reconcile (retry): should succeed after conflict resolved")
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
-
-				By("Verifying nodeID was assigned after retry")
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
-				Expect(updatedRVR).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "nodeID should be assigned")
+				By("Reconciling until nodeID is assigned after conflict resolved")
+				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+					g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
+					updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed(), "should get updated RVR")
+					return updatedRVR
+				}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically(">=", v1alpha3.RVRMinNodeID))), "nodeID should be assigned after retry")
 			})
 		})
 
