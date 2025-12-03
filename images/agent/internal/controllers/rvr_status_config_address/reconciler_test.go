@@ -27,7 +27,6 @@ import (
 	gomegatypes "github.com/onsi/gomega/types"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,24 +39,28 @@ import (
 )
 
 var _ = Describe("Reconciler", func() {
+	// Setup scheme
+	s := scheme.Scheme
+	_ = metav1.AddMetaToScheme(s)
+	_ = corev1.AddToScheme(s)
+	_ = v1alpha3.AddToScheme(s)
+
 	var (
-		cl        client.Client
-		rec       *rvrstatusconfigaddress.Reconciler
-		log       logr.Logger
-		node      *corev1.Node
-		configMap *corev1.ConfigMap
-		s         *runtime.Scheme
+		cl      client.Client
+		rec     *rvrstatusconfigaddress.Reconciler
+		log     logr.Logger
+		node    *corev1.Node
+		drbdCfg cluster.DRBDConfig
 	)
 
 	BeforeEach(func() {
 		cl = nil
-		log = logr.Discard()
+		log = GinkgoLogr
 
-		// Setup scheme
-		s = scheme.Scheme
-		_ = metav1.AddMetaToScheme(s)
-		_ = corev1.AddToScheme(s)
-		_ = v1alpha3.AddToScheme(s)
+		drbdCfg = cluster.DRBDConfig{
+			MinPort: 7000,
+			MaxPort: 7999,
+		}
 
 		// Create test node with InternalIP
 		node = &corev1.Node{
@@ -73,18 +76,6 @@ var _ = Describe("Reconciler", func() {
 				},
 			},
 		}
-
-		// Create test ConfigMap with port settings
-		configMap = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      cluster.ConfigMapName,
-				Namespace: cluster.ConfigMapNamespace,
-			},
-			Data: map[string]string{
-				"drbdMinPort": "7000",
-				"drbdMaxPort": "9000",
-			},
-		}
 	})
 
 	JustBeforeEach(func(ctx SpecContext) {
@@ -97,14 +88,11 @@ var _ = Describe("Reconciler", func() {
 			Build()
 
 		// Create reconciler using New method
-		rec = rvrstatusconfigaddress.NewReconciler(cl, log)
+		rec = rvrstatusconfigaddress.NewReconciler(cl, log, drbdCfg)
 
 		// Create default objects if they are set
 		if node != nil {
 			Expect(cl.Create(ctx, node)).To(Succeed())
-		}
-		if configMap != nil {
-			Expect(cl.Create(ctx, configMap)).To(Succeed())
 		}
 	})
 
@@ -157,45 +145,6 @@ var _ = Describe("Reconciler", func() {
 			})
 
 	})
-
-	DescribeTableSubtree("should return error when ConfigMap",
-		Entry("does not exist", func() {
-			configMap = nil
-		}),
-		Entry("has wrong name", func() {
-			configMap.Name = "wrong-name"
-		}),
-		Entry("has wrong namespace", func() {
-			configMap.Namespace = "wrong-namespace"
-		}),
-		Entry("has invalid min port", func() {
-			configMap.Data["drbdMinPort"] = "invalid"
-		}),
-		Entry("has invalid max port", func() {
-			configMap.Data["drbdMaxPort"] = "invalid"
-		}),
-		Entry("has empty min port", func() {
-			configMap.Data["drbdMinPort"] = ""
-		}),
-		Entry("has empty max port", func() {
-			configMap.Data["drbdMaxPort"] = ""
-		}),
-		Entry("has nil Data", func() {
-			configMap.Data = nil
-		}),
-		Entry("has missing drbdMinPort key", func() {
-			delete(configMap.Data, "drbdMinPort")
-		}),
-		Entry("has missing drbdMaxPort key", func() {
-			delete(configMap.Data, "drbdMaxPort")
-		}),
-		func(beforeEach func()) {
-			BeforeEach(beforeEach)
-
-			It("should return error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(node))).Error().To(MatchError(rvrstatusconfigaddress.ErrConfigSettings))
-			})
-		})
 
 	It("should succeed without errors when there are no RVRs on the node", func(ctx SpecContext) {
 		Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
@@ -290,8 +239,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvrList).To(SatisfyAll(
 					HaveUniquePorts(),
 					HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
-						BeNumerically(">=", 7000),
-						BeNumerically("<=", 9000),
+						BeNumerically(">=", drbdCfg.MinPort),
+						BeNumerically("<=", drbdCfg.MaxPort),
 					)))))
 
 				By("verifying RVRs on other nodes were not modified")
@@ -359,8 +308,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(rvrList).To(SatisfyAll(
 						HaveUniquePorts(),
 						HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
-							BeNumerically(">=", 7000),
-							BeNumerically("<=", 9000),
+							BeNumerically(">=", drbdCfg.MinPort),
+							BeNumerically("<=", drbdCfg.MaxPort),
 						)))))
 				})
 			})
@@ -393,9 +342,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("port range is exhausted", func() {
 			BeforeEach(func() {
-				// Update ConfigMap with very small port range
-				configMap.Data["drbdMinPort"] = "7000"
-				configMap.Data["drbdMaxPort"] = "7000" // Only one port available
+				drbdCfg.MaxPort = drbdCfg.MinPort // Only one port available
 
 				rvrList = rvrList[:2]
 				// Set first RVR to use the only available port
@@ -404,7 +351,7 @@ var _ = Describe("Reconciler", func() {
 						Config: &v1alpha3.DRBDConfig{
 							Address: &v1alpha3.Address{
 								IPv4: "192.168.1.10",
-								Port: 7000, // Uses the only available port
+								Port: drbdCfg.MinPort, // Uses the only available port
 							},
 						},
 					},

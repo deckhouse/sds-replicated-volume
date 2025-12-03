@@ -33,6 +33,7 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 )
 
@@ -44,7 +45,7 @@ type managerConfig interface {
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
-	cfg managerConfig,
+	cfg cluster.Config,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {
@@ -60,9 +61,9 @@ func newManager(
 		Scheme:                 scheme,
 		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
-		HealthProbeBindAddress: cfg.HealthProbeBindAddress(),
+		HealthProbeBindAddress: cfg.HealthProbeBindAddress,
 		Metrics: server.Options{
-			BindAddress: cfg.MetricsBindAddress(),
+			BindAddress: cfg.MetricsBindAddress,
 		},
 	}
 
@@ -96,7 +97,7 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("AddReadyzCheck: %w", err))
 	}
 
-	if err := controllers.BuildAll(mgr, envConfig.NodeName); err != nil {
+	if err := controllers.BuildAll(mgr, cfg); err != nil {
 		return nil, err
 	}
 

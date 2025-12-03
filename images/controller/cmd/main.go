@@ -64,7 +64,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)
 
-	envConfig, err := env.GetConfig()
+	envConfig, err := GetEnvConfig()
 	if err != nil {
 		return fmt.Errorf("getting env config: %w", err)
 	}

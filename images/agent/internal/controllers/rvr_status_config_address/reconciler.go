@@ -35,25 +35,17 @@ import (
 type Reconciler struct {
 	cl      client.Client
 	log     logr.Logger
-	drbdCfg DRBDConfig
-}
-
-type DRBDConfig interface {
-	DRBDMinPort() uint
-	DRBDMaxPort() uint
-}
-
-func IsPortValid(c DRBDConfig, port uint) bool {
-	return port >= c.DRBDMinPort() && port <= c.DRBDMaxPort()
+	drbdCfg cluster.DRBDConfig
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, drbdConfig cluster.DRBDConfig) *Reconciler {
 	return &Reconciler{
-		cl:  cl,
-		log: log,
+		cl:      cl,
+		log:     log,
+		drbdCfg: drbdConfig,
 	}
 }
 
@@ -77,13 +69,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	if err != nil {
 		log.Error(err, "Node missing InternalIP")
 		return reconcile.Result{}, err
-	}
-
-	// Get DRBD port settings
-	settings, err := cluster.GetSettings(ctx, r.cl)
-	if err != nil {
-		log.Error(err, "Can't get DRBD port settings")
-		return reconcile.Result{}, fmt.Errorf("%w: %w", ErrConfigSettings, err)
 	}
 
 	// List all RVRs on this node that need address configuration
@@ -126,8 +111,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 			rvr.Status.DRBD.Config.Address != nil {
 			existingPort := rvr.Status.DRBD.Config.Address.Port
 			// Check if existing port is in valid range
-			if existingPort >= settings.DRBDMinPort &&
-				existingPort <= settings.DRBDMaxPort &&
+			if existingPort >= r.drbdCfg.MinPort &&
+				existingPort <= r.drbdCfg.MaxPort &&
 				existingPort != 0 {
 				freePort = existingPort
 				found = true
@@ -137,7 +122,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 		// If no valid existing port, find the smallest free port in the range
 		if !found {
-			for port := settings.DRBDMinPort; port <= settings.DRBDMaxPort; port++ {
+			for port := r.drbdCfg.MinPort; port <= r.drbdCfg.MaxPort; port++ {
 				if _, used := usedPorts[port]; !used {
 					freePort = port
 					found = true
@@ -150,7 +135,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		if !found {
 			log.Error(
 				fmt.Errorf("no free port available in range [%d, %d]",
-					settings.DRBDMinPort, settings.DRBDMaxPort,
+					r.drbdCfg.MinPort, r.drbdCfg.MaxPort,
 				),
 				"No free port available",
 			)
