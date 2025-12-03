@@ -158,17 +158,18 @@ spec:
     DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
     attempt=0
     bb-log-info "host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS"
-    until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
-    do
-      if [ $attempt -gt 10 ]; then
-        bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP for DRBD building"
-        exit 1
-      fi
-
-      ((attempt=attempt+1))
-      bb-log-info "Waiting for cluster DNS response (try #$attempt)"
-      sleep 10
-    done
+    DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    #until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    #do
+    #  if [ $attempt -gt 10 ]; then
+    #    bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP for DRBD building"
+    #    exit 1
+    #  fi
+  
+    #  ((attempt=attempt+1))
+    #  bb-log-info "Waiting for cluster DNS response (try #$attempt)"
+    #  sleep 10
+    #done
 
     bb-log-info "Cluster DNS responded, got drbd-build-server service url"
     DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
