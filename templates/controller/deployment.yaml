@@ -91,9 +91,9 @@ spec:
               {{- include "sds_drbd_controller_resources" . | nindent 14 }}
 {{- end }}
           # TODO: fix and remove - disable seccomp-profile check - seccompProfile not specified
-          # dmtlint:disable=seccomp-profile
+          # nolint:seccomp-profile
           # TODO: fix and remove - disable no-new-privileges check - AllowPrivilegeEscalation not specified
-          # dmtlint:disable=no-new-privileges
+          # nolint:no-new-privileges
           securityContext:
             privileged: true
             readOnlyRootFilesystem: true
