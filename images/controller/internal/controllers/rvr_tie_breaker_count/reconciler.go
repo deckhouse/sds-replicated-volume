@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -167,8 +166,8 @@ func (r *Reconciler) Reconcile(
 		for i := 0; i < toCreate; i++ {
 			rvr := &v1alpha3.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:       rv.Name + "-tiebreaker-" + strconv.Itoa(i),
-					Finalizers: []string{rvreconcile.ControllerFinalizerName},
+					GenerateName: rv.Name + "-tiebreaker-",
+					Finalizers:   []string{rvreconcile.ControllerFinalizerName},
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,

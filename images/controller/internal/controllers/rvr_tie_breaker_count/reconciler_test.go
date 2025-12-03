@@ -39,6 +39,8 @@ import (
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
 
+var expectedError = errors.New("test error")
+
 var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
 	Expect(corev1.AddToScheme(scheme)).To(Succeed())
@@ -342,7 +344,7 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("too many tie breakers", func() {
+			When("extra TieBreakers", func() {
 				BeforeEach(func() {
 					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
 						{
@@ -365,7 +367,6 @@ var _ = Describe("Reconcile", func() {
 								Type:                 "Diskful",
 							},
 						},
-
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-tb1",
@@ -385,27 +386,47 @@ var _ = Describe("Reconcile", func() {
 							},
 						},
 					}
-					// Initial State:
-					//   FD "node-1": [Diskful]
-					//   FD "node-2": [Diskful]
-					//   TB: [TieBreaker, TieBreaker]
-					// Violates:
-					//   - minimality of TieBreaker count for given FD distribution and odd total replica requirement
-					// Desired state:
-					//   FD "node-1": [Diskful]
-					//   FD "node-2": [Diskful, TieBreaker]
-					//   TB total: 1
-					//   replicas total: 3 (odd)
-					It("4. deletes extra TieBreakers and leaves one", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+				})
 
-						Expect(cl.List(ctx, &rvrList)).To(Succeed())
-						Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+				// Initial State:
+				//   FD "node-1": [Diskful]
+				//   FD "node-2": [Diskful]
+				//   TB: [TieBreaker, TieBreaker]
+				// Violates:
+				//   - minimality of TieBreaker count for given FD distribution and odd total replica requirement
+				// Desired state:
+				//   FD "node-1": [Diskful]
+				//   FD "node-2": [Diskful, TieBreaker]
+				//   TB total: 1
+				//   replicas total: 3 (odd)
+				It("4. deletes extra TieBreakers and leaves one", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+					Expect(cl.List(ctx, &rvrList)).To(Succeed())
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
+				})
+
+				When("Delete RVR fails", func() {
+					BeforeEach(func() {
+						builder.WithInterceptorFuncs(interceptor.Funcs{
+							Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+								if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
+									return expectedError
+								}
+								return c.Delete(ctx, obj, opts...)
+							},
+						})
+					})
+
+					It("returns same error", func(ctx SpecContext) {
+						Expect(rec.Reconcile(
+							ctx,
+							reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
+						)).Error().To(MatchError(expectedError))
 					})
 				})
 			})
 
-			expectedError := errors.New("test error")
 			When("Get ReplicatedVolume fails", func() {
 				BeforeEach(func() {
 					builder.WithInterceptorFuncs(interceptor.Funcs{
@@ -506,67 +527,6 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("Delete RVR fails", func() {
-				BeforeEach(func() {
-					// prepare state with extra TieBreakers so that Reconcile will try to delete them
-					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-df1",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								NodeName:             nodeList[0].Name,
-								Type:                 "Diskful",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-df2",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								NodeName:             nodeList[1].Name,
-								Type:                 "Diskful",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-tb1",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								Type:                 "TieBreaker",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-tb2",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								Type:                 "TieBreaker",
-							},
-						},
-					}
-
-					builder.WithInterceptorFuncs(interceptor.Funcs{
-						Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-							if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
-								return expectedError
-							}
-							return c.Delete(ctx, obj, opts...)
-						},
-					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
 		})
 
 	})
