@@ -173,6 +173,7 @@ spec:
 
     bb-log-info "Cluster DNS responded, got drbd-build-server service url"
     DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
+    bb-log-info "DRBD build server url: $DRBD_BUILD_SERVER_URL"
 
     KERNEL_VERSION=$kernel_version_in_use
     KERNEL_VERSION_SHORT="${KERNEL_VERSION%-generic}"
@@ -187,6 +188,9 @@ spec:
 
     BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
     BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed '$d')
+    bb-log-info "Build response: $BUILD_RESPONSE"
+    bb-log-info "Build body: $BUILD_BODY"
+    bb-log-info "Build HTTP code: $BUILD_HTTP_CODE"
 
     # Accept both 200 OK and 202 Accepted from build endpoint
     if [ "$BUILD_HTTP_CODE" != "200" ] && [ "$BUILD_HTTP_CODE" != "202" ]; then
