@@ -261,8 +261,8 @@ func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, r
 // and another with replicas that don't have DeletionTimestamp.
 // Returns two maps with RVR name as key and RVR object as value. Returns empty maps if no RVRs are found.
 func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) (deletedRvrMap, nonDeletedRvrMap map[string]*v1alpha3.ReplicatedVolumeReplica) {
-	deletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica)
-	nonDeletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+	deletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
+	nonDeletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
 	for _, rvr := range totalRvrMap {
 		if rvr.DeletionTimestamp != nil {
 			deletedRvrMap[rvr.Name] = rvr
