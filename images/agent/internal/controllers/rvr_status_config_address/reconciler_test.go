@@ -91,7 +91,9 @@ var _ = Describe("Reconciler", func() {
 		// Create fake client with status subresource support
 		cl = fake.NewClientBuilder().
 			WithScheme(s).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+			WithStatusSubresource(
+				&v1alpha3.ReplicatedVolumeReplica{},
+				&v1alpha3.ReplicatedVolume{}).
 			Build()
 
 		// Create reconciler using New method
