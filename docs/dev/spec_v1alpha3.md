@@ -17,7 +17,7 @@
   - [`status`](#status-1)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
+    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
   - [`drbd-resize-controller`](#drbd-resize-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
@@ -45,7 +45,7 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
@@ -56,7 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-3)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
 
 # Основные положения
 
