@@ -192,37 +192,32 @@ var _ = Describe("Reconciler", func() {
 				rsc.Spec.Replication = "None"
 			})
 
-			It("should create one replica", func(ctx SpecContext) {
+			It("should create one replica with correct properties and condition", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+				// Verify replica was created
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(SatisfyAll(
 					HaveLen(1),
 					HaveEach(SatisfyAll(
 						HaveField("Spec.ReplicatedVolumeName", Equal(rv.Name)),
 						HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful)),
+						HaveField("OwnerReferences", ContainElement(SatisfyAll(
+							HaveField("Name", Equal(rv.Name)),
+							HaveField("Kind", Equal("ReplicatedVolume")),
+							HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+							HaveField("Controller", PointTo(BeTrue())),
+							HaveField("BlockOwnerDeletion", PointTo(BeTrue())),
+						))),
 					)),
 				))
-			})
 
-			It("should verify condition was set", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				// Verify condition was set
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
 				Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
 					HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
 					HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
 				))))
-			})
-
-			It("should have OwnerReferences with correct rvName", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				Expect(cl.List(ctx, rvrList)).To(Succeed())
-				Expect(rvrList.Items).To(ContainElement(HaveField("OwnerReferences", ContainElement(SatisfyAll(
-					HaveField("Name", Equal(rv.Name)),
-					HaveField("Kind", Equal("ReplicatedVolume")),
-					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
-					HaveField("Controller", PointTo(BeTrue())),
-					HaveField("BlockOwnerDeletion", PointTo(BeTrue())),
-				)))))
 			})
 		})
 
@@ -379,87 +374,50 @@ var _ = Describe("Reconciler", func() {
 				})
 			})
 
-			When("creating multiple missing replicas", func() {
-				BeforeEach(func() {
-					rsc.Spec.Replication = "ConsistencyAndAvailability"
-				})
-
-				It("should create multiple missing replicas", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				})
-			})
 		})
 
 		When("the required number of non-deleted ReplicatedVolumeReplicas is reached", func() {
-			When("None replication", func() {
-				var rvr1 *v1alpha3.ReplicatedVolumeReplica
+			var replicas []*v1alpha3.ReplicatedVolumeReplica
 
-				BeforeEach(func() {
+			DescribeTableSubtree("replication types",
+				Entry("None replication", func() {
 					rsc.Spec.Replication = "None"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-				})
-
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(cl.Create(ctx, rvr1)).To(Succeed())
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				})
-
-				It("should set condition to True for None replication", func(ctx SpecContext) {
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
-				})
-			})
-
-			When("Availability replication", func() {
-				var rvr1, rvr2 *v1alpha3.ReplicatedVolumeReplica
-
-				BeforeEach(func() {
+					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
+					}
+				}),
+				Entry("Availability replication", func() {
 					rsc.Spec.Replication = "Availability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-					rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
-				})
-
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(cl.Create(ctx, rvr1)).To(Succeed())
-					Expect(cl.Create(ctx, rvr2)).To(Succeed())
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				})
-
-				It("should set condition to True for Availability replication", func(ctx SpecContext) {
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
-				})
-			})
-
-			When("ConsistencyAndAvailability replication", func() {
-				var rvr1, rvr2, rvr3 *v1alpha3.ReplicatedVolumeReplica
-
-				BeforeEach(func() {
+					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
+						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
+					}
+				}),
+				Entry("ConsistencyAndAvailability replication", func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-					rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
-					rvr3 = createReplicatedVolumeReplica("rvr-3", rv, scheme, true, nil)
-				})
+					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
+						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
+						createReplicatedVolumeReplica("rvr-3", rv, scheme, true, nil),
+					}
+				}),
+				func(beforeEach func()) {
+					BeforeEach(beforeEach)
 
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(cl.Create(ctx, rvr1)).To(Succeed())
-					Expect(cl.Create(ctx, rvr2)).To(Succeed())
-					Expect(cl.Create(ctx, rvr3)).To(Succeed())
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				})
+					JustBeforeEach(func(ctx SpecContext) {
+						for _, rvr := range replicas {
+							Expect(cl.Create(ctx, rvr)).To(Succeed())
+						}
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					})
 
-				It("should set condition to True for ConsistencyAndAvailability replication", func(ctx SpecContext) {
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
+					It("should set condition to True", func(ctx SpecContext) {
+						updatedRV := &v1alpha3.ReplicatedVolume{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
+						condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
+						Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
+					})
 				})
-			})
 		})
 
 		When("there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
