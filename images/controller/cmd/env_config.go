@@ -22,7 +22,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/config"
 )
 
 const (
@@ -40,8 +40,8 @@ const (
 
 var ErrInvalidConfig = errors.New("invalid config")
 
-func GetEnvConfig() (cluster.Config, error) {
-	cfg := cluster.Config{}
+func GetEnvConfig() (config.Config, error) {
+	cfg := config.Config{}
 
 	cfg.HealthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)
 	if cfg.HealthProbeBindAddress == "" {
