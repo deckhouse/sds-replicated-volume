@@ -141,6 +141,7 @@ require (
 	github.com/nishanths/predeclared v0.2.2 // indirect
 	github.com/nunnatsa/ginkgolinter v0.19.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
+	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
@@ -255,7 +256,6 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-tool (
-	github.com/golangci/golangci-lint/cmd/golangci-lint
-	github.com/onsi/ginkgo/v2/ginkgo
-)
+tool github.com/onsi/ginkgo/v2/ginkgo
+
+tool github.com/golangci/golangci-lint/cmd/golangci-lint
