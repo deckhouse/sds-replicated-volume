@@ -17,7 +17,7 @@
   - [`status`](#status-1)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
+    - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
   - [`drbd-resize-controller`](#drbd-resize-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
@@ -45,7 +45,7 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
@@ -56,19 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
-  - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
-  - [`rv-gc-controller`](#rv-gc-controller)
-  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
-- [Сценарии](#сценарии)
-  - [Отказоустойчивость](#отказоустойчивость)
-    - [Arrange](#arrange)
-    - [Act](#act)
-    - [Assert](#assert)
-  - [Нагрузочный](#нагрузочный)
-    - [Arrange](#arrange-1)
-    - [Act](#act-1)
-    - [Assert](#assert-1)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-3)
 
 # Основные положения
 
@@ -367,10 +355,6 @@ TODO
   - см. существующую реализацию
 - удалить конфиги ресурса (основной и временный), если они есть
 - снять последний финализатор с rvr
-
-TODO:
- - Агент (drbd-config) должен ставить финалайзер agent на llv перед тем, как начинает ее использовать и снимать после того, как перестал.
- - У реплики добавить отдельный condition FullyConnected, который НЕ влияет на Ready. Он true, когда у реплики есть связь со всеми ее пирами.
 
 ### Вывод 
   - `rvr.status.drbd.errors.*`
@@ -703,7 +687,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
-### Статус: [OK | priority: 5 | complexity: 2]
+### Статус: [TBD | priority: 5 | complexity: 2]
 
 ### Контекст
 
