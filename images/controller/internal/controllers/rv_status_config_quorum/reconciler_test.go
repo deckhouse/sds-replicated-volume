@@ -44,7 +44,9 @@ var _ = Describe("Reconciler", func() {
 	JustBeforeEach(func() {
 		cl = fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
+			WithStatusSubresource(
+				&v1alpha3.ReplicatedVolumeReplica{},
+				&v1alpha3.ReplicatedVolume{}).
 			Build()
 		rec = rvquorumcontroller.NewReconciler(
 			cl,
