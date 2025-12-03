@@ -108,38 +108,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	totalNumberOfReplicas := len(totalRvrMap)
-	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", totalNumberOfReplicas)
-
-	// If no RVRs found, create one
-	if totalNumberOfReplicas == 0 {
-		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
-		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
-		if err != nil {
-			log.Error(err, "creating ReplicatedVolumeReplica")
-			return reconcile.Result{}, err
-		}
-
-		err = patchDiskfulReplicaCountReachedCondition(
-			ctx, r.cl, log, rv,
-			metav1.ConditionFalse,
-			v1alpha3.ReasonFirstReplicaIsBeingCreated,
-			fmt.Sprintf("Created first replica, need %d diskful replicas", neededNumberOfReplicas),
-		)
-		if err != nil {
-			log.Error(err, "setting DiskfulReplicaCountReached condition")
-		}
-
-		return reconcile.Result{}, err
-	}
+	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(totalRvrMap))
 
 	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
-	deletedNumberOfReplicas := len(deletedRvrMap)
-	nonDeletedNumberOfReplicas := len(nonDeletedRvrMap)
-	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", deletedNumberOfReplicas)
-	log.V(4).Info("Counted non-deleted ReplicatedVolumeReplicas", "count", nonDeletedNumberOfReplicas)
+	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", len(deletedRvrMap))
+	log.V(4).Info("Counted non-deleted ReplicatedVolumeReplicas", "count", len(nonDeletedRvrMap))
 
-	if nonDeletedNumberOfReplicas == 0 {
+	if len(nonDeletedRvrMap) == 0 {
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
@@ -161,7 +136,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Need to wait until RVR becomes Ready.
-	if nonDeletedNumberOfReplicas == 1 {
+	if len(nonDeletedRvrMap) == 1 {
 		for _, rvr := range nonDeletedRvrMap {
 			if !isRvrReady(rvr) {
 				log.V(4).Info("RVR is not ready yet, waiting", "rvr", rvr.Name)
@@ -174,8 +149,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// warning message if more non-deleted RVRs found than needed
-	if nonDeletedNumberOfReplicas > neededNumberOfReplicas {
-		log.V(1).Info("More non-deleted ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", nonDeletedNumberOfReplicas, "neededNumberOfReplicas", neededNumberOfReplicas)
+	if len(nonDeletedRvrMap) > neededNumberOfReplicas {
+		log.V(1).Info("More non-deleted ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", len(nonDeletedRvrMap), "neededNumberOfReplicas", neededNumberOfReplicas)
 
 		// TODO: should we set a condition here that there are more replicas than needed?
 
@@ -183,7 +158,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Calculate number of replicas to create
-	creatingNumberOfReplicas := neededNumberOfReplicas - nonDeletedNumberOfReplicas
+	creatingNumberOfReplicas := neededNumberOfReplicas - len(nonDeletedRvrMap)
 	log.V(4).Info("Calculated number of replicas to create", "creatingNumberOfReplicas", creatingNumberOfReplicas)
 
 	if creatingNumberOfReplicas > 0 {
