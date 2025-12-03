@@ -224,7 +224,7 @@ var _ = Describe("Reconciler", func() {
 					))))
 				})
 
-				It("should have OwnerReferences with correct rvName", func(ctx SpecContext) {
+				It("should have OwnerReferences with correct rvName", func() {
 					Expect(rvrList.Items).To(ContainElement(HaveField("OwnerReferences", ContainElement(SatisfyAll(
 						HaveField("Name", Equal(rv.Name)),
 						HaveField("Kind", Equal("ReplicatedVolume")),
@@ -251,7 +251,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create one replica", func(ctx SpecContext) {
+				It("should create one replica", func() {
 					Expect(rvrList.Items).To(HaveLen(1))
 				})
 			})
@@ -272,7 +272,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create one replica", func(ctx SpecContext) {
+				It("should create one replica", func() {
 					Expect(rvrList.Items).To(HaveLen(1))
 				})
 			})
