@@ -48,7 +48,6 @@ var _ = Describe("Reconciler", func() {
 			Build()
 		rec = rvquorumcontroller.NewReconciler(
 			cl,
-			cl,
 			nil,
 			GinkgoLogr,
 		)

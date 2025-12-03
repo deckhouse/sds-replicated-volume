@@ -84,6 +84,10 @@ func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
 	return s.Conditions
 }
 
+func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
+	s.Conditions = conditions
+}
+
 // +k8s:deepcopy-gen=true
 type DRBDResource struct {
 	// +patchStrategy=merge
