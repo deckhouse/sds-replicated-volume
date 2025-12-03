@@ -157,7 +157,7 @@ spec:
 
     DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
     attempt=0
-    bb-log-info "host -t A "DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS"
+    bb-log-info "host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS"
     until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
     do
       if [ $attempt -gt 10 ]; then
