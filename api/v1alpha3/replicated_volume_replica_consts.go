@@ -16,6 +16,11 @@ limitations under the License.
 
 package v1alpha3
 
+import (
+	"strconv"
+	"strings"
+)
+
 // DRBD node ID constants for ReplicatedVolumeReplica
 const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
@@ -23,3 +28,21 @@ const (
 	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
 	RVRMaxNodeID = uint(7)
 )
+
+// IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
+func IsValidNodeID(nodeID uint) bool {
+	return nodeID >= RVRMinNodeID && nodeID <= RVRMaxNodeID
+}
+
+// FormatValidNodeIDRange returns a formatted string representing the valid nodeID range.
+// faster than fmt.Sprintf("%d; %d", RVRMinNodeID, RVRMaxNodeID) because it avoids allocation and copying of the string.
+func FormatValidNodeIDRange() string {
+	var b strings.Builder
+	b.Grow(10) // Pre-allocate: "[0; 7]" = 7 bytes, but allocate a bit more
+	b.WriteByte('[')
+	b.WriteString(strconv.FormatUint(uint64(RVRMinNodeID), 10))
+	b.WriteString("; ")
+	b.WriteString(strconv.FormatUint(uint64(RVRMaxNodeID), 10))
+	b.WriteByte(']')
+	return b.String()
+}

@@ -20,24 +20,16 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sync"
 
 	"github.com/go-logr/logr"
+	"golang.org/x/sync/errgroup"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
-
-// formatValidRange returns a formatted string representing the valid nodeID range.
-func formatValidRange() string {
-	return fmt.Sprintf("[%d; %d]", v1alpha3.RVRMinNodeID, v1alpha3.RVRMaxNodeID)
-}
-
-// isValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].
-func isValidNodeID(nodeID uint) bool {
-	return nodeID >= v1alpha3.RVRMinNodeID && nodeID <= v1alpha3.RVRMaxNodeID
-}
 
 type Reconciler struct {
 	cl  client.Client
@@ -62,120 +54,152 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
-	// Get the RVR
-	var rvr v1alpha3.ReplicatedVolumeReplica
-	if err := r.cl.Get(ctx, req.NamespacedName, &rvr); err != nil {
-		log.Error(err, "Getting ReplicatedVolumeReplica")
+	// Get the RV
+	var rv v1alpha3.ReplicatedVolume
+	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		log.Error(err, "Getting ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if nodeId is already set
-	if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.NodeId != nil {
-		nodeID := *rvr.Status.DRBD.Config.NodeId
-		if isValidNodeID(nodeID) {
-			log.V(1).Info("nodeId already assigned", "nodeId", nodeID)
-			return reconcile.Result{}, nil
-		}
-		// NOTE: Logging invalid nodeID is NOT in the spec.
-		// This was added to improve observability - administrators can see invalid nodeIDs in logs.
-		log.V(0).Info("nodeID outside valid range, will be reset and reassigned",
-			"nodeID", nodeID,
-			"validRange", formatValidRange(),
-			"rvr", req.NamespacedName,
-		)
-		// Reset invalid nodeID - will continue processing to assign valid nodeID
-		rvr.Status.DRBD.Config.NodeId = nil
-	}
-
-	// Get all RVRs for the same ReplicatedVolume
+	// Get all RVRs for this ReplicatedVolume
+	// Note: Filtering by replicatedVolumeName instead of owner reference to avoid requiring
+	// a custom index field setup in the manager.
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing RVRs: %w", err)
+		log.Error(err, "listing RVRs")
+		return reconcile.Result{}, err
 	}
 
-	// Filter by replicatedVolumeName
+	// Filter by replicatedVolumeName (required field, always present)
 	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha3.ReplicatedVolumeReplica) bool {
-		return item.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName
+		return item.Spec.ReplicatedVolumeName != rv.Name
 	})
 
-	// Collect used nodeIDs
+	// Early exit if no RVRs for this volume
+	if len(rvrList.Items) == 0 {
+		log.V(1).Info("no RVRs for volume")
+		return reconcile.Result{}, nil
+	}
+
+	// Collect used nodeIDs and find RVRs that need nodeID assignment
 	usedNodeIDs := make(map[uint]struct{})
+	var rvrsNeedingNodeID []v1alpha3.ReplicatedVolumeReplica
+
 	for _, item := range rvrList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
 			nodeID := *item.Status.DRBD.Config.NodeId
-			if isValidNodeID(nodeID) {
+			if v1alpha3.IsValidNodeID(nodeID) {
 				usedNodeIDs[nodeID] = struct{}{}
-			} else {
-				// NOTE: Logging invalid nodeID is NOT in the spec.
-				// This was added to improve observability - administrators can see invalid nodeIDs in logs.
-				// To revert: remove this log line.
-				log.V(1).Info("ignoring nodeID outside valid range", "nodeID", nodeID, "validRange", formatValidRange())
+				continue
 			}
+			// NOTE: Logging invalid nodeID is NOT in the spec.
+			// This was added to improve observability - administrators can see invalid nodeIDs in logs.
+			// To revert: remove this log line.
+			log.V(1).Info("ignoring nodeID outside valid range, will reassign", "nodeID", nodeID, "validRange", v1alpha3.FormatValidNodeIDRange(), "rvr", item.Name)
 		}
+		// RVR needs nodeID assignment (either nil or invalid)
+		rvrsNeedingNodeID = append(rvrsNeedingNodeID, item)
 	}
 
-	// Count total replicas (including the one we're processing)
+	// Early exit if all RVRs already have valid nodeIDs
+	if len(rvrsNeedingNodeID) == 0 {
+		log.V(1).Info("all RVRs already have valid nodeIDs")
+		return reconcile.Result{}, nil
+	}
+
+	// Count total replicas
 	totalReplicas := len(rvrList.Items)
 	if totalReplicas > int(v1alpha3.RVRMaxNodeID)+1 {
-		// NOTE: It would be a good idea to set ConfigurationAdjusted condition to False here
-		// for better user experience and understanding what's wrong (for administrators, not end users).
-		// This would make the problem visible in RVR status conditions, not just in controller logs.
-		// However, for now we keep it simple and only log the error.
-		// The error will be logged by controller-runtime and visible in controller logs.
 		err := e.ErrInvalidClusterf(
 			"too many replicas for volume %s: %d (maximum is %d)",
-			rvr.Spec.ReplicatedVolumeName,
+			rv.Name,
 			totalReplicas,
 			int(v1alpha3.RVRMaxNodeID)+1,
 		)
-		log.Error(err, "too many replicas for volume", "volume", rvr.Spec.ReplicatedVolumeName, "replicas", totalReplicas, "max", int(v1alpha3.RVRMaxNodeID)+1)
+		log.Error(err, "too many replicas for volume", "replicas", totalReplicas, "max", int(v1alpha3.RVRMaxNodeID)+1)
 		return reconcile.Result{}, err
 	}
 
-	// Find available nodeID
-	var availableNodeID *uint
+	// Check if we have enough available nodeIDs
+	availableNodeIDs := make([]uint, 0, int(v1alpha3.RVRMaxNodeID)+1)
 	for i := v1alpha3.RVRMinNodeID; i <= v1alpha3.RVRMaxNodeID; i++ {
 		if _, exists := usedNodeIDs[i]; !exists {
-			availableNodeID = &i
-			break
+			availableNodeIDs = append(availableNodeIDs, i)
 		}
 	}
 
-	if availableNodeID == nil {
-		// NOTE: It would be a good idea to set ConfigurationAdjusted condition to False here
-		// for better user experience and understanding what's wrong (for administrators, not end users).
-		// This would make the problem visible in RVR status conditions, not just in controller logs.
-		// However, for now we keep it simple and only log the error.
-		// The error will be logged by controller-runtime and visible in controller logs.
+	if len(availableNodeIDs) < len(rvrsNeedingNodeID) {
 		err := e.ErrInvalidClusterf(
-			"no available nodeID for volume %s (all %d nodeIDs are used)",
-			rvr.Spec.ReplicatedVolumeName,
+			"no available nodeID for volume %s: need %d, available %d (all %d nodeIDs are used)",
+			rv.Name,
+			len(rvrsNeedingNodeID),
+			len(availableNodeIDs),
 			int(v1alpha3.RVRMaxNodeID)+1,
 		)
-		log.Error(err, "no available nodeID for volume", "volume", rvr.Spec.ReplicatedVolumeName, "maxNodeIDs", int(v1alpha3.RVRMaxNodeID)+1)
+		log.Error(err, "no available nodeID for volume", "needed", len(rvrsNeedingNodeID), "available", len(availableNodeIDs), "maxNodeIDs", int(v1alpha3.RVRMaxNodeID)+1)
 		return reconcile.Result{}, err
 	}
 
-	// Update RVR status with nodeID using simple Patch
-	// If there's a conflict (409), error will be returned and next reconciliation will retry
-	from := client.MergeFrom(&rvr)
-	changedRVR := (&rvr).DeepCopy()
-	if changedRVR.Status == nil {
-		changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-	}
-	if changedRVR.Status.DRBD == nil {
-		changedRVR.Status.DRBD = &v1alpha3.DRBD{}
-	}
-	if changedRVR.Status.DRBD.Config == nil {
-		changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-	}
-	changedRVR.Status.DRBD.Config.NodeId = availableNodeID
+	// Assign nodeIDs to RVRs that need them
+	// Use goroutines for parallel Patch operations
+	var mu sync.Mutex
+	nodeIDIndex := 0
 
-	if err := r.cl.Status().Patch(ctx, changedRVR, from); err != nil {
-		log.Error(err, "Patching ReplicatedVolumeReplica status with nodeID")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	eg, egCtx := errgroup.WithContext(ctx)
+	for i := range rvrsNeedingNodeID {
+		rvr := &rvrsNeedingNodeID[i]
+		eg.Go(func() error {
+			// Get next available nodeID (thread-safe)
+			mu.Lock()
+			if nodeIDIndex >= len(availableNodeIDs) {
+				mu.Unlock()
+				return fmt.Errorf("no more available nodeIDs")
+			}
+			nodeID := availableNodeIDs[nodeIDIndex]
+			nodeIDIndex++
+			mu.Unlock()
+
+			// Get fresh RVR to avoid conflicts
+			var freshRVR v1alpha3.ReplicatedVolumeReplica
+			if err := r.cl.Get(egCtx, client.ObjectKeyFromObject(rvr), &freshRVR); err != nil {
+				if client.IgnoreNotFound(err) == nil {
+					// RVR was deleted, skip
+					return nil
+				}
+				return err
+			}
+
+			// Prepare patch
+			from := client.MergeFrom(&freshRVR)
+			changedRVR := freshRVR.DeepCopy()
+			if changedRVR.Status == nil {
+				changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			}
+			if changedRVR.Status.DRBD == nil {
+				changedRVR.Status.DRBD = &v1alpha3.DRBD{}
+			}
+			if changedRVR.Status.DRBD.Config == nil {
+				changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+			}
+			changedRVR.Status.DRBD.Config.NodeId = &nodeID
+
+			// Patch RVR status
+			if err := r.cl.Status().Patch(egCtx, changedRVR, from); err != nil {
+				if client.IgnoreNotFound(err) == nil {
+					// RVR was deleted, skip
+					return nil
+				}
+				log.Error(err, "Patching ReplicatedVolumeReplica status with nodeID", "rvr", freshRVR.Name, "nodeID", nodeID)
+				return err
+			}
+			log.Info("assigned nodeID to RVR", "nodeID", nodeID, "rvr", freshRVR.Name, "volume", rv.Name)
+			return nil
+		})
 	}
-	log.Info("assigned nodeID to RVR", "nodeID", *availableNodeID, "volume", rvr.Spec.ReplicatedVolumeName)
+
+	if err := eg.Wait(); err != nil {
+		return reconcile.Result{}, err
+	}
 
 	return reconcile.Result{}, nil
 }
