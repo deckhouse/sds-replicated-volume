@@ -1,0 +1,335 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package rvpublishcontroller
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	commonapi "github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
+)
+
+type Reconciler struct {
+	cl     client.Client
+	log    logr.Logger
+	scheme *runtime.Scheme
+}
+
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
+	return &Reconciler{
+		cl:     cl,
+		log:    log,
+		scheme: scheme,
+	}
+}
+
+var _ reconcile.Reconciler = &Reconciler{}
+
+const (
+	ConditionTypePublishSucceeded          = "PublishSucceeded"
+	ReasonUnableToProvideLocalVolumeAccess = "UnableToProvideLocalVolumeAccess"
+)
+
+func (r *Reconciler) Reconcile(
+	ctx context.Context,
+	req reconcile.Request,
+) (reconcile.Result, error) {
+	log := r.log.WithName("Reconcile").WithValues("request", req)
+
+	// fetch target ReplicatedVolume; if it was deleted, stop reconciliation
+	rv := &v1alpha3.ReplicatedVolume{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rv); err != nil {
+		log.Error(err, "unable to get ReplicatedVolume")
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// check basic preconditions from spec before doing any work
+	if shouldSkipRV(rv, log) {
+		return reconcile.Result{}, nil
+	}
+
+	// load ReplicatedStorageClass and all replicas of this RV
+	rsc, replicasForRV, err := r.loadPublishContext(ctx, rv, log)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	// validate local access constraints for volumeAccess=Local; may set PublishSucceeded=False and stop
+	if res, err := r.validateLocalAccess(ctx, rv, rsc, replicasForRV, log); res != nil || err != nil {
+		return *res, err
+	}
+
+	// sync rv.status.drbd.config.allowTwoPrimaries and wait for actual application on replicas when needed
+	if res, err := r.syncAllowTwoPrimaries(ctx, rv, replicasForRV, log); res != nil || err != nil {
+		return *res, err
+	}
+
+	// sync primary roles on replicas and rv.status.publishedOn
+	if err := r.syncReplicaPrimariesAndPublishedOn(ctx, rv, rsc, replicasForRV, log); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	return reconcile.Result{}, nil
+}
+
+// loadPublishContext fetches ReplicatedStorageClass and all non-deleted replicas
+// for the given ReplicatedVolume. It returns data needed for publish logic.
+func (r *Reconciler) loadPublishContext(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	log logr.Logger,
+) (*v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, error) {
+	// read ReplicatedStorageClass to understand volumeAccess and other policies
+	rsc := &v1alpha1.ReplicatedStorageClass{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
+		log.Error(err, "unable to get ReplicatedStorageClass")
+		return nil, nil, client.IgnoreNotFound(err)
+	}
+
+	// list all ReplicatedVolumeReplica objects and filter those that belong to this RV
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, rvrList); err != nil {
+		log.Error(err, "unable to list ReplicatedVolumeReplica")
+		return nil, nil, err
+	}
+
+	var replicasForRV []v1alpha3.ReplicatedVolumeReplica
+	for _, rvr := range rvrList.Items {
+		// select replicas of this volume that are not marked for deletion
+		if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.DeletionTimestamp.IsZero() {
+			replicasForRV = append(replicasForRV, rvr)
+		}
+	}
+
+	return rsc, replicasForRV, nil
+}
+
+// validateLocalAccess enforces the rule that for volumeAccess=Local there must be
+// a Diskful replica on each node from rv.spec.publishOn. On violation it sets
+// PublishSucceeded=False and stops reconciliation.
+func (r *Reconciler) validateLocalAccess(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	log logr.Logger,
+) (*reconcile.Result, error) {
+	// this validation is relevant only when volumeAccess is Local
+	if rsc.Spec.VolumeAccess != "Local" {
+		return nil, nil
+	}
+
+	// map replicas by NodeName for efficient lookup
+	replicasByNode := make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(replicasForRV))
+	for i := range replicasForRV {
+		rvr := &replicasForRV[i]
+		replicasByNode[rvr.Spec.NodeName] = rvr
+	}
+
+	// In case rsc.spec.volumeAccess==Local, but replica is not Diskful or doesn't exist,
+	// promotion is impossible: update PublishSucceeded on RV and stop reconcile.
+	for _, publishNodeName := range rv.Spec.PublishOn {
+		rvr, ok := replicasByNode[publishNodeName]
+		if !ok || rvr.Spec.Type != "Diskful" {
+			if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
+				if patchedRV.Status == nil {
+					patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+				}
+				meta.SetStatusCondition(&patchedRV.Status.Conditions, metav1.Condition{
+					Type:    ConditionTypePublishSucceeded,
+					Status:  metav1.ConditionFalse,
+					Reason:  ReasonUnableToProvideLocalVolumeAccess,
+					Message: fmt.Sprintf("Local access required but no Diskful replica found on node %s", publishNodeName),
+				})
+				return nil
+			}); err != nil {
+				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
+				return &reconcile.Result{}, err
+			}
+
+			// stop reconciliation after setting the failure condition
+			return &reconcile.Result{}, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
+// the number of nodes in rv.spec.publishOn and, when two nodes are requested,
+// waits until rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas.
+func (r *Reconciler) syncAllowTwoPrimaries(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	log logr.Logger,
+) (*reconcile.Result, error) {
+	// update rv.status.drbd.config.allowTwoPrimaries according to spec:
+	// - true when exactly 2 nodes are requested in spec.publishOn
+	// - false otherwise
+	desiredAllowTwoPrimaries := len(rv.Spec.PublishOn) == 2
+	if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
+		if patchedRV.Status == nil {
+			patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		}
+		if patchedRV.Status.DRBD == nil {
+			patchedRV.Status.DRBD = &v1alpha3.DRBDResource{}
+		}
+		if patchedRV.Status.DRBD.Config == nil {
+			patchedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		}
+		patchedRV.Status.DRBD.Config.AllowTwoPrimaries = desiredAllowTwoPrimaries
+		return nil
+	}); err != nil {
+		log.Error(err, "unable to patch ReplicatedVolume allowTwoPrimaries")
+		return &reconcile.Result{}, err
+	}
+
+	// when two nodes are requested in publishOn, we must wait until
+	// rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas
+	if len(rv.Spec.PublishOn) == 2 {
+		for _, rvr := range replicasForRV {
+			if rvr.Status == nil ||
+				rvr.Status.DRBD == nil ||
+				rvr.Status.DRBD.Actual == nil ||
+				!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
+				// reconciliation will be re-triggered on further RVR status updates
+				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name)
+				return &reconcile.Result{}, nil
+			}
+		}
+	}
+
+	return nil, nil
+}
+
+// syncReplicaPrimariesAndPublishedOn updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)
+// for all replicas according to rv.spec.publishOn and recomputes rv.status.publishedOn
+// from actual DRBD roles on replicas.
+func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	rsc *v1alpha1.ReplicatedStorageClass, // kept for future use if topology/volumeAccess will affect primary placement
+	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	log logr.Logger,
+) error {
+	// desired primary set: replicas on nodes from rv.spec.publishOn should be primary
+	publishSet := make(map[string]struct{}, len(rv.Spec.PublishOn))
+	for _, nodeName := range rv.Spec.PublishOn {
+		publishSet[nodeName] = struct{}{}
+	}
+
+	for _, rvr := range replicasForRV {
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+
+		_, shouldBePrimary := publishSet[rvr.Spec.NodeName]
+
+		// update both spec.type (for TieBreaker) and rvr.status.drbd.config.primary in a single patch as required by spec
+		if err := commonapi.PatchWithConflictRetry(ctx, r.cl, &rvr, func(patchedRVR *v1alpha3.ReplicatedVolumeReplica) error {
+			// convert TieBreaker to Access when it is supposed to be Primary
+			if shouldBePrimary && patchedRVR.Spec.Type == "TieBreaker" {
+				patchedRVR.Spec.Type = "Access"
+			}
+
+			if patchedRVR.Status == nil {
+				patchedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			}
+			if patchedRVR.Status.DRBD == nil {
+				patchedRVR.Status.DRBD = &v1alpha3.DRBD{}
+			}
+			if patchedRVR.Status.DRBD.Config == nil {
+				patchedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+			}
+
+			current := false
+			if patchedRVR.Status.DRBD.Config.Primary != nil {
+				current = *patchedRVR.Status.DRBD.Config.Primary
+			}
+			if current == shouldBePrimary {
+				return nil
+			}
+
+			patchedRVR.Status.DRBD.Config.Primary = &shouldBePrimary
+			return nil
+		}); err != nil {
+			log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
+			return err
+		}
+	}
+
+	// recompute rv.status.publishedOn from actual DRBD roles on replicas
+	publishedOn := make([]string, 0, len(replicasForRV))
+	for _, rvr := range replicasForRV {
+		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+			continue
+		}
+		if rvr.Status.DRBD.Status.Role != "Primary" {
+			continue
+		}
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+		publishedOn = append(publishedOn, rvr.Spec.NodeName)
+	}
+
+	// apply publishedOn via status patch with conflict retry
+	if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
+		if patchedRV.Status == nil {
+			patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		}
+		patchedRV.Status.PublishedOn = publishedOn
+		return nil
+	}); err != nil {
+		log.Error(err, "unable to patch ReplicatedVolume publishedOn")
+		return err
+	}
+
+	return nil
+}
+
+// shouldSkipRV returns true when, according to spec, rv-publish-controller
+// should not perform any actions for the given ReplicatedVolume.
+func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+	// controller works only when status is initialized
+	if rv.Status == nil {
+		return true
+	}
+
+	// controller works only when RV is Ready according to spec
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, "Ready") {
+		return true
+	}
+
+	// fetch ReplicatedStorageClass to inspect volumeAccess mode and other policies
+	if rv.Spec.ReplicatedStorageClassName == "" {
+		log.Info("ReplicatedStorageClassName is empty, skipping")
+		return true
+	}
+
+	return false
+}
