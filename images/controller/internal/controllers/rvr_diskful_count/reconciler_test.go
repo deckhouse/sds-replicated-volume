@@ -164,33 +164,26 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("ReplicatedVolume has empty ReplicatedStorageClassName", func() {
-			BeforeEach(func() {
+		DescribeTableSubtree("Cehecking errors",
+			Entry("ReplicatedVolume has empty ReplicatedStorageClassName", func() {
 				rv.Spec.ReplicatedStorageClassName = ""
-			})
-			It("should return an error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().
-					To(MatchError(rvrdiskfulcount.ErrEmptyReplicatedStorageClassName))
-			})
-		})
-
-		When("ReplicatedStorageClass does not exist", func() {
-			BeforeEach(func() {
+			}, MatchError(rvrdiskfulcount.ErrEmptyReplicatedStorageClassName)),
+			Entry("ReplicatedStorageClass does not exist", func() {
 				rsc = nil
-			})
-			It("should return an error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(HaveOccurred())
-			})
-		})
-
-		When("ReplicatedStorageClass has unknown replication value", func() {
-			BeforeEach(func() {
+			}, HaveOccurred()),
+			Entry("ReplicatedStorageClass has unknown replication value", func() {
 				rsc.Spec.Replication = "Unknown"
+			}, MatchError(ContainSubstring("unknown replication value"))),
+			Entry("replication is None", func() {
+				rsc.Spec.Replication = "None"
+			}),
+			func(beforeEach func(), errorMatcher OmegaMatcher) {
+				BeforeEach(beforeEach)
+				It("should return an error", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(errorMatcher)
+				})
+
 			})
-			It("should return an error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(ContainSubstring("unknown replication value")))
-			})
-		})
 
 		When("replication is None", func() {
 			BeforeEach(func() {

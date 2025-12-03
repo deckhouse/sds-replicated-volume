@@ -108,11 +108,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", len(totalRvrMap))
 
 	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
-	log.V(4).Info("Counted deleting ReplicatedVolumeReplicas", "count", len(deletedRvrMap))
-	log.V(4).Info("Counted non-deleted ReplicatedVolumeReplicas", "count", len(nonDeletedRvrMap))
+
+	log.V(4).Info("Counted RVRs", "total", len(totalRvrMap), "deleted", len(deletedRvrMap), "nonDeleted", len(nonDeletedRvrMap))
 
 	if len(nonDeletedRvrMap) == 0 {
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
@@ -155,7 +154,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		// TODO: should we set a condition here that there are more replicas than needed?
 
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, fmt.Errorf("more non-deleted ReplicatedVolumeReplicas found than needed: %d > %d", len(nonDeletedRvrMap), neededNumberOfReplicas)
 	}
 
 	// Calculate number of replicas to create
