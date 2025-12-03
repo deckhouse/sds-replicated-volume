@@ -457,16 +457,8 @@ var _ = Describe("Reconciler", func() {
 						}
 					})
 
-					It("should only keep one peer entry per node", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-
-						// rvr3 should only have one peer entry for node-1 (the first one found)
-						updatedRVR3 := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updatedRVR3)).To(Succeed())
-						Expect(updatedRVR3.Status.DRBD.Config.Peers).To(And(
-							HaveKey("node-1"),
-							HaveLen(1),
-						))
+					It("should fail", func(ctx SpecContext) {
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(rvr_status_config_peers.ErrMultiplePeersOnSameNode))
 					})
 				})
 
