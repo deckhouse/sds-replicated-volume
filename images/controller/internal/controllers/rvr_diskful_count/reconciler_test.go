@@ -251,7 +251,6 @@ var _ = Describe("Reconciler", func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
 				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, &now)
-				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -295,12 +294,10 @@ var _ = Describe("Reconciler", func() {
 
 		When("there is one non-deleted ReplicatedVolumeReplica that is not ready", func() {
 			var rvr1 *v1alpha3.ReplicatedVolumeReplica
-			var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
 				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, nil)
-				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -336,12 +333,10 @@ var _ = Describe("Reconciler", func() {
 		When("there are fewer non-deleted ReplicatedVolumeReplicas than needed", func() {
 			When("Availability replication", func() {
 				var rvr1 *v1alpha3.ReplicatedVolumeReplica
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
 					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -362,12 +357,10 @@ var _ = Describe("Reconciler", func() {
 
 			When("ConsistencyAndAvailability replication", func() {
 				var rvr1 *v1alpha3.ReplicatedVolumeReplica
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
 					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -471,14 +464,12 @@ var _ = Describe("Reconciler", func() {
 
 		When("there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
 			var rvr1, rvr2 *v1alpha3.ReplicatedVolumeReplica
-			var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
 				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, &now)
 				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
-				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -508,12 +499,10 @@ var _ = Describe("Reconciler", func() {
 		When("there are non-Diskful ReplicatedVolumeReplicas", func() {
 			When("ignoring non-Diskful replicas", func() {
 				var rvrNonDiskful *v1alpha3.ReplicatedVolumeReplica
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
 					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -543,13 +532,11 @@ var _ = Describe("Reconciler", func() {
 
 			When("calculating required count", func() {
 				var rvrDiskful, rvrNonDiskful *v1alpha3.ReplicatedVolumeReplica
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
 					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv, scheme, true, nil)
 					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -571,11 +558,8 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("ReplicatedVolume has ConsistencyAndAvailability replication", func() {
-			var rvrList *v1alpha3.ReplicatedVolumeReplicaList
-
 			BeforeEach(func() {
 				rsc.Spec.Replication = "ConsistencyAndAvailability"
-				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
 			It("should create one replica, wait for it to become ready, then create remaining replicas", func(ctx SpecContext) {
