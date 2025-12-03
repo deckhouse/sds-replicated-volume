@@ -572,7 +572,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 Готовая RVR - та, у которой `spec.nodeName!="", status.nodeId !=nil, status.address != nil`
 
 После первой инициализации, даже в случае отсутствия пиров, требуется поставить
-`rvr.status.drbd.config.peersInitialized=true` в том же патче. 
+`rvr.status.drbd.config.peersInitialized=true` в том же патче.
 
 ### Вывод
   - `rvr.status.drbd.config.peers`
