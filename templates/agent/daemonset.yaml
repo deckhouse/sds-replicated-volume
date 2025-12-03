@@ -98,6 +98,8 @@ spec:
                 fieldPath: spec.nodeName
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
+        # TODO: disable seccomp-profile check - seccompProfile not specified
+        # TODO: disable no-new-privileges check - AllowPrivilegeEscalation not specified
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
