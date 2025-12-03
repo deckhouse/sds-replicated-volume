@@ -128,10 +128,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		)
 		if err != nil {
 			log.Error(err, "setting DiskfulReplicaCountReached condition")
-			return reconcile.Result{}, err
 		}
 
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, err
 	}
 
 	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
@@ -156,10 +155,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		)
 		if err != nil {
 			log.Error(err, "setting DiskfulReplicaCountReached condition")
-			return reconcile.Result{}, err
 		}
 
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, err
 	}
 
 	// Need to wait until RVR becomes Ready.
