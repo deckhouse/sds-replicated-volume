@@ -95,6 +95,7 @@ spec:
                 type: string
             required:
             - replicatedVolumeName
+            - type
             type: object
           status:
             properties:
@@ -226,6 +227,8 @@ spec:
                           - nodeId
                           type: object
                         type: object
+                      peersInitialized:
+                        type: boolean
                       primary:
                         type: boolean
                     type: object

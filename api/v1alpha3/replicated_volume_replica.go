@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 )
 
 // +k8s:deepcopy-gen=true
@@ -52,10 +51,6 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
-}
-
-func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
-	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
 }
 
 // +k8s:deepcopy-gen=true
@@ -114,6 +109,10 @@ type ReplicatedVolumeReplicaStatus struct {
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	ActualType string `json:"actualType,omitempty"`
 
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
+
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 
@@ -147,29 +146,10 @@ type DRBDConfig struct {
 	Peers map[string]Peer `json:"peers,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
-	// +kubebuilder:validation:MaxLength=256
-	Disk string `json:"disk,omitempty"`
+	PeersInitialized bool `json:"peersInitialized,omitempty"`
 
 	// +optional
 	Primary *bool `json:"primary,omitempty"`
-}
-
-func (v *DRBDConfig) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
-	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
-}
-
-func (v *DRBDConfig) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
-	parts := strings.Split(v.Disk, "/")
-	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
-		len(parts[2]) == 0 || len(parts[3]) == 0 {
-		return "", "",
-			fmt.Errorf(
-				"parsing Volume Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-				v.Disk,
-			)
-	}
-	return parts[2], parts[3], nil
 }
 
 // +k8s:deepcopy-gen=true
@@ -180,6 +160,29 @@ type DRBD struct {
 	Actual *DRBDActual `json:"actual,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	Status *DRBDStatus `json:"status,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	Errors *DRBDErrors `json:"errors,omitempty" patchStrategy:"merge"`
+}
+
+// +k8s:deepcopy-gen=true
+type CmdError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	Output   string `json:"output,omitempty"`
+	ExitCode int    `json:"exitCode,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type SharedSecretUnsupportedAlgError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type DRBDErrors struct {
+	// +patchStrategy=merge
+	LastAdjustmentError *CmdError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	SharedSecretAlgSelectionError *SharedSecretUnsupportedAlgError `json:"sharedSecretAlgSelectionError,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -189,8 +192,30 @@ type DRBDActual struct {
 	// +kubebuilder:validation:MaxLength=256
 	Disk string `json:"disk,omitempty"`
 
+	// +optional
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+
+	// +optional
+	// +kubebuilder:default=false
+	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
+}
+
+func (v *DRBDActual) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
+	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
+}
+
+func (v *DRBDActual) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
+	parts := strings.Split(v.Disk, "/")
+	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
+		len(parts[2]) == 0 || len(parts[3]) == 0 {
+		return "", "",
+			fmt.Errorf(
+				"parsing Volume Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
+				v.Disk,
+			)
+	}
+	return parts[2], parts[3], nil
 }
 
 // +k8s:deepcopy-gen=true

@@ -264,4 +264,7 @@ replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
 replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go/common
 
-tool github.com/golangci/golangci-lint/cmd/golangci-lint
+tool (
+	github.com/golangci/golangci-lint/cmd/golangci-lint
+	github.com/onsi/ginkgo/v2/ginkgo
+)
