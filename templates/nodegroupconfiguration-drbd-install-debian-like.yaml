@@ -181,13 +181,15 @@ spec:
 
     bb-log-info "Uploading kernel headers and starting build..."
     BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}" "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}-generic" |
-        curl -s -w "\n%{http_code}" -X POST \
+        curl -s -w '|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
           -H "Content-Type: application/gzip" \
           --data-binary @- \
-          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo -e "\n000")
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '|||CURL_METADATA|||{"http_code":000}')
 
-    BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
-    BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed '$d')
+    # Extract HTTP code using jq
+    BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | grep -oP '|||CURL_METADATA|||\K.*' | jq -r '.http_code' 2>/dev/null || echo "000")
+    # Extract body (everything before the metadata separator)
+    BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
     bb-log-info "Build response: $BUILD_RESPONSE"
     bb-log-info "Build body: $BUILD_BODY"
     bb-log-info "Build HTTP code: $BUILD_HTTP_CODE"
