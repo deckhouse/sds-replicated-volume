@@ -18,7 +18,6 @@
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
-  - [`rvr-delete-controller`](#rvr-delete-controller)
   - [`drbd-resize-controller`](#drbd-resize-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
@@ -46,6 +45,7 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
@@ -56,10 +56,9 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-3)
 
 # Основные положения
-
 
 ## Схема именования акторов
 `{controlledEntity}-{name}-{actorType}`
@@ -104,7 +103,6 @@ TB в любой ситуации поддерживает нечетное, и 
 
 TODO
 
-
 ## Константы
 Константы - это значения, которые должны быть определены в коде во время компиляции программы.
 
@@ -134,7 +132,7 @@ TODO
 
 ### Порты DRBD
  - `drbdMinPort=7000` - минимальный порт для использования ресурсами 
- - `drbdMaxPort=8000` - максимальный порт для использования ресурсами
+ - `drbdMaxPort=7999` - максимальный порт для использования ресурсами
 
 ### Финализаторы ресурсов
 - `rv`
@@ -142,6 +140,8 @@ TODO
 - `rvr`
   - `sds-replicated-volume.storage.deckhouse.io/controller`
   - `sds-replicated-volume.storage.deckhouse.io/agent`
+  - `sds-replicated-volume.storage.deckhouse.io/peers` TODO
+  - `sds-replicated-volume.storage.deckhouse.io/quorum` TODO
 - `llv`
   - `sds-replicated-volume.storage.deckhouse.io/controller`
 
@@ -311,12 +311,12 @@ TODO
 
 Существующая реализация поддерживает `Diskful` и `Access` типы реплик. Для
 `TieBreaker` реплик требуется изменить параметры так, чтобы избежать
-синхронизации метаданных на ноду.
+синхронизации метаданных на ноду (провести исследование самостоятельно).
 
 Последовательность реконсайла, если не заполнен `rvr.metadata.deletionTimestamp`:
-
-- ставим финализатор на rvr
+- ставим финализаторы на rvr
   - `sds-replicated-volume.storage.deckhouse.io/agent`
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 - пишем конфиг во временный файл и проверяем валидность
   - команда (новая, нужно реализовать аналогично другим): `drbdadm --config-to-test <...>.res_tmp --config-to-exclude <...>.res sh-nop`
   - в случае невалидного конфига, нужно вывести ошибку в `rvr.status.drbd.errors.<...>` и прекратить реконсайл
@@ -336,8 +336,8 @@ TODO
   - если первоначальная синхронизация нужна
     - выполняем `drdbadm primary --force`
       - см. существующую реализацию
-  - выполняем `drdbadm secondary`
-    - см. существующую реализацию
+    - выполняем `drdbadm secondary`
+      - см. существующую реализацию
   - выставляем `rvr.status.drbd.actual.initialSyncCompleted=true`
 - если `rvr.spec.type!=Diskful`
   - выставляем `rvr.status.drbd.actual.initialSyncCompleted=true`
@@ -349,26 +349,17 @@ TODO
   - см. существующую реализацию
 
 Если заполнен `rvr.metadata.deletionTimestamp`:
+- если есть другие финализаторы, кроме `sds-replicated-volume.storage.deckhouse.io/agent`,
+то прекращаем реконсайл, т.к. агент должен быть последним, кто удаляет свой финализатор
 - выполнить `drbdadm down`
   - см. существующую реализацию
 - удалить конфиги ресурса (основной и временный), если они есть
-- снять свой финализатор с rvr, если нет других финализаторов (т.е. наш - последний)
-  - `sds-replicated-volume.storage.deckhouse.io/agent`
+- снять последний финализатор с rvr
 
 ### Вывод 
   - `rvr.status.drbd.errors.*`
   - `rvr.status.drbd.actual.*`
   - *.res, *.res_tmp файлы на ноде
-
-
-## `rvr-delete-controller`
-
-### Цель 
-
-### Триггер 
-  - 
-### Вывод 
-  - 
 
 ## `drbd-resize-controller`
 
@@ -697,6 +688,8 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
+### Статус: [TBD | priority: 5 | complexity: 2]
+
 ### Контекст
 
 TODO
@@ -732,11 +725,8 @@ agent не удаляет ресурс из DRBD, пока есть чужие �
 Поддерживать `rvr.metada.ownerReference`, указывающий на `rv` по имени
 `rvr.spec.replicatedVolumeName`.
 
-Настройки:
- - `controller=true`
- - ``
-
-
+Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
+`sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
 
 ### Вывод 
  - `rvr.metada.ownerReference`
