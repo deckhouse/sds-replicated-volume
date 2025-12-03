@@ -8,7 +8,7 @@ metadata:
 
 ---
 # TODO: fix and remove - disable wildcards (#rbac) check - ClusterRole uses wildcards in apiGroups, resources, verbs
-# nolint:wildcards
+# dmtlint-disable wildcards
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
