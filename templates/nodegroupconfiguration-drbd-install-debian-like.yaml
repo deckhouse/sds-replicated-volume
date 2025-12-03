@@ -186,8 +186,9 @@ spec:
           --data-binary @- \
           "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '|||CURL_METADATA|||{"http_code":000}')
 
-    # Extract HTTP code using jq
-    BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | grep -oP '|||CURL_METADATA|||\K.*' | jq -r '.http_code' 2>/dev/null || echo "000")
+    # Extract HTTP code using jq (parse JSON metadata)
+    CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
+    BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r '.http_code' 2>/dev/null || echo "000")
     # Extract body (everything before the metadata separator)
     BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
     bb-log-info "Build response: $BUILD_RESPONSE"
