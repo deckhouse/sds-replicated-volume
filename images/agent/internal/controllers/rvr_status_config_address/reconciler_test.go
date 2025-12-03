@@ -34,7 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
@@ -50,14 +50,14 @@ var _ = Describe("Reconciler", func() {
 		rec     *rvrstatusconfigaddress.Reconciler
 		log     logr.Logger
 		node    *corev1.Node
-		drbdCfg cluster.DRBDConfig
+		drbdCfg config.DRBDConfig
 	)
 
 	BeforeEach(func() {
 		cl = nil
 		log = GinkgoLogr
 
-		drbdCfg = cluster.DRBDConfig{
+		drbdCfg = config.DRBDConfig{
 			MinPort: 7000,
 			MaxPort: 7999,
 		}

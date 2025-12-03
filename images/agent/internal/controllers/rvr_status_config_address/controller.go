@@ -25,10 +25,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 )
 
-func BuildController(mgr manager.Manager, cfg cluster.Config) error {
+func BuildController(mgr manager.Manager, cfg config.Config) error {
 	const controllerName = "rvr-status-config-address-controller"
 
 	log := mgr.GetLogger().WithName(controllerName)
