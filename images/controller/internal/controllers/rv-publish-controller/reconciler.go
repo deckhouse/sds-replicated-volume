@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -166,8 +167,13 @@ func (r *Reconciler) validateLocalAccess(
 				})
 				return nil
 			}); err != nil {
-				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
-				return &reconcile.Result{}, err
+				if !apierrors.IsNotFound(err) {
+					log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
+					return &reconcile.Result{}, err
+				}
+
+				// RV was deleted concurrently; nothing left to publish for
+				return &reconcile.Result{}, nil
 			}
 
 			// stop reconciliation after setting the failure condition
@@ -204,8 +210,13 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 		patchedRV.Status.DRBD.Config.AllowTwoPrimaries = desiredAllowTwoPrimaries
 		return nil
 	}); err != nil {
-		log.Error(err, "unable to patch ReplicatedVolume allowTwoPrimaries")
-		return &reconcile.Result{}, err
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to patch ReplicatedVolume allowTwoPrimaries")
+			return &reconcile.Result{}, err
+		}
+
+		// RV was deleted concurrently; nothing left to publish for
+		return &reconcile.Result{}, nil
 	}
 
 	// when two nodes are requested in publishOn, we must wait until
@@ -277,8 +288,11 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 			patchedRVR.Status.DRBD.Config.Primary = &shouldBePrimary
 			return nil
 		}); err != nil {
-			log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
-			return err
+			if !apierrors.IsNotFound(err) {
+				log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
+				return err
+			}
+			// replica was deleted concurrently; continue with the rest
 		}
 	}
 
@@ -305,8 +319,11 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		patchedRV.Status.PublishedOn = publishedOn
 		return nil
 	}); err != nil {
-		log.Error(err, "unable to patch ReplicatedVolume publishedOn")
-		return err
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to patch ReplicatedVolume publishedOn")
+			return err
+		}
+		// RV was deleted concurrently; nothing left to publish for
 	}
 
 	return nil
