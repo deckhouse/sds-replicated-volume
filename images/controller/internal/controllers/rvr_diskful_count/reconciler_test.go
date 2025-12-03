@@ -345,7 +345,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should wait and return no error", func(ctx SpecContext) {
+			It("should wait and return no error", func() {
 				Expect(rvrList.Items).To(HaveLen(1))
 			})
 		})
@@ -368,7 +368,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should log warning and return no error", func(ctx SpecContext) {
+			It("should log warning and return no error", func() {
 				Expect(rvrList.Items).To(HaveLen(2))
 			})
 		})
