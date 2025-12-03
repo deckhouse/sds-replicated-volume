@@ -396,7 +396,7 @@ var _ = Describe("Reconciler", func() {
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
 					condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionCreated())
+					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
 				})
 			})
 
@@ -422,7 +422,7 @@ var _ = Describe("Reconciler", func() {
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
 					condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionCreated())
+					Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
 				})
 			})
 
@@ -541,7 +541,7 @@ var _ = Describe("Reconciler", func() {
 				updatedRV := &v1alpha3.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
 				condition := findCondition(updatedRV.Status.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached)
-				Expect(condition).To(HaveDiskfulReplicaCountReachedConditionCreatedOrAvailable())
+				Expect(condition).To(HaveDiskfulReplicaCountReachedConditionAvailable())
 			})
 		})
 

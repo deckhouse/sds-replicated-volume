@@ -138,6 +138,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Need to wait until RVR becomes Ready.
 	if len(nonDeletedRvrMap) == 1 {
 		for _, rvr := range nonDeletedRvrMap {
+			// Do nothing until the only non-deleted replica is ready
 			if !isRvrReady(rvr) {
 				log.V(4).Info("RVR is not ready yet, waiting", "rvr", rvr.Name)
 				return reconcile.Result{}, nil
@@ -171,31 +172,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				return reconcile.Result{}, err
 			}
 		}
-
-		// Set condition that required number of replicas is reached
-		err = patchDiskfulReplicaCountReachedCondition(
-			ctx, r.cl, log, rv,
-			metav1.ConditionTrue,
-			v1alpha3.ReasonCreatedRequiredNumberOfReplicas,
-			fmt.Sprintf("Created %d replica(s), required number of diskful replicas is reached: %d", creatingNumberOfReplicas, neededNumberOfReplicas),
-		)
-		if err != nil {
-			log.Error(err, "setting DiskfulReplicaCountReached condition")
-			return reconcile.Result{}, err
-		}
 	} else {
 		log.Info("No replicas to create")
-		// Set condition that required number of replicas is reached
-		err = patchDiskfulReplicaCountReachedCondition(
-			ctx, r.cl, log, rv,
-			metav1.ConditionTrue,
-			v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
-			fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
-		)
-		if err != nil {
-			log.Error(err, "setting DiskfulReplicaCountReached condition")
-			return reconcile.Result{}, err
-		}
+	}
+
+	// Set condition that required number of replicas is reached
+	err = patchDiskfulReplicaCountReachedCondition(
+		ctx, r.cl, log, rv,
+		metav1.ConditionTrue,
+		v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
+		fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
+	)
+	if err != nil {
+		log.Error(err, "setting DiskfulReplicaCountReached condition")
+		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil

@@ -52,15 +52,6 @@ func HaveDiskfulReplicaCountReachedConditionAvailable() OmegaMatcher {
 	)
 }
 
-// HaveDiskfulReplicaCountReachedConditionCreated is a convenience matcher that checks if
-// the DiskfulReplicaCountReached condition is True with ReasonCreatedRequiredNumberOfReplicas.
-func HaveDiskfulReplicaCountReachedConditionCreated() OmegaMatcher {
-	return HaveDiskfulReplicaCountReachedConditionWithReason(
-		metav1.ConditionTrue,
-		v1alpha3.ReasonCreatedRequiredNumberOfReplicas,
-	)
-}
-
 // HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated is a convenience matcher that checks if
 // the DiskfulReplicaCountReached condition is False with ReasonFirstReplicaIsBeingCreated.
 func HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated() OmegaMatcher {
@@ -71,17 +62,9 @@ func HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated() OmegaMatc
 }
 
 // HaveDiskfulReplicaCountReachedConditionCreatedOrAvailable is a convenience matcher that checks if
-// the DiskfulReplicaCountReached condition is True with either ReasonCreatedRequiredNumberOfReplicas
-// or ReasonRequiredNumberOfReplicasIsAvailable.
+// the DiskfulReplicaCountReached condition is True with ReasonRequiredNumberOfReplicasIsAvailable.
 func HaveDiskfulReplicaCountReachedConditionCreatedOrAvailable() OmegaMatcher {
-	return And(
-		Not(BeNil()),
-		HaveField("Status", Equal(metav1.ConditionTrue)),
-		HaveField("Reason", BeElementOf(
-			v1alpha3.ReasonCreatedRequiredNumberOfReplicas,
-			v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
-		)),
-	)
+	return HaveDiskfulReplicaCountReachedConditionAvailable()
 }
 
 func Requeue() OmegaMatcher {

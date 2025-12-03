@@ -117,7 +117,6 @@ const (
 // Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
 const (
 	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
-	ReasonCreatedRequiredNumberOfReplicas     = "CreatedRequiredNumberOfReplicas"
 	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
 )
 
