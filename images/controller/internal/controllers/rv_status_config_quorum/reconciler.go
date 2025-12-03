@@ -106,7 +106,7 @@ func (r *Reconciler) Reconcile(
 
 	diskfulCount := 0
 	for _, rvr := range rvrList.Items {
-		if rvr.Spec.Type == "Diskful" { // TODO: Replace wiht api function
+		if rvr.Spec.Type == "Diskful" { // TODO: Replace with api function
 			diskfulCount++
 		}
 	}

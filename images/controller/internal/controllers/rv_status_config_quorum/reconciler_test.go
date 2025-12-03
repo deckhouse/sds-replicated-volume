@@ -41,7 +41,7 @@ var _ = Describe("Reconciler", func() {
 		rec = nil
 	})
 
-	JustBeforeEach(func(ctx SpecContext) {
+	JustBeforeEach(func() {
 		cl = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}, &v1alpha3.ReplicatedVolume{}).
