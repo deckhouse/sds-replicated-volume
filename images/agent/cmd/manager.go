@@ -33,14 +33,14 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
+	appconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 )
 
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
-	cfg cluster.Config,
+	cfg appconfig.Config,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {

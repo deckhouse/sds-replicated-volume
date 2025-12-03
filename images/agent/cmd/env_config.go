@@ -22,7 +22,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 )
 
 const (
@@ -41,8 +41,8 @@ const (
 
 var ErrInvalidConfig = errors.New("invalid config")
 
-func GetEnvConfig() (cluster.Config, error) {
-	cfg := cluster.Config{}
+func GetEnvConfig() (config.Config, error) {
+	cfg := config.Config{}
 
 	cfg.NodeName = os.Getenv(NodeNameEnvVar)
 	if cfg.NodeName == "" {
