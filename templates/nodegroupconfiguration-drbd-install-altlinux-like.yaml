@@ -170,6 +170,19 @@ spec:
     bb-log-info "Cluster DNS responded, got drbd-build-server service url"
     DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
 
+    attempt=0
+    until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $DRBD_BUILD_SERVER_URL'/api/v1/hello')" == "200" ]]
+    do
+      if [ $attempt -gt 3 ]; then
+        bb-log-info "DRBD_BUILD_SERVER_URL service isn't accessible, can't continue DRBD building"
+        exit 1
+      fi
+
+      ((attempt=attempt+1))
+      bb-log-info "Waiting for DRBD_BUILD_SERVER_URL service is being accessible (try #$attempt)"
+      sleep 10
+    done
+
     KERNEL_VERSION=$kernel_version_in_use
     KERNEL_VERSION_SHORT="${KERNEL_VERSION%-generic}"
     bb-log-info "Detected kernel version: $KERNEL_VERSION"
