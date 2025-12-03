@@ -24,6 +24,7 @@ import (
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
@@ -80,7 +81,10 @@ var _ = Describe("Handlers", func() {
 		})
 
 		It("should enqueue node for agent-config ConfigMap", func(ctx SpecContext) {
-			ExpectEnqueueNodeForRequest(handler, ctx, configMap, nodeName)
+			Expect(handler(ctx, configMap)).To(SatisfyAll(
+				HaveLen(1),
+				Enqueue(reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}})),
+			)
 		})
 
 		DescribeTableSubtree("should not enqueue",
@@ -183,7 +187,10 @@ var _ = Describe("Handlers", func() {
 		})
 
 		It("should enqueue node for RVR on current node", func(ctx SpecContext) {
-			ExpectEnqueueNodeForRequest(handler, ctx, rvr, nodeName)
+			Expect(handler(ctx, rvr)).To(SatisfyAll(
+				HaveLen(1),
+				Enqueue(reconcile.Request{NamespacedName: types.NamespacedName{Name: nodeName}}),
+			))
 		})
 
 		DescribeTableSubtree("should not enqueue",
