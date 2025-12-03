@@ -18,6 +18,7 @@ package rvr_status_config_peers
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"slices"
 
@@ -37,6 +38,9 @@ type Reconciler struct {
 type Request = reconcile.Request
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
+var (
+	ErrMultiplePeersOnSameNode = errors.New("multiple peers on the same node")
+)
 
 func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 	return &Reconciler{
@@ -97,8 +101,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	peers := make(map[string]v1alpha3.Peer, len(list.Items))
 	for _, rvr := range list.Items {
 		if _, exist := peers[rvr.Spec.NodeName]; exist {
-			log.Info("Peer on this node already found. Skipping")
-			continue
+			log.Error(ErrMultiplePeersOnSameNode, "Can't build peers map")
+			return reconcile.Result{}, ErrMultiplePeersOnSameNode
 		}
 		peers[rvr.Spec.NodeName] = v1alpha3.Peer{
 			NodeId:   *rvr.Status.DRBD.Config.NodeId,
@@ -115,11 +119,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		peersWithoutSelf := maps.Clone(peers)
 		delete(peersWithoutSelf, rvr.Spec.NodeName)
 
-		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
-			log.V(1).Info("No status.drbd.config. Skipping")
-			continue
-		}
-
 		peersChanged := !maps.Equal(peersWithoutSelf, rvr.Status.DRBD.Config.Peers)
 		if !peersChanged && rvr.Status.DRBD.Config.PeersInitialized {
 			log.V(1).Info("not changed")
@@ -128,12 +127,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 		from := client.MergeFrom(&rvr)
 		changedRvr := rvr.DeepCopy()
-		if changedRvr.Status.DRBD == nil {
-			changedRvr.Status.DRBD = &v1alpha3.DRBD{}
-		}
-		if changedRvr.Status.DRBD.Config == nil {
-			changedRvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-		}
+
 		changedRvr.Status.DRBD.Config.Peers = peersWithoutSelf
 		// After first initialization, even if there are no peers, set peersInitialized=true
 		changedRvr.Status.DRBD.Config.PeersInitialized = true
