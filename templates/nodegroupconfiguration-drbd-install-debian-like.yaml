@@ -202,7 +202,14 @@ spec:
     # Extract HTTP code using jq (parse JSON metadata)
     if echo "$BUILD_RESPONSE" | grep -q '|||CURL_METADATA|||'; then
       CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
-      BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r '.http_code' 2>/dev/null || echo "000")
+      bb-log-info "CURL metadata raw: $CURL_METADATA"
+      # Try to parse JSON and extract http_code
+      BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r 'if type == "object" then .http_code // empty else empty end' 2>/dev/null)
+      # If jq returned null or empty, try fallback extraction
+      if [ -z "$BUILD_HTTP_CODE" ] || [ "$BUILD_HTTP_CODE" = "null" ]; then
+        # Fallback: extract number after "http_code": using sed
+        BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | sed -n 's/.*"http_code":\s*\([0-9]\+\).*/\1/p' || echo "000")
+      fi
       # Extract body (everything before the metadata separator)
       BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
     else
