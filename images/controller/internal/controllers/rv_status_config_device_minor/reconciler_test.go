@@ -220,10 +220,8 @@ var _ = Describe("Reconciler", func() {
 				)
 
 				BeforeEach(func() {
-					// Exclude base rv from parent BeforeEach
+					By("Creating 5 volumes with deviceMinors 0-4 and one without deviceMinor (should get 5)")
 					rv = nil
-
-					// Create 5 volumes with deviceMinors 0-4 for sequential assignment test
 					rvSeqList = make([]*v1alpha3.ReplicatedVolume, 5)
 					for i := 0; i < 5; i++ {
 						rvSeqList[i] = &v1alpha3.ReplicatedVolume{
@@ -239,13 +237,11 @@ var _ = Describe("Reconciler", func() {
 							},
 						}
 					}
-
-					// Create volume without deviceMinor to test sequential assignment
 					rv6 = &v1alpha3.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{Name: "volume-seq-6"},
 					}
 
-					// Create volumes with deviceMinors 6, 8, 9 (gap at 7) for gap filling test
+					By("Creating volumes with deviceMinors 6, 8, 9 (gap at 7) and one without deviceMinor (should fill gap)")
 					rvGap1 := &v1alpha3.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-1"},
 						Status: &v1alpha3.ReplicatedVolumeStatus{
@@ -283,13 +279,10 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
-					// Create volumes for sequential assignment test
 					for _, rv := range rvSeqList {
 						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 					}
 					Expect(cl.Create(ctx, rv6)).To(Succeed(), "should create ReplicatedVolume")
-
-					// Create volumes for gap filling test
 					for _, rv := range rvGapList {
 						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 					}
@@ -332,7 +325,6 @@ var _ = Describe("Reconciler", func() {
 			It("does not reassign deviceMinor and is idempotent", func(ctx SpecContext) {
 				By("Reconciling multiple times and verifying deviceMinor remains unchanged")
 				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
-					// Reconcile multiple times to verify idempotency
 					for i := 0; i < 3; i++ {
 						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
 					}
@@ -383,7 +375,6 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{Name: "volume-conflict-1"},
 			}
 			patchAttempts = 0
-			// Simulate 409 Conflict error (e.g., if another controller updates the same resource)
 			conflictError = kerrors.NewConflict(
 				schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumes"},
 				rv.Name,
@@ -394,11 +385,9 @@ var _ = Describe("Reconciler", func() {
 					if rvObj, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
 						if subResourceName == "status" && rvObj.Name == rv.Name {
 							patchAttempts++
-							// Simulate conflict on first patch attempt only
 							if patchAttempts == 1 {
 								return conflictError
 							}
-							// Allow subsequent attempts to succeed (simulating retry after conflict)
 						}
 					}
 					return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
