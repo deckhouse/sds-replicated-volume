@@ -118,6 +118,7 @@ var _ = Describe("Reconciler", func() {
 	When("RV and RSC exists", func() {
 		var rv *v1alpha3.ReplicatedVolume
 		var rsc *v1alpha1.ReplicatedStorageClass
+		var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 		BeforeEach(func() {
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"}}
@@ -127,6 +128,7 @@ var _ = Describe("Reconciler", func() {
 					ReplicatedStorageClassName: rsc.Name},
 				Status: &v1alpha3.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{}}}
+			rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 		})
 		JustBeforeEach(func(ctx SpecContext) {
 			if rsc != nil {
@@ -134,6 +136,9 @@ var _ = Describe("Reconciler", func() {
 			}
 			if rv != nil {
 				Expect(cl.Create(ctx, rv)).To(Succeed())
+			}
+			for _, rvr := range rvrList.Items {
+				Expect(cl.Create(ctx, &rvr)).To(Succeed())
 			}
 		})
 
@@ -174,9 +179,6 @@ var _ = Describe("Reconciler", func() {
 			Entry("ReplicatedStorageClass has unknown replication value", func() {
 				rsc.Spec.Replication = "Unknown"
 			}, MatchError(ContainSubstring("unknown replication value"))),
-			Entry("replication is None", func() {
-				rsc.Spec.Replication = "None"
-			}),
 			func(beforeEach func(), errorMatcher OmegaMatcher) {
 				BeforeEach(beforeEach)
 				It("should return an error", func(ctx SpecContext) {
@@ -190,90 +192,59 @@ var _ = Describe("Reconciler", func() {
 				rsc.Spec.Replication = "None"
 			})
 
-			When("reconciled", func() {
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
-				BeforeEach(func() {
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
-				})
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-					Expect(cl.List(ctx, rvrList)).To(Succeed())
-				})
+			It("should create one replica", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				Expect(cl.List(ctx, rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(SatisfyAll(
+					HaveLen(1),
+					HaveEach(SatisfyAll(
+						HaveField("Spec.ReplicatedVolumeName", Equal(rv.Name)),
+						HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful)),
+					)),
+				))
+			})
+
+			It("should verify condition was set", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
+				Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
+					HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
+					HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
+				))))
+			})
+
+			It("should have OwnerReferences with correct rvName", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				Expect(cl.List(ctx, rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(ContainElement(HaveField("OwnerReferences", ContainElement(SatisfyAll(
+					HaveField("Name", Equal(rv.Name)),
+					HaveField("Kind", Equal("ReplicatedVolume")),
+					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					HaveField("Controller", PointTo(BeTrue())),
+					HaveField("BlockOwnerDeletion", PointTo(BeTrue())),
+				)))))
+			})
+		})
+
+		DescribeTableSubtree("replication types that create one replica",
+			Entry("Availability replication", func() {
+				rsc.Spec.Replication = "Availability"
+			}),
+			Entry("ConsistencyAndAvailability replication", func() {
+				rsc.Spec.Replication = "ConsistencyAndAvailability"
+			}),
+			func(beforeEach func()) {
+				BeforeEach(beforeEach)
 
 				It("should create one replica", func(ctx SpecContext) {
-					Expect(rvrList.Items).To(SatisfyAll(
-						HaveLen(1),
-						HaveEach(SatisfyAll(
-							HaveField("Spec.ReplicatedVolumeName", Equal(rv.Name)),
-							HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful)),
-						)),
-					))
-
-					// Verify condition was set
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-					Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-						HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))))
-				})
-
-				It("should have OwnerReferences with correct rvName", func() {
-					Expect(rvrList.Items).To(ContainElement(HaveField("OwnerReferences", ContainElement(SatisfyAll(
-						HaveField("Name", Equal(rv.Name)),
-						HaveField("Kind", Equal("ReplicatedVolume")),
-						HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
-						HaveField("Controller", PointTo(BeTrue())),
-						HaveField("BlockOwnerDeletion", PointTo(BeTrue())),
-					)))))
-				})
-			})
-		})
-
-		When("Availability replication", func() {
-			BeforeEach(func() {
-				rsc.Spec.Replication = "Availability"
-			})
-
-			When("reconciled", func() {
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
-				BeforeEach(func() {
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
-				})
-				JustBeforeEach(func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
-				})
-
-				It("should create one replica", func() {
 					Expect(rvrList.Items).To(HaveLen(1))
 				})
 			})
-		})
-
-		When("ConsistencyAndAvailability replication", func() {
-			BeforeEach(func() {
-				rsc.Spec.Replication = "ConsistencyAndAvailability"
-			})
-
-			When("reconciled", func() {
-				var rvrList *v1alpha3.ReplicatedVolumeReplicaList
-				BeforeEach(func() {
-					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
-				})
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-					Expect(cl.List(ctx, rvrList)).To(Succeed())
-				})
-
-				It("should create one replica", func() {
-					Expect(rvrList.Items).To(HaveLen(1))
-				})
-			})
-		})
 
 		When("all ReplicatedVolumeReplicas are being deleted", func() {
 			var rvr1 *v1alpha3.ReplicatedVolumeReplica
-			var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 			var nonDeletedBefore []v1alpha3.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
@@ -345,24 +316,20 @@ var _ = Describe("Reconciler", func() {
 
 		When("there are more non-deleted ReplicatedVolumeReplicas than needed", func() {
 			var rvr1, rvr2 *v1alpha3.ReplicatedVolumeReplica
-			var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
 				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
 				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
-				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
 				Expect(cl.Create(ctx, rvr1)).To(Succeed())
 				Expect(cl.Create(ctx, rvr2)).To(Succeed())
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
-				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should log warning and return no error", func() {
-				Expect(rvrList.Items).To(HaveLen(2))
+			It("should return an error", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(ContainSubstring("more non-deleted ReplicatedVolumeReplicas found than needed")))
 			})
 		})
 
