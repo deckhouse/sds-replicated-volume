@@ -194,7 +194,7 @@ spec:
 
     bb-log-info "Uploading kernel headers and starting build..."
     BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}" "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}-generic" |
-        curl -s -w '|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
+        curl -s -w '\n|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
           -H "Content-Type: application/gzip" \
           --data-binary @- \
           "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '')
