@@ -22,4 +22,3 @@ var (
 	ErrConfigSettings        = errors.New("getting DRBD port settings")
 	ErrNodeMissingInternalIP = errors.New("node missing InternalIP")
 )
-

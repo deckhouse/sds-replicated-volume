@@ -1,7 +1,6 @@
 package rvrstatusconfigaddress_test
 
 import (
-	"context"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -53,13 +52,7 @@ func RequestFor(object client.Object) reconcile.Request {
 	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(object)}
 }
 
-// ExpectEnqueueNodeForRequest checks that handler returns a single request for the given node name.
-func ExpectEnqueueNodeForRequest(handler func(context.Context, client.Object) []reconcile.Request, ctx context.Context, obj client.Object, nodeName string) {
-	Expect(handler(ctx, obj)).To(SatisfyAll(
-		HaveLen(1),
-		ContainElement(SatisfyAll(
-			HaveField("NamespacedName.Name", Equal(nodeName)),
-			HaveField("NamespacedName.Namespace", BeEmpty()),
-		)),
-	))
+// Enqueue checks that handler returns a single request.
+func Enqueue(request reconcile.Request) gomegatypes.GomegaMatcher {
+	return ContainElement(Equal(request))
 }
