@@ -99,9 +99,9 @@ spec:
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
         # TODO: fix and remove - disable seccomp-profile check - seccompProfile not specified
-        # nolint:seccomp-profile
+        # dmtlint-disable seccomp-profile
         # TODO: fix and remove - disable no-new-privileges check - AllowPrivilegeEscalation not specified
-        # nolint:no-new-privileges
+        # dmtlint-disable no-new-privileges
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
