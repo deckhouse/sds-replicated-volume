@@ -38,6 +38,8 @@ const QuorumReconfFinalizer = "quorum-reconf"
 func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 	if diskfulCount > 1 {
 		quorum = byte(max(2, all/2+1))
+
+		// TODO: Revisit this logic — QMR should not be set when ReplicatedStorageClass.spec.replication == Availability.
 		qmr = byte(max(2, diskfulCount/2+1))
 	}
 	return
