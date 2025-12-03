@@ -30,8 +30,9 @@ var registry []func(mgr manager.Manager) error
 
 func init() {
 	registry = append(
+		registry,
 		rvrdiskfulcount.BuildController,
-    rvr_status_config_peers.BuildController
+		rvr_status_config_peers.BuildController,
 		rvstatusconfigquorum.BuildController,
 	)
 
