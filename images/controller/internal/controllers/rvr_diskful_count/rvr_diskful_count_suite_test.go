@@ -6,6 +6,8 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
@@ -64,4 +66,12 @@ func HaveDiskfulReplicaCountReachedConditionCreatedOrAvailable() OmegaMatcher {
 			v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
 		)),
 	)
+}
+
+func Requeue() OmegaMatcher {
+	return Not(Equal(reconcile.Result{}))
+}
+
+func RequestFor(o client.Object) reconcile.Request {
+	return reconcile.Request{NamespacedName: client.ObjectKeyFromObject(o)}
 }

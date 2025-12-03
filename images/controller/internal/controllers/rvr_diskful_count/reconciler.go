@@ -18,6 +18,7 @@ package rvrdiskfulcount
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -41,6 +42,8 @@ type Reconciler struct {
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
+
+var ErrEmptyReplicatedStorageClassName = errors.New("ReplicatedVolume has empty ReplicatedStorageClassName")
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
 func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
@@ -210,7 +213,7 @@ func getDiskfulReplicaCountFromReplicatedStorageClass(ctx context.Context, cl cl
 	// Get ReplicatedStorageClass name from ReplicatedVolume
 	rscName := rv.Spec.ReplicatedStorageClassName
 	if rscName == "" {
-		return 0, fmt.Errorf("ReplicatedVolume has empty ReplicatedStorageClassName")
+		return 0, ErrEmptyReplicatedStorageClassName
 	}
 
 	// Get ReplicatedStorageClass object
