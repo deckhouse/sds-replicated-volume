@@ -184,7 +184,7 @@ spec:
         curl -s -w '|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
           -H "Content-Type: application/gzip" \
           --data-binary @- \
-          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '|||CURL_METADATA|||{"http_code":000}')
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '')
 
     # Extract HTTP code using jq (parse JSON metadata)
     CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
