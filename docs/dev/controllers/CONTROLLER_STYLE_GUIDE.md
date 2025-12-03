@@ -353,6 +353,76 @@ for i := uint(minNodeID); i <= uint(maxNodeID); i++ {
 
 ---
 
+## 9. Порядок импортов (gci)
+
+**✅ Используйте правильную группировку импортов:**
+
+Линтер `gci` (Go import formatter) автоматически проверяет и исправляет порядок импортов. Импорты должны быть сгруппированы в следующем порядке:
+
+1. **Стандартная библиотека (stdlib)** - пакеты из стандартной библиотеки Go
+2. **Пустая строка**
+3. **Third-party пакеты** - внешние зависимости (например, `sigs.k8s.io/...`, `github.com/go-logr/...`)
+4. **Пустая строка**
+5. **Локальные пакеты** - пакеты из текущего проекта (например, `github.com/deckhouse/sds-replicated-volume/...`)
+
+**Обоснование:** Правильная группировка импортов улучшает читаемость и соответствует стандартам Go. Линтер `gci` автоматически исправляет порядок импортов при запуске.
+
+**Пример правильного порядка импортов:**
+```go
+import (
+	"context"  // 1. Стандартная библиотека
+	"fmt"      // 1. Стандартная библиотека
+
+	"github.com/go-logr/logr"                    // 3. Third-party
+	"sigs.k8s.io/controller-runtime/pkg/client" // 3. Third-party
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3" // 5. Локальный пакет
+)
+```
+
+**Важно для `registry.go`:**
+
+В файле `registry.go` особенно важно правильно группировать импорты, так как там могут быть и third-party, и локальные пакеты:
+
+```go
+import (
+	"fmt"  // 1. Стандартная библиотека
+
+	"sigs.k8s.io/controller-runtime/pkg/manager"  // 3. Third-party (НЕ в группе локальных!)
+
+	// 5. Локальные пакеты (алфавитный порядок)
+	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
+	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
+)
+```
+
+**❌ НЕПРАВИЛЬНО:**
+```go
+import (
+	"fmt"
+
+	rvrdiskfulcount "..."
+	"sigs.k8s.io/controller-runtime/pkg/manager"  // ❌ В группе локальных пакетов
+	rvrstatusconfignodeid "..."
+)
+```
+
+**✅ ПРАВИЛЬНО:**
+```go
+import (
+	"fmt"
+
+	"sigs.k8s.io/controller-runtime/pkg/manager"  // ✅ В группе third-party
+
+	rvrdiskfulcount "..."
+	rvrstatusconfignodeid "..."
+)
+```
+
+**Примечание:** Линтер `gci` автоматически исправляет порядок импортов при запуске. Если вы видите изменения в порядке импортов после запуска линтера - это нормально, линтер привел код к стандарту.
+
+---
+
 ## Структура контроллера
 
 ### Принципы упрощения
@@ -649,22 +719,41 @@ var _ = Describe("Reconciler", func() {
 - [ ] **НЕ использовать `WithEventFilter`** - фильтрация через early return в Reconcile
 - [ ] Использовать `EnqueueRequestForOwner` если нужно реагировать на дочерние ресурсы с owner reference
 - [ ] Использовать `EnqueueRequestsFromMapFunc` только если нет owner reference, но нужен маппинг
+- [ ] Если используются кастомные Watch handlers, вынести их в отдельный файл `handler.go`
 - [ ] Использовать structured logger с `.WithName()` и `.WithValues()` в Reconcile
-- [ ] **Упрощенная структура Reconciler:** только `cl`, `log` (приватные поля, только `logr.Logger`)
+- [ ] **Упрощенная структура Reconciler:** только `cl`, `log` (приватные поля, только `logr.Logger`). НЕ добавлять неиспользуемые поля (`rdr`, `sch`)
 - [ ] **Конструктор `NewReconciler`:** для создания экземпляра в `controller.go` и тестах
+- [ ] **Работа с клиентом:** Не прятать работу с клиентом в хелперы. Если функция работает с клиентом, она должна принимать `ctx context.Context`. Исключение: функции `reconcile<вариант>` для разных вариантов reconcile
 - [ ] **Проверка интерфейса:** `var _ reconcile.Reconciler = (*Reconciler)(nil)` (nil pointer)
+- [ ] **Неиспользуемые параметры:** Заменять неиспользуемые параметры на `_` в predicate functions
+- [ ] **Порядок импортов:** Правильная группировка импортов (stdlib → third-party → local). Линтер `gci` автоматически исправит, но лучше сразу делать правильно
 - [ ] **Использование `slices.DeleteFunc`:** для фильтрации слайсов вместо ручной фильтрации
 - [ ] **Использование `map[K]struct{}`:** для set-подобных структур вместо `map[K]bool`
-- [ ] **Инициализация status:** внутри `patchFn`, а не в начале `Reconcile`
-- [ ] **Использование PatchStatusWithConflictRetry:** для всех обновлений status
-- [ ] **Идемпотентность:** проверка состояния в начале Reconcile и внутри patchFn
-- [ ] Добавить unit тесты с **Ginkgo/Gomega**
-- [ ] Использовать fake client с `.WithStatusSubresource()`
-- [ ] Использовать `reconcile.Request` в тестах
-- [ ] Зарегистрировать контроллер в `registry.go`
+- [ ] **Обработка ошибок:** Использовать типизированные ошибки из `internal/errors`. Сначала создать ошибку, затем залогировать её и вернуть (не наоборот)
+- [ ] **Конфликты при обновлении:** НЕ использовать `api.PatchStatusWithConflictRetry`. Использовать простой `client.Status().Patch()`. При конфликте (409) возвращать ошибку - следующий reconciliation решит проблему
+- [ ] **Инициализация status:** Использовать `DeepCopy()` для создания изменяемой копии перед Patch. `MergeFrom` должен получать оригинальный объект, а не DeepCopy
+- [ ] **Идемпотентность:** проверка состояния в начале Reconcile и внутри patchFn. Ранний выход, если уже установлено
+- [ ] **Тестирование:**
+  - [ ] Добавить unit тесты с **Ginkgo/Gomega**
+  - [ ] Использовать fake client с `.WithStatusSubresource()`
+  - [ ] Использовать `reconcile.Request` в тестах (или `RequestFor()` helper из `suite_test.go`)
+  - [ ] Использовать `SpecContext` вместо `context.Context` для таймаутов от Ginkgo
+  - [ ] Использовать вложенные `When` блоки для группировки связанных тестов
+  - [ ] Использовать `By()` для структурирования шагов в многошаговых тестах (отображается в выводе)
+  - [ ] Добавлять второй аргумент в `Expect()` для объяснений (где это не очевидно)
+  - [ ] Использовать `JustBeforeEach` и `clientBuilder` паттерн для гибкой настройки fake client с interceptors
+  - [ ] Использовать `DescribeTableSubtree` для тестирования edge cases с похожей логикой
+  - [ ] Использовать interceptors для тестирования ошибок API (Get, List, Patch, включая 409 Conflict)
+  - [ ] Создать отдельный `suite_test.go` с хелперами (`RequestFor`, `Requeue`, `InterceptGet`)
+  - [ ] Использовать `HaveField` matchers для проверки вложенных полей вместо множественных `Expect`
+  - [ ] Использовать `Error().To(MatchError(...))` для проверки ошибок
+  - [ ] Использовать `client.ObjectKeyFromObject` для `Get`/`Delete` вместо ручного создания `ObjectKey`
+  - [ ] Покрыть основные сценарии (happy path), edge cases, идемпотентность, обработку ошибок API
+- [ ] Зарегистрировать контроллер в `registry.go` с правильным порядком импортов
 - [ ] **Лицензионные заголовки:** Все файлы (включая тестовые) содержат лицензионный заголовок Apache 2.0
 - [ ] **Константы API:** Константы, связанные с API, размещены в `api/v1alpha3/replicated_volume_consts.go` или `api/v1alpha3/replicated_volume_replica_consts.go`
 - [ ] **Тесты рядом с кодом:** Тесты для функций из `controller.go` находятся в `controller_test.go`, а не в отдельных файлах
+- [ ] **Проверка оптимизаций:** Проверить код на возможные оптимизации (ранний выход из циклов, проверка до дорогих операций, избегание лишних итераций). См. раздел "Оптимизации кода" для деталей
 
 ---
 
@@ -672,8 +761,15 @@ var _ = Describe("Reconciler", func() {
 
 После создания контроллера, зарегистрируйте его в `images/controller/internal/controllers/registry.go`:
 
+**Важно:** Следуйте правильному порядку импортов (см. раздел 9. Порядок импортов):
+
 ```go
 import (
+	"fmt"  // Стандартная библиотека
+
+	"sigs.k8s.io/controller-runtime/pkg/manager"  // Third-party
+
+	// Локальные пакеты (алфавитный порядок)
 	mycontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/my_controller"
 )
 
@@ -682,6 +778,8 @@ func init() {
 	// ...
 }
 ```
+
+**Примечание:** Линтер `gci` автоматически исправит порядок импортов, если они неправильно сгруппированы. Убедитесь, что third-party пакеты (например, `sigs.k8s.io/controller-runtime/pkg/manager`) находятся в отдельной группе от локальных пакетов.
 
 ---
 
