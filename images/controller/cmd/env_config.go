@@ -17,7 +17,12 @@ limitations under the License.
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"strconv"
+
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/cluster"
 )
 
 const (
@@ -25,15 +30,18 @@ const (
 	DefaultHealthProbeBindAddress = ":4271"
 	MetricsPortEnvVar             = "METRICS_BIND_ADDRESS"
 	DefaultMetricsBindAddress     = ":4272"
+
+	DRBDMinPortEnvVar       = "DRBD_MIN_PORT"
+	DRBDMinPortDefault uint = 7000
+
+	DRBDMaxPortEnvVar       = "DRBD_MAX_PORT"
+	DRBDMaxPortDefault uint = 7999
 )
 
-type EnvConfig struct {
-	HealthProbeBindAddress string
-	MetricsBindAddress     string
-}
+var ErrInvalidConfig = errors.New("invalid config")
 
-func GetEnvConfig() *EnvConfig {
-	cfg := &EnvConfig{}
+func GetEnvConfig() (cluster.Config, error) {
+	cfg := cluster.Config{}
 
 	cfg.HealthProbeBindAddress = os.Getenv(HealthProbeBindAddressEnvVar)
 	if cfg.HealthProbeBindAddress == "" {
@@ -45,5 +53,31 @@ func GetEnvConfig() *EnvConfig {
 		cfg.MetricsBindAddress = DefaultMetricsBindAddress
 	}
 
-	return cfg
+	minPortStr := os.Getenv(DRBDMinPortEnvVar)
+	if minPortStr == "" {
+		cfg.DRBD.MinPort = DRBDMinPortDefault
+	} else {
+		minPort, err := strconv.ParseUint(minPortStr, 10, 32)
+		if err != nil {
+			return cfg, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
+		}
+		cfg.DRBD.MinPort = uint(minPort)
+	}
+
+	maxPortStr := os.Getenv(DRBDMaxPortEnvVar)
+	if maxPortStr == "" {
+		cfg.DRBD.MaxPort = DRBDMaxPortDefault
+	} else {
+		maxPort, err := strconv.ParseUint(maxPortStr, 10, 32)
+		if err != nil {
+			return cfg, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
+		}
+		cfg.DRBD.MaxPort = uint(maxPort)
+	}
+
+	if cfg.DRBD.MaxPort < cfg.DRBD.MinPort {
+		return cfg, fmt.Errorf("%w: invalid port range %d-%d", ErrInvalidConfig, cfg.DRBD.MinPort, cfg.DRBD.MaxPort)
+	}
+
+	return cfg, nil
 }
