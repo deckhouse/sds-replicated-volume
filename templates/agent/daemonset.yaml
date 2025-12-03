@@ -98,10 +98,6 @@ spec:
                 fieldPath: spec.nodeName
           - name: SLOGH_CONFIG_PATH
             value: "/etc/config/slogh.cfg"
-        # TODO: fix and remove - disable seccomp-profile check - seccompProfile not specified
-        # dmtlint-disable seccomp-profile
-        # TODO: fix and remove - disable no-new-privileges check - AllowPrivilegeEscalation not specified
-        # dmtlint-disable no-new-privileges
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
