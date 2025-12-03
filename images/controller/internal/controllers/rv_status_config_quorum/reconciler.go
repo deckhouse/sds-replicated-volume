@@ -27,10 +27,10 @@ func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 	return
 }
 
-func isRvReady(rv *v1alpha3.ReplicatedVolume) bool {
-	return conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
+func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
+	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
+		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
+		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
 
 type Reconciler struct {
@@ -59,6 +59,7 @@ func (r *Reconciler) Reconcile(
 	req reconcile.Request,
 ) (reconcile.Result, error) {
 	log := r.log.WithValues("request", req.NamespacedName).WithName("Reconcile")
+	log.V(1).Info("Reconciling")
 
 	var rv v1alpha3.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
@@ -66,7 +67,13 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !isRvReady(&rv) {
+	if rv.Status == nil {
+		log.V(1).Info("No status. Skipping")
+		return reconcile.Result{}, nil
+	}
+	if !isRvReady(rv.Status) {
+		log.V(1).Info("not ready for quorum calculations")
+		log.V(2).Info("status is", "status", rv.Status)
 		return reconcile.Result{}, nil
 	}
 
@@ -89,7 +96,7 @@ func (r *Reconciler) Reconcile(
 		},
 	)
 
-	// Keeping only non deleted here
+	// Keeping only without deletion timestamp
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
 		func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
@@ -99,8 +106,6 @@ func (r *Reconciler) Reconcile(
 
 	diskfulCount := 0
 	for _, rvr := range rvrList.Items {
-		// Type can be "Diskful", "Access", or "TieBreaker"
-		// Diskful replicas have Type == "Diskful", others are diskless
 		if rvr.Spec.Type == "Diskful" { // TODO: Replace wiht api function
 			diskfulCount++
 		}
@@ -132,10 +137,10 @@ func (r *Reconciler) Reconcile(
 
 	// updating replicated volume
 	from := client.MergeFrom(rv.DeepCopy())
-	if updateReplicatedVolumeIfNeeded(&rv, diskfulCount, len(rvrList.Items)) {
+	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items)) {
 		log.V(1).Info("Updating quorum")
-		if err := r.cl.Patch(ctx, &rv, from); err != nil {
-			log.Error(err, "patching ReplicatedVolume")
+		if err := r.cl.Status().Patch(ctx, &rv, from); err != nil {
+			log.Error(err, "patching ReplicatedVolume status")
 			return reconcile.Result{}, err
 		}
 	} else {
@@ -169,29 +174,26 @@ func (r *Reconciler) Reconcile(
 }
 
 func updateReplicatedVolumeIfNeeded(
-	rv *v1alpha3.ReplicatedVolume,
+	rvStatus *v1alpha3.ReplicatedVolumeStatus,
 	diskfulCount,
 	all int,
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all)
-	if rv.Status == nil {
-		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+	if rvStatus.DRBD == nil {
+		rvStatus.DRBD = &v1alpha3.DRBDResource{}
 	}
-	if rv.Status.DRBD == nil {
-		rv.Status.DRBD = &v1alpha3.DRBDResource{}
-	}
-	if rv.Status.DRBD.Config == nil {
-		rv.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+	if rvStatus.DRBD.Config == nil {
+		rvStatus.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 	}
 
-	changed = rv.Status.DRBD.Config.Quorum != quorum ||
-		rv.Status.DRBD.Config.QuorumMinimumRedundancy != qmr
+	changed = rvStatus.DRBD.Config.Quorum != quorum ||
+		rvStatus.DRBD.Config.QuorumMinimumRedundancy != qmr
 
-	rv.Status.DRBD.Config.Quorum = quorum
-	rv.Status.DRBD.Config.QuorumMinimumRedundancy = qmr
+	rvStatus.DRBD.Config.Quorum = quorum
+	rvStatus.DRBD.Config.QuorumMinimumRedundancy = qmr
 
-	if !conditions.IsTrue(rv.Status, v1alpha3.ConditionTypeQuorumConfigured) {
-		conditions.Set(rv.Status, metav1.Condition{
+	if !conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeQuorumConfigured) {
+		conditions.Set(rvStatus, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeQuorumConfigured,
 			Status:  metav1.ConditionTrue,
 			Reason:  "QuorumConfigured", // TODO: change reason
