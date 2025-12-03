@@ -90,8 +90,10 @@ spec:
 {{- if not ( .Values.global.enabledModules | has "vertical-pod-autoscaler-crd") }}
               {{- include "sds_drbd_controller_resources" . | nindent 14 }}
 {{- end }}
-          # TODO: disable seccomp-profile check - seccompProfile not specified
-          # TODO: disable no-new-privileges check - AllowPrivilegeEscalation not specified
+          # TODO: fix and remove - disable seccomp-profile check - seccompProfile not specified
+          # dmtlint:disable=seccomp-profile
+          # TODO: fix and remove - disable no-new-privileges check - AllowPrivilegeEscalation not specified
+          # dmtlint:disable=no-new-privileges
           securityContext:
             privileged: true
             readOnlyRootFilesystem: true
