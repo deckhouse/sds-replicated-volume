@@ -189,11 +189,13 @@ spec:
     done
 
     KERNEL_VERSION=$kernel_version_in_use
-    KERNEL_VERSION_SHORT="${KERNEL_VERSION%-generic}"
+    KERNEL_BASE="${KERNEL_VERSION%%-*}"
+    KERNEL_SUFFIX="${KERNEL_VERSION#*-}"
     bb-log-info "Detected kernel version: $KERNEL_VERSION"
+    bb-log-info "Kernel base: $KERNEL_BASE"
 
     bb-log-info "Uploading kernel headers and starting build..."
-    BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}" "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}-generic" |
+    BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_BASE}" "/usr/src/linux-headers-${KERNEL_BASE}-${KERNEL_SUFFIX}" |
         curl -s -w '\n|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
           -H "Content-Type: application/gzip" \
           --data-binary @- \
@@ -236,6 +238,7 @@ spec:
     JOB_ID=$(echo "$BUILD_BODY" | jq -r '.job_id')
     #DOWNLOAD_URL=null if emty
     DOWNLOAD_URL=$(echo "$BUILD_BODY" | jq -r '.download_url')
+    bb-log-info "Download URL: $DOWNLOAD_URL"
 
     bb-log-info "Downloading build artifacts..."
     BUILD_ARTIFACTS_TAR="./drbd-modules-${JOB_ID}.tar.gz"
