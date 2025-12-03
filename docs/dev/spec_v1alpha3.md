@@ -17,11 +17,11 @@
   - [`status`](#status-1)
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 5\]](#статус-tbd--priority-5--complexity-5)
+    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
   - [`drbd-resize-controller`](#drbd-resize-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
   - [`rvr-drbd-status-controller`](#rvr-drbd-status-controller)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
@@ -29,13 +29,13 @@
   - [`rvr-diskful-count-controller`](#rvr-diskful-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4)
   - [`rvr-scheduling-controller`](#rvr-scheduling-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
+    - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5-1)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-2)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
   - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-3)
   - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
   - [`rvr-access-count-controller`](#rvr-access-count-controller)
@@ -45,7 +45,7 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-2)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
@@ -56,7 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-3)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
 
 # Основные положения
 
@@ -264,7 +264,7 @@ TODO
 
 ## `drbd-config-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 5]
+### Статус: [OK | priority: 5 | complexity: 5]
 
 ### Цель 
 
@@ -363,7 +363,7 @@ TODO
 
 ## `drbd-resize-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 2]
+### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
 Выполнить команду `drbdadm resize`, когда желаемый размер диска больше
@@ -388,18 +388,17 @@ Cм. существующую реализацию `drbdadm resize`.
 
 ### Вывод 
  - `rvr.status.drbd.errors.*`
- - `rv.status.actualSize.*`
+ - `rv.status.actualSize`
 
 ## `drbd-primary-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 2]
+### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
 Выполнить команду `drbdadm primary`/`drbdadm secondary`, когда желаемая роль ресурса не
 соответствует фактической.
 
-Команда должна выполняться на `rvr.spec.type=Diskful` ноде с наименьшим
-`rvr.status.drbd.config.nodeId` для ресурса.
+Команда должна выполняться на `rvr.spec.nodeName` ноде.
 
 Cм. существующую реализацию `drbdadm primary` и `drbdadm secondary`.
 
@@ -844,10 +843,10 @@ if M > 1 {
         - `rvr.status.drbd.errors.lastAdjustmentError == nil`
         - `rvr.status.drbd.errors.lastPromotionError == nil`
         - `rvr.status.drbd.errors.lastResizeError == nil`
-        - `rvr.status.drbd.errors.last<...>Error == nil`
+        - `rvr.status.drbd.errors.<...>Error == nil`
       - `False` - иначе
         - `reason` - в соответствии с причиной
-        - `message` - сформировать из `rvr.status.drbd.errors.last<...>Error`
+        - `message` - сформировать из `rvr.status.drbd.errors.<...>Error`
   - `Ready`
     - `status`
       - `True` (AND)
@@ -873,6 +872,7 @@ if M > 1 {
 TODO: коннекты между разными узлами
 TODO: что ещё нужно для UI (%sync?)?
 TODO: SharedSecretAlgorithmSelected .reason=UnableToSelectSharedSecretAlgorithm
+TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Error` ?
 
 ### Вывод 
   - `rvr.status.conditions`
