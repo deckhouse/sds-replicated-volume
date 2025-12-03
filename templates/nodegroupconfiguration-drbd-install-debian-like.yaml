@@ -172,7 +172,7 @@ spec:
     #done
 
     bb-log-info "Cluster DNS responded, got drbd-build-server service url"
-    DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
+    DRBD_BUILD_SERVER_URL="http://${DRBD_BUILD_SERVER_IP}:2021"
     bb-log-info "DRBD build server url: $DRBD_BUILD_SERVER_URL"
 
     KERNEL_VERSION=$kernel_version_in_use
