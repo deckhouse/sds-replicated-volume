@@ -208,6 +208,8 @@ var _ = Describe("Reconciler", func() {
 				When("assigning nodeID sequentially", func() {
 
 					BeforeEach(func() {
+						// Exclude base rvr from parent BeforeEach to avoid parallel processing interference
+						rvr = nil
 						rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 6)
 						for i := 0; i < 5; i++ {
 							nodeID := v1alpha3.RVRMinNodeID + uint(i)
