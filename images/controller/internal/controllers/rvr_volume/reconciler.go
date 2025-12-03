@@ -203,7 +203,7 @@ func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.L
 	llv := &snc.LVMLogicalVolume{}
 	key := client.ObjectKey{Name: llvName}
 	if err := cl.Get(ctx, key, llv); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("getting LVMLogicalVolume %s: %w", llvName, err)
@@ -375,7 +375,7 @@ func ensureLLVOwnerReference(ctx context.Context, cl client.Client, llv *snc.LVM
 // If the object is already marked for deletion (has DeletionTimestamp), it removes only our finalizer.
 func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, log logr.Logger) error {
 	if llv.DeletionTimestamp == nil {
-		if err := cl.Delete(ctx, llv); client.IgnoreNotFound(err) != nil {
+		if err := cl.Delete(ctx, llv); !apierrors.IsNotFound(err) && err != nil {
 			return fmt.Errorf("deleting LVMLogicalVolume %s: %w", llv.Name, err)
 		}
 		log.Info("LVMLogicalVolume marked for deletion", "llvName", llv.Name)
@@ -413,7 +413,7 @@ func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName str
 	rv := &v1alpha3.ReplicatedVolume{}
 	key := client.ObjectKey{Name: rvName}
 	if err := cl.Get(ctx, key, rv); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if apierrors.IsNotFound(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("getting ReplicatedVolume %s: %w", rvName, err)
@@ -430,7 +430,7 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	key := client.ObjectKey{Name: rscName}
 	if err := cl.Get(ctx, key, rsc); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if apierrors.IsNotFound(err) {
 			return "", "", fmt.Errorf("ReplicatedStorageClass %s not found", rscName)
 		}
 		return "", "", fmt.Errorf("getting ReplicatedStorageClass %s: %w", rscName, err)
