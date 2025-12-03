@@ -130,7 +130,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, log logr.Logger, 
 			}
 		} else {
 			log.V(4).Info("Found LVMLogicalVolume with ownerReference", "rvrName", rvr.Name, "llvName", llv.Name)
-			if isLLVCreated(llv) {
+			if isLLVPhaseCreated(llv) {
 				log.V(4).Info("LVMLogicalVolume is already created", "llvName", llv.Name)
 				// Update status with llv name if not set
 				if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName != llv.Name {
@@ -159,7 +159,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, log logr.Logger, 
 				return fmt.Errorf("ensuring llv ownerReference: %w", err)
 			}
 
-			if isLLVCreated(llv) {
+			if isLLVPhaseCreated(llv) {
 				log.V(4).Info("LLV is already created", "llvName", llv.Name)
 				// Update status with llv name if not set
 				if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName != llv.Name {
@@ -286,8 +286,8 @@ func createLLV(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVo
 	return nil
 }
 
-// isLLVCreated checks if LLV status phase is "Created".
-func isLLVCreated(llv *snc.LVMLogicalVolume) bool {
+// isLLVPhaseCreated checks if LLV status phase is "Created".
+func isLLVPhaseCreated(llv *snc.LVMLogicalVolume) bool {
 	return llv.Status != nil && llv.Status.Phase == "Created"
 }
 
@@ -430,10 +430,7 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	key := client.ObjectKey{Name: rscName}
 	if err := cl.Get(ctx, key, rsc); err != nil {
-		if apierrors.IsNotFound(err) {
-			return "", "", fmt.Errorf("ReplicatedStorageClass %s not found", rscName)
-		}
-		return "", "", fmt.Errorf("getting ReplicatedStorageClass %s: %w", rscName, err)
+		return "", "", err
 	}
 
 	// Get StoragePool name from ReplicatedStorageClass
