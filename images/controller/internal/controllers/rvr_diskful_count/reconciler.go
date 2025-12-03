@@ -72,7 +72,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			log.Info("ReplicatedVolume not found, ignoring reconcile request")
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolume: %w", err)
+		log.Error(err, "getting ReplicatedVolume")
+		return reconcile.Result{}, err
 	}
 
 	if rv.DeletionTimestamp != nil {
@@ -83,26 +84,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Get ReplicatedStorageClass object
 	rscName := rv.Spec.ReplicatedStorageClassName
 	if rscName == "" {
-		return reconcile.Result{}, fmt.Errorf("ReplicatedVolume has empty ReplicatedStorageClassName: %w", ErrEmptyReplicatedStorageClassName)
+		log.Error(ErrEmptyReplicatedStorageClassName, "ReplicatedVolume has empty ReplicatedStorageClassName")
+		return reconcile.Result{}, ErrEmptyReplicatedStorageClassName
 	}
 
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	err = r.cl.Get(ctx, client.ObjectKey{Name: rscName}, rsc)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting ReplicatedStorageClass %s: %w", rscName, err)
+		log.Error(err, "getting ReplicatedStorageClass", "name", rscName)
+		return reconcile.Result{}, err
 	}
 
 	// Get diskful replica count
 	neededNumberOfReplicas, err := getDiskfulReplicaCountFromReplicatedStorageClass(rsc)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting diskful replica count: %w", err)
+		log.Error(err, "getting diskful replica count")
+		return reconcile.Result{}, err
 	}
 	log.V(4).Info("Calculated diskful replica count", "count", neededNumberOfReplicas)
 
 	// Get all RVRs for this RV
-	totalRvrMap, err := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv)
+	totalRvrMap, err := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log)
 	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplicas: %w", err)
+		return reconcile.Result{}, err
 	}
 	totalNumberOfReplicas := len(totalRvrMap)
 	log.V(4).Info("Found ReplicatedVolumeReplicas", "count", totalNumberOfReplicas)
@@ -112,7 +116,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("No ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
+			log.Error(err, "creating ReplicatedVolumeReplica")
+			return reconcile.Result{}, err
 		}
 
 		err = patchDiskfulReplicaCountReachedCondition(
@@ -122,7 +127,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			fmt.Sprintf("Created first replica, need %d diskful replicas", neededNumberOfReplicas),
 		)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+			log.Error(err, "setting DiskfulReplicaCountReached condition")
+			return reconcile.Result{}, err
 		}
 
 		return reconcile.Result{}, nil
@@ -138,7 +144,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
+			log.Error(err, "creating ReplicatedVolumeReplica")
+			return reconcile.Result{}, err
 		}
 
 		err = patchDiskfulReplicaCountReachedCondition(
@@ -148,7 +155,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			fmt.Sprintf("Created non-deleted replica, need %d diskful replicas", neededNumberOfReplicas),
 		)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+			log.Error(err, "setting DiskfulReplicaCountReached condition")
+			return reconcile.Result{}, err
 		}
 
 		return reconcile.Result{}, nil
@@ -186,7 +194,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			log.V(4).Info("Creating replica", "replica", i)
 			err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 			if err != nil {
-				return reconcile.Result{}, fmt.Errorf("creating ReplicatedVolumeReplica: %w", err)
+				log.Error(err, "creating ReplicatedVolumeReplica")
+				return reconcile.Result{}, err
 			}
 		}
 
@@ -198,7 +207,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			fmt.Sprintf("Created %d replica(s), required number of diskful replicas is reached: %d", creatingNumberOfReplicas, neededNumberOfReplicas),
 		)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+			log.Error(err, "setting DiskfulReplicaCountReached condition")
+			return reconcile.Result{}, err
 		}
 	} else {
 		log.Info("No replicas to create")
@@ -210,7 +220,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
 		)
 		if err != nil {
-			return reconcile.Result{}, fmt.Errorf("setting DiskfulReplicaCountReached condition: %w", err)
+			log.Error(err, "setting DiskfulReplicaCountReached condition")
+			return reconcile.Result{}, err
 		}
 	}
 
@@ -238,11 +249,12 @@ func getDiskfulReplicaCountFromReplicatedStorageClass(rsc *v1alpha1.ReplicatedSt
 // getDiskfulReplicatedVolumeReplicas gets all Diskful ReplicatedVolumeReplica objects for the given ReplicatedVolume
 // by the spec.replicatedVolumeName and spec.type fields. Returns a map with RVR name as key and RVR object as value.
 // Returns empty map if no RVRs are found.
-func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (map[string]*v1alpha3.ReplicatedVolumeReplica, error) {
+func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume, log logr.Logger) (map[string]*v1alpha3.ReplicatedVolumeReplica, error) {
 	allRvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	err := cl.List(ctx, allRvrList)
 	if err != nil {
-		return nil, fmt.Errorf("listing all ReplicatedVolumeReplicas: %w", err)
+		log.Error(err, "listing all ReplicatedVolumeReplicas")
+		return nil, err
 	}
 
 	// Filter by spec.replicatedVolumeName and build map
@@ -297,12 +309,14 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme
 	}
 
 	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
-		return fmt.Errorf("setting controller reference: %w", err)
+		log.Error(err, "setting controller reference")
+		return err
 	}
 
 	err := cl.Create(ctx, rvr)
 	if err != nil {
-		return fmt.Errorf("creating ReplicatedVolumeReplica with GenerateName %s: %w", generateName, err)
+		log.Error(err, "creating ReplicatedVolumeReplica", "generateName", generateName)
+		return err
 	}
 
 	log.Info("Created ReplicatedVolumeReplica", "name", rvr.Name)

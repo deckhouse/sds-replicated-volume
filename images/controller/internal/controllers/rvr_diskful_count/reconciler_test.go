@@ -183,7 +183,7 @@ var _ = Describe("Reconciler", func() {
 			})
 			It("should return an error", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().
-					To(MatchError(ContainSubstring("getting ReplicatedStorageClass")))
+					To(HaveOccurred())
 			})
 		})
 
