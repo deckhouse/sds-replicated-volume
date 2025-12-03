@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -60,43 +61,35 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}()
 
 	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rvr)
+	err := r.cl.Get(ctx, req.NamespacedName, rvr)
 	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
+		if apierrors.IsNotFound(err) {
 			log.Info("ReplicatedVolumeReplica not found, ignoring reconcile request")
 			return reconcile.Result{}, nil
 		}
-		return reconcile.Result{}, fmt.Errorf("getting ReplicatedVolumeReplica: %w", err)
+		log.Error(err, "getting ReplicatedVolume")
+		return reconcile.Result{}, err
 	}
 
 	if rvr.DeletionTimestamp != nil {
-		if err := requestToDeleteLLV(ctx, r.cl, log, rvr); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
 	if rvr.Spec.Type == "Diskful" && rvr.Spec.NodeName != "" {
-		if err := requestToCreateLLV(ctx, r.cl, log, rvr); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, reconcileLLVNormal(ctx, r.cl, log, rvr)
 	}
 
 	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
-		if err := requestToDeleteLLV(ctx, r.cl, log, rvr); err != nil {
-			return reconcile.Result{}, err
-		}
-		return reconcile.Result{}, nil
+		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
 	return reconcile.Result{}, nil
 }
 
-func requestToDeleteLLV(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	// Thanks to the ownerReference, llv will have a deletionTimestamp, we will only need to remove our finalizer.
-	log = log.WithName("RequestToDeleteLLV")
+	log = log.WithName("ReconcileLLVDeletion")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
 		log.V(4).Info("No LVMLogicalVolumeName in status, skipping delete")
@@ -122,8 +115,8 @@ func requestToDeleteLLV(ctx context.Context, cl client.Client, log logr.Logger, 
 	return nil
 }
 
-func requestToCreateLLV(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
-	log = log.WithName("ReconcileCreateLLV")
+func reconcileLLVNormal(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+	log = log.WithName("ReconcileLLVNormal")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
 		llv, err := findLLVWithOwnerReference(ctx, cl, rvr.Name)
