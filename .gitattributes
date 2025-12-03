@@ -1,0 +1,3 @@
+*.mod merge=gomod-merge-driver
+*.sum merge=gomod-merge-driver
+
