@@ -21,44 +21,29 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
 )
 
-func BuildController(mgr manager.Manager, nodeName string) error {
+func BuildController(mgr manager.Manager, cfg cluster.Config) error {
 	const controllerName = "rvr-status-config-address-controller"
 
 	log := mgr.GetLogger().WithName(controllerName)
-	var rec = &Reconciler{
-		cl:  mgr.GetClient(),
-		log: log,
-	}
+	var rec = NewReconciler(mgr.GetClient(), log, cfg.DRBD)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
 		For(
 			&corev1.Node{},
-			builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				node, ok := obj.(*corev1.Node)
-				if !ok {
-					log.WithName("For").Error(nil, "Can't cast Node to *corev1.Node")
-					return false
-				}
-				return node.Name == nodeName
-			}))).
-		Watches(
-			&corev1.ConfigMap{},
-			handler.EnqueueRequestsFromMapFunc(NewConfigMapEnqueueHandler(nodeName, log)),
-			builder.WithPredicates(NewConfigMapUpdatePredicate(log)),
+			builder.WithPredicates(NewNodePredicate(cfg.NodeName, log)),
 		).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(NewReplicatedVolumeReplicaEnqueueHandler(nodeName, log)),
-			builder.WithPredicates(NewReplicatedVolumeReplicaUpdatePredicate(nodeName, log)),
+			handler.EnqueueRequestsFromMapFunc(NewReplicatedVolumeReplicaEnqueueHandler(cfg.NodeName, log)),
+			builder.WithPredicates(NewReplicatedVolumeReplicaUpdatePredicate(cfg.NodeName, log)),
 		).
 		Complete(rec)
 }

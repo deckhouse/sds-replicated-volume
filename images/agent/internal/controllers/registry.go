@@ -21,19 +21,20 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/cluster"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
-var registry []func(mgr manager.Manager, nodeName string) error
+var registry []func(mgr manager.Manager, cfg cluster.Config) error
 
 func init() {
 	registry = append(registry, rvrstatusconfigaddress.BuildController)
 	// ...
 }
 
-func BuildAll(mgr manager.Manager, nodeName string) error {
+func BuildAll(mgr manager.Manager, cfg cluster.Config) error {
 	for i, buildCtl := range registry {
-		err := buildCtl(mgr, nodeName)
+		err := buildCtl(mgr, cfg)
 		if err != nil {
 			return fmt.Errorf("building controller %d: %w", i, err)
 		}
