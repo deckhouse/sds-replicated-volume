@@ -80,8 +80,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
+	// Get ReplicatedStorageClass object
+	rscName := rv.Spec.ReplicatedStorageClassName
+	if rscName == "" {
+		return reconcile.Result{}, fmt.Errorf("ReplicatedVolume has empty ReplicatedStorageClassName: %w", ErrEmptyReplicatedStorageClassName)
+	}
+
+	rsc := &v1alpha1.ReplicatedStorageClass{}
+	err = r.cl.Get(ctx, client.ObjectKey{Name: rscName}, rsc)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("getting ReplicatedStorageClass %s: %w", rscName, err)
+	}
+
 	// Get diskful replica count
-	neededNumberOfReplicas, err := getDiskfulReplicaCountFromReplicatedStorageClass(ctx, r.cl, rv)
+	neededNumberOfReplicas, err := getDiskfulReplicaCountFromReplicatedStorageClass(rsc)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting diskful replica count: %w", err)
 	}
@@ -209,20 +221,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 //
 // If replication = None, returns 1; if replication = Availability, returns 2;
 // if replication = ConsistencyAndAvailability, returns 3.
-func getDiskfulReplicaCountFromReplicatedStorageClass(ctx context.Context, cl client.Client, rv *v1alpha3.ReplicatedVolume) (int, error) {
-	// Get ReplicatedStorageClass name from ReplicatedVolume
-	rscName := rv.Spec.ReplicatedStorageClassName
-	if rscName == "" {
-		return 0, ErrEmptyReplicatedStorageClassName
-	}
-
-	// Get ReplicatedStorageClass object
-	rsc := &v1alpha1.ReplicatedStorageClass{}
-	err := cl.Get(ctx, client.ObjectKey{Name: rscName}, rsc)
-	if err != nil {
-		return 0, fmt.Errorf("getting ReplicatedStorageClass %s: %w", rscName, err)
-	}
-
+func getDiskfulReplicaCountFromReplicatedStorageClass(rsc *v1alpha1.ReplicatedStorageClass) (int, error) {
 	// Determine diskful replica count based on replication
 	switch rsc.Spec.Replication {
 	case v1alpha3.ReplicationNone:
