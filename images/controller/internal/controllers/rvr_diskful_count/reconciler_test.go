@@ -17,6 +17,8 @@ limitations under the License.
 package rvrdiskfulcount_test
 
 import (
+	"fmt"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -26,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -33,29 +36,24 @@ import (
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 )
 
-//nolint:unparam // name and rvName parameters are kept for flexibility in tests
-func createReplicatedVolumeReplica(name, rvName string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
-	return createReplicatedVolumeReplicaWithType(name, rvName, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
+//nolint:unparam // name and rv parameters are kept for flexibility in tests
+func createReplicatedVolumeReplica(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
+	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
-func createReplicatedVolumeReplicaWithType(name, rvName, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
+func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         "storage.deckhouse.io/v1alpha3",
-					Kind:               "ReplicatedVolume",
-					Name:               rvName,
-					Controller:         func() *bool { b := true; return &b }(),
-					BlockOwnerDeletion: func() *bool { b := true; return &b }(),
-				},
-			},
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: rvName,
+			ReplicatedVolumeName: rv.Name,
 			Type:                 rvrType,
 		},
+	}
+
+	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
+		panic(fmt.Sprintf("failed to set controller reference: %v", err))
 	}
 
 	// If deletionTimestamp is provided, add a finalizer so we can delete the object
@@ -288,7 +286,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, false, &now)
+				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, &now)
 				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
@@ -337,7 +335,7 @@ var _ = Describe("Reconciler", func() {
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, false, nil)
+				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, nil)
 				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
@@ -358,8 +356,8 @@ var _ = Describe("Reconciler", func() {
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
-				rvr2 = createReplicatedVolumeReplica("rvr-2", rv.Name, true, nil)
+				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
+				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
 				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
@@ -382,7 +380,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
+					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
 					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
@@ -408,7 +406,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
+					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
 					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
@@ -446,7 +444,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
+					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -467,8 +465,8 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
-					rvr2 = createReplicatedVolumeReplica("rvr-2", rv.Name, true, nil)
+					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
+					rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -490,9 +488,9 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, nil)
-					rvr2 = createReplicatedVolumeReplica("rvr-2", rv.Name, true, nil)
-					rvr3 = createReplicatedVolumeReplica("rvr-3", rv.Name, true, nil)
+					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
+					rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
+					rvr3 = createReplicatedVolumeReplica("rvr-3", rv, scheme, true, nil)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -518,8 +516,8 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv.Name, true, &now)
-				rvr2 = createReplicatedVolumeReplica("rvr-2", rv.Name, true, nil)
+				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, &now)
+				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
 				rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 			})
 
@@ -554,7 +552,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv.Name, "Diskless", true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
 					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
@@ -589,8 +587,8 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv.Name, true, nil)
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv.Name, "Diskless", true, nil)
+					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv, scheme, true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
 					rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 				})
 
