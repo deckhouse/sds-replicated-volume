@@ -29,6 +29,10 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetClient(),
 		mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName).WithName("Reconciler"),
 	)
+	// MaxConcurrentReconciles: 1
+	// prevents race conditions when assigning unique deviceMinor values
+	// to different ReplicatedVolume resources. Status not protected by optimistic locking,
+	// so we need to prevent parallel reconciles for avoiding duplicate assignments.
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVStatusConfigDeviceMinorControllerName).

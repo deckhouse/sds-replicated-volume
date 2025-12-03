@@ -35,27 +35,6 @@ import (
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 )
 
-func createRV(name string) *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: v1alpha3.ReplicatedVolumeSpec{},
-	}
-}
-
-func createRVWithDeviceMinor(name string, deviceMinor uint) *v1alpha3.ReplicatedVolume {
-	rv := createRV(name)
-	rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-		DRBD: &v1alpha3.DRBDResource{
-			Config: &v1alpha3.DRBDResourceConfig{
-				DeviceMinor: deviceMinor,
-			},
-		},
-	}
-	return rv
-}
-
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
 	// 1. Invalid deviceMinor (outside RVMinDeviceMinor-RVMaxDeviceMinor range):
@@ -92,7 +71,9 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
-		Expect(rec.Reconcile(ctx, RequestFor(createRV("non-existent")))).ToNot(Requeue(), "should ignore NotFound errors")
+		Expect(rec.Reconcile(ctx, RequestFor(&v1alpha3.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "non-existent"},
+		}))).ToNot(Requeue(), "should ignore NotFound errors")
 	})
 
 	When("Get fails with non-NotFound error", func() {
@@ -106,7 +87,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
 			By("Creating ReplicatedVolume")
-			rv := createRV("volume-1")
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
+			}
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 
 			By("Reconciling with Get interceptor that returns error")
@@ -134,7 +117,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("should fail if listing ReplicatedVolumes failed", func(ctx SpecContext) {
 			By("Creating ReplicatedVolume")
-			rv := createRV("volume-1")
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
+			}
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 
 			By("Reconciling with List interceptor that returns error")
@@ -147,7 +132,9 @@ var _ = Describe("Reconciler", func() {
 		var rv *v1alpha3.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = createRV("volume-1")
+			rv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
+			}
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
@@ -188,91 +175,171 @@ var _ = Describe("Reconciler", func() {
 		When("RV without deviceMinor", func() {
 			It("assigns unique deviceMinors to multiple volumes", func(ctx SpecContext) {
 				By("Creating volumes with deviceMinors 0 and 1, and one without deviceMinor")
-				rv1 := createRVWithDeviceMinor("volume-multi-1", v1alpha3.RVMinDeviceMinor)
-				rv2 := createRVWithDeviceMinor("volume-multi-2", v1alpha3.RVMinDeviceMinor+1)
-				rv3 := createRV("volume-multi-3")
+				rv1 := &v1alpha3.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: "volume-multi-1"},
+					Status: &v1alpha3.ReplicatedVolumeStatus{
+						DRBD: &v1alpha3.DRBDResource{
+							Config: &v1alpha3.DRBDResourceConfig{
+								DeviceMinor: v1alpha3.RVMinDeviceMinor,
+							},
+						},
+					},
+				}
+				rv2 := &v1alpha3.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: "volume-multi-2"},
+					Status: &v1alpha3.ReplicatedVolumeStatus{
+						DRBD: &v1alpha3.DRBDResource{
+							Config: &v1alpha3.DRBDResourceConfig{
+								DeviceMinor: v1alpha3.RVMinDeviceMinor + 1,
+							},
+						},
+					},
+				}
+				rv3 := &v1alpha3.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: "volume-multi-3"},
+				}
 				Expect(cl.Create(ctx, rv1)).To(Succeed(), "should create ReplicatedVolume")
 				Expect(cl.Create(ctx, rv2)).To(Succeed(), "should create ReplicatedVolume")
 				Expect(cl.Create(ctx, rv3)).To(Succeed(), "should create ReplicatedVolume")
 
-				By("Reconciling third volume without deviceMinor")
-				result, err := rec.Reconcile(ctx, RequestFor(rv3))
-				Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
-				Expect(result).ToNot(Requeue(), "should not requeue after successful assignment")
-
-				By("Verifying third volume got next available deviceMinor")
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv3), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-				Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 2)), "should assign deviceMinor 2 as next available after 0 and 1")
+				By("Reconciling until third volume gets next available deviceMinor")
+				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
+					g.Expect(rec.Reconcile(ctx, RequestFor(rv3))).ToNot(Requeue(), "should not requeue after successful assignment")
+					updatedRV := &v1alpha3.ReplicatedVolume{}
+					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv3), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+					return updatedRV
+				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 2)), "should assign deviceMinor 2 as next available after 0 and 1")
 			})
 
-			It("assigns deviceMinor sequentially and fills gaps", func(ctx SpecContext) {
-				By("Creating 5 volumes with deviceMinors 0-4 for sequential assignment test")
-				for i := 0; i < 5; i++ {
-					rv := createRVWithDeviceMinor(
-						fmt.Sprintf("volume-seq-%d", i+1),
-						uint(i),
-					)
-					Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
-				}
+			When("assigning deviceMinor sequentially and filling gaps", func() {
+				var (
+					rvSeqList []*v1alpha3.ReplicatedVolume
+					rv6       *v1alpha3.ReplicatedVolume
+					rvGapList []*v1alpha3.ReplicatedVolume
+					rvGap4    *v1alpha3.ReplicatedVolume
+				)
 
-				By("Creating volume without deviceMinor to test sequential assignment")
-				rv6 := createRV("volume-seq-6")
-				Expect(cl.Create(ctx, rv6)).To(Succeed(), "should create ReplicatedVolume")
+				BeforeEach(func() {
+					// Exclude base rv from parent BeforeEach
+					rv = nil
 
-				By("Reconciling volume without deviceMinor")
-				result, err := rec.Reconcile(ctx, RequestFor(rv6))
-				Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
-				Expect(result).ToNot(Requeue(), "should not requeue after successful assignment")
+					// Create 5 volumes with deviceMinors 0-4 for sequential assignment test
+					rvSeqList = make([]*v1alpha3.ReplicatedVolume, 5)
+					for i := 0; i < 5; i++ {
+						rvSeqList[i] = &v1alpha3.ReplicatedVolume{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: fmt.Sprintf("volume-seq-%d", i+1),
+							},
+							Status: &v1alpha3.ReplicatedVolumeStatus{
+								DRBD: &v1alpha3.DRBDResource{
+									Config: &v1alpha3.DRBDResourceConfig{
+										DeviceMinor: uint(i),
+									},
+								},
+							},
+						}
+					}
 
-				By("Verifying sequential assignment: next available deviceMinor after 0-4")
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv6), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-				Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 5)), "should assign deviceMinor 5 as next sequential value")
+					// Create volume without deviceMinor to test sequential assignment
+					rv6 = &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "volume-seq-6"},
+					}
 
-				By("Creating volumes with deviceMinors 6, 8, 9 (gap at 7) for gap filling test")
-				rvGap1 := createRVWithDeviceMinor("volume-gap-1", 6)
-				rvGap2 := createRVWithDeviceMinor("volume-gap-2", 8)
-				rvGap3 := createRVWithDeviceMinor("volume-gap-3", 9)
-				rvGap4 := createRV("volume-gap-4")
-				Expect(cl.Create(ctx, rvGap1)).To(Succeed(), "should create ReplicatedVolume")
-				Expect(cl.Create(ctx, rvGap2)).To(Succeed(), "should create ReplicatedVolume")
-				Expect(cl.Create(ctx, rvGap3)).To(Succeed(), "should create ReplicatedVolume")
-				Expect(cl.Create(ctx, rvGap4)).To(Succeed())
+					// Create volumes with deviceMinors 6, 8, 9 (gap at 7) for gap filling test
+					rvGap1 := &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-1"},
+						Status: &v1alpha3.ReplicatedVolumeStatus{
+							DRBD: &v1alpha3.DRBDResource{
+								Config: &v1alpha3.DRBDResourceConfig{
+									DeviceMinor: 6,
+								},
+							},
+						},
+					}
+					rvGap2 := &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-2"},
+						Status: &v1alpha3.ReplicatedVolumeStatus{
+							DRBD: &v1alpha3.DRBDResource{
+								Config: &v1alpha3.DRBDResourceConfig{
+									DeviceMinor: 8,
+								},
+							},
+						},
+					}
+					rvGap3 := &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-3"},
+						Status: &v1alpha3.ReplicatedVolumeStatus{
+							DRBD: &v1alpha3.DRBDResource{
+								Config: &v1alpha3.DRBDResourceConfig{
+									DeviceMinor: 9,
+								},
+							},
+						},
+					}
+					rvGap4 = &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-4"},
+					}
+					rvGapList = []*v1alpha3.ReplicatedVolume{rvGap1, rvGap2, rvGap3, rvGap4}
+				})
 
-				By("Reconciling volume without deviceMinor to test gap filling")
-				result2, err2 := rec.Reconcile(ctx, RequestFor(rvGap4))
-				Expect(err2).NotTo(HaveOccurred(), "reconciliation should succeed")
-				Expect(result2).ToNot(Requeue(), "should not requeue after successful assignment")
+				JustBeforeEach(func(ctx SpecContext) {
+					// Create volumes for sequential assignment test
+					for _, rv := range rvSeqList {
+						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+					}
+					Expect(cl.Create(ctx, rv6)).To(Succeed(), "should create ReplicatedVolume")
 
-				By("Verifying gap filling: minimum free deviceMinor between 6 and 8")
-				updatedRV2 := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvGap4), updatedRV2)).To(Succeed(), "should get updated ReplicatedVolume")
-				Expect(updatedRV2).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 7)), "should assign deviceMinor 7 to fill gap between 6 and 8")
+					// Create volumes for gap filling test
+					for _, rv := range rvGapList {
+						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
+					}
+				})
+
+				It("assigns deviceMinor sequentially and fills gaps", func(ctx SpecContext) {
+					By("Reconciling until volume gets sequential deviceMinor (5) after 0-4")
+					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
+						g.Expect(rec.Reconcile(ctx, RequestFor(rv6))).ToNot(Requeue(), "should not requeue after successful assignment")
+						updatedRV := &v1alpha3.ReplicatedVolume{}
+						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv6), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+						return updatedRV
+					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 5)), "should assign deviceMinor 5 as next sequential value")
+
+					By("Reconciling until volume gets gap-filled deviceMinor (7) between 6 and 8")
+					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
+						g.Expect(rec.Reconcile(ctx, RequestFor(rvGap4))).ToNot(Requeue(), "should not requeue after successful assignment")
+						updatedRV := &v1alpha3.ReplicatedVolume{}
+						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvGap4), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+						return updatedRV
+					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 7)), "should assign deviceMinor 7 to fill gap between 6 and 8")
+				})
 			})
 		})
 
 		When("RV with deviceMinor already assigned", func() {
 			BeforeEach(func() {
-				rv = createRVWithDeviceMinor("volume-1", 42)
+				rv = &v1alpha3.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
+					Status: &v1alpha3.ReplicatedVolumeStatus{
+						DRBD: &v1alpha3.DRBDResource{
+							Config: &v1alpha3.DRBDResourceConfig{
+								DeviceMinor: 42,
+							},
+						},
+					},
+				}
 			})
 
 			It("does not reassign deviceMinor and is idempotent", func(ctx SpecContext) {
-				By("First reconciliation: should not reassign existing deviceMinor")
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
-
-				By("Verifying deviceMinor remains unchanged after first reconciliation")
-				updatedRV1 := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV1)).To(Succeed(), "should get updated ReplicatedVolume")
-				Expect(updatedRV1).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 42)), "deviceMinor should remain 42, not be reassigned")
-
-				By("Second reconciliation: should still not reassign (idempotent)")
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
-
-				By("Verifying deviceMinor hasn't changed after both reconciliations")
-				updatedRV2 := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV2)).To(Succeed(), "should get updated ReplicatedVolume")
-				Expect(updatedRV2).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 42)), "deviceMinor should remain 42 after multiple reconciliations (idempotent)")
+				By("Reconciling multiple times and verifying deviceMinor remains unchanged")
+				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
+					// Reconcile multiple times to verify idempotency
+					for i := 0; i < 3; i++ {
+						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when deviceMinor already assigned")
+					}
+					updatedRV := &v1alpha3.ReplicatedVolume{}
+					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+					return updatedRV
+				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 42)), "deviceMinor should remain 42 after multiple reconciliations (idempotent)")
 			})
 		})
 	})
@@ -282,7 +349,9 @@ var _ = Describe("Reconciler", func() {
 		patchError := errors.New("failed to patch status")
 
 		BeforeEach(func() {
-			rv = createRV("volume-patch-1")
+			rv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-patch-1"},
+			}
 			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 				SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 					if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
@@ -310,7 +379,9 @@ var _ = Describe("Reconciler", func() {
 		var patchAttempts int
 
 		BeforeEach(func() {
-			rv = createRV("volume-conflict-1")
+			rv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-conflict-1"},
+			}
 			patchAttempts = 0
 			// Simulate 409 Conflict error (e.g., if another controller updates the same resource)
 			conflictError = kerrors.NewConflict(
@@ -343,13 +414,13 @@ var _ = Describe("Reconciler", func() {
 			By("First reconcile: should fail with 409 Conflict")
 			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
 
-			By("Second reconcile (retry): should succeed after conflict resolved")
-			Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
-
-			By("Verifying deviceMinor was assigned after retry")
-			updatedRV := &v1alpha3.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-			Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", v1alpha3.RVMinDeviceMinor)), "deviceMinor should be assigned")
+			By("Reconciling until deviceMinor is assigned after conflict resolved")
+			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
+				g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "retry reconciliation should succeed")
+				updatedRV := &v1alpha3.ReplicatedVolume{}
+				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
+				return updatedRV
+			}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", v1alpha3.RVMinDeviceMinor)), "deviceMinor should be assigned after retry")
 		})
 	})
 })
