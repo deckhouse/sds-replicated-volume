@@ -255,7 +255,6 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-tool (
-	github.com/golangci/golangci-lint/cmd/golangci-lint
-	github.com/onsi/ginkgo/v2/ginkgo
-)
+tool github.com/onsi/ginkgo/v2/ginkgo
+
+tool github.com/golangci/golangci-lint/cmd/golangci-lint
