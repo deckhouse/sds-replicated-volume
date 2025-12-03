@@ -304,7 +304,7 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 
-	When("Patch fails with 409 Conflict (race condition)", func() {
+	When("Patch fails with 409 Conflict", func() {
 		var rv *v1alpha3.ReplicatedVolume
 		var conflictError error
 		var patchAttempts int
@@ -312,7 +312,7 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			rv = createRV("volume-conflict-1")
 			patchAttempts = 0
-			// Simulate 409 Conflict error (race condition scenario)
+			// Simulate 409 Conflict error (e.g., if another controller updates the same resource)
 			conflictError = kerrors.NewConflict(
 				schema.GroupResource{Group: "storage.deckhouse.io", Resource: "replicatedvolumes"},
 				rv.Name,

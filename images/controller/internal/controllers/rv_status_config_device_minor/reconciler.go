@@ -64,7 +64,7 @@ func (r *Reconciler) Reconcile(
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		deviceMinor := rv.Status.DRBD.Config.DeviceMinor
 		if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
-			log.V(1).Info("deviceMinor already assigned", "deviceMinor", deviceMinor)
+			log.V(1).Info("deviceMinor already assigned and valid", "deviceMinor", deviceMinor)
 			return reconcile.Result{}, nil
 		}
 	}
@@ -72,14 +72,15 @@ func (r *Reconciler) Reconcile(
 	// Get all RVs to collect used deviceMinors
 	rvList := &v1alpha3.ReplicatedVolumeList{}
 	if err := r.cl.List(ctx, rvList); err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing RVs: %w", err)
+		log.Error(err, "listing RVs")
+		return reconcile.Result{}, err
 	}
 
 	// Collect used deviceMinors
-	// Note: Race condition handling: If two reconciles run simultaneously and both try to assign
-	// the same deviceMinor, one will get a conflict (409) on Patch. The next reconciliation
-	// will recalculate usedDeviceMinors and assign a different value. This is handled by
-	// returning the error from Patch and letting the reconciliation retry mechanism handle it.
+	// Note: With MaxConcurrentReconciles: 1, parallel reconciles are prevented, ensuring
+	// unique deviceMinor assignment. Conflicts (409) are still possible if another controller
+	// updates the same resource, in which case the next reconciliation will recalculate
+	// usedDeviceMinors and assign a different value.
 	usedDeviceMinors := make(map[uint]struct{})
 	for _, item := range rvList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
@@ -107,12 +108,12 @@ func (r *Reconciler) Reconcile(
 			rv.Name,
 			int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1,
 		)
-		log.Error(err, "no available deviceMinor for volume", "volume", rv.Name, "maxDeviceMinors", int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1)
+		log.Error(err, "no available deviceMinor for volume", "maxDeviceMinors", int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1)
 		return reconcile.Result{}, err
 	}
 
 	// Update RV status with deviceMinor
-	// Note: If there's a conflict (409) due to race condition, return error - next reconciliation will solve it
+	// Note: If there's a conflict (409), return error - next reconciliation will solve it
 	// by recalculating usedDeviceMinors and assigning a different value.
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()

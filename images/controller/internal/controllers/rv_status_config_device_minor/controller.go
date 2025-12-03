@@ -17,9 +17,8 @@ limitations under the License.
 package rvstatusconfigdeviceminor
 
 import (
-	"fmt"
-
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -31,14 +30,9 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName).WithName("Reconciler"),
 	)
 
-	err := builder.ControllerManagedBy(mgr).
+	return builder.ControllerManagedBy(mgr).
 		Named(RVStatusConfigDeviceMinorControllerName).
 		For(&v1alpha3.ReplicatedVolume{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(rec)
-
-	if err != nil {
-		return fmt.Errorf("building controller: %w", err)
-	}
-
-	return nil
 }
