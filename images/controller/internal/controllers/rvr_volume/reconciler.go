@@ -209,9 +209,7 @@ func setLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr 
 // It retrieves the ReplicatedVolume and determines the appropriate LVMVolumeGroup and ThinPool
 // based on the RVR's node name, then creates the LLV with the correct configuration.
 func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
-	generateLLVName := fmt.Sprintf("%s-", rvr.Spec.ReplicatedVolumeName)
-
-	log = log.WithValues("generateLLVName", generateLLVName, "nodeName", rvr.Spec.NodeName)
+	log = log.WithValues("llvName", rvr.Name, "nodeName", rvr.Spec.NodeName)
 	log.Info("Creating LVMLogicalVolume")
 
 	rv, err := getReplicatedVolumeByName(ctx, cl, rvr.Spec.ReplicatedVolumeName)
@@ -226,8 +224,8 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 
 	llvNew := &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: fmt.Sprintf("%s-", rvr.Name),
-			Finalizers:   []string{finalizerName},
+			Name:       rvr.Name,
+			Finalizers: []string{finalizerName},
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: rvr.Spec.ReplicatedVolumeName,
