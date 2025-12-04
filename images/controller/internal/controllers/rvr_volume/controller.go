@@ -32,8 +32,9 @@ const (
 
 func BuildController(mgr manager.Manager) error {
 	r := &Reconciler{
-		cl:  mgr.GetClient(),
-		log: mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
+		cl:     mgr.GetClient(),
+		log:    mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
+		scheme: mgr.GetScheme(),
 	}
 
 	return builder.ControllerManagedBy(mgr).

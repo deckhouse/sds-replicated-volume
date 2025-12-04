@@ -25,28 +25,31 @@ import (
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
-	cl  client.Client
-	log logr.Logger
+	cl     client.Client
+	log    logr.Logger
+	scheme *runtime.Scheme
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
-func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
 	return &Reconciler{
-		cl:  cl,
-		log: log,
+		cl:     cl,
+		log:    log,
+		scheme: scheme,
 	}
 }
 
@@ -80,7 +83,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// "Diskful" will appear as a variable after merging rvr-diskfull-count-controller.
 	if rvr.Spec.Type == "Diskful" && rvr.Spec.NodeName != "" {
 		if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
-			return reconcile.Result{}, reconcileLLVNormalByOwnerReference(ctx, r.cl, log, rvr)
+			return reconcile.Result{}, reconcileLLVNormalByOwnerReference(ctx, r.cl, r.scheme, log, rvr)
 		}
 	}
 
@@ -126,12 +129,12 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 // reconcileLLVNormalByOwnerReference reconciles LVMLogicalVolume for a normal (non-deleting) RVR
 // by finding it via ownerReference. If not found, creates a new LLV. If found and created,
 // updates RVR status with the LLV name.
-func reconcileLLVNormalByOwnerReference(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func reconcileLLVNormalByOwnerReference(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	llv, err := getLLVByOwnerReference(ctx, cl, rvr.Name)
 	switch {
 	case err != nil && apierrors.IsNotFound(err):
 		log.V(4).Info("No LVMLogicalVolume found with ownerReference, creating it", "rvrName", rvr.Name)
-		if err := createLLV(ctx, cl, rvr, log); err != nil {
+		if err := createLLV(ctx, cl, scheme, rvr, log); err != nil {
 			return fmt.Errorf("creating llv: %w", err)
 		}
 	case err != nil:
@@ -201,26 +204,11 @@ func setLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr 
 // createLLV creates a LVMLogicalVolume with ownerReference pointing to RVR.
 // It retrieves the ReplicatedVolume and determines the appropriate LVMVolumeGroup and ThinPool
 // based on the RVR's node name, then creates the LLV with the correct configuration.
-func createLLV(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
+func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
 	generateLLVName := fmt.Sprintf("%s-", rvr.Spec.ReplicatedVolumeName)
 
 	log = log.WithValues("generateLLVName", generateLLVName, "nodeName", rvr.Spec.NodeName)
 	log.Info("Creating LVMLogicalVolume")
-
-	// Set ownerReference manually
-	gvk := schema.GroupVersionKind{
-		Group:   v1alpha3.SchemeGroupVersion.Group,
-		Version: v1alpha3.SchemeGroupVersion.Version,
-		Kind:    "ReplicatedVolumeReplica",
-	}
-	ownerRef := metav1.OwnerReference{
-		APIVersion:         gvk.GroupVersion().String(),
-		Kind:               gvk.Kind,
-		Name:               rvr.Name,
-		UID:                rvr.UID,
-		Controller:         utils.Ptr(true),
-		BlockOwnerDeletion: utils.Ptr(true),
-	}
 
 	rv, err := getReplicatedVolumeByName(ctx, cl, rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
@@ -237,9 +225,8 @@ func createLLV(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVo
 
 	llvNew := &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName:    fmt.Sprintf("%s-", rvr.Name),
-			Finalizers:      []string{finalizerName},
-			OwnerReferences: []metav1.OwnerReference{ownerRef},
+			GenerateName: fmt.Sprintf("%s-", rvr.Name),
+			Finalizers:   []string{finalizerName},
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: rvr.Spec.ReplicatedVolumeName,
@@ -254,6 +241,10 @@ func createLLV(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVo
 		llvNew.Spec.Thin = &snc.LVMLogicalVolumeThinSpec{
 			PoolName: thinPoolName,
 		}
+	}
+
+	if err := controllerutil.SetControllerReference(rvr, llvNew, scheme); err != nil {
+		return fmt.Errorf("setting controller reference: %w", err)
 	}
 
 	if err := cl.Create(ctx, llvNew); err != nil {
