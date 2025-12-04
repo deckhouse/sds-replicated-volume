@@ -135,6 +135,8 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 // by finding it via ownerReference. If not found, creates a new LLV. If found and created,
 // updates RVR status with the LLV name.
 func reconcileLLVNormalByOwnerReference(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+	log = log.WithName("ReconcileLLVNormalByOwnerReference")
+
 	llv, err := getLLVByOwnerReference(ctx, cl, rvr.Name)
 	switch {
 	case err != nil && apierrors.IsNotFound(err):
