@@ -124,7 +124,7 @@ func (r *Reconciler) Reconcile(
 			if rvr.Spec.NodeName != "" {
 				if fd, ok := FDKeyByNodeName[rvr.Spec.NodeName]; ok {
 					FDReplicaCount[fd]++
-				} // TODO: записать 0 если нет
+				}
 			}
 		case "Access":
 			if rvr.Spec.NodeName != "" {
