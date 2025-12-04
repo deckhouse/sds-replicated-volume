@@ -727,7 +727,7 @@ agent не удаляет ресурс из DRBD, пока есть чужие �
 
 Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
 `sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
-za
+
 ### Вывод 
  - `rvr.metada.ownerReference`
 
