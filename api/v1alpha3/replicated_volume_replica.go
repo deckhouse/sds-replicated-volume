@@ -119,9 +119,6 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
-
-	// +optional
-	LVMLogicalVolumeName string `json:"lvmLogicalVolumeName,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

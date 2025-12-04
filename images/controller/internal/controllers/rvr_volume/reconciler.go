@@ -50,8 +50,9 @@ func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 	}
 }
 
+// Reconcile reconciles a ReplicatedVolumeReplica by managing its associated LVMLogicalVolume.
+// It handles creation, deletion, and status updates of LVMLogicalVolumes based on the RVR state.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	// always will come an event on ReplicatedVolume, even if the event happened on ReplicatedVolumeReplica
 
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling started")
@@ -76,13 +77,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
+	// "Diskful" will appear as a variable after merging rvr-diskfull-count-controller.
 	if rvr.Spec.Type == "Diskful" && rvr.Spec.NodeName != "" {
 		if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
 			return reconcile.Result{}, reconcileLLVNormalByOwnerReference(ctx, r.cl, log, rvr)
 		}
-		return reconcile.Result{}, reconcileLLVNormalByName(ctx, r.cl, log, rvr)
 	}
 
+	// RVR is not diskful, so we need to delete the LLV.
 	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
 		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
@@ -90,8 +92,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
+// reconcileLLVDeletion handles deletion of LVMLogicalVolume associated with the RVR.
+// If LLV is not found, it clears the LVMLogicalVolumeName from RVR status.
+// If LLV exists, it deletes it (or removes the finalizer if already marked for deletion).
 func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
-	// Thanks to the ownerReference, llv will have a deletionTimestamp, we will only need to remove our finalizer.
 	log = log.WithName("ReconcileLLVDeletion")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
@@ -102,7 +106,7 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 	llvName := rvr.Status.LVMLogicalVolumeName
 	llv, err := getLLVByName(ctx, cl, llvName)
 	switch {
-	case apierrors.IsNotFound(err):
+	case err != nil && apierrors.IsNotFound(err):
 		log.V(4).Info("LVMLogicalVolume not found in cluster, clearing status", "llvName", llvName)
 		if err := setLVMLogicalVolumeNameInStatus(ctx, cl, rvr, ""); err != nil {
 			return fmt.Errorf("clearing LVMLogicalVolumeName from status: %w", err)
@@ -115,13 +119,17 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 			return fmt.Errorf("deleting llv: %w", err)
 		}
 	}
+
 	return nil
 }
 
+// reconcileLLVNormalByOwnerReference reconciles LVMLogicalVolume for a normal (non-deleting) RVR
+// by finding it via ownerReference. If not found, creates a new LLV. If found and created,
+// updates RVR status with the LLV name.
 func reconcileLLVNormalByOwnerReference(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	llv, err := getLLVByOwnerReference(ctx, cl, rvr.Name)
 	switch {
-	case apierrors.IsNotFound(err):
+	case err != nil && apierrors.IsNotFound(err):
 		log.V(4).Info("No LVMLogicalVolume found with ownerReference, creating it", "rvrName", rvr.Name)
 		if err := createLLV(ctx, cl, rvr, log); err != nil {
 			return fmt.Errorf("creating llv: %w", err)
@@ -144,43 +152,9 @@ func reconcileLLVNormalByOwnerReference(ctx context.Context, cl client.Client, l
 	return nil
 }
 
-func reconcileLLVNormalByName(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
-	log = log.WithName("ReconcileLLVNormal")
-
-	llvName := rvr.Status.LVMLogicalVolumeName
-	llv, err := getLLVByName(ctx, cl, llvName)
-	switch {
-	case apierrors.IsNotFound(err):
-		log.V(4).Info("LLV not found in cluster, creating it", "llvName", llvName)
-		if err := createLLV(ctx, cl, rvr, log); err != nil {
-			return fmt.Errorf("creating llv: %w", err)
-		}
-	case err != nil:
-		return fmt.Errorf("checking if llv exists: %w", err)
-	default:
-		log.V(4).Info("LLV found in cluster", "llvName", llvName)
-		if err := ensureLLVOwnerReference(ctx, cl, llv, rvr, log); err != nil {
-			return fmt.Errorf("ensuring llv ownerReference: %w", err)
-		}
-		if isLLVPhaseCreated(llv) {
-			log.V(4).Info("LLV is already created", "llvName", llv.Name)
-			// Update status with llv name if not set
-			if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName != llv.Name {
-				if err := setLVMLogicalVolumeNameInStatus(ctx, cl, rvr, llv.Name); err != nil {
-					return fmt.Errorf("updating LVMLogicalVolumeName in status: %w", err)
-				}
-			}
-		} else {
-			log.V(4).Info("LLV is not yet created, waiting", "llvName", llv.Name, "phase", getLLVPhase(llv))
-		}
-	}
-
-	return nil
-}
-
 // getLLVByOwnerReference finds a LVMLogicalVolume in the cluster with ownerReference
 // pointing to ReplicatedVolumeReplica with the specified name.
-// Returns the llv object if found, nil otherwise.
+// Returns the llv object and nil error if found, or nil and a NotFound error if not found, or nil and an error on failure.
 func getLLVByOwnerReference(ctx context.Context, cl client.Client, rvrName string) (*snc.LVMLogicalVolume, error) {
 	var llvList snc.LVMLogicalVolumeList
 	if err := cl.List(ctx, &llvList); err != nil {
@@ -203,11 +177,11 @@ func getLLVByOwnerReference(ctx context.Context, cl client.Client, rvrName strin
 }
 
 // getLLVByName gets a LVMLogicalVolume from the cluster by name.
-// Returns the llv object if found, nil if not found, or an error.
+// Returns the llv object and nil error if found, or nil and an error if not found or on failure.
+// The error will be a NotFound error if the object doesn't exist.
 func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.LVMLogicalVolume, error) {
 	llv := &snc.LVMLogicalVolume{}
-	key := client.ObjectKey{Name: llvName}
-	if err := cl.Get(ctx, key, llv); err != nil {
+	if err := cl.Get(ctx, client.ObjectKey{Name: llvName}, llv); err != nil {
 		return nil, fmt.Errorf("getting LVMLogicalVolume %s: %w", llvName, err)
 	}
 	return llv, nil
@@ -225,6 +199,8 @@ func setLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr 
 }
 
 // createLLV creates a LVMLogicalVolume with ownerReference pointing to RVR.
+// It retrieves the ReplicatedVolume and determines the appropriate LVMVolumeGroup and ThinPool
+// based on the RVR's node name, then creates the LLV with the correct configuration.
 func createLLV(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
 	generateLLVName := fmt.Sprintf("%s-", rvr.Spec.ReplicatedVolumeName)
 
@@ -301,83 +277,11 @@ func getLLVPhase(llv *snc.LVMLogicalVolume) string {
 	return llv.Status.Phase
 }
 
-// ensureLLVOwnerReference ensures that LLV has ownerReference pointing to RVR.
-// If ownerReference is missing, it sets it. If ownerReference exists but points to different RVR,
-// it logs a warning and updates it to point to the correct RVR.
-func ensureLLVOwnerReference(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
-	// Find existing ownerReference for ReplicatedVolumeReplica
-	var existingOwnerRef *metav1.OwnerReference
-	var ownerRefIndex = -1
-	for i, ownerRef := range llv.OwnerReferences {
-		if ownerRef.Kind == "ReplicatedVolumeReplica" {
-			existingOwnerRef = &llv.OwnerReferences[i]
-			ownerRefIndex = i
-			break
-		}
-	}
-
-	// Check if ownerReference needs to be set or updated
-	var needsUpdate bool
-	switch {
-	case existingOwnerRef == nil:
-		// No ownerReference found, need to add it
-		log.V(4).Info("LLV has no ownerReference, setting it", "llvName", llv.Name, "rvrName", rvr.Name)
-		needsUpdate = true
-	case existingOwnerRef.Name != rvr.Name:
-		// OwnerReference exists but points to different RVR
-		log.Info("LLV ownerReference points to different RVR, updating it",
-			"llvName", llv.Name,
-			"currentOwnerName", existingOwnerRef.Name,
-			"newOwnerName", rvr.Name)
-		needsUpdate = true
-	default:
-		// OwnerReference is correct, no update needed
-		log.V(4).Info("LLV ownerReference is correct", "llvName", llv.Name, "rvrName", rvr.Name)
-		return nil
-	}
-
-	if !needsUpdate {
-		return nil
-	}
-
-	// Prepare ownerReference
-	gvk := schema.GroupVersionKind{
-		Group:   v1alpha3.SchemeGroupVersion.Group,
-		Version: v1alpha3.SchemeGroupVersion.Version,
-		Kind:    "ReplicatedVolumeReplica",
-	}
-	newOwnerRef := metav1.OwnerReference{
-		APIVersion:         gvk.GroupVersion().String(),
-		Kind:               gvk.Kind,
-		Name:               rvr.Name,
-		UID:                rvr.UID,
-		Controller:         utils.Ptr(true),
-		BlockOwnerDeletion: utils.Ptr(true),
-	}
-
-	// Update ownerReference
-	patch := client.MergeFrom(llv.DeepCopy())
-	if ownerRefIndex >= 0 {
-		// Replace existing ownerReference
-		llv.OwnerReferences[ownerRefIndex] = newOwnerRef
-	} else {
-		// Add new ownerReference
-		llv.OwnerReferences = append(llv.OwnerReferences, newOwnerRef)
-	}
-
-	if err := cl.Patch(ctx, llv, patch); err != nil {
-		return fmt.Errorf("patching LLV ownerReference: %w", err)
-	}
-
-	log.Info("LLV ownerReference updated successfully", "llvName", llv.Name, "rvrName", rvr.Name)
-	return nil
-}
-
 // deleteLLV deletes a LVMLogicalVolume from the cluster.
 // If the object is already marked for deletion (has DeletionTimestamp), it removes only our finalizer.
 func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, log logr.Logger) error {
 	if llv.DeletionTimestamp == nil {
-		if err := cl.Delete(ctx, llv); !apierrors.IsNotFound(err) && err != nil {
+		if err := cl.Delete(ctx, llv); err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("deleting LVMLogicalVolume %s: %w", llv.Name, err)
 		}
 		log.Info("LVMLogicalVolume marked for deletion", "llvName", llv.Name)
@@ -410,7 +314,8 @@ func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume,
 }
 
 // getReplicatedVolumeByName gets a ReplicatedVolume from the cluster by name.
-// Returns the ReplicatedVolume object if found, nil if not found, or an error.
+// Returns the ReplicatedVolume object and nil error if found, or nil and nil if not found (NotFound is handled and returns nil, nil),
+// or nil and an error on failure.
 func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName string) (*v1alpha3.ReplicatedVolume, error) {
 	rv := &v1alpha3.ReplicatedVolume{}
 	key := client.ObjectKey{Name: rvName}
