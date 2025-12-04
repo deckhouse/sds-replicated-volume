@@ -23,6 +23,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	. "github.com/onsi/gomega/gstruct"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,6 +35,10 @@ import (
 	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 )
+
+func uintPtr(v uint) *uint {
+	return &v
+}
 
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
@@ -157,7 +162,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying deviceMinor was assigned")
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-					Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", v1alpha3.RVMinDeviceMinor)), "first volume should get deviceMinor RVMinDeviceMinor")
+					Expect(updatedRV).To(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", v1alpha3.RVMinDeviceMinor))), "first volume should get deviceMinor RVMinDeviceMinor")
 				})
 			},
 		)
@@ -171,7 +176,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor),
 							},
 						},
 					},
@@ -181,7 +186,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor),
 							},
 						},
 					},
@@ -192,7 +197,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor + 1,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -202,7 +207,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor + 1,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -212,7 +217,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor + 1,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -223,7 +228,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: v1alpha3.RVMinDeviceMinor + 2,
+								DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor + 2),
 							},
 						},
 					},
@@ -243,7 +248,7 @@ var _ = Describe("Reconciler", func() {
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvD1), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 					return updatedRV
-				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", v1alpha3.RVMinDeviceMinor+3)), "should assign deviceMinor 3 to D1")
+				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", v1alpha3.RVMinDeviceMinor+3))), "should assign deviceMinor 3 to D1")
 
 				// Reconcile any volume to trigger duplicate detection
 				Expect(rec.Reconcile(ctx, RequestFor(rvA1))).ToNot(Requeue(), "should trigger duplicate detection")
@@ -410,7 +415,7 @@ var _ = Describe("Reconciler", func() {
 							Status: &v1alpha3.ReplicatedVolumeStatus{
 								DRBD: &v1alpha3.DRBDResource{
 									Config: &v1alpha3.DRBDResourceConfig{
-										DeviceMinor: uint(i),
+										DeviceMinor: uintPtr(uint(i)),
 									},
 								},
 							},
@@ -425,7 +430,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
-									DeviceMinor: 6,
+									DeviceMinor: uintPtr(6),
 								},
 							},
 						},
@@ -435,7 +440,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
-									DeviceMinor: 8,
+									DeviceMinor: uintPtr(8),
 								},
 							},
 						},
@@ -445,7 +450,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
-									DeviceMinor: 9,
+									DeviceMinor: uintPtr(9),
 								},
 							},
 						},
@@ -473,7 +478,7 @@ var _ = Describe("Reconciler", func() {
 						updatedRV := &v1alpha3.ReplicatedVolume{}
 						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv6), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 						return updatedRV
-					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 5)), "should assign deviceMinor 5 as next sequential value")
+					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", 5))), "should assign deviceMinor 5 as next sequential value")
 
 					By("Reconciling until volume gets gap-filled deviceMinor (7) between 6 and 8")
 					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
@@ -481,7 +486,7 @@ var _ = Describe("Reconciler", func() {
 						updatedRV := &v1alpha3.ReplicatedVolume{}
 						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvGap4), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 						return updatedRV
-					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 7)), "should assign deviceMinor 7 to fill gap between 6 and 8")
+					}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", 7))), "should assign deviceMinor 7 to fill gap between 6 and 8")
 				})
 			})
 		})
@@ -493,7 +498,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
-								DeviceMinor: 42,
+								DeviceMinor: uintPtr(42),
 							},
 						},
 					},
@@ -509,8 +514,67 @@ var _ = Describe("Reconciler", func() {
 					updatedRV := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 					return updatedRV
-				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically("==", 42)), "deviceMinor should remain 42 after multiple reconciliations (idempotent)")
+				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", 42))), "deviceMinor should remain 42 after multiple reconciliations (idempotent)")
 			})
+		})
+	})
+
+	When("RV has DRBD.Config without explicit deviceMinor and 0 is already used", func() {
+		var (
+			rvExisting *v1alpha3.ReplicatedVolume
+			rvNew      *v1alpha3.ReplicatedVolume
+		)
+
+		BeforeEach(func() {
+			// Existing volume that already uses deviceMinor = RVMinDeviceMinor (0)
+			rvExisting = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-zero-used"},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					DRBD: &v1alpha3.DRBDResource{
+						Config: &v1alpha3.DRBDResourceConfig{
+							DeviceMinor: uintPtr(v1alpha3.RVMinDeviceMinor), // 0
+						},
+					},
+				},
+			}
+
+			// New volume: DRBD.Config is already initialized, but DeviceMinor was never set explicitly
+			// (the pointer stays nil and the field is not present in the JSON). We expect the controller
+			// to treat this as "minor is not assigned yet" and pick the next free value (1), instead of
+			// reusing 0 which is already taken by another volume.
+			rvNew = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{Name: "volume-config-no-minor"},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					DRBD: &v1alpha3.DRBDResource{
+						Config: &v1alpha3.DRBDResourceConfig{
+							SharedSecret:    "test-secret",
+							SharedSecretAlg: "alg",
+							// DeviceMinor is not set here – the pointer remains nil and the field is not present in JSON.
+						},
+					},
+				},
+			}
+		})
+
+		JustBeforeEach(func(ctx SpecContext) {
+			Expect(cl.Create(ctx, rvExisting)).To(Succeed(), "should create existing ReplicatedVolume")
+			Expect(cl.Create(ctx, rvNew)).To(Succeed(), "should create new ReplicatedVolume")
+		})
+
+		It("treats zero-value deviceMinor as unassigned and picks next free value", func(ctx SpecContext) {
+			By("Reconciling the RV with DRBD.Config but zero-value deviceMinor")
+			result, err := rec.Reconcile(ctx, RequestFor(rvNew))
+			Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
+			Expect(result).ToNot(Requeue(), "should not requeue after successful assignment")
+
+			By("Verifying next free deviceMinor was assigned (RVMinDeviceMinor + 1)")
+			updated := &v1alpha3.ReplicatedVolume{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvNew), updated)).To(Succeed(), "should get updated ReplicatedVolume")
+
+			Expect(updated).To(HaveField("Status.DRBD.Config.DeviceMinor",
+				PointTo(BeNumerically("==", v1alpha3.RVMinDeviceMinor+1))),
+				"new volume should get the next free deviceMinor, since 0 is already used",
+			)
 		})
 	})
 
@@ -588,7 +652,7 @@ var _ = Describe("Reconciler", func() {
 				updatedRV := &v1alpha3.ReplicatedVolume{}
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 				return updatedRV
-			}).Should(HaveField("Status.DRBD.Config.DeviceMinor", BeNumerically(">=", v1alpha3.RVMinDeviceMinor)), "deviceMinor should be assigned after retry")
+			}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically(">=", v1alpha3.RVMinDeviceMinor))), "deviceMinor should be assigned after retry")
 		})
 	})
 })

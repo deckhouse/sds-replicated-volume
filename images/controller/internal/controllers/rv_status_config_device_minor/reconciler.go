@@ -69,8 +69,8 @@ func (r *Reconciler) Reconcile(
 	// Collect used deviceMinors from all RVs and find duplicates
 	deviceMinorToVolumes := make(map[uint][]string)
 	for _, item := range rvList.Items {
-		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
-			deviceMinor := item.Status.DRBD.Config.DeviceMinor
+		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.DeviceMinor != nil {
+			deviceMinor := *item.Status.DRBD.Config.DeviceMinor
 			if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
 				deviceMinorToVolumes[deviceMinor] = append(deviceMinorToVolumes[deviceMinor], item.Name)
 			}
@@ -102,15 +102,27 @@ func (r *Reconciler) Reconcile(
 	// - We need to detect and report duplicates for all volumes using the same deviceMinor to prevent conflicts
 	// - Even volumes marked for deletion can cause conflicts if a new volume gets assigned the same deviceMinor
 	for _, item := range rvList.Items {
-		_, hasDuplicate := duplicateMessages[item.Name]
-		hasError := item.Status != nil && item.Status.Errors != nil && item.Status.Errors.DuplicateDeviceMinor != nil
+		duplicateMsg, hasDuplicate := duplicateMessages[item.Name]
 
-		// Skip if no change needed
-		if hasDuplicate == hasError && (!hasDuplicate || item.Status.Errors.DuplicateDeviceMinor.Message == duplicateMessages[item.Name]) {
+		var currentErrMsg string
+		hasError := false
+		if item.Status != nil && item.Status.Errors != nil && item.Status.Errors.DuplicateDeviceMinor != nil {
+			currentErrMsg = item.Status.Errors.DuplicateDeviceMinor.Message
+			hasError = true
+		}
+
+		// Skip if no change needed:
+		// 1) no duplicate and no error
+		if !hasDuplicate && !hasError {
 			continue
 		}
 
-		// Prepare patch
+		// 2) duplicate exists, error exists, and message is already up-to-date
+		if hasDuplicate && hasError && currentErrMsg == duplicateMsg {
+			continue
+		}
+
+		// Prepare patch to set/clear error
 		from := client.MergeFrom(&item)
 		changedRV := item.DeepCopy()
 		if changedRV.Status == nil {
@@ -123,7 +135,7 @@ func (r *Reconciler) Reconcile(
 		if hasDuplicate {
 			// Set error for duplicate
 			changedRV.Status.Errors.DuplicateDeviceMinor = &v1alpha3.MessageError{
-				Message: duplicateMessages[item.Name],
+				Message: duplicateMsg,
 			}
 		} else {
 			// Clear error - no longer has duplicate
@@ -141,9 +153,9 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Check if deviceMinor already assigned and valid for this RV
-	// Note: DeviceMinor is uint (not *uint), so we check if Config exists and value is in valid range
-	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
-		deviceMinor := rv.Status.DRBD.Config.DeviceMinor
+	// Note: DeviceMinor is *uint, so we check if Config exists, pointer is not nil, and value is in valid range
+	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.DeviceMinor != nil {
+		deviceMinor := *rv.Status.DRBD.Config.DeviceMinor
 		if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
 			log.V(1).Info("deviceMinor already assigned and valid", "deviceMinor", deviceMinor)
 			return reconcile.Result{}, nil
@@ -151,15 +163,17 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Find first available deviceMinor (minimum free value)
-	var availableDeviceMinor *uint
+	var availableDeviceMinor uint
+	found := false
 	for i := v1alpha3.RVMinDeviceMinor; i <= v1alpha3.RVMaxDeviceMinor; i++ {
 		if _, exists := deviceMinorToVolumes[i]; !exists {
-			availableDeviceMinor = &i
+			availableDeviceMinor = i
+			found = true
 			break
 		}
 	}
 
-	if availableDeviceMinor == nil {
+	if !found {
 		// All deviceMinors are used - this is extremely unlikely (1,048,576 volumes),
 		// but we should handle it gracefully
 		err := fmt.Errorf(
@@ -183,14 +197,14 @@ func (r *Reconciler) Reconcile(
 	if changedRV.Status.DRBD.Config == nil {
 		changedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
 	}
-	changedRV.Status.DRBD.Config.DeviceMinor = *availableDeviceMinor
+	changedRV.Status.DRBD.Config.DeviceMinor = &availableDeviceMinor
 
 	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
 		log.Error(err, "Patching ReplicatedVolume status with deviceMinor")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("assigned deviceMinor to RV", "deviceMinor", *availableDeviceMinor)
+	log.Info("assigned deviceMinor to RV", "deviceMinor", availableDeviceMinor)
 
 	return reconcile.Result{}, nil
 }

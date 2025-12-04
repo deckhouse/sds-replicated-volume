@@ -22,4 +22,4 @@
 #   Generate all the modules:
 #       `for-each-mod go generate ./...`
 
-find -type f -name go.mod -execdir sh -c "$*" {} +
+find . -type f -name go.mod -execdir sh -c "$*" {} +
