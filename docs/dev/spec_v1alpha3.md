@@ -57,6 +57,8 @@
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
+  - [`llv-owner-reference-controller`](#llv-owner-reference-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
 
 # Основные положения
 
@@ -681,7 +683,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Вывод 
   - Новое `llv`
-  - Обновление для уже существующих: `llv.metadata.ownerReference`
+  - Обновление для уже существующих: `llv.metadata.ownerReference` - вынесли в отдельный контроллер [`llv-owner-reference-controller`](#llv-owner-reference-controller)
   - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
 ## `rvr-gc-controller`
@@ -725,7 +727,7 @@ agent не удаляет ресурс из DRBD, пока есть чужие �
 
 Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
 `sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
-
+za
 ### Вывод 
  - `rvr.metada.ownerReference`
 
@@ -875,3 +877,16 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 
 ### Вывод 
   - `rvr.status.conditions`
+## `llv-owner-reference-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 1]
+
+### Цель 
+
+Поддерживать `llv.metada.ownerReference`, указывающий на `rvr`.
+
+Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
+`sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
+
+### Вывод 
+ - `llv.metada.ownerReference`
