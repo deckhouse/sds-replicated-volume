@@ -36,6 +36,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
+const (
+	llvTypeThick = "Thick"
+	llvTypeThin  = "Thin"
+)
+
 type Reconciler struct {
 	cl     client.Client
 	log    logr.Logger
@@ -214,9 +219,6 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 	if err != nil {
 		return fmt.Errorf("getting ReplicatedVolume: %w", err)
 	}
-	if rv == nil {
-		return fmt.Errorf("ReplicatedVolume not found")
-	}
 
 	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(ctx, cl, rv.Spec.ReplicatedStorageClassName, rvr.Spec.NodeName)
 	if err != nil {
@@ -235,9 +237,9 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 		},
 	}
 	if thinPoolName == "" {
-		llvNew.Spec.Type = "Thick"
+		llvNew.Spec.Type = llvTypeThick
 	} else {
-		llvNew.Spec.Type = "Thin"
+		llvNew.Spec.Type = llvTypeThin
 		llvNew.Spec.Thin = &snc.LVMLogicalVolumeThinSpec{
 			PoolName: thinPoolName,
 		}
@@ -305,16 +307,11 @@ func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume,
 }
 
 // getReplicatedVolumeByName gets a ReplicatedVolume from the cluster by name.
-// Returns the ReplicatedVolume object and nil error if found, or nil and nil if not found (NotFound is handled and returns nil, nil),
-// or nil and an error on failure.
+// Returns the ReplicatedVolume object and nil error if found, or nil and an error if not found or on failure.
 func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName string) (*v1alpha3.ReplicatedVolume, error) {
 	rv := &v1alpha3.ReplicatedVolume{}
-	key := client.ObjectKey{Name: rvName}
-	if err := cl.Get(ctx, key, rv); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("getting ReplicatedVolume %s: %w", rvName, err)
+	if err := cl.Get(ctx, client.ObjectKey{Name: rvName}, rv); err != nil {
+		return nil, err
 	}
 	return rv, nil
 }
@@ -326,8 +323,7 @@ func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName str
 func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client, rscName, nodeName string) (string, string, error) {
 	// Get ReplicatedStorageClass
 	rsc := &v1alpha1.ReplicatedStorageClass{}
-	key := client.ObjectKey{Name: rscName}
-	if err := cl.Get(ctx, key, rsc); err != nil {
+	if err := cl.Get(ctx, client.ObjectKey{Name: rscName}, rsc); err != nil {
 		return "", "", err
 	}
 
@@ -339,8 +335,7 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 
 	// Get ReplicatedStoragePool
 	rsp := &v1alpha1.ReplicatedStoragePool{}
-	key = client.ObjectKey{Name: storagePoolName}
-	if err := cl.Get(ctx, key, rsp); err != nil {
+	if err := cl.Get(ctx, client.ObjectKey{Name: storagePoolName}, rsp); err != nil {
 		return "", "", fmt.Errorf("getting ReplicatedStoragePool %s: %w", storagePoolName, err)
 	}
 
@@ -348,8 +343,7 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 	for _, rspLVG := range rsp.Spec.LVMVolumeGroups {
 		// Get LVMVolumeGroup resource to check its node
 		lvg := &snc.LVMVolumeGroup{}
-		key = client.ObjectKey{Name: rspLVG.Name}
-		if err := cl.Get(ctx, key, lvg); err != nil {
+		if err := cl.Get(ctx, client.ObjectKey{Name: rspLVG.Name}, lvg); err != nil {
 			return "", "", fmt.Errorf("getting LVMVolumeGroup %s: %w", rspLVG.Name, err)
 		}
 
