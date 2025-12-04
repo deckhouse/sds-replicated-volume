@@ -175,6 +175,9 @@ spec:
                         maxLength: 256
                         pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                         type: string
+                      initialSyncCompleted:
+                        default: false
+                        type: boolean
                     type: object
                   config:
                     properties:
@@ -191,10 +194,6 @@ spec:
                         - ipv4
                         - port
                         type: object
-                      disk:
-                        maxLength: 256
-                        pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                        type: string
                       nodeId:
                         maximum: 7
                         minimum: 0
@@ -234,6 +233,23 @@ spec:
                         type: boolean
                       primary:
                         type: boolean
+                    type: object
+                  errors:
+                    properties:
+                      lastAdjustmentError:
+                        properties:
+                          exitCode:
+                            type: integer
+                          output:
+                            maxLength: 1024
+                            type: string
+                        type: object
+                      sharedSecretAlgSelectionError:
+                        properties:
+                          unsupportedAlg:
+                            maxLength: 1024
+                            type: string
+                        type: object
                     type: object
                   status:
                     properties:
@@ -425,6 +441,9 @@ spec:
                     - writeOrdering
                     type: object
                 type: object
+              lvmLogicalVolumeName:
+                maxLength: 256
+                type: string
             type: object
         required:
         - metadata

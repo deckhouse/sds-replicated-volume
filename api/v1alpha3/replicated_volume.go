@@ -78,6 +78,21 @@ type ReplicatedVolumeStatus struct {
 
 	// +optional
 	Phase string `json:"phase,omitempty"`
+
+	// +patchStrategy=merge
+	// +optional
+	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type MessageError struct {
+	Message string `json:"message,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedVolumeStatusErrors struct {
+	// +patchStrategy=merge
+	DuplicateDeviceId *MessageError `json:"duplicateDeviceId,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
