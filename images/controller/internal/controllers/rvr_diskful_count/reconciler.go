@@ -174,6 +174,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("No replicas to create")
 	}
 
+	// TODO: wait for all replicas to be created and ready before setting the condition
 	// Set condition that required number of replicas is reached
 	err = patchDiskfulReplicaCountReachedCondition(
 		ctx, r.cl, log, rv,
