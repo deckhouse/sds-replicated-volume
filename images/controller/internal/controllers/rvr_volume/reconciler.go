@@ -61,7 +61,6 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *R
 // Reconcile reconciles a ReplicatedVolumeReplica by managing its associated LVMLogicalVolume.
 // It handles creation, deletion, and status updates of LVMLogicalVolumes based on the RVR state.
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling started")
 	start := time.Now()
