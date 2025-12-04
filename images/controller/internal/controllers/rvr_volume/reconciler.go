@@ -170,7 +170,7 @@ func getLLVByOwnerReference(ctx context.Context, cl client.Client, rvrName strin
 
 	for i := range llvList.Items {
 		llv := &llvList.Items[i]
-		for _, ownerRef := range llv.OwnerReferences {
+		if ownerRef := metav1.GetControllerOf(llv); ownerRef != nil {
 			if ownerRef.Kind == "ReplicatedVolumeReplica" && ownerRef.Name == rvrName {
 				return llv, nil
 			}
