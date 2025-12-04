@@ -172,7 +172,7 @@ spec:
                 type: object
               errors:
                 properties:
-                  duplicateDeviceMinor:
+                  duplicateDeviceId:
                     properties:
                       message:
                         type: string

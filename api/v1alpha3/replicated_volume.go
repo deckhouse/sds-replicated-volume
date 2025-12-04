@@ -92,15 +92,7 @@ type MessageError struct {
 // +k8s:deepcopy-gen=true
 type ReplicatedVolumeStatusErrors struct {
 	// +patchStrategy=merge
-	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
-}
-
-func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
-	return s.Conditions
-}
-
-func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
-	s.Conditions = conditions
+	DuplicateDeviceId *MessageError `json:"duplicateDeviceId,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
