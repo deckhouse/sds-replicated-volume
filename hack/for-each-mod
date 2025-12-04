@@ -23,15 +23,4 @@
 #       `for-each-mod go generate ./...`
 #
 
-os="$(uname -s)"
-
-case "$os" in
-  Darwin)
-    # BSD find on macOS: keep expression simple and portable.
-    find . -name go.mod -execdir sh -c "$*" {} +
-    ;;
-  *)
-    # Original behaviour (Linux / CI, etc.).
-    find . -type f -name go.mod -execdir sh -c "$*" {} +
-    ;;
-esac
+find . -type f -name go.mod -execdir sh -c "$*" {} +

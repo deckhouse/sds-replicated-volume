@@ -21,9 +21,9 @@ import (
 	"slices"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -43,9 +43,13 @@ func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 }
 
 func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
+	if rvStatus == nil {
+		return false
+	}
+
+	return meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
+		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeAllReplicasReady) &&
+		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
 
 type Reconciler struct {
@@ -156,8 +160,8 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus.DRBD.Config.Quorum = quorum
 	rvStatus.DRBD.Config.QuorumMinimumRedundancy = qmr
 
-	if !conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeQuorumConfigured) {
-		conditions.Set(rvStatus, metav1.Condition{
+	if !meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeQuorumConfigured) {
+		meta.SetStatusCondition(&rvStatus.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeQuorumConfigured,
 			Status:  metav1.ConditionTrue,
 			Reason:  "QuorumConfigured", // TODO: change reason
