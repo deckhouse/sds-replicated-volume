@@ -234,13 +234,15 @@ var _ = Describe("Reconcile", func() {
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
-					Expect(rvList.Items).To(HaveLen(1))
-					got := &rvList.Items[0]
-
-					// no PublishSucceeded condition should be present
-					for _, cond := range got.Status.Conditions {
-						Expect(cond.Type).NotTo(Equal(rvpublishcontroller.ConditionTypePublishSucceeded))
-					}
+					Expect(rvList.Items).To(SatisfyAll(
+						HaveLen(1),
+						HaveEach(HaveField(
+							"Status.Conditions",
+							Not(ContainElement(
+								HaveField("Type", Equal(rvpublishcontroller.ConditionTypePublishSucceeded)),
+							)),
+						)),
+					))
 				})
 			})
 
