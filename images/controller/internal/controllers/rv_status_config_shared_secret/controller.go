@@ -17,8 +17,6 @@ limitations under the License.
 package rvstatusconfigsharedsecret
 
 import (
-	"fmt"
-
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -34,7 +32,7 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetLogger().WithName(RVStatusConfigSharedSecretControllerName).WithName("Reconciler"),
 	)
 
-	err := builder.ControllerManagedBy(mgr).
+	return builder.ControllerManagedBy(mgr).
 		Named(RVStatusConfigSharedSecretControllerName).
 		For(&v1alpha3.ReplicatedVolume{}).
 		Watches(
@@ -66,12 +64,6 @@ func BuildController(mgr manager.Manager) error {
 			}),
 		).
 		Complete(rec)
-
-	if err != nil {
-		return fmt.Errorf("building controller: %w", err)
-	}
-
-	return nil
 }
 
 // HasUnsupportedAlgorithmError checks if RVR has SharedSecretAlgSelectionError in drbd.errors

@@ -18,7 +18,6 @@ package rvstatusconfigsharedsecret
 
 import (
 	"context"
-	"fmt"
 	"slices"
 
 	"github.com/go-logr/logr"
@@ -62,15 +61,15 @@ func (r *Reconciler) Reconcile(
 	// Check if sharedSecret is not set - generate new one
 	// Filtering through early return instead of WithEventFilter
 	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil || rv.Status.DRBD.Config.SharedSecret == "" {
-		return r.generateSharedSecret(ctx, rv, log)
+		return r.reconcileGenerateSharedSecret(ctx, rv, log)
 	}
 
 	// Check for UnsupportedAlgorithm errors in RVRs
-	return r.handleUnsupportedAlgorithm(ctx, rv, log)
+	return r.reconcileHandleUnsupportedAlgorithm(ctx, rv, log)
 }
 
-// generateSharedSecret generates a new shared secret and selects the first algorithm
-func (r *Reconciler) generateSharedSecret(
+// reconcileGenerateSharedSecret generates a new shared secret and selects the first algorithm
+func (r *Reconciler) reconcileGenerateSharedSecret(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
@@ -92,7 +91,7 @@ func (r *Reconciler) generateSharedSecret(
 	// Note: This check is on the copy, but if there's a race condition, Patch will return 409 Conflict
 	// and the next reconciliation will handle it correctly.
 	if changedRV.Status != nil && changedRV.Status.DRBD != nil && changedRV.Status.DRBD.Config != nil && changedRV.Status.DRBD.Config.SharedSecret != "" {
-		log.V(1).Info("sharedSecret already set", "algorithm", changedRV.Status.DRBD.Config.SharedSecretAlg)
+		log.V(1).Info("sharedSecret already set and valid", "algorithm", changedRV.Status.DRBD.Config.SharedSecretAlg)
 		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
 	}
 
@@ -108,12 +107,12 @@ func (r *Reconciler) generateSharedSecret(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("Generated shared secret", "algorithm", algorithm)
+	log.Info("Generated shared secret")
 	return reconcile.Result{}, nil
 }
 
-// handleUnsupportedAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
-func (r *Reconciler) handleUnsupportedAlgorithm(
+// reconcileHandleUnsupportedAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
+func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
@@ -121,7 +120,8 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	// Get all RVRs for this RV
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing RVRs: %w", err)
+		log.Error(err, "Listing ReplicatedVolumeReplicas")
+		return reconcile.Result{}, err
 	}
 
 	// Filter by replicatedVolumeName and check for UnsupportedAlgorithm errors
@@ -162,7 +162,7 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 	nextIndex := currentIndex + 1
 	if nextIndex >= len(algorithms) {
 		// All algorithms exhausted - stop trying
-		log.Error(nil, "All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
+		log.Info("All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
 		return reconcile.Result{}, nil
 	}
 
@@ -186,7 +186,7 @@ func (r *Reconciler) handleUnsupportedAlgorithm(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("Switched to new algorithm", "algorithm", nextAlgorithm)
+	log.Info("Switched to new algorithm")
 	return reconcile.Result{}, nil
 }
 

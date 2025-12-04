@@ -287,7 +287,7 @@ var _ = Describe("Reconciler", func() {
 		When("List fails", func() {
 			listError := errors.New("failed to list replicas")
 			BeforeEach(func() {
-				// Set sharedSecret so controller will check RVRs (handleUnsupportedAlgorithm)
+				// Set sharedSecret so controller will check RVRs (reconcileHandleUnsupportedAlgorithm)
 				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
