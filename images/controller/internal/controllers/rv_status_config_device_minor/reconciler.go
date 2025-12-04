@@ -19,6 +19,8 @@ package rvstatusconfigdeviceminor
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -50,14 +52,95 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
-	// Step 1: Get the ReplicatedVolume
+	// Get the ReplicatedVolume
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		log.Error(err, "Getting ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Step 2: Early exit if deviceMinor already assigned and valid
+	// List all RVs to collect used deviceMinors
+	rvList := &v1alpha3.ReplicatedVolumeList{}
+	if err := r.cl.List(ctx, rvList); err != nil {
+		log.Error(err, "listing RVs")
+		return reconcile.Result{}, err
+	}
+
+	// Collect used deviceMinors from all RVs and find duplicates
+	deviceMinorToVolumes := make(map[uint][]string)
+	for _, item := range rvList.Items {
+		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
+			deviceMinor := item.Status.DRBD.Config.DeviceMinor
+			if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
+				deviceMinorToVolumes[deviceMinor] = append(deviceMinorToVolumes[deviceMinor], item.Name)
+			}
+		}
+	}
+
+	// Build maps for duplicate volumes
+	duplicateMessages := make(map[string]string)
+	for deviceMinor, volumes := range deviceMinorToVolumes {
+		if len(volumes) > 1 {
+			// Found duplicate deviceMinor - mark all volumes with this deviceMinor
+			// Error message format: "deviceMinor X is used by volumes: [vol1 vol2 ...]"
+			errorMessage := strings.Join([]string{
+				"deviceMinor",
+				strconv.FormatUint(uint64(deviceMinor), 10),
+				"is used by volumes: [",
+				strings.Join(volumes, " "),
+				"]",
+			}, " ")
+			for _, volumeName := range volumes {
+				duplicateMessages[volumeName] = errorMessage
+			}
+		}
+	}
+
+	// Set/clear errors for all volumes in one pass
+	// Note: We process all volumes including those with DeletionTimestamp != nil because:
+	// - deviceMinor is a physical DRBD device identifier that remains in use until the volume is fully deleted
+	// - We need to detect and report duplicates for all volumes using the same deviceMinor to prevent conflicts
+	// - Even volumes marked for deletion can cause conflicts if a new volume gets assigned the same deviceMinor
+	for _, item := range rvList.Items {
+		_, hasDuplicate := duplicateMessages[item.Name]
+		hasError := item.Status != nil && item.Status.Errors != nil && item.Status.Errors.DuplicateDeviceMinor != nil
+
+		// Skip if no change needed
+		if hasDuplicate == hasError && (!hasDuplicate || item.Status.Errors.DuplicateDeviceMinor.Message == duplicateMessages[item.Name]) {
+			continue
+		}
+
+		// Prepare patch
+		from := client.MergeFrom(&item)
+		changedRV := item.DeepCopy()
+		if changedRV.Status == nil {
+			changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		}
+		if changedRV.Status.Errors == nil {
+			changedRV.Status.Errors = &v1alpha3.ReplicatedVolumeStatusErrors{}
+		}
+
+		if hasDuplicate {
+			// Set error for duplicate
+			changedRV.Status.Errors.DuplicateDeviceMinor = &v1alpha3.MessageError{
+				Message: duplicateMessages[item.Name],
+			}
+		} else {
+			// Clear error - no longer has duplicate
+			changedRV.Status.Errors.DuplicateDeviceMinor = nil
+		}
+
+		if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
+			if hasDuplicate {
+				log.Error(err, "Patching ReplicatedVolume status with duplicate error", "volume", item.Name)
+			} else {
+				log.Error(err, "Patching ReplicatedVolume status to clear duplicate error", "volume", item.Name)
+			}
+			continue
+		}
+	}
+
+	// Check if deviceMinor already assigned and valid for this RV
 	// Note: DeviceMinor is uint (not *uint), so we check if Config exists and value is in valid range
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		deviceMinor := rv.Status.DRBD.Config.DeviceMinor
@@ -67,30 +150,10 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 
-	// Step 3: List all RVs to collect used deviceMinors
-	rvList := &v1alpha3.ReplicatedVolumeList{}
-	if err := r.cl.List(ctx, rvList); err != nil {
-		log.Error(err, "listing RVs")
-		return reconcile.Result{}, err
-	}
-
-	// Step 4: Collect used deviceMinors from all RVs
-	// Note: MaxConcurrentReconciles: 1 prevents parallel reconciles, ensuring unique assignment.
-	// Conflicts (409) from other controllers are handled by retry reconciliation.
-	usedDeviceMinors := make(map[uint]struct{}, len(rvList.Items))
-	for _, item := range rvList.Items {
-		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil {
-			deviceMinor := item.Status.DRBD.Config.DeviceMinor
-			if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
-				usedDeviceMinors[deviceMinor] = struct{}{}
-			}
-		}
-	}
-
-	// Step 5: Find first available deviceMinor (minimum free value)
+	// Find first available deviceMinor (minimum free value)
 	var availableDeviceMinor *uint
 	for i := v1alpha3.RVMinDeviceMinor; i <= v1alpha3.RVMaxDeviceMinor; i++ {
-		if _, used := usedDeviceMinors[i]; !used {
+		if _, exists := deviceMinorToVolumes[i]; !exists {
 			availableDeviceMinor = &i
 			break
 		}
@@ -108,7 +171,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	// Step 6: Patch RV status with assigned deviceMinor
+	// Patch RV status with assigned deviceMinor
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()
 	if changedRV.Status == nil {
@@ -127,7 +190,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("assigned deviceMinor to RV", "deviceMinor", *availableDeviceMinor, "volume", rv.Name)
+	log.Info("assigned deviceMinor to RV", "deviceMinor", *availableDeviceMinor)
 
 	return reconcile.Result{}, nil
 }
