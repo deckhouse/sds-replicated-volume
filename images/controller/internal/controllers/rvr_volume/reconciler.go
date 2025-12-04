@@ -19,6 +19,7 @@ package rvrvolume
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -278,17 +279,11 @@ func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume,
 	}
 
 	// Remove only our finalizer, leaving others intact
-	hasOurFinalizer := false
-	newFinalizers := make([]string, 0, len(llv.Finalizers))
-	for _, finalizer := range llv.Finalizers {
-		if finalizer == finalizerName {
-			hasOurFinalizer = true
-		} else {
-			newFinalizers = append(newFinalizers, finalizer)
-		}
-	}
+	newFinalizers := slices.DeleteFunc(llv.Finalizers, func(f string) bool {
+		return f == finalizerName
+	})
 
-	if hasOurFinalizer {
+	if len(llv.Finalizers) != len(newFinalizers) {
 		log.V(4).Info("LVMLogicalVolume is marked for deletion, removing our finalizer", "llvName", llv.Name)
 		patch := client.MergeFrom(llv.DeepCopy())
 		llv.Finalizers = newFinalizers
