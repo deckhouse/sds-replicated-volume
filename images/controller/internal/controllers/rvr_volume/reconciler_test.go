@@ -804,7 +804,7 @@ var _ = Describe("Reconciler", func() {
 						lvg = nil
 					})
 
-					JustBeforeEach(func(ctx SpecContext) {
+					JustBeforeEach(func() {
 						// RVR, RV, RSC, and RSP are already created in parent JustBeforeEach, don't recreate them
 						// Don't create LVG (it's nil)
 					})
