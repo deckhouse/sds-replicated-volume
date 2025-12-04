@@ -33,21 +33,11 @@ import (
 	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 )
 
-var (
-	testScheme = func() *runtime.Scheme {
-		scheme := runtime.NewScheme()
-		_ = v1alpha3.AddToScheme(scheme)
-		return scheme
-	}()
-)
-
-func Requeue() OmegaMatcher {
-	return Not(Equal(reconcile.Result{}))
-}
-
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	_ = v1alpha3.AddToScheme(scheme)
+
+	var clientBuilder *fake.ClientBuilder
 
 	var cl client.Client
 	var rec *rvquorumcontroller.Reconciler
@@ -55,20 +45,21 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		cl = nil
 		rec = nil
-	})
-
-	JustBeforeEach(func() {
-		cl = fake.NewClientBuilder().
+		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{}).
-			Build()
+				&v1alpha3.ReplicatedVolume{})
+	})
+
+	JustBeforeEach(func() {
+		cl = clientBuilder.Build()
 		rec = rvquorumcontroller.NewReconciler(
 			cl,
 			nil,
 			GinkgoLogr,
 		)
+		clientBuilder = nil
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
@@ -110,35 +101,36 @@ var _ = Describe("Reconciler", func() {
 			}
 		})
 
-		DescribeTableSubtree("ReplicatedVolume is not ready",
+		DescribeTableSubtree("When any change disabled and RV is not ready",
 			func(beforeEach func()) {
-				BeforeEach(beforeEach)
-
-				It("should not set quorum config", func(ctx SpecContext) {
+				var isActive bool
+				BeforeEach(func() {
+					beforeEach()
+					isActive = false
+					clientBuilder.WithInterceptorFuncs(FailOnAnyChange(func() bool { return isActive }))
+				})
+				JustBeforeEach(func() {
+					isActive = true
+				})
+				It("should not requeue", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{
 						NamespacedName: client.ObjectKeyFromObject(rv),
 					})).NotTo(Requeue())
-
-					// Verify no quorum config was set
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-					if rv.Status != nil {
-						Expect(rv.Status.DRBD).To(BeNil())
-					}
 				})
 			},
-			Entry("when Status is nil", func() {
+			Entry("because Status is nil", func() {
 				rv.Status = nil
 			}),
-			Entry("when Conditions is nil", func() {
+			Entry("because Conditions is nil", func() {
 				if rv.Status == nil {
 					rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
 				}
 				rv.Status.Conditions = nil
 			}),
-			Entry("when Conditions is empty", func() {
+			Entry("because Conditions is empty", func() {
 				rv.Status.Conditions = []metav1.Condition{}
 			}),
-			Entry("when DiskfulReplicaCountReached is false", func() {
+			Entry("because DiskfulReplicaCountReached is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
 						Type:   v1alpha3.ConditionTypeDiskfulReplicaCountReached,
@@ -146,7 +138,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 			}),
-			Entry("when AllReplicasReady is false", func() {
+			Entry("because AllReplicasReady is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
 						Type:   v1alpha3.ConditionTypeAllReplicasReady,
@@ -154,7 +146,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 			}),
-			Entry("when SharedSecretAlgorithmSelected is false", func() {
+			Entry("because SharedSecretAlgorithmSelected is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
 						Type:   v1alpha3.ConditionTypeSharedSecretAlgorithmSelected,
@@ -162,7 +154,7 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 			}),
-			Entry("when multiple conditions are missing", func() {
+			Entry("because multiple conditions are missing", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
 						Type:   v1alpha3.ConditionTypeDiskfulReplicaCountReached,
@@ -205,7 +197,10 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify finalizers were added to RVRs
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-				Expect(rvrList[0].Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+				Expect(rvrList[0].Finalizers).To(SatisfyAll(
+					HaveLen(1),
+					ContainElement(rvquorumcontroller.QuorumReconfFinalizer),
+				))
 
 				// Verify QuorumConfigured condition is set
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())

@@ -31,7 +31,7 @@ import (
 )
 
 // QuorumReconfFinalizer is the name of the finalizer used to manage quorum reconfiguration.
-const QuorumReconfFinalizer = "quorum-reconf"
+const QuorumReconfFinalizer = "sds-replicated-volume.storage.deckhouse.io/controller-rv-status-config-quorum"
 
 // CalculateQuorum calculates quorum and quorum minimum redundancy values
 // based on the number of diskful and total replicas.
