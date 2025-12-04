@@ -67,6 +67,15 @@ func HaveDiskfulReplicaCountReachedConditionCreatedOrAvailable() OmegaMatcher {
 	return HaveDiskfulReplicaCountReachedConditionAvailable()
 }
 
+// HaveCondition is a matcher that checks if a slice of conditions contains a condition
+// with the specified type that matches the provided matcher.
+func HaveCondition(conditionType string, matcher OmegaMatcher) OmegaMatcher {
+	return ContainElement(SatisfyAll(
+		HaveField("Type", Equal(conditionType)),
+		matcher,
+	))
+}
+
 func Requeue() OmegaMatcher {
 	return Not(Equal(reconcile.Result{}))
 }
