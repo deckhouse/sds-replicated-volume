@@ -117,34 +117,28 @@ var _ = Describe("Reconcile", func() {
 					},
 				}
 
-				nodeList = []corev1.Node{
-					{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
-					{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
-				}
+				// reset lists before populating them
+				nodeList = nil
+				rvrList = v1alpha3.ReplicatedVolumeReplicaList{}
 
-				rvrList = v1alpha3.ReplicatedVolumeReplicaList{
-					Items: []v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-df1",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								NodeName:             nodeList[0].Name,
-								Type:                 "Diskful",
-							},
+				for i := 1; i <= 2; i++ {
+					node := corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: fmt.Sprintf("node-%d", i),
 						},
-						{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "rvr-df2",
-							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: rv.Name,
-								NodeName:             nodeList[1].Name,
-								Type:                 "Diskful",
-							},
+					}
+					nodeList = append(nodeList, node)
+
+					rvrList.Items = append(rvrList.Items, v1alpha3.ReplicatedVolumeReplica{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: fmt.Sprintf("rvr-df%d", i),
 						},
-					},
+						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             node.Name,
+							Type:                 "Diskful",
+						},
+					})
 				}
 			})
 
@@ -196,10 +190,12 @@ var _ = Describe("Reconcile", func() {
 							Type:                 "Diskful",
 						},
 					}}
+
+					old := scheme
+					DeferCleanup(func() { scheme = old })
+					scheme = nil
 				})
 				It("returns error when SetControllerReference fails", func(ctx SpecContext) {
-					// recreate reconciler with nil scheme to force SetControllerReference to fail
-					rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), nil)
 					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 					Expect(err).To(HaveOccurred())
 				})
@@ -221,30 +217,27 @@ var _ = Describe("Reconcile", func() {
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 					}
-					// clear initial RVRs so that JustBeforeEach in this context does not create them
-					rvrList.Items = nil
+					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-1",
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-2",
+								Type:                 "Access",
+							},
+						},
+					}
 				})
 
 				It("counts Access replicas in FD distribution", func(ctx SpecContext) {
-					rvr1 := v1alpha3.ReplicatedVolumeReplica{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: rv.Name,
-							NodeName:             "node-1",
-							Type:                 "Diskful",
-						},
-					}
-					rvr2 := v1alpha3.ReplicatedVolumeReplica{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: rv.Name,
-							NodeName:             "node-2",
-							Type:                 "Access",
-						},
-					}
-					Expect(cl.Create(ctx, &rvr1)).To(Succeed())
-					Expect(cl.Create(ctx, &rvr2)).To(Succeed())
-
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
@@ -257,12 +250,6 @@ var _ = Describe("Reconcile", func() {
 
 			When("replicas without NodeName", func() {
 				BeforeEach(func() {
-					rv = v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
-						Spec: v1alpha3.ReplicatedVolumeSpec{
-							ReplicatedStorageClassName: "rsc1",
-						},
-					}
 					rsc = v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
 						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
@@ -427,9 +414,21 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("Get ReplicatedVolume fails", func() {
-				BeforeEach(func() {
-					builder.WithInterceptorFuncs(interceptor.Funcs{
+			DescribeTableSubtree("propagates client errors",
+				func(setupInterceptors func(*fake.ClientBuilder)) {
+					BeforeEach(func() {
+						setupInterceptors(builder)
+					})
+
+					It("returns same error", func(ctx SpecContext) {
+						Expect(rec.Reconcile(
+							ctx,
+							reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
+						)).Error().To(MatchError(expectedError))
+					})
+				},
+				Entry("Get ReplicatedVolume fails", func(b *fake.ClientBuilder) {
+					b.WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 							if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
 								return expectedError
@@ -437,19 +436,9 @@ var _ = Describe("Reconcile", func() {
 							return c.Get(ctx, key, obj, opts...)
 						},
 					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
-
-			When("Get ReplicatedStorageClass fails", func() {
-				BeforeEach(func() {
-					builder.WithInterceptorFuncs(interceptor.Funcs{
+				}),
+				Entry("Get ReplicatedStorageClass fails", func(b *fake.ClientBuilder) {
+					b.WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 							if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
 								return expectedError
@@ -457,19 +446,9 @@ var _ = Describe("Reconcile", func() {
 							return c.Get(ctx, key, obj, opts...)
 						},
 					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
-
-			When("List Nodes fails", func() {
-				BeforeEach(func() {
-					builder.WithInterceptorFuncs(interceptor.Funcs{
+				}),
+				Entry("List Nodes fails", func(b *fake.ClientBuilder) {
+					b.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							if _, ok := list.(*corev1.NodeList); ok {
 								return expectedError
@@ -477,19 +456,9 @@ var _ = Describe("Reconcile", func() {
 							return c.List(ctx, list, opts...)
 						},
 					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
-
-			When("List ReplicatedVolumeReplicaList fails", func() {
-				BeforeEach(func() {
-					builder.WithInterceptorFuncs(interceptor.Funcs{
+				}),
+				Entry("List ReplicatedVolumeReplicaList fails", func(b *fake.ClientBuilder) {
+					b.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
 								return expectedError
@@ -497,19 +466,9 @@ var _ = Describe("Reconcile", func() {
 							return c.List(ctx, list, opts...)
 						},
 					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
-
-			When("Create RVR fails", func() {
-				BeforeEach(func() {
-					builder.WithInterceptorFuncs(interceptor.Funcs{
+				}),
+				Entry("Create RVR fails", func(b *fake.ClientBuilder) {
+					b.WithInterceptorFuncs(interceptor.Funcs{
 						Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 							if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
 								return expectedError
@@ -517,15 +476,8 @@ var _ = Describe("Reconcile", func() {
 							return c.Create(ctx, obj, opts...)
 						},
 					})
-				})
-
-				It("returns same error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(
-						ctx,
-						reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-					)).Error().To(MatchError(expectedError))
-				})
-			})
+				}),
+			)
 
 		})
 
@@ -569,7 +521,11 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 			Expect(err.Error()).To(ContainSubstring("only supported for less than 4 failure domains"))
 		},
 		func(fd map[string]int) string {
-			return fmt.Sprintf("%d FDs -> error", len(fd))
+			s := []string{}
+			for _, v := range fd {
+				s = append(s, fmt.Sprintf("%d", v))
+			}
+			return fmt.Sprintf("%d FDs, %s replicas -> error", len(fd), strings.Join(s, "+"))
 		},
 		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 1}),
 		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2, "d": 2}),
