@@ -45,7 +45,7 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
@@ -56,7 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
 
 # Основные положения
 
@@ -687,7 +687,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 2]
+### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Контекст
 
