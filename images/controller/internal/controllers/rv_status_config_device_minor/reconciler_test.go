@@ -233,13 +233,9 @@ var _ = Describe("Reconciler", func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-d1"},
 				}
 
-				Expect(cl.Create(ctx, rvA1)).To(Succeed(), "should create ReplicatedVolume A1")
-				Expect(cl.Create(ctx, rvA2)).To(Succeed(), "should create ReplicatedVolume A2")
-				Expect(cl.Create(ctx, rvB1)).To(Succeed(), "should create ReplicatedVolume B1")
-				Expect(cl.Create(ctx, rvB2)).To(Succeed(), "should create ReplicatedVolume B2")
-				Expect(cl.Create(ctx, rvB3)).To(Succeed(), "should create ReplicatedVolume B3")
-				Expect(cl.Create(ctx, rvC1)).To(Succeed(), "should create ReplicatedVolume C1")
-				Expect(cl.Create(ctx, rvD1)).To(Succeed(), "should create ReplicatedVolume D1")
+				for _, rv := range []*v1alpha3.ReplicatedVolume{rvA1, rvA2, rvB1, rvB2, rvB3, rvC1, rvD1} {
+					Expect(cl.Create(ctx, rv)).To(Succeed(), fmt.Sprintf("should create ReplicatedVolume %s", rv.Name))
+				}
 
 				By("Reconciling D1 to assign deviceMinor and trigger duplicate detection")
 				Eventually(func(g Gomega) *v1alpha3.ReplicatedVolume {
@@ -257,39 +253,33 @@ var _ = Describe("Reconciler", func() {
 					// Check A1 and A2 have duplicate error
 					updatedA1 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA1), updatedA1)).To(Succeed())
-					g.Expect(updatedA1.Status.Errors).ToNot(BeNil(), "A1 should have errors")
-					g.Expect(updatedA1.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "A1 should have duplicate error")
-					g.Expect(updatedA1.Status.Errors.DuplicateDeviceMinor.Message).To(
-						And(
+					g.Expect(updatedA1).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
+						SatisfyAll(
 							ContainSubstring("deviceMinor"),
 							ContainSubstring("0"),
 							ContainSubstring("is used by volumes:"),
 							ContainSubstring("volume-dup-a1"),
 							ContainSubstring("volume-dup-a2"),
 						),
-					)
+					), "A1 should have duplicate error message")
 
 					updatedA2 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA2), updatedA2)).To(Succeed())
-					g.Expect(updatedA2.Status.Errors).ToNot(BeNil(), "A2 should have errors")
-					g.Expect(updatedA2.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "A2 should have duplicate error")
-					g.Expect(updatedA2.Status.Errors.DuplicateDeviceMinor.Message).To(
-						And(
+					g.Expect(updatedA2).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
+						SatisfyAll(
 							ContainSubstring("deviceMinor"),
 							ContainSubstring("0"),
 							ContainSubstring("is used by volumes:"),
 							ContainSubstring("volume-dup-a1"),
 							ContainSubstring("volume-dup-a2"),
 						),
-					)
+					), "A2 should have duplicate error message")
 
 					// Check B1, B2, B3 have duplicate error
 					updatedB1 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB1), updatedB1)).To(Succeed())
-					g.Expect(updatedB1.Status.Errors).ToNot(BeNil(), "B1 should have errors")
-					g.Expect(updatedB1.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "B1 should have duplicate error")
-					g.Expect(updatedB1.Status.Errors.DuplicateDeviceMinor.Message).To(
-						And(
+					g.Expect(updatedB1).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
+						SatisfyAll(
 							ContainSubstring("deviceMinor"),
 							ContainSubstring("1"),
 							ContainSubstring("is used by volumes:"),
@@ -297,31 +287,31 @@ var _ = Describe("Reconciler", func() {
 							ContainSubstring("volume-dup-b2"),
 							ContainSubstring("volume-dup-b3"),
 						),
-					)
+					), "B1 should have duplicate error message")
 
 					updatedB2 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB2), updatedB2)).To(Succeed())
-					g.Expect(updatedB2.Status.Errors).ToNot(BeNil(), "B2 should have errors")
-					g.Expect(updatedB2.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "B2 should have duplicate error")
+					g.Expect(updatedB2).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B2 should have duplicate error")
 
 					updatedB3 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					g.Expect(updatedB3.Status.Errors).ToNot(BeNil(), "B3 should have errors")
-					g.Expect(updatedB3.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "B3 should have duplicate error")
+					g.Expect(updatedB3).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B3 should have duplicate error")
 
 					// Check C1 has no error (single volume, no duplicate)
 					updatedC1 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvC1), updatedC1)).To(Succeed())
-					if updatedC1.Status.Errors != nil {
-						g.Expect(updatedC1.Status.Errors.DuplicateDeviceMinor).To(BeNil(), "C1 should not have duplicate error")
-					}
+					g.Expect(updatedC1).To(Or(
+						HaveField("Status.Errors", BeNil()),
+						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
+					), "C1 should not have duplicate error")
 
 					// Check D1 has no error (single volume, no duplicate)
 					updatedD1 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvD1), updatedD1)).To(Succeed())
-					if updatedD1.Status.Errors != nil {
-						g.Expect(updatedD1.Status.Errors.DuplicateDeviceMinor).To(BeNil(), "D1 should not have duplicate error")
-					}
+					g.Expect(updatedD1).To(Or(
+						HaveField("Status.Errors", BeNil()),
+						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
+					), "D1 should not have duplicate error")
 				}).Should(Succeed(), "error messages should be set correctly")
 
 				By("Removing A1 and B1, verifying partial resolution")
@@ -355,20 +345,19 @@ var _ = Describe("Reconciler", func() {
 					// A2 should have no error (only one volume left with deviceMinor=0)
 					updatedA2 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA2), updatedA2)).To(Succeed())
-					if updatedA2.Status.Errors != nil {
-						g.Expect(updatedA2.Status.Errors.DuplicateDeviceMinor).To(BeNil(), "A2 should not have duplicate error after A1 deletion")
-					}
+					g.Expect(updatedA2).To(Or(
+						HaveField("Status.Errors", BeNil()),
+						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
+					), "A2 should not have duplicate error after A1 deletion")
 
 					// B2 and B3 should still have errors (2 volumes still share deviceMinor=1)
 					updatedB2 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB2), updatedB2)).To(Succeed())
-					g.Expect(updatedB2.Status.Errors).ToNot(BeNil(), "B2 should still have errors")
-					g.Expect(updatedB2.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "B2 should still have duplicate error")
+					g.Expect(updatedB2).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B2 should still have duplicate error")
 
 					updatedB3 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					g.Expect(updatedB3.Status.Errors).ToNot(BeNil(), "B3 should still have errors")
-					g.Expect(updatedB3.Status.Errors.DuplicateDeviceMinor).ToNot(BeNil(), "B3 should still have duplicate error")
+					g.Expect(updatedB3).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B3 should still have duplicate error")
 				}).Should(Succeed(), "partial resolution should work correctly")
 
 				By("Removing B2, verifying full resolution")
@@ -395,9 +384,10 @@ var _ = Describe("Reconciler", func() {
 					// B3 should have no error (only one volume left with deviceMinor=1)
 					updatedB3 := &v1alpha3.ReplicatedVolume{}
 					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					if updatedB3.Status.Errors != nil {
-						g.Expect(updatedB3.Status.Errors.DuplicateDeviceMinor).To(BeNil(), "B3 should not have duplicate error after B2 deletion")
-					}
+					g.Expect(updatedB3).To(Or(
+						HaveField("Status.Errors", BeNil()),
+						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
+					), "B3 should not have duplicate error after B2 deletion")
 				}).Should(Succeed(), "full resolution should work correctly")
 			})
 
