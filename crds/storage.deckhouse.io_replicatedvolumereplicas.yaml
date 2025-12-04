@@ -230,6 +230,9 @@ spec:
                           The key in this map is the node name where the peer replica is located.
                         type: object
                       peersInitialized:
+                        description: |-
+                          PeersInitialized indicates that Peers has been calculated.
+                          This field is used to distinguish between no peers and not yet calculated.
                         type: boolean
                       primary:
                         type: boolean
