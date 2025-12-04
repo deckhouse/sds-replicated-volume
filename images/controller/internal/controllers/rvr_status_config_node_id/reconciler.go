@@ -50,14 +50,14 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
-	// Step 1: Get the ReplicatedVolume (parent resource)
+	// Get the ReplicatedVolume (parent resource)
 	var rv v1alpha3.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
 		log.Error(err, "Getting ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Step 2: List all RVRs and filter by replicatedVolumeName
+	// List all RVRs and filter by replicatedVolumeName
 	// Note: We list all RVRs and filter in memory instead of using owner reference index
 	// to avoid requiring a custom index field setup in the manager.
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -77,7 +77,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	// Step 3: Collect used nodeIDs and find RVRs that need nodeID assignment
+	// Collect used nodeIDs and find RVRs that need nodeID assignment
 	// - RVRs with valid nodeID: add to usedNodeIDs map
 	// - RVRs without nodeID or with invalid nodeID: add to rvrsNeedingNodeID list
 	usedNodeIDs := make(map[uint]struct{})
@@ -106,7 +106,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	// Step 4: Find available nodeIDs (not in usedNodeIDs map)
+	// Find available nodeIDs (not in usedNodeIDs map)
 	availableNodeIDs := make([]uint, 0, int(v1alpha3.RVRMaxNodeID)+1)
 	for i := v1alpha3.RVRMinNodeID; i <= v1alpha3.RVRMaxNodeID; i++ {
 		if _, exists := usedNodeIDs[i]; !exists {
@@ -114,15 +114,14 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 
-	// Step 5: Warn if we don't have enough available nodeIDs, but continue assigning what we have
+	// Warn if we don't have enough available nodeIDs, but continue assigning what we have
 	// Remaining RVRs will get nodeIDs in the next reconcile when more become available
 	if len(availableNodeIDs) < len(rvrsNeedingNodeID) {
 		totalReplicas := len(rvrList.Items)
 		log.Info("not enough available nodeIDs, assigning available ones", "needed", len(rvrsNeedingNodeID), "available", len(availableNodeIDs), "replicas", totalReplicas, "max", int(v1alpha3.RVRMaxNodeID)+1, "volume", rv.Name)
 	}
 
-	// Step 6: Assign nodeIDs to RVRs that need them sequentially
-	// Warn if we have too many replicas or not enough available nodeIDs (checked above)
+	// Assign nodeIDs to RVRs that need them sequentially
 	// Note: We use ResourceVersion from List. Since we reconcile RV (not RVR) and process RVRs sequentially
 	// for each RV, no one can edit the same RVR simultaneously within our controller. This makes the code
 	// simple and solid, though not the fastest (no parallel processing of RVRs).
