@@ -320,8 +320,10 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Create(ctx, rvr2)).To(Succeed())
 			})
 
-			It("should return an error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(ContainSubstring("more non-deleted ReplicatedVolumeReplicas found than needed")))
+			It("should return no error and not create additional replicas", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				Expect(cl.List(ctx, rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(HaveLen(2))
 			})
 		})
 

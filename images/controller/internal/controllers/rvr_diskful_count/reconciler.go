@@ -148,13 +148,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
-	// warning message if more non-deleted RVRs found than needed
+	// Warning message if more non-deleted diskful RVRs found than needed.
+	// Processing such a situation is not the responsibility of this controller.
 	if len(nonDeletedRvrMap) > neededNumberOfReplicas {
-		log.V(1).Info("More non-deleted ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", len(nonDeletedRvrMap), "neededNumberOfReplicas", neededNumberOfReplicas)
+		log.V(1).Info("More non-deleted diskful ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", len(nonDeletedRvrMap), "neededNumberOfReplicas", neededNumberOfReplicas)
 
-		// TODO: should we set a condition here that there are more replicas than needed?
-
-		return reconcile.Result{}, fmt.Errorf("more non-deleted ReplicatedVolumeReplicas found than needed: %d > %d", len(nonDeletedRvrMap), neededNumberOfReplicas)
+		return reconcile.Result{}, nil
 	}
 
 	// Calculate number of replicas to create
