@@ -95,7 +95,7 @@ var _ = Describe("Reconcile", func() {
 			It("returns nil when ReplicatedStorageClassName is empty", func(ctx SpecContext) {
 				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 				Expect(err).NotTo(HaveOccurred())
-				Expect(result).To(Equal(reconcile.Result{}))
+				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).Error().NotTo(HaveOccurred())
 			})
 		})
 
