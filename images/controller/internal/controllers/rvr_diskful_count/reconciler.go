@@ -113,7 +113,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	log.V(4).Info("Counted RVRs", "total", len(totalRvrMap), "deleted", len(deletedRvrMap), "nonDeleted", len(nonDeletedRvrMap))
 
-	if len(nonDeletedRvrMap) == 0 {
+	switch {
+	case len(nonDeletedRvrMap) == 0:
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
 		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
 		if err != nil {
@@ -132,10 +133,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 
 		return reconcile.Result{}, err
-	}
 
-	// Need to wait until RVR becomes Ready.
-	if len(nonDeletedRvrMap) == 1 {
+	case len(nonDeletedRvrMap) == 1:
+		// Need to wait until RVR becomes Ready.
 		for _, rvr := range nonDeletedRvrMap {
 			// Do nothing until the only non-deleted replica is ready
 			if !isRvrReady(rvr) {
@@ -146,13 +146,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// Ready condition is True, continue with the code
 			log.V(4).Info("RVR Ready condition is True, continuing", "rvr", rvr.Name)
 		}
-	}
 
-	// Warning message if more non-deleted diskful RVRs found than needed.
-	// Processing such a situation is not the responsibility of this controller.
-	if len(nonDeletedRvrMap) > neededNumberOfReplicas {
+	case len(nonDeletedRvrMap) > neededNumberOfReplicas:
+		// Warning message if more non-deleted diskful RVRs found than needed.
+		// Processing such a situation is not the responsibility of this controller.
 		log.V(1).Info("More non-deleted diskful ReplicatedVolumeReplicas found than needed", "nonDeletedNumberOfReplicas", len(nonDeletedRvrMap), "neededNumberOfReplicas", neededNumberOfReplicas)
-
 		return reconcile.Result{}, nil
 	}
 
