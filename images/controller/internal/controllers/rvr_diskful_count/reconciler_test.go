@@ -37,8 +37,7 @@ import (
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-
-// TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
+//
 //nolint:unparam // name and rv parameters are kept for flexibility in tests
 func createReplicatedVolumeReplica(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
