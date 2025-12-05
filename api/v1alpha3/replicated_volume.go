@@ -144,5 +144,5 @@ type DRBDResourceConfig struct {
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
-	DeviceMinor uint `json:"deviceMinor,omitempty"`
+	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }

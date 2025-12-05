@@ -585,6 +585,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
   - `rvr.status.drbd.config.peersInitialized`
 
 ## `rv-status-config-device-minor-controller`
+
 ### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
