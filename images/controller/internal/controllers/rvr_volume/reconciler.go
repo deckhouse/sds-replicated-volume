@@ -37,6 +37,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
+// TODO: Update sds-node-configurator to export this contants and reuse here
 const (
 	llvTypeThick = "Thick"
 	llvTypeThin  = "Thin"
