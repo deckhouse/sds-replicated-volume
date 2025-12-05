@@ -120,10 +120,7 @@ func BeDiskful() gomegatypes.GomegaMatcher {
 
 // BeNonDiskful returns a matcher that checks if RVR is not diskful
 func BeNonDiskful() gomegatypes.GomegaMatcher {
-	return SatisfyAny(
-		HaveField("Spec.Type", Equal("Access")),
-		HaveField("Spec.Type", Equal("TieBreaker")),
-	)
+	return Not(BeDiskful())
 }
 
 // HaveDeletionTimestamp returns a matcher that checks if object has deletion timestamp
