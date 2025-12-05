@@ -45,10 +45,10 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-gc-controller`](#rvr-gc-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
+    - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
@@ -56,7 +56,7 @@
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2-1)
+    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
 
 # Основные положения
 
@@ -356,6 +356,10 @@ TODO
 - удалить конфиги ресурса (основной и временный), если они есть
 - снять последний финализатор с rvr
 
+TODO:
+ - Агент (drbd-config) должен ставить финалайзер agent на llv перед тем, как начинает ее использовать и снимать после того, как перестал.
+ - У реплики добавить отдельный condition FullyConnected, который НЕ влияет на Ready. Он true, когда у реплики есть связь со всеми ее пирами.
+
 ### Вывод 
   - `rvr.status.drbd.errors.*`
   - `rvr.status.drbd.actual.*`
@@ -572,13 +576,14 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 Готовая RVR - та, у которой `spec.nodeName!="", status.nodeId !=nil, status.address != nil`
 
 После первой инициализации, даже в случае отсутствия пиров, требуется поставить
-`rvr.status.drbd.config.peersInitialized=true` в том же патче. 
+`rvr.status.drbd.config.peersInitialized=true` в том же патче.
 
 ### Вывод
   - `rvr.status.drbd.config.peers`
   - `rvr.status.drbd.config.peersInitialized`
 
 ## `rv-status-config-device-minor-controller`
+
 ### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Цель
@@ -686,37 +691,35 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ## `rvr-gc-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 2]
+### Статус: [OK | priority: 5 | complexity: 2]
 
 ### Контекст
 
-TODO
-`sds-replicated-volume.storage.deckhouse.io/agent`
-`sds-replicated-volume.storage.deckhouse.io/controller`
+Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD.
+  - `sds-replicated-volume.storage.deckhouse.io/agent` (далее - `F/agent`)
+  - `sds-replicated-volume.storage.deckhouse.io/controller` (далее - `F/controller`)
+
+При удалении RVR, agent не удаляет ресурс из DRBD, и не снимает финализаторы,
+пока стоит `F/controller`.
 
 ### Цель 
-Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD, и
-удаляет - после.
-  - `sds-replicated-volume.storage.deckhouse.io/agent`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
-agent не удаляет ресурс из DRBD, пока есть чужие финализаторы (свой финализатор
-всегда снимается последним).
+Цель `rvr-gc-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
+кластер к этому готов. Условия готовности:
 
-Цель `rvr-gc-controller` - снять финализатор, когда есть необходимое количество рабочих реплик в кластере,
-завершим тем самым удаление, вызванное по любой другой причине.
-
-Нельзя снимать финализатор, пока rvr фактически опубликована - `rvr.status.drbd.`
+- количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
+(исключая ту, которую собираются удалить) больше, либо равно `rv.status.drbd.config.quorum`
+- присутствует необходимое количество `rvr.status.actualType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
+соответствии с `rsc.spec.replication`
+- удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.publishedOn`
 
 
-### Триггер 
-  - 
-
-### Вывод 
+### Вывод
+ - удалить `rvr.metadata.finalizers[sds-replicated-volume.storage.deckhouse.io/controller]`
 
 ## `rvr-owner-reference-controller`
 
-### Статус: [TBD | priority: 5 | complexity: 1]
+### Статус: [OK | priority: 5 | complexity: 1]
 
 ### Цель 
 

@@ -21,6 +21,8 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 // +k8s:deepcopy-gen=true
@@ -42,6 +44,7 @@ import (
 // +kubebuilder:printcolumn:name="DevicesReady",type=string,JSONPath=".status.conditions[?(@.type=='DevicesReady')].status"
 // +kubebuilder:printcolumn:name="DiskIOSuspended",type=string,JSONPath=".status.conditions[?(@.type=='DiskIOSuspended')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+')).all(o, o.controller == true && o.name == self.spec.replicatedVolumeName)",message="All ReplicatedVolume ownerReferences must be ControllerReferences (controller == true) and their name must equal spec.replicatedVolumeName"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -51,6 +54,12 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+// SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.
+func (rvr *ReplicatedVolumeReplica) SetReplicatedVolume(rv *ReplicatedVolume, scheme *runtime.Scheme) error {
+	rvr.Spec.ReplicatedVolumeName = rv.Name
+	return controllerutil.SetControllerReference(rv, rvr, scheme)
 }
 
 // +k8s:deepcopy-gen=true
@@ -70,6 +79,10 @@ type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
 	Type string `json:"type"`
+}
+
+func (s *ReplicatedVolumeReplicaSpec) IsDiskless() bool {
+	return s.Type != "Diskful"
 }
 
 // +k8s:deepcopy-gen=true
@@ -139,9 +152,13 @@ type DRBDConfig struct {
 	// +optional
 	Address *Address `json:"address,omitempty"`
 
+	// Peers contains information about other replicas in the same ReplicatedVolume.
+	// The key in this map is the node name where the peer replica is located.
 	// +optional
 	Peers map[string]Peer `json:"peers,omitempty"`
 
+	// PeersInitialized indicates that Peers has been calculated.
+	// This field is used to distinguish between no peers and not yet calculated.
 	// +optional
 	PeersInitialized bool `json:"peersInitialized,omitempty"`
 

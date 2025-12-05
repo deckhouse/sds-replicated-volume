@@ -78,6 +78,21 @@ type ReplicatedVolumeStatus struct {
 
 	// +optional
 	Phase string `json:"phase,omitempty"`
+
+	// +patchStrategy=merge
+	// +optional
+	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type MessageError struct {
+	Message string `json:"message,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedVolumeStatusErrors struct {
+	// +patchStrategy=merge
+	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -129,5 +144,5 @@ type DRBDResourceConfig struct {
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
-	DeviceMinor uint `json:"deviceMinor,omitempty"`
+	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }
