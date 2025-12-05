@@ -465,7 +465,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("there are non-Diskful ReplicatedVolumeReplicas", func() {
-			When("ignoring non-Diskful replicas", func() {
+			When("non-Diskful replica successfully reconciled", func() {
 				var rvrNonDiskful *v1alpha3.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
