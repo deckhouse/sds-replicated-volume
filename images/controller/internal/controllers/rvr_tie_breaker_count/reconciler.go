@@ -96,7 +96,7 @@ func (r *Reconciler) Reconcile(
 				log.Error(ErrNoZoneLabel, "No zone label")
 				return reconcile.Result{}, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
-			FDKeyByNodeName[node.Name] = zone + "/" + node.Name
+			FDKeyByNodeName[node.Name] = zone
 		} else {
 			FDKeyByNodeName[node.Name] = node.Name
 		}
@@ -213,7 +213,8 @@ func CalculateDesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error)
 		return 0, nil
 	}
 
-	for tieBreakerCount := 0; tieBreakerCount <= fdCount; tieBreakerCount++ {
+	// TODO: tieBreakerCount <= totalBaseReplicas is not the best approach, need to rework later
+	for tieBreakerCount := 0; tieBreakerCount <= totalBaseReplicas; tieBreakerCount++ {
 		if IsThisTieBreakerCountEnough(FDReplicaCount, fdCount, totalBaseReplicas, tieBreakerCount) {
 			return tieBreakerCount, nil
 		}
@@ -264,6 +265,7 @@ func IsThisTieBreakerCountEnough(
 	*/
 
 	for _, replicasAlreadyInFD := range FDReplicaCount {
+		// 3 - 2 = 1
 		delta := replicasAlreadyInFD - replicasPerFDMin
 
 		if delta > 1 {

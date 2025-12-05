@@ -248,6 +248,81 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
+			/*
+
+			 */
+			When("more than one TieBreaker is required", func() {
+				BeforeEach(func() {
+					rv = v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
+						Spec: v1alpha3.ReplicatedVolumeSpec{
+							ReplicatedStorageClassName: "rsc1",
+						},
+					}
+					rsc = v1alpha1.ReplicatedStorageClass{
+						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
+						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
+					}
+					nodeList = []corev1.Node{
+						{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
+						{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}},
+						{ObjectMeta: metav1.ObjectMeta{Name: "node-c"}},
+					}
+					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-a1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-a",
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-b1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-b",
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-c1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-c",
+								Type:                 "Diskful",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc-c2"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-c",
+								Type:                 "Access",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc-c3"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: rv.Name,
+								NodeName:             "node-c",
+								Type:                 "Access",
+							},
+						},
+					}
+				})
+
+				It("creates two TieBreakers for FD distribution 1+1+3", func(ctx SpecContext) {
+					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(reconcile.Result{}))
+
+					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					Expect(cl.List(ctx, rvrList)).To(Succeed())
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(2)))
+				})
+			})
+
 			When("replicas without NodeName", func() {
 				BeforeEach(func() {
 					rsc = v1alpha1.ReplicatedStorageClass{
@@ -512,5 +587,6 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2}, 1),
 		Entry(nil, map[string]int{"a": 1, "b": 2, "c": 2}, 0),
 		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 3}, 2),
+		Entry(nil, map[string]int{"a": 1, "b": 3, "c": 5}, 4),
 	)
 })
