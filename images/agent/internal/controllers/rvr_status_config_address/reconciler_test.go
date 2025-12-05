@@ -351,7 +351,6 @@ var _ = Describe("Reconciler", func() {
 func HaveUniquePorts() gomegatypes.GomegaMatcher {
 	return gcustom.MakeMatcher(func(list []v1alpha3.ReplicatedVolumeReplica) (bool, error) {
 		result := make(map[uint]struct{}, len(list))
-
 		for i := range list {
 			if list[i].Status == nil ||
 				list[i].Status.DRBD == nil ||
