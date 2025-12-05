@@ -137,7 +137,7 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 
-	desiredTB, err := DesiredTieBreakerTotal(FDReplicaCount)
+	desiredTB, err := CalculateDesiredTieBreakerTotal(FDReplicaCount)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("calculate desired tie breaker count: %w", err)
 	}
@@ -198,77 +198,88 @@ func (r *Reconciler) Reconcile(
 	return reconcile.Result{}, nil
 }
 
-func DesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error) {
-	// number of distinct failure domains
+func CalculateDesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error) {
 	fdCount := len(FDReplicaCount)
 
-	// function is only guaranteed to work for fdCount < 4
-	if fdCount >= 4 {
-		return 0, fmt.Errorf("DesiredTieBreakerTotal is only supported for less than 4 failure domains, got %d", fdCount)
-	}
-
-	// if there is only one (or zero) failure domain, TieBreakers are not useful
 	if fdCount <= 1 {
 		return 0, nil
 	}
 
-	// count how many base (non-TieBreaker) replicas we already have across all FDs
 	totalBaseReplicas := 0
 	for _, v := range FDReplicaCount {
 		totalBaseReplicas += v
 	}
-	// no base replicas means nothing to protect with TieBreakers
 	if totalBaseReplicas == 0 {
 		return 0, nil
 	}
 
-	// search over TieBreakerCount (number of TieBreakers to add) starting from 0:
-	// we look for the minimal TieBreakerCount such that:
-	// - totalReplicas = totalBaseReplicas + TieBreakersCount is odd
-	// - replicas can be distributed over FDs with max(FD) - min(FD) <= 1
-	// bound TieBreakersCount by fdCount: more than one TieBreaker per FD would not be minimal
 	for tieBreakerCount := 0; tieBreakerCount <= fdCount; tieBreakerCount++ {
-		// if totalReplicas is even, it's not a valid solution
-		totalReplicas := totalBaseReplicas + tieBreakerCount
-		if totalReplicas%2 == 0 {
-			continue
+		if IsThisTieBreakerCountEnough(FDReplicaCount, fdCount, totalBaseReplicas, tieBreakerCount) {
+			return tieBreakerCount, nil
 		}
-
-		// per-FD replica range [minReplicasPerFD, minReplicasPerFD+1] with at most fdsWithOneMoreReplica FDs at the upper bound
-		minReplicasPerFD := totalReplicas / fdCount
-		fdsWithOneMoreReplica := totalReplicas % fdCount
-
-		fdsWithExtraReplica := 0
-		ok := true
-
-		// verify that base replicas can fit into [minReplicasPerFD, minReplicasPerFD+1] for each FD
-		for _, baseReplicasInFD := range FDReplicaCount {
-			// if a FD already has more than minReplicasPerFD+1 base replicas,
-			// then even the "high" bucket cannot accommodate it for this totalReplicas
-			if baseReplicasInFD > minReplicasPerFD+1 {
-				ok = false
-				break
-			}
-			// if a FD has strictly more than minReplicasPerFD base replicas,
-			// it must be assigned to the "high" bucket (minReplicasPerFD+1)
-			if baseReplicasInFD > minReplicasPerFD {
-				fdsWithExtraReplica++
-			}
-		}
-
-		if !ok {
-			continue
-		}
-
-		// we cannot assign more than fdsWithOneMoreReplica FDs to the "high" bucket minReplicasPerFD+1
-		if fdsWithExtraReplica > fdsWithOneMoreReplica {
-			continue
-		}
-
-		// tieBreakerCount is the minimal number of TieBreakers needed
-		return tieBreakerCount, nil
 	}
 
-	// fall-back: do not add TieBreakers if no suitable distribution was found
 	return 0, nil
+}
+
+func IsThisTieBreakerCountEnough(
+	FDReplicaCount map[string]int,
+	fdCount int,
+	totalBaseReplicas int,
+	tieBreakerCount int,
+) bool {
+	totalReplicas := totalBaseReplicas + tieBreakerCount
+	if totalReplicas%2 == 0 {
+		return false
+	}
+
+	/*
+		example:
+		totalReplicas 7
+		fdCount 3
+	*/
+
+	replicasPerFDMin := totalReplicas / fdCount // 2 (и 1 в остатке)
+	if replicasPerFDMin == 0 {
+		replicasPerFDMin = 1
+	}
+	maxFDsWithExtraReplica := totalReplicas % fdCount // 1
+
+	/*
+		fd 1: [replica] [replica]
+		fd 2: [replica] [replica]
+		fd 3: [replica] [replica]   *[extra replica]*
+
+		maxFDsWithExtraReplica == 1 means that 1 of these fds take an extra replica
+	*/
+
+	fdsAlreadyAboveMin := 0 // how many FDs have min+1 replica
+
+	/*
+		FDReplicaCount {
+			"1" : 3
+			"2" : 2
+			"3" : 1
+		}
+	*/
+
+	for _, replicasAlreadyInFD := range FDReplicaCount {
+		delta := replicasAlreadyInFD - replicasPerFDMin
+
+		if delta > 1 {
+			return false
+		}
+
+		if delta == 1 {
+			fdsAlreadyAboveMin++
+		}
+	}
+
+	// we expext fdsWithMaxReplicaPossible (which ew calculated just now) to be
+	// not more then we predicted earlier (maxFDsWithExtraReplica)
+	if fdsAlreadyAboveMin > maxFDsWithExtraReplica {
+		return false
+	}
+
+	return true
 }

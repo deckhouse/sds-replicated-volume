@@ -487,7 +487,7 @@ var _ = Describe("Reconcile", func() {
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTable("returns correct TieBreaker count for fdCount < 4",
 		func(fd map[string]int, expected int) {
-			got, err := rvrtiebreakercount.DesiredTieBreakerTotal(fd)
+			got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(Equal(expected))
 		},
@@ -512,24 +512,5 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2}, 1),
 		Entry(nil, map[string]int{"a": 1, "b": 2, "c": 2}, 0),
 		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 3}, 2),
-	)
-
-	DescribeTable("returns error for fdCount >= 4",
-		func(fd map[string]int) {
-			_, err := rvrtiebreakercount.DesiredTieBreakerTotal(fd)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("only supported for less than 4 failure domains"))
-		},
-		func(fd map[string]int) string {
-			s := []string{}
-			for _, v := range fd {
-				s = append(s, fmt.Sprintf("%d", v))
-			}
-			return fmt.Sprintf("%d FDs, %s replicas -> error", len(fd), strings.Join(s, "+"))
-		},
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 1}),
-		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2, "d": 2}),
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 2}),
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}),
 	)
 })
