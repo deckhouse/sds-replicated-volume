@@ -112,6 +112,30 @@ const (
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
 )
 
+// Condition types for [ReplicatedVolume] status
+const (
+	// [ConditionTypeDiskfulReplicaCountReached] indicates whether the required number of diskful replicas has been reached
+	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
+)
+
+// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
+const (
+	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
+	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
+)
+
+// Replication values for [ReplicatedStorageClass] spec
+const (
+	ReplicationNone                       = "None"
+	ReplicationAvailability               = "Availability"
+	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
+)
+
+// Replica type values for [ReplicatedVolumeReplica] spec
+const (
+	ReplicaTypeDiskful = "Diskful"
+)
+
 // Condition reasons for [ConditionTypeAddressConfigured] condition
 const (
 	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
