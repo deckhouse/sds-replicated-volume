@@ -35,5 +35,3 @@ case "$os" in
     find . -type f -name go.mod -execdir sh -c "$*" {} +
     ;;
 esac
-
-

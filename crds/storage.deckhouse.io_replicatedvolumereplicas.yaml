@@ -175,6 +175,9 @@ spec:
                         maxLength: 256
                         pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
                         type: string
+                      initialSyncCompleted:
+                        default: false
+                        type: boolean
                     type: object
                   config:
                     properties:
@@ -191,10 +194,6 @@ spec:
                         - ipv4
                         - port
                         type: object
-                      disk:
-                        maxLength: 256
-                        pattern: ^(/[a-zA-Z0-9/.+_-]+)?$
-                        type: string
                       nodeId:
                         maximum: 7
                         minimum: 0
@@ -231,9 +230,29 @@ spec:
                           The key in this map is the node name where the peer replica is located.
                         type: object
                       peersInitialized:
+                        description: |-
+                          PeersInitialized indicates that Peers has been calculated.
+                          This field is used to distinguish between no peers and not yet calculated.
                         type: boolean
                       primary:
                         type: boolean
+                    type: object
+                  errors:
+                    properties:
+                      lastAdjustmentError:
+                        properties:
+                          exitCode:
+                            type: integer
+                          output:
+                            maxLength: 1024
+                            type: string
+                        type: object
+                      sharedSecretAlgSelectionError:
+                        properties:
+                          unsupportedAlg:
+                            maxLength: 1024
+                            type: string
+                        type: object
                     type: object
                   status:
                     properties:
@@ -425,11 +444,17 @@ spec:
                     - writeOrdering
                     type: object
                 type: object
+              lvmLogicalVolumeName:
+                maxLength: 256
+                type: string
             type: object
         required:
         - metadata
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: "If ReplicatedVolumeReplica has any ReplicatedVolume ownerReference, there must be exactly one and spec.replicatedVolumeName must equal the ownerReference name"
+          rule: "!has(self.metadata.ownerReferences) || size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 0 || (size(self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))) == 1 && self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+'))[0].name == self.spec.replicatedVolumeName)"
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName

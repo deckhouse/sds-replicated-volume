@@ -50,6 +50,9 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
+
+	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
+	ConditionTypeAddressConfigured = "AddressConfigured"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -60,6 +63,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeConfigurationAdjusted: {false},
 	ConditionTypeQuorum:                {false},
 	ConditionTypeDiskIOSuspended:       {false},
+	ConditionTypeAddressConfigured:     {false},
 }
 
 // Condition reasons for [ConditionTypeReady] condition
@@ -118,4 +122,12 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
+)
+
+// Condition reasons for [ConditionTypeAddressConfigured] condition
+const (
+	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
+	ReasonNodeIPNotFound                = "NodeIPNotFound"
+	ReasonPortSettingsNotFound          = "PortSettingsNotFound"
+	ReasonNoFreePortAvailable           = "NoFreePortAvailable"
 )

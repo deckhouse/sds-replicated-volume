@@ -14,30 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrstatusconfigaddress
+package config
 
-type Request interface {
-	_isRequest()
+const (
+	ConfigMapNamespace = "d8-sds-replicated-volume"
+	ConfigMapName      = "controller-config"
+)
+
+type DRBDConfig struct {
+	MinPort uint
+	MaxPort uint
 }
 
-//
-
-type MainRequest struct {
-	Name string
+type Config struct {
+	HealthProbeBindAddress string
+	MetricsBindAddress     string
+	DRBD                   DRBDConfig
 }
-
-type AlternativeRequest struct {
-	Name string
-}
-
-// ...
-
-func (r MainRequest) _isRequest()        {}
-func (r AlternativeRequest) _isRequest() {}
-
-// ...
-
-var _ Request = MainRequest{}
-var _ Request = AlternativeRequest{}
-
-// ...

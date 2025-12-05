@@ -17,71 +17,29 @@ limitations under the License.
 package rvrstatusconfigaddress
 
 import (
-	"context"
-	"log/slog"
-
-	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 )
 
-func BuildController(mgr manager.Manager) error {
-	var rec = &Reconciler{
-		cl:  mgr.GetClient(),
-		rdr: mgr.GetAPIReader(),
-		sch: mgr.GetScheme(),
-		log: slog.Default(),
-	}
+func BuildController(mgr manager.Manager, cfg config.Config) error {
+	const controllerName = "rvr-status-config-address-controller"
 
-	type TReq = Request
-	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
+	log := mgr.GetLogger().WithName(controllerName)
+	var rec = NewReconciler(mgr.GetClient(), log, cfg.DRBD)
 
-	err := builder.TypedControllerManagedBy[TReq](mgr).
-		Named("rvr_status_config_address_controller").
+	return builder.ControllerManagedBy(mgr).
+		Named(controllerName).
+		// We reconciling nodes as single unit to make sure we will not assign the same port because of race condition.
+		// We are not watching node updates because internalIP we are using is not expected to change
+		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
 		Watches(
-			&v1alpha3.ReplicatedVolume{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				CreateFunc: func(
-					_ context.Context,
-					_ event.TypedCreateEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				UpdateFunc: func(
-					_ context.Context,
-					_ event.TypedUpdateEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				DeleteFunc: func(
-					_ context.Context,
-					_ event.TypedDeleteEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-				GenericFunc: func(
-					_ context.Context,
-					_ event.TypedGenericEvent[client.Object],
-					_ TQueue,
-				) {
-					// ...
-				},
-			}).
+			&v1alpha3.ReplicatedVolumeReplica{},
+			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName, log)),
+			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
+		).
 		Complete(rec)
-
-	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
-	}
-
-	return nil
 }
