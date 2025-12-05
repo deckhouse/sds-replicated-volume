@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
+	rvrgccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr-gc-controller"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvr_status_config_peers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
 )
@@ -30,6 +31,7 @@ var registry = []func(mgr manager.Manager) error{
 	rvrdiskfulcount.BuildController,
 	rvr_status_config_peers.BuildController,
 	rvstatusconfigdeviceminor.BuildController,
+	rvrgccontroller.BuildController,
 }
 
 func init() {
