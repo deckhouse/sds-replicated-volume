@@ -124,8 +124,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("RVR has DeletionTimestamp", func() {
 			BeforeEach(func() {
-				// Add finalizer to RVR so it can be marked for deletion
-				rvr.Finalizers = []string{"test-finalizer"}
+				rvr.Finalizers = []string{}
 				// Ensure status is set before creating RVR
 				if rvr.Status == nil {
 					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
@@ -133,7 +132,10 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
-				// Create RVR first, then delete it to set DeletionTimestamp
+				By("Adding finalizer to RVR so it can be marked for deletion")
+				rvr.Finalizers = append(rvr.Finalizers, "test-finalizer")
+
+				By("Create RVR first, then delete it to set DeletionTimestamp")
 				Expect(cl.Create(ctx, rvr)).To(Succeed())
 				Expect(cl.Delete(ctx, rvr)).To(Succeed())
 			})
