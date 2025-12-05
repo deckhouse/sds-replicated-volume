@@ -21,6 +21,10 @@ type DRBDConfig struct {
 	MaxPort uint
 }
 
+func (c DRBDConfig) IsPortValid(port uint) bool {
+	return port >= c.MinPort && port <= c.MaxPort
+}
+
 type Config struct {
 	NodeName               string
 	HealthProbeBindAddress string
