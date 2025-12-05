@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
@@ -28,6 +29,7 @@ var registry []func(mgr manager.Manager) error
 
 func init() {
 	registry = append(registry, rvrstatusconfigaddress.BuildController)
+	registry = append(registry, drbdconfig.BuildController)
 	// ...
 }
 
