@@ -74,12 +74,6 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
-	// Generate new shared secret
-	sharedSecret := uuid.New().String()
-	algorithm := v1alpha3.SharedSecretAlgorithms()[0] // Start with first algorithm (sha256)
-
-	log.Info("Generating new shared secret", "algorithm", algorithm)
-
 	// Update RV status with shared secret
 	// If there's a conflict (409), return error - next reconciliation will solve it
 	// Race condition handling: If two reconciles run simultaneously, one will get 409 Conflict on Patch.
@@ -94,6 +88,13 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 		log.V(1).Info("sharedSecret already set and valid", "algorithm", changedRV.Status.DRBD.Config.SharedSecretAlg)
 		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
 	}
+
+	// Generate new shared secret using UUID v4 (36 characters, fits DRBD limit of 64)
+	// UUID provides uniqueness and randomness required for peer authentication
+	sharedSecret := uuid.New().String()
+	algorithm := v1alpha3.SharedSecretAlgorithms()[0] // Start with first algorithm (sha256)
+
+	log.Info("Generating new shared secret", "algorithm", algorithm)
 
 	// Initialize status if needed
 	ensureRVStatusInitialized(changedRV)
@@ -111,6 +112,41 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 	return reconcile.Result{}, nil
 }
 
+// buildAlgorithmLogFields builds structured logging fields for algorithm-related logs
+// logFields: structured logging fields for debugging algorithm operations
+func buildAlgorithmLogFields(
+	rv *v1alpha3.ReplicatedVolume,
+	currentAlg string,
+	nextAlgorithm string,
+	maxFailedIndex int,
+	maxFailedRVR *v1alpha3.ReplicatedVolumeReplica,
+	algorithms []string,
+	failedNodeNames []string,
+) []interface{} {
+	logFields := []interface{}{
+		"rv", rv.Name,
+		"from", currentAlg,
+		"to", nextAlgorithm,
+	}
+
+	if maxFailedRVR != nil {
+		logFields = append(logFields,
+			"maxFailedIndex", maxFailedIndex,
+			"maxFailedRVR", maxFailedRVR.Name,
+			"maxFailedRVRNode", maxFailedRVR.Spec.NodeName,
+			"maxFailedAlgorithm", algorithms[maxFailedIndex],
+		)
+	} else {
+		logFields = append(logFields, "maxFailedIndex", maxFailedIndex)
+	}
+
+	if len(failedNodeNames) > 0 {
+		logFields = append(logFields, "failedNodes", failedNodeNames)
+	}
+
+	return logFields
+}
+
 // reconcileHandleUnsupportedAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
 func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	ctx context.Context,
@@ -124,20 +160,16 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 		return reconcile.Result{}, err
 	}
 
-	// Filter by replicatedVolumeName and check for UnsupportedAlgorithm errors
+	// Collect all RVRs with errors
+	var rvrsWithErrors []*v1alpha3.ReplicatedVolumeReplica
 	var failedNodeNames []string
-	var failedAlgorithm string
 	for _, rvr := range rvrList.Items {
 		if rvr.Spec.ReplicatedVolumeName != rv.Name {
 			continue
 		}
 		if HasUnsupportedAlgorithmError(&rvr) {
 			failedNodeNames = append(failedNodeNames, rvr.Spec.NodeName)
-			// Get the unsupported algorithm from RVR error
-			if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil &&
-				rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil {
-				failedAlgorithm = rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg
-			}
+			rvrsWithErrors = append(rvrsWithErrors, &rvr)
 		}
 	}
 
@@ -146,28 +178,60 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 		return reconcile.Result{}, nil
 	}
 
-	log.Info("Found UnsupportedAlgorithm errors", "nodes", failedNodeNames, "algorithm", failedAlgorithm)
-
-	// Find current algorithm index
 	algorithms := v1alpha3.SharedSecretAlgorithms()
-	currentAlg := rv.Status.DRBD.Config.SharedSecretAlg
-	currentIndex := slices.Index(algorithms, currentAlg)
 
-	// If current algorithm not found, start from first
-	if currentIndex == -1 {
-		currentIndex = 0
+	// Find maximum index among all failed algorithms and RVR with max algorithm
+	maxFailedIndex := -1
+	var maxFailedRVR *v1alpha3.ReplicatedVolumeReplica
+	var rvrsWithoutAlg []string
+	for _, rvr := range rvrsWithErrors {
+		// Access UnsupportedAlg directly, checking for nil
+		var unsupportedAlg string
+		if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil &&
+			rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil {
+			unsupportedAlg = rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg
+		}
+
+		if unsupportedAlg == "" {
+			rvrsWithoutAlg = append(rvrsWithoutAlg, rvr.Name)
+			continue
+		}
+
+		index := slices.Index(algorithms, unsupportedAlg)
+		if index != -1 && index > maxFailedIndex {
+			maxFailedIndex = index
+			maxFailedRVR = rvr
+		}
 	}
 
-	// Try next algorithm
-	nextIndex := currentIndex + 1
+	// If no valid algorithms found in errors (all empty), we cannot determine which algorithm is unsupported
+	// Log this issue and do nothing - we should not switch algorithm without knowing which one failed
+	if maxFailedIndex == -1 {
+		logFields := []interface{}{"rv", rv.Name, "failedNodes", failedNodeNames}
+		if len(rvrsWithoutAlg) > 0 {
+			logFields = append(logFields, "rvrsWithoutAlg", rvrsWithoutAlg)
+		}
+		log.V(1).Info("UnsupportedAlg is empty for all failed RVRs, cannot determine which algorithm to switch", logFields...)
+		return reconcile.Result{}, nil // Do nothing - we don't know which algorithm is unsupported
+	}
+
+	// Try next algorithm after maximum failed index
+	nextIndex := maxFailedIndex + 1
 	if nextIndex >= len(algorithms) {
 		// All algorithms exhausted - stop trying
-		log.Info("All algorithms exhausted", "failedNodes", failedNodeNames, "lastAlgorithm", failedAlgorithm)
+		// logFields: structured logging fields for debugging algorithm exhaustion
+		logFields := buildAlgorithmLogFields(rv, rv.Status.DRBD.Config.SharedSecretAlg, "", maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
+		log.V(2).Info("All algorithms exhausted, cannot switch to next", logFields...)
 		return reconcile.Result{}, nil
 	}
 
 	nextAlgorithm := algorithms[nextIndex]
-	log.Info("Switching to next algorithm", "from", currentAlg, "to", nextAlgorithm)
+	currentAlg := rv.Status.DRBD.Config.SharedSecretAlg
+
+	// Log algorithm change details at V(2) for debugging (before patch)
+	// logFields: structured logging fields for debugging algorithm switch preparation
+	logFields := buildAlgorithmLogFields(rv, currentAlg, nextAlgorithm, maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
+	log.V(2).Info("Preparing to switch algorithm", logFields...)
 
 	// Update RV with new algorithm and regenerate shared secret
 	// If there's a conflict (409), return error - next reconciliation will solve it
@@ -177,8 +241,13 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	// Initialize status if needed
 	ensureRVStatusInitialized(changedRV)
 
-	// Generate new shared secret
-	changedRV.Status.DRBD.Config.SharedSecret = uuid.New().String()
+	// Check if sharedSecret already exists before generating new one
+	// According to spec, we should generate new secret when switching algorithm,
+	// but we check for idempotency to avoid unnecessary regeneration
+	if changedRV.Status.DRBD.Config.SharedSecret == "" {
+		// Generate new shared secret only if it doesn't exist
+		changedRV.Status.DRBD.Config.SharedSecret = uuid.New().String()
+	}
 	changedRV.Status.DRBD.Config.SharedSecretAlg = nextAlgorithm
 
 	if err := r.cl.Status().Patch(ctx, changedRV, from); err != nil {
@@ -186,7 +255,9 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("Switched to new algorithm")
+	// Log result of controller logic when algorithm is changed (after successful patch)
+	// Short log: detailed debug already logged at V(2), this is just a summary
+	log.V(1).Info("Algorithm switched", "rv", rv.Name, "from", currentAlg, "to", nextAlgorithm)
 	return reconcile.Result{}, nil
 }
 
