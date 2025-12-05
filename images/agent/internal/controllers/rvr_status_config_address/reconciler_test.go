@@ -105,56 +105,53 @@ var _ = Describe("Reconciler", func() {
 			ToNot(Requeue())
 	})
 
-	When("node is missing InternalIP", func() {
-		DescribeTableSubtree("when node has no status or addresses",
-			Entry("has no status", func() {
-				node.Status = corev1.NodeStatus{}
-			}),
-			Entry("has no addresses", func() {
-				node.Status.Addresses = []corev1.NodeAddress{}
-			}),
-			func(beforeEach func()) {
-				BeforeEach(beforeEach)
+	DescribeTableSubtree("when node has no",
+		Entry("status", func() {
+			node.Status = corev1.NodeStatus{}
+		}),
+		Entry("addresses", func() {
+			node.Status.Addresses = []corev1.NodeAddress{}
+		}),
+		func(beforeEach func()) {
+			BeforeEach(beforeEach)
 
-				It("should return error", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(node))).Error().
-						To(MatchError(rvrstatusconfigaddress.ErrNodeMissingInternalIP))
-				})
+			It("should return error", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(node))).Error().
+					To(MatchError(rvrstatusconfigaddress.ErrNodeMissingInternalIP))
 			})
+		})
 
-		DescribeTableSubtree("when node has address of different type",
-			Entry("Hostname", corev1.NodeHostName),
-			Entry("ExternalIP", corev1.NodeExternalIP),
-			Entry("InternalDNS", corev1.NodeInternalDNS),
-			Entry("ExternalDNS", corev1.NodeExternalDNS),
-			func(addrType corev1.NodeAddressType) {
-				DescribeTableSubtree("with address value",
-					Entry("valid IPv4", "192.168.1.10"),
-					Entry("valid IPv6", "2001:db8::1"),
-					Entry("invalid format", "invalid-ip-address"),
-					Entry("empty string", ""),
-					Entry("hostname", "test-node"),
-					Entry("DNS name", "test-node.example.com"),
-					func(addrValue string) {
-						BeforeEach(func() {
-							node.Status.Addresses = []corev1.NodeAddress{{Type: addrType, Address: addrValue}}
-						})
-
-						It("should return error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(node))).Error().To(Satisfy(func(err error) bool {
-								return errors.Is(err, rvrstatusconfigaddress.ErrNodeMissingInternalIP)
-							}))
-						})
+	DescribeTableSubtree("when node has only",
+		Entry("Hostname", corev1.NodeHostName),
+		Entry("ExternalIP", corev1.NodeExternalIP),
+		Entry("InternalDNS", corev1.NodeInternalDNS),
+		Entry("ExternalDNS", corev1.NodeExternalDNS),
+		func(addrType corev1.NodeAddressType) {
+			DescribeTableSubtree("with address value",
+				Entry("valid IPv4", "192.168.1.10"),
+				Entry("valid IPv6", "2001:db8::1"),
+				Entry("invalid format", "invalid-ip-address"),
+				Entry("empty string", ""),
+				Entry("hostname", "test-node"),
+				Entry("DNS name", "test-node.example.com"),
+				func(addrValue string) {
+					BeforeEach(func() {
+						node.Status.Addresses = []corev1.NodeAddress{{Type: addrType, Address: addrValue}}
 					})
-			})
 
-	})
+					It("should return error", func(ctx SpecContext) {
+						Expect(rec.Reconcile(ctx, RequestFor(node))).Error().To(Satisfy(func(err error) bool {
+							return errors.Is(err, rvrstatusconfigaddress.ErrNodeMissingInternalIP)
+						}))
+					})
+				})
+		})
 
 	It("should succeed without errors when there are no RVRs on the node", func(ctx SpecContext) {
 		Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 	})
 
-	When("RVRs created", func() {
+	When("RVs and RVRs created", func() {
 		var (
 			rvList           []v1alpha3.ReplicatedVolume
 			rvrList          []v1alpha3.ReplicatedVolumeReplica
@@ -176,11 +173,8 @@ var _ = Describe("Reconciler", func() {
 				rvrList[i] = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-this-node", i+1)},
 					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{
-							Config: &v1alpha3.DRBDConfig{
-								Address: &v1alpha3.Address{},
-							},
-						},
+						Conditions: []metav1.Condition{},
+						DRBD:       &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{}}},
 					},
 				}
 				rvrList[i].Spec.NodeName = node.Name
@@ -189,6 +183,10 @@ var _ = Describe("Reconciler", func() {
 				otherNodeRVRList[i] = v1alpha3.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-other-node", i+1)},
 					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "other-node"},
+					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+						Conditions: []metav1.Condition{},
+						DRBD:       &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{}}},
+					},
 				}
 				Expect(otherNodeRVRList[i].SetReplicatedVolume(&rvList[i], s)).To(Succeed())
 			}
@@ -207,29 +205,100 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("should filter out RVRs on other nodes and not configure addresses", func(ctx SpecContext) {
+			By("Saving previous versions")
+			prev := make([]v1alpha3.ReplicatedVolumeReplica, len(otherNodeRVRList))
+			for i := range otherNodeRVRList {
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &prev[i])).To(Succeed())
+			}
+
+			By("Reconciling")
 			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
 
-			By("verifying all RVRs on other nodes were not modified")
+			By("Verifying all RVRs on other nodes are not modified")
 			for i := range otherNodeRVRList {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &otherNodeRVRList[i])).To(Succeed())
 			}
-			Expect(otherNodeRVRList).To(HaveEach(HaveField("Status", BeNil())))
+			Expect(otherNodeRVRList).To(Equal(prev))
+		})
+
+		When("single RVR", func() {
+			var (
+				rvr *v1alpha3.ReplicatedVolumeReplica
+			)
+			BeforeEach(func() {
+				rvrList = rvrList[:1]
+				rvr = &rvrList[0]
+			})
+
+			It("should configure address with first available port", func(ctx SpecContext) {
+				By("using only first RVR for this test")
+				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+
+				By("verifying address was configured")
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+				Expect(rvr).To(SatisfyAll(
+					HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")),
+					HaveField("Status.DRBD.Config.Address.Port", Equal(uint(7000))),
+				))
+
+				By("verifying condition was set")
+				Expect(rvr).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
+					HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
+					HaveField("Status", Equal(metav1.ConditionTrue)),
+					HaveField("Reason", Equal(v1alpha3.ReasonAddressConfigurationSucceeded)),
+				))))
+			})
+
+			DescribeTableSubtree("should work with nil",
+				Entry("Status", func() { rvr.Status = nil }),
+				Entry("DRBD", func() { rvr.Status.DRBD = nil }),
+				Entry("Config", func() { rvr.Status.DRBD.Config = nil }),
+				Entry("Address", func() { rvr.Status.DRBD.Config.Address = nil }),
+				func(beforeEach func()) {
+					BeforeEach(beforeEach)
+
+					It("should reconcile successfully and assign unique ports", func(ctx SpecContext) {
+						Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+
+						By("verifying all RVRs got unique ports in valid range")
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+
+						Expect(rvr).To(HaveField("Status.DRBD.Config.Address.Port", Satisfy(drbdCfg.IsPortValid)))
+					})
+				})
+
+			When("RVR has different IP address", func() {
+				BeforeEach(func() {
+					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
+							IPv4: "192.168.1.99", // different IP
+							Port: 7500,
+						}}},
+					}
+				})
+
+				It("should update address but not port", func(ctx SpecContext) {
+					originalPort := rvr.Status.DRBD.Config.Address.Port
+
+					Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
+
+					By("verifying all RVRs have address updated to node IP")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+
+					Expect(rvr).To(HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")))
+
+					By("verifying port stayed the same for first RVR")
+					Expect(rvr.Status.DRBD.Config.Address.Port).To(Equal(originalPort))
+				})
+			})
 		})
 
 		When("other node RVRs have ports", func() {
 			BeforeEach(func() {
 				// Set same ports on other node RVRs as will be assigned to this node RVRs
 				for i := range otherNodeRVRList {
-					otherNodeRVRList[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{
-							Config: &v1alpha3.DRBDConfig{
-								Address: &v1alpha3.Address{
-									IPv4: "192.168.1.99",
-									Port: uint(7000 + i), // Same ports as will be assigned
-								},
-							},
-						},
-					}
+					otherNodeRVRList[i].Status.DRBD.Config.Address.IPv4 = "192.168.1.99"
+					otherNodeRVRList[i].Status.DRBD.Config.Address.Port = uint(7000 + i) // Same ports as will be assigned
 				}
 			})
 
@@ -242,10 +311,7 @@ var _ = Describe("Reconciler", func() {
 				}
 				Expect(rvrList).To(SatisfyAll(
 					HaveUniquePorts(),
-					HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
-						BeNumerically(">=", drbdCfg.MinPort),
-						BeNumerically("<=", drbdCfg.MaxPort),
-					)))))
+					HaveEach(HaveField("Status.DRBD.Config.Address.Port", Satisfy(drbdCfg.IsPortValid)))))
 
 				By("verifying RVRs on other nodes were not modified")
 				for i := range otherNodeRVRList {
@@ -255,111 +321,14 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		It("should configure address with first available port", func(ctx SpecContext) {
-			By("using only first RVR for this test")
-			originalList := rvrList
-			rvrList = rvrList[:1]
-			rvList = rvList[:1]
-
-			Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
-
-			By("verifying address was configured")
-			Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), &rvrList[0])).To(Succeed())
-			Expect(rvrList[0]).To(SatisfyAll(
-				HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10")),
-				HaveField("Status.DRBD.Config.Address.Port", Equal(uint(7000))),
-			))
-
-			By("verifying condition was set")
-			Expect(rvrList[0]).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-				HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
-				HaveField("Status", Equal(metav1.ConditionTrue)),
-				HaveField("Reason", Equal(v1alpha3.ReasonAddressConfigurationSucceeded)),
-			))))
-
-			By("restoring for other tests")
-			rvrList = originalList
-		})
-
-		DescribeTableSubtree("should assign unique ports",
-			Entry("with no status", func() {
-				rvrList = rvrList[:1]
-				rvrList[0].Status = nil
-			}),
-			Entry("with no DRBD", func() {
-				rvrList = rvrList[:1]
-				rvrList[0].Status.DRBD = nil
-			}),
-			Entry("with no Config", func() {
-				rvrList = rvrList[:1]
-				rvrList[0].Status.DRBD.Config = nil
-			}),
-			Entry("with no Address", func() {
-				rvrList = rvrList[:1]
-				rvrList[0].Status.DRBD.Config.Address = nil
-			}),
-			func(beforeEach func()) {
-				BeforeEach(beforeEach)
-
-				It("should reconcile successfully and assign unique ports", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
-
-					By("verifying all RVRs got unique ports in valid range")
-					for i := range rvrList {
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
-					}
-
-					Expect(rvrList).To(SatisfyAll(
-						HaveUniquePorts(),
-						HaveEach(HaveField("Status.DRBD.Config.Address.Port", SatisfyAll(
-							BeNumerically(">=", drbdCfg.MinPort),
-							BeNumerically("<=", drbdCfg.MaxPort),
-						)))))
-				})
-			})
-
-		When("RVR has different IP address", func() {
-			BeforeEach(func() {
-				rvrList = rvrList[:1]
-				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
-						IPv4: "192.168.1.99", // different IP
-						Port: 7500,
-					}}},
-				}
-			})
-
-			It("should update address but not port", func(ctx SpecContext) {
-				originalPort := rvrList[0].Status.DRBD.Config.Address.Port
-
-				Expect(rec.Reconcile(ctx, RequestFor(node))).ToNot(Requeue())
-
-				By("verifying all RVRs have address updated to node IP")
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[0]), &rvrList[0])).To(Succeed())
-
-				Expect(rvrList).To(HaveEach(HaveField("Status.DRBD.Config.Address.IPv4", Equal("192.168.1.10"))))
-
-				By("verifying port stayed the same for first RVR")
-				Expect(rvrList[0].Status.DRBD.Config.Address.Port).To(Equal(originalPort))
-			})
-		})
-
 		When("port range is exhausted", func() {
 			BeforeEach(func() {
 				drbdCfg.MaxPort = drbdCfg.MinPort // Only one port available
 
 				rvrList = rvrList[:2]
 				// Set first RVR to use the only available port
-				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{
-						Config: &v1alpha3.DRBDConfig{
-							Address: &v1alpha3.Address{
-								IPv4: "192.168.1.10",
-								Port: drbdCfg.MinPort, // Uses the only available port
-							},
-						},
-					},
-				}
+				rvrList[0].Status.DRBD.Config.Address.IPv4 = "192.168.1.10"
+				rvrList[0].Status.DRBD.Config.Address.Port = drbdCfg.MinPort
 			})
 
 			It("should set condition to false with NoFreePortAvailable reason", func(ctx SpecContext) {
