@@ -19,7 +19,6 @@ package drbdprimary
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"time"
@@ -78,12 +77,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// TODO: clarify InitialSyncCompleted parameter
-	if !rvr.Status.DRBD.Actual.InitialSyncCompleted {
-		log.V(4).Info("Initial sync not completed, skipping")
-		return reconcile.Result{}, nil
-	}
-
 	// Get current node name from environment
 	nodeName := os.Getenv("NODE_NAME")
 	if nodeName == "" {
@@ -94,9 +87,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Check if this RVR belongs to this node
 	if rvr.Spec.NodeName != nodeName {
-		err := fmt.Errorf("ReplicatedVolumeReplica does not belong to this node, expected %s, got %s", nodeName, rvr.Spec.NodeName)
-		log.Error(err, "checking if this RVR belongs to this node")
-		return reconcile.Result{}, err
+		log.V(4).Info("ReplicatedVolumeReplica does not belong to this node, skipping")
+		return reconcile.Result{}, nil
+	}
+
+	if !rvr.Status.DRBD.Actual.InitialSyncCompleted {
+		log.V(4).Info("Initial sync not completed, skipping")
+		return reconcile.Result{}, nil
 	}
 
 	// Get ReplicatedVolume to check Ready condition
@@ -106,7 +103,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Error(err, "getting ReplicatedVolume")
 		return reconcile.Result{}, err
 	}
-
 	// Check preconditions for ReplicatedVolume
 	readyCond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
 	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
