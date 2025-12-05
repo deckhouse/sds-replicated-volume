@@ -1202,4 +1202,178 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 	})
+
+	When("integration test for full controller lifecycle", func() {
+		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var rv *v1alpha3.ReplicatedVolume
+		var rsc *v1alpha1.ReplicatedStorageClass
+		var rsp *v1alpha1.ReplicatedStoragePool
+		var lvg *snc.LVMVolumeGroup
+
+		BeforeEach(func() {
+			rvr = &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rvr",
+					UID:  "test-uid",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "test-rv",
+					Type:                 "Diskful",
+					NodeName:             "node-1",
+				},
+				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+					LVMLogicalVolumeName: "",
+				},
+			}
+
+			rv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rv",
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("1Gi"),
+					ReplicatedStorageClassName: "test-rsc",
+				},
+			}
+
+			rsc = &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rsc",
+				},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool: "test-rsp",
+				},
+			}
+
+			rsp = &v1alpha1.ReplicatedStoragePool{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rsp",
+				},
+				Spec: v1alpha1.ReplicatedStoragePoolSpec{
+					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+						{
+							Name:         "test-lvg",
+							ThinPoolName: "",
+						},
+					},
+				},
+			}
+
+			lvg = &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-lvg",
+				},
+				Spec: snc.LVMVolumeGroupSpec{
+					Local: snc.LVMVolumeGroupLocalSpec{
+						NodeName: "node-1",
+					},
+				},
+			}
+		})
+
+		JustBeforeEach(func(ctx SpecContext) {
+			// Create all required objects
+			rvrCopy := rvr.DeepCopy()
+			rvrCopy.ResourceVersion = ""
+			rvrCopy.UID = ""
+			rvrCopy.Generation = 0
+			Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
+
+			rvCopy := rv.DeepCopy()
+			rvCopy.ResourceVersion = ""
+			rvCopy.UID = ""
+			rvCopy.Generation = 0
+			Expect(cl.Create(ctx, rvCopy)).To(Succeed())
+
+			rscCopy := rsc.DeepCopy()
+			rscCopy.ResourceVersion = ""
+			rscCopy.UID = ""
+			rscCopy.Generation = 0
+			Expect(cl.Create(ctx, rscCopy)).To(Succeed())
+
+			rspCopy := rsp.DeepCopy()
+			rspCopy.ResourceVersion = ""
+			rspCopy.UID = ""
+			rspCopy.Generation = 0
+			Expect(cl.Create(ctx, rspCopy)).To(Succeed())
+
+			lvgCopy := lvg.DeepCopy()
+			lvgCopy.ResourceVersion = ""
+			lvgCopy.UID = ""
+			lvgCopy.Generation = 0
+			Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
+		})
+
+		It("should handle full controller lifecycle", func(ctx SpecContext) {
+			// Step 1: Initial reconcile - should create LLV
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify LLV was created
+			var llvList snc.LVMLogicalVolumeList
+			Expect(cl.List(ctx, &llvList)).To(Succeed())
+			Expect(llvList.Items).To(HaveLen(1))
+			llvName := llvList.Items[0].Name
+			Expect(llvName).To(Equal(rvr.Name))
+
+			// Step 2: Set LLV phase to Pending and reconcile
+			// Get the created LLV
+			llv := &snc.LVMLogicalVolume{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
+			llv.Status = &snc.LVMLogicalVolumeStatus{
+				Phase: "Pending",
+			}
+			// Use regular Update for LLV status in fake client
+			Expect(cl.Update(ctx, llv)).To(Succeed())
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Step 3: Set LLV phase to Created and reconcile - should update RVR status
+			// Get LLV again to get fresh state
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
+			llv.Status.Phase = "Created"
+			// Use regular Update for LLV status in fake client
+			Expect(cl.Update(ctx, llv)).To(Succeed())
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify RVR status was updated with LLV name
+			updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
+			Expect(updatedRVR).To(HaveLVMLogicalVolumeName(rvr.Name))
+
+			// Step 4: Change RVR type to Access - LLV should remain
+			updatedRVR.Spec.Type = "Access"
+			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify LLV still exists
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
+
+			// Step 5: Set actualType to Access - LLV should be deleted
+			// Get fresh RVR state
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
+			updatedRVR.Status.ActualType = "Access"
+			Expect(cl.Status().Update(ctx, updatedRVR)).To(Succeed())
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify LLV was deleted
+			err := cl.Get(ctx, client.ObjectKey{Name: llvName}, &snc.LVMLogicalVolume{})
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+			// Step 6: Reconcile again - should clear LVMLogicalVolumeName from status
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify status was cleared
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
+			Expect(updatedRVR).To(HaveNoLVMLogicalVolumeName())
+
+			// Step 7: Change type back to Diskful - should create LLV again
+			updatedRVR.Spec.Type = "Diskful"
+			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			// Verify LLV was created again
+			Expect(cl.List(ctx, &llvList)).To(Succeed())
+			Expect(llvList.Items).To(HaveLen(1))
+			Expect(llvList.Items[0].Name).To(Equal(rvr.Name))
+		})
+	})
 })
