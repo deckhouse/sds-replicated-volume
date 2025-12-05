@@ -60,7 +60,7 @@ var _ = Describe("Handlers", func() {
 		})
 
 		JustBeforeEach(func() {
-			handler = rvrstatusconfigaddress.NewReplicatedVolumeReplicaEnqueueHandler(nodeName, log)
+			handler = rvrstatusconfigaddress.EnqueueNodeByRVRFunc(nodeName, log)
 		})
 
 		It("should enqueue node for RVR on current node", func(ctx SpecContext) {
@@ -113,7 +113,7 @@ var _ = Describe("Handlers", func() {
 		})
 
 		JustBeforeEach(func() {
-			pred = rvrstatusconfigaddress.NewReplicatedVolumeReplicaUpdatePredicate(nodeName, log)
+			pred = rvrstatusconfigaddress.SkipWhenRVRNodeNameNotUpdatedPred(log)
 			e = event.UpdateEvent{
 				ObjectOld: oldRVR,
 				ObjectNew: newRVR,
@@ -148,13 +148,17 @@ var _ = Describe("Handlers", func() {
 			Expect(pred.Generic(event.GenericEvent{})).To(BeTrue())
 		})
 
-		DescribeTableSubtree("should return true",
+		DescribeTableSubtree("expect pass filtering if",
 			Entry("RVR is on current node", func() {
 				oldRVR.Spec.NodeName = nodeName
 				newRVR.Spec.NodeName = nodeName
 			}),
 			Entry("NodeName changes on current node", func() {
 				oldRVR.Spec.NodeName = "other-node"
+			}),
+			Entry("RVR is on other node", func() {
+				oldRVR.Spec.NodeName = "other-node"
+				newRVR.Spec.NodeName = "other-node"
 			}),
 			func(beforeEach func()) {
 				BeforeEach(beforeEach)
@@ -164,11 +168,7 @@ var _ = Describe("Handlers", func() {
 				})
 			})
 
-		DescribeTableSubtree("should return false",
-			Entry("RVR is on other node", func() {
-				oldRVR.Spec.NodeName = "other-node"
-				newRVR.Spec.NodeName = "other-node"
-			}),
+		DescribeTableSubtree("expect not pass filtering if",
 			Entry("object is not RVR", func() {
 				e.ObjectOld = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
 				e.ObjectNew = &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
