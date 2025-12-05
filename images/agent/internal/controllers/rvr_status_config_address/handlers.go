@@ -30,9 +30,9 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-// NewReplicatedVolumeReplicaEnqueueHandler returns a handler function that enqueues the node for reconciliation
-// when a ReplicatedVolumeReplica on the current node changes.
-func NewReplicatedVolumeReplicaEnqueueHandler(nodeName string, log logr.Logger) handler.MapFunc {
+// EnqueueNodeByRVR returns a event handler that enqueues the node for reconciliation
+// when a ReplicatedVolumeReplica on the that node changes.
+func EnqueueNodeByRVRFunc(nodeName string, log logr.Logger) handler.MapFunc {
 	log = log.WithName("Watches").WithValues("type", "ReplicatedVolumeReplica")
 	return func(_ context.Context, obj client.Object) []reconcile.Request {
 		rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
@@ -40,19 +40,19 @@ func NewReplicatedVolumeReplicaEnqueueHandler(nodeName string, log logr.Logger) 
 			log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha3.ReplicatedVolumeReplica")
 			return nil
 		}
-		// Only watch RVRs on the current node
+		// Only watch RVRs on the node
 		if rvr.Spec.NodeName == nodeName {
-			log.V(3).Info("RVR on the current node. Enqueue.")
+			log.V(3).Info("RVR on the node. Enqueue.")
 			return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: nodeName}}}
 		}
-		log.V(4).Info("RVR not on the current node. Skip.")
+		log.V(4).Info("RVR not on the node. Skip.")
 		return nil
 	}
 }
 
-// NewReplicatedVolumeReplicaUpdatePredicate returns a predicate that filters ReplicatedVolumeReplica update events
+// SkipWhenRVRNodeNameNotUpdatedPred returns a predicate that filters ReplicatedVolumeReplica update events
 // to only enqueue when relevant fields change (e.g., NodeName, Status).
-func NewReplicatedVolumeReplicaUpdatePredicate(nodeName string, log logr.Logger) predicate.Funcs {
+func SkipWhenRVRNodeNameNotUpdatedPred(log logr.Logger) predicate.Funcs {
 	log = log.WithName("Predicate").WithValues("type", "ReplicatedVolumeReplica")
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -60,11 +60,6 @@ func NewReplicatedVolumeReplicaUpdatePredicate(nodeName string, log logr.Logger)
 			newRVR, ok2 := e.ObjectNew.(*v1alpha3.ReplicatedVolumeReplica)
 			if !ok1 || !ok2 {
 				log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha3.ReplicatedVolumeReplica")
-				return false
-			}
-			// Only watch RVRs on the current node
-			if newRVR.Spec.NodeName != nodeName {
-				log.V(4).Info("RVR not on the current node. Skip.")
 				return false
 			}
 			// Enqueue if NodeName changed (shouldn't happen, but handle it)
