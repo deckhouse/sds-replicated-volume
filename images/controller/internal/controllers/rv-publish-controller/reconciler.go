@@ -79,13 +79,13 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// validate local access constraints for volumeAccess=Local; may set PublishSucceeded=False and stop
-	if res, err := r.validateLocalAccess(ctx, rv, rsc, replicasForRV, log); res != nil || err != nil {
-		return *res, err
+	if err := r.validateLocalAccess(ctx, rv, rsc, replicasForRV, log); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// sync rv.status.drbd.config.allowTwoPrimaries and wait for actual application on replicas when needed
-	if res, err := r.syncAllowTwoPrimaries(ctx, rv, replicasForRV, log); res != nil || err != nil {
-		return *res, err
+	if err := r.syncAllowTwoPrimaries(ctx, rv, replicasForRV, log); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	// sync primary roles on replicas and rv.status.publishedOn
@@ -137,10 +137,10 @@ func (r *Reconciler) validateLocalAccess(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
-) (*reconcile.Result, error) {
+) error {
 	// this validation is relevant only when volumeAccess is Local
 	if rsc.Spec.VolumeAccess != "Local" {
-		return nil, nil
+		return nil
 	}
 
 	// map replicas by NodeName for efficient lookup
@@ -169,19 +169,19 @@ func (r *Reconciler) validateLocalAccess(
 			}); err != nil {
 				if !apierrors.IsNotFound(err) {
 					log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
-					return &reconcile.Result{}, err
+					return err
 				}
 
 				// RV was deleted concurrently; nothing left to publish for
-				return &reconcile.Result{}, nil
+				return nil
 			}
 
 			// stop reconciliation after setting the failure condition
-			return &reconcile.Result{}, nil
+			return nil
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
 // syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
@@ -192,7 +192,7 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 	rv *v1alpha3.ReplicatedVolume,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
-) (*reconcile.Result, error) {
+) error {
 	// update rv.status.drbd.config.allowTwoPrimaries according to spec:
 	// - true when exactly 2 nodes are requested in spec.publishOn
 	// - false otherwise
@@ -212,11 +212,11 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 	}); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to patch ReplicatedVolume allowTwoPrimaries")
-			return &reconcile.Result{}, err
+			return err
 		}
 
 		// RV was deleted concurrently; nothing left to publish for
-		return &reconcile.Result{}, nil
+		return nil
 	}
 
 	// when two nodes are requested in publishOn, we must wait until
@@ -229,12 +229,12 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 				!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
 				// reconciliation will be re-triggered on further RVR status updates
 				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name)
-				return &reconcile.Result{}, nil
+				return nil
 			}
 		}
 	}
 
-	return nil, nil
+	return nil
 }
 
 // syncReplicaPrimariesAndPublishedOn updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)
