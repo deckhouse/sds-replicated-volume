@@ -1274,11 +1274,7 @@ var _ = Describe("Reconciler", func() {
 
 		JustBeforeEach(func(ctx SpecContext) {
 			// Create all required objects
-			rvrCopy := rvr.DeepCopy()
-			rvrCopy.ResourceVersion = ""
-			rvrCopy.UID = ""
-			rvrCopy.Generation = 0
-			Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
+			Expect(cl.Create(ctx, rvr)).To(Succeed())
 
 			rvCopy := rv.DeepCopy()
 			rvCopy.ResourceVersion = ""
