@@ -157,34 +157,72 @@ spec:
 
     DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
     attempt=0
-    until DRBD_BUILD_SERVER_IP="$(host -t A "DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    bb-log-info "host -t A $DRBD_BUILD_SERVER_FQDN $CLUSTER_DNS"
+    DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    #until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    #do
+    #  if [ $attempt -gt 10 ]; then
+    #    bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP for DRBD building"
+    #    exit 1
+    #  fi
+  
+    #  ((attempt=attempt+1))
+    #  bb-log-info "Waiting for cluster DNS response (try #$attempt)"
+    #  sleep 10
+    #done
+
+    bb-log-info "Cluster DNS responded, got drbd-build-server service url"
+    DRBD_BUILD_SERVER_URL="http://${DRBD_BUILD_SERVER_IP}:2021"
+    bb-log-info "DRBD build server url: $DRBD_BUILD_SERVER_URL"
+
+    attempt=0
+    until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $DRBD_BUILD_SERVER_URL'/api/v1/hello')" == "200" ]]
     do
-      if [ $attempt -gt 60 ]; then
-        bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP for DRBD building"
+      if [ $attempt -gt 3 ]; then
+        bb-log-info "DRBD_BUILD_SERVER_URL service isn't accessible, can't continue DRBD building"
         exit 1
       fi
 
       ((attempt=attempt+1))
-      bb-log-info "Waiting for cluster DNS response (try #$attempt)"
+      bb-log-info "Waiting for DRBD_BUILD_SERVER_URL service is being accessible (try #$attempt)"
       sleep 10
     done
 
-    bb-log-info "Cluster DNS responded, got drbd-build-server service url"
-    DRBD_BUILD_SERVER_URL="https://${DRBD_BUILD_SERVER_IP}:2021"
-
     KERNEL_VERSION=$kernel_version_in_use
-    KERNEL_VERSION_SHORT="${KERNEL_VERSION%-generic}"
+    KERNEL_BASE="${KERNEL_VERSION%%-*}"
+    KERNEL_SUFFIX="${KERNEL_VERSION#*-}"
     bb-log-info "Detected kernel version: $KERNEL_VERSION"
+    bb-log-info "Kernel base: $KERNEL_BASE"
 
     bb-log-info "Uploading kernel headers and starting build..."
-    BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}" "/usr/src/linux-headers-${KERNEL_VERSION_SHORT}-generic"|
-        d8-curl -s -w "\n%{http_code}" -X POST \
+    BUILD_RESPONSE=$(tar -czf - "/usr/src/linux-headers-${KERNEL_BASE}" "/usr/src/linux-headers-${KERNEL_BASE}-${KERNEL_SUFFIX}" |
+        curl -s -w '\n|||CURL_METADATA|||{"http_code":%{http_code}}' -X POST \
           -H "Content-Type: application/gzip" \
           --data-binary @- \
-          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" || echo -e "\n000")
+          "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION}" 2>/dev/null || echo '')
 
-    BUILD_HTTP_CODE=$(echo "$BUILD_RESPONSE" | tail -n1)
-    BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed '$d')
+    # Extract HTTP code using jq (parse JSON metadata)
+    if echo "$BUILD_RESPONSE" | grep -q '|||CURL_METADATA|||'; then
+      CURL_METADATA=$(echo "$BUILD_RESPONSE" | sed 's/.*|||CURL_METADATA|||//')
+      bb-log-info "CURL metadata raw: $CURL_METADATA"
+      # Try to parse JSON and extract http_code
+      BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | jq -r 'if type == "object" then .http_code // empty else empty end' 2>/dev/null)
+      # If jq returned null or empty, try fallback extraction
+      if [ -z "$BUILD_HTTP_CODE" ] || [ "$BUILD_HTTP_CODE" = "null" ]; then
+        # Fallback: extract number after "http_code": using sed
+        BUILD_HTTP_CODE=$(echo "$CURL_METADATA" | sed -n 's/.*"http_code":\s*\([0-9]\+\).*/\1/p' || echo "000")
+      fi
+      # Extract body (everything before the metadata separator)
+      BUILD_BODY=$(echo "$BUILD_RESPONSE" | sed 's/|||CURL_METADATA|||.*$//')
+    else
+      # Fallback if metadata format is missing
+      BUILD_HTTP_CODE="000"
+      BUILD_BODY="$BUILD_RESPONSE"
+    fi
+    
+    bb-log-info "Build response: $BUILD_RESPONSE"
+    bb-log-info "Build body: $BUILD_BODY"
+    bb-log-info "Build HTTP code: $BUILD_HTTP_CODE"
 
     # Accept both 200 OK and 202 Accepted from build endpoint
     if [ "$BUILD_HTTP_CODE" != "200" ] && [ "$BUILD_HTTP_CODE" != "202" ]; then
@@ -200,6 +238,7 @@ spec:
     JOB_ID=$(echo "$BUILD_BODY" | jq -r '.job_id')
     #DOWNLOAD_URL=null if emty
     DOWNLOAD_URL=$(echo "$BUILD_BODY" | jq -r '.download_url')
+    bb-log-info "Download URL: $DOWNLOAD_URL"
 
     bb-log-info "Downloading build artifacts..."
     BUILD_ARTIFACTS_TAR="./drbd-modules-${JOB_ID}.tar.gz"
