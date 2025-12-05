@@ -17,9 +17,6 @@ limitations under the License.
 package rvrstatusconfigaddress
 
 import (
-	"fmt"
-
-	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -36,25 +33,13 @@ func BuildController(mgr manager.Manager, cfg config.Config) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
-		For(
-			&corev1.Node{},
-			builder.WithPredicates(NewNodePredicate(cfg.NodeName, log)),
-		).
+		// We reconciling nodes as single unit to make sure we will not assign the same port because of race condition.
+		// We are not watching node updates because internalIP we are using is not expected to change
+		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(NewReplicatedVolumeReplicaEnqueueHandler(cfg.NodeName, log)),
-			builder.WithPredicates(NewReplicatedVolumeReplicaUpdatePredicate(cfg.NodeName, log)),
+			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName, log)),
+			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
 		).
 		Complete(rec)
-}
-
-// getInternalIP extracts the InternalIP address from a Node.
-// Returns ErrNodeMissingInternalIP if InternalIP is not found.
-func getInternalIP(node *corev1.Node) (string, error) {
-	for _, addr := range node.Status.Addresses {
-		if addr.Type == corev1.NodeInternalIP {
-			return addr.Address, nil
-		}
-	}
-	return "", fmt.Errorf("%w: %s", ErrNodeMissingInternalIP, node.Name)
 }

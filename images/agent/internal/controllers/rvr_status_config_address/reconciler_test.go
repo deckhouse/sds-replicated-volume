@@ -41,11 +41,12 @@ import (
 var _ = Describe("Reconciler", func() {
 	// Setup scheme
 	s := scheme.Scheme
-	_ = metav1.AddMetaToScheme(s)
-	_ = corev1.AddToScheme(s)
-	_ = v1alpha3.AddToScheme(s)
+	Expect(metav1.AddMetaToScheme(s)).To(Succeed())
+	Expect(corev1.AddToScheme(s)).To(Succeed())
+	Expect(v1alpha3.AddToScheme(s)).To(Succeed())
 
 	var (
+		builder *fake.ClientBuilder
 		cl      client.Client
 		rec     *rvrstatusconfigaddress.Reconciler
 		log     logr.Logger
@@ -54,6 +55,14 @@ var _ = Describe("Reconciler", func() {
 	)
 
 	BeforeEach(func() {
+		builder = fake.NewClientBuilder().
+			WithScheme(s).
+			WithStatusSubresource(
+				&v1alpha3.ReplicatedVolumeReplica{},
+				&v1alpha3.ReplicatedVolume{},
+				&corev1.Node{},
+			)
+
 		cl = nil
 		log = GinkgoLogr
 
@@ -80,12 +89,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func(ctx SpecContext) {
 		// Create fake client with status subresource support
-		cl = fake.NewClientBuilder().
-			WithScheme(s).
-			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{}).
-			Build()
+		cl = builder.Build()
 
 		// Create reconciler using New method
 		rec = rvrstatusconfigaddress.NewReconciler(cl, log, drbdCfg)
@@ -314,12 +318,12 @@ var _ = Describe("Reconciler", func() {
 				})
 			})
 
-		When("RVR has wrong IP address", func() {
+		When("RVR has different IP address", func() {
 			BeforeEach(func() {
 				rvrList = rvrList[:1]
 				rvrList[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
-						IPv4: "192.168.1.99", // Wrong IP
+						IPv4: "192.168.1.99", // different IP
 						Port: 7500,
 					}}},
 				}

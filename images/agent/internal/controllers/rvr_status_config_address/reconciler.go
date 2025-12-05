@@ -18,11 +18,11 @@ package rvrstatusconfigaddress
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/go-logr/logr"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,7 +30,10 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
+	v1 "k8s.io/api/core/v1"
 )
+
+var ErrNoPortsAvailable = errors.New("no free port available")
 
 type Reconciler struct {
 	cl      client.Client
@@ -41,11 +44,14 @@ type Reconciler struct {
 var _ reconcile.Reconciler = &Reconciler{}
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, log logr.Logger, drbdConfig config.DRBDConfig) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, drbdCfg config.DRBDConfig) *Reconciler {
+	if drbdCfg.MinPort == 0 {
+		panic("Minimal DRBD port can't be 0 to be able to distinguish the port unset case")
+	}
 	return &Reconciler{
 		cl:      cl,
 		log:     log,
-		drbdCfg: drbdConfig,
+		drbdCfg: drbdCfg,
 	}
 }
 
@@ -57,19 +63,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	log := r.log.WithName("Reconcile").WithValues("request", request)
 	log.Info("Reconcile start")
 
-	// Get Node to extract InternalIP
-	var node corev1.Node
+	var node v1.Node
 	if err := r.cl.Get(ctx, request.NamespacedName, &node); err != nil {
 		log.Error(err, "Can't get Node")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Extract InternalIP from node
-	nodeIP, err := getInternalIP(&node)
-	if err != nil {
-		log.Error(err, "Node missing InternalIP")
-		return reconcile.Result{}, err
+	// Extract InternalIP
+	nodeAddressIndex := slices.IndexFunc(node.Status.Addresses, func(address v1.NodeAddress) bool {
+		return address.Type == v1.NodeInternalIP
+	})
+	if nodeAddressIndex < 0 {
+		log.Error(ErrNodeMissingInternalIP, "Node don't have InternalIP address. Returning error to reconcile later")
+		return reconcile.Result{}, fmt.Errorf("%w: %s", ErrNodeMissingInternalIP, node.Name)
 	}
+	nodeInternalIP := node.Status.Addresses[nodeAddressIndex].Address
 
 	// List all RVRs on this node that need address configuration
 	var rvrList v1alpha3.ReplicatedVolumeReplicaList
@@ -78,94 +86,91 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		return reconcile.Result{}, err
 	}
 
-	// Just in case if MatchingFilterSelector is not working as expected
+	// Keep only RVR on that node
 	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
 		return rvr.Spec.NodeName != node.Name
 	})
 
-	// Build map of used ports from all RVRs on this node
-	usedPorts := make(map[uint]struct{})
-	for _, rvr := range rvrList.Items {
-		if rvr.Status != nil &&
-			rvr.Status.DRBD != nil &&
-			rvr.Status.DRBD.Config != nil &&
-			rvr.Status.DRBD.Config.Address != nil {
-			usedPorts[rvr.Status.DRBD.Config.Address.Port] = struct{}{}
+	// Instantiate the Address field here to simplify code. Zero port means not set
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		if rvr.Status == nil {
+			rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		}
+		if rvr.Status.DRBD == nil {
+			rvr.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if rvr.Status.DRBD.Config == nil {
+			rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		}
+		if rvr.Status.DRBD.Config.Address == nil {
+			rvr.Status.DRBD.Config.Address = &v1alpha3.Address{}
 		}
 	}
 
-	// Process each RVR that needs address configuration
-	for i := range rvrList.Items {
-		rvr := &rvrList.Items[i]
+	// Build map of used ports from all RVRs removing the RVR with valid port and the not changed IPv4
+	usedPorts := make(map[uint]struct{})
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+		if !r.drbdCfg.IsPortValid(rvr.Status.DRBD.Config.Address.Port) {
+			return false // keep invalid
+		}
+		// mark as used
+		usedPorts[rvr.Status.DRBD.Config.Address.Port] = struct{}{}
 
+		// delete only rvr with same address
+		return nodeInternalIP == rvr.Status.DRBD.Config.Address.IPv4
+	})
+
+	// Process each RVR that needs address configuration
+	for _, rvr := range rvrList.Items {
 		log := log.WithValues("rvr", rvr.Name)
+
 		// Create a patch from the current state at the beginning
 		patch := client.MergeFrom(rvr.DeepCopy())
 
-		// Check if RVR already has a valid port that we can reuse
-		var freePort uint
-		found := false
-		if rvr.Status != nil &&
-			rvr.Status.DRBD != nil &&
-			rvr.Status.DRBD.Config != nil &&
-			rvr.Status.DRBD.Config.Address != nil {
-			existingPort := rvr.Status.DRBD.Config.Address.Port
-			// Check if existing port is in valid range
-			if existingPort >= r.drbdCfg.MinPort &&
-				existingPort <= r.drbdCfg.MaxPort &&
-				existingPort != 0 {
-				freePort = existingPort
-				found = true
-				// Port is already in usedPorts from initial build, no need to add again
-			}
-		}
-
 		// If no valid existing port, find the smallest free port in the range
-		if !found {
+		var portToAssign uint = rvr.Status.DRBD.Config.Address.Port
+
+		// Change port only if it's invalid
+		if !r.drbdCfg.IsPortValid(portToAssign) {
 			for port := r.drbdCfg.MinPort; port <= r.drbdCfg.MaxPort; port++ {
 				if _, used := usedPorts[port]; !used {
-					freePort = port
-					found = true
-					usedPorts[port] = struct{}{} // Mark as used for next RVR
+					portToAssign = port
+					usedPorts[portToAssign] = struct{}{} // Mark as used for next RVR
 					break
 				}
 			}
 		}
 
-		if !found {
-			log.Error(
-				fmt.Errorf("no free port available in range [%d, %d]",
-					r.drbdCfg.MinPort, r.drbdCfg.MaxPort,
-				),
+		if portToAssign == 0 {
+			log.Error(ErrNoPortsAvailable, "Out of free ports", "minPort", r.drbdCfg.MinPort, "maxPort", r.drbdCfg.MaxPort)
+			if changed := r.setCondition(
+				&rvr,
+				metav1.ConditionFalse,
+				v1alpha3.ReasonNoFreePortAvailable,
 				"No free port available",
-			)
-
-			if !r.setCondition(rvr, metav1.ConditionFalse, v1alpha3.ReasonNoFreePortAvailable, "No free port available") {
-				continue
+			); changed {
+				if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
+					log.Error(err, "Failed to patch status")
+					return reconcile.Result{}, err
+				}
 			}
-
-			if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
-				log.Error(err, "Failed to patch status")
-				return reconcile.Result{}, err
-			}
-			continue
+			continue // process next rvr
 		}
 
 		// Set address and condition
 		address := &v1alpha3.Address{
-			IPv4: nodeIP,
-			Port: freePort,
+			IPv4: nodeInternalIP,
+			Port: portToAssign,
 		}
 		log = log.WithValues("address", address)
 
 		// Patch status once at the end if anything changed
-		if !r.setAddressAndCondition(rvr, address) {
-			continue
-		}
-
-		if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
-			log.Error(err, "Failed to patch status")
-			return reconcile.Result{}, err
+		if changed := r.setAddressAndCondition(&rvr, address); changed {
+			if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
+				log.Error(err, "Failed to patch status")
+				return reconcile.Result{}, err
+			}
 		}
 
 		log.Info("Address configured")
@@ -194,14 +199,14 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplic
 	}
 
 	// Set condition using helper function (it checks if condition needs to be updated)
-	condChanged := r.setCondition(
+	conditionChanged := r.setCondition(
 		rvr,
 		metav1.ConditionTrue,
 		v1alpha3.ReasonAddressConfigurationSucceeded,
 		"Address configured",
 	)
 
-	return addressChanged || condChanged
+	return addressChanged || conditionChanged
 }
 
 func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
