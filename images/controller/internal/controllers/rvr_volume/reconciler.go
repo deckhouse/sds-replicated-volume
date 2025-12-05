@@ -282,9 +282,7 @@ func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume,
 	}
 
 	// Remove only our finalizer, leaving others intact
-	newFinalizers := slices.DeleteFunc(llv.Finalizers, func(f string) bool {
-		return f == finalizerName
-	})
+	newFinalizers := slices.Delete(llv.Finalizers, finalizerName)
 
 	if len(llv.Finalizers) != len(newFinalizers) {
 		log.V(4).Info("LVMLogicalVolume is marked for deletion, removing our finalizer", "llvName", llv.Name)
