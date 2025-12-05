@@ -197,10 +197,6 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify finalizers were added to RVRs
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-				Expect(rvrList[0].Finalizers).To(SatisfyAll(
-					HaveLen(1),
-					ContainElement(rvquorumcontroller.QuorumReconfFinalizer),
-				))
 
 				// Verify QuorumConfigured condition is set
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
@@ -219,7 +215,6 @@ var _ = Describe("Reconciler", func() {
 				for _, name := range []string{"rvr-1", "rvr-2", "rvr-3", "rvr-4"} {
 					rvr := &v1alpha3.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, types.NamespacedName{Name: name}, rvr)).To(Succeed())
-					Expect(rvr.Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
 				}
 			})
 
@@ -305,7 +300,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR having finalizer and DeletionTimestamp", func() {
 				BeforeEach(func() {
-					rvrList[0].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
+					rvrList[0].Finalizers = []string{"other-finalizer"}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -319,24 +314,9 @@ var _ = Describe("Reconciler", func() {
 
 					// Verify finalizer was removed
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-					Expect(rvrList[0].Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
-					Expect(rvrList[0].Finalizers).To(ContainElement("other-finalizer"))
-				})
-			})
-
-			When("RVR having finalizer but no DeletionTimestamp", func() {
-				BeforeEach(func() {
-					rvrList[0].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
-				})
-
-				It("should not remove finalizer from RVR without DeletionTimestamp", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})).NotTo(Requeue())
-
-					// Verify finalizer is still present (unsetFinalizers should skip RVR without DeletionTimestamp)
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-					Expect(rvrList[0].Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+					Expect(rvrList[0].Finalizers).To(SatisfyAll(
+						ContainElement("other-finalizer"),
+						HaveLen(1)))
 				})
 			})
 
@@ -356,16 +336,17 @@ var _ = Describe("Reconciler", func() {
 
 					// Verify other finalizer is still present (unsetFinalizers should skip RVR without quorum-reconf finalizer)
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-					Expect(rvrList[0].Finalizers).To(ContainElement("other-finalizer"))
-					Expect(rvrList[0].Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+					Expect(rvrList[0].Finalizers).To(SatisfyAll(
+						ContainElement("other-finalizer"),
+						HaveLen(1)))
 				})
 			})
 
 			When("multiple RVRs", func() {
 				BeforeEach(func() {
-					rvrList[0].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
-					rvrList[1].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer, "other-finalizer"}
-					rvrList[2].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
+					rvrList[0].Finalizers = []string{}
+					rvrList[1].Finalizers = []string{"other-finalizer"}
+					rvrList[2].Finalizers = []string{}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -382,34 +363,16 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Satisfy(apierrors.IsNotFound))
 
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[1]), rvrList[1])).To(Succeed())
-					Expect(rvrList[1].Finalizers).NotTo(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
-					Expect(rvrList[1].Finalizers).To(ContainElement("other-finalizer"))
+					Expect(rvrList[1].Finalizers).To(SatisfyAll(
+						ContainElement("other-finalizer"),
+						HaveLen(1),
+					))
 
 					// Verify finalizer kept for RVR without DeletionTimestamp
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[2]), rvrList[2])).To(Succeed())
-					Expect(rvrList[2].Finalizers).To(ContainElement(rvquorumcontroller.QuorumReconfFinalizer))
+					Expect(rvrList[2].Finalizers).To(HaveLen(0))
 				})
 			})
-
-			When("RVR having only quorum-reconf finalizer and DeletionTimestamp", func() {
-				BeforeEach(func() {
-					rvrList[0].Finalizers = []string{rvquorumcontroller.QuorumReconfFinalizer}
-				})
-
-				JustBeforeEach(func(ctx SpecContext) {
-					Expect(cl.Delete(ctx, rvrList[0])).To(Succeed())
-				})
-
-				It("should handle RVR with only quorum-reconf finalizer and DeletionTimestamp", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{
-						NamespacedName: types.NamespacedName{Name: "test-rv"},
-					})).NotTo(Requeue())
-
-					// Verify finalizer was removed (after removal, finalizers list should be empty)
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Satisfy(apierrors.IsNotFound))
-				})
-			})
-
 		})
 	})
 })

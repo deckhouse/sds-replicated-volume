@@ -30,9 +30,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-// QuorumReconfFinalizer is the name of the finalizer used to manage quorum reconfiguration.
-const QuorumReconfFinalizer = "sds-replicated-volume.storage.deckhouse.io/controller-rv-status-config-quorum"
-
 // CalculateQuorum calculates quorum and quorum minimum redundancy values
 // based on the number of diskful and total replicas.
 func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
@@ -106,14 +103,6 @@ func (r *Reconciler) Reconcile(
 		return !metav1.IsControlledBy(&rvr, &rv)
 	})
 
-	// Finding out deleted from owned
-	deletedRVRList := slices.DeleteFunc(
-		slices.Clone(rvrList.Items),
-		func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp == nil
-		},
-	)
-
 	// Keeping only without deletion timestamp
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
@@ -132,27 +121,6 @@ func (r *Reconciler) Reconcile(
 	log = log.WithValues("diskful", diskfulCount, "all", len(rvrList.Items))
 	log.V(1).Info("calculated replica counts")
 
-	// adding finalizers
-	for i := range rvrList.Items {
-		rvr := &rvrList.Items[i]
-		log := log.WithValues("rvr", rvr.Name)
-
-		if slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) {
-			log.V(2).Info("finalizer already present, skipping")
-			continue
-		}
-
-		from := client.MergeFrom(rvr.DeepCopy())
-		// Load the object fresh for PatchWithConflictRetry
-		rvr.Finalizers = append(rvr.Finalizers, QuorumReconfFinalizer)
-		if err := r.cl.Patch(ctx, rvr, from); err != nil {
-			log.Error(err, "patching ReplicatedVolumeReplica")
-			return reconcile.Result{}, err
-		}
-
-		log.V(1).Info("finalizer added")
-	}
-
 	// updating replicated volume
 	from := client.MergeFrom(rv.DeepCopy())
 	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items)) {
@@ -163,29 +131,6 @@ func (r *Reconciler) Reconcile(
 		}
 	} else {
 		log.V(2).Info("Nothing to update in ReplicatedVolume")
-	}
-
-	// removing finalizers from deleted replicas
-	for i := range deletedRVRList {
-		rvr := &deletedRVRList[i]
-		log := log.WithValues("rvr", rvr.Name)
-
-		if !slices.Contains(rvr.Finalizers, QuorumReconfFinalizer) {
-			log.V(2).Info("Finalizer is not set. Nothing to update")
-			continue
-		}
-
-		from := client.MergeFrom(rvr.DeepCopy())
-		rvr.Finalizers = slices.DeleteFunc(rvr.Finalizers, func(s string) bool {
-			return s == QuorumReconfFinalizer
-		})
-
-		if err := r.cl.Patch(ctx, rvr, from); err != nil {
-			log.Error(err, "patching ReplicatedVolumeReplica")
-			return reconcile.Result{}, err
-		}
-
-		log.V(1).Info("finalizer removed")
 	}
 
 	return reconcile.Result{}, nil
