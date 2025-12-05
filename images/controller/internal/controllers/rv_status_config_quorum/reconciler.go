@@ -24,6 +24,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -43,13 +44,9 @@ func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 }
 
 func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	if rvStatus == nil {
-		return false
-	}
-
-	return meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeAllReplicasReady) &&
-		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
+	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
+		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
+		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
 
 type Reconciler struct {
