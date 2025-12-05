@@ -97,6 +97,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		if rvr.Status == nil {
 			rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 		}
+		if rvr.Status.Conditions == nil {
+			rvr.Status.Conditions = []metav1.Condition{}
+		}
 		if rvr.Status.DRBD == nil {
 			rvr.Status.DRBD = &v1alpha3.DRBD{}
 		}
@@ -181,22 +184,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 
 func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplica, address *v1alpha3.Address) bool {
 	// Check if address is already set correctly
-	addressChanged := rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil ||
-		rvr.Status.DRBD.Config.Address == nil || *rvr.Status.DRBD.Config.Address != *address
-
-	// Apply address changes if needed
-	if addressChanged {
-		if rvr.Status == nil {
-			rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-		}
-		if rvr.Status.DRBD == nil {
-			rvr.Status.DRBD = &v1alpha3.DRBD{}
-		}
-		if rvr.Status.DRBD.Config == nil {
-			rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-		}
-		rvr.Status.DRBD.Config.Address = address
-	}
+	addressChanged := *rvr.Status.DRBD.Config.Address != *address
+	rvr.Status.DRBD.Config.Address = address
 
 	// Set condition using helper function (it checks if condition needs to be updated)
 	conditionChanged := r.setCondition(
@@ -223,13 +212,6 @@ func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status 
 	}
 
 	// Apply changes
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-	}
-	if rvr.Status.Conditions == nil {
-		rvr.Status.Conditions = []metav1.Condition{}
-	}
-
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
