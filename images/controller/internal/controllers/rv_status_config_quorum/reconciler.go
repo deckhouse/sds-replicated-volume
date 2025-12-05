@@ -103,6 +103,7 @@ func (r *Reconciler) Reconcile(
 		return !metav1.IsControlledBy(&rvr, &rv)
 	})
 
+	// TODO: Revisit this in the spec
 	// Keeping only without deletion timestamp
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
