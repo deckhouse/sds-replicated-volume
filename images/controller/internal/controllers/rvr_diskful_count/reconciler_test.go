@@ -44,6 +44,7 @@ func createReplicatedVolumeReplica(name string, rv *v1alpha3.ReplicatedVolume, s
 	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
+// TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
 func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
