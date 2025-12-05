@@ -189,34 +189,8 @@ var _ = Describe("Reconciler", func() {
 							})
 						})
 
-						JustBeforeEach(func(ctx SpecContext) {
-							// Create new client builder with interceptors
-							newClientBuilder := fake.NewClientBuilder().
-								WithScheme(scheme).
-								WithStatusSubresource(
-									&v1alpha3.ReplicatedVolumeReplica{},
-									&v1alpha3.ReplicatedVolume{}).
-								WithInterceptorFuncs(interceptor.Funcs{
-									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-										if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
-											if subResourceName == "status" {
-												return statusPatchError
-											}
-										}
-										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
-									},
-								})
-							cl = newClientBuilder.Build()
-							rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-							// Recreate RVR in new client, then delete it to set DeletionTimestamp
-							// Clear metadata before creating
-							rvrCopy := rvr.DeepCopy()
-							rvrCopy.ResourceVersion = ""
-							rvrCopy.UID = ""
-							rvrCopy.Generation = 0
-							Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-							Expect(cl.Delete(ctx, rvrCopy)).To(Succeed())
-						})
+						// RVR is already created and deleted in parent JustBeforeEach
+						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
 						It("should fail if patching status failed", func(ctx SpecContext) {
 							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("clearing LVMLogicalVolumeName from status")))
@@ -269,102 +243,55 @@ var _ = Describe("Reconciler", func() {
 								})
 							})
 
-							JustBeforeEach(func(ctx SpecContext) {
-								// Create new client builder with interceptors
-								newClientBuilder := fake.NewClientBuilder().
-									WithScheme(scheme).
-									WithStatusSubresource(
-										&v1alpha3.ReplicatedVolumeReplica{},
-										&v1alpha3.ReplicatedVolume{}).
-									WithInterceptorFuncs(interceptor.Funcs{
-										Delete: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-											if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-llv" {
-												return deleteError
-											}
-											return cl.Delete(ctx, obj, opts...)
-										},
-									})
-								cl = newClientBuilder.Build()
-								rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-								// Recreate objects in new client, then delete RVR to set DeletionTimestamp
-								// Clear metadata before creating
-								rvrCopy := rvr.DeepCopy()
-								rvrCopy.ResourceVersion = ""
-								rvrCopy.UID = ""
-								rvrCopy.Generation = 0
-								Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-								Expect(cl.Delete(ctx, rvrCopy)).To(Succeed())
-								llvCopy := llv.DeepCopy()
-								llvCopy.ResourceVersion = ""
-								llvCopy.UID = ""
-								llvCopy.Generation = 0
-								Expect(cl.Create(ctx, llvCopy)).To(Succeed())
-							})
+							// RVR and LLV are already created in parent JustBeforeEach
+							// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
 							It("should fail if deleting LLV failed", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("deleting llv")))
 							})
 						})
-					})
 
-					When("LLV is marked for deletion", func() {
-						JustBeforeEach(func(ctx SpecContext) {
-							// LLV is already created in parent JustBeforeEach, just delete it to set DeletionTimestamp
-							// Get the existing LLV first
-							existingLLV := &snc.LVMLogicalVolume{}
-							Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)).To(Succeed())
-							Expect(cl.Delete(ctx, existingLLV)).To(Succeed())
-						})
-
-						It("should remove finalizer from LLV", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-
-							// LLV might be deleted after finalizer removal, so check if it exists first
-							existingLLV := &snc.LVMLogicalVolume{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)
-							if err == nil {
-								// If still exists, it should not have our finalizer
-								Expect(existingLLV).To(NotHaveFinalizer(finalizerName))
-							} else {
-								// Or it might be deleted (which is fine after finalizer removal)
-								Expect(apierrors.IsNotFound(err)).To(BeTrue())
-							}
-						})
-
-						When("LLV has other finalizers", func() {
-							BeforeEach(func() {
-								llv.Finalizers = []string{finalizerName, "other-finalizer"}
+						When("LLV is marked for deletion", func() {
+							JustBeforeEach(func(ctx SpecContext) {
+								// LLV is already created in parent JustBeforeEach, just delete it to set DeletionTimestamp
+								// Get the existing LLV first
+								existingLLV := &snc.LVMLogicalVolume{}
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)).To(Succeed())
+								Expect(cl.Delete(ctx, existingLLV)).To(Succeed())
 							})
 
-							It("should remove only our finalizer", func(ctx SpecContext) {
+							It("should remove finalizer from LLV", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-								Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), llv)).To(Succeed())
-								Expect(llv.Finalizers).To(ConsistOf("other-finalizer"))
+								// LLV might be deleted after finalizer removal, so check if it exists first
+								existingLLV := &snc.LVMLogicalVolume{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)
+								if err == nil {
+									// If still exists, it should not have our finalizer
+									Expect(existingLLV).To(NotHaveFinalizer(finalizerName))
+								} else {
+									// Or it might be deleted (which is fine after finalizer removal)
+									Expect(apierrors.IsNotFound(err)).To(BeTrue())
+								}
 							})
-						})
 
-						When("Patch fails", func() {
-							patchError := errors.New("failed to patch")
-							BeforeEach(func() {
-								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-									Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-										if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-llv" {
-											return patchError
-										}
-										return cl.Patch(ctx, obj, patch, opts...)
-									},
+							When("LLV has other finalizers", func() {
+								BeforeEach(func() {
+									llv.Finalizers = []string{finalizerName, "other-finalizer"}
+								})
+
+								It("should remove only our finalizer", func(ctx SpecContext) {
+									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+									Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), llv)).To(Succeed())
+									Expect(llv.Finalizers).To(ConsistOf("other-finalizer"))
 								})
 							})
 
-							JustBeforeEach(func(ctx SpecContext) {
-								// Create new client builder with interceptors
-								newClientBuilder := fake.NewClientBuilder().
-									WithScheme(scheme).
-									WithStatusSubresource(
-										&v1alpha3.ReplicatedVolumeReplica{},
-										&v1alpha3.ReplicatedVolume{}).
-									WithInterceptorFuncs(interceptor.Funcs{
+							When("Patch fails", func() {
+								patchError := errors.New("failed to patch")
+								BeforeEach(func() {
+									clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 										Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
 											if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-llv" {
 												return patchError
@@ -372,62 +299,32 @@ var _ = Describe("Reconciler", func() {
 											return cl.Patch(ctx, obj, patch, opts...)
 										},
 									})
-								cl = newClientBuilder.Build()
-								rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-								// Recreate objects in new client, then delete RVR to set DeletionTimestamp
-								// Clear metadata before creating
-								rvrCopy := rvr.DeepCopy()
-								rvrCopy.ResourceVersion = ""
-								rvrCopy.UID = ""
-								rvrCopy.Generation = 0
-								Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-								Expect(cl.Delete(ctx, rvrCopy)).To(Succeed())
-								// Recreate LLV, then delete it to set DeletionTimestamp
-								llvCopy := llv.DeepCopy()
-								llvCopy.ResourceVersion = ""
-								llvCopy.UID = ""
-								llvCopy.Generation = 0
-								Expect(cl.Create(ctx, llvCopy)).To(Succeed())
-								Expect(cl.Delete(ctx, llvCopy)).To(Succeed())
+								})
+
+								// RVR and LLV are already created in parent JustBeforeEach
+								// LLV will be deleted in sibling JustBeforeEach to set DeletionTimestamp
+								// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
+
+								It("should fail if patching LLV failed", func(ctx SpecContext) {
+									Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("removing finalizer")))
+								})
 							})
 
-							It("should fail if patching LLV failed", func(ctx SpecContext) {
-								Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("removing finalizer")))
+							When("our finalizer is not present", func() {
+								BeforeEach(func() {
+									llv.Finalizers = []string{"other-finalizer"}
+								})
+
+								It("should reconcile successfully", func(ctx SpecContext) {
+									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+								})
 							})
 						})
 
-						When("our finalizer is not present", func() {
+						When("Get LLV fails with non-NotFound error", func() {
+							getError := errors.New("failed to get")
 							BeforeEach(func() {
-								llv.Finalizers = []string{"other-finalizer"}
-							})
-
-							It("should reconcile successfully", func(ctx SpecContext) {
-								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-							})
-						})
-					})
-
-					When("Get LLV fails with non-NotFound error", func() {
-						getError := errors.New("failed to get")
-						BeforeEach(func() {
-							clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-								Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-									if _, ok := obj.(*snc.LVMLogicalVolume); ok && key.Name == "test-llv" {
-										return getError
-									}
-									return cl.Get(ctx, key, obj, opts...)
-								},
-							})
-						})
-
-						JustBeforeEach(func(ctx SpecContext) {
-							// Create new client builder with interceptors
-							newClientBuilder := fake.NewClientBuilder().
-								WithScheme(scheme).
-								WithStatusSubresource(
-									&v1alpha3.ReplicatedVolumeReplica{},
-									&v1alpha3.ReplicatedVolume{}).
-								WithInterceptorFuncs(interceptor.Funcs{
+								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 									Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 										if _, ok := obj.(*snc.LVMLogicalVolume); ok && key.Name == "test-llv" {
 											return getError
@@ -435,474 +332,234 @@ var _ = Describe("Reconciler", func() {
 										return cl.Get(ctx, key, obj, opts...)
 									},
 								})
-							cl = newClientBuilder.Build()
-							rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-							// Recreate objects in new client, then delete RVR to set DeletionTimestamp
-							// Clear metadata before creating
-							rvrCopy := rvr.DeepCopy()
-							rvrCopy.ResourceVersion = ""
-							rvrCopy.UID = ""
-							rvrCopy.Generation = 0
-							Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-							Expect(cl.Delete(ctx, rvrCopy)).To(Succeed())
-						})
+							})
 
-						It("should fail if getting LLV failed", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("checking if llv exists")))
+							// RVR and LLV are already created in parent JustBeforeEach
+							// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
+
+							It("should fail if getting LLV failed", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("checking if llv exists")))
+							})
 						})
 					})
 				})
 			})
-		})
 
-		When("RVR does not have DeletionTimestamp", func() {
-			DescribeTableSubtree("when RVR is not diskful because",
-				Entry("Type is Access", func() { rvr.Spec.Type = "Access" }),
-				Entry("Type is TieBreaker", func() { rvr.Spec.Type = "TieBreaker" }),
-				func(setup func()) {
-					BeforeEach(func() {
-						setup()
-					})
-
-					When("ActualType matches Spec.Type", func() {
-						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								ActualType: rvr.Spec.Type,
-							}
-						})
-
-						It("should call reconcileLLVDeletion", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
-
-					When("ActualType does not match Spec.Type", func() {
-						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								ActualType: "Diskful",
-							}
-						})
-
-						It("should reconcile successfully without error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
-
-					When("Status is nil", func() {
-						BeforeEach(func() {
-							rvr.Status = nil
-						})
-
-						It("should reconcile successfully without error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
-				})
-
-			When("RVR is Diskful", func() {
-				BeforeEach(func() {
-					rvr.Spec.Type = "Diskful"
-				})
-
-				DescribeTableSubtree("when RVR cannot create LLV because",
-					Entry("NodeName is empty", func() { rvr.Spec.NodeName = "" }),
-					Entry("Type is not Diskful", func() { rvr.Spec.Type = "Access" }),
+			When("RVR does not have DeletionTimestamp", func() {
+				DescribeTableSubtree("when RVR is not diskful because",
+					Entry("Type is Access", func() { rvr.Spec.Type = "Access" }),
+					Entry("Type is TieBreaker", func() { rvr.Spec.Type = "TieBreaker" }),
 					func(setup func()) {
 						BeforeEach(func() {
 							setup()
 						})
 
-						It("should reconcile successfully without error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+						When("ActualType matches Spec.Type", func() {
+							BeforeEach(func() {
+								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+									ActualType: rvr.Spec.Type,
+								}
+							})
+
+							It("should call reconcileLLVDeletion", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
+						})
+
+						When("ActualType does not match Spec.Type", func() {
+							BeforeEach(func() {
+								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+									ActualType: "Diskful",
+								}
+							})
+
+							It("should reconcile successfully without error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
+						})
+
+						When("Status is nil", func() {
+							BeforeEach(func() {
+								rvr.Status = nil
+							})
+
+							It("should reconcile successfully without error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
 						})
 					})
 
-				When("RVR has NodeName and is Diskful", func() {
+				When("RVR is Diskful", func() {
 					BeforeEach(func() {
-						rvr.Spec.NodeName = "node-1"
 						rvr.Spec.Type = "Diskful"
 					})
 
-					When("Status is nil", func() {
+					DescribeTableSubtree("when RVR cannot create LLV because",
+						Entry("NodeName is empty", func() { rvr.Spec.NodeName = "" }),
+						Entry("Type is not Diskful", func() { rvr.Spec.Type = "Access" }),
+						func(setup func()) {
+							BeforeEach(func() {
+								setup()
+							})
+
+							It("should reconcile successfully without error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
+						})
+
+					When("RVR has NodeName and is Diskful", func() {
 						BeforeEach(func() {
-							rvr.Status = nil
+							rvr.Spec.NodeName = "node-1"
+							rvr.Spec.Type = "Diskful"
 						})
 
-						It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
+						When("Status is nil", func() {
+							BeforeEach(func() {
+								rvr.Status = nil
+							})
 
-					When("Status.LVMLogicalVolumeName is empty", func() {
-						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								LVMLogicalVolumeName: "",
-							}
+							It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
 						})
 
-						It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
+						When("Status.LVMLogicalVolumeName is empty", func() {
+							BeforeEach(func() {
+								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+									LVMLogicalVolumeName: "",
+								}
+							})
 
-					When("Status.LVMLogicalVolumeName is set", func() {
-						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								LVMLogicalVolumeName: "existing-llv",
-							}
+							It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
 						})
 
-						It("should reconcile successfully without error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+						When("Status.LVMLogicalVolumeName is set", func() {
+							BeforeEach(func() {
+								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+									LVMLogicalVolumeName: "existing-llv",
+								}
+							})
+
+							It("should reconcile successfully without error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
 						})
 					})
 				})
 			})
 		})
-	})
 
-	When("reconcileLLVNormalByOwnerReference scenarios", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
-		var rv *v1alpha3.ReplicatedVolume
-		var rsc *v1alpha1.ReplicatedStorageClass
-		var rsp *v1alpha1.ReplicatedStoragePool
-		var lvg *snc.LVMVolumeGroup
+		When("reconcileLLVNormalByOwnerReference scenarios", func() {
+			var rvr *v1alpha3.ReplicatedVolumeReplica
+			var rv *v1alpha3.ReplicatedVolume
+			var rsc *v1alpha1.ReplicatedStorageClass
+			var rsp *v1alpha1.ReplicatedStoragePool
+			var lvg *snc.LVMVolumeGroup
 
-		BeforeEach(func() {
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rvr",
-					UID:  "test-uid",
-				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "test-rv",
-					Type:                 "Diskful",
-					NodeName:             "node-1",
-				},
-			}
+			BeforeEach(func() {
+				rvr = &v1alpha3.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-rvr",
+						UID:  "test-uid",
+					},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "test-rv",
+						Type:                 "Diskful",
+						NodeName:             "node-1",
+					},
+				}
 
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
-				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("1Gi"),
-					ReplicatedStorageClassName: "test-rsc",
-				},
-			}
+				rv = &v1alpha3.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-rv",
+					},
+					Spec: v1alpha3.ReplicatedVolumeSpec{
+						Size:                       resource.MustParse("1Gi"),
+						ReplicatedStorageClassName: "test-rsc",
+					},
+				}
 
-			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rsc",
-				},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool: "test-rsp",
-				},
-			}
+				rsc = &v1alpha1.ReplicatedStorageClass{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-rsc",
+					},
+					Spec: v1alpha1.ReplicatedStorageClassSpec{
+						StoragePool: "test-rsp",
+					},
+				}
 
-			rsp = &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rsp",
-				},
-				Spec: v1alpha1.ReplicatedStoragePoolSpec{
-					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
-						{
-							Name:         "test-lvg",
-							ThinPoolName: "",
+				rsp = &v1alpha1.ReplicatedStoragePool{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-rsp",
+					},
+					Spec: v1alpha1.ReplicatedStoragePoolSpec{
+						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+							{
+								Name:         "test-lvg",
+								ThinPoolName: "",
+							},
 						},
 					},
-				},
-			}
+				}
 
-			lvg = &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-lvg",
-				},
-				Spec: snc.LVMVolumeGroupSpec{
-					Local: snc.LVMVolumeGroupLocalSpec{
-						NodeName: "node-1",
+				lvg = &snc.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-lvg",
 					},
-				},
-			}
-		})
-
-		JustBeforeEach(func(ctx SpecContext) {
-			// Clear metadata before creating to avoid ResourceVersion issues
-			rvrCopy := rvr.DeepCopy()
-			rvrCopy.ResourceVersion = ""
-			rvrCopy.UID = ""
-			rvrCopy.Generation = 0
-			Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-			if rv != nil {
-				rvCopy := rv.DeepCopy()
-				rvCopy.ResourceVersion = ""
-				rvCopy.UID = ""
-				rvCopy.Generation = 0
-				Expect(cl.Create(ctx, rvCopy)).To(Succeed())
-			}
-			if rsc != nil {
-				rscCopy := rsc.DeepCopy()
-				rscCopy.ResourceVersion = ""
-				rscCopy.UID = ""
-				rscCopy.Generation = 0
-				Expect(cl.Create(ctx, rscCopy)).To(Succeed())
-			}
-			if rsp != nil {
-				rspCopy := rsp.DeepCopy()
-				rspCopy.ResourceVersion = ""
-				rspCopy.UID = ""
-				rspCopy.Generation = 0
-				Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-			}
-			if lvg != nil {
-				lvgCopy := lvg.DeepCopy()
-				lvgCopy.ResourceVersion = ""
-				lvgCopy.UID = ""
-				lvgCopy.Generation = 0
-				Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-			}
-		})
-
-		When("RVR is Diskful with NodeName and no LLV name in status", func() {
-			BeforeEach(func() {
-				rvr.Status = nil
+					Spec: snc.LVMVolumeGroupSpec{
+						Local: snc.LVMVolumeGroupLocalSpec{
+							NodeName: "node-1",
+						},
+					},
+				}
 			})
 
-			When("LLV does not exist with ownerReference", func() {
-				It("should create LLV", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+			JustBeforeEach(func(ctx SpecContext) {
+				// Clear metadata before creating to avoid ResourceVersion issues
+				rvrCopy := rvr.DeepCopy()
+				rvrCopy.ResourceVersion = ""
+				rvrCopy.UID = ""
+				rvrCopy.Generation = 0
+				Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
+				if rv != nil {
+					rvCopy := rv.DeepCopy()
+					rvCopy.ResourceVersion = ""
+					rvCopy.UID = ""
+					rvCopy.Generation = 0
+					Expect(cl.Create(ctx, rvCopy)).To(Succeed())
+				}
+				if rsc != nil {
+					rscCopy := rsc.DeepCopy()
+					rscCopy.ResourceVersion = ""
+					rscCopy.UID = ""
+					rscCopy.Generation = 0
+					Expect(cl.Create(ctx, rscCopy)).To(Succeed())
+				}
+				if rsp != nil {
+					rspCopy := rsp.DeepCopy()
+					rspCopy.ResourceVersion = ""
+					rspCopy.UID = ""
+					rspCopy.Generation = 0
+					Expect(cl.Create(ctx, rspCopy)).To(Succeed())
+				}
+				if lvg != nil {
+					lvgCopy := lvg.DeepCopy()
+					lvgCopy.ResourceVersion = ""
+					lvgCopy.UID = ""
+					lvgCopy.Generation = 0
+					Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
+				}
+			})
 
-					var llvList snc.LVMLogicalVolumeList
-					Expect(cl.List(ctx, &llvList)).To(Succeed())
-					Expect(llvList.Items).To(HaveLen(1))
-
-					llv := &llvList.Items[0]
-					Expect(llv).To(HaveLLVWithOwnerReference(rvr.Name))
-					Expect(llv.Name).To(Equal(rvr.Name))
-					Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
-					Expect(llv.Spec.Size).To(Equal("1Gi"))
-					Expect(llv.Spec.Type).To(Equal("Thick"))
-					Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
-					Expect(llv).To(HaveFinalizer(finalizerName))
-
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
-					Expect(rvr).To(HaveNoLVMLogicalVolumeName())
+			When("RVR is Diskful with NodeName and no LLV name in status", func() {
+				BeforeEach(func() {
+					rvr.Status = nil
 				})
 
-				When("ReplicatedVolume does not exist", func() {
-					BeforeEach(func() {
-						rv = nil
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						// RVR is already created in parent JustBeforeEach, don't recreate it
-						// Don't create RV (it's nil), but create other objects if they don't exist
-						if rsc != nil {
-							existingRSC := &v1alpha1.ReplicatedStorageClass{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(rsc), existingRSC)
-							if err != nil {
-								rscCopy := rsc.DeepCopy()
-								rscCopy.ResourceVersion = ""
-								rscCopy.UID = ""
-								rscCopy.Generation = 0
-								Expect(cl.Create(ctx, rscCopy)).To(Succeed())
-							}
-						}
-						if rsp != nil {
-							existingRSP := &v1alpha1.ReplicatedStoragePool{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(rsp), existingRSP)
-							if err != nil {
-								rspCopy := rsp.DeepCopy()
-								rspCopy.ResourceVersion = ""
-								rspCopy.UID = ""
-								rspCopy.Generation = 0
-								Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-							}
-						}
-						if lvg != nil {
-							existingLVG := &snc.LVMVolumeGroup{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
-							if err != nil {
-								lvgCopy := lvg.DeepCopy()
-								lvgCopy.ResourceVersion = ""
-								lvgCopy.UID = ""
-								lvgCopy.Generation = 0
-								Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-							}
-						}
-					})
-
-					It("should fail if getting ReplicatedVolume failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting ReplicatedVolume")))
-					})
-				})
-
-				When("ReplicatedStorageClass does not exist", func() {
-					BeforeEach(func() {
-						rsc = nil
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						// RVR and RV are already created in parent JustBeforeEach, don't recreate them
-						// Don't create RSC (it's nil), but create other objects if they don't exist
-						if rsp != nil {
-							existingRSP := &v1alpha1.ReplicatedStoragePool{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(rsp), existingRSP)
-							if err != nil {
-								rspCopy := rsp.DeepCopy()
-								rspCopy.ResourceVersion = ""
-								rspCopy.UID = ""
-								rspCopy.Generation = 0
-								Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-							}
-						}
-						if lvg != nil {
-							existingLVG := &snc.LVMVolumeGroup{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
-							if err != nil {
-								lvgCopy := lvg.DeepCopy()
-								lvgCopy.ResourceVersion = ""
-								lvgCopy.UID = ""
-								lvgCopy.Generation = 0
-								Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-							}
-						}
-					})
-
-					It("should fail if getting ReplicatedStorageClass failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting LVMVolumeGroupName and ThinPoolName")))
-					})
-				})
-
-				When("ReplicatedStoragePool does not exist", func() {
-					BeforeEach(func() {
-						rsp = nil
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						// RVR, RV, and RSC are already created in parent JustBeforeEach, don't recreate them
-						// Don't create RSP (it's nil), but create other objects if they don't exist
-						if lvg != nil {
-							existingLVG := &snc.LVMVolumeGroup{}
-							err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
-							if err != nil {
-								lvgCopy := lvg.DeepCopy()
-								lvgCopy.ResourceVersion = ""
-								lvgCopy.UID = ""
-								lvgCopy.Generation = 0
-								Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-							}
-						}
-					})
-
-					It("should fail if getting ReplicatedStoragePool failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting ReplicatedStoragePool")))
-					})
-				})
-
-				When("LVMVolumeGroup does not exist", func() {
-					BeforeEach(func() {
-						lvg = nil
-					})
-
-					JustBeforeEach(func() {
-						// RVR, RV, RSC, and RSP are already created in parent JustBeforeEach, don't recreate them
-						// Don't create LVG (it's nil)
-					})
-
-					It("should fail if getting LVMVolumeGroup failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting LVMVolumeGroup")))
-					})
-				})
-
-				When("no LVMVolumeGroup matches node", func() {
-					BeforeEach(func() {
-						lvg.Spec.Local.NodeName = "other-node"
-					})
-
-					It("should fail if no LVMVolumeGroup found for node", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("no LVMVolumeGroup found")))
-					})
-				})
-
-				When("Create LLV fails", func() {
-					createError := errors.New("failed to create")
-					BeforeEach(func() {
-						clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-							Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-								if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-rvr" {
-									return createError
-								}
-								return cl.Create(ctx, obj, opts...)
-							},
-						})
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						// Create new client builder with interceptors
-						newClientBuilder := fake.NewClientBuilder().
-							WithScheme(scheme).
-							WithStatusSubresource(
-								&v1alpha3.ReplicatedVolumeReplica{},
-								&v1alpha3.ReplicatedVolume{}).
-							WithInterceptorFuncs(interceptor.Funcs{
-								Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-									if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-rvr" {
-										return createError
-									}
-									return cl.Create(ctx, obj, opts...)
-								},
-							})
-						cl = newClientBuilder.Build()
-						rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-						// Recreate objects in new client (except LLV which should fail to create)
-						// Clear metadata before creating
-						rvrCopy := rvr.DeepCopy()
-						rvrCopy.ResourceVersion = ""
-						rvrCopy.UID = ""
-						rvrCopy.Generation = 0
-						Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-						if rv != nil {
-							rvCopy := rv.DeepCopy()
-							rvCopy.ResourceVersion = ""
-							rvCopy.UID = ""
-							rvCopy.Generation = 0
-							Expect(cl.Create(ctx, rvCopy)).To(Succeed())
-						}
-						if rsc != nil {
-							rscCopy := rsc.DeepCopy()
-							rscCopy.ResourceVersion = ""
-							rscCopy.UID = ""
-							rscCopy.Generation = 0
-							Expect(cl.Create(ctx, rscCopy)).To(Succeed())
-						}
-						if rsp != nil {
-							rspCopy := rsp.DeepCopy()
-							rspCopy.ResourceVersion = ""
-							rspCopy.UID = ""
-							rspCopy.Generation = 0
-							Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-						}
-						if lvg != nil {
-							lvgCopy := lvg.DeepCopy()
-							lvgCopy.ResourceVersion = ""
-							lvgCopy.UID = ""
-							lvgCopy.Generation = 0
-							Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-						}
-					})
-
-					It("should fail if creating LLV failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating llv")))
-					})
-				})
-
-				When("ThinPool is specified", func() {
-					BeforeEach(func() {
-						rsp.Spec.LVMVolumeGroups[0].ThinPoolName = "test-thin-pool"
-					})
-
-					It("should create LLV with Thin type", func(ctx SpecContext) {
+				When("LLV does not exist with ownerReference", func() {
+					It("should create LLV", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
 						var llvList snc.LVMLogicalVolumeList
@@ -910,99 +567,262 @@ var _ = Describe("Reconciler", func() {
 						Expect(llvList.Items).To(HaveLen(1))
 
 						llv := &llvList.Items[0]
-						Expect(llv.Spec.Type).To(Equal("Thin"))
-						Expect(llv.Spec.Thin).NotTo(BeNil())
-						Expect(llv.Spec.Thin.PoolName).To(Equal("test-thin-pool"))
-					})
-				})
-			})
+						Expect(llv).To(HaveLLVWithOwnerReference(rvr.Name))
+						Expect(llv.Name).To(Equal(rvr.Name))
+						Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
+						Expect(llv.Spec.Size).To(Equal("1Gi"))
+						Expect(llv.Spec.Type).To(Equal("Thick"))
+						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
+						Expect(llv).To(HaveFinalizer(finalizerName))
 
-			When("LLV exists with ownerReference", func() {
-				var llv *snc.LVMLogicalVolume
-
-				BeforeEach(func() {
-					llv = &snc.LVMLogicalVolume{
-						ObjectMeta: metav1.ObjectMeta{
-							Name: rvr.Name,
-						},
-					}
-					Expect(controllerutil.SetControllerReference(rvr, llv, scheme)).To(Succeed())
-				})
-
-				JustBeforeEach(func(ctx SpecContext) {
-					// RVR is already created in parent JustBeforeEach
-					// Get the created RVR to set ownerReference correctly
-					createdRVR := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), createdRVR)).To(Succeed())
-					// Clear metadata and recreate ownerReference
-					llvCopy := llv.DeepCopy()
-					llvCopy.ResourceVersion = ""
-					llvCopy.UID = ""
-					llvCopy.Generation = 0
-					llvCopy.OwnerReferences = nil
-					// Set status if available (it might be set in nested BeforeEach)
-					// We'll create with status, and nested JustBeforeEach can update if needed
-					if llv.Status != nil {
-						llvCopy.Status = llv.Status.DeepCopy()
-					}
-					Expect(controllerutil.SetControllerReference(createdRVR, llvCopy, scheme)).To(Succeed())
-					Expect(cl.Create(ctx, llvCopy)).To(Succeed())
-					// If status was set, update it after creation (fake client might need this)
-					if llvCopy.Status != nil {
-						createdLLV := &snc.LVMLogicalVolume{}
-						if err := cl.Get(ctx, client.ObjectKeyFromObject(llvCopy), createdLLV); err == nil {
-							createdLLV.Status = llvCopy.Status.DeepCopy()
-							// Try to update status, but don't fail if it doesn't work
-							_ = cl.Status().Update(ctx, createdLLV)
-						}
-					}
-				})
-
-				When("LLV phase is Created", func() {
-					BeforeEach(func() {
-						llv.Status = &snc.LVMLogicalVolumeStatus{
-							Phase: "Created",
-						}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
 					})
 
-					// Status is already set in parent JustBeforeEach when creating LLV
-					// No need to update it here
-
-					When("RVR status does not have LLV name", func() {
+					When("ReplicatedVolume does not exist", func() {
 						BeforeEach(func() {
-							rvr.Status = nil
+							rv = nil
 						})
 
-						It("should update RVR status with LLV name", func(ctx SpecContext) {
+						JustBeforeEach(func(ctx SpecContext) {
+							// RVR is already created in parent JustBeforeEach, don't recreate it
+							// Don't create RV (it's nil), but create other objects if they don't exist
+							if rsc != nil {
+								existingRSC := &v1alpha1.ReplicatedStorageClass{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(rsc), existingRSC)
+								if err != nil {
+									rscCopy := rsc.DeepCopy()
+									rscCopy.ResourceVersion = ""
+									rscCopy.UID = ""
+									rscCopy.Generation = 0
+									Expect(cl.Create(ctx, rscCopy)).To(Succeed())
+								}
+							}
+							if rsp != nil {
+								existingRSP := &v1alpha1.ReplicatedStoragePool{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(rsp), existingRSP)
+								if err != nil {
+									rspCopy := rsp.DeepCopy()
+									rspCopy.ResourceVersion = ""
+									rspCopy.UID = ""
+									rspCopy.Generation = 0
+									Expect(cl.Create(ctx, rspCopy)).To(Succeed())
+								}
+							}
+							if lvg != nil {
+								existingLVG := &snc.LVMVolumeGroup{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
+								if err != nil {
+									lvgCopy := lvg.DeepCopy()
+									lvgCopy.ResourceVersion = ""
+									lvgCopy.UID = ""
+									lvgCopy.Generation = 0
+									Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
+								}
+							}
+						})
+
+						It("should fail if getting ReplicatedVolume failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting ReplicatedVolume")))
+						})
+					})
+
+					When("ReplicatedStorageClass does not exist", func() {
+						BeforeEach(func() {
+							rsc = nil
+						})
+
+						JustBeforeEach(func(ctx SpecContext) {
+							// RVR and RV are already created in parent JustBeforeEach, don't recreate them
+							// Don't create RSC (it's nil), but create other objects if they don't exist
+							if rsp != nil {
+								existingRSP := &v1alpha1.ReplicatedStoragePool{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(rsp), existingRSP)
+								if err != nil {
+									rspCopy := rsp.DeepCopy()
+									rspCopy.ResourceVersion = ""
+									rspCopy.UID = ""
+									rspCopy.Generation = 0
+									Expect(cl.Create(ctx, rspCopy)).To(Succeed())
+								}
+							}
+							if lvg != nil {
+								existingLVG := &snc.LVMVolumeGroup{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
+								if err != nil {
+									lvgCopy := lvg.DeepCopy()
+									lvgCopy.ResourceVersion = ""
+									lvgCopy.UID = ""
+									lvgCopy.Generation = 0
+									Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
+								}
+							}
+						})
+
+						It("should fail if getting ReplicatedStorageClass failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting LVMVolumeGroupName and ThinPoolName")))
+						})
+					})
+
+					When("ReplicatedStoragePool does not exist", func() {
+						BeforeEach(func() {
+							rsp = nil
+						})
+
+						JustBeforeEach(func(ctx SpecContext) {
+							// RVR, RV, and RSC are already created in parent JustBeforeEach, don't recreate them
+							// Don't create RSP (it's nil), but create other objects if they don't exist
+							if lvg != nil {
+								existingLVG := &snc.LVMVolumeGroup{}
+								err := cl.Get(ctx, client.ObjectKeyFromObject(lvg), existingLVG)
+								if err != nil {
+									lvgCopy := lvg.DeepCopy()
+									lvgCopy.ResourceVersion = ""
+									lvgCopy.UID = ""
+									lvgCopy.Generation = 0
+									Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
+								}
+							}
+						})
+
+						It("should fail if getting ReplicatedStoragePool failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting ReplicatedStoragePool")))
+						})
+					})
+
+					When("LVMVolumeGroup does not exist", func() {
+						BeforeEach(func() {
+							lvg = nil
+						})
+
+						JustBeforeEach(func() {
+							// RVR, RV, RSC, and RSP are already created in parent JustBeforeEach, don't recreate them
+							// Don't create LVG (it's nil)
+						})
+
+						It("should fail if getting LVMVolumeGroup failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("getting LVMVolumeGroup")))
+						})
+					})
+
+					When("no LVMVolumeGroup matches node", func() {
+						BeforeEach(func() {
+							lvg.Spec.Local.NodeName = "other-node"
+						})
+
+						It("should fail if no LVMVolumeGroup found for node", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("no LVMVolumeGroup found")))
+						})
+					})
+
+					When("Create LLV fails", func() {
+						createError := errors.New("failed to create")
+						BeforeEach(func() {
+							clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+								Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+									if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-rvr" {
+										return createError
+									}
+									return cl.Create(ctx, obj, opts...)
+								},
+							})
+						})
+
+						// RVR, RV, RSC, RSP, and LVG are already created in parent JustBeforeEach
+						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
+
+						It("should fail if creating LLV failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating llv")))
+						})
+					})
+
+					When("ThinPool is specified", func() {
+						BeforeEach(func() {
+							rsp.Spec.LVMVolumeGroups[0].ThinPoolName = "test-thin-pool"
+						})
+
+						It("should create LLV with Thin type", func(ctx SpecContext) {
 							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
-							Expect(rvr).To(HaveLVMLogicalVolumeName(llv.Name))
+							var llvList snc.LVMLogicalVolumeList
+							Expect(cl.List(ctx, &llvList)).To(Succeed())
+							Expect(llvList.Items).To(HaveLen(1))
+
+							llv := &llvList.Items[0]
+							Expect(llv.Spec.Type).To(Equal("Thin"))
+							Expect(llv.Spec.Thin).NotTo(BeNil())
+							Expect(llv.Spec.Thin.PoolName).To(Equal("test-thin-pool"))
+						})
+					})
+				})
+
+				When("LLV exists with ownerReference", func() {
+					var llv *snc.LVMLogicalVolume
+
+					BeforeEach(func() {
+						llv = &snc.LVMLogicalVolume{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: rvr.Name,
+							},
+						}
+						Expect(controllerutil.SetControllerReference(rvr, llv, scheme)).To(Succeed())
+					})
+
+					JustBeforeEach(func(ctx SpecContext) {
+						// RVR is already created in parent JustBeforeEach
+						// Get the created RVR to set ownerReference correctly
+						createdRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), createdRVR)).To(Succeed())
+						// Clear metadata and recreate ownerReference
+						llvCopy := llv.DeepCopy()
+						llvCopy.ResourceVersion = ""
+						llvCopy.UID = ""
+						llvCopy.Generation = 0
+						llvCopy.OwnerReferences = nil
+						// Set status if available (it might be set in nested BeforeEach)
+						// We'll create with status, and nested JustBeforeEach can update if needed
+						if llv.Status != nil {
+							llvCopy.Status = llv.Status.DeepCopy()
+						}
+						Expect(controllerutil.SetControllerReference(createdRVR, llvCopy, scheme)).To(Succeed())
+						Expect(cl.Create(ctx, llvCopy)).To(Succeed())
+						// If status was set, update it after creation (fake client might need this)
+						if llvCopy.Status != nil {
+							createdLLV := &snc.LVMLogicalVolume{}
+							if err := cl.Get(ctx, client.ObjectKeyFromObject(llvCopy), createdLLV); err == nil {
+								createdLLV.Status = llvCopy.Status.DeepCopy()
+								// Try to update status, but don't fail if it doesn't work
+								_ = cl.Status().Update(ctx, createdLLV)
+							}
+						}
+					})
+
+					When("LLV phase is Created", func() {
+						BeforeEach(func() {
+							llv.Status = &snc.LVMLogicalVolumeStatus{
+								Phase: "Created",
+							}
 						})
 
-						When("updating status fails", func() {
-							statusPatchError := errors.New("failed to patch status")
+						// Status is already set in parent JustBeforeEach when creating LLV
+						// No need to update it here
+
+						When("RVR status does not have LLV name", func() {
 							BeforeEach(func() {
-								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-										if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
-											if subResourceName == "status" {
-												return statusPatchError
-											}
-										}
-										return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
-									},
-								})
+								rvr.Status = nil
 							})
 
-							JustBeforeEach(func(ctx SpecContext) {
-								// Create new client builder with interceptors
-								newClientBuilder := fake.NewClientBuilder().
-									WithScheme(scheme).
-									WithStatusSubresource(
-										&v1alpha3.ReplicatedVolumeReplica{},
-										&v1alpha3.ReplicatedVolume{}).
-									WithInterceptorFuncs(interceptor.Funcs{
+							It("should update RVR status with LLV name", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+								Expect(rvr).To(HaveLVMLogicalVolumeName(llv.Name))
+							})
+
+							When("updating status fails", func() {
+								statusPatchError := errors.New("failed to patch status")
+								BeforeEach(func() {
+									clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 										SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
 											if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
 												if subResourceName == "status" {
@@ -1012,129 +832,57 @@ var _ = Describe("Reconciler", func() {
 											return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
 										},
 									})
-								cl = newClientBuilder.Build()
-								rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-								// Recreate objects in new client
-								// Clear metadata before creating
-								rvrCopy := rvr.DeepCopy()
-								rvrCopy.ResourceVersion = ""
-								rvrCopy.UID = ""
-								rvrCopy.Generation = 0
-								Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-								if rv != nil {
-									rvCopy := rv.DeepCopy()
-									rvCopy.ResourceVersion = ""
-									rvCopy.UID = ""
-									rvCopy.Generation = 0
-									Expect(cl.Create(ctx, rvCopy)).To(Succeed())
-								}
-								if rsc != nil {
-									rscCopy := rsc.DeepCopy()
-									rscCopy.ResourceVersion = ""
-									rscCopy.UID = ""
-									rscCopy.Generation = 0
-									Expect(cl.Create(ctx, rscCopy)).To(Succeed())
-								}
-								if rsp != nil {
-									rspCopy := rsp.DeepCopy()
-									rspCopy.ResourceVersion = ""
-									rspCopy.UID = ""
-									rspCopy.Generation = 0
-									Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-								}
-								if lvg != nil {
-									lvgCopy := lvg.DeepCopy()
-									lvgCopy.ResourceVersion = ""
-									lvgCopy.UID = ""
-									lvgCopy.Generation = 0
-									Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-								}
-								// Recreate LLV with status and correct ownerReference
-								llvCopy := llv.DeepCopy()
-								llvCopy.ResourceVersion = ""
-								llvCopy.UID = ""
-								llvCopy.Generation = 0
-								llvCopy.OwnerReferences = nil
-								// Set status if available
-								if llv.Status != nil {
-									llvCopy.Status = llv.Status.DeepCopy()
-								}
-								Expect(controllerutil.SetControllerReference(rvrCopy, llvCopy, scheme)).To(Succeed())
-								Expect(cl.Create(ctx, llvCopy)).To(Succeed())
-								// Try to update status after creation (fake client might need this)
-								if llvCopy.Status != nil {
-									createdLLV := &snc.LVMLogicalVolume{}
-									if err := cl.Get(ctx, client.ObjectKeyFromObject(llvCopy), createdLLV); err == nil {
-										createdLLV.Status = llvCopy.Status.DeepCopy()
-										// Don't fail if status update doesn't work - fake client might not support it
-										_ = cl.Status().Update(ctx, createdLLV)
-									}
+								})
+
+								// RVR, RV, RSC, RSP, LVG, and LLV are already created in parent JustBeforeEach
+								// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
+
+								It("should fail if patching status failed", func(ctx SpecContext) {
+									Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("updating LVMLogicalVolumeName in status")))
+								})
+							})
+						})
+
+						When("RVR status already has LLV name", func() {
+							BeforeEach(func() {
+								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+									LVMLogicalVolumeName: llv.Name,
 								}
 							})
 
-							It("should fail if patching status failed", func(ctx SpecContext) {
-								Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("updating LVMLogicalVolumeName in status")))
+							It("should reconcile successfully without error", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 							})
 						})
 					})
 
-					When("RVR status already has LLV name", func() {
+					DescribeTableSubtree("when LLV phase is not Created because",
+						Entry("phase is empty", func() {
+							llv.Status = &snc.LVMLogicalVolumeStatus{Phase: ""}
+						}),
+						Entry("phase is Pending", func() {
+							llv.Status = &snc.LVMLogicalVolumeStatus{Phase: "Pending"}
+						}),
+						Entry("status is nil", func() {
+							llv.Status = nil
+						}),
+						func(setup func()) {
+							BeforeEach(func() {
+								setup()
+							})
+
+							// Status is already set in parent JustBeforeEach when creating LLV
+							// No need to update it here - parent JustBeforeEach handles it
+
+							It("should reconcile successfully and wait", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+							})
+						})
+
+					When("List LLVs fails", func() {
+						listError := errors.New("failed to list")
 						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								LVMLogicalVolumeName: llv.Name,
-							}
-						})
-
-						It("should reconcile successfully without error", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
-				})
-
-				DescribeTableSubtree("when LLV phase is not Created because",
-					Entry("phase is empty", func() {
-						llv.Status = &snc.LVMLogicalVolumeStatus{Phase: ""}
-					}),
-					Entry("phase is Pending", func() {
-						llv.Status = &snc.LVMLogicalVolumeStatus{Phase: "Pending"}
-					}),
-					Entry("status is nil", func() {
-						llv.Status = nil
-					}),
-					func(setup func()) {
-						BeforeEach(func() {
-							setup()
-						})
-
-						// Status is already set in parent JustBeforeEach when creating LLV
-						// No need to update it here - parent JustBeforeEach handles it
-
-						It("should reconcile successfully and wait", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-						})
-					})
-
-				When("List LLVs fails", func() {
-					listError := errors.New("failed to list")
-					BeforeEach(func() {
-						clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-							List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-								if _, ok := list.(*snc.LVMLogicalVolumeList); ok {
-									return listError
-								}
-								return cl.List(ctx, list, opts...)
-							},
-						})
-					})
-
-					JustBeforeEach(func(ctx SpecContext) {
-						// Create new client builder with interceptors
-						newClientBuilder := fake.NewClientBuilder().
-							WithScheme(scheme).
-							WithStatusSubresource(
-								&v1alpha3.ReplicatedVolumeReplica{},
-								&v1alpha3.ReplicatedVolume{}).
-							WithInterceptorFuncs(interceptor.Funcs{
+							clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 								List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 									if _, ok := list.(*snc.LVMLogicalVolumeList); ok {
 										return listError
@@ -1142,62 +890,14 @@ var _ = Describe("Reconciler", func() {
 									return cl.List(ctx, list, opts...)
 								},
 							})
-						cl = newClientBuilder.Build()
-						rec = rvrvolume.NewReconciler(cl, GinkgoLogr, scheme)
-						// Recreate objects in new client
-						// Clear metadata before creating
-						rvrCopy := rvr.DeepCopy()
-						rvrCopy.ResourceVersion = ""
-						rvrCopy.UID = ""
-						rvrCopy.Generation = 0
-						Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
-						if rv != nil {
-							rvCopy := rv.DeepCopy()
-							rvCopy.ResourceVersion = ""
-							rvCopy.UID = ""
-							rvCopy.Generation = 0
-							Expect(cl.Create(ctx, rvCopy)).To(Succeed())
-						}
-						if rsc != nil {
-							rscCopy := rsc.DeepCopy()
-							rscCopy.ResourceVersion = ""
-							rscCopy.UID = ""
-							rscCopy.Generation = 0
-							Expect(cl.Create(ctx, rscCopy)).To(Succeed())
-						}
-						if rsp != nil {
-							rspCopy := rsp.DeepCopy()
-							rspCopy.ResourceVersion = ""
-							rspCopy.UID = ""
-							rspCopy.Generation = 0
-							Expect(cl.Create(ctx, rspCopy)).To(Succeed())
-						}
-						if lvg != nil {
-							lvgCopy := lvg.DeepCopy()
-							lvgCopy.ResourceVersion = ""
-							lvgCopy.UID = ""
-							lvgCopy.Generation = 0
-							Expect(cl.Create(ctx, lvgCopy)).To(Succeed())
-						}
-						// Recreate LLV with status and correct ownerReference
-						llvCopy := llv.DeepCopy()
-						llvCopy.ResourceVersion = ""
-						llvCopy.UID = ""
-						llvCopy.Generation = 0
-						llvCopy.OwnerReferences = nil
-						Expect(controllerutil.SetControllerReference(rvrCopy, llvCopy, scheme)).To(Succeed())
-						Expect(cl.Create(ctx, llvCopy)).To(Succeed())
-						// Update status if it was set - need to get the created LLV first
-						if llv.Status != nil {
-							createdLLV := &snc.LVMLogicalVolume{}
-							Expect(cl.Get(ctx, client.ObjectKeyFromObject(llvCopy), createdLLV)).To(Succeed())
-							createdLLV.Status = llv.Status.DeepCopy()
-							Expect(cl.Status().Update(ctx, createdLLV)).To(Succeed())
-						}
-					})
+						})
 
-					It("should fail if listing LLVs failed", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("listing LVMLogicalVolumes")))
+						// RVR, RV, RSC, RSP, LVG, and LLV are already created in parent JustBeforeEach
+						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
+
+						It("should fail if listing LLVs failed", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("listing LVMLogicalVolumes")))
+						})
 					})
 				})
 			})
