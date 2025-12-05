@@ -188,6 +188,10 @@ type DRBDErrors struct {
 	LastAdjustmentError *CmdError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	SharedSecretAlgSelectionError *SharedSecretUnsupportedAlgError `json:"sharedSecretAlgSelectionError,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	LastPrimaryError *CmdError `json:"lastPrimaryError,omitempty" patchStrategy:"merge"`
+	// +patchStrategy=merge
+	LastSecondaryError *CmdError `json:"lastSecondaryError,omitempty" patchStrategy:"merge"`
 }
 
 // +k8s:deepcopy-gen=true
