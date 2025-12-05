@@ -98,7 +98,7 @@ func HaveFinalizer(finalizerName string) gomegatypes.GomegaMatcher {
 			}
 		}
 		return false, nil
-	}).WithMessage("expected object to have finalizer " + finalizerName)
+	}).WithTemplate("Expected:\n{{.FormattedActual}}\n{{.To}} have finalizer:\n{{format .Data 1}}").WithTemplateData(finalizerName)
 }
 
 // NotHaveFinalizer returns a matcher that checks if object does not have the specified finalizer
