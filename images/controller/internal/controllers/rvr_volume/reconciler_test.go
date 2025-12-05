@@ -1329,16 +1329,22 @@ var _ = Describe("Reconciler", func() {
 			llv.Status.Phase = "Created"
 			// Use regular Update for LLV status in fake client
 			Expect(cl.Update(ctx, llv)).To(Succeed())
-			Eventually(func(g Gomega, ctx context.Context) v1alpha3.ReplicatedVolumeReplica {
+			// Use Eventually to support future async client migration
+			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
 				g.Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
 				// Verify RVR status was updated with LLV name
-				updatedRVR := v1alpha3.ReplicatedVolumeReplica{}
-				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), &updatedRVR)).To(Succeed())
+				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 				return updatedRVR
-			}).To(HaveLVMLogicalVolumeName(rvr.Name))
+			}).WithContext(ctx).Should(HaveLVMLogicalVolumeName(rvr.Name))
+
+			// Get updatedRVR for next steps
+			updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 
 			// Step 4: Change RVR type to Access - LLV should remain
+			// updatedRVR already obtained above
 			updatedRVR.Spec.Type = "Access"
 			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
