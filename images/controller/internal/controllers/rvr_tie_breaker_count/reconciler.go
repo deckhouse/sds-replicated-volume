@@ -61,40 +61,99 @@ func (r *Reconciler) Reconcile(
 	req reconcile.Request,
 ) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("request", req)
-	// get target ReplicatedVolume
-	rv := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
-		log.Error(err, "Can't get ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+	rv, err := r.getReplicatedVolume(ctx, req, log)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
-
-	// controller logic depends on ReplicatedStorageClass policy; skip if not set
-	if rv.Spec.ReplicatedStorageClassName == "" {
-		log.Info("Empty ReplicatedStorageClassName")
+	if rv == nil {
 		return reconcile.Result{}, nil
 	}
 
-	// get ReplicatedStorageClass to read replication and topology settings
+	if shouldSkipRV(rv, log) {
+		return reconcile.Result{}, nil
+	}
+
+	rsc, err := r.getReplicatedStorageClass(ctx, rv, log)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+	if rsc == nil {
+		return reconcile.Result{}, nil
+	}
+
+	FDKeyByNodeName, err := r.buildFDKeyByNode(ctx, rsc, log)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	replicasForRV, err := r.listReplicasForRV(ctx, rv, log)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	FDReplicaCount, tieBreakerCurrent := aggregateReplicas(FDKeyByNodeName, replicasForRV)
+
+	return r.syncTieBreakers(ctx, rv, FDReplicaCount, tieBreakerCurrent, log)
+}
+
+func (r *Reconciler) getReplicatedVolume(
+	ctx context.Context,
+	req reconcile.Request,
+	log logr.Logger,
+) (*v1alpha3.ReplicatedVolume, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
+	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		log.Error(err, "Can't get ReplicatedVolume")
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return rv, nil
+}
+
+func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+	if rv.Spec.ReplicatedStorageClassName == "" {
+		log.Info("Empty ReplicatedStorageClassName")
+		return true
+	}
+	return false
+}
+
+func (r *Reconciler) getReplicatedStorageClass(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	log logr.Logger,
+) (*v1alpha1.ReplicatedStorageClass, error) {
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
 		log.Error(err, "Can't get ReplicatedStorageClass")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		if client.IgnoreNotFound(err) == nil {
+			return nil, nil
+		}
+		return nil, err
 	}
+	return rsc, nil
+}
 
-	// list Nodes to build nodeName -> FD key map according to rsc.Spec.Topology
+func (r *Reconciler) buildFDKeyByNode(
+	ctx context.Context,
+	rsc *v1alpha1.ReplicatedStorageClass,
+	log logr.Logger,
+) (map[string]string, error) {
 	nodes := &corev1.NodeList{}
 	if err := r.cl.List(ctx, nodes); err != nil {
-		return reconcile.Result{}, err
+		return nil, err
 	}
 
 	FDKeyByNodeName := make(map[string]string)
 	for _, node := range nodes.Items {
-		log := log.WithValues("node", node.Name)
+		nodeLog := log.WithValues("node", node.Name)
 		if rsc.Spec.Topology == "TransZonal" {
 			zone, ok := node.Labels[NodeZoneLabel]
 			if !ok {
-				log.Error(ErrNoZoneLabel, "No zone label")
-				return reconcile.Result{}, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
+				nodeLog.Error(ErrNoZoneLabel, "No zone label")
+				return nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
 			FDKeyByNodeName[node.Name] = zone
 		} else {
@@ -102,61 +161,70 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 
+	return FDKeyByNodeName, nil
+}
+
+func (r *Reconciler) listReplicasForRV(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	log logr.Logger,
+) ([]v1alpha3.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Can't List ReplicatedVolumeReplicaList")
-		return reconcile.Result{}, err
+		return nil, err
 	}
 
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	replicasForRV := slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
 		return rv.Name != rvr.Spec.ReplicatedVolumeName || !rvr.DeletionTimestamp.IsZero()
 	})
 
-	// aggregate base replicas (Diskful+Access) per FD and collect existing TieBreaker replicas
+	return replicasForRV, nil
+}
+
+func aggregateReplicas(
+	FDKeyByNodeName map[string]string,
+	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+) (map[string]int, []*v1alpha3.ReplicatedVolumeReplica) {
 	FDReplicaCount := make(map[string]int, len(FDKeyByNodeName))
-	var diskfulCount int
 	var tieBreakerCurrent []*v1alpha3.ReplicatedVolumeReplica
 
-	for _, rvr := range rvrList.Items {
+	for i := range replicasForRV {
+		rvr := &replicasForRV[i]
 		switch rvr.Spec.Type {
-		case "Diskful":
-			diskfulCount++
-			if rvr.Spec.NodeName != "" {
-				if fd, ok := FDKeyByNodeName[rvr.Spec.NodeName]; ok {
-					FDReplicaCount[fd]++
-				}
-			}
-		case "Access":
+		case "Diskful", "Access":
 			if rvr.Spec.NodeName != "" {
 				if fd, ok := FDKeyByNodeName[rvr.Spec.NodeName]; ok {
 					FDReplicaCount[fd]++
 				}
 			}
 		case "TieBreaker":
-			tieBreakerCurrent = append(tieBreakerCurrent, &rvr)
+			tieBreakerCurrent = append(tieBreakerCurrent, rvr)
 		}
 	}
 
+	return FDReplicaCount, tieBreakerCurrent
+}
+
+func (r *Reconciler) syncTieBreakers(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	FDReplicaCount map[string]int,
+	tieBreakerCurrent []*v1alpha3.ReplicatedVolumeReplica,
+	log logr.Logger,
+) (reconcile.Result, error) {
 	desiredTB, err := CalculateDesiredTieBreakerTotal(FDReplicaCount)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("calculate desired tie breaker count: %w", err)
 	}
 
-	// for Replication=Availability with at least two Diskful replicas,
-	// compute the minimal required number of TieBreakers based on FD distribution
-	// if rsc.Spec.Replication == "Availability" && diskfulCount == 2 {
-	// 	desiredTB = desiredTieBreakerTotal(FDReplicaCount)
-	// }
-
 	currentTB := len(tieBreakerCurrent)
 
-	// if the current number of TieBreaker replicas already matches the desired one, nothing to change
 	if currentTB == desiredTB {
 		log.Info("No need to change")
 		return reconcile.Result{}, nil
 	}
 
-	// when there are fewer TieBreakers than required, create the missing ones
 	if currentTB < desiredTB {
 		if r.scheme == nil {
 			return reconcile.Result{}, fmt.Errorf("reconciler scheme is nil")
@@ -186,7 +254,6 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	// when there are more TieBreakers than required, delete the excess ones
 	toDelete := currentTB - desiredTB
 	for i := 0; i < toDelete; i++ {
 		rvr := tieBreakerCurrent[i]
