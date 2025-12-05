@@ -36,6 +36,8 @@ import (
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 )
 
+// TODO: remove this function in the future and not use it in tests, because it's a bad pattern
+//
 //nolint:unparam // name and rv parameters are kept for flexibility in tests
 func createReplicatedVolumeReplica(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
 	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
@@ -301,7 +303,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should wait and return no error", func() {
+			It("should not create additional replicas", func() {
 				Expect(rvrList.Items).To(HaveLen(1))
 			})
 		})
