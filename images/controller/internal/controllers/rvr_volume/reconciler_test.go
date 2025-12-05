@@ -167,10 +167,9 @@ var _ = Describe("Reconciler", func() {
 					It("should clear LVMLogicalVolumeName from status", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-						// Refresh RVR from cluster to get updated status
-						updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
-						Expect(updatedRVR).To(HaveNoLVMLogicalVolumeName())
+						By("Refreshing RVR from cluster to get updated status")
+						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
 					})
 
 					When("clearing status fails", func() {
