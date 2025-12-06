@@ -54,7 +54,6 @@ var _ = registry.RegisterFunc(
 )
 
 func discoveryDataNodesChecksum(_ context.Context, input *pkg.HookInput) error {
-
 	uidList, err := objectpatch.UnmarshalToStruct[string](input.Snapshots, nodeSnapshotName)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal node UIDs: %w", err)

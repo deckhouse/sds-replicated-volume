@@ -166,7 +166,7 @@ func (d *Driver) Run(ctx context.Context) error {
 	var eg errgroup.Group
 	eg.Go(func() error {
 		<-ctx.Done()
-		return d.httpSrv.Shutdown(context.Background())
+		return d.httpSrv.Shutdown(context.Background()) // TODO: Should we use just ctx here?
 	})
 	eg.Go(func() error {
 		go func() {

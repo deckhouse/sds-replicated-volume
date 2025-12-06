@@ -37,3 +37,6 @@ __pycache__/
 hack.sh
 **/Dockerfile-dev
 .secret
+
+# test data
+images/agent/pkg/drbdconf/testdata/out/

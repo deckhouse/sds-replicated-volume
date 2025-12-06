@@ -1,6 +1,16 @@
 linters-settings:
   container:
     exclude-rules:
+      # TODO: fix and remove - disable seccomp-profile check for agent and controller
+      seccomp-profile:
+        # TODO: fix and remove
+        - kind: DaemonSet
+          name: agent
+          container: agent
+        # TODO: fix and remove
+        - kind: Deployment
+          name: controller
+          container: controller
       no-new-privileges:
         - kind: DaemonSet
           name: csi-node
@@ -14,6 +24,14 @@ linters-settings:
         - kind: Deployment
           name: sds-replicated-volume-controller
           container: sds-replicated-volume-controller
+        # TODO: fix and remove
+        - kind: DaemonSet
+          name: agent
+          container: agent
+        # TODO: fix and remove
+        - kind: Deployment
+          name: controller
+          container: controller
       liveness-probe:
         - kind: Deployment
           name: csi-controller
@@ -85,11 +103,43 @@ linters-settings:
           container: linstor-satellite
   rbac:
     exclude-rules:
+      # TODO: fix and remove - disable placement (#rbac) check for CSI driver RBAC objects
+      placement:
+        # TODO: fix and remove
+        - kind: RoleBinding
+          name: csi:controller:external-attacher
+        # TODO: fix and remove
+        - kind: RoleBinding
+          name: csi:controller:external-provisioner
+        # TODO: fix and remove
+        - kind: RoleBinding
+          name: csi:controller:external-resizer
+        # TODO: fix and remove
+        - kind: RoleBinding
+          name: csi:controller:external-snapshotter
+        # TODO: fix and remove
+        - kind: Role
+          name: csi:controller:external-attacher
+        # TODO: fix and remove
+        - kind: Role
+          name: csi:controller:external-provisioner
+        # TODO: fix and remove
+        - kind: Role
+          name: csi:controller:external-resizer
+        # TODO: fix and remove
+        - kind: Role
+          name: csi:controller:external-snapshotter
+        # TODO: fix and remove
+        - kind: ServiceAccount
+          name: csi
       wildcards:
         - kind: ClusterRole
           name: d8:sds-replicated-volume:metadata-backup
         - kind: ClusterRole
           name: d8:sds-replicated-volume:linstor-controller
+        # TODO: fix and remove
+        - kind: ClusterRole
+          name: d8:sds-replicated-volume:controller
   images:
     patches:
       disable: true

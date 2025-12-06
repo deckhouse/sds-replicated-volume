@@ -4,6 +4,8 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.19.0
+  labels:
+    module: sds-replicated-volume
   name: replicatedvolumes.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
@@ -153,11 +155,11 @@ spec:
                         minimum: 0
                         type: integer
                       quorum:
-                        maximum: 7
+                        maximum: 8
                         minimum: 0
                         type: integer
                       quorumMinimumRedundancy:
-                        maximum: 7
+                        maximum: 8
                         minimum: 0
                         type: integer
                       sharedSecret:
@@ -166,9 +168,14 @@ spec:
                       sharedSecretAlg:
                         minLength: 1
                         type: string
-                    required:
-                    - quorum
-                    - quorumMinimumRedundancy
+                    type: object
+                type: object
+              errors:
+                properties:
+                  duplicateDeviceMinor:
+                    properties:
+                      message:
+                        type: string
                     type: object
                 type: object
               phase:

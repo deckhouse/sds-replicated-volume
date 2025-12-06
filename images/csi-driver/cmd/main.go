@@ -49,7 +49,6 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
-
 	defer cancel()
 
 	c := make(chan os.Signal, 1)
@@ -62,13 +61,11 @@ func main() {
 	cfgParams, err := config.NewConfig()
 	if err != nil {
 		klog.Fatalf("unable to create NewConfig, err: %s", err.Error())
-		os.Exit(1)
 	}
 
 	log, err := logger.NewLogger(cfgParams.Loglevel)
 	if err != nil {
-		fmt.Printf("unable to create NewLogger, err: %v\n", err)
-		os.Exit(1)
+		klog.Fatalf("unable to create NewLogger, err: %v", err)
 	}
 
 	log.Info("version = ", cfgParams.Version)
@@ -84,7 +81,7 @@ func main() {
 	)
 	if err != nil {
 		log.Error(err, "[main] unable to create kubeclient")
-		os.Exit(1)
+		klog.Fatalf("unable to create kubeclient, err: %v", err)
 	}
 
 	http.HandleFunc("/healthz", healthHandler)
