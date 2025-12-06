@@ -14,30 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount
+package config
 
-type Request interface {
-	_isRequest()
+type DRBDConfig struct {
+	MinPort uint
+	MaxPort uint
 }
 
-//
-
-type AddFirstRequest struct {
-	Name string
+func (c DRBDConfig) IsPortValid(port uint) bool {
+	return port >= c.MinPort && port <= c.MaxPort
 }
 
-type AddSubsequentRequest struct {
-	Name string
+type Config struct {
+	NodeName               string
+	HealthProbeBindAddress string
+	MetricsBindAddress     string
+	DRBD                   DRBDConfig
 }
-
-// ...
-
-func (r AddFirstRequest) _isRequest()      {}
-func (r AddSubsequentRequest) _isRequest() {}
-
-// ...
-
-var _ Request = AddFirstRequest{}
-var _ Request = AddSubsequentRequest{}
-
-// ...

@@ -14,31 +14,29 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount
+package rvstatusconfigdeviceminor
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func BuildController(mgr manager.Manager) error {
-	nameController := "rvr_diskful_count_controller"
-
-	r := &Reconciler{
-		cl:     mgr.GetClient(),
-		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
-		scheme: mgr.GetScheme(),
-	}
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName).WithName("Reconciler"),
+	)
+	// MaxConcurrentReconciles: 1
+	// prevents race conditions when assigning unique deviceMinor values
+	// to different ReplicatedVolume resources. Status not protected by optimistic locking,
+	// so we need to prevent parallel reconciles for avoiding duplicate assignments.
 
 	return builder.ControllerManagedBy(mgr).
-		Named(nameController).
-		For(
-			&v1alpha3.ReplicatedVolume{}).
-		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
-		Complete(r)
+		Named(RVStatusConfigDeviceMinorControllerName).
+		For(&v1alpha3.ReplicatedVolume{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		Complete(rec)
 }
