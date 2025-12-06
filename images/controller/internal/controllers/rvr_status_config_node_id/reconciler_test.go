@@ -480,26 +480,28 @@ var _ = Describe("Reconciler", func() {
 					rvrList = []*v1alpha3.ReplicatedVolumeReplica{rvrWithInvalidNodeID, rvrWithoutNodeID}
 				})
 
-				It("ignores nodeID outside valid range and assigns valid nodeIDs", func(ctx SpecContext) {
-					By("Reconciling until both RVRs get valid unique nodeIDs")
+				It("ignores nodeID outside valid range and assigns valid nodeID only to RVR without nodeID", func(ctx SpecContext) {
+					invalidNodeID := v1alpha3.RVRMaxNodeID + 1
+					By("Reconciling until RVR without nodeID gets valid nodeID")
 					Eventually(func(g Gomega) bool {
 						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful assignment")
-						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), rvrWithInvalidNodeID)).To(Succeed(), "should get updated RVR with invalid nodeID")
+						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), rvrWithInvalidNodeID)).To(Succeed(), "should get RVR with invalid nodeID")
 						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithoutNodeID), rvrWithoutNodeID)).To(Succeed(), "should get updated RVR without nodeID")
-						return rvrWithInvalidNodeID.Status != nil &&
+						// RVR with invalid nodeID should keep its invalid nodeID (it's ignored, not overwritten)
+						hasInvalidNodeID := rvrWithInvalidNodeID.Status != nil &&
 							rvrWithInvalidNodeID.Status.DRBD != nil &&
 							rvrWithInvalidNodeID.Status.DRBD.Config != nil &&
 							rvrWithInvalidNodeID.Status.DRBD.Config.NodeId != nil &&
-							*rvrWithInvalidNodeID.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
-							*rvrWithInvalidNodeID.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
-							rvrWithoutNodeID.Status != nil &&
+							*rvrWithInvalidNodeID.Status.DRBD.Config.NodeId == invalidNodeID
+						// RVR without nodeID should get a valid nodeID
+						hasValidNodeID := rvrWithoutNodeID.Status != nil &&
 							rvrWithoutNodeID.Status.DRBD != nil &&
 							rvrWithoutNodeID.Status.DRBD.Config != nil &&
 							rvrWithoutNodeID.Status.DRBD.Config.NodeId != nil &&
 							*rvrWithoutNodeID.Status.DRBD.Config.NodeId >= v1alpha3.RVRMinNodeID &&
-							*rvrWithoutNodeID.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID &&
-							*rvrWithInvalidNodeID.Status.DRBD.Config.NodeId != *rvrWithoutNodeID.Status.DRBD.Config.NodeId
-					}).Should(BeTrue(), "both RVRs should get valid unique nodeIDs (invalid nodeID was ignored)")
+							*rvrWithoutNodeID.Status.DRBD.Config.NodeId <= v1alpha3.RVRMaxNodeID
+						return hasInvalidNodeID && hasValidNodeID
+					}).Should(BeTrue(), "RVR with invalid nodeID should keep invalid nodeID (ignored), RVR without nodeID should get valid nodeID")
 				})
 			})
 
@@ -507,7 +509,7 @@ var _ = Describe("Reconciler", func() {
 				var rvrWithInvalidNodeID *v1alpha3.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
-					By("Creating 6 RVRs with valid nodeID 1-6 and one RVR with invalid nodeID > MaxNodeID (should be reset)")
+					By("Creating 6 RVRs with valid nodeID 1-6 and one RVR with invalid nodeID > MaxNodeID (should be ignored)")
 					rvr = nil
 					rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 7)
 					for i := 1; i < 7; i++ {
@@ -549,16 +551,12 @@ var _ = Describe("Reconciler", func() {
 					rvrList[6] = rvrWithInvalidNodeID
 				})
 
-				It("resets invalid nodeID and reassigns valid one", func(ctx SpecContext) {
-					By("Reconciling until invalid nodeID is reset and valid nodeID is assigned")
-					Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
-						g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after successful reassignment")
-						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), rvrWithInvalidNodeID)).To(Succeed(), "should get updated RVR")
-						return rvrWithInvalidNodeID
-					}).Should(HaveField("Status.DRBD.Config.NodeId", PointTo(And(
-						BeNumerically(">=", v1alpha3.RVRMinNodeID),
-						BeNumerically("<=", v1alpha3.RVRMaxNodeID),
-					))), "should assign valid nodeID after resetting invalid nodeID")
+				It("ignores invalid nodeID and keeps it unchanged", func(ctx SpecContext) {
+					invalidNodeID := v1alpha3.RVRMaxNodeID + 1
+					By("Reconciling and verifying invalid nodeID remains unchanged (ignored)")
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue when invalid nodeID is ignored")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrWithInvalidNodeID), rvrWithInvalidNodeID)).To(Succeed(), "should get RVR with invalid nodeID")
+					Expect(rvrWithInvalidNodeID).To(HaveField("Status.DRBD.Config.NodeId", PointTo(BeNumerically("==", invalidNodeID))), "invalid nodeID should remain unchanged (ignored, not reset)")
 				})
 			})
 
@@ -635,18 +633,21 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("assigns available nodeIDs and handles remaining after RVRs are removed", func(ctx SpecContext) {
-				By("First reconcile: 3 available nodeIDs (5, 6, 7), 4 RVRs need nodeID - only 3 should get assigned")
-				Eventually(func(g Gomega) {
-					g.Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after assignment")
-					assignedCount := 0
-					for i := 0; i < 4; i++ {
-						g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrNeedingNodeIDList[i]), rvrNeedingNodeIDList[i])).To(Succeed())
-						if rvrNeedingNodeIDList[i].Status != nil && rvrNeedingNodeIDList[i].Status.DRBD != nil && rvrNeedingNodeIDList[i].Status.DRBD.Config != nil && rvrNeedingNodeIDList[i].Status.DRBD.Config.NodeId != nil {
-							assignedCount++
-						}
+				By("First reconcile: 3 available nodeIDs (5, 6, 7), 4 RVRs need nodeID - only 3 should get assigned, reconcile should fail")
+				// Reconcile should fail with error because not enough nodeIDs, but 3 RVRs should get assigned
+				_, err := rec.Reconcile(ctx, RequestFor(rv))
+				Expect(err).To(HaveOccurred(), "reconcile should fail when not enough nodeIDs available")
+				Expect(err.Error()).To(ContainSubstring(rvrstatusconfignodeid.ErrNotEnoughAvailableNodeIDsPrefix), "error should mention insufficient nodeIDs")
+
+				// Verify that 3 RVRs got nodeIDs assigned despite the error
+				assignedCount := 0
+				for i := 0; i < 4; i++ {
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrNeedingNodeIDList[i]), rvrNeedingNodeIDList[i])).To(Succeed())
+					if rvrNeedingNodeIDList[i].Status != nil && rvrNeedingNodeIDList[i].Status.DRBD != nil && rvrNeedingNodeIDList[i].Status.DRBD.Config != nil && rvrNeedingNodeIDList[i].Status.DRBD.Config.NodeId != nil {
+						assignedCount++
 					}
-					g.Expect(assignedCount).To(Equal(3), "exactly 3 RVRs should get nodeIDs assigned")
-				}).Should(Succeed(), "3 RVRs should get nodeIDs, 1 should remain without")
+				}
+				Expect(assignedCount).To(Equal(3), "exactly 3 RVRs should get nodeIDs assigned before reconcile fails")
 
 				By("Finding RVR that didn't get nodeID")
 				var rvrWithoutNodeID *v1alpha3.ReplicatedVolumeReplica

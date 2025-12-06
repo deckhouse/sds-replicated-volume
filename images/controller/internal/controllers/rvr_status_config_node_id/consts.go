@@ -18,4 +18,7 @@ package rvrstatusconfignodeid
 
 const (
 	RVRStatusConfigNodeIDControllerName = "rvr_status_config_node_id_controller"
+
+	// ErrNotEnoughAvailableNodeIDsPrefix is the prefix of the error message when there are not enough available nodeIDs
+	ErrNotEnoughAvailableNodeIDsPrefix = "not enough available nodeIDs"
 )

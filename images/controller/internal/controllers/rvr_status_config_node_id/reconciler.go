@@ -18,6 +18,7 @@ package rvrstatusconfignodeid
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/go-logr/logr"
@@ -79,7 +80,8 @@ func (r *Reconciler) Reconcile(
 
 	// Collect used nodeIDs and find RVRs that need nodeID assignment
 	// - RVRs with valid nodeID: add to usedNodeIDs map
-	// - RVRs without nodeID or with invalid nodeID: add to rvrsNeedingNodeID list
+	// - RVRs without nodeID: add to rvrsNeedingNodeID list
+	// - RVRs with invalid nodeID: log and ignore. TODO: Revisit this in spec
 	usedNodeIDs := make(map[uint]struct{})
 	var rvrsNeedingNodeID []v1alpha3.ReplicatedVolumeReplica
 
@@ -94,9 +96,10 @@ func (r *Reconciler) Reconcile(
 			// NOTE: Logging invalid nodeID is NOT in the spec.
 			// This was added to improve observability - administrators can see invalid nodeIDs in logs.
 			// To revert: remove this log line.
-			log.V(1).Info("ignoring nodeID outside valid range, will reassign", "nodeID", nodeID, "validRange", v1alpha3.FormatValidNodeIDRange(), "rvr", item.Name, "volume", rv.Name)
+			log.V(1).Info("ignoring nodeID outside valid range", "nodeID", nodeID, "validRange", v1alpha3.FormatValidNodeIDRange(), "rvr", item.Name, "volume", rv.Name)
+			continue
 		}
-		// RVR needs nodeID assignment (either nil Status/DRBD/Config or invalid nodeID)
+		// RVR needs nodeID assignment
 		rvrsNeedingNodeID = append(rvrsNeedingNodeID, item)
 	}
 
@@ -118,27 +121,40 @@ func (r *Reconciler) Reconcile(
 	// Remaining RVRs will get nodeIDs in the next reconcile when more become available
 	if len(availableNodeIDs) < len(rvrsNeedingNodeID) {
 		totalReplicas := len(rvrList.Items)
-		log.Info("not enough available nodeIDs, assigning available ones", "needed", len(rvrsNeedingNodeID), "available", len(availableNodeIDs), "replicas", totalReplicas, "max", int(v1alpha3.RVRMaxNodeID)+1, "volume", rv.Name)
+		log.Info(
+			"not enough available nodeIDs to assign all replicas; will assign to as many as possible and fail reconcile",
+			"needed", len(rvrsNeedingNodeID),
+			"available", len(availableNodeIDs),
+			"replicas", totalReplicas,
+			"max", int(v1alpha3.RVRMaxNodeID)+1,
+			"volume", rv.Name,
+		)
 	}
 
 	// Assign nodeIDs to RVRs that need them sequentially
 	// Note: We use ResourceVersion from List. Since we reconcile RV (not RVR) and process RVRs sequentially
 	// for each RV, no one can edit the same RVR simultaneously within our controller. This makes the code
 	// simple and solid, though not the fastest (no parallel processing of RVRs).
-	// If we run out of available nodeIDs, we stop assigning and let the next reconcile handle remaining RVRs.
-	nodeIDIndex := 0
+	// If we run out of available nodeIDs, we stop assigning, fail the reconcile, and let the next reconcile handle remaining RVRs once some replicas are removed.
 	for i := range rvrsNeedingNodeID {
 		rvr := &rvrsNeedingNodeID[i]
 
 		// Get next available nodeID from the list
 		// If no more available, stop assigning (remaining RVRs will be handled in next reconcile)
-		if nodeIDIndex >= len(availableNodeIDs) {
-			// Debug: log how many RVRs didn't get nodeID and why
-			log.V(2).Info("no more available nodeIDs, remaining RVRs will be assigned in next reconcile", "rvr", rvr.Name, "remainingCount", len(rvrsNeedingNodeID)-i, "volume", rv.Name, "reason", "not enough available nodeIDs")
-			break
+		if i >= len(availableNodeIDs) {
+			// We will fail reconcile and let the next reconcile handle remaining RVRs
+			err := fmt.Errorf(
+				"%s for volume %s: remaining RVRs without nodeID=%d, usedNodeIDs=%d, maxNodeIDs=%d",
+				ErrNotEnoughAvailableNodeIDsPrefix,
+				rv.Name,
+				len(rvrsNeedingNodeID)-i,
+				len(usedNodeIDs),
+				int(v1alpha3.RVRMaxNodeID)+1,
+			)
+			log.Error(err, "no more available nodeIDs, remaining RVRs will be assigned only after some replicas are removed")
+			return reconcile.Result{}, err
 		}
-		nodeID := availableNodeIDs[nodeIDIndex]
-		nodeIDIndex++
+		nodeID := availableNodeIDs[i]
 
 		// Prepare patch: initialize status fields if needed and set nodeID
 		from := client.MergeFrom(rvr)
