@@ -249,14 +249,6 @@ func isLLVPhaseCreated(llv *snc.LVMLogicalVolume) bool {
 	return llv.Status != nil && llv.Status.Phase == "Created"
 }
 
-// getLLVPhase returns the phase of LLV or empty string if status is nil.
-func getLLVPhase(llv *snc.LVMLogicalVolume) string {
-	if llv.Status == nil {
-		return ""
-	}
-	return llv.Status.Phase
-}
-
 // deleteLLV deletes a LVMLogicalVolume from the cluster.
 func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume, log logr.Logger) error {
 	if llv.DeletionTimestamp != nil {
