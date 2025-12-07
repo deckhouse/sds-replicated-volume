@@ -18,7 +18,6 @@ package rvrstatusconfigaddress
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -30,22 +29,28 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 )
-
-var ErrNoPortsAvailable = errors.New("no free port available")
 
 type Reconciler struct {
 	cl      client.Client
 	log     logr.Logger
-	drbdCfg config.DRBDConfig
+	drbdCfg DRBDConfig
+}
+
+type DRBDConfig interface {
+	DRBDMinPort() uint
+	DRBDMaxPort() uint
+}
+
+func IsPortValid(c DRBDConfig, port uint) bool {
+	return port >= c.DRBDMinPort() && port <= c.DRBDMaxPort()
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
 
 // NewReconciler creates a new Reconciler.
-func NewReconciler(cl client.Client, log logr.Logger, drbdCfg config.DRBDConfig) *Reconciler {
-	if drbdCfg.MinPort == 0 {
+func NewReconciler(cl client.Client, log logr.Logger, drbdCfg DRBDConfig) *Reconciler {
+	if drbdCfg.DRBDMinPort() == 0 {
 		panic("Minimal DRBD port can't be 0 to be able to distinguish the port unset case")
 	}
 	return &Reconciler{
@@ -114,7 +119,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	// Build map of used ports from all RVRs removing the RVR with valid port and the not changed IPv4
 	usedPorts := make(map[uint]struct{})
 	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-		if !r.drbdCfg.IsPortValid(rvr.Status.DRBD.Config.Address.Port) {
+		if !IsPortValid(r.drbdCfg, rvr.Status.DRBD.Config.Address.Port) {
 			return false // keep invalid
 		}
 		// mark as used
@@ -135,8 +140,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		var portToAssign uint = rvr.Status.DRBD.Config.Address.Port
 
 		// Change port only if it's invalid
-		if !r.drbdCfg.IsPortValid(portToAssign) {
-			for port := r.drbdCfg.MinPort; port <= r.drbdCfg.MaxPort; port++ {
+		if !IsPortValid(r.drbdCfg, portToAssign) {
+			for port := r.drbdCfg.DRBDMinPort(); port <= r.drbdCfg.DRBDMaxPort(); port++ {
 				if _, used := usedPorts[port]; !used {
 					portToAssign = port
 					usedPorts[portToAssign] = struct{}{} // Mark as used for next RVR
@@ -146,7 +151,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 
 		if portToAssign == 0 {
-			log.Error(ErrNoPortsAvailable, "Out of free ports", "minPort", r.drbdCfg.MinPort, "maxPort", r.drbdCfg.MaxPort)
+			log.Error(ErrNoPortsAvailable, "Out of free ports", "minPort", r.drbdCfg.DRBDMinPort(), "maxPort", r.drbdCfg.DRBDMaxPort())
 			if changed := r.setCondition(
 				&rvr,
 				metav1.ConditionFalse,

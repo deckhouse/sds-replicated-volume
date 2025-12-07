@@ -19,6 +19,6 @@ package rvrstatusconfigaddress
 import "errors"
 
 var (
-	ErrConfigSettings        = errors.New("getting DRBD port settings")
 	ErrNodeMissingInternalIP = errors.New("node missing InternalIP")
+	ErrNoPortsAvailable      = errors.New("no free port available")
 )
