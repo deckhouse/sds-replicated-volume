@@ -57,6 +57,18 @@
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+  - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
+  - [`rv-gc-controller`](#rv-gc-controller)
+  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
+- [Сценарии](#сценарии)
+  - [Отказоустойчивость](#отказоустойчивость)
+    - [Arrange](#arrange)
+    - [Act](#act)
+    - [Assert](#assert)
+  - [Нагрузочный](#нагрузочный)
+    - [Arrange](#arrange-1)
+    - [Act](#act-1)
+    - [Assert](#assert-1)
 
 # Основные положения
 
