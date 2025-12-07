@@ -36,8 +36,23 @@ const (
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
 
-	// [ConditionTypeDiskIOSuspended] indicates whether replica has achieved quorum
+	// [ConditionTypeDiskIOSuspended] indicates whether replica IO is suspended
 	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
+
+	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
+	ConditionTypeQuorumConfigured = "QuorumConfigured"
+
+	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
+	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
+
+	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
+	ConditionTypeAllReplicasReady = "AllReplicasReady"
+
+	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
+	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
+
+	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
+	ConditionTypeAddressConfigured = "AddressConfigured"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -48,6 +63,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeConfigurationAdjusted: {false},
 	ConditionTypeQuorum:                {false},
 	ConditionTypeDiskIOSuspended:       {false},
+	ConditionTypeAddressConfigured:     {false},
 }
 
 // Condition reasons for [ConditionTypeReady] condition
@@ -106,4 +122,30 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
+)
+
+// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
+const (
+	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
+	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
+)
+
+// Replication values for [ReplicatedStorageClass] spec
+const (
+	ReplicationNone                       = "None"
+	ReplicationAvailability               = "Availability"
+	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
+)
+
+// Replica type values for [ReplicatedVolumeReplica] spec
+const (
+	ReplicaTypeDiskful = "Diskful"
+)
+
+// Condition reasons for [ConditionTypeAddressConfigured] condition
+const (
+	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
+	ReasonNodeIPNotFound                = "NodeIPNotFound"
+	ReasonPortSettingsNotFound          = "PortSettingsNotFound"
+	ReasonNoFreePortAvailable           = "NoFreePortAvailable"
 )

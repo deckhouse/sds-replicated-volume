@@ -95,6 +95,14 @@ type ReplicatedVolumeStatusErrors struct {
 	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
 }
 
+func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
+	return s.Conditions
+}
+
+func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
+	s.Conditions = conditions
+}
+
 // +k8s:deepcopy-gen=true
 type DRBDResource struct {
 	// +patchStrategy=merge
@@ -144,5 +152,5 @@ type DRBDResourceConfig struct {
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
-	DeviceMinor uint `json:"deviceMinor,omitempty"`
+	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }

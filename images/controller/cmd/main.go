@@ -31,6 +31,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/env"
 )
 
 func main() {
@@ -63,7 +64,10 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)
 
-	envConfig := GetEnvConfig()
+	envConfig, err := env.GetConfig()
+	if err != nil {
+		return fmt.Errorf("getting env config: %w", err)
+	}
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)

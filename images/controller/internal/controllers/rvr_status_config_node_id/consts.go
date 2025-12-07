@@ -14,30 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount
+package rvrstatusconfignodeid
 
-type Request interface {
-	_isRequest()
-}
+const (
+	RVRStatusConfigNodeIDControllerName = "rvr_status_config_node_id_controller"
 
-//
-
-type AddFirstRequest struct {
-	Name string
-}
-
-type AddSubsequentRequest struct {
-	Name string
-}
-
-// ...
-
-func (r AddFirstRequest) _isRequest()      {}
-func (r AddSubsequentRequest) _isRequest() {}
-
-// ...
-
-var _ Request = AddFirstRequest{}
-var _ Request = AddSubsequentRequest{}
-
-// ...
+	// ErrNotEnoughAvailableNodeIDsPrefix is the prefix of the error message when there are not enough available nodeIDs
+	ErrNotEnoughAvailableNodeIDsPrefix = "not enough available nodeIDs"
+)

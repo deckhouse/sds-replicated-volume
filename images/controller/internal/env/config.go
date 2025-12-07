@@ -20,32 +20,22 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
 )
 
 const (
-	NodeNameEnvVar = "NODE_NAME"
-
-	DRBDMinPortEnvVar = "DRBD_MIN_PORT"
-	DRBDMaxPortEnvVar = "DRBD_MAX_PORT"
-
-	DRBDMinPortDefault uint = 7000
-	DRBDMaxPortDefault uint = 7999
-
+	NodeNameEnvVar               = "NODE_NAME"
 	HealthProbeBindAddressEnvVar = "HEALTH_PROBE_BIND_ADDRESS"
 	MetricsPortEnvVar            = "METRICS_BIND_ADDRESS"
 
 	// defaults are different for each app, do not merge them
-	DefaultHealthProbeBindAddress = ":4269"
-	DefaultMetricsBindAddress     = ":4270"
+	DefaultHealthProbeBindAddress = ":4271"
+	DefaultMetricsBindAddress     = ":4272"
 )
 
 var ErrInvalidConfig = errors.New("invalid config")
 
 type config struct {
 	nodeName               string
-	drbdMinPort            uint
-	drbdMaxPort            uint
 	healthProbeBindAddress string
 	metricsBindAddress     string
 }
@@ -58,22 +48,12 @@ func (c *config) MetricsBindAddress() string {
 	return c.metricsBindAddress
 }
 
-func (c *config) DRBDMaxPort() uint {
-	return c.drbdMaxPort
-}
-
-func (c *config) DRBDMinPort() uint {
-	return c.drbdMinPort
-}
-
 func (c *config) NodeName() string {
 	return c.nodeName
 }
 
 type Config interface {
 	NodeName() string
-	DRBDMinPort() uint
-	DRBDMaxPort() uint
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 }
@@ -91,35 +71,6 @@ func GetConfig() (*config, error) {
 			return nil, fmt.Errorf("getting hostname: %w", err)
 		}
 		cfg.nodeName = hostName
-	}
-
-	//
-	minPortStr := os.Getenv(DRBDMinPortEnvVar)
-	if minPortStr == "" {
-		cfg.drbdMinPort = DRBDMinPortDefault
-	} else {
-		minPort, err := strconv.ParseUint(minPortStr, 10, 32)
-		if err != nil {
-			return cfg, fmt.Errorf("parsing %s: %w", DRBDMinPortEnvVar, err)
-		}
-		cfg.drbdMinPort = uint(minPort)
-	}
-
-	//
-	maxPortStr := os.Getenv(DRBDMaxPortEnvVar)
-	if maxPortStr == "" {
-		cfg.drbdMaxPort = DRBDMaxPortDefault
-	} else {
-		maxPort, err := strconv.ParseUint(maxPortStr, 10, 32)
-		if err != nil {
-			return cfg, fmt.Errorf("parsing %s: %w", DRBDMaxPortEnvVar, err)
-		}
-		cfg.drbdMaxPort = uint(maxPort)
-	}
-
-	//
-	if cfg.drbdMaxPort < cfg.drbdMinPort {
-		return cfg, fmt.Errorf("%w: invalid port range %d-%d", ErrInvalidConfig, cfg.drbdMinPort, cfg.drbdMaxPort)
 	}
 
 	//
