@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-var registry []func(mgr manager.Manager) error
+var registry = []func(mgr manager.Manager) error{}
 
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
