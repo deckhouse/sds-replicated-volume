@@ -300,7 +300,7 @@ func (r *Reconciler) handleDown(name string) (reconcile.Result, error) {
 			r.log.Debug("other finalizers present, skip drbd-config cleanup", "finalizer", fz)
 			return reconcile.Result{}, nil
 		}
-	}rvr
+	}
 	// drbd down
 	if err := drbdadm.ExecuteDown(ctx, rvr.Spec.ReplicatedVolumeName); err != nil {
 		r.log.Error("drbd down failed", "error", err)
