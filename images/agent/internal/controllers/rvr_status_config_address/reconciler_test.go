@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
@@ -51,7 +50,7 @@ var _ = Describe("Reconciler", func() {
 		rec     *rvrstatusconfigaddress.Reconciler
 		log     logr.Logger
 		node    *corev1.Node
-		drbdCfg config.DRBDConfig
+		drbdCfg testDRBDConfig
 	)
 
 	BeforeEach(func() {
@@ -66,7 +65,7 @@ var _ = Describe("Reconciler", func() {
 		cl = nil
 		log = GinkgoLogr
 
-		drbdCfg = config.DRBDConfig{
+		drbdCfg = testDRBDConfig{
 			MinPort: 7000,
 			MaxPort: 7999,
 		}
@@ -363,3 +362,22 @@ func HaveUniquePorts() gomegatypes.GomegaMatcher {
 		return len(result) == len(list), nil
 	}).WithMessage("Ports need to be set and unique")
 }
+
+type testDRBDConfig struct {
+	MinPort uint
+	MaxPort uint
+}
+
+func (d testDRBDConfig) IsPortValid(port uint) bool {
+	return rvrstatusconfigaddress.IsPortValid(d, port)
+}
+
+func (d testDRBDConfig) DRBDMaxPort() uint {
+	return d.MaxPort
+}
+
+func (d testDRBDConfig) DRBDMinPort() uint {
+	return d.MinPort
+}
+
+var _ rvrstatusconfigaddress.DRBDConfig = testDRBDConfig{}

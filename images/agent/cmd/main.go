@@ -31,6 +31,7 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 func main() {
@@ -62,11 +63,11 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	// returns a non-nil error or the first time Wait returns
 	eg, ctx := errgroup.WithContext(ctx)
 
-	envConfig, err := GetEnvConfig()
+	envConfig, err := env.GetConfig()
 	if err != nil {
 		return u.LogError(log, fmt.Errorf("getting env config: %w", err))
 	}
-	log = log.With("nodeName", envConfig.NodeName)
+	log = log.With("nodeName", envConfig.NodeName())
 
 	// MANAGER
 	mgr, err := newManager(ctx, log, envConfig)
@@ -82,7 +83,7 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	})
 
 	// DRBD SCANNER
-	scanner := NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig)
+	scanner := NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
 
 	eg.Go(func() error {
 		return scanner.Run()

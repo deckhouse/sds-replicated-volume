@@ -16,11 +16,7 @@ require (
 	golang.org/x/sync v0.18.0
 	k8s.io/api v0.34.2
 	k8s.io/apimachinery v0.34.2
-<<<<<<< HEAD
-=======
-	k8s.io/client-go v0.34.2
 	sigs.k8s.io/cluster-api v1.11.3
->>>>>>> a0e1236 (ReplicatedVolume Status Config Quorum Controller (#356))
 	sigs.k8s.io/controller-runtime v0.22.4
 )
 
