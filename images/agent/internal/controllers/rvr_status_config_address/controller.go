@@ -22,14 +22,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
-func BuildController(mgr manager.Manager, cfg config.Config) error {
+func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
+
 	const controllerName = "rvr-status-config-address-controller"
 
 	log := mgr.GetLogger().WithName(controllerName)
-	var rec = NewReconciler(mgr.GetClient(), log, cfg.DRBD)
+	var rec = NewReconciler(mgr.GetClient(), log, cfg)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
@@ -38,7 +43,7 @@ func BuildController(mgr manager.Manager, cfg config.Config) error {
 		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName, log)),
+			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName(), log)),
 			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
 		).
 		Complete(rec)
