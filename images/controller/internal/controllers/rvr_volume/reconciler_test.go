@@ -41,10 +41,6 @@ import (
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-const (
-	finalizerName = "sds-replicated-volume.deckhouse.io/rvr-volume-controller"
-)
-
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
@@ -204,8 +200,7 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						llv = &snc.LVMLogicalVolume{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:       "test-llv",
-								Finalizers: []string{finalizerName},
+								Name: "test-llv",
 							},
 						}
 					})
@@ -253,71 +248,21 @@ var _ = Describe("Reconciler", func() {
 
 						When("LLV is marked for deletion", func() {
 							JustBeforeEach(func(ctx SpecContext) {
-								// LLV is already created in parent JustBeforeEach, just delete it to set DeletionTimestamp
-								// Get the existing LLV first
 								existingLLV := &snc.LVMLogicalVolume{}
 								Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)).To(Succeed())
 								Expect(cl.Delete(ctx, existingLLV)).To(Succeed())
 							})
 
-							It("should remove finalizer from LLV", func(ctx SpecContext) {
+							It("should reconcile successfully when LLV already deleting", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-								// LLV might be deleted after finalizer removal, so check if it exists first
 								existingLLV := &snc.LVMLogicalVolume{}
 								err := cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)
 								if err == nil {
-									// If still exists, it should not have our finalizer
-									Expect(existingLLV).To(NotHaveFinalizer(finalizerName))
+									Expect(existingLLV.DeletionTimestamp).NotTo(BeNil())
 								} else {
-									// Or it might be deleted (which is fine after finalizer removal)
 									Expect(apierrors.IsNotFound(err)).To(BeTrue())
 								}
-							})
-
-							When("LLV has other finalizers", func() {
-								BeforeEach(func() {
-									llv.Finalizers = []string{finalizerName, "other-finalizer"}
-								})
-
-								It("should remove only our finalizer", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-
-									Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), llv)).To(Succeed())
-									Expect(llv.Finalizers).To(ConsistOf("other-finalizer"))
-								})
-							})
-
-							When("Patch fails", func() {
-								patchError := errors.New("failed to patch")
-								BeforeEach(func() {
-									clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-										Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-											if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-llv" {
-												return patchError
-											}
-											return cl.Patch(ctx, obj, patch, opts...)
-										},
-									})
-								})
-
-								// RVR and LLV are already created in parent JustBeforeEach
-								// LLV will be deleted in sibling JustBeforeEach to set DeletionTimestamp
-								// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
-
-								It("should fail if patching LLV failed", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("removing finalizer")))
-								})
-							})
-
-							When("our finalizer is not present", func() {
-								BeforeEach(func() {
-									llv.Finalizers = []string{"other-finalizer"}
-								})
-
-								It("should reconcile successfully", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-								})
 							})
 						})
 
@@ -573,7 +518,6 @@ var _ = Describe("Reconciler", func() {
 						Expect(llv.Spec.Size).To(Equal("1Gi"))
 						Expect(llv.Spec.Type).To(Equal("Thick"))
 						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
-						Expect(llv).To(HaveFinalizer(finalizerName))
 
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
@@ -732,7 +676,7 @@ var _ = Describe("Reconciler", func() {
 						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
 						It("should fail if creating LLV failed", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating llv")))
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating LVMLogicalVolume")))
 						})
 					})
 
@@ -895,8 +839,8 @@ var _ = Describe("Reconciler", func() {
 						// RVR, RV, RSC, RSP, LVG, and LLV are already created in parent JustBeforeEach
 						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
-						It("should fail if listing LLVs failed", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("listing LVMLogicalVolumes")))
+						It("should reconcile successfully without listing LLVs", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 						})
 					})
 				})

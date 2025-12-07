@@ -27,7 +27,6 @@ import (
 
 const (
 	controllerName = "rvr_volume_controller"
-	finalizerName  = "sds-replicated-volume.deckhouse.io/rvr-volume-controller"
 )
 
 func BuildController(mgr manager.Manager) error {
