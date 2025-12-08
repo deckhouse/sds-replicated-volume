@@ -19,8 +19,6 @@ package drbdprimary
 import (
 	"context"
 	"errors"
-	"fmt"
-	"os"
 	"os/exec"
 	"time"
 
@@ -39,16 +37,18 @@ type Reconciler struct {
 	cl     client.Client
 	log    logr.Logger
 	scheme *runtime.Scheme
+	cfg    env.Config
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, cfg env.Config) *Reconciler {
 	return &Reconciler{
 		cl:     cl,
 		log:    log,
 		scheme: scheme,
+		cfg:    cfg,
 	}
 }
 
@@ -78,16 +78,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get current node name from environment
-	nodeName := os.Getenv(env.NodeNameEnvVar)
-	if nodeName == "" {
-		err := fmt.Errorf("%s is not set", env.NodeNameEnvVar)
-		log.Error(err, "getting node name from environment variable")
-		return reconcile.Result{}, err
-	}
-
 	// Check if this RVR belongs to this node
-	if rvr.Spec.NodeName != nodeName {
+	if rvr.Spec.NodeName != r.cfg.NodeName() {
 		log.V(4).Info("ReplicatedVolumeReplica does not belong to this node, skipping")
 		return reconcile.Result{}, nil
 	}

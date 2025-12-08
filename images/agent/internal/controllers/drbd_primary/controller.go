@@ -21,6 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 const (
@@ -28,10 +29,15 @@ const (
 )
 
 func BuildController(mgr manager.Manager) error {
+	cfg, err := env.GetConfig()
+	if err != nil {
+		return err
+	}
 	r := &Reconciler{
 		cl:     mgr.GetClient(),
 		log:    mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
 		scheme: mgr.GetScheme(),
+		cfg:    cfg,
 	}
 
 	return builder.ControllerManagedBy(mgr).
