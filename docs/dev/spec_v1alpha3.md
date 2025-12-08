@@ -424,10 +424,10 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
   - OR
     - выполняем `drbdadm primary` (AND)
       - `rvr.status.drbd.config.primary==true`
-      - `rvr.status.drbd.status.role==Primary`
+      - `rvr.status.drbd.status.role!=Primary`
     - выполняем `drbdadm secondary` (AND)
       - `rvr.status.drbd.config.primary==false`
-      - `rvr.status.drbd.status.role!=Primary`
+      - `rvr.status.drbd.status.role==Primary`
 
 Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
 
