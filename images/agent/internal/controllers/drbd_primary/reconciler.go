@@ -19,6 +19,7 @@ package drbdprimary
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
@@ -77,10 +79,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Get current node name from environment
-	nodeName := os.Getenv("NODE_NAME")
+	nodeName := os.Getenv(env.NodeNameEnvVar)
 	if nodeName == "" {
-		err := errors.New("NODE_NAME is not set")
-		log.Error(err, "getting node name from environment")
+		err := fmt.Errorf("%s is not set", env.NodeNameEnvVar)
+		log.Error(err, "getting node name from environment variable")
 		return reconcile.Result{}, err
 	}
 
@@ -96,6 +98,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Check if ReplicatedVolume is Ready
+	// TODO: condition type v1alpha3.ConditionTypeReady is used here!
 	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName, log)
 	if err != nil {
 		return reconcile.Result{}, err

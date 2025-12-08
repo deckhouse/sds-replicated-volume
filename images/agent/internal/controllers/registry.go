@@ -28,7 +28,8 @@ import (
 var registry []func(mgr manager.Manager) error
 
 func init() {
-	registry = append(registry, rvrstatusconfigaddress.BuildController, drbdprimary.BuildController)
+	registry = append(registry, rvrstatusconfigaddress.BuildController)
+	registry = append(registry, drbdprimary.BuildController)
 }
 
 func BuildAll(mgr manager.Manager) error {
