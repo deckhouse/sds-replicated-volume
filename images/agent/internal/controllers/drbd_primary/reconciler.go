@@ -135,9 +135,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// The error from drbdadm.ExecutePrimary/ExecuteSecondary is a joined error
 		// containing both the exec error and the command output
 		cmdOutput = cmdErr.Error()
-		log.Error(cmdErr, "drbdadm command failed", "command", map[bool]string{true: "primary", false: "secondary"}[needPrimary])
+		log.Error(cmdErr, "executed command failed", "command", drbdadm.Command, "args", map[bool][]string{true: drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName), false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName)}[needPrimary], "output", cmdOutput)
 	} else {
-		log.Info("drbdadm command succeeded", "command", map[bool]string{true: "primary", false: "secondary"}[needPrimary])
+		log.V(4).Info("executed command successfully", "command", drbdadm.Command, "args", map[bool][]string{true: drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName), false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName)}[needPrimary])
 	}
 
 	// Update status with error or clear it
