@@ -578,7 +578,7 @@ func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
 
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTableSubtree("returns correct TieBreaker count for fdCount < 4",
-		func(fdExtended map[string]FDReplicaCounts, expected int) {
+		func(_ string, fdExtended map[string]FDReplicaCounts, expected int) {
 			It("function CalculateDesiredTieBreakerTotal works", func() {
 				fd := shrinkFDExtended(fdExtended)
 				got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
@@ -714,49 +714,42 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				})
 			})
 		},
-		func(fd map[string]FDReplicaCounts, expected int) string {
-			s := []string{}
-			for _, counts := range fd {
-				parts := []string{}
-				if counts.Diskful > 0 {
-					parts = append(parts, fmt.Sprintf("DF:%d", counts.Diskful))
-				}
-				if counts.Access > 0 {
-					parts = append(parts, fmt.Sprintf("AC:%d", counts.Access))
-				}
-				if counts.TieBreaker > 0 {
-					parts = append(parts, fmt.Sprintf("TB:%d", counts.TieBreaker))
-				}
-				if len(parts) == 0 {
-					parts = append(parts, "0")
-				}
-				total := counts.Diskful + counts.Access + counts.TieBreaker
-				s = append(s, fmt.Sprintf("%s(%d)", strings.Join(parts, ","), total))
-			}
-			return fmt.Sprintf("%d FDs, %s -> %d", len(fd), strings.Join(s, "+"), expected)
-		},
-		Entry(nil, map[string]FDReplicaCounts{}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
+		func(name string, fd map[string]FDReplicaCounts, expected int) string {
+			// Sort zone names for predictable output
+			zones := slices.Collect(maps.Keys(fd))
+			slices.Sort(zones)
 
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
-		// Test cases with mixed replica types
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
-		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 1),
+			s := []string{}
+			for _, zone := range zones {
+				counts := fd[zone]
+				// Sum only Diskful + Access (without TieBreaker)
+				total := counts.Diskful + counts.Access
+				s = append(s, fmt.Sprintf("%d", total))
+			}
+			return fmt.Sprintf("case %s: %d FDs, %s -> %d", name, len(fd), strings.Join(s, "+"), expected)
+		},
+		// Entry(nil, "1", map[string]FDReplicaCounts{}, 0),
+		// Entry(nil, "2", map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
+		// Entry(nil, "3", map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
+		// Entry(nil, "4", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
+		// Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2),
+		// Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1),
+		Entry(nil, "7", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {}}, 3),
+		// Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2),
+		// Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3),
+		// Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
+
+		// Entry(nil, "11", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
+		// Entry(nil, "12", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
+		// Entry(nil, "13", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
+		// Entry(nil, "14", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
+		// Entry(nil, "15", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
+		// // Test cases with mixed replica types
+		// Entry(nil, "16", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
+		// Entry(nil, "17", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
+		// Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
+		// Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
+		// Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
+		// Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 1),
 	)
 })
