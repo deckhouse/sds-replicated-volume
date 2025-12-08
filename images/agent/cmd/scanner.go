@@ -37,7 +37,6 @@ import (
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
@@ -56,11 +55,11 @@ func NewScanner(
 	ctx context.Context,
 	log *slog.Logger,
 	cl client.Client,
-	cfg config.Config,
+	hostname string,
 ) *Scanner {
 	ctx, cancel := context.WithCancelCause(ctx)
 	s := &Scanner{
-		hostname: cfg.NodeName,
+		hostname: hostname,
 		ctx:      ctx,
 		cancel:   cancel,
 		log:      log,

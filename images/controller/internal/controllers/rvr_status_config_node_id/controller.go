@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrstatusconfigaddress
+package rvrstatusconfignodeid
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -22,29 +22,24 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 func BuildController(mgr manager.Manager) error {
-	cfg, err := env.GetConfig()
-	if err != nil {
-		return err
-	}
-
-	const controllerName = "rvr-status-config-address-controller"
-
-	log := mgr.GetLogger().WithName(controllerName)
-	var rec = NewReconciler(mgr.GetClient(), log, cfg)
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(RVRStatusConfigNodeIDControllerName).WithName("Reconciler"),
+	)
 
 	return builder.ControllerManagedBy(mgr).
-		Named(controllerName).
-		// We reconciling nodes as single unit to make sure we will not assign the same port because of race condition.
-		// We are not watching node updates because internalIP we are using is not expected to change
-		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
+		Named(RVRStatusConfigNodeIDControllerName).
+		For(&v1alpha3.ReplicatedVolume{}).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName(), log)),
-			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
+			handler.EnqueueRequestForOwner(
+				mgr.GetScheme(),
+				mgr.GetRESTMapper(),
+				&v1alpha3.ReplicatedVolume{},
+			),
 		).
 		Complete(rec)
 }

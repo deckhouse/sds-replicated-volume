@@ -59,6 +59,18 @@
     - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
   - [`llv-owner-reference-controller`](#llv-owner-reference-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
+  - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
+  - [`rv-gc-controller`](#rv-gc-controller)
+  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
+- [Сценарии](#сценарии)
+  - [Отказоустойчивость](#отказоустойчивость)
+    - [Arrange](#arrange)
+    - [Act](#act)
+    - [Assert](#assert)
+  - [Нагрузочный](#нагрузочный)
+    - [Arrange](#arrange-1)
+    - [Act](#act-1)
+    - [Assert](#assert-1)
 
 # Основные положения
 
@@ -880,6 +892,7 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 
 ### Вывод 
   - `rvr.status.conditions`
+
 ## `llv-owner-reference-controller`
 
 ### Статус: [TBD | priority: 5 | complexity: 1]
@@ -893,3 +906,23 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 
 ### Вывод 
  - `llv.metada.ownerReference`
+
+
+## `rv-status-conditions-controller`
+
+## `rv-gc-controller`
+
+## `tie-breaker-removal-controller`
+
+# Сценарии
+
+## Отказоустойчивость
+### Arrange
+### Act
+### Assert
+
+## Нагрузочный
+### Arrange
+### Act
+### Assert
+

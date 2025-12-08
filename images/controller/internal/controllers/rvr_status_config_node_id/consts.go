@@ -14,20 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package config
+package rvrstatusconfignodeid
 
 const (
-	ConfigMapNamespace = "d8-sds-replicated-volume"
-	ConfigMapName      = "controller-config"
+	RVRStatusConfigNodeIDControllerName = "rvr_status_config_node_id_controller"
+
+	// ErrNotEnoughAvailableNodeIDsPrefix is the prefix of the error message when there are not enough available nodeIDs
+	ErrNotEnoughAvailableNodeIDsPrefix = "not enough available nodeIDs"
 )
-
-type DRBDConfig struct {
-	MinPort uint
-	MaxPort uint
-}
-
-type Config struct {
-	HealthProbeBindAddress string
-	MetricsBindAddress     string
-	DRBD                   DRBDConfig
-}
