@@ -18,6 +18,7 @@ package rvrqnpccontroller
 
 import (
 	"context"
+	"slices"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -228,18 +229,13 @@ func (r *Reconciler) removeControllerFinalizer(
 		return nil
 	}
 
-	newFinalizers := make([]string, 0, len(current.Finalizers))
-	for _, f := range current.Finalizers {
-		if f == rvreconcile.ControllerFinalizerName {
-			continue
-		}
-		newFinalizers = append(newFinalizers, f)
-	}
-	if len(newFinalizers) == len(current.Finalizers) {
+	oldFinalizersLen := len(current.Finalizers)
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == rvreconcile.ControllerFinalizerName })
+
+	if oldFinalizersLen == len(current.Finalizers) {
 		return nil
 	}
 
-	current.Finalizers = newFinalizers
 	if err := r.cl.Update(ctx, current); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
