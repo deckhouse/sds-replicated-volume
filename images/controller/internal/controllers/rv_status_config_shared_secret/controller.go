@@ -37,15 +37,8 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha3.ReplicatedVolumeReplica{},
 			// OnlyControllerOwner ensures we only react to RVRs with controller owner reference (controller: true).
 			// This should be safe, if RVRs are created with SetControllerReference, which sets controller: true.
+			// TODO use OnlyControllerOwner everywhere if possible.
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{}, handler.OnlyControllerOwner()),
 		).
 		Complete(rec)
-}
-
-// HasUnsupportedAlgorithmError checks if RVR has SharedSecretAlgSelectionError in drbd.errors
-func HasUnsupportedAlgorithmError(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
-		return false
-	}
-	return rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil
 }

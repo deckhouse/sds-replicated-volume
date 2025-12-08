@@ -59,13 +59,12 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Check if sharedSecret is not set - generate new one
-	// Filtering through early return instead of WithEventFilter
 	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil || rv.Status.DRBD.Config.SharedSecret == "" {
 		return r.reconcileGenerateSharedSecret(ctx, rv, log)
 	}
 
-	// Check for UnsupportedAlgorithm errors in RVRs
-	return r.reconcileHandleUnsupportedAlgorithm(ctx, rv, log)
+	// Check for UnsupportedAlgorithm errors in RVRs and switch algorithm if needed, also generates new SharedSecret, if needed.
+	return r.reconcileSwitchAlgorithm(ctx, rv, log)
 }
 
 // reconcileGenerateSharedSecret generates a new shared secret and selects the first algorithm
@@ -74,20 +73,18 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
+	// Check if sharedSecret is already set (idempotent check on original)
+	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.SharedSecret != "" {
+		log.V(1).Info("sharedSecret already set and valid", "algorithm", rv.Status.DRBD.Config.SharedSecretAlg)
+		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
+	}
+
 	// Update RV status with shared secret
 	// If there's a conflict (409), return error - next reconciliation will solve it
 	// Race condition handling: If two reconciles run simultaneously, one will get 409 Conflict on Patch.
 	// The next reconciliation will check if sharedSecret is already set and skip generation.
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()
-
-	// Check if sharedSecret is already set (idempotent check after DeepCopy)
-	// Note: This check is on the copy, but if there's a race condition, Patch will return 409 Conflict
-	// and the next reconciliation will handle it correctly.
-	if changedRV.Status != nil && changedRV.Status.DRBD != nil && changedRV.Status.DRBD.Config != nil && changedRV.Status.DRBD.Config.SharedSecret != "" {
-		log.V(1).Info("sharedSecret already set and valid", "algorithm", changedRV.Status.DRBD.Config.SharedSecretAlg)
-		return reconcile.Result{}, nil // Already set, nothing to do (idempotent)
-	}
 
 	// Generate new shared secret using UUID v4 (36 characters, fits DRBD limit of 64)
 	// UUID provides uniqueness and randomness required for peer authentication
@@ -122,8 +119,8 @@ func buildAlgorithmLogFields(
 	maxFailedRVR *v1alpha3.ReplicatedVolumeReplica,
 	algorithms []string,
 	failedNodeNames []string,
-) []interface{} {
-	logFields := []interface{}{
+) []any {
+	logFields := []any{
 		"rv", rv.Name,
 		"from", currentAlg,
 		"to", nextAlgorithm,
@@ -147,8 +144,8 @@ func buildAlgorithmLogFields(
 	return logFields
 }
 
-// reconcileHandleUnsupportedAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
-func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
+// reconcileSwitchAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
+func (r *Reconciler) reconcileSwitchAlgorithm(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
@@ -167,7 +164,7 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 		if rvr.Spec.ReplicatedVolumeName != rv.Name {
 			continue
 		}
-		if HasUnsupportedAlgorithmError(&rvr) {
+		if hasUnsupportedAlgorithmError(&rvr) {
 			failedNodeNames = append(failedNodeNames, rvr.Spec.NodeName)
 			rvrsWithErrors = append(rvrsWithErrors, &rvr)
 		}
@@ -222,14 +219,14 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	// If no valid algorithms found in errors (all empty or unknown), we cannot determine which algorithm is unsupported
 	// Log this issue and do nothing - we should not switch algorithm without knowing which one failed
 	if maxFailedIndex == -1 {
-		logFields := []interface{}{"rv", rv.Name, "failedNodes", failedNodeNames}
+		log := log.WithValues("rv", rv.Name, "failedNodes", failedNodeNames)
 		if len(rvrsWithoutAlg) > 0 {
-			logFields = append(logFields, "rvrsWithoutAlg", rvrsWithoutAlg)
+			log = log.WithValues("rvrsWithoutAlg", rvrsWithoutAlg)
 		}
 		if len(rvrsWithUnknownAlg) > 0 {
-			logFields = append(logFields, "rvrsWithUnknownAlg", rvrsWithUnknownAlg)
+			log = log.WithValues("rvrsWithUnknownAlg", rvrsWithUnknownAlg)
 		}
-		log.V(1).Info("Cannot determine which algorithm to switch: all RVRs have empty or unknown UnsupportedAlg", logFields...)
+		log.V(1).Info("Cannot determine which algorithm to switch: all RVRs have empty or unknown UnsupportedAlg")
 		return reconcile.Result{}, nil // Do nothing - we don't know which algorithm is unsupported
 	}
 
@@ -277,6 +274,14 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	// Short log: detailed debug already logged at V(2), this is just a summary
 	log.V(1).Info("Algorithm switched", "rv", rv.Name, "from", currentAlg, "to", nextAlgorithm)
 	return reconcile.Result{}, nil
+}
+
+// hasUnsupportedAlgorithmError checks if RVR has SharedSecretAlgSelectionError in drbd.errors
+func hasUnsupportedAlgorithmError(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
+		return false
+	}
+	return rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil
 }
 
 // ensureRVStatusInitialized ensures that RV status structure is initialized
