@@ -355,6 +355,7 @@ var _ = Describe("Reconcile", func() {
 			When("different zones", func() {
 				BeforeEach(func() {
 					rsc.Spec.Topology = "TransZonal"
+					rsc.Spec.Zones = []string{"zone-0", "zone-1"}
 					for i := range nodeList {
 						nodeList[i].Labels = map[string]string{rvrtiebreakercount.NodeZoneLabel: fmt.Sprintf("zone-%d", i)}
 					}
@@ -735,7 +736,8 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		// Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2),
 		// Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1),
 		Entry(nil, "7", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {}}, 3),
-		// Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2),
+		Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2),
+		Entry(nil, "8.1", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0),
 		// Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3),
 		// Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
 
@@ -750,6 +752,6 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		// Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
 		// Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
 		// Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
-		// Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 1),
+		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4), // 3+1+1+0 (+0+1+1+2)=> 3+2+2+2 ?
 	)
 })

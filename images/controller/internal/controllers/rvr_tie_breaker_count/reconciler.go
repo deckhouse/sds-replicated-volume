@@ -91,7 +91,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	FDToReplicaCountMap, existingTieBreakers := aggregateReplicas(NodeNameToFdMap, replicasForRVList)
+	FDToReplicaCountMap, existingTieBreakers := aggregateReplicas(NodeNameToFdMap, replicasForRVList, rsc)
 
 	return r.syncTieBreakers(ctx, rv, FDToReplicaCountMap, existingTieBreakers, log)
 }
@@ -189,8 +189,16 @@ func (r *Reconciler) listReplicasForRV(
 func aggregateReplicas(
 	NodeNameToFdMap map[string]string,
 	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
+	rsc *v1alpha1.ReplicatedStorageClass,
 ) (map[string]int, []*v1alpha3.ReplicatedVolumeReplica) {
 	FDToReplicaCountMap := make(map[string]int, len(NodeNameToFdMap))
+
+	for _, zone := range rsc.Spec.Zones {
+		if _, ok := FDToReplicaCountMap[zone]; !ok {
+			FDToReplicaCountMap[zone] = 0
+		}
+	}
+
 	var existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica
 
 	for _, rvr := range replicasForRVList {
