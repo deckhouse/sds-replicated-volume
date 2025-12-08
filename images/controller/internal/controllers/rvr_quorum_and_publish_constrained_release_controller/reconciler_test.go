@@ -133,9 +133,8 @@ var _ = Describe("Reconcile", func() {
 
 			rvr = &v1alpha3.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:              "rvr-deleting",
-					Finalizers:        []string{"other-finalizer", "sds-replicated-volume.deckhouse.io/controller"},
-					DeletionTimestamp: &metav1.Time{Time: now},
+					Name:       "rvr-deleting",
+					Finalizers: []string{"other-finalizer", "sds-replicated-volume.deckhouse.io/controller"},
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
