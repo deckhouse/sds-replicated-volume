@@ -41,10 +41,6 @@ import (
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-const (
-	finalizerName = "sds-replicated-volume.deckhouse.io/rvr-volume-controller"
-)
-
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
@@ -204,8 +200,7 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						llv = &snc.LVMLogicalVolume{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:       "test-llv",
-								Finalizers: []string{finalizerName},
+								Name: "test-llv",
 							},
 						}
 					})
@@ -228,6 +223,21 @@ var _ = Describe("Reconciler", func() {
 								// Or it might be deleted
 								Expect(apierrors.IsNotFound(err)).To(BeTrue())
 							}
+						})
+
+						When("LLV has another finalizer", func() {
+							BeforeEach(func() {
+								llv.Finalizers = []string{"other-finalizer"}
+							})
+
+							It("should keep other finalizers and set DeletionTimestamp", func(ctx SpecContext) {
+								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+								updatedLLV := &snc.LVMLogicalVolume{}
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), updatedLLV)).To(Succeed())
+								Expect(updatedLLV.Finalizers).To(ConsistOf("other-finalizer"))
+								Expect(updatedLLV.DeletionTimestamp).NotTo(BeNil())
+							})
 						})
 
 						When("Delete fails", func() {
@@ -253,71 +263,21 @@ var _ = Describe("Reconciler", func() {
 
 						When("LLV is marked for deletion", func() {
 							JustBeforeEach(func(ctx SpecContext) {
-								// LLV is already created in parent JustBeforeEach, just delete it to set DeletionTimestamp
-								// Get the existing LLV first
 								existingLLV := &snc.LVMLogicalVolume{}
 								Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)).To(Succeed())
 								Expect(cl.Delete(ctx, existingLLV)).To(Succeed())
 							})
 
-							It("should remove finalizer from LLV", func(ctx SpecContext) {
+							It("should reconcile successfully when LLV already deleting", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-								// LLV might be deleted after finalizer removal, so check if it exists first
 								existingLLV := &snc.LVMLogicalVolume{}
 								err := cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)
 								if err == nil {
-									// If still exists, it should not have our finalizer
-									Expect(existingLLV).To(NotHaveFinalizer(finalizerName))
+									Expect(existingLLV.DeletionTimestamp).NotTo(BeNil())
 								} else {
-									// Or it might be deleted (which is fine after finalizer removal)
 									Expect(apierrors.IsNotFound(err)).To(BeTrue())
 								}
-							})
-
-							When("LLV has other finalizers", func() {
-								BeforeEach(func() {
-									llv.Finalizers = []string{finalizerName, "other-finalizer"}
-								})
-
-								It("should remove only our finalizer", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-
-									Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), llv)).To(Succeed())
-									Expect(llv.Finalizers).To(ConsistOf("other-finalizer"))
-								})
-							})
-
-							When("Patch fails", func() {
-								patchError := errors.New("failed to patch")
-								BeforeEach(func() {
-									clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-										Patch: func(ctx context.Context, cl client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
-											if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-llv" {
-												return patchError
-											}
-											return cl.Patch(ctx, obj, patch, opts...)
-										},
-									})
-								})
-
-								// RVR and LLV are already created in parent JustBeforeEach
-								// LLV will be deleted in sibling JustBeforeEach to set DeletionTimestamp
-								// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
-
-								It("should fail if patching LLV failed", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("removing finalizer")))
-								})
-							})
-
-							When("our finalizer is not present", func() {
-								BeforeEach(func() {
-									llv.Finalizers = []string{"other-finalizer"}
-								})
-
-								It("should reconcile successfully", func(ctx SpecContext) {
-									Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
-								})
 							})
 						})
 
@@ -369,7 +329,8 @@ var _ = Describe("Reconciler", func() {
 						When("ActualType does not match Spec.Type", func() {
 							BeforeEach(func() {
 								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-									ActualType: "Diskful",
+									ActualType:           "Diskful",
+									LVMLogicalVolumeName: "keep-llv",
 								}
 							})
 
@@ -418,7 +379,7 @@ var _ = Describe("Reconciler", func() {
 								rvr.Status = nil
 							})
 
-							It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
+							It("should call reconcileLLVNormal", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 							})
 						})
@@ -430,7 +391,7 @@ var _ = Describe("Reconciler", func() {
 								}
 							})
 
-							It("should call reconcileLLVNormalByOwnerReference", func(ctx SpecContext) {
+							It("should call reconcileLLVNormal", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 							})
 						})
@@ -451,7 +412,7 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("reconcileLLVNormalByOwnerReference scenarios", func() {
+		When("reconcileLLVNormal scenarios", func() {
 			var rvr *v1alpha3.ReplicatedVolumeReplica
 			var rv *v1alpha3.ReplicatedVolume
 			var rsc *v1alpha1.ReplicatedStorageClass
@@ -558,7 +519,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status = nil
 				})
 
-				When("LLV does not exist with ownerReference", func() {
+				When("LLV does not exist", func() {
 					It("should create LLV", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
@@ -573,10 +534,36 @@ var _ = Describe("Reconciler", func() {
 						Expect(llv.Spec.Size).To(Equal("1Gi"))
 						Expect(llv.Spec.Type).To(Equal("Thick"))
 						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
-						Expect(llv).To(HaveFinalizer(finalizerName))
 
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
+					})
+
+					When("ActualType was Access before switching to Diskful", func() {
+						BeforeEach(func() {
+							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+								ActualType: "Access",
+							}
+						})
+
+						It("should create LLV for Diskful mode", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+							var llvList snc.LVMLogicalVolumeList
+							Expect(cl.List(ctx, &llvList)).To(Succeed())
+							Expect(llvList.Items).To(HaveLen(1))
+
+							llv := &llvList.Items[0]
+							Expect(llv).To(HaveLLVWithOwnerReference(rvr.Name))
+							Expect(llv.Name).To(Equal(rvr.Name))
+							Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
+							Expect(llv.Spec.Size).To(Equal("1Gi"))
+							Expect(llv.Spec.Type).To(Equal("Thick"))
+							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
+
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+							Expect(rvr).To(HaveNoLVMLogicalVolumeName())
+						})
 					})
 
 					When("ReplicatedVolume does not exist", func() {
@@ -732,7 +719,7 @@ var _ = Describe("Reconciler", func() {
 						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
 						It("should fail if creating LLV failed", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating llv")))
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating LVMLogicalVolume")))
 						})
 					})
 
@@ -895,12 +882,131 @@ var _ = Describe("Reconciler", func() {
 						// RVR, RV, RSC, RSP, LVG, and LLV are already created in parent JustBeforeEach
 						// Client is already created in top-level JustBeforeEach with interceptors from BeforeEach
 
-						It("should fail if listing LLVs failed", func(ctx SpecContext) {
-							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("listing LVMLogicalVolumes")))
+						It("should reconcile successfully without listing LLVs", func(ctx SpecContext) {
+							Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 						})
 					})
 				})
 			})
+		})
+	})
+
+	When("Spec.Type changes from Diskful to Access", func() {
+		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var llv *snc.LVMLogicalVolume
+
+		BeforeEach(func() {
+			rvr = &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "type-switch-rvr",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "type-switch-rv",
+					Type:                 "Access",
+				},
+				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+					ActualType:           "Access",
+					LVMLogicalVolumeName: "type-switch-llv",
+				},
+			}
+
+			llv = &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "type-switch-llv",
+					Finalizers: []string{"other-finalizer"},
+				},
+			}
+		})
+
+		JustBeforeEach(func(ctx SpecContext) {
+			rvrCopy := rvr.DeepCopy()
+			rvrCopy.ResourceVersion = ""
+			rvrCopy.UID = ""
+			rvrCopy.Generation = 0
+			Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
+
+			llvCopy := llv.DeepCopy()
+			llvCopy.ResourceVersion = ""
+			llvCopy.UID = ""
+			llvCopy.Generation = 0
+			Expect(cl.Create(ctx, llvCopy)).To(Succeed())
+		})
+
+		It("should mark LLV for deletion and keep other finalizers", func(ctx SpecContext) {
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			updatedLLV := &snc.LVMLogicalVolume{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), updatedLLV)).To(Succeed())
+			Expect(updatedLLV.DeletionTimestamp).NotTo(BeNil())
+			Expect(updatedLLV.Finalizers).To(ConsistOf("other-finalizer"))
+		})
+
+		When("LLV has no finalizers and gets fully removed", func() {
+			BeforeEach(func() {
+				llv.Finalizers = nil
+			})
+
+			It("should clear LVMLogicalVolumeName in status", func(ctx SpecContext) {
+				// First reconcile: delete LLV (it disappears immediately because no finalizers)
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+				err := cl.Get(ctx, client.ObjectKeyFromObject(llv), &snc.LVMLogicalVolume{})
+				Expect(apierrors.IsNotFound(err)).To(BeTrue())
+
+				// Second reconcile: see LLV gone and clear status
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+				fetchedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), fetchedRVR)).To(Succeed())
+				Expect(fetchedRVR.Status.LVMLogicalVolumeName).To(BeEmpty())
+			})
+		})
+	})
+
+	When("Spec.Type is Access but ActualType is Diskful and LLV exists", func() {
+		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var llv *snc.LVMLogicalVolume
+
+		BeforeEach(func() {
+			rvr = &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "mismatch-rvr",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "mismatch-rv",
+					Type:                 "Access",
+				},
+				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+					ActualType:           "Diskful",
+					LVMLogicalVolumeName: "keep-llv",
+				},
+			}
+
+			llv = &snc.LVMLogicalVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "keep-llv",
+				},
+			}
+		})
+
+		JustBeforeEach(func(ctx SpecContext) {
+			rvrCopy := rvr.DeepCopy()
+			rvrCopy.ResourceVersion = ""
+			rvrCopy.UID = ""
+			rvrCopy.Generation = 0
+			Expect(cl.Create(ctx, rvrCopy)).To(Succeed())
+
+			llvCopy := llv.DeepCopy()
+			llvCopy.ResourceVersion = ""
+			llvCopy.UID = ""
+			llvCopy.Generation = 0
+			Expect(cl.Create(ctx, llvCopy)).To(Succeed())
+		})
+
+		It("should leave LLV intact when ActualType differs", func(ctx SpecContext) {
+			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+			existingLLV := &snc.LVMLogicalVolume{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(llv), existingLLV)).To(Succeed())
 		})
 	})
 
