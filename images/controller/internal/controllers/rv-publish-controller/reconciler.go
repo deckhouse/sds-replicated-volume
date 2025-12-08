@@ -97,7 +97,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// sync primary roles on replicas and rv.status.publishedOn
-	if err := r.syncReplicaPrimariesAndPublishedOn(ctx, rv, rsc, replicasForRV, log); err != nil {
+	if err := r.syncReplicaPrimariesAndPublishedOn(ctx, rv, replicasForRV, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -277,7 +277,6 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	rsc *v1alpha1.ReplicatedStorageClass, // kept for future use if topology/volumeAccess will affect primary placement
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
@@ -326,7 +325,6 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 				log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
 				return err
 			}
-			// replica was deleted concurrently; continue with the rest
 		}
 	}
 
