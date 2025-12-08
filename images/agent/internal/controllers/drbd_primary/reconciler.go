@@ -25,7 +25,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -96,17 +95,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get ReplicatedVolume to check Ready condition
-	rv := &v1alpha3.ReplicatedVolume{}
-	err = r.cl.Get(ctx, client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}, rv)
+	// Check if ReplicatedVolume is Ready
+	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName, log)
 	if err != nil {
-		log.Error(err, "getting ReplicatedVolume")
 		return reconcile.Result{}, err
 	}
-	// Check preconditions for ReplicatedVolume
-	readyCond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
-	if readyCond == nil || readyCond.Status != metav1.ConditionTrue {
-		log.V(4).Info("ReplicatedVolume is not Ready, skipping", "rvName", rv.Name)
+	if !ready {
+		log.V(4).Info("ReplicatedVolume is not Ready, skipping", "rvName", rvr.Spec.ReplicatedVolumeName)
 		return reconcile.Result{}, nil
 	}
 
@@ -241,4 +236,17 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, st
 	}
 
 	return true, ""
+}
+
+// rvIsReady checks if the ReplicatedVolume is Ready.
+// It returns true if the ReplicatedVolume exists and has Ready condition set to True,
+// false if the condition is not True, and an error if the ReplicatedVolume cannot be retrieved.
+func (r *Reconciler) rvIsReady(ctx context.Context, rvName string, log logr.Logger) (bool, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
+	err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv)
+	if err != nil {
+		log.Error(err, "getting ReplicatedVolume")
+		return false, err
+	}
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeReady), nil
 }
