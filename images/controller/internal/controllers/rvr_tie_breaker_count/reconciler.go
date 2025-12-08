@@ -81,19 +81,19 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	FDKeyByNodeName, err := r.buildFDKeyByNode(ctx, rsc, log)
+	NodeNameToFdMap, err := r.GetNodeNameToFdMap(ctx, rsc, log)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	replicasForRV, err := r.listReplicasForRV(ctx, rv, log)
+	replicasForRVList, err := r.listReplicasForRV(ctx, rv, log)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	FDReplicaCount, tieBreakerCurrent := aggregateReplicas(FDKeyByNodeName, replicasForRV)
+	FDToReplicaCountMap, existingTieBreakers := aggregateReplicas(NodeNameToFdMap, replicasForRVList)
 
-	return r.syncTieBreakers(ctx, rv, FDReplicaCount, tieBreakerCurrent, log)
+	return r.syncTieBreakers(ctx, rv, FDToReplicaCountMap, existingTieBreakers, log)
 }
 
 func (r *Reconciler) getReplicatedVolume(
@@ -136,7 +136,7 @@ func (r *Reconciler) getReplicatedStorageClass(
 	return rsc, nil
 }
 
-func (r *Reconciler) buildFDKeyByNode(
+func (r *Reconciler) GetNodeNameToFdMap(
 	ctx context.Context,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	log logr.Logger,
@@ -146,7 +146,7 @@ func (r *Reconciler) buildFDKeyByNode(
 		return nil, err
 	}
 
-	FDKeyByNodeName := make(map[string]string)
+	NodeNameToFdMap := make(map[string]string)
 	for _, node := range nodes.Items {
 		nodeLog := log.WithValues("node", node.Name)
 		if rsc.Spec.Topology == "TransZonal" {
@@ -155,13 +155,13 @@ func (r *Reconciler) buildFDKeyByNode(
 				nodeLog.Error(ErrNoZoneLabel, "No zone label")
 				return nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
-			FDKeyByNodeName[node.Name] = zone
+			NodeNameToFdMap[node.Name] = zone
 		} else {
-			FDKeyByNodeName[node.Name] = node.Name
+			NodeNameToFdMap[node.Name] = node.Name
 		}
 	}
 
-	return FDKeyByNodeName, nil
+	return NodeNameToFdMap, nil
 }
 
 func (r *Reconciler) listReplicasForRV(
@@ -183,42 +183,41 @@ func (r *Reconciler) listReplicasForRV(
 }
 
 func aggregateReplicas(
-	FDKeyByNodeName map[string]string,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	NodeNameToFdMap map[string]string,
+	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
 ) (map[string]int, []*v1alpha3.ReplicatedVolumeReplica) {
-	FDReplicaCount := make(map[string]int, len(FDKeyByNodeName))
-	var tieBreakerCurrent []*v1alpha3.ReplicatedVolumeReplica
+	FDToReplicaCountMap := make(map[string]int, len(NodeNameToFdMap))
+	var existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica
 
-	for i := range replicasForRV {
-		rvr := &replicasForRV[i]
+	for _, rvr := range replicasForRVList {
 		switch rvr.Spec.Type {
 		case "Diskful", "Access":
 			if rvr.Spec.NodeName != "" {
-				if fd, ok := FDKeyByNodeName[rvr.Spec.NodeName]; ok {
-					FDReplicaCount[fd]++
+				if fd, ok := NodeNameToFdMap[rvr.Spec.NodeName]; ok {
+					FDToReplicaCountMap[fd]++
 				}
 			}
 		case "TieBreaker":
-			tieBreakerCurrent = append(tieBreakerCurrent, rvr)
+			existingTieBreakersList = append(existingTieBreakersList, &rvr)
 		}
 	}
 
-	return FDReplicaCount, tieBreakerCurrent
+	return FDToReplicaCountMap, existingTieBreakersList
 }
 
 func (r *Reconciler) syncTieBreakers(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	FDReplicaCount map[string]int,
-	tieBreakerCurrent []*v1alpha3.ReplicatedVolumeReplica,
+	FDToReplicaCountMap map[string]int,
+	existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) (reconcile.Result, error) {
-	desiredTB, err := CalculateDesiredTieBreakerTotal(FDReplicaCount)
+	desiredTB, err := CalculateDesiredTieBreakerTotal(FDToReplicaCountMap)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("calculate desired tie breaker count: %w", err)
 	}
 
-	currentTB := len(tieBreakerCurrent)
+	currentTB := len(existingTieBreakersList)
 
 	if currentTB == desiredTB {
 		log.Info("No need to change")
@@ -256,7 +255,7 @@ func (r *Reconciler) syncTieBreakers(
 
 	toDelete := currentTB - desiredTB
 	for i := 0; i < toDelete; i++ {
-		rvr := tieBreakerCurrent[i]
+		rvr := existingTieBreakersList[i]
 		if err := r.cl.Delete(ctx, rvr); client.IgnoreNotFound(err) != nil {
 			return reconcile.Result{}, err
 		}
