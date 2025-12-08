@@ -227,11 +227,9 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			When("replication condition is not satisfied", func() {
-				JustBeforeEach(func(ctx SpecContext) {
+				BeforeEach(func(ctx SpecContext) {
 					rvr2.Status.ActualType = "Access"
 					rvr3.Status.ActualType = "Access"
-					Expect(cl.Update(ctx, rvr2)).To(Succeed())
-					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 				})
 
 				It("does not remove controller finalizer", func(ctx SpecContext) {
