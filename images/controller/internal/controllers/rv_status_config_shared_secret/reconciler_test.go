@@ -296,7 +296,7 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("RVRs with empty UnsupportedAlg", func() {
-					var rvrWithAlg, rvrWithoutAlg *v1alpha3.ReplicatedVolumeReplica
+					var rvrWithAlg, rvrWithoutAlg, rvrWithUnknownAlg *v1alpha3.ReplicatedVolumeReplica
 
 					BeforeEach(func() {
 						// RVR with UnsupportedAlg
@@ -338,23 +338,45 @@ var _ = Describe("Reconciler", func() {
 								},
 							},
 						}
+
+						// RVR with unknown algorithm (not in SharedSecretAlgorithms list)
+						// This simulates a scenario where algorithm list changes or RVR reports unexpected value
+						rvrWithUnknownAlg = &v1alpha3.ReplicatedVolumeReplica{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "test-rvr-unknown-alg",
+							},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "test-rv",
+								NodeName:             "node-4",
+							},
+							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha3.DRBD{
+									Errors: &v1alpha3.DRBDErrors{
+										SharedSecretAlgSelectionError: &v1alpha3.SharedSecretUnsupportedAlgError{
+											UnsupportedAlg: "md5", // Unknown algorithm (not in SharedSecretAlgorithms)
+										},
+									},
+								},
+							},
+						}
 					})
 
 					JustBeforeEach(func(ctx SpecContext) {
 						Expect(cl.Create(ctx, rvrWithAlg)).To(Succeed(), "should create RVR with alg")
 						Expect(cl.Create(ctx, rvrWithoutAlg)).To(Succeed(), "should create RVR without alg")
+						Expect(cl.Create(ctx, rvrWithUnknownAlg)).To(Succeed(), "should create RVR with unknown alg")
 					})
 
-					It("uses RVR with valid UnsupportedAlg and ignores empty ones", func(ctx SpecContext) {
-						By("Reconciling with mixed RVRs")
+					It("uses RVR with valid UnsupportedAlg and ignores empty and unknown ones", func(ctx SpecContext) {
+						By("Reconciling with mixed RVRs (valid, empty, and unknown algorithms)")
 						Expect(rec.Reconcile(ctx, reconcile.Request{
 							NamespacedName: types.NamespacedName{Name: "test-rv"},
 						})).ToNot(Requeue(), "reconciliation should succeed")
 
-						By("Verifying algorithm switched to SHA1 (next after SHA256)")
+						By("Verifying algorithm switched to SHA1 (next after SHA256, ignoring empty and unknown)")
 						updatedRV := &v1alpha3.ReplicatedVolume{}
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-						Expect(updatedRV).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA1)), "should switch to SHA1")
+						Expect(updatedRV).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA1)), "should switch to SHA1 using valid algorithm, ignoring empty and unknown")
 					})
 
 					When("all RVRs have empty UnsupportedAlg", func() {

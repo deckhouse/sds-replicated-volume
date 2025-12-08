@@ -184,6 +184,9 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 	maxFailedIndex := -1
 	var maxFailedRVR *v1alpha3.ReplicatedVolumeReplica
 	var rvrsWithoutAlg []string
+	// rvrsWithUnknownAlg: RVRs with unknown algorithms (not in SharedSecretAlgorithms list)
+	// This is unlikely but possible if the algorithm list changes (e.g., algorithm removed or renamed)
+	var rvrsWithUnknownAlg []string
 	for _, rvr := range rvrsWithErrors {
 		// Access UnsupportedAlg directly, checking for nil
 		var unsupportedAlg string
@@ -198,20 +201,35 @@ func (r *Reconciler) reconcileHandleUnsupportedAlgorithm(
 		}
 
 		index := slices.Index(algorithms, unsupportedAlg)
-		if index != -1 && index > maxFailedIndex {
+		if index == -1 {
+			// Unknown algorithm - log warning but ignore for algorithm selection
+			// This is unlikely but possible if algorithm list changes (e.g., algorithm removed or renamed)
+			rvrsWithUnknownAlg = append(rvrsWithUnknownAlg, rvr.Name)
+			log.V(1).Info("Unknown algorithm in RVR error, ignoring for algorithm selection",
+				"rv", rv.Name,
+				"rvr", rvr.Name,
+				"unknownAlg", unsupportedAlg,
+				"knownAlgorithms", algorithms)
+			continue
+		}
+
+		if index > maxFailedIndex {
 			maxFailedIndex = index
 			maxFailedRVR = rvr
 		}
 	}
 
-	// If no valid algorithms found in errors (all empty), we cannot determine which algorithm is unsupported
+	// If no valid algorithms found in errors (all empty or unknown), we cannot determine which algorithm is unsupported
 	// Log this issue and do nothing - we should not switch algorithm without knowing which one failed
 	if maxFailedIndex == -1 {
 		logFields := []interface{}{"rv", rv.Name, "failedNodes", failedNodeNames}
 		if len(rvrsWithoutAlg) > 0 {
 			logFields = append(logFields, "rvrsWithoutAlg", rvrsWithoutAlg)
 		}
-		log.V(1).Info("UnsupportedAlg is empty for all failed RVRs, cannot determine which algorithm to switch", logFields...)
+		if len(rvrsWithUnknownAlg) > 0 {
+			logFields = append(logFields, "rvrsWithUnknownAlg", rvrsWithUnknownAlg)
+		}
+		log.V(1).Info("Cannot determine which algorithm to switch: all RVRs have empty or unknown UnsupportedAlg", logFields...)
 		return reconcile.Result{}, nil // Do nothing - we don't know which algorithm is unsupported
 	}
 
