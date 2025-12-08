@@ -17,15 +17,24 @@ limitations under the License.
 package drbdconfig
 
 type Request interface {
+	RVRName() string
 	_isRequest()
 }
 
+type RVRRequest struct {
+	rvrName string
+}
+
+func (r RVRRequest) RVRName() string { return r.rvrName }
+
+//
+
 type UpRequest struct {
-	RVRName string
+	RVRRequest
 }
 
 type DownRequest struct {
-	RVRName string
+	RVRRequest
 }
 
 // ...
@@ -37,7 +46,6 @@ func (DownRequest) _isRequest() {}
 // ...
 
 var _ Request = UpRequest{}
-
 var _ Request = DownRequest{}
 
 // ...

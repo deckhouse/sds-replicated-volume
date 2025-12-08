@@ -14,18 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package lang
+package drbdadm
 
-func If[T any](cond bool, valueTrue, valueFalse T) T {
-	if cond {
-		return valueTrue
-	}
-	return valueFalse
-}
+import (
+	"context"
+	"os/exec"
+)
 
-func IfFunc[T any](cond bool, valueTrue, valueFalse func() T) T {
-	if cond {
-		return valueTrue()
+func ExecuteShNop(ctx context.Context, configToTest string, configToExclude string) (string, int, error) {
+	cmd := exec.CommandContext(ctx, Command, ShNopArgs(configToTest, configToExclude)...)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return string(out), cmd.ProcessState.ExitCode(), err
 	}
-	return valueFalse()
+
+	return "", 0, nil
 }

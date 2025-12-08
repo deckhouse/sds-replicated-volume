@@ -211,6 +211,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20251112082451-591b11c7b2da
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20251121101523-5ed5ba65d062
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect

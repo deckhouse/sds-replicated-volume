@@ -186,6 +186,12 @@ type CmdError struct {
 }
 
 // +k8s:deepcopy-gen=true
+type MessageError struct {
+	// +kubebuilder:validation:MaxLength=1024
+	Message string `json:"message,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
 type SharedSecretUnsupportedAlgError struct {
 	// +kubebuilder:validation:MaxLength=1024
 	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
@@ -193,6 +199,8 @@ type SharedSecretUnsupportedAlgError struct {
 
 // +k8s:deepcopy-gen=true
 type DRBDErrors struct {
+	// +patchStrategy=merge
+	ConfigValidationError *CmdError `json:"configValidationError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	LastAdjustmentError *CmdError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
@@ -215,18 +223,18 @@ type DRBDActual struct {
 	InitialSyncCompleted bool `json:"initialSyncCompleted,omitempty"`
 }
 
-func (v *DRBDActual) SetDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) {
-	v.Disk = fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
+func SprintDRBDDisk(actualVGNameOnTheNode, actualLVNameOnTheNode string) string {
+	return fmt.Sprintf("/dev/%s/%s", actualVGNameOnTheNode, actualLVNameOnTheNode)
 }
 
-func (v *DRBDActual) ParseDisk() (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
-	parts := strings.Split(v.Disk, "/")
+func ParseDRBDDisk(disk string) (actualVGNameOnTheNode, actualLVNameOnTheNode string, err error) {
+	parts := strings.Split(disk, "/")
 	if len(parts) != 4 || parts[0] != "" || parts[1] != "dev" ||
 		len(parts[2]) == 0 || len(parts[3]) == 0 {
 		return "", "",
 			fmt.Errorf(
-				"parsing Volume Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
-				v.Disk,
+				"parsing DRBD Disk: expected format '/dev/{actualVGNameOnTheNode}/{actualLVNameOnTheNode}', got '%s'",
+				disk,
 			)
 	}
 	return parts[2], parts[3], nil
