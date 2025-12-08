@@ -18,6 +18,7 @@ package rvpublishcontroller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -187,6 +188,7 @@ func (r *Reconciler) validateLocalAccess(
 // syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
 // the number of nodes in rv.spec.publishOn and, when two nodes are requested,
 // waits until rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas.
+// It returns a boolean flag indicating whether it's safe to proceed with primary sync.
 func (r *Reconciler) syncAllowTwoPrimaries(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
@@ -216,7 +218,7 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 		}
 
 		// RV was deleted concurrently; nothing left to publish for
-		return nil
+		return err
 	}
 
 	// when two nodes are requested in publishOn, we must wait until
@@ -229,7 +231,7 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 				!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
 				// reconciliation will be re-triggered on further RVR status updates
 				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name)
-				return nil
+				return errors.New("some RVR has not been switched to allowTwoPrimaries yet")
 			}
 		}
 	}
