@@ -155,7 +155,7 @@ func (r *Reconciler) GetNodeNameToFdMap(
 				nodeLog.Error(ErrNoZoneLabel, "No zone label")
 				return nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
-			NodeNameToFdMap[node.Name] = zone
+			NodeNameToFdMap[node.Name] = zone + node.Name
 		} else {
 			NodeNameToFdMap[node.Name] = node.Name
 		}
