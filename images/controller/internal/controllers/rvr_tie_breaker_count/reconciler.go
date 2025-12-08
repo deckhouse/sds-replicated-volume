@@ -349,5 +349,31 @@ func IsThisTieBreakerCountEnough(
 		return false
 	}
 
+	// quorum := totalReplicas/2 + 1
+
+	// maxReplicasInFD := replicasPerFDMin
+	// if maxFDsWithExtraReplica > 0 {
+	// 	maxReplicasInFD = replicasPerFDMin + 1
+	// }
+
+	// if totalReplicas-maxReplicasInFD < quorum {
+	// 	return false
+	// }
+
+	// majoritySize := fdCount/2 + 1
+	// minoritySize := fdCount - majoritySize
+	// if minoritySize <= 0 {
+	// 	return true
+	// }
+
+	// kExtra := maxFDsWithExtraReplica
+	// if kExtra > minoritySize {
+	// 	kExtra = minoritySize
+	// }
+	// sumLargestMinority := kExtra*(replicasPerFDMin+1) + (minoritySize-kExtra)*replicasPerFDMin
+	// if sumLargestMinority >= quorum {
+	// 	return false
+	// }
+
 	return true
 }
