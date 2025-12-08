@@ -168,13 +168,8 @@ func (r *Reconciler) validateLocalAccess(
 				})
 				return nil
 			}); err != nil {
-				if !apierrors.IsNotFound(err) {
-					log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
-					return err
-				}
-
-				// RV was deleted concurrently; nothing left to publish for
-				return nil
+				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
+				return err
 			}
 
 			// stop reconciliation after setting the failure condition
