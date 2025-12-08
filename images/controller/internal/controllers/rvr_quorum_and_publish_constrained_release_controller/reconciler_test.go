@@ -100,7 +100,7 @@ var _ = Describe("Reconcile", func() {
 		)
 
 		BeforeEach(func() {
-			now = time.Now()
+			now = time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
 
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
