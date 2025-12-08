@@ -559,34 +559,73 @@ var _ = Describe("Reconcile", func() {
 	})
 })
 
+type FDReplicaCounts struct {
+	Diskful    int
+	Access     int
+	TieBreaker int
+}
+
+func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
+	fd := make(map[string]int, len(fdExtended))
+	for zone, counts := range fdExtended {
+		// Sum Diskful and Access replicas (TieBreaker is not counted as base replica)
+		fd[zone] = counts.Diskful + counts.Access
+	}
+	return fd
+}
+
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTable("returns correct TieBreaker count for fdCount < 4",
-		func(fd map[string]int, expected int) {
+		func(fdExtended map[string]FDReplicaCounts, expected int) {
+			fd := shrinkFDExtended(fdExtended)
 			got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(got).To(Equal(expected))
+
 		},
-		func(fd map[string]int, expected int) string {
+		func(fd map[string]FDReplicaCounts, expected int) string {
 			s := []string{}
-			for _, v := range fd {
-				s = append(s, fmt.Sprintf("%d", v))
+			for _, counts := range fd {
+				parts := []string{}
+				if counts.Diskful > 0 {
+					parts = append(parts, fmt.Sprintf("DF:%d", counts.Diskful))
+				}
+				if counts.Access > 0 {
+					parts = append(parts, fmt.Sprintf("AC:%d", counts.Access))
+				}
+				if counts.TieBreaker > 0 {
+					parts = append(parts, fmt.Sprintf("TB:%d", counts.TieBreaker))
+				}
+				if len(parts) == 0 {
+					parts = append(parts, "0")
+				}
+				total := counts.Diskful + counts.Access + counts.TieBreaker
+				s = append(s, fmt.Sprintf("%s(%d)", strings.Join(parts, ","), total))
 			}
-			return fmt.Sprintf("%d FDs, %s replicas -> %d", len(fd), strings.Join(s, "+"), expected)
+			return fmt.Sprintf("%d FDs, %s -> %d", len(fd), strings.Join(s, "+"), expected)
 		},
-		Entry(nil, map[string]int{}, 0),
-		Entry(nil, map[string]int{"a": 1}, 0),
-		Entry(nil, map[string]int{"a": 0, "b": 0}, 0),
-		Entry(nil, map[string]int{"a": 1, "b": 1}, 1),
-		Entry(nil, map[string]int{"a": 1, "b": 2}, 0),
-		Entry(nil, map[string]int{"a": 2, "b": 2}, 1),
-		Entry(nil, map[string]int{"a": 1, "b": 3}, 1),
-		Entry(nil, map[string]int{"a": 2, "b": 3}, 0),
-		Entry(nil, map[string]int{"a": 3, "b": 3}, 1),
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 1}, 0),
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 2}, 1),
-		Entry(nil, map[string]int{"a": 2, "b": 2, "c": 2}, 1),
-		Entry(nil, map[string]int{"a": 1, "b": 2, "c": 2}, 0),
-		Entry(nil, map[string]int{"a": 1, "b": 1, "c": 3}, 2),
-		Entry(nil, map[string]int{"a": 1, "b": 3, "c": 5}, 4),
+		Entry(nil, map[string]FDReplicaCounts{}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
+
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
+		// Test cases with mixed replica types
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
+		Entry(nil, map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 1),
 	)
 })
