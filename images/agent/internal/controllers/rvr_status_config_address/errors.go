@@ -16,28 +16,9 @@ limitations under the License.
 
 package rvrstatusconfigaddress
 
-type Request interface {
-	_isRequest()
-}
+import "errors"
 
-//
-
-type MainRequest struct {
-	Name string
-}
-
-type AlternativeRequest struct {
-	Name string
-}
-
-// ...
-
-func (r MainRequest) _isRequest()        {}
-func (r AlternativeRequest) _isRequest() {}
-
-// ...
-
-var _ Request = MainRequest{}
-var _ Request = AlternativeRequest{}
-
-// ...
+var (
+	ErrNodeMissingInternalIP = errors.New("node missing InternalIP")
+	ErrNoPortsAvailable      = errors.New("no free port available")
+)

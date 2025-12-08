@@ -55,11 +55,11 @@ func NewScanner(
 	ctx context.Context,
 	log *slog.Logger,
 	cl client.Client,
-	envConfig *EnvConfig,
+	hostname string,
 ) *Scanner {
 	ctx, cancel := context.WithCancelCause(ctx)
 	s := &Scanner{
-		hostname: envConfig.NodeName,
+		hostname: hostname,
 		ctx:      ctx,
 		cancel:   cancel,
 		log:      log,

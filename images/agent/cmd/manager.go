@@ -36,10 +36,15 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 )
 
+type managerConfig interface {
+	HealthProbeBindAddress() string
+	MetricsBindAddress() string
+}
+
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
-	envConfig *EnvConfig,
+	cfg managerConfig,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {
@@ -55,9 +60,9 @@ func newManager(
 		Scheme:                 scheme,
 		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
-		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
+		HealthProbeBindAddress: cfg.HealthProbeBindAddress(),
 		Metrics: server.Options{
-			BindAddress: envConfig.MetricsBindAddress,
+			BindAddress: cfg.MetricsBindAddress(),
 		},
 	}
 
