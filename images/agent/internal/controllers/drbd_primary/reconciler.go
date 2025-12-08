@@ -207,12 +207,20 @@ func (r *Reconciler) updateErrorStatus(
 }
 
 func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
-	patch := client.MergeFrom(rvr.DeepCopy())
-	if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Errors != nil {
-		// Clear primary and secondary errors since role is already correct
-		rvr.Status.DRBD.Errors.LastPrimaryError = nil
-		rvr.Status.DRBD.Errors.LastSecondaryError = nil
+	// Check if there are any errors to clear
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
+		return reconcile.Result{}, nil
 	}
+
+	// Only patch if there are errors to clear
+	if rvr.Status.DRBD.Errors.LastPrimaryError == nil && rvr.Status.DRBD.Errors.LastSecondaryError == nil {
+		return reconcile.Result{}, nil
+	}
+
+	patch := client.MergeFrom(rvr.DeepCopy())
+	// Clear primary and secondary errors since role is already correct
+	rvr.Status.DRBD.Errors.LastPrimaryError = nil
+	rvr.Status.DRBD.Errors.LastSecondaryError = nil
 	return reconcile.Result{}, r.cl.Status().Patch(ctx, rvr, patch)
 }
 
