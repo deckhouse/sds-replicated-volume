@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrgccontroller_test
+package rvrqnpccontroller_test
 
 import (
 	"context"
@@ -34,14 +34,14 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvrgccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr-gc-controller"
+	rvrqnpccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_quorum_and_publish_constrained_release_controller"
 )
 
 var _ = Describe("Reconcile", func() {
 	var (
 		scheme *runtime.Scheme
 		cl     client.WithWatch
-		rec    *rvrgccontroller.Reconciler
+		rec    *rvrqnpccontroller.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -58,7 +58,7 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme)
 
 		cl = builder.Build()
-		rec = rvrgccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
@@ -316,7 +316,7 @@ var _ = Describe("Reconcile", func() {
 						})
 
 					cl = builder.Build()
-					rec = rvrgccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+					rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 				})
 
 				It("removes only controller finalizer", func(ctx SpecContext) {
@@ -352,7 +352,7 @@ var _ = Describe("Reconcile", func() {
 					})
 
 				cl = builder.Build()
-				rec = rvrgccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+				rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 
 				_, err := rec.Reconcile(ctx, RequestFor(rvr))
 				Expect(err).To(MatchError(expectedErr))
@@ -372,7 +372,7 @@ var _ = Describe("Reconcile", func() {
 					})
 
 				cl = builder.Build()
-				rec = rvrgccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+				rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 
 				_, err := rec.Reconcile(ctx, RequestFor(rvr))
 				Expect(err).To(MatchError(expectedErr))
