@@ -729,29 +729,30 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 			}
 			return fmt.Sprintf("case %s: %d FDs, %s -> %d", name, len(fd), strings.Join(s, "+"), expected)
 		},
-		// Entry(nil, "1", map[string]FDReplicaCounts{}, 0),
-		// Entry(nil, "2", map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
-		// Entry(nil, "3", map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
-		// Entry(nil, "4", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
-		// Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2),
-		// Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1),
+		Entry(nil, "1", map[string]FDReplicaCounts{}, 0),
+		Entry(nil, "2", map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
+		Entry(nil, "3", map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
+		Entry(nil, "4", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
+		Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2),
+		Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1),
 		Entry(nil, "7", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {}}, 3),
 		Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2),
 		Entry(nil, "8.1", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0),
-		// Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3),
-		// Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
+		Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3),
+		Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
 
-		// Entry(nil, "11", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
-		// Entry(nil, "12", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
-		// Entry(nil, "13", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
-		// Entry(nil, "14", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
-		// Entry(nil, "15", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
-		// // Test cases with mixed replica types
-		// Entry(nil, "16", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
-		// Entry(nil, "17", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
-		// Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
-		// Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
-		// Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
-		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4), // 3+1+1+0 (+0+1+1+2)=> 3+2+2+2 ?
+		Entry(nil, "11", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
+		Entry(nil, "12", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
+		Entry(nil, "13", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
+		Entry(nil, "14", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
+		Entry(nil, "15", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
+		// Test cases with mixed replica types
+		Entry(nil, "16", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
+		Entry(nil, "17", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
+		Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
+		Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
+		Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
+		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4),
+		// 3+1+1+0 (+0+1+1+2)=> 3+2+2+2 ?
 	)
 })
