@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -53,6 +54,8 @@ var _ reconcile.Reconciler = &Reconciler{}
 const (
 	ConditionTypePublishSucceeded          = "PublishSucceeded"
 	ReasonUnableToProvideLocalVolumeAccess = "UnableToProvideLocalVolumeAccess"
+	DefaultRetiresCount                    = 5
+	DefaultRetryWaitInterval               = 5
 )
 
 func (r *Reconciler) Reconcile(
@@ -80,12 +83,16 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// validate local access constraints for volumeAccess=Local; may set PublishSucceeded=False and stop
-	if err := r.validateLocalAccess(ctx, rv, rsc, replicasForRV, log); err != nil {
+	if err := r.checkIfLocalAccessHasEnoughDiskfulReplicas(ctx, rv, rsc, replicasForRV, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// sync rv.status.drbd.config.allowTwoPrimaries and wait for actual application on replicas when needed
-	if err := r.syncAllowTwoPrimaries(ctx, rv, replicasForRV, log); err != nil {
+	// sync rv.status.drbd.config.allowTwoPrimaries and, when needed, wait until it is actually applied on replicas
+	if err := r.syncAllowTwoPrimaries(ctx, rv, log); err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if err := r.waitForAllowTwoPrimariesApplied(ctx, rv, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -129,14 +136,14 @@ func (r *Reconciler) loadPublishContext(
 	return rsc, replicasForRV, nil
 }
 
-// validateLocalAccess enforces the rule that for volumeAccess=Local there must be
+// checkIfLocalAccessHasEnoughDiskfulReplicas enforces the rule that for volumeAccess=Local there must be
 // a Diskful replica on each node from rv.spec.publishOn. On violation it sets
 // PublishSucceeded=False and stops reconciliation.
-func (r *Reconciler) validateLocalAccess(
+func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
 	// this validation is relevant only when volumeAccess is Local
@@ -145,16 +152,15 @@ func (r *Reconciler) validateLocalAccess(
 	}
 
 	// map replicas by NodeName for efficient lookup
-	replicasByNode := make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(replicasForRV))
-	for i := range replicasForRV {
-		rvr := &replicasForRV[i]
-		replicasByNode[rvr.Spec.NodeName] = rvr
+	NodeNameToRvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(replicasForRVList))
+	for _, rvr := range replicasForRVList {
+		NodeNameToRvrMap[rvr.Spec.NodeName] = &rvr
 	}
 
 	// In case rsc.spec.volumeAccess==Local, but replica is not Diskful or doesn't exist,
 	// promotion is impossible: update PublishSucceeded on RV and stop reconcile.
 	for _, publishNodeName := range rv.Spec.PublishOn {
-		rvr, ok := replicasByNode[publishNodeName]
+		rvr, ok := NodeNameToRvrMap[publishNodeName]
 		if !ok || rvr.Spec.Type != "Diskful" {
 			if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
 				if patchedRV.Status == nil {
@@ -181,13 +187,11 @@ func (r *Reconciler) validateLocalAccess(
 }
 
 // syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
-// the number of nodes in rv.spec.publishOn and, when two nodes are requested,
-// waits until rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas.
-// It returns a boolean flag indicating whether it's safe to proceed with primary sync.
+// the number of nodes in rv.spec.publishOn. Waiting for actual application on
+// replicas is handled separately by waitForAllowTwoPrimariesApplied.
 func (r *Reconciler) syncAllowTwoPrimaries(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
 	// update rv.status.drbd.config.allowTwoPrimaries according to spec:
@@ -213,25 +217,58 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 		}
 
 		// RV was deleted concurrently; nothing left to publish for
-		return err
+		return nil
 	}
 
+	return nil
+}
+
+func (r *Reconciler) waitForAllowTwoPrimariesApplied(
+	ctx context.Context,
+	rv *v1alpha3.ReplicatedVolume,
+	log logr.Logger,
+) error {
 	// when two nodes are requested in publishOn, we must wait until
 	// rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas
-	if len(rv.Spec.PublishOn) == 2 {
-		for _, rvr := range replicasForRV {
+	if len(rv.Spec.PublishOn) != 2 {
+		return nil
+	}
+
+	var maxAttempts = DefaultRetiresCount
+	for attempt := 0; attempt < DefaultRetiresCount; attempt++ {
+		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+		if err := r.cl.List(ctx, rvrList); err != nil {
+			log.Error(err, "unable to list ReplicatedVolumeReplica while waiting for allowTwoPrimaries", "attempt", attempt+1)
+			return err
+		}
+
+		allReady := true
+		for _, rvr := range rvrList.Items {
+			if rvr.Spec.ReplicatedVolumeName != rv.Name || !rvr.DeletionTimestamp.IsZero() {
+				continue
+			}
+
 			if rvr.Status == nil ||
 				rvr.Status.DRBD == nil ||
 				rvr.Status.DRBD.Actual == nil ||
 				!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
-				// reconciliation will be re-triggered on further RVR status updates
-				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name)
-				return errors.New("some RVR has not been switched to allowTwoPrimaries yet")
+				allReady = false
+				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name, "attempt", attempt+1)
+				break
 			}
+		}
+
+		if allReady {
+			return nil
+		}
+
+		if attempt < maxAttempts-1 {
+			time.Sleep(DefaultRetryWaitInterval * time.Second)
 		}
 	}
 
-	return nil
+	log.Error(errors.New("some RVR has not been switched to allowTwoPrimaries yet"), "allowTwoPrimaries not applied on all replicas after retries")
+	return errors.New("some RVR has not been switched to allowTwoPrimaries yet")
 }
 
 // syncReplicaPrimariesAndPublishedOn updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)

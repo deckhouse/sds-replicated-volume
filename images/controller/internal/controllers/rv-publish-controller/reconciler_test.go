@@ -229,7 +229,7 @@ var _ = Describe("Reconcile", func() {
 
 				It("does not set PublishSucceeded condition for non-Local access", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-					Expect(err).NotTo(HaveOccurred())
+					Expect(err).To(MatchError("some RVR has not been switched to allowTwoPrimaries yet"))
 					Expect(result).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
@@ -254,7 +254,7 @@ var _ = Describe("Reconcile", func() {
 
 				It("does not set PublishSucceeded=False and proceeds with reconciliation", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-					Expect(err).NotTo(HaveOccurred())
+					Expect(err).To(MatchError("some RVR has not been switched to allowTwoPrimaries yet"))
 					Expect(result).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
@@ -280,7 +280,7 @@ var _ = Describe("Reconcile", func() {
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-					Expect(err).NotTo(HaveOccurred())
+					Expect(err).To(MatchError("some RVR has not been switched to allowTwoPrimaries yet"))
 					Expect(result).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
@@ -322,7 +322,7 @@ var _ = Describe("Reconcile", func() {
 
 				It("sets rv.status.drbd.config.allowTwoPrimaries=true and waits for replicas", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-					Expect(err).NotTo(HaveOccurred())
+					Expect(err).To(MatchError("some RVR has not been switched to allowTwoPrimaries yet"))
 					Expect(result).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
