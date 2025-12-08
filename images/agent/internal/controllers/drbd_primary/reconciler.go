@@ -91,8 +91,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Check if ReplicatedVolume is Ready
 	// TODO: condition type v1alpha3.ConditionTypeReady is used here!
-	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName, log)
+	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
+		log.Error(err, "checking ReplicatedVolume")
 		return reconcile.Result{}, err
 	}
 	if !ready {
@@ -110,7 +111,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if !needPrimary && !needSecondary {
 		log.V(4).Info("DRBD role already matches desired state", "role", currentRole, "desiredPrimary", desiredPrimary)
 		// Clear any previous errors
-		return r.clearErrors(ctx, rvr)
+		err = r.clearErrors(ctx, rvr)
+		if err != nil {
+			log.Error(err, "clearing errors")
+		}
+		return reconcile.Result{}, err
 	}
 
 	// Execute drbdadm command
@@ -141,7 +146,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Update status with error or clear it
-	return r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, needPrimary)
+	err = r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, needPrimary)
+	if err != nil {
+		log.Error(err, "updating error status")
+	}
+	return reconcile.Result{}, err
 }
 
 func (r *Reconciler) updateErrorStatus(
@@ -151,7 +160,7 @@ func (r *Reconciler) updateErrorStatus(
 	cmdOutput string,
 	exitCode int,
 	isPrimary bool,
-) (reconcile.Result, error) {
+) error {
 	patch := client.MergeFrom(rvr.DeepCopy())
 
 	if rvr.Status == nil {
@@ -195,25 +204,25 @@ func (r *Reconciler) updateErrorStatus(
 		}
 	}
 
-	return reconcile.Result{}, r.cl.Status().Patch(ctx, rvr, patch)
+	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
-func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) (reconcile.Result, error) {
+func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	// Check if there are any errors to clear
 	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
-		return reconcile.Result{}, nil
+		return nil
 	}
 
 	// Only patch if there are errors to clear
 	if rvr.Status.DRBD.Errors.LastPrimaryError == nil && rvr.Status.DRBD.Errors.LastSecondaryError == nil {
-		return reconcile.Result{}, nil
+		return nil
 	}
 
 	patch := client.MergeFrom(rvr.DeepCopy())
 	// Clear primary and secondary errors since role is already correct
 	rvr.Status.DRBD.Errors.LastPrimaryError = nil
 	rvr.Status.DRBD.Errors.LastSecondaryError = nil
-	return reconcile.Result{}, r.cl.Status().Patch(ctx, rvr, patch)
+	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
 // rvrIsReady checks if ReplicatedVolumeReplica is ready for primary/secondary operations.
@@ -244,11 +253,10 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, st
 // rvIsReady checks if the ReplicatedVolume is Ready.
 // It returns true if the ReplicatedVolume exists and has Ready condition set to True,
 // false if the condition is not True, and an error if the ReplicatedVolume cannot be retrieved.
-func (r *Reconciler) rvIsReady(ctx context.Context, rvName string, log logr.Logger) (bool, error) {
+func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error) {
 	rv := &v1alpha3.ReplicatedVolume{}
 	err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv)
 	if err != nil {
-		log.Error(err, "getting ReplicatedVolume")
 		return false, err
 	}
 	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeReady), nil
