@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+fromImage: builder/golang-alpine
 final: false
 
 git:

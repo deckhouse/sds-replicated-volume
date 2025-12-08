@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+fromImage: builder/golang-alpine
 final: false
 
 git:
@@ -35,6 +35,7 @@ mount:
     to: /go/pkg
 shell:
   beforeSetup:
+    - apk add --no-cache git
     - cd /usr/local/go/stork
     - '[ -d "/patches/stork/new-files" ] && cp -frp /patches/stork/new-files/* /usr/local/go/stork/'
     - git apply /patches/stork/*.patch
