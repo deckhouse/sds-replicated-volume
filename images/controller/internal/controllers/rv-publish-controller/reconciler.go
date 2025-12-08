@@ -18,9 +18,7 @@ package rvpublishcontroller
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,8 +52,6 @@ var _ reconcile.Reconciler = &Reconciler{}
 const (
 	ConditionTypePublishSucceeded          = "PublishSucceeded"
 	ReasonUnableToProvideLocalVolumeAccess = "UnableToProvideLocalVolumeAccess"
-	DefaultRetiresCount                    = 5
-	DefaultRetryWaitInterval               = 5
 )
 
 func (r *Reconciler) Reconcile(
@@ -92,8 +88,12 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if err := r.waitForAllowTwoPrimariesApplied(ctx, rv, log); err != nil {
+	ready, err := r.waitForAllowTwoPrimariesApplied(ctx, rv, log)
+	if err != nil {
 		return reconcile.Result{}, err
+	}
+	if !ready {
+		return reconcile.Result{}, nil
 	}
 
 	// sync primary roles on replicas and rv.status.publishedOn
@@ -162,18 +162,18 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	for _, publishNodeName := range rv.Spec.PublishOn {
 		rvr, ok := NodeNameToRvrMap[publishNodeName]
 		if !ok || rvr.Spec.Type != "Diskful" {
-			if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
-				if patchedRV.Status == nil {
-					patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
-				}
-				meta.SetStatusCondition(&patchedRV.Status.Conditions, metav1.Condition{
-					Type:    ConditionTypePublishSucceeded,
-					Status:  metav1.ConditionFalse,
-					Reason:  ReasonUnableToProvideLocalVolumeAccess,
-					Message: fmt.Sprintf("Local access required but no Diskful replica found on node %s", publishNodeName),
-				})
-				return nil
-			}); err != nil {
+			patchedRV := rv.DeepCopy()
+			if patchedRV.Status == nil {
+				patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+			}
+			meta.SetStatusCondition(&patchedRV.Status.Conditions, metav1.Condition{
+				Type:    ConditionTypePublishSucceeded,
+				Status:  metav1.ConditionFalse,
+				Reason:  ReasonUnableToProvideLocalVolumeAccess,
+				Message: fmt.Sprintf("Local access required but no Diskful replica found on node %s", publishNodeName),
+			})
+
+			if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
 				return err
 			}
@@ -194,23 +194,29 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
 ) error {
-	// update rv.status.drbd.config.allowTwoPrimaries according to spec:
-	// - true when exactly 2 nodes are requested in spec.publishOn
-	// - false otherwise
 	desiredAllowTwoPrimaries := len(rv.Spec.PublishOn) == 2
-	if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
-		if patchedRV.Status == nil {
-			patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
-		}
-		if patchedRV.Status.DRBD == nil {
-			patchedRV.Status.DRBD = &v1alpha3.DRBDResource{}
-		}
-		if patchedRV.Status.DRBD.Config == nil {
-			patchedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
-		}
-		patchedRV.Status.DRBD.Config.AllowTwoPrimaries = desiredAllowTwoPrimaries
+
+	if rv.Status != nil &&
+		rv.Status.DRBD != nil &&
+		rv.Status.DRBD.Config != nil &&
+		rv.Status.DRBD.Config.AllowTwoPrimaries == desiredAllowTwoPrimaries {
 		return nil
-	}); err != nil {
+	}
+
+	patchedRV := rv.DeepCopy()
+
+	if patchedRV.Status == nil {
+		patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+	}
+	if patchedRV.Status.DRBD == nil {
+		patchedRV.Status.DRBD = &v1alpha3.DRBDResource{}
+	}
+	if patchedRV.Status.DRBD.Config == nil {
+		patchedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+	}
+	patchedRV.Status.DRBD.Config.AllowTwoPrimaries = desiredAllowTwoPrimaries
+
+	if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to patch ReplicatedVolume allowTwoPrimaries")
 			return err
@@ -227,48 +233,31 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
-) error {
-	// when two nodes are requested in publishOn, we must wait until
-	// rvr.status.drbd.actual.allowTwoPrimaries is applied on all replicas
+) (bool, error) {
 	if len(rv.Spec.PublishOn) != 2 {
-		return nil
+		return true, nil
 	}
 
-	var maxAttempts = DefaultRetiresCount
-	for attempt := 0; attempt < DefaultRetiresCount; attempt++ {
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		if err := r.cl.List(ctx, rvrList); err != nil {
-			log.Error(err, "unable to list ReplicatedVolumeReplica while waiting for allowTwoPrimaries", "attempt", attempt+1)
-			return err
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, rvrList); err != nil {
+		log.Error(err, "unable to list ReplicatedVolumeReplica while waiting for allowTwoPrimaries")
+		return false, err
+	}
+
+	for _, rvr := range rvrList.Items {
+		if rvr.Spec.ReplicatedVolumeName != rv.Name || !rvr.DeletionTimestamp.IsZero() {
+			continue
 		}
 
-		allReady := true
-		for _, rvr := range rvrList.Items {
-			if rvr.Spec.ReplicatedVolumeName != rv.Name || !rvr.DeletionTimestamp.IsZero() {
-				continue
-			}
-
-			if rvr.Status == nil ||
-				rvr.Status.DRBD == nil ||
-				rvr.Status.DRBD.Actual == nil ||
-				!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
-				allReady = false
-				log.Info("waiting for allowTwoPrimaries to be applied on all replicas", "rvr", rvr.Name, "attempt", attempt+1)
-				break
-			}
-		}
-
-		if allReady {
-			return nil
-		}
-
-		if attempt < maxAttempts-1 {
-			time.Sleep(DefaultRetryWaitInterval * time.Second)
+		if rvr.Status == nil ||
+			rvr.Status.DRBD == nil ||
+			rvr.Status.DRBD.Actual == nil ||
+			!rvr.Status.DRBD.Actual.AllowTwoPrimaries {
+			return false, nil
 		}
 	}
 
-	log.Error(errors.New("some RVR has not been switched to allowTwoPrimaries yet"), "allowTwoPrimaries not applied on all replicas after retries")
-	return errors.New("some RVR has not been switched to allowTwoPrimaries yet")
+	return true, nil
 }
 
 // syncReplicaPrimariesAndPublishedOn updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)
@@ -293,34 +282,30 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 
 		_, shouldBePrimary := publishSet[rvr.Spec.NodeName]
 
-		// update both spec.type (for TieBreaker) and rvr.status.drbd.config.primary in a single patch as required by spec
-		if err := commonapi.PatchWithConflictRetry(ctx, r.cl, &rvr, func(patchedRVR *v1alpha3.ReplicatedVolumeReplica) error {
-			// convert TieBreaker to Access when it is supposed to be Primary
-			if shouldBePrimary && patchedRVR.Spec.Type == "TieBreaker" {
-				patchedRVR.Spec.Type = "Access"
-			}
+		patchedRVR := rvr.DeepCopy()
 
-			if patchedRVR.Status == nil {
-				patchedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-			}
-			if patchedRVR.Status.DRBD == nil {
-				patchedRVR.Status.DRBD = &v1alpha3.DRBD{}
-			}
-			if patchedRVR.Status.DRBD.Config == nil {
-				patchedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-			}
+		if shouldBePrimary && patchedRVR.Spec.Type == "TieBreaker" {
+			patchedRVR.Spec.Type = "Access"
+		}
+		if patchedRVR.Status == nil {
+			patchedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		}
+		if patchedRVR.Status.DRBD == nil {
+			patchedRVR.Status.DRBD = &v1alpha3.DRBD{}
+		}
+		if patchedRVR.Status.DRBD.Config == nil {
+			patchedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		}
 
-			current := false
-			if patchedRVR.Status.DRBD.Config.Primary != nil {
-				current = *patchedRVR.Status.DRBD.Config.Primary
-			}
-			if current == shouldBePrimary {
-				return nil
-			}
-
+		currentPrimaryValue := false
+		if patchedRVR.Status.DRBD.Config.Primary != nil {
+			currentPrimaryValue = *patchedRVR.Status.DRBD.Config.Primary
+		}
+		if currentPrimaryValue != shouldBePrimary {
 			patchedRVR.Status.DRBD.Config.Primary = &shouldBePrimary
-			return nil
-		}); err != nil {
+		}
+
+		if err := r.cl.Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
 			if !apierrors.IsNotFound(err) {
 				log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
 				return err
