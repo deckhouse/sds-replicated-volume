@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -575,13 +577,142 @@ func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
 }
 
 var _ = Describe("DesiredTieBreakerTotal", func() {
-	DescribeTable("returns correct TieBreaker count for fdCount < 4",
+	DescribeTableSubtree("returns correct TieBreaker count for fdCount < 4",
 		func(fdExtended map[string]FDReplicaCounts, expected int) {
-			fd := shrinkFDExtended(fdExtended)
-			got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(got).To(Equal(expected))
+			It("function CalculateDesiredTieBreakerTotal works", func() {
+				fd := shrinkFDExtended(fdExtended)
+				got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
+				Expect(err).NotTo(HaveOccurred())
+				Expect(got).To(Equal(expected))
+			})
 
+			When("XXX", func() {
+				scheme := runtime.NewScheme()
+				Expect(corev1.AddToScheme(scheme)).To(Succeed())
+				Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
+				Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+
+				var (
+					builder *fake.ClientBuilder
+					cl      client.WithWatch
+					rec     *rvrtiebreakercount.Reconciler
+					rv      *v1alpha3.ReplicatedVolume
+				)
+
+				BeforeEach(func() {
+
+					cl = nil
+					rec = nil
+
+					rv = &v1alpha3.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rv1",
+						},
+						Spec: v1alpha3.ReplicatedVolumeSpec{
+							ReplicatedStorageClassName: "rsc1",
+						},
+					}
+
+					zones := maps.Keys(fdExtended)
+					rsc := &v1alpha1.ReplicatedStorageClass{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "rsc1",
+						},
+						Spec: v1alpha1.ReplicatedStorageClassSpec{
+							Replication: "Availability",
+							Topology:    "TransZonal",
+							Zones:       slices.Collect(zones),
+						},
+					}
+
+					var objects []client.Object
+					objects = append(objects, rv, rsc)
+
+					for fdName, fdReplicaCounts := range fdExtended {
+						var nodeNameSlice []string
+						for i := range 10 {
+							nodeName := fmt.Sprintf("node-%s-%d", fdName, i)
+							node := &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name:   nodeName,
+									Labels: map[string]string{rvrtiebreakercount.NodeZoneLabel: fdName},
+								},
+							}
+							objects = append(objects, node)
+							nodeNameSlice = append(nodeNameSlice, nodeName)
+
+						}
+						index := 0
+						for j := 0; j < fdReplicaCounts.Diskful; j++ {
+							rvr := &v1alpha3.ReplicatedVolumeReplica{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: fmt.Sprintf("rvr-df-%s-%d", fdName, j+1),
+								},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: rv.Name,
+									NodeName:             nodeNameSlice[index],
+									Type:                 "Diskful",
+								},
+							}
+							objects = append(objects, rvr)
+							index++
+						}
+
+						for j := 0; j < fdReplicaCounts.Access; j++ {
+							rvr := &v1alpha3.ReplicatedVolumeReplica{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: fmt.Sprintf("rvr-ac-%s-%d", fdName, j+1),
+								},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: rv.Name,
+									NodeName:             nodeNameSlice[index],
+									Type:                 "Access",
+								},
+							}
+							objects = append(objects, rvr)
+							index++
+						}
+
+						for j := 0; j < fdReplicaCounts.TieBreaker; j++ {
+							rvr := &v1alpha3.ReplicatedVolumeReplica{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: fmt.Sprintf("rvr-tb-%s-%d", fdName, j+1),
+								},
+								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+									ReplicatedVolumeName: rv.Name,
+									NodeName:             nodeNameSlice[index],
+									Type:                 "TieBreaker",
+								},
+							}
+							objects = append(objects, rvr)
+							index++
+						}
+					}
+					builder = fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...)
+				})
+
+				JustBeforeEach(func() {
+					cl = builder.Build()
+					rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+				})
+
+				It("Reconcile works", func(ctx SpecContext) {
+					req := reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rv)}
+					result, err := rec.Reconcile(context.Background(), req)
+
+					fmt.Fprintf(GinkgoWriter, "  reconcile result: %#v, err: %v\n", result, err)
+
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(reconcile.Result{}))
+
+					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					Expect(cl.List(ctx, rvrList)).To(Succeed())
+
+					fmt.Fprintf(GinkgoWriter, "  total replicas after reconcile: %d\n", len(rvrList.Items))
+
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(expected)))
+				})
+			})
 		},
 		func(fd map[string]FDReplicaCounts, expected int) string {
 			s := []string{}
