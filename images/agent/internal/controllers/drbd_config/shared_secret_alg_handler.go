@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -60,7 +59,7 @@ func (h *SharedSecretAlgHandler) Handle(ctx context.Context) error {
 }
 
 func kernelHasCrypto(name string) (bool, error) {
-	f, err := os.Open("/proc/crypto")
+	f, err := afs.Open("/proc/crypto")
 	if err != nil {
 		return false, err
 	}

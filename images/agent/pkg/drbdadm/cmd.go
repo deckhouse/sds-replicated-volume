@@ -6,21 +6,21 @@ import (
 	"os/exec"
 )
 
-type cmd interface {
+type Cmd interface {
 	CombinedOutput() ([]byte, error)
 	SetStderr(io.Writer)
 	Run() error
 }
 
 // overridable for testing purposes
-var ExecCommandContext = func(ctx context.Context, name string, arg ...string) cmd {
+var ExecCommandContext = func(ctx context.Context, name string, arg ...string) Cmd {
 	return (*execCmd)(exec.CommandContext(ctx, name, arg...))
 }
 
 // dummy decorator to isolate from [exec.Cmd] struct fields
 type execCmd exec.Cmd
 
-var _ cmd = &execCmd{}
+var _ Cmd = &execCmd{}
 
 func (r *execCmd) Run() error                      { return (*exec.Cmd)(r).Run() }
 func (r *execCmd) SetStderr(w io.Writer)           { (*exec.Cmd)(r).Stderr = w }

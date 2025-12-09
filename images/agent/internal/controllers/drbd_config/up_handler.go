@@ -106,8 +106,8 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 		return configurationCommandError{err}
 	}
 
-	// move
-	if err := os.Rename(tmpFilePath, regularFilePath); err != nil {
+	// move using afero wrapper to allow test FS swap
+	if err := afs.Rename(tmpFilePath, regularFilePath); err != nil {
 		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, regularFilePath, fileSystemOperationError{err})
 	}
 
@@ -200,7 +200,7 @@ func (h *UpHandler) writeResourceConfig(filepath string) error {
 		root.Elements = append(root.Elements, sec.(*drbdconf.Section))
 	}
 
-	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	file, err := afs.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("open file %s: %w", filepath, err)
 	}

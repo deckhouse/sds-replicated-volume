@@ -58,4 +58,19 @@ var _ RVRRequest = UpRequest{}
 var _ RVRRequest = DownRequest{}
 var _ Request = SharedSecretAlgRequest{}
 
+// NewUpRequest builds UpRequest for given RVR name (useful in tests).
+func NewUpRequest(rvrName string) UpRequest {
+	return UpRequest{rvrRequest{rvrName: rvrName}}
+}
+
+// NewDownRequest builds DownRequest for given RVR name (useful in tests).
+func NewDownRequest(rvrName string) DownRequest {
+	return DownRequest{rvrRequest{rvrName: rvrName}}
+}
+
+// NewSharedSecretAlgRequest builds SharedSecretAlgRequest.
+func NewSharedSecretAlgRequest(rvName, alg string) SharedSecretAlgRequest {
+	return SharedSecretAlgRequest{RVName: rvName, SharedSecretAlg: alg}
+}
+
 // ...

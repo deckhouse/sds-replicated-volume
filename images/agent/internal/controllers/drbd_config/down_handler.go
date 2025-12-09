@@ -2,13 +2,14 @@ package drbdconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
+	"github.com/spf13/afero"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -36,16 +37,16 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 		h.log.Info("successfully brought down DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
 	}
 
-	if err := os.Remove(regularFilePath); err != nil {
-		if !os.IsNotExist(err) {
+	if err := afs.Remove(regularFilePath); err != nil {
+		if !errors.Is(err, afero.ErrFileNotFound) {
 			h.log.Warn("failed to remove config file", "path", regularFilePath, "error", err)
 		}
 	} else {
 		h.log.Info("successfully removed config file", "path", regularFilePath)
 	}
 
-	if err := os.Remove(tmpFilePath); err != nil {
-		if !os.IsNotExist(err) {
+	if err := afs.Remove(tmpFilePath); err != nil {
+		if !errors.Is(err, afero.ErrFileNotFound) {
 			h.log.Warn("failed to remove config file", "path", tmpFilePath, "error", err)
 		}
 	} else {

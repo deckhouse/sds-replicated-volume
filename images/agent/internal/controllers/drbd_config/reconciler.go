@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -33,12 +32,24 @@ import (
 type Reconciler struct {
 	cl       client.Client
 	rdr      client.Reader
-	sch      *runtime.Scheme
 	log      *slog.Logger
 	nodeName string
 }
 
 var _ reconcile.TypedReconciler[Request] = &Reconciler{}
+
+// NewReconciler constructs a Reconciler; exported for tests.
+func NewReconciler(cl client.Client, rdr client.Reader, log *slog.Logger, nodeName string) *Reconciler {
+	if log == nil {
+		log = slog.Default()
+	}
+	return &Reconciler{
+		cl:       cl,
+		rdr:      rdr,
+		log:      log,
+		nodeName: nodeName,
+	}
+}
 
 func (r *Reconciler) OnRVUpdate(
 	ctx context.Context,
