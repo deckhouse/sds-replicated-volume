@@ -40,3 +40,6 @@ hack.sh
 
 # test data
 images/agent/pkg/drbdconf/testdata/out/
+
+# Megatest
+PR_DESCRIPTION.md
