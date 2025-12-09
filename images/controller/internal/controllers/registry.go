@@ -19,12 +19,14 @@ package controllers
 import (
 	"fmt"
 
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
+	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
 var registry []func(mgr manager.Manager) error
@@ -35,6 +37,7 @@ func init() {
 	registry = append(registry, rvrstatusconfigpeers.BuildController)
 	registry = append(registry, rvrstatusconfignodeid.BuildController)
 	registry = append(registry, rvstatusconfigdeviceminor.BuildController)
+	registry = append(registry, rvrvolume.BuildController)
 	// ...
 }
 
