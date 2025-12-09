@@ -23,21 +23,27 @@ import (
 
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
+	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrownerreferencecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference_controller"
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
+	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-var registry []func(mgr manager.Manager) error
+var registry = []func(mgr manager.Manager) error{}
 
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
+	registry = append(registry, rvrtiebreakercount.BuildController)
+
+	// TODO issues/333 register new controllers here
 	registry = append(registry, rvstatusconfigquorum.BuildController)
 	registry = append(registry, rvrstatusconfigpeers.BuildController)
 	registry = append(registry, rvrstatusconfignodeid.BuildController)
 	registry = append(registry, rvstatusconfigdeviceminor.BuildController)
+	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrownerreferencecontroller.BuildController)
 	// ...
