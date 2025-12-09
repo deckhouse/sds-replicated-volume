@@ -40,6 +40,28 @@ type Reconciler struct {
 
 var _ reconcile.TypedReconciler[Request] = &Reconciler{}
 
+func (r *Reconciler) OnRVUpdate(
+	ctx context.Context,
+	rvOld *v1alpha3.ReplicatedVolume,
+	rvNew *v1alpha3.ReplicatedVolume,
+	q TQueue,
+) {
+	if rvNew.Status == nil || rvNew.Status.DRBD == nil ||
+		rvNew.Status.DRBD.Config == nil || rvNew.Status.DRBD.Config.SharedSecretAlg == "" {
+		return
+	}
+
+	if rvOld.Status == nil || rvOld.Status.DRBD == nil || rvOld.Status.DRBD.Config == nil ||
+		rvOld.Status.DRBD.Config.SharedSecretAlg != rvNew.Status.DRBD.Config.SharedSecretAlg {
+		q.Add(
+			SharedSecretAlgRequest{
+				RVName:          rvNew.Name,
+				SharedSecretAlg: rvNew.Status.DRBD.Config.SharedSecretAlg,
+			},
+		)
+	}
+}
+
 func (r *Reconciler) OnRVRCreateOrUpdate(
 	ctx context.Context,
 	rvr *v1alpha3.ReplicatedVolumeReplica,
@@ -60,7 +82,7 @@ func (r *Reconciler) OnRVRCreateOrUpdate(
 		}
 
 		r.log.Debug("down resource", "rvrName", rvr.Name)
-		q.Add(DownRequest{RVRRequest: RVRRequest{rvr.Name}})
+		q.Add(DownRequest{rvrRequest{rvr.Name}})
 		return
 	}
 
@@ -75,27 +97,43 @@ func (r *Reconciler) OnRVRCreateOrUpdate(
 	}
 
 	r.log.Debug("up resource", "rvrName", rvr.Name)
-	q.Add(UpRequest{RVRRequest: RVRRequest{rvr.Name}})
-}
-
-func (r *Reconciler) rvrOnThisNode(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
-	if rvr.Spec.NodeName == "" {
-		return false
-	}
-	if rvr.Spec.NodeName != r.nodeName {
-		r.log.Debug("invalid node - skip",
-			"rvrName", rvr.Name,
-			"rvrNodeName", rvr.Spec.NodeName,
-			"nodeName", r.nodeName,
-		)
-		return false
-	}
-	return true
+	q.Add(UpRequest{rvrRequest{rvr.Name}})
 }
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req Request,
+) (reconcile.Result, error) {
+	if rvrReq, ok := req.(RVRRequest); ok {
+		return r.reconcileRVRRequest(ctx, rvrReq)
+	}
+	return r.reconcileOtherRequest(ctx, req)
+}
+
+func (r *Reconciler) reconcileOtherRequest(
+	ctx context.Context,
+	req Request,
+) (reconcile.Result, error) {
+	switch typedReq := req.(type) {
+	case SharedSecretAlgRequest:
+		handler := SharedSecretAlgHandler{
+			cl:              r.cl,
+			rdr:             r.rdr,
+			log:             r.log.With("handler", "sharedSecretAlg"),
+			nodeName:        r.nodeName,
+			rvName:          typedReq.RVName,
+			sharedSecretAlg: typedReq.SharedSecretAlg,
+		}
+		return reconcile.Result{}, handler.Handle(ctx)
+	default:
+		r.log.Error("unknown req type", "typedReq", typedReq)
+		return reconcile.Result{}, e.ErrNotImplemented
+	}
+}
+
+func (r *Reconciler) reconcileRVRRequest(
+	ctx context.Context,
+	req RVRRequest,
 ) (reconcile.Result, error) {
 	rvr := &v1alpha3.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.RVRName()}, rvr); err != nil {
@@ -170,6 +208,29 @@ func (r *Reconciler) Reconcile(
 		r.log.Error("unknown req type", "typedReq", typedReq)
 		return reconcile.Result{}, e.ErrNotImplemented
 	}
+}
+
+func (r *Reconciler) rvrOnThisNode(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+	if rvr.Spec.NodeName == "" {
+		return false
+	}
+	if rvr.Spec.NodeName != r.nodeName {
+		r.log.Debug("invalid node - skip",
+			"rvrName", rvr.Name,
+			"rvrNodeName", rvr.Spec.NodeName,
+			"nodeName", r.nodeName,
+		)
+		return false
+	}
+	return true
+}
+
+func (r *Reconciler) sharedSecretAlgUpdated(
+	rv *v1alpha3.ReplicatedVolume,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	oldRVR *v1alpha3.ReplicatedVolumeReplica,
+) bool {
+	return rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.SharedSecretAlg != ""
 }
 
 func (r *Reconciler) rvrInitialized(rvr *v1alpha3.ReplicatedVolumeReplica, rv *v1alpha3.ReplicatedVolume) bool {

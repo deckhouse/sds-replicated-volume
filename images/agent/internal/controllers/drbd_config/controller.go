@@ -72,6 +72,19 @@ func BuildController(mgr manager.Manager) error {
 					rec.OnRVRCreateOrUpdate(ctx, rvr, q)
 				},
 			}).
+		Watches(
+			&v1alpha3.ReplicatedVolume{},
+			&handler.TypedFuncs[client.Object, TReq]{
+				UpdateFunc: func(
+					ctx context.Context,
+					e event.TypedUpdateEvent[client.Object],
+					q TQueue,
+				) {
+					rvOld := e.ObjectOld.(*v1alpha3.ReplicatedVolume)
+					rvNew := e.ObjectNew.(*v1alpha3.ReplicatedVolume)
+					rec.OnRVUpdate(ctx, rvOld, rvNew, q)
+				},
+			}).
 		Complete(rec)
 
 	if err != nil {

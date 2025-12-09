@@ -17,35 +17,45 @@ limitations under the License.
 package drbdconfig
 
 type Request interface {
-	RVRName() string
 	_isRequest()
 }
 
-type RVRRequest struct {
+type RVRRequest interface {
+	Request
+	RVRName() string
+}
+
+type rvrRequest struct {
 	rvrName string
 }
 
-func (r RVRRequest) RVRName() string { return r.rvrName }
+func (r rvrRequest) RVRName() string { return r.rvrName }
 
 //
 
 type UpRequest struct {
-	RVRRequest
+	rvrRequest
 }
 
 type DownRequest struct {
-	RVRRequest
+	rvrRequest
+}
+
+type SharedSecretAlgRequest struct {
+	RVName          string
+	SharedSecretAlg string
 }
 
 // ...
 
-func (UpRequest) _isRequest() {}
-
-func (DownRequest) _isRequest() {}
+func (UpRequest) _isRequest()              {}
+func (DownRequest) _isRequest()            {}
+func (SharedSecretAlgRequest) _isRequest() {}
 
 // ...
 
-var _ Request = UpRequest{}
-var _ Request = DownRequest{}
+var _ RVRRequest = UpRequest{}
+var _ RVRRequest = DownRequest{}
+var _ Request = SharedSecretAlgRequest{}
 
 // ...
