@@ -44,7 +44,6 @@ import (
 // +kubebuilder:printcolumn:name="DevicesReady",type=string,JSONPath=".status.conditions[?(@.type=='DevicesReady')].status"
 // +kubebuilder:printcolumn:name="DiskIOSuspended",type=string,JSONPath=".status.conditions[?(@.type=='DiskIOSuspended')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
-// +kubebuilder:validation:XValidation:rule="!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.filter(o, o.kind == 'ReplicatedVolume' && o.apiVersion.matches('storage.deckhouse.io/v1alpha[0-9]+')).all(o, o.controller == true && o.name == self.spec.replicatedVolumeName)",message="All ReplicatedVolume ownerReferences must be ControllerReferences (controller == true) and their name must equal spec.replicatedVolumeName"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
