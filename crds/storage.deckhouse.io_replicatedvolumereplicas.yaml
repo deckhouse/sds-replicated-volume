@@ -73,6 +73,22 @@ spec:
             type: string
           metadata:
             type: object
+            properties:
+              ownerReferences:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    apiVersion:
+                      type: string
+                    kind:
+                      type: string
+                    name:
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name          
           spec:
             properties:
               nodeName:
