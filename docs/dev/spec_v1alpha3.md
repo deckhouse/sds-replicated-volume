@@ -57,6 +57,20 @@
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
   - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+  - [`llv-owner-reference-controller`](#llv-owner-reference-controller)
+    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
+  - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
+  - [`rv-gc-controller`](#rv-gc-controller)
+  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
+- [Сценарии](#сценарии)
+  - [Отказоустойчивость](#отказоустойчивость)
+    - [Arrange](#arrange)
+    - [Act](#act)
+    - [Assert](#assert)
+  - [Нагрузочный](#нагрузочный)
+    - [Arrange](#arrange-1)
+    - [Act](#act-1)
+    - [Assert](#assert-1)
 
 # Основные положения
 
@@ -143,7 +157,7 @@ TODO
   - `sds-replicated-volume.storage.deckhouse.io/peers` TODO
   - `sds-replicated-volume.storage.deckhouse.io/quorum` TODO
 - `llv`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.storage.deckhouse.io/controller` TODO
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -686,7 +700,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Вывод 
   - Новое `llv`
-  - Обновление для уже существующих: `llv.metadata.ownerReference`
+  - Обновление для уже существующих: `llv.metadata.ownerReference` - вынесли в отдельный контроллер [`llv-owner-reference-controller`](#llv-owner-reference-controller)
   - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
 ## `rvr-quorum-and-publish-constrained-release-controller`
@@ -878,3 +892,37 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 
 ### Вывод 
   - `rvr.status.conditions`
+
+## `llv-owner-reference-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 1]
+
+### Цель 
+
+Поддерживать `llv.metada.ownerReference`, указывающий на `rvr`.
+
+Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
+`sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
+
+### Вывод 
+ - `llv.metada.ownerReference`
+
+
+## `rv-status-conditions-controller`
+
+## `rv-gc-controller`
+
+## `tie-breaker-removal-controller`
+
+# Сценарии
+
+## Отказоустойчивость
+### Arrange
+### Act
+### Assert
+
+## Нагрузочный
+### Arrange
+### Act
+### Assert
+

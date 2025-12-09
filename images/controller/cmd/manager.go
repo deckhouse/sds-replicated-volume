@@ -32,14 +32,20 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers"
 )
 
+type managerConfig interface {
+	HealthProbeBindAddress() string
+	MetricsBindAddress() string
+}
+
 func newManager(
 	ctx context.Context,
 	log *slog.Logger,
-	envConfig *EnvConfig,
+	envConfig managerConfig,
 ) (manager.Manager, error) {
 	config, err := config.GetConfig()
 	if err != nil {
@@ -55,9 +61,9 @@ func newManager(
 		Scheme:                 scheme,
 		BaseContext:            func() context.Context { return ctx },
 		Logger:                 logr.FromSlogHandler(log.Handler()),
-		HealthProbeBindAddress: envConfig.HealthProbeBindAddress,
+		HealthProbeBindAddress: envConfig.HealthProbeBindAddress(),
 		Metrics: server.Options{
-			BindAddress: envConfig.MetricsBindAddress,
+			BindAddress: envConfig.MetricsBindAddress(),
 		},
 	}
 
@@ -87,6 +93,7 @@ func newScheme() (*runtime.Scheme, error) {
 	var schemeFuncs = []func(s *runtime.Scheme) error{
 		corev1.AddToScheme,
 		storagev1.AddToScheme,
+		v1alpha1.AddToScheme,
 		v1alpha3.AddToScheme,
 		snc.AddToScheme,
 	}

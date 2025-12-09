@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount
+package rvrtiebreakercount
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -25,20 +25,18 @@ import (
 )
 
 func BuildController(mgr manager.Manager) error {
-	nameController := "rvr_diskful_count_controller"
+	const controllerName = "rvr_tie_breaker_count_controller"
 
-	r := &Reconciler{
-		cl:     mgr.GetClient(),
-		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
-		scheme: mgr.GetScheme(),
-	}
+	log := mgr.GetLogger().WithName(controllerName)
+
+	var rec = NewReconciler(mgr.GetClient(), log, mgr.GetScheme())
 
 	return builder.ControllerManagedBy(mgr).
-		Named(nameController).
-		For(
-			&v1alpha3.ReplicatedVolume{}).
+		Named(controllerName).
+		For(&v1alpha3.ReplicatedVolume{}).
 		Watches(
 			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
-		Complete(r)
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{}),
+		).
+		Complete(rec)
 }

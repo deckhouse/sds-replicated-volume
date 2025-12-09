@@ -14,31 +14,34 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount
+package rvrvolume
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-func BuildController(mgr manager.Manager) error {
-	nameController := "rvr_diskful_count_controller"
+const (
+	controllerName = "rvr_volume_controller"
+)
 
+func BuildController(mgr manager.Manager) error {
 	r := &Reconciler{
 		cl:     mgr.GetClient(),
-		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		log:    mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
 		scheme: mgr.GetScheme(),
 	}
 
 	return builder.ControllerManagedBy(mgr).
-		Named(nameController).
+		Named(controllerName).
 		For(
-			&v1alpha3.ReplicatedVolume{}).
+			&v1alpha3.ReplicatedVolumeReplica{}).
 		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
+			&snc.LVMLogicalVolume{},
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolumeReplica{})).
 		Complete(r)
 }
