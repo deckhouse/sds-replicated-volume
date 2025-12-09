@@ -18,19 +18,19 @@ package drbdadm
 
 import (
 	"context"
-	"os/exec"
 )
 
 func ExecuteShNop(ctx context.Context, configToTest string, configToExclude string) CommandError {
-	cmd := exec.CommandContext(ctx, Command, ShNopArgs(configToTest, configToExclude)...)
+	args := ShNopArgs(configToTest, configToExclude)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return &commandError{
 			error:           err,
-			commandWithArgs: append([]string{Command}, ShNopArgs(configToTest, configToExclude)...),
+			commandWithArgs: append([]string{Command}, args...),
 			output:          string(out),
-			exitCode:        cmd.ProcessState.ExitCode(),
+			exitCode:        errToExitCode(err),
 		}
 	}
 

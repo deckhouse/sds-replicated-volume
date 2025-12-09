@@ -18,19 +18,19 @@ package drbdadm
 
 import (
 	"context"
-	"os/exec"
 )
 
 func ExecuteCreateMD(ctx context.Context, resource string) CommandError {
-	cmd := exec.CommandContext(ctx, Command, CreateMDArgs(resource)...)
+	args := CreateMDArgs(resource)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return &commandError{
 			error:           err,
-			commandWithArgs: append([]string{Command}, CreateMDArgs(resource)...),
+			commandWithArgs: append([]string{Command}, args...),
 			output:          string(out),
-			exitCode:        cmd.ProcessState.ExitCode(),
+			exitCode:        errToExitCode(err),
 		}
 	}
 

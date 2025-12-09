@@ -29,10 +29,11 @@ import (
 // - (false, nil) if it exits with code 10 and contains "No such resource"
 // - (false, error) for any other case
 func ExecuteStatusIsUp(ctx context.Context, resource string) (bool, CommandError) {
-	cmd := exec.CommandContext(ctx, Command, StatusArgs(resource)...)
+	args := StatusArgs(resource)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	cmd.SetStderr(&stderr)
 
 	err := cmd.Run()
 	if err == nil {
@@ -51,8 +52,8 @@ func ExecuteStatusIsUp(ctx context.Context, resource string) (bool, CommandError
 
 	return false, &commandError{
 		error:           err,
-		commandWithArgs: append([]string{Command}, StatusArgs(resource)...),
+		commandWithArgs: append([]string{Command}, args...),
 		output:          stderr.String(),
-		exitCode:        cmd.ProcessState.ExitCode(),
+		exitCode:        errToExitCode(err),
 	}
 }
