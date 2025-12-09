@@ -69,6 +69,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	// TODO: fail ReplicatedVolume if it has empty ReplicatedStorageClassName
 	if shouldSkipRV(rv, log) {
 		return reconcile.Result{}, nil
 	}
