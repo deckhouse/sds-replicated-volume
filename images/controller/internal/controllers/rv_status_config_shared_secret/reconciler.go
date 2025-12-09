@@ -150,14 +150,14 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 	rv *v1alpha3.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
-	// Get all RVRs for this RV
+	// Get all RVRs
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
-	// Collect all RVRs with errors
+	// Collect all RVRs for this RV with errors
 	var rvrsWithErrors []*v1alpha3.ReplicatedVolumeReplica
 	var failedNodeNames []string
 	for _, rvr := range rvrList.Items {
