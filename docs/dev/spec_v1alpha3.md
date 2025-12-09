@@ -157,7 +157,7 @@ TODO
   - `sds-replicated-volume.storage.deckhouse.io/peers` TODO
   - `sds-replicated-volume.storage.deckhouse.io/quorum` TODO
 - `llv`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.storage.deckhouse.io/controller` TODO
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
