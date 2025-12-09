@@ -50,14 +50,23 @@ func (r *Reconciler) OnRVRCreateOrUpdate(
 	}
 
 	if rvr.DeletionTimestamp != nil {
-		r.log.Info("deletionTimestamp, do cleanup")
+		r.log.Info("deletionTimestamp, check finalizers", "rvrName", rvr.Name)
+
+		for _, f := range rvr.Finalizers {
+			if f != v1alpha3.AgentAppFinalizer {
+				r.log.Info("non-agent finalizer found, ignore", "rvrName", rvr.Name)
+				return
+			}
+		}
+
+		r.log.Debug("down resource", "rvrName", rvr.Name)
 		q.Add(DownRequest{RVRRequest: RVRRequest{rvr.Name}})
 		return
 	}
 
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}, rv); err != nil {
-		r.log.Error("getting rv", "err", err)
+		r.log.Error("getting rv", "err", err, "rvrName", rvr.Name)
 		return
 	}
 
@@ -101,6 +110,19 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
+	var llv *v1alpha1.LVMLogicalVolume
+	if rvr.Spec.Type == "Diskful" {
+		llv = &v1alpha1.LVMLogicalVolume{}
+		if err := r.cl.Get(
+			ctx,
+			client.ObjectKey{Name: rvr.Status.LVMLogicalVolumeName},
+			llv,
+		); err != nil {
+			r.log.Error("getting llv", "err", err)
+			return reconcile.Result{}, err
+		}
+	}
+
 	switch typedReq := req.(type) {
 	case UpRequest:
 		rv := &v1alpha3.ReplicatedVolume{}
@@ -119,20 +141,11 @@ func (r *Reconciler) Reconcile(
 			log:      r.log.With("handler", "up"),
 			rvr:      rvr,
 			rv:       rv,
+			llv:      llv,
 			nodeName: r.nodeName,
 		}
 
-		if rvr.Spec.Type == "Diskful" {
-			handler.llv = &v1alpha1.LVMLogicalVolume{}
-			if err := r.cl.Get(
-				ctx,
-				client.ObjectKey{Name: rvr.Status.LVMLogicalVolumeName},
-				handler.llv,
-			); err != nil {
-				r.log.Error("getting llv", "err", err)
-				return reconcile.Result{}, err
-			}
-
+		if llv != nil {
 			handler.lvg = &v1alpha1.LVMVolumeGroup{}
 			if err := r.cl.Get(
 				ctx,
@@ -148,8 +161,9 @@ func (r *Reconciler) Reconcile(
 	case DownRequest:
 		handler := &DownHandler{
 			cl:  r.cl,
-			log: r.log.With("handler", "up"),
+			log: r.log.With("handler", "down"),
 			rvr: rvr,
+			llv: llv,
 		}
 		return reconcile.Result{}, handler.Handle(ctx)
 	default:

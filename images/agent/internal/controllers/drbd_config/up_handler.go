@@ -6,11 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 
-	. "github.com/deckhouse/sds-common-lib/utils"
-
+	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -24,14 +22,19 @@ type UpHandler struct {
 	log      *slog.Logger
 	rvr      *v1alpha3.ReplicatedVolumeReplica
 	rv       *v1alpha3.ReplicatedVolume
-	lvg      *snc.LVMVolumeGroup   // may be nil for rvr.spec.type != "Diskful"
-	llv      *snc.LVMLogicalVolume // may be nil for rvr.spec.type != "Diskful"
+	lvg      *snc.LVMVolumeGroup   // will be nil for rvr.spec.type != "Diskful"
+	llv      *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful"
 	nodeName string
 }
 
 func (h *UpHandler) Handle(ctx context.Context) error {
-	if err := h.ensureFinalizers(ctx); err != nil {
+	if err := h.ensureRVRFinalizers(ctx); err != nil {
 		return err
+	}
+	if h.llv != nil {
+		if err := h.ensureLLVFinalizers(ctx); err != nil {
+			return err
+		}
 	}
 
 	statusPatch := client.MergeFrom(h.rvr.DeepCopy())
@@ -55,7 +58,7 @@ func (h *UpHandler) Handle(ctx context.Context) error {
 	return err
 }
 
-func (h *UpHandler) ensureFinalizers(ctx context.Context) error {
+func (h *UpHandler) ensureRVRFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.rvr.DeepCopy())
 	if !slices.Contains(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer) {
 		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer)
@@ -64,7 +67,18 @@ func (h *UpHandler) ensureFinalizers(ctx context.Context) error {
 		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.ControllerAppFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
-		return fmt.Errorf("patching finalizers: %w", err)
+		return fmt.Errorf("patching rvr finalizers: %w", err)
+	}
+	return nil
+}
+
+func (h *UpHandler) ensureLLVFinalizers(ctx context.Context) error {
+	patch := client.MergeFrom(h.llv.DeepCopy())
+	if !slices.Contains(h.llv.Finalizers, v1alpha3.AgentAppFinalizer) {
+		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha3.AgentAppFinalizer)
+	}
+	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
+		return fmt.Errorf("patching llv finalizers: %w", err)
 	}
 	return nil
 }
@@ -82,20 +96,19 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	// write config to temp file
-	normalFilePath := filepath.Join(ResourcesDir, rvName+".res")
-	tmpFilePath := normalFilePath + "_tmp"
+	regularFilePath, tmpFilePath := filePaths(rvName)
 	if err := h.writeResourceConfig(tmpFilePath); err != nil {
 		return fmt.Errorf("writing to %s: %w", tmpFilePath, fileSystemOperationError{err})
 	}
 
 	// test temp file
-	if err := drbdadm.ExecuteShNop(ctx, tmpFilePath, normalFilePath); err != nil {
+	if err := drbdadm.ExecuteShNop(ctx, tmpFilePath, regularFilePath); err != nil {
 		return configurationCommandError{err}
 	}
 
 	// move
-	if err := os.Rename(tmpFilePath, normalFilePath); err != nil {
-		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, normalFilePath, fileSystemOperationError{err})
+	if err := os.Rename(tmpFilePath, regularFilePath); err != nil {
+		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, regularFilePath, fileSystemOperationError{err})
 	}
 
 	//
@@ -217,7 +230,7 @@ func (h *UpHandler) generateResourceConfig() *v9.Resource {
 			OnNoQuorum:                 v9.OnNoQuorumPolicySuspendIO,
 			OnNoDataAccessible:         v9.OnNoDataAccessiblePolicySuspendIO,
 			OnSuspendedPrimaryOutdated: v9.OnSuspendedPrimaryOutdatedPolicyForceSecondary,
-			AutoPromote:                Ptr(false),
+			AutoPromote:                u.Ptr(false),
 		},
 	}
 
@@ -262,14 +275,14 @@ func (h *UpHandler) populateResourceForNode(
 
 	onSection := &v9.On{
 		HostNames: []string{nodeName},
-		NodeID:    Ptr(nodeID),
+		NodeID:    u.Ptr(nodeID),
 	}
 
 	// volumes
 
 	vol := &v9.Volume{
-		Number:   Ptr(0),
-		Device:   Ptr(v9.DeviceMinorNumber(*h.rv.Status.DRBD.Config.DeviceMinor)),
+		Number:   u.Ptr(0),
+		Device:   u.Ptr(v9.DeviceMinorNumber(*h.rv.Status.DRBD.Config.DeviceMinor)),
 		MetaDisk: &v9.VolumeMetaDiskInternal{},
 	}
 
@@ -278,20 +291,20 @@ func (h *UpHandler) populateResourceForNode(
 		if h.llv == nil {
 			vol.Disk = &v9.VolumeDiskNone{}
 		} else {
-			vol.Disk = Ptr(v9.VolumeDisk(v1alpha3.SprintDRBDDisk(
+			vol.Disk = u.Ptr(v9.VolumeDisk(v1alpha3.SprintDRBDDisk(
 				h.lvg.Spec.ActualVGNameOnTheNode,
 				h.llv.Spec.ActualLVNameOnTheNode,
 			)))
 		}
 		vol.DiskOptions = &v9.DiskOptions{
-			DiscardZeroesIfAligned: Ptr(false),
-			RsDiscardGranularity:   Ptr(uint(8192)),
+			DiscardZeroesIfAligned: u.Ptr(false),
+			RsDiscardGranularity:   u.Ptr(uint(8192)),
 		}
 	} else {
 		if peerOptions.Diskless {
 			vol.Disk = &v9.VolumeDiskNone{}
 		} else {
-			vol.Disk = Ptr(v9.VolumeDisk("/not/used"))
+			vol.Disk = u.Ptr(v9.VolumeDisk("/not/used"))
 		}
 	}
 	onSection.Volumes = append(onSection.Volumes, vol)
