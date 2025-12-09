@@ -41,7 +41,7 @@ import (
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
 
-var expectedError = errors.New("test error")
+var errExpectedTestError = errors.New("test error")
 
 var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
@@ -474,7 +474,7 @@ var _ = Describe("Reconcile", func() {
 						builder.WithInterceptorFuncs(interceptor.Funcs{
 							Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
 								if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
-									return expectedError
+									return errExpectedTestError
 								}
 								return c.Delete(ctx, obj, opts...)
 							},
@@ -485,7 +485,7 @@ var _ = Describe("Reconcile", func() {
 						Expect(rec.Reconcile(
 							ctx,
 							reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-						)).Error().To(MatchError(expectedError))
+						)).Error().To(MatchError(errExpectedTestError))
 					})
 				})
 			})
@@ -500,14 +500,14 @@ var _ = Describe("Reconcile", func() {
 						Expect(rec.Reconcile(
 							ctx,
 							reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)},
-						)).Error().To(MatchError(expectedError))
+						)).Error().To(MatchError(errExpectedTestError))
 					})
 				},
 				Entry("Get ReplicatedVolume fails", func(b *fake.ClientBuilder) {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 							if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
-								return expectedError
+								return errExpectedTestError
 							}
 							return c.Get(ctx, key, obj, opts...)
 						},
@@ -517,7 +517,7 @@ var _ = Describe("Reconcile", func() {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 							if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
-								return expectedError
+								return errExpectedTestError
 							}
 							return c.Get(ctx, key, obj, opts...)
 						},
@@ -527,7 +527,7 @@ var _ = Describe("Reconcile", func() {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							if _, ok := list.(*corev1.NodeList); ok {
-								return expectedError
+								return errExpectedTestError
 							}
 							return c.List(ctx, list, opts...)
 						},
@@ -537,7 +537,7 @@ var _ = Describe("Reconcile", func() {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
-								return expectedError
+								return errExpectedTestError
 							}
 							return c.List(ctx, list, opts...)
 						},
@@ -547,7 +547,7 @@ var _ = Describe("Reconcile", func() {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 							if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
-								return expectedError
+								return errExpectedTestError
 							}
 							return c.Create(ctx, obj, opts...)
 						},

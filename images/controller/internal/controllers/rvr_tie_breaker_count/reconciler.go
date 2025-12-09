@@ -157,7 +157,6 @@ func (r *Reconciler) GetNodeNameToFdMap(
 			if slices.Contains(rsc.Spec.Zones, zone) {
 				NodeNameToFdMap[node.Name] = zone
 			}
-
 		} else {
 			NodeNameToFdMap[node.Name] = node.Name
 		}
@@ -185,11 +184,11 @@ func (r *Reconciler) listReplicasForRV(
 }
 
 func aggregateReplicas(
-	NodeNameToFdMap map[string]string,
+	nodeNameToFdMap map[string]string,
 	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (map[string]int, []*v1alpha3.ReplicatedVolumeReplica) {
-	FDToReplicaCountMap := make(map[string]int, len(NodeNameToFdMap))
+	FDToReplicaCountMap := make(map[string]int, len(nodeNameToFdMap))
 
 	for _, zone := range rsc.Spec.Zones {
 		if _, ok := FDToReplicaCountMap[zone]; !ok {
@@ -203,7 +202,7 @@ func aggregateReplicas(
 		switch rvr.Spec.Type {
 		case "Diskful", "Access":
 			if rvr.Spec.NodeName != "" {
-				if fd, ok := NodeNameToFdMap[rvr.Spec.NodeName]; ok {
+				if fd, ok := nodeNameToFdMap[rvr.Spec.NodeName]; ok {
 					FDToReplicaCountMap[fd]++
 				}
 			}
@@ -218,11 +217,11 @@ func aggregateReplicas(
 func (r *Reconciler) syncTieBreakers(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	FDToReplicaCountMap map[string]int,
+	fdToReplicaCountMap map[string]int,
 	existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) (reconcile.Result, error) {
-	desiredTB, err := CalculateDesiredTieBreakerTotal(FDToReplicaCountMap)
+	desiredTB, err := CalculateDesiredTieBreakerTotal(fdToReplicaCountMap)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("calculate desired tie breaker count: %w", err)
 	}
@@ -274,15 +273,15 @@ func (r *Reconciler) syncTieBreakers(
 	return reconcile.Result{}, nil
 }
 
-func CalculateDesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error) {
-	fdCount := len(FDReplicaCount)
+func CalculateDesiredTieBreakerTotal(fdReplicaCount map[string]int) (int, error) {
+	fdCount := len(fdReplicaCount)
 
 	if fdCount <= 1 {
 		return 0, nil
 	}
 
 	totalBaseReplicas := 0
-	for _, v := range FDReplicaCount {
+	for _, v := range fdReplicaCount {
 		totalBaseReplicas += v
 	}
 	if totalBaseReplicas == 0 {
@@ -291,7 +290,7 @@ func CalculateDesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error)
 
 	// TODO: tieBreakerCount <= totalBaseReplicas is not the best approach, need to rework later
 	for tieBreakerCount := 0; tieBreakerCount <= totalBaseReplicas; tieBreakerCount++ {
-		if IsThisTieBreakerCountEnough(FDReplicaCount, fdCount, totalBaseReplicas, tieBreakerCount) {
+		if IsThisTieBreakerCountEnough(fdReplicaCount, fdCount, totalBaseReplicas, tieBreakerCount) {
 			return tieBreakerCount, nil
 		}
 	}
@@ -300,7 +299,7 @@ func CalculateDesiredTieBreakerTotal(FDReplicaCount map[string]int) (int, error)
 }
 
 func IsThisTieBreakerCountEnough(
-	FDReplicaCount map[string]int,
+	fdReplicaCount map[string]int,
 	fdCount int,
 	totalBaseReplicas int,
 	tieBreakerCount int,
@@ -348,7 +347,7 @@ func IsThisTieBreakerCountEnough(
 	*/
 
 	fdsAlreadyAboveMin := 0 // how many FDs have min+1 replica
-	for _, replicasAlreadyInFD := range FDReplicaCount {
+	for _, replicasAlreadyInFD := range fdReplicaCount {
 		delta := replicasAlreadyInFD - replicasPerFDMin
 
 		if delta > 1 {
