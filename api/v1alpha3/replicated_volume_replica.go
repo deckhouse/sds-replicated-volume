@@ -179,30 +179,11 @@ type DRBD struct {
 }
 
 // +k8s:deepcopy-gen=true
-type CmdError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	Output   string `json:"output,omitempty"`
-	ExitCode int    `json:"exitCode,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
-type MessageError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	Message string `json:"message,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
-type SharedSecretUnsupportedAlgError struct {
-	// +kubebuilder:validation:MaxLength=1024
-	UnsupportedAlg string `json:"unsupportedAlg,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
 type DRBDErrors struct {
 	// +patchStrategy=merge
-	ConfigValidationError *CmdError `json:"configValidationError,omitempty" patchStrategy:"merge"`
+	FileSystemOperationError *MessageError `json:"fileSystemOperationError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
-	LastAdjustmentError *CmdError `json:"lastAdjustmentError,omitempty" patchStrategy:"merge"`
+	ConfigurationCommandError *CmdError `json:"configurationCommandError,omitempty" patchStrategy:"merge"`
 	// +patchStrategy=merge
 	SharedSecretAlgSelectionError *SharedSecretUnsupportedAlgError `json:"sharedSecretAlgSelectionError,omitempty" patchStrategy:"merge"`
 }

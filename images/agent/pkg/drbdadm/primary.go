@@ -34,25 +34,35 @@ func ExecutePrimary(ctx context.Context, resource string) error {
 	return nil
 }
 
-func ExecutePrimaryForce(ctx context.Context, resource string) error {
+func ExecutePrimaryForce(ctx context.Context, resource string) CommandError {
 	args := PrimaryForceArgs(resource)
 	cmd := exec.CommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, PrimaryForceArgs(resource)...),
+			output:          string(out),
+			exitCode:        cmd.ProcessState.ExitCode(),
+		}
 	}
 
 	return nil
 }
 
-func ExecuteSecondary(ctx context.Context, resource string) error {
+func ExecuteSecondary(ctx context.Context, resource string) CommandError {
 	args := SecondaryArgs(resource)
 	cmd := exec.CommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, SecondaryArgs(resource)...),
+			output:          string(out),
+			exitCode:        cmd.ProcessState.ExitCode(),
+		}
 	}
 
 	return nil

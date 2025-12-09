@@ -28,7 +28,7 @@ import (
 // - (true, nil) if it exits with code 0
 // - (false, nil) if it exits with code 1 and contains "No valid meta data found"
 // - (false, error) for any other case
-func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, error) {
+func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, CommandError) {
 	cmd := exec.CommandContext(ctx, Command, DumpMDArgs(resource)...)
 
 	var stderr bytes.Buffer
@@ -49,5 +49,10 @@ func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, er
 		}
 	}
 
-	return false, errors.Join(err, errors.New(stderr.String()))
+	return false, &commandError{
+		error:           err,
+		commandWithArgs: append([]string{Command}, DumpMDArgs(resource)...),
+		output:          stderr.String(),
+		exitCode:        cmd.ProcessState.ExitCode(),
+	}
 }

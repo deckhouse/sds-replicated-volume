@@ -2,6 +2,7 @@ package drbdconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,9 +36,11 @@ func (h *UpHandler) Handle(ctx context.Context) error {
 
 	statusPatch := client.MergeFrom(h.rvr.DeepCopy())
 
-	drbdErr := h.handleDRBDOperation(ctx)
+	err := h.handleDRBDOperation(ctx)
 
-	if drbdErr != nil {
+	var drbdErr drbdAPIError
+
+	if errors.As(err, &drbdErr) {
 		if h.rvr.Status.DRBD.Errors == nil {
 			h.rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
 		}
@@ -45,15 +48,11 @@ func (h *UpHandler) Handle(ctx context.Context) error {
 		drbdErr.ToDRBDErrors(h.rvr.Status.DRBD.Errors)
 	}
 
-	if err := h.cl.Status().Patch(ctx, h.rvr, statusPatch); err != nil {
-		return fmt.Errorf("patching status: %w", err)
+	if patchErr := h.cl.Status().Patch(ctx, h.rvr, statusPatch); patchErr != nil {
+		return fmt.Errorf("patching status: %w", errors.Join(patchErr, err))
 	}
 
-	if drbdErr != nil {
-		return drbdErr
-	}
-
-	return nil
+	return err
 }
 
 func (h *UpHandler) ensureFinalizers(ctx context.Context) error {
@@ -70,7 +69,7 @@ func (h *UpHandler) ensureFinalizers(ctx context.Context) error {
 	return nil
 }
 
-func (h *UpHandler) handleDRBDOperation(ctx context.Context) drbdOperationError {
+func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 	rvName := h.rvr.Spec.ReplicatedVolumeName
 
 	// prepare patch for status errors/actual fields
@@ -86,38 +85,33 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) drbdOperationError 
 	normalFilePath := filepath.Join(ResourcesDir, rvName+".res")
 	tmpFilePath := normalFilePath + "_tmp"
 	if err := h.writeResourceConfig(tmpFilePath); err != nil {
-		return fmt.Errorf("writing to %s: %w", tmpFilePath, err)
+		return fmt.Errorf("writing to %s: %w", tmpFilePath, fileSystemOperationError{err})
 	}
 
 	// test temp file
-	if output, code, err := drbdadm.ExecuteShNop(ctx, tmpFilePath, normalFilePath); err != nil {
-		return configValidationError{
-			error:    fmt.Errorf("config validation failed: %w", err),
-			output:   output,
-			exitCode: code,
-		}
+	if err := drbdadm.ExecuteShNop(ctx, tmpFilePath, normalFilePath); err != nil {
+		return configurationCommandError{err}
 	}
 
 	// move
 	if err := os.Rename(tmpFilePath, normalFilePath); err != nil {
-		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, normalFilePath, err)
+		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, normalFilePath, fileSystemOperationError{err})
 	}
 
 	//
 	if h.rvr.Spec.Type == "Diskful" {
 		exists, err := drbdadm.ExecuteDumpMDMetadataExists(ctx, rvName)
 		if err != nil {
-			return fmt.Errorf("dumping metadata: %w", err)
+			return fmt.Errorf("dumping metadata: %w", configurationCommandError{err})
 		}
 
 		if !exists {
 			if err := drbdadm.ExecuteCreateMD(ctx, rvName); err != nil {
-				return fmt.Errorf("creating metadata: %w", err)
+				return fmt.Errorf("creating metadata: %w", configurationCommandError{err})
 			}
 		}
 
 		// initial sync?
-
 		noPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
 			len(h.rvr.Status.DRBD.Config.Peers) == 0
 
@@ -133,11 +127,11 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) drbdOperationError 
 
 		if noPeers && !upToDate && !alreadyCompleted {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
-				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, err)
+				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, configurationCommandError{err})
 			}
 
 			if err := drbdadm.ExecuteSecondary(ctx, rvName); err != nil {
-				return fmt.Errorf("demoting resource '%s' after initil sync: %w", rvName, err)
+				return fmt.Errorf("demoting resource '%s' after initil sync: %w", rvName, configurationCommandError{err})
 			}
 		}
 	}
@@ -157,19 +151,20 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) drbdOperationError 
 	// up & adjust
 	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
 	if err != nil {
-		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, err)
+		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, configurationCommandError{err})
 	}
 
 	if !isUp {
 		if err := drbdadm.ExecuteUp(ctx, rvName); err != nil {
-			return fmt.Errorf("upping the resource '%s': %w", rvName, err)
+			return fmt.Errorf("upping the resource '%s': %w", rvName, configurationCommandError{err})
 		}
 	}
 
 	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
-		return fmt.Errorf("adjusting the resource '%s': %w", rvName, err)
+		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
 	}
 
+	return nil
 }
 
 func (h *UpHandler) writeResourceConfig(filepath string) error {

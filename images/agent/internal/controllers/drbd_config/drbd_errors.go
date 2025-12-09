@@ -1,12 +1,17 @@
 package drbdconfig
 
 import (
+	"strings"
+
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
-type drbdOperationError interface {
+const maxErrLen = 1024
+
+type drbdAPIError interface {
 	error
-	ToDRBDErrors(*v1alpha3.DRBDErrors)
+	ToDRBDErrors(apiErrors *v1alpha3.DRBDErrors)
 }
 
 func trimLen(s string, maxLen int) string {
@@ -16,17 +21,23 @@ func trimLen(s string, maxLen int) string {
 	return s
 }
 
-type configValidationError struct {
-	error
-	output   string
-	exitCode int
+type configurationCommandError struct{ drbdadm.CommandError }
+
+type fileSystemOperationError struct{ error }
+
+var _ drbdAPIError = configurationCommandError{}
+var _ drbdAPIError = fileSystemOperationError{}
+
+func (c configurationCommandError) ToDRBDErrors(apiErrors *v1alpha3.DRBDErrors) {
+	apiErrors.ConfigurationCommandError = &v1alpha3.CmdError{
+		Command:  trimLen(strings.Join(c.CommandWithArgs(), " "), maxErrLen),
+		Output:   trimLen(c.Output(), maxErrLen),
+		ExitCode: c.ExitCode(),
+	}
 }
 
-var _ drbdOperationError = configValidationError{}
-
-func (c configValidationError) ToDRBDErrors(e *v1alpha3.DRBDErrors) {
-	e.ConfigValidationError = &v1alpha3.CmdError{
-		Output:   trimLen(c.output, 1024),
-		ExitCode: c.exitCode,
+func (f fileSystemOperationError) ToDRBDErrors(apiErrors *v1alpha3.DRBDErrors) {
+	apiErrors.FileSystemOperationError = &v1alpha3.MessageError{
+		Message: trimLen(f.Error(), maxErrLen),
 	}
 }

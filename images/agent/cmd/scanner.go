@@ -39,7 +39,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
-	. "github.com/deckhouse/sds-replicated-volume/lib/go/common/lang"
 )
 
 type Scanner struct {
@@ -344,12 +343,12 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 				&rvr.Status.Conditions,
 				metav1.Condition{
 					Type: v1alpha2.ConditionTypeIsPrimary,
-					Status: If(
+					Status: ternaryIf(
 						isPrimary,
 						metav1.ConditionTrue,
 						metav1.ConditionFalse,
 					),
-					Reason: If(
+					Reason: ternaryIf(
 						isPrimary,
 						v1alpha2.ReasonResourceRoleIsPrimary,
 						v1alpha2.ReasonResourceRoleIsNotPrimary,
@@ -499,4 +498,11 @@ func copyStatusFields(
 
 		target.Connections = append(target.Connections, conn)
 	}
+}
+
+func ternaryIf[T any](cond bool, valueTrue, valueFalse T) T {
+	if cond {
+		return valueTrue
+	}
+	return valueFalse
 }

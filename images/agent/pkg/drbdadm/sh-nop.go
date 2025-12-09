@@ -21,13 +21,18 @@ import (
 	"os/exec"
 )
 
-func ExecuteShNop(ctx context.Context, configToTest string, configToExclude string) (string, int, error) {
+func ExecuteShNop(ctx context.Context, configToTest string, configToExclude string) CommandError {
 	cmd := exec.CommandContext(ctx, Command, ShNopArgs(configToTest, configToExclude)...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), cmd.ProcessState.ExitCode(), err
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, ShNopArgs(configToTest, configToExclude)...),
+			output:          string(out),
+			exitCode:        cmd.ProcessState.ExitCode(),
+		}
 	}
 
-	return "", 0, nil
+	return nil
 }
