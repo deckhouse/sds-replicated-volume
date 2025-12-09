@@ -78,6 +78,29 @@ type ReplicatedVolumeStatus struct {
 
 	// +optional
 	Phase string `json:"phase,omitempty"`
+
+	// +patchStrategy=merge
+	// +optional
+	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type MessageError struct {
+	Message string `json:"message,omitempty"`
+}
+
+// +k8s:deepcopy-gen=true
+type ReplicatedVolumeStatusErrors struct {
+	// +patchStrategy=merge
+	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
+}
+
+func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
+	return s.Conditions
+}
+
+func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
+	s.Conditions = conditions
 }
 
 // +k8s:deepcopy-gen=true
@@ -113,21 +136,21 @@ type DRBDResourceConfig struct {
 	SharedSecret string `json:"sharedSecret,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Enum=sha256;sha1
 	SharedSecretAlg string `json:"sharedSecretAlg,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	Quorum byte `json:"quorum"`
+	// +kubebuilder:validation:Maximum=8
+	Quorum byte `json:"quorum,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy"`
+	// +kubebuilder:validation:Maximum=8
+	QuorumMinimumRedundancy byte `json:"quorumMinimumRedundancy,omitempty"`
 
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1048575
-	DeviceMinor uint `json:"deviceMinor,omitempty"`
+	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }

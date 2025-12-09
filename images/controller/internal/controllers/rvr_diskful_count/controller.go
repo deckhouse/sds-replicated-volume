@@ -17,75 +17,28 @@ limitations under the License.
 package rvrdiskfulcount
 
 import (
-	"context"
-	"log/slog"
-
-	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 func BuildController(mgr manager.Manager) error {
-	// TODO issues/333 your global dependencies
-	var rec = &Reconciler{
+	nameController := "rvr_diskful_count_controller"
+
+	r := &Reconciler{
 		cl:     mgr.GetClient(),
-		rdr:    mgr.GetAPIReader(),
-		sch:    mgr.GetScheme(),
-		log:    slog.Default(),
-		logAlt: mgr.GetLogger(),
+		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		scheme: mgr.GetScheme(),
 	}
 
-	type TReq = Request
-	type TQueue = workqueue.TypedRateLimitingInterface[TReq]
-
-	err := builder.TypedControllerManagedBy[TReq](mgr).
-		Named("rvr_diskful_count_controller").
+	return builder.ControllerManagedBy(mgr).
+		Named(nameController).
+		For(
+			&v1alpha3.ReplicatedVolume{}).
 		Watches(
-			&v1alpha3.ReplicatedVolume{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				CreateFunc: func(
-					_ context.Context,
-					_ event.TypedCreateEvent[client.Object],
-					_ TQueue,
-				) {
-					// TODO issues/333 filter events here
-				},
-				UpdateFunc: func(
-					_ context.Context,
-					_ event.TypedUpdateEvent[client.Object],
-					_ TQueue,
-				) {
-					// TODO issues/333 filter events here
-				},
-				DeleteFunc: func(
-					_ context.Context,
-					_ event.TypedDeleteEvent[client.Object],
-					_ TQueue,
-				) {
-					// TODO issues/333 filter events here
-				},
-				GenericFunc: func(
-					_ context.Context,
-					_ event.TypedGenericEvent[client.Object],
-					_ TQueue,
-				) {
-					// TODO issues/333 filter events here
-				},
-			}).
-		Complete(rec)
-
-	if err != nil {
-		// TODO issues/333 log errors early
-		// TODO issues/333 use typed errors
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
-	}
-
-	return nil
+			&v1alpha3.ReplicatedVolumeReplica{},
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{})).
+		Complete(r)
 }
