@@ -21,7 +21,6 @@ import (
 	"slices"
 
 	"github.com/go-logr/logr"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/cluster-api/util/conditions"
@@ -157,8 +156,8 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus.DRBD.Config.Quorum = quorum
 	rvStatus.DRBD.Config.QuorumMinimumRedundancy = qmr
 
-	if !meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha3.ConditionTypeQuorumConfigured) {
-		meta.SetStatusCondition(&rvStatus.Conditions, metav1.Condition{
+	if !conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeQuorumConfigured) {
+		conditions.Set(rvStatus, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeQuorumConfigured,
 			Status:  metav1.ConditionTrue,
 			Reason:  "QuorumConfigured", // TODO: change reason
