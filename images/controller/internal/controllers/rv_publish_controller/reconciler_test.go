@@ -220,7 +220,7 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("does not set PublishSucceeded condition for non-Local access", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
@@ -243,7 +243,7 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("does not set PublishSucceeded=False and proceeds with reconciliation", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
@@ -267,7 +267,7 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
@@ -307,7 +307,7 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("sets rv.status.drbd.config.allowTwoPrimaries=true and waits for replicas", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha3.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
@@ -343,7 +343,7 @@ var _ = Describe("Reconcile", func() {
 				})
 
 				It("updates primary roles and publishedOn", func(ctx SpecContext) {
-					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					// RVRs on publishOn nodes should be configured as Primary
 					gotRVRs := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -395,7 +395,9 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns same error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+				Expect(err).To(MatchError(expectedError))
+				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
 
@@ -421,7 +423,9 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns same error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+				Expect(err).To(MatchError(expectedError))
+				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
 
@@ -459,7 +463,9 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			It("returns same error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
+				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+				Expect(err).To(MatchError(expectedError))
+				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
 	})
