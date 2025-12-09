@@ -587,7 +587,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				Expect(got).To(Equal(expected))
 			})
 
-			When("XXX", func() {
+			When("reconciler creates expected TieBreaker replicas", func() {
 				scheme := runtime.NewScheme()
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
 				Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
@@ -753,6 +753,5 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
 		Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
 		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4),
-		// 3+1+1+0 (+0+1+1+2)=> 3+2+2+2 ?
 	)
 })

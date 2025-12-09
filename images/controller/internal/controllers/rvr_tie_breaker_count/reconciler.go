@@ -318,32 +318,39 @@ func IsThisTieBreakerCountEnough(
 		fdCount 3
 	*/
 
-	replicasPerFDMin := totalReplicas / fdCount // 2 (и 1 в остатке)
+	replicasPerFDMin := totalReplicas / fdCount // 7/3 = 2 (+ 1 remains (modulo))
 	if replicasPerFDMin == 0 {
 		replicasPerFDMin = 1
 	}
-	maxFDsWithExtraReplica := totalReplicas % fdCount // 1
+	maxFDsWithExtraReplica := totalReplicas % fdCount // 1 (modulo)
 
 	/*
+		This method takes the actual state of the replica distribution and attempts to convert it to the desired state
+
+		Desired state of replica distribution, calculated from totalReplicas (example):
 		fd 1: [replica] [replica]
 		fd 2: [replica] [replica]
 		fd 3: [replica] [replica]   *[extra replica]*
 
 		maxFDsWithExtraReplica == 1 means that 1 of these fds take an extra replica
-	*/
 
-	fdsAlreadyAboveMin := 0 // how many FDs have min+1 replica
-
-	/*
+		Actual state (example):
 		FDReplicaCount {
 			"1" : 3
 			"2" : 2
 			"3" : 1
 		}
+
+		Desired state can be achieved:
+		FDReplicaCount {
+			"1" : 3 (+0) = 2
+			"2" : 2 (+0) = 2
+			"3" : 1 (+1) = 3
+		}
 	*/
 
+	fdsAlreadyAboveMin := 0 // how many FDs have min+1 replica
 	for _, replicasAlreadyInFD := range FDReplicaCount {
-		// 3 - 2 = 1
 		delta := replicasAlreadyInFD - replicasPerFDMin
 
 		if delta > 1 {
@@ -360,32 +367,6 @@ func IsThisTieBreakerCountEnough(
 	if fdsAlreadyAboveMin > maxFDsWithExtraReplica {
 		return false
 	}
-
-	// quorum := totalReplicas/2 + 1
-
-	// maxReplicasInFD := replicasPerFDMin
-	// if maxFDsWithExtraReplica > 0 {
-	// 	maxReplicasInFD = replicasPerFDMin + 1
-	// }
-
-	// if totalReplicas-maxReplicasInFD < quorum {
-	// 	return false
-	// }
-
-	// majoritySize := fdCount/2 + 1
-	// minoritySize := fdCount - majoritySize
-	// if minoritySize <= 0 {
-	// 	return true
-	// }
-
-	// kExtra := maxFDsWithExtraReplica
-	// if kExtra > minoritySize {
-	// 	kExtra = minoritySize
-	// }
-	// sumLargestMinority := kExtra*(replicasPerFDMin+1) + (minoritySize-kExtra)*replicasPerFDMin
-	// if sumLargestMinority >= quorum {
-	// 	return false
-	// }
 
 	return true
 }

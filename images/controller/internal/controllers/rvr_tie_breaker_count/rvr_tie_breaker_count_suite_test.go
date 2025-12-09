@@ -19,9 +19,6 @@ func HaveTieBreakerCount(matcher types.GomegaMatcher) types.GomegaMatcher {
 	return WithTransform(func(list []v1alpha3.ReplicatedVolumeReplica) int {
 		tbCount := 0
 		for _, rvr := range list {
-			// if rvr.Spec.ReplicatedVolumeName != "rv1" {
-			// 	continue
-			// }
 			if rvr.Spec.Type == "TieBreaker" {
 				tbCount++
 			}
