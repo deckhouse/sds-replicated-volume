@@ -67,7 +67,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if rvr.DeletionTimestamp != nil {
+	if !rvr.DeletionTimestamp.IsZero() {
 		log.Info("ReplicatedVolumeReplica is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil
 	}
