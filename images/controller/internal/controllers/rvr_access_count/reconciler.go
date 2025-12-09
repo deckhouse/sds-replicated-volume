@@ -123,6 +123,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			if rvr.DeletionTimestamp == nil {
 				nodesWithAccess[nodeName] = rvr
 			}
+		default:
+			log.V(1).Info("Unknown or unhandled RVR type, skipping", "rvr", rvr.Name, "type", rvr.Spec.Type)
 		}
 	}
 

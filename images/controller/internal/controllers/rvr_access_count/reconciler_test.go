@@ -64,10 +64,9 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("Get RV fails with non-NotFound error", func() {
-		var testError error
+		testError := errors.New("internal server error")
 
 		BeforeEach(func() {
-			testError = errors.New("internal server error")
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				InterceptGet(func(_ *v1alpha3.ReplicatedVolume) error {
 					return testError
@@ -116,9 +115,14 @@ var _ = Describe("Reconciler", func() {
 
 		When("RV is being deleted", func() {
 			BeforeEach(func() {
-				now := metav1.Now()
-				rv.DeletionTimestamp = &now
 				rv.Finalizers = []string{"test-finalizer"}
+			})
+
+			JustBeforeEach(func(ctx SpecContext) {
+				Expect(cl.Delete(ctx, rv)).To(Succeed(), "should delete RV")
+
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get RV after delete")
+				Expect(rv.DeletionTimestamp).ToNot(BeNil(), "DeletionTimestamp should be set after Delete")
 			})
 
 			It("should skip without error", func(ctx SpecContext) {
