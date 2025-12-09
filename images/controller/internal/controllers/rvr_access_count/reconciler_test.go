@@ -49,6 +49,11 @@ var _ = Describe("Reconciler", func() {
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
+			// WithStatusSubresource makes fake client mimic real API server behavior:
+			// - Create() ignores status field
+			// - Update() ignores status field
+			// - Status().Update() updates only status
+			// This means tests must use Status().Update() to set status after Create().
 			WithStatusSubresource(&v1alpha3.ReplicatedVolume{}, &v1alpha3.ReplicatedVolumeReplica{})
 	})
 

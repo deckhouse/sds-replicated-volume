@@ -18,6 +18,7 @@ package rvraccesscount
 
 import (
 	"context"
+	"errors"
 	"slices"
 
 	"github.com/go-logr/logr"
@@ -104,6 +105,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	nodesWithDiskfulOrTieBreaker := make(map[string]struct{})
 	nodesWithAccess := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
 
+	// ErrUnknownRVRType is logged when an unknown RVR type is encountered.
+	var ErrUnknownRVRType = errors.New("unknown RVR type")
+
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
 		nodeName := rvr.Spec.NodeName
@@ -124,7 +128,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 				nodesWithAccess[nodeName] = rvr
 			}
 		default:
-			log.V(1).Info("Unknown or unhandled RVR type, skipping", "rvr", rvr.Name, "type", rvr.Spec.Type)
+			log.Error(ErrUnknownRVRType, "Skipping", "rvr", rvr.Name, "type", rvr.Spec.Type)
 		}
 	}
 
