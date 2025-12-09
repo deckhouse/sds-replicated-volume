@@ -63,10 +63,10 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("Reconcile").WithValues("request", req)
 	rv, err := r.getReplicatedVolume(ctx, req, log)
 	if err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			return reconcile.Result{}, nil
+		}
 		return reconcile.Result{}, err
-	}
-	if rv == nil {
-		return reconcile.Result{}, nil
 	}
 
 	if shouldSkipRV(rv, log) {
@@ -104,9 +104,6 @@ func (r *Reconciler) getReplicatedVolume(
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		log.Error(err, "Can't get ReplicatedVolume")
-		if client.IgnoreNotFound(err) == nil {
-			return nil, nil
-		}
 		return nil, err
 	}
 	return rv, nil
