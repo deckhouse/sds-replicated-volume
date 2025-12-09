@@ -90,4 +90,3 @@ func InterceptGet[T client.Object](
 		},
 	}
 }
-
