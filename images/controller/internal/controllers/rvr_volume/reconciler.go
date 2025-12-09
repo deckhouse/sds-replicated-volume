@@ -75,7 +75,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			log.Info("ReplicatedVolumeReplica not found, ignoring reconcile request")
 			return reconcile.Result{}, nil
 		}
-		log.Error(err, "getting ReplicatedVolume")
+		log.Error(err, "getting ReplicatedVolumeReplica")
 		return reconcile.Result{}, err
 	}
 
@@ -90,7 +90,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// RVR is not diskful, so we need to delete the LLV if it exists and the actual type is the same as the spec type.
-	if rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
+	if rvr.Spec.Type != "Diskful" && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
 		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
@@ -236,6 +236,7 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 		return fmt.Errorf("setting controller reference: %w", err)
 	}
 
+	// TODO: Define in our spec how to handle IsAlreadyExists here (LLV with this name already exists)
 	if err := cl.Create(ctx, llvNew); err != nil {
 		return fmt.Errorf("creating LVMLogicalVolume: %w", err)
 	}

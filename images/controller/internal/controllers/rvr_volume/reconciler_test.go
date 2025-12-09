@@ -1118,7 +1118,7 @@ var _ = Describe("Reconciler", func() {
 			llvName := llvList.Items[0].Name
 			Expect(llvName).To(Equal(rvr.Name))
 
-			// Step 2: Set LLV phase to Pending and reconcile
+			// Step 2: Set LLV phase to Pending and reconcile - should not update RVR status
 			// Get the created LLV
 			llv := &snc.LVMLogicalVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
@@ -1127,7 +1127,17 @@ var _ = Describe("Reconciler", func() {
 			}
 			// Use regular Update for LLV status in fake client
 			Expect(cl.Update(ctx, llv)).To(Succeed())
-			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
+			Expect(llv.Status.Phase).To(Equal("Pending"))
+
+			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+				g.Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+				// Verify RVR status was not updated with LLV name
+				notUpdatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), notUpdatedRVR)).To(Succeed())
+				return notUpdatedRVR
+			}).WithContext(ctx).Should(HaveNoLVMLogicalVolumeName())
 
 			// Step 3: Set LLV phase to Created and reconcile - should update RVR status
 			// Get LLV again to get fresh state
@@ -1135,6 +1145,7 @@ var _ = Describe("Reconciler", func() {
 			llv.Status.Phase = "Created"
 			// Use regular Update for LLV status in fake client
 			Expect(cl.Update(ctx, llv)).To(Succeed())
+
 			// Use Eventually to support future async client migration
 			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
 				g.Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
