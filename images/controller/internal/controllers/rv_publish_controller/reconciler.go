@@ -30,7 +30,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	commonapi "github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 )
 
 type Reconciler struct {
@@ -88,12 +87,8 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	ready, err := r.waitForAllowTwoPrimariesApplied(ctx, rv, log)
-	if err != nil {
+	if ready, err := r.waitForAllowTwoPrimariesApplied(ctx, rv, log); err != nil || !ready {
 		return reconcile.Result{}, err
-	}
-	if !ready {
-		return reconcile.Result{}, nil
 	}
 
 	// sync primary roles on replicas and rv.status.publishedOn
@@ -328,14 +323,13 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		publishedOn = append(publishedOn, rvr.Spec.NodeName)
 	}
 
-	// apply publishedOn via status patch with conflict retry
-	if err := commonapi.PatchStatusWithConflictRetry(ctx, r.cl, rv, func(patchedRV *v1alpha3.ReplicatedVolume) error {
-		if patchedRV.Status == nil {
-			patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
-		}
-		patchedRV.Status.PublishedOn = publishedOn
-		return nil
-	}); err != nil {
+	patchedRV := rv.DeepCopy()
+	if patchedRV.Status == nil {
+		patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+	}
+	patchedRV.Status.PublishedOn = publishedOn
+
+	if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to patch ReplicatedVolume publishedOn")
 			return err
