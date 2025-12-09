@@ -34,34 +34,34 @@ const (
 
 var ErrInvalidConfig = errors.New("invalid config")
 
-type config struct {
+type Config struct {
 	nodeName               string
 	healthProbeBindAddress string
 	metricsBindAddress     string
 }
 
-func (c *config) HealthProbeBindAddress() string {
+func (c *Config) HealthProbeBindAddress() string {
 	return c.healthProbeBindAddress
 }
 
-func (c *config) MetricsBindAddress() string {
+func (c *Config) MetricsBindAddress() string {
 	return c.metricsBindAddress
 }
 
-func (c *config) NodeName() string {
+func (c *Config) NodeName() string {
 	return c.nodeName
 }
 
-type Config interface {
+type ConfigProvider interface {
 	NodeName() string
 	HealthProbeBindAddress() string
 	MetricsBindAddress() string
 }
 
-var _ Config = &config{}
+var _ ConfigProvider = &Config{}
 
-func GetConfig() (*config, error) {
-	cfg := &config{}
+func GetConfig() (*Config, error) {
+	cfg := &Config{}
 
 	//
 	cfg.nodeName = os.Getenv(NodeNameEnvVar)
