@@ -36,6 +36,20 @@ const (
 	testLlvDiskful   = "llv-up"
 	testSharedRVSSA  = "rv-ssa"
 	testSharedRVRSSA = "rvr-ssa"
+	testRVNoCfgOld   = "rv-no-config-old"
+	testRVNoCfg      = "rv-no-config"
+	testRVAdd        = "rv-add"
+	testRVSame       = "rv-same"
+	testRVChange     = "rv-change"
+	testRVOther      = "rv-other"
+	testRVNonAgent   = "rv-non-agent"
+	testRVMissing    = "rv-missing"
+	testRVNotInit    = "rv-not-init"
+	testRVRNotInit   = "rvr-not-init"
+	testRVRNonAgent  = "rvr-non-agent"
+	testRVRMissing   = "rvr-no-rv"
+	testRVROther     = "rvr-other"
+	testLLVDown      = "llv-down"
 )
 
 type onRVUpdateTestCase struct {
@@ -91,35 +105,35 @@ func TestReconciler_OnRVUpdate(t *testing.T) {
 		{
 			name: "new rv without drbd config",
 			oldRV: &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-no-config-old"},
+				ObjectMeta: metav1.ObjectMeta{Name: testRVNoCfgOld},
 			},
 			newRV: &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-no-config"},
+				ObjectMeta: metav1.ObjectMeta{Name: testRVNoCfg},
 			},
 		},
 		{
 			name:  "shared secret alg added",
-			oldRV: rvWithSharedSecretAlg("rv-add", ""),
-			newRV: rvWithSharedSecretAlg("rv-add", "sha256"),
+			oldRV: rvWithSharedSecretAlg(testRVAdd, ""),
+			newRV: rvWithSharedSecretAlg(testRVAdd, "sha256"),
 			expectedQueueItems: []drbdconfig.Request{
 				drbdconfig.SharedSecretAlgRequest{
-					RVName:          "rv-add",
+					RVName:          testRVAdd,
 					SharedSecretAlg: "sha256",
 				},
 			},
 		},
 		{
 			name:  "shared secret alg unchanged",
-			oldRV: rvWithSharedSecretAlg("rv-same", "sha256"),
-			newRV: rvWithSharedSecretAlg("rv-same", "sha256"),
+			oldRV: rvWithSharedSecretAlg(testRVSame, "sha256"),
+			newRV: rvWithSharedSecretAlg(testRVSame, "sha256"),
 		},
 		{
 			name:  "shared secret alg changed",
-			oldRV: rvWithSharedSecretAlg("rv-change", "sha1"),
-			newRV: rvWithSharedSecretAlg("rv-change", "sha256"),
+			oldRV: rvWithSharedSecretAlg(testRVChange, "sha1"),
+			newRV: rvWithSharedSecretAlg(testRVChange, "sha256"),
 			expectedQueueItems: []drbdconfig.Request{
 				drbdconfig.SharedSecretAlgRequest{
-					RVName:          "rv-change",
+					RVName:          testRVChange,
 					SharedSecretAlg: "sha256",
 				},
 			},
@@ -160,12 +174,12 @@ func TestReconciler_OnRVRCreateOrUpdate(t *testing.T) {
 	tests := []onRVRCreateOrUpdateTestCase{
 		{
 			name: "rvr on another node",
-			rvr: newRVR("rvr-other", "rv-other", "Access",
+			rvr: newRVR(testRVROther, testRVOther, "Access",
 				withRVRNode("other")),
 		},
 		{
 			name: "deletion with non-agent finalizer",
-			rvr: newRVR("rvr-non-agent", "rv-non-agent", "Access",
+			rvr: newRVR(testRVRNonAgent, testRVNonAgent, "Access",
 				withRVRDeletion(),
 				withRVRNode(testNodeName),
 				withRVRFinalizers("something")),
@@ -182,23 +196,23 @@ func TestReconciler_OnRVRCreateOrUpdate(t *testing.T) {
 		},
 		{
 			name: "rv missing in api",
-			rvr: newRVR("rvr-no-rv", "rv-missing", "Access",
+			rvr: newRVR(testRVRMissing, testRVMissing, "Access",
 				withRVRNode(testNodeName),
 				withRVRStatus(minimalRVRStatus())),
 			addRV: u.Ptr(false),
 		},
 		{
 			name: "rvr not initialized yet",
-			rvr: newRVR("rvr-not-init", "rv-not-init", "Access",
+			rvr: newRVR(testRVRNotInit, testRVNotInit, "Access",
 				withRVRNode(testNodeName)),
 		},
 		{
 			name: "rvr initialized enqueues up",
-			rvr: newRVR("rvr-up", "rv-up", "Access",
+			rvr: newRVR(testRVRUp, testRVUp, "Access",
 				withRVRNode(testNodeName),
 				withRVRStatus(minimalRVRStatus())),
 			expectedQueueItems: []drbdconfig.Request{
-				drbdconfig.UpRequest{"rvr-up"},
+				drbdconfig.UpRequest{testRVRUp},
 			},
 		},
 	}
@@ -363,13 +377,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 					withRVRNode(testNodeName),
 					withRVRFinalizers(v1alpha3.AgentAppFinalizer),
 					withRVRStatus(&v1alpha3.ReplicatedVolumeReplicaStatus{
-						LVMLogicalVolumeName: "llv-down",
+						LVMLogicalVolumeName: testLLVDown,
 						DRBD:                 &v1alpha3.DRBD{},
 					}))
 
 				llv := &sncv1alpha1.LVMLogicalVolume{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:       "llv-down",
+						Name:       testLLVDown,
 						Finalizers: []string{v1alpha3.AgentAppFinalizer},
 					},
 				}
@@ -504,7 +518,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}
 
 				llv := &sncv1alpha1.LVMLogicalVolume{}
-				if getErr := cl.Get(t.Context(), client.ObjectKey{Name: "llv-down"}, llv); getErr != nil {
+				if getErr := cl.Get(t.Context(), client.ObjectKey{Name: testLLVDown}, llv); getErr != nil {
 					t.Fatalf("get llv: %v", getErr)
 				}
 				if len(llv.Finalizers) != 0 {
