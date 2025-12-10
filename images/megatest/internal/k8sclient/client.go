@@ -376,7 +376,7 @@ func (c *Client) WaitForResize(ctx context.Context, name string, expectedSize re
 			return err
 		}
 
-		if rv.Status != nil && rv.Status.ActualSize.Cmp(expectedSize) >= 0 {
+		if rv.Status != nil && rv.Status.ActualSize != nil && rv.Status.ActualSize.Cmp(expectedSize) >= 0 {
 			return nil
 		}
 
