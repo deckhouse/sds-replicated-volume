@@ -340,10 +340,10 @@ var _ = Describe("Reconcile", func() {
 					WithScheme(scheme).
 					WithObjects(rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
-						Get: func(_ context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
 							return expectedErr
 						},
-						List: func(_ context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
 							return expectedErr
 						},
 					})
@@ -360,10 +360,10 @@ var _ = Describe("Reconcile", func() {
 					WithScheme(scheme).
 					WithObjects(rsc, rv, rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
-						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						Get: func(_ context.Context, _ client.WithWatch, _ client.ObjectKey, _ client.Object, _ ...client.GetOption) error {
 							return expectedErr
 						},
-						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						List: func(_ context.Context, _ client.WithWatch, _ client.ObjectList, _ ...client.ListOption) error {
 							return expectedErr
 						},
 					})
