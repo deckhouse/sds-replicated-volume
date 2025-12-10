@@ -17,10 +17,11 @@ limitations under the License.
 package rvpublishcontroller
 
 import (
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func BuildController(mgr manager.Manager) error {

@@ -43,7 +43,7 @@ func TestRvPublishReconciler(t *testing.T) {
 	RunSpecs(t, "rv-publish-controller Reconciler Suite")
 }
 
-var expectedError = errors.New("test error")
+var errExpectedTestError = errors.New("test error")
 
 var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
@@ -116,7 +116,7 @@ var _ = Describe("Reconcile", func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 						if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
-							return expectedError
+							return errExpectedTestError
 						}
 						return c.Get(ctx, key, obj, opts...)
 					},
@@ -136,7 +136,7 @@ var _ = Describe("Reconcile", func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 						if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
-							return expectedError
+							return errExpectedTestError
 						}
 						return c.Get(ctx, key, obj, opts...)
 					},
@@ -387,7 +387,7 @@ var _ = Describe("Reconcile", func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
-							return expectedError
+							return errExpectedTestError
 						}
 						return c.Get(ctx, key, obj, opts...)
 					},
@@ -396,7 +396,7 @@ var _ = Describe("Reconcile", func() {
 
 			It("returns same error", func(ctx SpecContext) {
 				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-				Expect(err).To(MatchError(expectedError))
+				Expect(err).To(MatchError(errExpectedTestError))
 				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
@@ -415,7 +415,7 @@ var _ = Describe("Reconcile", func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 						if _, ok := obj.(*v1alpha1.ReplicatedStorageClass); ok {
-							return expectedError
+							return errExpectedTestError
 						}
 						return c.Get(ctx, key, obj, opts...)
 					},
@@ -424,7 +424,7 @@ var _ = Describe("Reconcile", func() {
 
 			It("returns same error", func(ctx SpecContext) {
 				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-				Expect(err).To(MatchError(expectedError))
+				Expect(err).To(MatchError(errExpectedTestError))
 				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
@@ -455,7 +455,7 @@ var _ = Describe("Reconcile", func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 						if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
-							return expectedError
+							return errExpectedTestError
 						}
 						return c.List(ctx, list, opts...)
 					},
@@ -464,7 +464,7 @@ var _ = Describe("Reconcile", func() {
 
 			It("returns same error", func(ctx SpecContext) {
 				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-				Expect(err).To(MatchError(expectedError))
+				Expect(err).To(MatchError(errExpectedTestError))
 				Expect(result).To(Equal(reconcile.Result{}))
 			})
 		})
