@@ -236,14 +236,6 @@ func (r *Reconciler) rvrOnThisNode(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	return true
 }
 
-func (r *Reconciler) sharedSecretAlgUpdated(
-	rv *v1alpha3.ReplicatedVolume,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
-	oldRVR *v1alpha3.ReplicatedVolumeReplica,
-) bool {
-	return rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.SharedSecretAlg != ""
-}
-
 func (r *Reconciler) rvrInitialized(rvr *v1alpha3.ReplicatedVolumeReplica, rv *v1alpha3.ReplicatedVolume) bool {
 	var logNotInitializedField = func(field string) {
 		r.log.Debug("rvr not initialized", "field", field)

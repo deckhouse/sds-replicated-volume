@@ -59,7 +59,7 @@ func (h *SharedSecretAlgHandler) Handle(ctx context.Context) error {
 }
 
 func kernelHasCrypto(name string) (bool, error) {
-	f, err := afs.Open("/proc/crypto")
+	f, err := FS.Open("/proc/crypto")
 	if err != nil {
 		return false, err
 	}

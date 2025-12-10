@@ -12,8 +12,14 @@ type Cmd interface {
 	Run() error
 }
 
+type ExecCommandContextFactory func(ctx context.Context, name string, arg ...string) Cmd
+
 // overridable for testing purposes
-var ExecCommandContext = func(ctx context.Context, name string, arg ...string) Cmd {
+var ExecCommandContext ExecCommandContextFactory = func(
+	ctx context.Context,
+	name string,
+	arg ...string,
+) Cmd {
 	return (*execCmd)(exec.CommandContext(ctx, name, arg...))
 }
 

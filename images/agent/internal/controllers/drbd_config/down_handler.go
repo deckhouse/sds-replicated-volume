@@ -37,7 +37,7 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 		h.log.Info("successfully brought down DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
 	}
 
-	if err := afs.Remove(regularFilePath); err != nil {
+	if err := FS.Remove(regularFilePath); err != nil {
 		if !errors.Is(err, afero.ErrFileNotFound) {
 			h.log.Warn("failed to remove config file", "path", regularFilePath, "error", err)
 		}
@@ -45,7 +45,7 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 		h.log.Info("successfully removed config file", "path", regularFilePath)
 	}
 
-	if err := afs.Remove(tmpFilePath); err != nil {
+	if err := FS.Remove(tmpFilePath); err != nil {
 		if !errors.Is(err, afero.ErrFileNotFound) {
 			h.log.Warn("failed to remove config file", "path", tmpFilePath, "error", err)
 		}
