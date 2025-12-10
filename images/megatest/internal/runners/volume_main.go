@@ -169,6 +169,12 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 	v.log.ActionStarted("create_rv", params)
 	startTime := time.Now()
 
+	// Ensure PublishOn is never nil (use empty slice instead)
+	publishOn := publishNodes
+	if publishOn == nil {
+		publishOn = []string{}
+	}
+
 	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -176,7 +182,7 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 		Spec: v1alpha3.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass, // Uses RSC for LVM config
-			PublishOn:                  publishNodes,
+			PublishOn:                  publishOn,
 		},
 	}
 
