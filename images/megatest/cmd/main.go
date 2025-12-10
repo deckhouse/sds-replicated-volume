@@ -53,7 +53,7 @@ func main() {
 	logging.SetupGlobalLogger(level)
 
 	// Create Kubernetes client
-	client, err := k8sclient.NewClient()
+	client, err := k8sclient.NewClientWithKubeconfig(opt.Kubeconfig)
 	if err != nil {
 		slog.Error("failed to create Kubernetes client", "error", err)
 		os.Exit(1)

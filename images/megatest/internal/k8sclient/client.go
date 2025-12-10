@@ -30,6 +30,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -49,9 +51,24 @@ type Client struct {
 
 // NewClient creates a new Kubernetes client
 func NewClient() (*Client, error) {
-	cfg, err := config.GetConfig()
-	if err != nil {
-		return nil, fmt.Errorf("getting kubeconfig: %w", err)
+	return NewClientWithKubeconfig("")
+}
+
+// NewClientWithKubeconfig creates a new Kubernetes client with the specified kubeconfig path
+func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
+	var cfg *rest.Config
+	var err error
+
+	if kubeconfigPath != "" {
+		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+		if err != nil {
+			return nil, fmt.Errorf("building config from kubeconfig file %s: %w", kubeconfigPath, err)
+		}
+	} else {
+		cfg, err = config.GetConfig()
+		if err != nil {
+			return nil, fmt.Errorf("getting kubeconfig: %w", err)
+		}
 	}
 
 	scheme := runtime.NewScheme()

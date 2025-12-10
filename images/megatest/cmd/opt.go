@@ -27,6 +27,7 @@ import (
 
 type Opt struct {
 	StorageClasses []string
+	Kubeconfig     string
 	MaxVolumes     int
 	StepMin        int
 	StepMax        int
@@ -88,6 +89,7 @@ func (o *Opt) Parse() {
 
 	// Add flags
 	rootCmd.Flags().StringSliceVarP(&o.StorageClasses, "storage-classes", "", nil, "Comma-separated list of storage class names to use (required)")
+	rootCmd.Flags().StringVarP(&o.Kubeconfig, "kubeconfig", "", "", "Path to kubeconfig file")
 	rootCmd.Flags().IntVarP(&o.MaxVolumes, "max-volumes", "", 10, "Maximum number of concurrent volumes")
 	rootCmd.Flags().IntVarP(&o.StepMin, "step-min", "", 1, "Minimum number of volumes to create per step")
 	rootCmd.Flags().IntVarP(&o.StepMax, "step-max", "", 3, "Maximum number of volumes to create per step")
