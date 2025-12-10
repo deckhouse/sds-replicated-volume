@@ -226,7 +226,7 @@ var _ = Describe("Reconcile", func() {
 			})
 
 			When("replication condition is not satisfied", func() {
-				BeforeEach(func(ctx SpecContext) {
+				BeforeEach(func(SpecContext) {
 					rvr2.Status.ActualType = "Access"
 					rvr3.Status.ActualType = "Access"
 				})
@@ -340,10 +340,10 @@ var _ = Describe("Reconcile", func() {
 					WithScheme(scheme).
 					WithObjects(rvr).
 					WithInterceptorFuncs(interceptor.Funcs{
-						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						Get: func(_ context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
 							return expectedErr
 						},
-						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						List: func(_ context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
 							return expectedErr
 						},
 					})
