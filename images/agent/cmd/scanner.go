@@ -26,8 +26,6 @@ import (
 	"slices"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,7 +36,6 @@ import (
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
-	"github.com/deckhouse/sds-replicated-volume/lib/go/common/api"
 )
 
 type Scanner struct {
@@ -249,166 +246,18 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	rvr *v1alpha2.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
-	return api.PatchStatusWithConflictRetry(
-		s.ctx,
-		s.cl,
-		rvr,
-		func(rvr *v1alpha2.ReplicatedVolumeReplica) error {
-			rvr.InitializeStatusConditions()
-			if rvr.Status.DRBD == nil {
-				rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
-			}
-			copyStatusFields(rvr.Status.DRBD, resource)
+	statusPatch := client.MergeFrom(rvr.DeepCopy())
 
-			diskless, err := rvr.Status.Config.Diskless()
-			if err != nil {
-				return err
-			}
+	if rvr.Status.DRBD == nil {
+		rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
+	}
+	copyStatusFields(rvr.Status.DRBD, resource)
 
-			devicesIter := uslices.Ptrs(resource.Devices)
+	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
+		return fmt.Errorf("patching status: %w", err)
+	}
 
-			failedDevice, foundFailed := uiter.Find(
-				devicesIter,
-				func(d *drbdsetup.Device) bool {
-					if diskless {
-						return d.DiskState != "Diskless"
-					}
-					return d.DiskState != "UpToDate"
-				},
-			)
-
-			allReady := !foundFailed && len(resource.Devices) > 0
-
-			if allReady && !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha2.ConditionTypeInitialSync) {
-				meta.SetStatusCondition(
-					&rvr.Status.Conditions,
-					metav1.Condition{
-						Type:    v1alpha2.ConditionTypeInitialSync,
-						Status:  metav1.ConditionTrue,
-						Reason:  v1alpha2.ReasonInitialDeviceReadinessReached,
-						Message: "All devices have been ready at least once",
-					},
-				)
-			}
-
-			condDevicesReady := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha2.ConditionTypeDevicesReady)
-
-			if !allReady && condDevicesReady.Status != metav1.ConditionFalse {
-				msg := "No devices found"
-				if len(resource.Devices) > 0 {
-					msg = fmt.Sprintf(
-						"Device %d volume %d is %s",
-						failedDevice.Minor, failedDevice.Volume, failedDevice.DiskState,
-					)
-				}
-				meta.SetStatusCondition(
-					&rvr.Status.Conditions,
-					metav1.Condition{
-						Type:    v1alpha2.ConditionTypeDevicesReady,
-						Status:  metav1.ConditionFalse,
-						Reason:  v1alpha2.ReasonDeviceIsNotReady,
-						Message: msg,
-					},
-				)
-			}
-
-			if allReady && condDevicesReady.Status != metav1.ConditionTrue {
-				var message string
-				if condDevicesReady.Reason == v1alpha2.ReasonDeviceIsNotReady {
-					prec := time.Second * 5
-					message = fmt.Sprintf(
-						"Recovered from %s to %s after <%v",
-						v1alpha2.ReasonDeviceIsNotReady,
-						v1alpha2.ReasonDeviceIsReady,
-						time.Since(condDevicesReady.LastTransitionTime.Time).Truncate(prec)+prec,
-					)
-				} else {
-					message = "All devices ready"
-				}
-
-				meta.SetStatusCondition(
-					&rvr.Status.Conditions,
-					metav1.Condition{
-						Type:    v1alpha2.ConditionTypeDevicesReady,
-						Status:  metav1.ConditionTrue,
-						Reason:  v1alpha2.ReasonDeviceIsReady,
-						Message: message,
-					},
-				)
-			}
-
-			// Role handling
-			isPrimary := resource.Role == "Primary"
-			meta.SetStatusCondition(
-				&rvr.Status.Conditions,
-				metav1.Condition{
-					Type: v1alpha2.ConditionTypeIsPrimary,
-					Status: ternaryIf(
-						isPrimary,
-						metav1.ConditionTrue,
-						metav1.ConditionFalse,
-					),
-					Reason: ternaryIf(
-						isPrimary,
-						v1alpha2.ReasonResourceRoleIsPrimary,
-						v1alpha2.ReasonResourceRoleIsNotPrimary,
-					),
-					Message: fmt.Sprintf("Resource is in a '%s' role", resource.Role),
-				},
-			)
-
-			// Quorum
-			noQuorumDevice, foundNoQuorum := uiter.Find(
-				devicesIter,
-				func(d *drbdsetup.Device) bool { return !d.Quorum },
-			)
-
-			quorumCond := metav1.Condition{
-				Type: v1alpha2.ConditionTypeQuorum,
-			}
-			if foundNoQuorum {
-				quorumCond.Status = metav1.ConditionFalse
-				quorumCond.Reason = v1alpha2.ReasonNoQuorumStatus
-				quorumCond.Message = fmt.Sprintf("Device %d not in quorum", noQuorumDevice.Minor)
-			} else {
-				quorumCond.Status = metav1.ConditionTrue
-				quorumCond.Reason = v1alpha2.ReasonQuorumStatus
-				quorumCond.Message = "All devices are in quorum"
-			}
-			meta.SetStatusCondition(&rvr.Status.Conditions, quorumCond)
-
-			// SuspendedIO
-			suspendedCond := metav1.Condition{
-				Type: v1alpha2.ConditionTypeDiskIOSuspended,
-			}
-			switch {
-			case resource.SuspendedFencing:
-				suspendedCond.Status = metav1.ConditionTrue
-				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedFencing
-			case resource.SuspendedNoData:
-				suspendedCond.Status = metav1.ConditionTrue
-				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedNoData
-			case resource.SuspendedQuorum:
-				suspendedCond.Status = metav1.ConditionTrue
-				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedQuorum
-			case resource.SuspendedUser:
-				suspendedCond.Status = metav1.ConditionTrue
-				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedByUser
-			case resource.Suspended:
-				suspendedCond.Status = metav1.ConditionTrue
-				suspendedCond.Reason = v1alpha2.ReasonDiskIOSuspendedUnknownReason
-			default:
-				suspendedCond.Status = metav1.ConditionFalse
-				suspendedCond.Reason = v1alpha2.ReasonDiskIONotSuspendedStatus
-			}
-			meta.SetStatusCondition(&rvr.Status.Conditions, suspendedCond)
-
-			// Ready handling
-			rvr.RecalculateStatusConditionReady()
-
-			return nil
-		},
-	)
+	return nil
 }
 
 func copyStatusFields(
@@ -498,11 +347,4 @@ func copyStatusFields(
 
 		target.Connections = append(target.Connections, conn)
 	}
-}
-
-func ternaryIf[T any](cond bool, valueTrue, valueFalse T) T {
-	if cond {
-		return valueTrue
-	}
-	return valueFalse
 }

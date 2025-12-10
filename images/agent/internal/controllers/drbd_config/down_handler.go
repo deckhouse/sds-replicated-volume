@@ -29,7 +29,7 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 	}
 
 	rvName := h.rvr.Spec.ReplicatedVolumeName
-	regularFilePath, tmpFilePath := filePaths(rvName)
+	regularFilePath, tmpFilePath := FilePaths(rvName)
 
 	if err := drbdadm.ExecuteDown(ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
 		h.log.Warn("failed to bring down DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)

@@ -22,23 +22,17 @@ type Request interface {
 
 type RVRRequest interface {
 	Request
-	RVRName() string
+	RVRRequestRVRName() string
 }
-
-type rvrRequest struct {
-	rvrName string
-}
-
-func (r rvrRequest) RVRName() string { return r.rvrName }
 
 //
 
 type UpRequest struct {
-	rvrRequest
+	RVRName string
 }
 
 type DownRequest struct {
-	rvrRequest
+	RVRName string
 }
 
 type SharedSecretAlgRequest struct {
@@ -46,31 +40,21 @@ type SharedSecretAlgRequest struct {
 	SharedSecretAlg string
 }
 
-// ...
+// [Request] implementations
 
 func (UpRequest) _isRequest()              {}
 func (DownRequest) _isRequest()            {}
 func (SharedSecretAlgRequest) _isRequest() {}
+
+// [RVRRequest] implementations
+
+func (r UpRequest) RVRRequestRVRName() string   { return r.RVRName }
+func (r DownRequest) RVRRequestRVRName() string { return r.RVRName }
 
 // ...
 
 var _ RVRRequest = UpRequest{}
 var _ RVRRequest = DownRequest{}
 var _ Request = SharedSecretAlgRequest{}
-
-// NewUpRequest builds UpRequest for given RVR name (useful in tests).
-func NewUpRequest(rvrName string) UpRequest {
-	return UpRequest{rvrRequest{rvrName: rvrName}}
-}
-
-// NewDownRequest builds DownRequest for given RVR name (useful in tests).
-func NewDownRequest(rvrName string) DownRequest {
-	return DownRequest{rvrRequest{rvrName: rvrName}}
-}
-
-// NewSharedSecretAlgRequest builds SharedSecretAlgRequest.
-func NewSharedSecretAlgRequest(rvName, alg string) SharedSecretAlgRequest {
-	return SharedSecretAlgRequest{RVName: rvName, SharedSecretAlg: alg}
-}
 
 // ...

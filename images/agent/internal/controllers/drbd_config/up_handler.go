@@ -96,7 +96,7 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	// write config to temp file
-	regularFilePath, tmpFilePath := filePaths(rvName)
+	regularFilePath, tmpFilePath := FilePaths(rvName)
 	if err := h.writeResourceConfig(tmpFilePath); err != nil {
 		return fmt.Errorf("writing to %s: %w", tmpFilePath, fileSystemOperationError{err})
 	}

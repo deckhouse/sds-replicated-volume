@@ -93,7 +93,7 @@ func (r *Reconciler) OnRVRCreateOrUpdate(
 		}
 
 		r.log.Debug("down resource", "rvrName", rvr.Name)
-		q.Add(DownRequest{rvrRequest{rvr.Name}})
+		q.Add(DownRequest{rvr.Name})
 		return
 	}
 
@@ -108,7 +108,7 @@ func (r *Reconciler) OnRVRCreateOrUpdate(
 	}
 
 	r.log.Debug("up resource", "rvrName", rvr.Name)
-	q.Add(UpRequest{rvrRequest{rvr.Name}})
+	q.Add(UpRequest{rvr.Name})
 }
 
 func (r *Reconciler) Reconcile(
@@ -147,7 +147,7 @@ func (r *Reconciler) reconcileRVRRequest(
 	req RVRRequest,
 ) (reconcile.Result, error) {
 	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.RVRName()}, rvr); err != nil {
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.RVRRequestRVRName()}, rvr); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			// deleted
 			return reconcile.Result{}, nil
