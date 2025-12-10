@@ -26,3 +26,22 @@ const (
 	// and this range allows for up to 1,048,576 unique DRBD devices per major number.
 	RVMaxDeviceMinor = uint(1048575)
 )
+
+// Shared secret hashing algorithms
+const (
+	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
+	SharedSecretAlgSHA256 = "sha256"
+	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
+	SharedSecretAlgSHA1 = "sha1"
+)
+
+// SharedSecretAlgorithms returns the ordered list of supported shared secret algorithms.
+// The order matters: algorithms are tried sequentially when one fails on any replica.
+func SharedSecretAlgorithms() []string {
+	return []string{
+		// TODO: remove after testing
+		"dummyAlgorithmName_ForTestingPurposes-1",
+		SharedSecretAlgSHA256,
+		SharedSecretAlgSHA1,
+	}
+}

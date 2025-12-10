@@ -60,7 +60,7 @@ type Config interface {
 
 var _ Config = &config{}
 
-func GetConfig() (*config, error) {
+func GetConfig() (Config, error) {
 	cfg := &config{}
 
 	//
