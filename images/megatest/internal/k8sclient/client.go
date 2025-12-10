@@ -33,7 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
@@ -59,9 +58,6 @@ func NewClient() (*Client, error) {
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding corev1 to scheme: %w", err)
 	}
-	if err := v1alpha2.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("adding v1alpha2 to scheme: %w", err)
-	}
 	if err := v1alpha3.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding v1alpha3 to scheme: %w", err)
 	}
@@ -75,8 +71,8 @@ func NewClient() (*Client, error) {
 }
 
 // GetRV returns a ReplicatedVolume by name
-func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha2.ReplicatedVolume, error) {
-	rv := &v1alpha2.ReplicatedVolume{}
+func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVolume, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
 	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rv)
 	if err != nil {
 		return nil, err
@@ -85,26 +81,26 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha2.ReplicatedVo
 }
 
 // CreateRV creates a new ReplicatedVolume
-func (c *Client) CreateRV(ctx context.Context, rv *v1alpha2.ReplicatedVolume) error {
+func (c *Client) CreateRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
 	return c.cl.Create(ctx, rv)
 }
 
 // UpdateRV updates an existing ReplicatedVolume
-func (c *Client) UpdateRV(ctx context.Context, rv *v1alpha2.ReplicatedVolume) error {
+func (c *Client) UpdateRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
 	return c.cl.Update(ctx, rv)
 }
 
 // DeleteRV deletes a ReplicatedVolume
 func (c *Client) DeleteRV(ctx context.Context, name string) error {
-	rv := &v1alpha2.ReplicatedVolume{
+	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 	return c.cl.Delete(ctx, rv)
 }
 
 // ListRVRs lists ReplicatedVolumeReplicas for a given RV
-func (c *Client) ListRVRs(ctx context.Context, rvName string) ([]v1alpha2.ReplicatedVolumeReplica, error) {
-	rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
+func (c *Client) ListRVRs(ctx context.Context, rvName string) ([]v1alpha3.ReplicatedVolumeReplica, error) {
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	err := c.cl.List(ctx, rvrList, client.MatchingFields{"spec.replicatedVolumeName": rvName})
 	if err != nil {
 		return nil, err
@@ -113,21 +109,21 @@ func (c *Client) ListRVRs(ctx context.Context, rvName string) ([]v1alpha2.Replic
 }
 
 // CreateRVR creates a new ReplicatedVolumeReplica
-func (c *Client) CreateRVR(ctx context.Context, rvr *v1alpha2.ReplicatedVolumeReplica) error {
+func (c *Client) CreateRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	return c.cl.Create(ctx, rvr)
 }
 
 // DeleteRVR deletes a ReplicatedVolumeReplica by name
 func (c *Client) DeleteRVR(ctx context.Context, name string) error {
-	rvr := &v1alpha2.ReplicatedVolumeReplica{
+	rvr := &v1alpha3.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 	}
 	return c.cl.Delete(ctx, rvr)
 }
 
 // GetRVR returns a ReplicatedVolumeReplica by name
-func (c *Client) GetRVR(ctx context.Context, name string) (*v1alpha2.ReplicatedVolumeReplica, error) {
-	rvr := &v1alpha2.ReplicatedVolumeReplica{}
+func (c *Client) GetRVR(ctx context.Context, name string) (*v1alpha3.ReplicatedVolumeReplica, error) {
+	rvr := &v1alpha3.ReplicatedVolumeReplica{}
 	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rvr)
 	if err != nil {
 		return nil, err
@@ -171,15 +167,15 @@ func (c *Client) DeletePod(ctx context.Context, namespace, name string) error {
 }
 
 // IsRVReady checks if a ReplicatedVolume is in Ready condition
-func (c *Client) IsRVReady(rv *v1alpha2.ReplicatedVolume) bool {
+func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
 	if rv.Status == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha2.ConditionTypeReady)
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
 }
 
 // IsRVQuorum checks if all replicas have quorum (simplified check via Ready condition)
-func (c *Client) IsRVQuorum(rv *v1alpha2.ReplicatedVolume) bool {
+func (c *Client) IsRVQuorum(rv *v1alpha3.ReplicatedVolume) bool {
 	// For simplicity, we consider quorum achieved if the volume is Ready
 	return c.IsRVReady(rv)
 }
@@ -235,7 +231,7 @@ func (c *Client) WaitForRVDeleted(ctx context.Context, name string, timeout time
 	return fmt.Errorf("timeout waiting for RV %s to be deleted", name)
 }
 
-// SetPublishOn sets the publishRequested field on a ReplicatedVolume
+// SetPublishOn sets the publishOn field on a ReplicatedVolume
 func (c *Client) SetPublishOn(ctx context.Context, name string, nodes []string) error {
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		rv, err := c.GetRV(ctx, name)
@@ -243,7 +239,7 @@ func (c *Client) SetPublishOn(ctx context.Context, name string, nodes []string) 
 			return err
 		}
 
-		rv.Spec.PublishRequested = nodes
+		rv.Spec.PublishOn = nodes
 		err = c.cl.Update(ctx, rv)
 		if err == nil {
 			return nil
@@ -253,10 +249,10 @@ func (c *Client) SetPublishOn(ctx context.Context, name string, nodes []string) 
 		}
 		time.Sleep(retryInterval)
 	}
-	return fmt.Errorf("failed to update publishRequested after %d retries", maxRetries)
+	return fmt.Errorf("failed to update publishOn after %d retries", maxRetries)
 }
 
-// WaitForPublishProvided waits for nodes to appear in publishProvided
+// WaitForPublishProvided waits for nodes to appear in publishedOn
 func (c *Client) WaitForPublishProvided(ctx context.Context, name string, expectedNodes []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -274,7 +270,7 @@ func (c *Client) WaitForPublishProvided(ctx context.Context, name string, expect
 		if rv.Status != nil {
 			allPresent := true
 			for _, node := range expectedNodes {
-				if !slices.Contains(rv.Status.PublishProvided, node) {
+				if !slices.Contains(rv.Status.PublishedOn, node) {
 					allPresent = false
 					break
 				}
@@ -286,10 +282,10 @@ func (c *Client) WaitForPublishProvided(ctx context.Context, name string, expect
 
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for nodes %v to appear in publishProvided", expectedNodes)
+	return fmt.Errorf("timeout waiting for nodes %v to appear in publishedOn", expectedNodes)
 }
 
-// WaitForPublishRemoved waits for nodes to be removed from publishProvided
+// WaitForPublishRemoved waits for nodes to be removed from publishedOn
 func (c *Client) WaitForPublishRemoved(ctx context.Context, name string, removedNodes []string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -313,7 +309,7 @@ func (c *Client) WaitForPublishRemoved(ctx context.Context, name string, removed
 
 		anyPresent := false
 		for _, node := range removedNodes {
-			if slices.Contains(rv.Status.PublishProvided, node) {
+			if slices.Contains(rv.Status.PublishedOn, node) {
 				anyPresent = true
 				break
 			}
@@ -324,7 +320,7 @@ func (c *Client) WaitForPublishRemoved(ctx context.Context, name string, removed
 
 		time.Sleep(500 * time.Millisecond)
 	}
-	return fmt.Errorf("timeout waiting for nodes %v to be removed from publishProvided", removedNodes)
+	return fmt.Errorf("timeout waiting for nodes %v to be removed from publishedOn", removedNodes)
 }
 
 // ResizeRV updates the size of a ReplicatedVolume
@@ -405,52 +401,15 @@ func (c *Client) SelectRandomNodes(ctx context.Context, n int) ([]corev1.Node, e
 }
 
 // ListRVRsForVolume lists all ReplicatedVolumeReplicas for a specific volume using fallback method
-func (c *Client) ListRVRsForVolume(ctx context.Context, rvName string) ([]v1alpha2.ReplicatedVolumeReplica, error) {
+func (c *Client) ListRVRsForVolume(ctx context.Context, rvName string) ([]v1alpha3.ReplicatedVolumeReplica, error) {
 	// First try using field selector
-	rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
-	err := c.cl.List(ctx, rvrList)
-	if err != nil {
-		return nil, err
-	}
-
-	// Filter manually since field selectors may not be indexed
-	var result []v1alpha2.ReplicatedVolumeReplica
-	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.ReplicatedVolumeName == rvName {
-			result = append(result, rvrList.Items[i])
-		}
-	}
-	return result, nil
-}
-
-// GetRVv3 returns a v1alpha3 ReplicatedVolume by name
-func (c *Client) GetRVv3(ctx context.Context, name string) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
-	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rv)
-	if err != nil {
-		return nil, err
-	}
-	return rv, nil
-}
-
-// CreateRVv3 creates a new v1alpha3 ReplicatedVolume
-func (c *Client) CreateRVv3(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
-	return c.cl.Create(ctx, rv)
-}
-
-// CreateRVRv3 creates a new v1alpha3 ReplicatedVolumeReplica
-func (c *Client) CreateRVRv3(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
-	return c.cl.Create(ctx, rvr)
-}
-
-// ListRVRsForVolumev3 lists all v1alpha3 ReplicatedVolumeReplicas for a specific volume
-func (c *Client) ListRVRsForVolumev3(ctx context.Context, rvName string) ([]v1alpha3.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	err := c.cl.List(ctx, rvrList)
 	if err != nil {
 		return nil, err
 	}
 
+	// Filter manually since field selectors may not be indexed
 	var result []v1alpha3.ReplicatedVolumeReplica
 	for i := range rvrList.Items {
 		if rvrList.Items[i].Spec.ReplicatedVolumeName == rvName {
@@ -458,12 +417,4 @@ func (c *Client) ListRVRsForVolumev3(ctx context.Context, rvName string) ([]v1al
 		}
 	}
 	return result, nil
-}
-
-// DeleteRVRv3 deletes a v1alpha3 ReplicatedVolumeReplica by name
-func (c *Client) DeleteRVRv3(ctx context.Context, name string) error {
-	rvr := &v1alpha3.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{Name: name},
-	}
-	return c.cl.Delete(ctx, rvr)
 }

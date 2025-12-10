@@ -35,7 +35,6 @@ type VolumeReplicaDestroyer struct {
 	client     *k8sclient.Client
 	log        *logging.Logger
 	instanceID string
-	useV3API   bool // Use v1alpha3 API
 }
 
 // NewVolumeReplicaDestroyer creates a new VolumeReplicaDestroyer
@@ -51,7 +50,6 @@ func NewVolumeReplicaDestroyer(
 		client:     client,
 		log:        logging.NewLogger(rvName, "volume-replica-destroyer", instanceID),
 		instanceID: instanceID,
-		useV3API:   true, // Default to v1alpha3 API
 	}
 }
 
@@ -80,15 +78,8 @@ func (v *VolumeReplicaDestroyer) Run(ctx context.Context) error {
 }
 
 func (v *VolumeReplicaDestroyer) doDestroy(ctx context.Context) error {
-	if v.useV3API {
-		return v.doDestroyV3(ctx)
-	}
-	return v.doDestroyV2(ctx)
-}
-
-func (v *VolumeReplicaDestroyer) doDestroyV3(ctx context.Context) error {
-	// List replicas for this volume using v1alpha3
-	rvrs, err := v.client.ListRVRsForVolumev3(ctx, v.rvName)
+	// List replicas for this volume
+	rvrs, err := v.client.ListRVRsForVolume(ctx, v.rvName)
 	if err != nil {
 		return err
 	}
@@ -112,42 +103,6 @@ func (v *VolumeReplicaDestroyer) doDestroyV3(ctx context.Context) error {
 	startTime := time.Now()
 
 	// Delete the RVR (don't wait for completion)
-	err = v.client.DeleteRVRv3(ctx, selectedRVR.Name)
-	if err != nil {
-		v.log.ActionFailed("destroy_replica", params, err, time.Since(startTime))
-		return fmt.Errorf("deleting RVR %s: %w", selectedRVR.Name, err)
-	}
-
-	// Log completion immediately (fire and forget)
-	v.log.ActionCompleted("destroy_replica", params, "delete_initiated", time.Since(startTime))
-	return nil
-}
-
-func (v *VolumeReplicaDestroyer) doDestroyV2(ctx context.Context) error {
-	// List replicas for this volume using v1alpha2
-	rvrs, err := v.client.ListRVRsForVolume(ctx, v.rvName)
-	if err != nil {
-		return err
-	}
-
-	if len(rvrs) == 0 {
-		v.log.Info("no replicas to destroy")
-		return nil
-	}
-
-	// Select random replica
-	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
-	selectedRVR := rvrs[rand.Intn(len(rvrs))]
-
-	params := logging.ActionParams{
-		"rvr_name":  selectedRVR.Name,
-		"node_name": selectedRVR.Spec.NodeName,
-	}
-
-	v.log.ActionStarted("destroy_replica", params)
-	startTime := time.Now()
-
-	// Delete the RVR (don't wait for completion)
 	err = v.client.DeleteRVR(ctx, selectedRVR.Name)
 	if err != nil {
 		v.log.ActionFailed("destroy_replica", params, err, time.Since(startTime))
@@ -158,4 +113,3 @@ func (v *VolumeReplicaDestroyer) doDestroyV2(ctx context.Context) error {
 	v.log.ActionCompleted("destroy_replica", params, "delete_initiated", time.Since(startTime))
 	return nil
 }
-

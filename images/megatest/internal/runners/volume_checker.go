@@ -23,7 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/logging"
 )
@@ -127,18 +127,18 @@ func (v *VolumeChecker) check(ctx context.Context) error {
 	return nil
 }
 
-func (v *VolumeChecker) getReadyStatus(rv *v1alpha2.ReplicatedVolume) metav1.ConditionStatus {
+func (v *VolumeChecker) getReadyStatus(rv *v1alpha3.ReplicatedVolume) metav1.ConditionStatus {
 	if rv.Status == nil {
 		return metav1.ConditionUnknown
 	}
-	cond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha2.ConditionTypeReady)
+	cond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
 	if cond == nil {
 		return metav1.ConditionUnknown
 	}
 	return cond.Status
 }
 
-func (v *VolumeChecker) hasQuorum(rv *v1alpha2.ReplicatedVolume) bool {
+func (v *VolumeChecker) hasQuorum(rv *v1alpha3.ReplicatedVolume) bool {
 	// We determine quorum based on Ready status
 	// A more sophisticated check would inspect all replicas' Quorum conditions
 	return v.getReadyStatus(rv) == metav1.ConditionTrue

@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
@@ -53,7 +52,6 @@ type VolumeReplicaCreator struct {
 	log        *logging.Logger
 	instanceID string
 	scheme     *runtime.Scheme
-	useV3API   bool // Use v1alpha3 API (simpler interface)
 }
 
 // NewVolumeReplicaCreator creates a new VolumeReplicaCreator
@@ -64,7 +62,6 @@ func NewVolumeReplicaCreator(
 	instanceID string,
 ) *VolumeReplicaCreator {
 	scheme := runtime.NewScheme()
-	_ = v1alpha2.AddToScheme(scheme)
 	_ = v1alpha3.AddToScheme(scheme)
 
 	return &VolumeReplicaCreator{
@@ -74,7 +71,6 @@ func NewVolumeReplicaCreator(
 		log:        logging.NewLogger(rvName, "volume-replica-creator", instanceID),
 		instanceID: instanceID,
 		scheme:     scheme,
-		useV3API:   true, // Default to v1alpha3 API
 	}
 }
 
@@ -126,28 +122,11 @@ func (v *VolumeReplicaCreator) doCreate(ctx context.Context) error {
 	v.log.ActionStarted("create_replica", params)
 	startTime := time.Now()
 
-	if v.useV3API {
-		err = v.doCreateV3(ctx, rvrName, string(selectedType), node.Name)
-	} else {
-		err = v.doCreateV2(ctx, rvrName, node.Name)
-	}
-
+	// Get RV for owner reference
+	rv, err := v.client.GetRV(ctx, v.rvName)
 	if err != nil {
 		v.log.ActionFailed("create_replica", params, err, time.Since(startTime))
-		return err
-	}
-
-	// Log completion immediately (fire and forget)
-	v.log.ActionCompleted("create_replica", params, "create_initiated", time.Since(startTime))
-	return nil
-}
-
-// doCreateV3 creates a replica using v1alpha3 API (simpler, just specify Type)
-func (v *VolumeReplicaCreator) doCreateV3(ctx context.Context, rvrName, replicaType, nodeName string) error {
-	// Get RV for owner reference (using v1alpha3)
-	rv, err := v.client.GetRVv3(ctx, v.rvName)
-	if err != nil {
-		return fmt.Errorf("getting RV v1alpha3: %w", err)
+		return fmt.Errorf("getting RV: %w", err)
 	}
 
 	// Create RVR with v1alpha3 API - just need to specify type and node
@@ -157,63 +136,24 @@ func (v *VolumeReplicaCreator) doCreateV3(ctx context.Context, rvrName, replicaT
 		},
 		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: v.rvName,
-			NodeName:             nodeName,
-			Type:                 replicaType, // "Access" or "TieBreaker"
+			NodeName:             node.Name,
+			Type:                 string(selectedType), // "Access" or "TieBreaker"
 		},
 	}
 
 	// Set owner reference
 	if err := controllerutil.SetControllerReference(rv, rvr, v.scheme); err != nil {
-		return fmt.Errorf("setting owner reference: %w", err)
-	}
-
-	// Create the RVR (don't wait for completion)
-	if err := v.client.CreateRVRv3(ctx, rvr); err != nil {
-		return fmt.Errorf("creating RVR %s: %w", rvrName, err)
-	}
-
-	return nil
-}
-
-// doCreateV2 creates a replica using v1alpha2 API (legacy, more complex)
-func (v *VolumeReplicaCreator) doCreateV2(ctx context.Context, rvrName, nodeName string) error {
-	// Get RV for owner reference
-	rv, err := v.client.GetRV(ctx, v.rvName)
-	if err != nil {
-		return fmt.Errorf("getting RV: %w", err)
-	}
-
-	// Create RVR with v1alpha2 API
-	rvr := &v1alpha2.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: rvrName,
-		},
-		Spec: v1alpha2.ReplicatedVolumeReplicaSpec{
-			ReplicatedVolumeName: v.rvName,
-			NodeName:             nodeName,
-			// For v1alpha2, we need to set Volumes for diskless replicas
-			// For Access/TieBreaker types, we use empty disk
-			Volumes: []v1alpha2.Volume{
-				{
-					Number: 0,
-					Disk:   "", // Empty disk for diskless replicas
-					Device: 0,  // Will be assigned by controller
-				},
-			},
-			SharedSecret: rv.Spec.SharedSecret,
-		},
-	}
-
-	// Set owner reference
-	if err := controllerutil.SetControllerReference(rv, rvr, v.scheme); err != nil {
+		v.log.ActionFailed("create_replica", params, err, time.Since(startTime))
 		return fmt.Errorf("setting owner reference: %w", err)
 	}
 
 	// Create the RVR (don't wait for completion)
 	if err := v.client.CreateRVR(ctx, rvr); err != nil {
+		v.log.ActionFailed("create_replica", params, err, time.Since(startTime))
 		return fmt.Errorf("creating RVR %s: %w", rvrName, err)
 	}
 
+	// Log completion immediately (fire and forget)
+	v.log.ActionCompleted("create_replica", params, "create_initiated", time.Since(startTime))
 	return nil
 }
-

@@ -26,7 +26,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
@@ -47,7 +46,6 @@ type VolumeMain struct {
 	client         *k8sclient.Client
 	log            *logging.Logger
 	instanceID     string
-	useV3API       bool // Use v1alpha3 API for RV creation
 
 	// Sub-runners
 	checker          *VolumeChecker
@@ -76,7 +74,6 @@ func NewVolumeMain(
 		client:         client,
 		log:            logging.NewLogger(rvName, "volume-main", instanceID),
 		instanceID:     instanceID,
-		useV3API:       true, // Default to v1alpha3 API
 	}
 }
 
@@ -169,31 +166,9 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 		"api_version":     "v1alpha3",
 	}
 
-	if !v.useV3API {
-		params["api_version"] = "v1alpha2"
-	}
-
 	v.log.ActionStarted("create_rv", params)
 	startTime := time.Now()
 
-	var err error
-	if v.useV3API {
-		err = v.createRVv3(ctx, publishNodes)
-	} else {
-		err = v.createRVv2(ctx, publishNodes)
-	}
-
-	if err != nil {
-		v.log.ActionFailed("create_rv", params, err, time.Since(startTime))
-		return fmt.Errorf("creating RV: %w", err)
-	}
-
-	v.log.ActionCompleted("create_rv", params, "created", time.Since(startTime))
-	return nil
-}
-
-// createRVv3 creates a ReplicatedVolume using v1alpha3 API
-func (v *VolumeMain) createRVv3(ctx context.Context, publishNodes []string) error {
 	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -205,30 +180,14 @@ func (v *VolumeMain) createRVv3(ctx context.Context, publishNodes []string) erro
 		},
 	}
 
-	return v.client.CreateRVv3(ctx, rv)
-}
-
-// createRVv2 creates a ReplicatedVolume using v1alpha2 API (legacy)
-func (v *VolumeMain) createRVv2(ctx context.Context, publishNodes []string) error {
-	rv := &v1alpha2.ReplicatedVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: v.rvName,
-		},
-		Spec: v1alpha2.ReplicatedVolumeSpec{
-			Size:             v.initialSize,
-			Replicas:         3, // Default to 3 replicas
-			SharedSecret:     fmt.Sprintf("secret-%s", v.rvName),
-			Topology:         "Ignored", // Use default topology
-			PublishRequested: publishNodes,
-			VolumeAccess:     "PreferablyLocal",
-			LVM: v1alpha2.LVMSpec{
-				Type:            "Thin", // Default to thin provisioning
-				LVMVolumeGroups: nil,    // Will be filled from StorageClass
-			},
-		},
+	err := v.client.CreateRV(ctx, rv)
+	if err != nil {
+		v.log.ActionFailed("create_rv", params, err, time.Since(startTime))
+		return fmt.Errorf("creating RV: %w", err)
 	}
 
-	return v.client.CreateRV(ctx, rv)
+	v.log.ActionCompleted("create_rv", params, "created", time.Since(startTime))
+	return nil
 }
 
 func (v *VolumeMain) waitForReady(ctx context.Context) error {
@@ -365,4 +324,3 @@ func (v *VolumeMain) deleteRV(ctx context.Context) {
 
 	v.log.ActionCompleted("delete_rv", params, "deleted", time.Since(startTime))
 }
-

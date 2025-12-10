@@ -107,36 +107,36 @@ func (v *VolumePublisher) doPublish(ctx context.Context) error {
 	v.log.ActionStarted("publish", params)
 	startTime := time.Now()
 
-	// Get current RV to read existing publishRequested
+	// Get current RV to read existing publishOn
 	rv, err := v.client.GetRV(ctx, v.rvName)
 	if err != nil {
 		v.log.ActionFailed("publish", params, err, time.Since(startTime))
 		return err
 	}
 
-	// Build new publishRequested list: keep existing but add our node
+	// Build new publishOn list: keep existing but add our node
 	// Max 2 nodes allowed
-	newPublishRequested := rv.Spec.PublishRequested
-	if !slices.Contains(newPublishRequested, nodeName) {
-		if len(newPublishRequested) >= 2 {
+	newPublishOn := rv.Spec.PublishOn
+	if !slices.Contains(newPublishOn, nodeName) {
+		if len(newPublishOn) >= 2 {
 			// Remove one to make room (prefer removing our previous node if any)
 			if v.currentNode != "" {
-				idx := slices.Index(newPublishRequested, v.currentNode)
+				idx := slices.Index(newPublishOn, v.currentNode)
 				if idx >= 0 {
-					newPublishRequested = slices.Delete(newPublishRequested, idx, idx+1)
+					newPublishOn = slices.Delete(newPublishOn, idx, idx+1)
 				} else {
 					// Remove first
-					newPublishRequested = newPublishRequested[1:]
+					newPublishOn = newPublishOn[1:]
 				}
 			} else {
-				newPublishRequested = newPublishRequested[1:]
+				newPublishOn = newPublishOn[1:]
 			}
 		}
-		newPublishRequested = append(newPublishRequested, nodeName)
+		newPublishOn = append(newPublishOn, nodeName)
 	}
 
-	// Update publishRequested
-	err = v.client.SetPublishOn(ctx, v.rvName, newPublishRequested)
+	// Update publishOn
+	err = v.client.SetPublishOn(ctx, v.rvName, newPublishOn)
 	if err != nil {
 		v.log.ActionFailed("publish", params, err, time.Since(startTime))
 		return err
@@ -173,16 +173,16 @@ func (v *VolumePublisher) doUnpublish(ctx context.Context) error {
 		return err
 	}
 
-	// Remove our node from publishRequested
-	newPublishRequested := make([]string, 0, len(rv.Spec.PublishRequested))
-	for _, n := range rv.Spec.PublishRequested {
+	// Remove our node from publishOn
+	newPublishOn := make([]string, 0, len(rv.Spec.PublishOn))
+	for _, n := range rv.Spec.PublishOn {
 		if n != v.currentNode {
-			newPublishRequested = append(newPublishRequested, n)
+			newPublishOn = append(newPublishOn, n)
 		}
 	}
 
-	// Update publishRequested
-	err = v.client.SetPublishOn(ctx, v.rvName, newPublishRequested)
+	// Update publishOn
+	err = v.client.SetPublishOn(ctx, v.rvName, newPublishOn)
 	if err != nil {
 		v.log.ActionFailed("unpublish", params, err, time.Since(startTime))
 		return err
@@ -199,4 +199,3 @@ func (v *VolumePublisher) doUnpublish(ctx context.Context) error {
 	v.currentNode = ""
 	return nil
 }
-
