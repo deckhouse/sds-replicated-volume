@@ -90,13 +90,13 @@ func (o *Opt) Parse() {
 	// Add flags
 	rootCmd.Flags().StringSliceVarP(&o.StorageClasses, "storage-classes", "", nil, "Comma-separated list of storage class names to use (required)")
 	rootCmd.Flags().StringVarP(&o.Kubeconfig, "kubeconfig", "", "", "Path to kubeconfig file")
-	rootCmd.Flags().IntVarP(&o.MaxVolumes, "max-volumes", "", 10, "Maximum number of concurrent volumes")
-	rootCmd.Flags().IntVarP(&o.StepMin, "step-min", "", 1, "Minimum number of volumes to create per step")
-	rootCmd.Flags().IntVarP(&o.StepMax, "step-max", "", 3, "Maximum number of volumes to create per step")
+	rootCmd.Flags().IntVarP(&o.MaxVolumes, "max-volumes", "", 10, "Maximum number of concurrent ReplicatedVolumes")
+	rootCmd.Flags().IntVarP(&o.StepMin, "step-min", "", 1, "Minimum number of ReplicatedVolumes to create per step")
+	rootCmd.Flags().IntVarP(&o.StepMax, "step-max", "", 3, "Maximum number of ReplicatedVolumes to create per step")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMin, "step-period-min", "", 10*time.Second, "Minimum wait between creation steps")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between creation steps")
-	rootCmd.Flags().DurationVarP(&o.VolPeriodMin, "vol-period-min", "", 60*time.Second, "Minimum volume lifetime")
-	rootCmd.Flags().DurationVarP(&o.VolPeriodMax, "vol-period-max", "", 300*time.Second, "Maximum volume lifetime")
+	rootCmd.Flags().DurationVarP(&o.VolPeriodMin, "vol-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
+	rootCmd.Flags().DurationVarP(&o.VolPeriodMax, "vol-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
 
 	if err := rootCmd.Execute(); err != nil {
