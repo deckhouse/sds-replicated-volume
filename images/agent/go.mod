@@ -6,7 +6,6 @@ replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go
 
 require (
 	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
 	github.com/spf13/afero v1.12.0
@@ -194,6 +193,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
