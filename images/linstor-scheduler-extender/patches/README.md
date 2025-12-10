@@ -5,3 +5,7 @@
 Scheduler extender
 
 Extend scheduler with HTTPS support and our own logic.
+
+### 002-fix-cve.patch
+
+CVE fix
