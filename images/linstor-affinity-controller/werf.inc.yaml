@@ -11,12 +11,20 @@ git:
     stageDependencies:
       setup:
         - "**/*"
+  - add: /images/{{ $.ImageName }}/patches
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
+
 mount:
   - fromPath: ~/go-pkg-cache
     to: /go/pkg
 shell:
-  setup:
+  setup:    
+    - apk add --no-cache git
     - cd /usr/local/go/{{ $.ImageName }}/cmd/linstor-affinity-controller
+    - git apply /patches/*.patch
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/piraeusdatastore/linstor-affinity-controller/pkg/consts.Version=v{{ $.Versions.LINSTOR_AFFINITY_CONTROLLER }}"
     - mv {{ $.ImageName }} /
     - chmod +x /{{ $.ImageName }}
