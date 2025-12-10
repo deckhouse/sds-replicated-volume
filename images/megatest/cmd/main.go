@@ -18,13 +18,11 @@ package main
 
 import (
 	"context"
-	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
-	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
@@ -34,33 +32,13 @@ import (
 )
 
 func main() {
-	// Parse flags
-	var (
-		storageClasses string
-		maxVolumes     int
-		stepMin        int
-		stepMax        int
-		stepPeriodMin  time.Duration
-		stepPeriodMax  time.Duration
-		volPeriodMin   time.Duration
-		volPeriodMax   time.Duration
-		logLevel       string
-	)
-
-	flag.StringVar(&storageClasses, "storage-classes", "", "Comma-separated list of storage class names to use")
-	flag.IntVar(&maxVolumes, "max-volumes", 10, "Maximum number of concurrent volumes")
-	flag.IntVar(&stepMin, "step-min", 1, "Minimum number of volumes to create per step")
-	flag.IntVar(&stepMax, "step-max", 3, "Maximum number of volumes to create per step")
-	flag.DurationVar(&stepPeriodMin, "step-period-min", 10*time.Second, "Minimum wait between creation steps")
-	flag.DurationVar(&stepPeriodMax, "step-period-max", 30*time.Second, "Maximum wait between creation steps")
-	flag.DurationVar(&volPeriodMin, "vol-period-min", 60*time.Second, "Minimum volume lifetime")
-	flag.DurationVar(&volPeriodMax, "vol-period-max", 300*time.Second, "Maximum volume lifetime")
-	flag.StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
-	flag.Parse()
+	// Parse options
+	var opt Opt
+	opt.Parse()
 
 	// Setup logging
 	var level slog.Level
-	switch strings.ToLower(logLevel) {
+	switch strings.ToLower(opt.LogLevel) {
 	case "debug":
 		level = slog.LevelDebug
 	case "info":
@@ -74,16 +52,6 @@ func main() {
 	}
 	logging.SetupGlobalLogger(level)
 
-	// Parse storage classes
-	if storageClasses == "" {
-		slog.Error("storage-classes flag is required")
-		os.Exit(1)
-	}
-	scList := strings.Split(storageClasses, ",")
-	for i := range scList {
-		scList[i] = strings.TrimSpace(scList[i])
-	}
-
 	// Create Kubernetes client
 	client, err := k8sclient.NewClient()
 	if err != nil {
@@ -93,11 +61,11 @@ func main() {
 
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
-		StorageClasses: scList,
-		MaxVolumes:     maxVolumes,
-		Step:           config.Count{Min: stepMin, Max: stepMax},
-		StepPeriod:     config.Duration{Min: stepPeriodMin, Max: stepPeriodMax},
-		VolumePeriod:   config.Duration{Min: volPeriodMin, Max: volPeriodMax},
+		StorageClasses: opt.StorageClasses,
+		MaxVolumes:     opt.MaxVolumes,
+		Step:           config.Count{Min: opt.StepMin, Max: opt.StepMax},
+		StepPeriod:     config.Duration{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
+		VolumePeriod:   config.Duration{Min: opt.VolPeriodMin, Max: opt.VolPeriodMax},
 	}
 
 	// Generate unique instance ID
@@ -122,8 +90,8 @@ func main() {
 	// Run
 	slog.Info("starting megatest",
 		"instance_id", instanceID,
-		"storage_classes", scList,
-		"max_volumes", maxVolumes,
+		"storage_classes", opt.StorageClasses,
+		"max_volumes", opt.MaxVolumes,
 	)
 
 	if err := multiVolume.Run(ctx); err != nil {
