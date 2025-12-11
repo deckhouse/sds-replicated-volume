@@ -33,8 +33,6 @@
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1-1)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller-1)
     - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3)
-  - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller-1)
-    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3-1)
   - [`llv-owner-reference-controller`](#llv-owner-reference-controller-1)
     - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
   - [`rv-status-conditions-controller`](#rv-status-conditions-controller-1)
@@ -286,22 +284,6 @@ Cм. существующую реализацию `drbdadm resize`.
 ### Триггер 
   - во время INIT/DELETE `corev1.Node`
     - когда Node больше нет в кластере
-
-### Вывод 
-  - delete rvr
-
-## `rvr-node-cordon-controller`
-
-### Статус: [TBD | priority: 3 | complexity: 3]
-
-### Цель 
-Удаляет (без снятия финализатора) RVR с тех нод, которые помечены специальным
-образом как закордоненные (аннотация, а не `spec.cordon`).
-
-### Триггер 
-  - во время INIT/DELETE `corev1.Node`
-    - когда Node помечена специальным
-образом как закордоненные (аннотация, а не `spec.cordon`).
 
 ### Вывод 
   - delete rvr
