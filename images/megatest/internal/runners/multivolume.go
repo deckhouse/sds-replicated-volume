@@ -75,7 +75,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 		"storage_classes", m.cfg.StorageClasses,
 		"max_volumes", m.cfg.MaxVolumes,
 	)
-	defer m.log.Info("multivolume orchestrator stopped")
+	defer m.log.Info("multivolume orchestrator finished")
 
 	// Start pod destroyers (if enabled)
 	if !m.cfg.DisablePodDestroyer {

@@ -120,13 +120,10 @@ func main() {
 	}
 	slog.Info("megatest started", logParams...)
 
-	//if err := multiVolume.Run(ctx); err != nil {
-	//	slog.Error("megatest failed", "error", err)
-	//	os.Exit(1)
-	//}
-	_ = multiVolume
-	_ = ctx
-	_ = cancel
+	if err := multiVolume.Run(ctx); err != nil {
+		slog.Error("megatest failed", "error", err)
+		os.Exit(1)
+	}
 
 	slog.Info("megatest finished", "duration", time.Since(start).String())
 }
