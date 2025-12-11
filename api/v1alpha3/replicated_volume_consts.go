@@ -39,6 +39,8 @@ const (
 // The order matters: algorithms are tried sequentially when one fails on any replica.
 func SharedSecretAlgorithms() []string {
 	return []string{
+		// TODO: remove after testing
+		"dummyAlgorithmName_ForTestingPurposes-1",
 		SharedSecretAlgSHA256,
 		SharedSecretAlgSHA1,
 	}
