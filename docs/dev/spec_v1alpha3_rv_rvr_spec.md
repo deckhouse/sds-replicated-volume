@@ -22,11 +22,12 @@
 | `Scheduled` | существует | Нода выбрана | rvr-scheduling-controller | `ReplicaScheduled`, `WaitingForAnotherReplica`, `NoAvailableNodes`, `TopologyConstraintsFailed`, `InsufficientStorage` |
 | `BackingVolumeCreated` | 🆕 новый | BackingVolume создан и ready | rvr-volume-controller | `BackingVolumeReady`, `BackingVolumeNotReady`, `WaitingForBackingVolume`, `BackingVolumeCreationFailed`, `NotApplicable` |
 | `Initialized` | 🆕 новый | Инициализация (не снимается) | drbd-config-controller | `Initialized`, `WaitingForInitialSync`, `InitialSyncInProgress` |
-| `InQuorum` | переименован | Реплика в кворуме | status-conditions-controller | `InQuorum`, `QuorumLost`, `NodeNotReady` |
-| `InSync` | переименован | Данные синхронизированы | status-conditions-controller | `InSync`, `Synchronizing`, `OutOfSync`, `Inconsistent`, `Diskless`, `NodeNotReady` |
-| `Configured` | переименован | Конфигурация применена | status-conditions-controller | `Configured`, `ConfigurationPending`, `ConfigurationFailed`, `MetadataCheckFailed`, `MetadataCreationFailed`, `StatusCheckFailed`, `ResourceUpFailed`, `AdjustmentFailed`, `WaitingForInitialSync`, `PromotionDemotionFailed`, `NodeNotReady` |
-| `Online` | 🆕 computed | Scheduled + Initialized + InQuorum | status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost`, `NodeNotReady` |
-| `IOReady` | 🆕 computed | Online + InSync | status-conditions-controller | `IOReady`, `Offline`, `OutOfSync`, `NodeNotReady` |
+| `InQuorum` | переименован | Реплика в кворуме | status-conditions-controller | `InQuorum`, `QuorumLost`, `NodeNotReady`, `AgentNotReady` |
+| `InSync` | переименован | Данные синхронизированы | status-conditions-controller | `InSync`, `Synchronizing`, `OutOfSync`, `Inconsistent`, `Diskless`, `DiskAttaching`, `NodeNotReady`, `AgentNotReady` |
+| `Configured` | переименован | Конфигурация применена | status-conditions-controller | `Configured`, `ConfigurationPending`, `ConfigurationFailed`, ...errors..., `NodeNotReady`, `AgentNotReady` |
+| `Online` | 🆕 computed | Scheduled + Initialized + InQuorum | status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost`, `NodeNotReady`, `AgentNotReady` |
+| `IOReady` | 🆕 computed | Online + InSync (safe) | status-conditions-controller | `IOReady`, `Offline`, `OutOfSync`, `Synchronizing`, `NodeNotReady`, `AgentNotReady` |
+| `DRBDIOReady` | 🆕 computed | DRBD может I/O | status-conditions-controller | `DRBDIOReady`, `Offline`, `QuorumLost`, `IOSuspended`, `IOFailuresForced`, `DiskStateInvalid`, `NodeNotReady`, `AgentNotReady` |
 | `Published` | переименован | Реплика Primary | rv-publish-controller | `Published`, `Unpublished`, `PublishPending` |
 
 ### Удаляемые
@@ -118,34 +119,43 @@
   - `True` — реплика в кворуме
     - `rvr.status.drbd.status.devices[0].quorum=true`
   - `False` — реплика вне кворума
-  - `Unknown` — нода недоступна (Node NotReady) - заменить на новый condition
+  - `Unknown` — нода или agent недоступны
 - `reason`:
   - `InQuorum` — реплика участвует в кворуме
   - `QuorumLost` — реплика потеряла кворум (недостаточно подключений)
   - `NodeNotReady` — нода недоступна, статус неизвестен
+  - `AgentNotReady` — agent pod не работает, статус неизвестен
 - Примечание: `devices[0]` — в текущей версии RVR всегда использует один DRBD volume (индекс 0).
 - Примечание: для TieBreaker реплик логика может отличаться.
-TODO: сделить да подами и еще и в случае если он падает ставить unknown
 
 ### `type=InSync`
 
 - Обновляется: **status-conditions-controller**.
 - Ранее: `DevicesReady`.
+- **Назначение:** Показывает состояние синхронизации данных реплики.
 - `status`:
   - `True` — данные синхронизированы
     - Diskful: `rvr.status.drbd.status.devices[0].diskState = UpToDate`
     - Access/TieBreaker: `diskState = Diskless` (всегда True с reason `Diskless`)
   - `False` — данные не синхронизированы
-  - `Unknown` — нода недоступна (Node NotReady)
+  - `Unknown` — нода или agent недоступны
 - `reason`:
-  - `InSync` — данные полностью синхронизированы (Diskful)
-  - `Diskless` — diskless реплика (Access/TieBreaker), данные получаются по сети
-  - `Synchronizing` — синхронизация в процессе (есть progress %)
-  - `OutOfSync` — данные рассинхронизированы, синхронизация не идёт
-  - `Inconsistent` — данные в несогласованном состоянии
+  - `InSync` — данные полностью синхронизированы (Diskful, diskState=UpToDate)
+  - `Diskless` — diskless реплика (Access/TieBreaker), нет локальных данных, I/O через сеть
+  - `Synchronizing` — синхронизация в процессе (diskState=SyncSource/SyncTarget)
+  - `OutOfSync` — данные устарели (diskState=Outdated), ожидание resync
+  - `Inconsistent` — данные повреждены (diskState=Inconsistent), требуется восстановление
+  - `DiskAttaching` — подключение к диску (diskState=Attaching/Negotiating)
   - `NodeNotReady` — нода недоступна, статус неизвестен
+  - `AgentNotReady` — agent pod не работает (crash, OOM, evicted), статус неизвестен
 - Применимость: все типы реплик.
-TODO: сделить да подами и еще и в случае если он падает ставить unknown
+- **DRBD diskState mapping:**
+  - `UpToDate` → reason=`InSync`
+  - `SyncSource`, `SyncTarget` → reason=`Synchronizing`
+  - `Outdated` → reason=`OutOfSync`
+  - `Inconsistent` → reason=`Inconsistent`
+  - `Attaching`, `Negotiating`, `DUnknown` → reason=`DiskAttaching`
+  - `Diskless` → reason=`Diskless`
 
 ### `type=Online`
 
@@ -163,39 +173,225 @@ TODO: сделить да подами и еще и в случае если о�
   - `Uninitialized` — реплика не прошла инициализацию
   - `QuorumLost` — реплика вне кворума
   - `NodeNotReady` — нода недоступна
+  - `AgentNotReady` — agent pod не работает
 - Примечание: `Configured` НЕ учитывается — реплика может быть online с устаревшей конфигурацией.
 
-TODO: Обсудить: IOReady - не сответствует DRDB IOReady. 
-### `type=IOReady(Safe)`
+### `type=IOReady`
 
 - Обновляется: **status-conditions-controller**.
 - 🆕 Вычисляемый (computed).
+- **Назначение:** Строгая проверка готовности к критическим операциям (resize, promote, snapshot).
 - `status`:
-  - `True` — реплика готова к I/O (AND)
+  - `True` — реплика **безопасно** готова к I/O (AND)
     - `Online=True`
-    - `InSync=True`
-  - `False` — реплика не готова к I/O
+    - `InSync=True` (diskState=UpToDate)
+  - `False` — реплика не готова к безопасным I/O операциям
 - `reason`:
   - `IOReady` — реплика полностью готова к I/O операциям
   - `Offline` — реплика не онлайн (смотри `Online` condition)
-  - `OutOfSync` — данные не синхронизированы (смотри `InSync` condition)
+  - `OutOfSync` — данные не синхронизированы (diskState != UpToDate)
+  - `Synchronizing` — идёт синхронизация (SyncSource/SyncTarget)
   - `NodeNotReady` — нода недоступна
+  - `AgentNotReady` — agent pod не работает
 - Используется: RV.IOReady вычисляется из RVR.IOReady.
+- **Примечание:** Более строгий чем `DRBDIOReady`. Гарантирует что данные полностью синхронизированы.
+- **Promote:** Переключение реплики Secondary→Primary. Требует `IOReady=True` чтобы гарантировать актуальность данных и избежать split-brain.
 
 ### `type=DRBDIOReady`
 
 - Обновляется: **status-conditions-controller**.
 - 🆕 Вычисляемый (computed).
+- **Назначение:** Отражает реальную способность DRBD обрабатывать I/O (включая во время синхронизации).
 - `status`:
-  - `True` — реплика готова к I/O (AND)
+  - `True` — DRBD **технически** может обрабатывать I/O (AND)
     - `Online=True`
-    - `Publised=True`
-  - `False` — реплика не готова к I/O
+    - `InQuorum=True`
+    - `drbd.status.suspended=false`
+    - `drbd.status.forceIOFailures=false`
+    - `diskState` in [`UpToDate`, `SyncSource`, `SyncTarget`, `Diskless`]
+  - `False` — DRBD не может обрабатывать I/O
 - `reason`:
-  - `IOReady` — реплика полностью готова к I/O операциям
+  - `DRBDIOReady` — DRBD готов к I/O операциям
   - `Offline` — реплика не онлайн (смотри `Online` condition)
-  - `OutOfSync` — данные не синхронизированы (смотри `InSync` condition)
+  - `QuorumLost` — потерян кворум, I/O заблокирован
+  - `IOSuspended` — I/O приостановлен DRBD (suspended=true)
+  - `IOFailuresForced` — I/O failures форсированы (forceIOFailures=true)
+  - `DiskStateInvalid` — diskState не позволяет I/O (`Inconsistent`, `Outdated`)
   - `NodeNotReady` — нода недоступна
+  - `AgentNotReady` — agent pod не работает
+- **Примечание:** `InSync` НЕ требуется — DRBD может обрабатывать I/O во время синхронизации (SyncSource/SyncTarget).
+- **Сравнение с IOReady:** Во время синхронизации `DRBDIOReady=True`, но `IOReady=False`.
+
+---
+
+## Когда использовать IOReady vs DRBDIOReady
+
+### `IOReady=True` — Нормальные операции (безопасные)
+
+```
+Состояние: Primary потерян, есть Secondary с UpToDate
+
+  node-1: Primary, DEAD/NotReady
+  node-2: Secondary, UpToDate, IOReady=True ✅
+  node-3: Secondary, UpToDate, IOReady=True ✅
+
+Действие: Автоматический promote node-2 → Primary
+  ✅ Данные 100% синхронизированы
+  ✅ Нет потери данных
+  ✅ Нет split-brain
+```
+
+| Операция | IOReady | Результат |
+|----------|---------|-----------|
+| **Promote** | ✅ True | ✅ Безопасно — данные полные |
+| **Resize** | ✅ True | ✅ Безопасно — все реплики синхронны |
+| **Snapshot** | ✅ True | ✅ Консистентный snapshot |
+| **Rolling update** | ✅ True | ✅ Можно безопасно мигрировать |
+
+### `DRBDIOReady=True`, `IOReady=False` — Disaster Recovery (с рисками)
+
+```
+Сценарий: Primary ПОТЕРЯН НАВСЕГДА, все Secondary в SyncTarget
+
+  node-1: Primary, DESTROYED (диск потерян)
+  node-2: Secondary, SyncTarget 60%, DRBDIOReady=True, IOReady=False ⚠️
+  node-3: Secondary, SyncTarget 40%, DRBDIOReady=True, IOReady=False ⚠️
+
+Решение: Emergency promote node-2 (лучший кандидат)
+  ⚠️ Потеря ~40% данных
+  ⚠️ Требуется manual --force
+  ⚠️ Только если Primary точно не вернётся
+```
+
+**Риски promote при `IOReady=False`:**
+
+| Риск | Описание |
+|------|----------|
+| **Потеря данных** | Несинхронизированная часть данных будет потеряна |
+| **Split-brain** | Если Primary ещё жив — два Primary одновременно |
+| **Inconsistent state** | Приложение увидит неполные данные |
+| **Manual recovery** | После восстановления нужен ручной resolution |
+
+### Операции по условиям
+
+| Операция | Условие | Комментарий | Подтверждено |
+|----------|---------|-------------|--------------|
+| **Read/Write I/O** | `DRBDIOReady=True` | DRBD обрабатывает I/O даже во время sync | ✅ Да |
+| **Pod mount** | `DRBDIOReady=True` | Volume доступен для workload | ✅ Да |
+| **Promote (normal)** | `IOReady=True` | Автоматический failover без потери данных | ✅ Да |
+| **Promote (DR)** | `DRBDIOReady=True` | ⚠️ Emergency only, manual `--force`, потеря данных | ✅ Да |
+| **Resize** | `IOReady=True` | Все реплики должны быть синхронны | ⚠️ Предположение |
+| **Snapshot** | `IOReady=True` | Гарантия консистентности | ⚠️ Предположение |
+| **Delete replica** | `DRBDIOReady=True` | ⚠️ Осторожно при удалении SyncSource | ⚠️ Предположение |
+
+### Использование в контроллерах
+
+| Контроллер | Условие | Действие |
+|------------|---------|----------|
+| `rv-publish-controller` | `IOReady=True` | Normal promote (подтверждено) |
+| `rv-publish-controller` | `DRBDIOReady=True` + manual `--force` | DR promote (подтверждено) |
+| `drbd-resize-controller` | `IOReady=True` | Resize volume (предположение) |
+| `drbd-primary-controller` | `IOReady=True` | Switch primary (подтверждено)
+| Мониторинг/UI | `DRBDIOReady` | Показать что I/O работает (sync в процессе) |
+
+### Резюме
+
+```
+IOReady     = "Безопасно для критических операций" (promote, resize, snapshot)
+DRBDIOReady = "DRBD может I/O" (мониторинг, DR failover, обычный I/O)
+
+Правило: Используй IOReady для автоматических операций.
+         DRBDIOReady только для мониторинга и emergency DR.
+```
+
+---
+
+## Источники: Почему `IOReady=True` требуется для Promote
+
+### Важное уточнение
+
+**Различие между двумя сценариями:**
+- **Primary ОСТАЁТСЯ Primary во время sync** = ✅ OK, I/O работает нормально
+- **Promote Secondary→Primary ВО ВРЕМЯ sync** = ❌ Опасно, требует `--force`
+
+Наш `IOReady` condition относится ко **второму сценарию** — выбор нового Primary после потери текущего.
+
+### Реальные обсуждения и документация
+
+**1. Linux Kernel Mailing List (Google Groups)**
+
+> "disallow promotion during resync handshake, avoid deadlock and hard reset"
+
+- **Ссылка:** https://groups.google.com/g/linux.kernel/c/nrZzOENTv3M
+- **Проблема:** Promote во время resync handshake вызывает deadlock и hard reset системы
+
+**2. Server Fault — реальный опыт операторов**
+
+> "As long as you're certain that the future peer's disk is going to be the same size, or bigger than, the Primary you're about to force promote, then you shouldn't run into any troubles: `# drbdadm primary <res> --force`"
+
+- **Ссылка:** https://serverfault.com/questions/890422/how-to-force-drbd-for-a-self-synchronization
+- **Вывод:** `--force` требуется для promote когда данные не UpToDate
+
+**3. LINBIT Forum — реальный случай Split-brain**
+
+> "Во время синхронизации размонтируйте C и смонтируйте B, заставляя B автоматически стать основным узлом."
+
+Описан реальный случай split-brain при promote во время sync в DRBD 9.2.13.
+
+- **Ссылка:** https://forums.linbit.com/t/split-brain-issue-in-drbd-9-2-13/762
+
+**4. DRBD Sync Documentation (wiki.zohead.com)**
+
+> "Во время синхронизации данные на резервном узле частично устарели и частично уже обновлены, что делает их состояние 'несогласованным'. Это состояние может привести к проблемам, если узел с несогласованными данными будет повышен до Primary."
+
+- **Ссылка:** https://wiki.zohead.com/技术/存储/DRBD/DRBD同步速率机制.md
+
+**5. MySQL/DRBD Documentation**
+
+> "Both replication and synchronization can take place at the same time. The block devices can be synchronized while they are actively being used by the primary node."
+
+- **Ссылка:** https://tool.oschina.net/uploads/apidocs/mysql-5.5-en/ha-overview.html
+- **Вывод:** Primary может работать во время sync, но это не то же что promote Secondary→Primary
+
+**6. Ubuntu Man Pages (drbdsetup)**
+
+> "auto-promote возможно только если состояние кластера это позволяет"
+
+- **Ссылка:** https://manpages.ubuntu.com/manpages/xenial/man8/drbdsetup-9.0.8.html
+
+**7. Официальная документация DRBD 9**
+
+- **User Guide:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/
+- **Disk States:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-disk-states
+- **Quorum:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-quorum
+- **Resync:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-resync
+
+### Подтверждённые факты
+
+| Факт | Источник |
+|------|----------|
+| Deadlock при promote во время resync handshake | Google Groups |
+| `--force` нужен для promote не-UpToDate | Server Fault |
+| Split-brain при promote во время sync | LINBIT Forum |
+| Primary может продолжать I/O во время sync | MySQL/DRBD docs |
+| Данные Inconsistent = частично устаревшие | wiki.zohead.com |
+| auto-promote зависит от состояния кластера | Ubuntu man pages |
+
+### Не найдено прямого подтверждения
+
+| Утверждение | Статус | Комментарий |
+|-------------|--------|-------------|
+| Resize требует UpToDate | ⚠️ Предположение | Логично, но не найдено в документации |
+| Snapshot требует UpToDate | ⚠️ Предположение | Логично для консистентности |
+| DRBD явно "отклоняет" promote | ⚠️ Косвенно | Нужен `--force`, но явного сообщения не найдено |
+
+### Выводы для нашей архитектуры
+
+1. **`IOReady=True`** = diskState UpToDate = безопасный автоматический promote
+2. **`IOReady=False`** = sync в процессе = promote только с `--force` (DR сценарий)
+3. **`DRBDIOReady=True`** = DRBD может I/O, но promote Secondary→Primary опасен
+
+---
 
 ### `type=Configured`
 
@@ -207,7 +403,7 @@ TODO: Обсудить: IOReady - не сответствует DRDB IOReady.
     - `rvr.status.drbd.errors.lastAdjustmentError == nil`
     - `rvr.status.drbd.errors.<...>Error == nil`
   - `False` — есть расхождения или ошибки
-  - `Unknown` — нода недоступна (Node NotReady)
+  - `Unknown` — нода или agent недоступны
 - `reason`:
   - `Configured` — конфигурация успешно применена
   - `ConfigurationPending` — ожидание применения конфигурации
@@ -220,6 +416,7 @@ TODO: Обсудить: IOReady - не сответствует DRDB IOReady.
   - `WaitingForInitialSync` — ожидание начальной синхронизации перед продолжением
   - `PromotionDemotionFailed` — ошибка переключения primary/secondary
   - `NodeNotReady` — нода недоступна, статус неизвестен
+  - `AgentNotReady` — agent pod не работает, статус неизвестен
 - `message`: детали ошибки из `rvr.status.drbd.errors.*`
 - Примечание: может "мигать" при изменении параметров — это нормально.
 - Примечание: НЕ включает publish и resize — они отделены.
@@ -551,7 +748,18 @@ builder.ControllerManagedBy(mgr).
     // Watch Nodes для обнаружения node failures.
     // Нужен mapper: Node → RV (через RVR.spec.nodeName).
     Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(nodeToRVMapper)).
+    // Watch Agent Pods для обнаружения agent failures.
+    // Нужен mapper: Pod → RV (через pod.spec.nodeName → RVR.spec.nodeName → RV).
+    // Predicate: только pods с label app=sds-drbd-agent.
+    Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(agentPodToRVMapper),
+        builder.WithPredicates(agentPodPredicate)).
     Complete(rec)
+
+// agentPodPredicate фильтрует только agent pods
+var agentPodPredicate = predicate.NewPredicateFuncs(func(obj client.Object) bool {
+    pod := obj.(*corev1.Pod)
+    return pod.Labels["app"] == "sds-drbd-agent"
+})
 ```
 
 ### Триггеры
@@ -561,6 +769,7 @@ builder.ControllerManagedBy(mgr).
 | RV создан/изменён/удалён | RV name |
 | RVR изменён (через ownerReference) | RV name (owner) |
 | Node изменилась | RV name (через mapper) |
+| Agent Pod изменился | RV name (через mapper) |
 
 ## Логика Reconcile
 
@@ -573,22 +782,34 @@ builder.ControllerManagedBy(mgr).
 
 3. For each RVR:
    a. Get Node by rvr.spec.nodeName
-   b. Check Node.Ready condition (см. Node Availability Check)
-   c. If Node NotReady:
+   b. Check Node.Ready condition
+   c. Check Agent Pod status on this node
+   d. If Node NotReady:
       - Set all conditions to Unknown/False with reason NodeNotReady:
         - InQuorum = Unknown
         - InSync = Unknown
         - Configured = Unknown
         - Online = False
         - IOReady = False
-   d. Else compute conditions:
+        - DRBDIOReady = False
+   e. Else if Agent NotReady:
+      - Set all conditions to Unknown/False with reason AgentNotReady:
+        - InQuorum = Unknown
+        - InSync = Unknown
+        - Configured = Unknown
+        - Online = False
+        - IOReady = False
+        - DRBDIOReady = False
+   f. Else compute conditions:
       - InQuorum: from drbd.status.devices[0].quorum
       - InSync: from drbd.status.devices[0].diskState
       - Configured: compare drbd.actual.* vs config.*
       - Online: Scheduled ∧ Initialized ∧ InQuorum
-      - IOReady: Online ∧ InSync
-   e. Compare with current RVR.status.conditions
-   f. Patch RVR ONLY if conditions changed (idempotency)
+      - IOReady: Online ∧ InSync (strict: requires UpToDate)
+      - DRBDIOReady: Online ∧ InQuorum ∧ ¬suspended ∧ ¬forceIOFailures ∧ validDiskState
+        // validDiskState = diskState in [UpToDate, SyncSource, SyncTarget, Diskless]
+   g. Compare with current RVR.status.conditions
+   h. Patch RVR ONLY if conditions changed (idempotency)
 
 4. Aggregate RVR conditions → RV conditions
    - Scheduled: ALL RVR.Scheduled=True
@@ -609,18 +830,24 @@ builder.ControllerManagedBy(mgr).
 7. Patch RV ONLY if conditions or counters changed
 ```
 
-## Node Availability Check
+## Node/Agent Availability Check
 
-Для каждого RVR проверяем доступность ноды:
+Для каждого RVR проверяем доступность ноды И agent pod:
 
 ```
 1. Get Node by rvr.spec.nodeName
    - If Node not found: reason = NodeNotFound
 
 2. Check node.status.conditions[type=Ready]
-   - status=True → node OK, compute conditions normally
+   - status=True → node OK
    - status=False → node failing
    - status=Unknown → node unreachable (kubelet not reporting)
+
+3. If Node OK, check Agent Pod:
+   - Get Pod with labels: app=sds-drbd-agent, spec.nodeName=rvr.spec.nodeName
+   - If Pod not found: reason = AgentNotReady
+   - If Pod.status.phase != Running: reason = AgentNotReady
+   - If Pod.status.conditions[type=Ready].status != True: reason = AgentNotReady
 
 If Node NotReady (False or Unknown):
    RVR.InQuorum     = Unknown, reason = NodeNotReady
@@ -628,13 +855,36 @@ If Node NotReady (False or Unknown):
    RVR.Configured   = Unknown, reason = NodeNotReady
    RVR.Online       = False,   reason = NodeNotReady
    RVR.IOReady      = False,   reason = NodeNotReady
+   RVR.DRBDIOReady  = False,   reason = NodeNotReady
+
+If Agent NotReady (Node OK, but Agent not running):
+   RVR.InQuorum     = Unknown, reason = AgentNotReady
+   RVR.InSync       = Unknown, reason = AgentNotReady
+   RVR.Configured   = Unknown, reason = AgentNotReady
+   RVR.Online       = False,   reason = AgentNotReady
+   RVR.IOReady      = False,   reason = AgentNotReady
+   RVR.DRBDIOReady  = False,   reason = AgentNotReady
 ```
 
+**Сценарии Agent NotReady:**
+- Agent pod CrashLoopBackOff (ошибка в коде или конфигурации)
+- Agent pod OOMKilled (недостаточно памяти)
+- Agent pod Evicted (node resource pressure)
+- Agent pod Pending (не может быть scheduled)
+- Agent pod Terminating (rolling update или удаление)
+
 **Время обнаружения:**
-- ~40s через kubelet heartbeat timeout (по умолчанию)
-- Быстрее через DRBD: если нода падает, DRBD агент на других нодах обнаружит потерю connection 
-  и обновит свой `rvr.status.drbd.status.connections[]`. Это изменение триггерит reconcile 
-  для status-conditions-controller, который увидит потерю кворума раньше, чем Node станет NotReady.
+
+| Метод | Что обнаруживает | Скорость |
+|-------|------------------|----------|
+| Node.Ready watch | Node failure | ~40s (kubelet heartbeat timeout) |
+| Agent Pod watch | Agent crash/OOM/evict | ~секунды |
+| DRBD connections | Network partition, node failure | ~секунды |
+
+**Примечание о DRBD:**
+Если нода падает, DRBD агент на других нодах обнаружит потерю connection 
+и обновит свой `rvr.status.drbd.status.connections[]`. Это изменение триггерит reconcile 
+для status-conditions-controller, который увидит потерю кворума раньше, чем Node станет NotReady.
 
 ## Node to RV Mapper
 
@@ -741,7 +991,8 @@ func nodeToRVMapper(ctx context.Context, node client.Object) []reconcile.Request
 | `InSync` | set | diskState == UpToDate → True |
 | `Configured` | compute | actual.* == config.* && no errors → True |
 | `Online` | compute | Scheduled ∧ Initialized ∧ InQuorum → True |
-| `IOReady` | compute | Online ∧ InSync → True |
+| `IOReady` | compute | Online ∧ InSync → True (strict: requires UpToDate) |
+| `DRBDIOReady` | compute | Online ∧ InQuorum ∧ ¬suspended ∧ validDiskState → True |
 | `FullyConnected` | set (future) | all connections established → True |
 
 #### RV Conditions
