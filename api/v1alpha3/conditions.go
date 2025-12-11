@@ -139,7 +139,9 @@ const (
 
 // Replica type values for [ReplicatedVolumeReplica] spec
 const (
-	ReplicaTypeDiskful = "Diskful"
+	ReplicaTypeDiskful    = "Diskful"
+	ReplicaTypeAccess     = "Access"
+	ReplicaTypeTieBreaker = "TieBreaker"
 )
 
 // Condition reasons for [ConditionTypeAddressConfigured] condition

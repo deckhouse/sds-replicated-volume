@@ -78,8 +78,12 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// validate local access constraints for volumeAccess=Local; may set PublishSucceeded=False and stop
-	if err := r.checkIfLocalAccessHasEnoughDiskfulReplicas(ctx, rv, rsc, replicasForRV, log); err != nil {
+	finish, err := r.checkIfLocalAccessHasEnoughDiskfulReplicas(ctx, rv, rsc, replicasForRV, log)
+	if err != nil {
 		return reconcile.Result{}, err
+	}
+	if finish {
+		return reconcile.Result{}, nil
 	}
 
 	// sync rv.status.drbd.config.allowTwoPrimaries and, when needed, wait until it is actually applied on replicas
@@ -110,7 +114,7 @@ func (r *Reconciler) loadPublishContext(
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
 		log.Error(err, "unable to get ReplicatedStorageClass")
-		return nil, nil, client.IgnoreNotFound(err)
+		return nil, nil, err
 	}
 
 	// list all ReplicatedVolumeReplica objects and filter those that belong to this RV
@@ -140,10 +144,10 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
-) error {
+) (bool, error) {
 	// this validation is relevant only when volumeAccess is Local
 	if rsc.Spec.VolumeAccess != "Local" {
-		return nil
+		return false, nil
 	}
 
 	// map replicas by NodeName for efficient lookup
@@ -170,15 +174,15 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 
 			if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
-				return err
+				return true, err
 			}
 
 			// stop reconciliation after setting the failure condition
-			return nil
+			return true, nil
 		}
 	}
 
-	return nil
+	return false, nil
 }
 
 // syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
@@ -281,6 +285,12 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 
 		if shouldBePrimary && patchedRVR.Spec.Type == "TieBreaker" {
 			patchedRVR.Spec.Type = "Access"
+			if err := r.cl.Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
+				if !apierrors.IsNotFound(err) {
+					log.Error(err, "unable to patch ReplicatedVolumeReplica type to Access")
+					return err
+				}
+			}
 		}
 		if patchedRVR.Status == nil {
 			patchedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
@@ -300,7 +310,7 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 			patchedRVR.Status.DRBD.Config.Primary = &shouldBePrimary
 		}
 
-		if err := r.cl.Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
+		if err := r.cl.Status().Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
 			if !apierrors.IsNotFound(err) {
 				log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
 				return err
