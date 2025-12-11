@@ -51,11 +51,13 @@ type ActionParams map[string]any
 // ActionStarted logs the start of an action
 func (l *Logger) ActionStarted(action string, params ActionParams) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
 		slog.String("action", action),
 		slog.String("phase", "started"),
 		slog.Time("timestamp", time.Now()),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 
 	for k, v := range params {
@@ -68,13 +70,15 @@ func (l *Logger) ActionStarted(action string, params ActionParams) {
 // ActionCompleted logs the completion of an action
 func (l *Logger) ActionCompleted(action string, params ActionParams, result string, duration time.Duration) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
 		slog.String("action", action),
 		slog.String("phase", "completed"),
 		slog.String("result", result),
 		slog.Duration("duration", duration),
 		slog.Time("timestamp", time.Now()),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 
 	for k, v := range params {
@@ -87,13 +91,15 @@ func (l *Logger) ActionCompleted(action string, params ActionParams, result stri
 // ActionFailed logs the failure of an action
 func (l *Logger) ActionFailed(action string, params ActionParams, err error, duration time.Duration) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
 		slog.String("action", action),
 		slog.String("phase", "failed"),
 		slog.String("error", err.Error()),
 		slog.Duration("duration", duration),
 		slog.Time("timestamp", time.Now()),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 
 	for k, v := range params {
@@ -106,11 +112,13 @@ func (l *Logger) ActionFailed(action string, params ActionParams, err error, dur
 // StateChanged logs a state change observation (for watchers)
 func (l *Logger) StateChanged(expectedState, observedState string, details ActionParams) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
 		slog.String("expected_state", expectedState),
 		slog.String("observed_state", observedState),
 		slog.Time("timestamp", time.Now()),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 
 	for k, v := range details {
@@ -123,8 +131,10 @@ func (l *Logger) StateChanged(expectedState, observedState string, details Actio
 // Info logs an informational message
 func (l *Logger) Info(msg string, args ...any) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 	attrs = append(attrs, args...)
 	l.log.Info(msg, attrs...)
@@ -133,9 +143,11 @@ func (l *Logger) Info(msg string, args ...any) {
 // Error logs an error message
 func (l *Logger) Error(msg string, err error, args ...any) {
 	attrs := []any{
-		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
 		slog.String("error", err.Error()),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
 	}
 	attrs = append(attrs, args...)
 	l.log.Error(msg, attrs...)
