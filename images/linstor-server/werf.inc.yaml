@@ -212,8 +212,6 @@ shell:
     - |
       if ls /patches/*.patch 1> /dev/null 2>&1; then
         git apply /patches/*.patch
-        go mod tidy
-        git commit -am "Auto-commit patched files"
       fi
     - make
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
