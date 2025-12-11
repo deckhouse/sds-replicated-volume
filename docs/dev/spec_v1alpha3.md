@@ -46,7 +46,6 @@
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
-    - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
@@ -62,15 +61,6 @@
   - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
   - [`rv-gc-controller`](#rv-gc-controller)
   - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
-- [Сценарии](#сценарии)
-  - [Отказоустойчивость](#отказоустойчивость)
-    - [Arrange](#arrange)
-    - [Act](#act)
-    - [Assert](#assert)
-  - [Нагрузочный](#нагрузочный)
-    - [Arrange](#arrange-1)
-    - [Act](#act-1)
-    - [Assert](#assert-1)
 
 # Основные положения
 
@@ -115,8 +105,6 @@
 
 TB в любой ситуации поддерживает нечетное, и сама может превратится в AP. Превращение происходит с помощью удаления.
 
-TODO
-
 ## Константы
 Константы - это значения, которые должны быть определены в коде во время компиляции программы.
 
@@ -154,10 +142,8 @@ TODO
 - `rvr`
   - `sds-replicated-volume.storage.deckhouse.io/controller`
   - `sds-replicated-volume.storage.deckhouse.io/agent`
-  - `sds-replicated-volume.storage.deckhouse.io/peers` TODO
-  - `sds-replicated-volume.storage.deckhouse.io/quorum` TODO
 - `llv`
-  - `sds-replicated-volume.storage.deckhouse.io/controller` TODO
+  - `sds-replicated-volume.storage.deckhouse.io/controller`
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -913,16 +899,4 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 ## `rv-gc-controller`
 
 ## `tie-breaker-removal-controller`
-
-# Сценарии
-
-## Отказоустойчивость
-### Arrange
-### Act
-### Assert
-
-## Нагрузочный
-### Arrange
-### Act
-### Assert
 
