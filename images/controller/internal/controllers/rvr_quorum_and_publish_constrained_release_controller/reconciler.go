@@ -19,6 +19,7 @@ package rvrqnpccontroller
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,6 +32,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
+
+const requeueAfterSec = 10
 
 type Reconciler struct {
 	cl     client.Client
@@ -71,18 +74,24 @@ func (r *Reconciler) Reconcile(
 	}
 
 	if !isThisReplicaCountEnoughForQuorum(rv, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied")
-		return reconcile.Result{}, nil
+		log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+		return reconcile.Result{
+			RequeueAfter: requeueAfterSec * time.Second,
+		}, nil
 	}
 
 	if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: replication condition is not satisfied")
-		return reconcile.Result{}, nil
+		log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+		return reconcile.Result{
+			RequeueAfter: requeueAfterSec * time.Second,
+		}, nil
 	}
 
 	if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
-		log.Info("cluster is not ready for RVR GC: deleting replica is published")
-		return reconcile.Result{}, nil
+		log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
+		return reconcile.Result{
+			RequeueAfter: requeueAfterSec * time.Second,
+		}, nil
 	}
 
 	if err := r.removeControllerFinalizer(ctx, rvr, log); err != nil {
@@ -94,19 +103,19 @@ func (r *Reconciler) Reconcile(
 
 func (r *Reconciler) loadGCContext(
 	ctx context.Context,
-	rvrName string,
+	rvName string,
 	log logr.Logger,
 ) (*v1alpha3.ReplicatedVolume, *v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, error) {
 	rv := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvrName}, rv); err != nil {
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv); err != nil {
 		log.Error(err, "Can't get ReplicatedVolume")
-		return nil, nil, nil, client.IgnoreNotFound(err)
+		return nil, nil, nil, err
 	}
 
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
 		log.Error(err, "Can't get ReplicatedStorageClass")
-		return nil, nil, nil, client.IgnoreNotFound(err)
+		return nil, nil, nil, err
 	}
 
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
@@ -201,7 +210,11 @@ func hasEnoughDiskfulReplicasForReplication(
 		if rvr.Status == nil {
 			continue
 		}
-		if rvr.Status.ActualType != "Diskful" {
+		if rvr.Status.ActualType != v1alpha3.ReplicaTypeDiskful {
+			continue
+		}
+
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, "Ready") {
 			continue
 		}
 
