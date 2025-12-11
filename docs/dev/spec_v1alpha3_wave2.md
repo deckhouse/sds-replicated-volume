@@ -302,10 +302,6 @@ Cм. существующую реализацию `drbdadm resize`.
 ### Вывод 
  - `llv.metada.ownerReference`
 
-
-
-
-
 ## `rv-status-conditions-controller`
 ### Цель
 ### Вывод
