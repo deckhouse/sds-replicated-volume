@@ -86,7 +86,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get all RVRs for this RV
+	// Get all RVRs
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
@@ -120,7 +120,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		switch rvr.Spec.Type {
 		case v1alpha3.ReplicaTypeDiskful, v1alpha3.ReplicaTypeTieBreaker:
 			// Both Diskful and TieBreaker mean node has "presence" in DRBD cluster.
-			// Pod can access data from these nodes directly - no Access RVR needed.
 			nodesWithDiskfulOrTieBreaker[nodeName] = struct{}{}
 		case v1alpha3.ReplicaTypeAccess:
 			// Only track non-deleting Access RVRs to avoid recreating during deletion
