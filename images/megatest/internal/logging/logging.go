@@ -33,7 +33,7 @@ type Logger struct {
 // NewLogger creates a new Logger with the given RV name and goroutine type
 func NewLogger(rvName, goroutine string) *Logger {
 	return &Logger{
-		log:       slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		log:       slog.Default(),
 		rvName:    rvName,
 		goroutine: goroutine,
 	}

@@ -68,17 +68,14 @@ func (m *MultiVolume) Name() string {
 
 // Run starts the multivolume orchestration until context is cancelled
 func (m *MultiVolume) Run(ctx context.Context) error {
-	m.log.Info("starting multivolume orchestrator",
-		"storage_classes", m.cfg.StorageClasses,
-		"max_volumes", m.cfg.MaxVolumes,
-	)
-	defer m.log.Info("multivolume orchestrator finished")
+	m.log.Debug("multivolume orchestrator started")
+	defer m.log.Debug("multivolume orchestrator finished")
 
 	// Start pod destroyers (if enabled)
 	if !m.cfg.DisablePodDestroyer {
 		m.startPodDestroyers(ctx)
 	} else {
-		m.log.Info("pod-destroyer goroutines are disabled")
+		m.log.Debug("pod-destroyer goroutines are disabled")
 	}
 
 	// Main volume creation loop
