@@ -200,6 +200,7 @@ git:
         - "**/*"
 shell:
   setup:
+    - apk add --no-cache git make
     - cd /usr/local/go/k8s-await-election
     - make
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
