@@ -128,6 +128,18 @@ func (l *Logger) StateChanged(expectedState, observedState string, details Actio
 	l.log.Warn("state_changed", attrs...)
 }
 
+// Debug logs a debug message
+func (l *Logger) Debug(msg string, args ...any) {
+	attrs := []any{
+		slog.String("goroutine", l.goroutine),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
+	}
+	attrs = append(attrs, args...)
+	l.log.Debug(msg, attrs...)
+}
+
 // Info logs an informational message
 func (l *Logger) Info(msg string, args ...any) {
 	attrs := []any{
@@ -138,6 +150,18 @@ func (l *Logger) Info(msg string, args ...any) {
 	}
 	attrs = append(attrs, args...)
 	l.log.Info(msg, attrs...)
+}
+
+// Warn logs a warning message
+func (l *Logger) Warn(msg string, args ...any) {
+	attrs := []any{
+		slog.String("goroutine", l.goroutine),
+	}
+	if l.rvName != "" {
+		attrs = append(attrs, slog.String("rv", l.rvName))
+	}
+	attrs = append(attrs, args...)
+	l.log.Warn(msg, attrs...)
 }
 
 // Error logs an error message
