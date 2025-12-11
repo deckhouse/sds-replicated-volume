@@ -68,8 +68,8 @@ func (m *MultiVolume) Name() string {
 
 // Run starts the multivolume orchestration until context is cancelled
 func (m *MultiVolume) Run(ctx context.Context) error {
-	m.log.Debug("multivolume orchestrator started")
-	defer m.log.Debug("multivolume orchestrator finished")
+	m.log.Info("multivolume orchestrator started")
+	defer m.log.Info("multivolume orchestrator finished")
 
 	// Start pod destroyers (if enabled)
 	if !m.cfg.DisablePodDestroyer {
@@ -152,7 +152,7 @@ func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
 func (m *MultiVolume) startPodDestroyer(ctx context.Context, cfg config.PodDestroyerConfig, name string) {
 	destroyer, err := NewPodDestroyer(cfg, m.client)
 	if err != nil {
-		m.log.Error("failed to create pod destroyer", err, "name", name)
+		m.log.Error("failed to create pod-destroyer", err, "pod-destroyer_name", name)
 		return
 	}
 
@@ -161,11 +161,11 @@ func (m *MultiVolume) startPodDestroyer(ctx context.Context, cfg config.PodDestr
 
 	go func() {
 		if err := destroyer.Run(destroyerCtx); err != nil {
-			m.log.Error("pod destroyer error", err, "name", name)
+			m.log.Error("pod-destroyer error", err, "pod-destroyer_name", name)
 		}
 	}()
 
-	m.log.Info("started pod destroyer", "name", name, "namespace", cfg.Namespace, "selector", cfg.LabelSelector)
+	m.log.Info("started pod-destroyer", "pod-destroyer_name", name, "namespace", cfg.Namespace, "selector", cfg.LabelSelector)
 }
 
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName, storageClass string, lifetime time.Duration) {
