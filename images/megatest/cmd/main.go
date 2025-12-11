@@ -68,7 +68,7 @@ func main() {
 		MaxVolumes:     opt.MaxVolumes,
 		VolumeStep:     config.Count{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
 		StepPeriod:     config.Duration{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
-		VolumePeriod:   config.Duration{Min: opt.VolPeriodMin, Max: opt.VolPeriodMax},
+		VolumePeriod:   config.Duration{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
 	}
 
 	// Generate unique instance ID

@@ -26,16 +26,16 @@ import (
 )
 
 type Opt struct {
-	StorageClasses []string
-	Kubeconfig     string
-	MaxVolumes     int
-	VolumeStepMin  int
-	VolumeStepMax  int
-	StepPeriodMin  time.Duration
-	StepPeriodMax  time.Duration
-	VolPeriodMin   time.Duration
-	VolPeriodMax   time.Duration
-	LogLevel       string
+	StorageClasses  []string
+	Kubeconfig      string
+	MaxVolumes      int
+	VolumeStepMin   int
+	VolumeStepMax   int
+	StepPeriodMin   time.Duration
+	StepPeriodMax   time.Duration
+	VolumePeriodMin time.Duration
+	VolumePeriodMax time.Duration
+	LogLevel        string
 }
 
 func (o *Opt) Parse() {
@@ -65,12 +65,12 @@ func (o *Opt) Parse() {
 				return errors.New("step-period-max must be greater than or equal to step-period-min")
 			}
 
-			if o.VolPeriodMin <= 0 {
-				return errors.New("vol-period-min must be positive")
+			if o.VolumePeriodMin <= 0 {
+				return errors.New("volume-period-min must be positive")
 			}
 
-			if o.VolPeriodMax < o.VolPeriodMin {
-				return errors.New("vol-period-max must be greater than or equal to vol-period-min")
+			if o.VolumePeriodMax < o.VolumePeriodMin {
+				return errors.New("volume-period-max must be greater than or equal to volume-period-min")
 			}
 
 			if o.MaxVolumes < 1 {
@@ -95,8 +95,8 @@ func (o *Opt) Parse() {
 	rootCmd.Flags().IntVarP(&o.VolumeStepMax, "volume-step-max", "", 3, "Maximum number of ReplicatedVolumes to create per step")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMin, "step-period-min", "", 10*time.Second, "Minimum wait between creation steps")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between creation steps")
-	rootCmd.Flags().DurationVarP(&o.VolPeriodMin, "vol-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
-	rootCmd.Flags().DurationVarP(&o.VolPeriodMax, "vol-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
+	rootCmd.Flags().DurationVarP(&o.VolumePeriodMin, "volume-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
+	rootCmd.Flags().DurationVarP(&o.VolumePeriodMax, "volume-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
 	rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
 
 	if err := rootCmd.Execute(); err != nil {
