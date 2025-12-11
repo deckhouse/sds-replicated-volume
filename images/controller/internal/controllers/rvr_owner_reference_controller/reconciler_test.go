@@ -186,7 +186,7 @@ var _ = Describe("Reconciler", func() {
 		When("Patch for ReplicatedVolumeReplica fails", func() {
 			BeforeEach(func() {
 				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
 						return errors.NewInternalError(fmt.Errorf("test error"))
 					},
 				})
@@ -239,7 +239,7 @@ var _ = Describe("Reconciler", func() {
 				}
 
 				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
-					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+					Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
 						return errors.NewInternalError(fmt.Errorf("test error"))
 					},
 				})
