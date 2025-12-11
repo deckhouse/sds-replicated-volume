@@ -198,10 +198,23 @@ git:
     stageDependencies:
       setup:
         - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches-k8s-await-election
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
 shell:
   setup:
     - apk add --no-cache git make
     - cd /usr/local/go/k8s-await-election
+    # apply git patches to upstream's code
+    - |
+      if ls /patches/*.patch 1> /dev/null 2>&1; then
+        git apply /patches/*.patch
+        go mod tidy
+        git commit -am "Auto-commit patched files"
+      fi
     - make
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
