@@ -33,21 +33,19 @@ const (
 
 // VolumeResizer periodically increases the size of a ReplicatedVolume
 type VolumeResizer struct {
-	rvName     string
-	cfg        config.VolumeResizerConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
+	rvName string
+	cfg    config.VolumeResizerConfig
+	client *k8sclient.Client
+	log    *logging.Logger
 }
 
 // NewVolumeResizer creates a new VolumeResizer
-func NewVolumeResizer(rvName string, cfg config.VolumeResizerConfig, client *k8sclient.Client, instanceID string) *VolumeResizer {
+func NewVolumeResizer(rvName string, cfg config.VolumeResizerConfig, client *k8sclient.Client) *VolumeResizer {
 	return &VolumeResizer{
-		rvName:     rvName,
-		cfg:        cfg,
-		client:     client,
-		log:        logging.NewLogger(rvName, "volume-resizer", instanceID),
-		instanceID: instanceID,
+		rvName: rvName,
+		cfg:    cfg,
+		client: client,
+		log:    logging.NewLogger(rvName, "volume-resizer"),
 	}
 }
 
@@ -114,4 +112,3 @@ func (v *VolumeResizer) doResize(ctx context.Context) error {
 	v.log.ActionCompleted("resize", params, "success", time.Since(startTime))
 	return nil
 }
-

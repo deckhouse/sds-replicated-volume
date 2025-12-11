@@ -30,18 +30,16 @@ import (
 
 // PodDestroyer periodically deletes random pods matching a label selector
 type PodDestroyer struct {
-	cfg        config.PodDestroyerConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
-	selector   labels.Selector
+	cfg      config.PodDestroyerConfig
+	client   *k8sclient.Client
+	log      *logging.Logger
+	selector labels.Selector
 }
 
 // NewPodDestroyer creates a new PodDestroyer
 func NewPodDestroyer(
 	cfg config.PodDestroyerConfig,
 	client *k8sclient.Client,
-	instanceID string,
 ) (*PodDestroyer, error) {
 	selector, err := labels.Parse(cfg.LabelSelector)
 	if err != nil {
@@ -49,11 +47,10 @@ func NewPodDestroyer(
 	}
 
 	return &PodDestroyer{
-		cfg:        cfg,
-		client:     client,
-		log:        logging.GlobalLogger("pod-destroyer", instanceID),
-		instanceID: instanceID,
-		selector:   selector,
+		cfg:      cfg,
+		client:   client,
+		log:      logging.GlobalLogger("pod-destroyer"),
+		selector: selector,
 	}, nil
 }
 
@@ -133,4 +130,3 @@ func (p *PodDestroyer) doDestroy(ctx context.Context) error {
 
 	return nil
 }
-

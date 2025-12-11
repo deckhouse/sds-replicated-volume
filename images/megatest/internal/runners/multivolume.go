@@ -34,10 +34,9 @@ import (
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
 type MultiVolume struct {
-	cfg        config.MultiVolumeConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
+	cfg    config.MultiVolumeConfig
+	client *k8sclient.Client
+	log    *logging.Logger
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
@@ -53,13 +52,11 @@ type MultiVolume struct {
 func NewMultiVolume(
 	cfg config.MultiVolumeConfig,
 	client *k8sclient.Client,
-	instanceID string,
 ) *MultiVolume {
 	return &MultiVolume{
 		cfg:            cfg,
 		client:         client,
-		log:            logging.GlobalLogger("multivolume", instanceID),
-		instanceID:     instanceID,
+		log:            logging.GlobalLogger("multivolume"),
 		volumesCancels: make(map[string]context.CancelFunc),
 	}
 }
@@ -156,7 +153,7 @@ func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
 }
 
 func (m *MultiVolume) startPodDestroyer(ctx context.Context, cfg config.PodDestroyerConfig, name string) {
-	destroyer, err := NewPodDestroyer(cfg, m.client, m.instanceID+"-"+name)
+	destroyer, err := NewPodDestroyer(cfg, m.client)
 	if err != nil {
 		m.log.Error("failed to create pod destroyer", err, "name", name)
 		return
@@ -187,7 +184,7 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName, storageClass 
 		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
 	}
 
-	volumeMain := NewVolumeMain(rvName, cfg, m.client, m.instanceID+"-"+rvName)
+	volumeMain := NewVolumeMain(rvName, cfg, m.client)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
 	m.volumesCancels[rvName] = cancel

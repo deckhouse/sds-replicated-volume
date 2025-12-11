@@ -25,19 +25,17 @@ import (
 
 // Logger provides structured logging for megatest goroutines
 type Logger struct {
-	log        *slog.Logger
-	rvName     string
-	goroutine  string
-	instanceID string
+	log       *slog.Logger
+	rvName    string
+	goroutine string
 }
 
 // NewLogger creates a new Logger with the given RV name and goroutine type
-func NewLogger(rvName, goroutine, instanceID string) *Logger {
+func NewLogger(rvName, goroutine string) *Logger {
 	return &Logger{
-		log:        slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})),
-		rvName:     rvName,
-		goroutine:  goroutine,
-		instanceID: instanceID,
+		log:       slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})),
+		rvName:    rvName,
+		goroutine: goroutine,
 	}
 }
 
@@ -55,7 +53,6 @@ func (l *Logger) ActionStarted(action string, params ActionParams) {
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 		slog.String("action", action),
 		slog.String("phase", "started"),
 		slog.Time("timestamp", time.Now()),
@@ -73,7 +70,6 @@ func (l *Logger) ActionCompleted(action string, params ActionParams, result stri
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 		slog.String("action", action),
 		slog.String("phase", "completed"),
 		slog.String("result", result),
@@ -93,7 +89,6 @@ func (l *Logger) ActionFailed(action string, params ActionParams, err error, dur
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 		slog.String("action", action),
 		slog.String("phase", "failed"),
 		slog.String("error", err.Error()),
@@ -113,7 +108,6 @@ func (l *Logger) StateChanged(expectedState, observedState string, details Actio
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 		slog.String("expected_state", expectedState),
 		slog.String("observed_state", observedState),
 		slog.Time("timestamp", time.Now()),
@@ -131,7 +125,6 @@ func (l *Logger) Info(msg string, args ...any) {
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 	}
 	attrs = append(attrs, args...)
 	l.log.Info(msg, attrs...)
@@ -142,7 +135,6 @@ func (l *Logger) Error(msg string, err error, args ...any) {
 	attrs := []any{
 		slog.String("rv", l.rvName),
 		slog.String("goroutine", l.goroutine),
-		slog.String("instance_id", l.instanceID),
 		slog.String("error", err.Error()),
 	}
 	attrs = append(attrs, args...)
@@ -152,26 +144,24 @@ func (l *Logger) Error(msg string, err error, args ...any) {
 // WithRV returns a new Logger for the specified RV name
 func (l *Logger) WithRV(rvName string) *Logger {
 	return &Logger{
-		log:        l.log,
-		rvName:     rvName,
-		goroutine:  l.goroutine,
-		instanceID: l.instanceID,
+		log:       l.log,
+		rvName:    rvName,
+		goroutine: l.goroutine,
 	}
 }
 
 // WithGoroutine returns a new Logger for the specified goroutine type
 func (l *Logger) WithGoroutine(goroutine string) *Logger {
 	return &Logger{
-		log:        l.log,
-		rvName:     l.rvName,
-		goroutine:  goroutine,
-		instanceID: l.instanceID,
+		log:       l.log,
+		rvName:    l.rvName,
+		goroutine: goroutine,
 	}
 }
 
 // GlobalLogger returns a logger without RV context
-func GlobalLogger(goroutine, instanceID string) *Logger {
-	return NewLogger("", goroutine, instanceID)
+func GlobalLogger(goroutine string) *Logger {
+	return NewLogger("", goroutine)
 }
 
 // GenerateInstanceID generates a unique instance ID for a goroutine

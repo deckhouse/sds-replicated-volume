@@ -30,11 +30,10 @@ import (
 // VolumeReplicaDestroyer periodically deletes random replicas from a volume
 // It does NOT wait for deletion to succeed
 type VolumeReplicaDestroyer struct {
-	rvName     string
-	cfg        config.VolumeReplicaDestroyerConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
+	rvName string
+	cfg    config.VolumeReplicaDestroyerConfig
+	client *k8sclient.Client
+	log    *logging.Logger
 }
 
 // NewVolumeReplicaDestroyer creates a new VolumeReplicaDestroyer
@@ -42,14 +41,12 @@ func NewVolumeReplicaDestroyer(
 	rvName string,
 	cfg config.VolumeReplicaDestroyerConfig,
 	client *k8sclient.Client,
-	instanceID string,
 ) *VolumeReplicaDestroyer {
 	return &VolumeReplicaDestroyer{
-		rvName:     rvName,
-		cfg:        cfg,
-		client:     client,
-		log:        logging.NewLogger(rvName, "volume-replica-destroyer", instanceID),
-		instanceID: instanceID,
+		rvName: rvName,
+		cfg:    cfg,
+		client: client,
+		log:    logging.NewLogger(rvName, "volume-replica-destroyer"),
 	}
 }
 

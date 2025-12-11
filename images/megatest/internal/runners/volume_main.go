@@ -45,7 +45,6 @@ type VolumeMain struct {
 	initialSize    resource.Quantity
 	client         *k8sclient.Client
 	log            *logging.Logger
-	instanceID     string
 
 	// Disable flags for sub-runners
 	disableVolumeResizer          bool
@@ -69,7 +68,6 @@ func NewVolumeMain(
 	rvName string,
 	cfg config.VolumeMainConfig,
 	client *k8sclient.Client,
-	instanceID string,
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -77,8 +75,7 @@ func NewVolumeMain(
 		lifetimePeriod:                cfg.LifetimePeriod,
 		initialSize:                   cfg.InitialSize,
 		client:                        client,
-		log:                           logging.NewLogger(rvName, "volume-main", instanceID),
-		instanceID:                    instanceID,
+		log:                           logging.NewLogger(rvName, "volume-main"),
 		disableVolumeResizer:          cfg.DisableVolumeResizer,
 		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
 		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
@@ -230,8 +227,8 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 
 	// Create runners
 	v.publishers = []*VolumePublisher{
-		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, v.instanceID+"-pub1"),
-		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, v.instanceID+"-pub2"),
+		NewVolumePublisher(v.rvName, publisher1Cfg, v.client),
+		NewVolumePublisher(v.rvName, publisher2Cfg, v.client),
 	}
 
 	// Start all runners
@@ -248,7 +245,7 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	// Start resizer (if enabled)
 	if !v.disableVolumeResizer {
 		resizerCfg := config.DefaultVolumeResizerConfig()
-		v.resizer = NewVolumeResizer(v.rvName, resizerCfg, v.client, v.instanceID+"-resizer")
+		v.resizer = NewVolumeResizer(v.rvName, resizerCfg, v.client)
 		resizerCtx, resizerCancel := context.WithCancel(ctx)
 		v.subRunnersCancel = append(v.subRunnersCancel, resizerCancel)
 		go func() {
@@ -263,7 +260,7 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	// Start replica destroyer (if enabled)
 	if !v.disableVolumeReplicaDestroyer {
 		replicaDestroyerCfg := config.DefaultVolumeReplicaDestroyerConfig()
-		v.replicaDestroyer = NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, v.instanceID+"-destroyer")
+		v.replicaDestroyer = NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client)
 		destroyerCtx, destroyerCancel := context.WithCancel(ctx)
 		v.subRunnersCancel = append(v.subRunnersCancel, destroyerCancel)
 		go func() {
@@ -278,7 +275,7 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	// Start replica creator (if enabled)
 	if !v.disableVolumeReplicaCreator {
 		replicaCreatorCfg := config.DefaultVolumeReplicaCreatorConfig()
-		v.replicaCreator = NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, v.instanceID+"-creator")
+		v.replicaCreator = NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client)
 		creatorCtx, creatorCancel := context.WithCancel(ctx)
 		v.subRunnersCancel = append(v.subRunnersCancel, creatorCancel)
 		go func() {
@@ -295,7 +292,7 @@ func (v *VolumeMain) startChecker(ctx context.Context) {
 	v.subRunnersMu.Lock()
 	defer v.subRunnersMu.Unlock()
 
-	v.checker = NewVolumeChecker(v.rvName, v.client, v.instanceID+"-checker")
+	v.checker = NewVolumeChecker(v.rvName, v.client)
 	checkerCtx, checkerCancel := context.WithCancel(ctx)
 	v.subRunnersCancel = append(v.subRunnersCancel, checkerCancel)
 	go func() {

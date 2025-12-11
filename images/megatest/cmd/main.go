@@ -29,7 +29,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/logging"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/runners"
-	"github.com/google/uuid"
 )
 
 func main() {
@@ -75,11 +74,8 @@ func main() {
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
 
-	// Generate unique instance ID
-	instanceID := uuid.New().String()[:8]
-
 	// Create multivolume orchestrator
-	multiVolume := runners.NewMultiVolume(cfg, client, instanceID)
+	multiVolume := runners.NewMultiVolume(cfg, client)
 
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,7 +107,6 @@ func main() {
 
 	// Run
 	logParams := []any{
-		"instance_id", instanceID,
 		"storage_classes", opt.StorageClasses,
 		"max_volumes", opt.MaxVolumes,
 	}

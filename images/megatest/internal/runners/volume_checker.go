@@ -35,10 +35,9 @@ const (
 // VolumeChecker watches a ReplicatedVolume and logs state changes
 // It monitors that the RV remains Ready and has Quorum
 type VolumeChecker struct {
-	rvName     string
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
+	rvName string
+	client *k8sclient.Client
+	log    *logging.Logger
 
 	// Last observed state
 	lastReady  metav1.ConditionStatus
@@ -46,12 +45,11 @@ type VolumeChecker struct {
 }
 
 // NewVolumeChecker creates a new VolumeChecker for the given RV
-func NewVolumeChecker(rvName string, client *k8sclient.Client, instanceID string) *VolumeChecker {
+func NewVolumeChecker(rvName string, client *k8sclient.Client) *VolumeChecker {
 	return &VolumeChecker{
 		rvName:     rvName,
 		client:     client,
-		log:        logging.NewLogger(rvName, "volume-checker", instanceID),
-		instanceID: instanceID,
+		log:        logging.NewLogger(rvName, "volume-checker"),
 		lastReady:  metav1.ConditionUnknown,
 		lastQuorum: false,
 	}

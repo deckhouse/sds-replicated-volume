@@ -46,12 +46,11 @@ const (
 // VolumeReplicaCreator periodically creates new Access or TieBreaker replicas
 // It does NOT wait for creation to succeed
 type VolumeReplicaCreator struct {
-	rvName     string
-	cfg        config.VolumeReplicaCreatorConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
-	scheme     *runtime.Scheme
+	rvName string
+	cfg    config.VolumeReplicaCreatorConfig
+	client *k8sclient.Client
+	log    *logging.Logger
+	scheme *runtime.Scheme
 }
 
 // NewVolumeReplicaCreator creates a new VolumeReplicaCreator
@@ -59,18 +58,16 @@ func NewVolumeReplicaCreator(
 	rvName string,
 	cfg config.VolumeReplicaCreatorConfig,
 	client *k8sclient.Client,
-	instanceID string,
 ) *VolumeReplicaCreator {
 	scheme := runtime.NewScheme()
 	_ = v1alpha3.AddToScheme(scheme)
 
 	return &VolumeReplicaCreator{
-		rvName:     rvName,
-		cfg:        cfg,
-		client:     client,
-		log:        logging.NewLogger(rvName, "volume-replica-creator", instanceID),
-		instanceID: instanceID,
-		scheme:     scheme,
+		rvName: rvName,
+		cfg:    cfg,
+		client: client,
+		log:    logging.NewLogger(rvName, "volume-replica-creator"),
+		scheme: scheme,
 	}
 }
 

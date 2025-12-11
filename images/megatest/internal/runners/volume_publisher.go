@@ -32,24 +32,22 @@ const (
 
 // VolumePublisher periodically publishes and unpublishes a volume to random nodes
 type VolumePublisher struct {
-	rvName     string
-	cfg        config.VolumePublisherConfig
-	client     *k8sclient.Client
-	log        *logging.Logger
-	instanceID string
+	rvName string
+	cfg    config.VolumePublisherConfig
+	client *k8sclient.Client
+	log    *logging.Logger
 
 	// Track current published node for this publisher
 	currentNode string
 }
 
 // NewVolumePublisher creates a new VolumePublisher
-func NewVolumePublisher(rvName string, cfg config.VolumePublisherConfig, client *k8sclient.Client, instanceID string) *VolumePublisher {
+func NewVolumePublisher(rvName string, cfg config.VolumePublisherConfig, client *k8sclient.Client) *VolumePublisher {
 	return &VolumePublisher{
-		rvName:     rvName,
-		cfg:        cfg,
-		client:     client,
-		log:        logging.NewLogger(rvName, "volume-publisher", instanceID),
-		instanceID: instanceID,
+		rvName: rvName,
+		cfg:    cfg,
+		client: client,
+		log:    logging.NewLogger(rvName, "volume-publisher"),
 	}
 }
 
