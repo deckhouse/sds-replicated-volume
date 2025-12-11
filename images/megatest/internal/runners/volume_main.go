@@ -47,6 +47,11 @@ type VolumeMain struct {
 	log            *logging.Logger
 	instanceID     string
 
+	// Disable flags for sub-runners
+	disableVolumeResizer          bool
+	disableVolumeReplicaDestroyer bool
+	disableVolumeReplicaCreator   bool
+
 	// Sub-runners
 	checker          *VolumeChecker
 	publishers       []*VolumePublisher
@@ -67,13 +72,16 @@ func NewVolumeMain(
 	instanceID string,
 ) *VolumeMain {
 	return &VolumeMain{
-		rvName:         rvName,
-		storageClass:   cfg.StorageClassName,
-		lifetimePeriod: cfg.LifetimePeriod,
-		initialSize:    cfg.InitialSize,
-		client:         client,
-		log:            logging.NewLogger(rvName, "volume-main", instanceID),
-		instanceID:     instanceID,
+		rvName:                        rvName,
+		storageClass:                  cfg.StorageClassName,
+		lifetimePeriod:                cfg.LifetimePeriod,
+		initialSize:                   cfg.InitialSize,
+		client:                        client,
+		log:                           logging.NewLogger(rvName, "volume-main", instanceID),
+		instanceID:                    instanceID,
+		disableVolumeResizer:          cfg.DisableVolumeResizer,
+		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
+		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
 	}
 }
 
@@ -220,23 +228,11 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	publisher1Cfg := config.DefaultVolumePublisherConfig(30*time.Second, 60*time.Second)
 	publisher2Cfg := config.DefaultVolumePublisherConfig(100*time.Second, 200*time.Second)
 
-	// Create resizer config
-	resizerCfg := config.DefaultVolumeResizerConfig()
-
-	// Create replica destroyer config
-	replicaDestroyerCfg := config.DefaultVolumeReplicaDestroyerConfig()
-
-	// Create replica creator config
-	replicaCreatorCfg := config.DefaultVolumeReplicaCreatorConfig()
-
 	// Create runners
 	v.publishers = []*VolumePublisher{
 		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, v.instanceID+"-pub1"),
 		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, v.instanceID+"-pub2"),
 	}
-	v.resizer = NewVolumeResizer(v.rvName, resizerCfg, v.client, v.instanceID+"-resizer")
-	v.replicaDestroyer = NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, v.instanceID+"-destroyer")
-	v.replicaCreator = NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, v.instanceID+"-creator")
 
 	// Start all runners
 	for _, pub := range v.publishers {
@@ -249,32 +245,50 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		}(pub)
 	}
 
-	// Start resizer
-	resizerCtx, resizerCancel := context.WithCancel(ctx)
-	v.subRunnersCancel = append(v.subRunnersCancel, resizerCancel)
-	go func() {
-		if err := v.resizer.Run(resizerCtx); err != nil {
-			v.log.Error("resizer error", err)
-		}
-	}()
+	// Start resizer (if enabled)
+	if !v.disableVolumeResizer {
+		resizerCfg := config.DefaultVolumeResizerConfig()
+		v.resizer = NewVolumeResizer(v.rvName, resizerCfg, v.client, v.instanceID+"-resizer")
+		resizerCtx, resizerCancel := context.WithCancel(ctx)
+		v.subRunnersCancel = append(v.subRunnersCancel, resizerCancel)
+		go func() {
+			if err := v.resizer.Run(resizerCtx); err != nil {
+				v.log.Error("resizer error", err)
+			}
+		}()
+	} else {
+		v.log.Info("volume-resizer goroutine is disabled")
+	}
 
-	// Start replica destroyer
-	destroyerCtx, destroyerCancel := context.WithCancel(ctx)
-	v.subRunnersCancel = append(v.subRunnersCancel, destroyerCancel)
-	go func() {
-		if err := v.replicaDestroyer.Run(destroyerCtx); err != nil {
-			v.log.Error("replica destroyer error", err)
-		}
-	}()
+	// Start replica destroyer (if enabled)
+	if !v.disableVolumeReplicaDestroyer {
+		replicaDestroyerCfg := config.DefaultVolumeReplicaDestroyerConfig()
+		v.replicaDestroyer = NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, v.instanceID+"-destroyer")
+		destroyerCtx, destroyerCancel := context.WithCancel(ctx)
+		v.subRunnersCancel = append(v.subRunnersCancel, destroyerCancel)
+		go func() {
+			if err := v.replicaDestroyer.Run(destroyerCtx); err != nil {
+				v.log.Error("replica destroyer error", err)
+			}
+		}()
+	} else {
+		v.log.Info("volume-replica-destroyer goroutine is disabled")
+	}
 
-	// Start replica creator
-	creatorCtx, creatorCancel := context.WithCancel(ctx)
-	v.subRunnersCancel = append(v.subRunnersCancel, creatorCancel)
-	go func() {
-		if err := v.replicaCreator.Run(creatorCtx); err != nil {
-			v.log.Error("replica creator error", err)
-		}
-	}()
+	// Start replica creator (if enabled)
+	if !v.disableVolumeReplicaCreator {
+		replicaCreatorCfg := config.DefaultVolumeReplicaCreatorConfig()
+		v.replicaCreator = NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, v.instanceID+"-creator")
+		creatorCtx, creatorCancel := context.WithCancel(ctx)
+		v.subRunnersCancel = append(v.subRunnersCancel, creatorCancel)
+		go func() {
+			if err := v.replicaCreator.Run(creatorCtx); err != nil {
+				v.log.Error("replica creator error", err)
+			}
+		}()
+	} else {
+		v.log.Info("volume-replica-creator goroutine is disabled")
+	}
 }
 
 func (v *VolumeMain) startChecker(ctx context.Context) {

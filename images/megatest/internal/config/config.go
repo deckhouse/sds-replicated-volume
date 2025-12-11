@@ -63,9 +63,12 @@ type VolumeReplicaCreatorConfig struct {
 
 // VolumeMainConfig configures the volume-main goroutine
 type VolumeMainConfig struct {
-	StorageClassName string
-	LifetimePeriod   time.Duration
-	InitialSize      resource.Quantity
+	StorageClassName              string
+	LifetimePeriod                time.Duration
+	InitialSize                   resource.Quantity
+	DisableVolumeResizer          bool
+	DisableVolumeReplicaDestroyer bool
+	DisableVolumeReplicaCreator   bool
 }
 
 // PodDestroyerConfig configures the pod-destroyer goroutine
@@ -78,11 +81,15 @@ type PodDestroyerConfig struct {
 
 // MultiVolumeConfig configures the multivolume orchestrator
 type MultiVolumeConfig struct {
-	StorageClasses []string
-	MaxVolumes     int
-	VolumeStep     Count
-	StepPeriod     Duration
-	VolumePeriod   Duration
+	StorageClasses                []string
+	MaxVolumes                    int
+	VolumeStep                    Count
+	StepPeriod                    Duration
+	VolumePeriod                  Duration
+	DisablePodDestroyer           bool
+	DisableVolumeResizer          bool
+	DisableVolumeReplicaDestroyer bool
+	DisableVolumeReplicaCreator   bool
 }
 
 // DefaultVolumePublisherConfig returns default configuration for volume-publisher

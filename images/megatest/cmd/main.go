@@ -64,11 +64,15 @@ func main() {
 
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
-		StorageClasses: opt.StorageClasses,
-		MaxVolumes:     opt.MaxVolumes,
-		VolumeStep:     config.Count{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
-		StepPeriod:     config.Duration{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
-		VolumePeriod:   config.Duration{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		StorageClasses:                opt.StorageClasses,
+		MaxVolumes:                    opt.MaxVolumes,
+		VolumeStep:                    config.Count{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
+		StepPeriod:                    config.Duration{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
+		VolumePeriod:                  config.Duration{Min: opt.VolumePeriodMin, Max: opt.VolumePeriodMax},
+		DisablePodDestroyer:           opt.DisablePodDestroyer,
+		DisableVolumeResizer:          opt.DisableVolumeResizer,
+		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
+		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
 
 	// Generate unique instance ID
@@ -90,12 +94,31 @@ func main() {
 		cancel()
 	}()
 
+	// Build list of disabled goroutines for logging
+	var disabledGoroutines []string
+	if opt.DisablePodDestroyer {
+		disabledGoroutines = append(disabledGoroutines, "pod-destroyer")
+	}
+	if opt.DisableVolumeResizer {
+		disabledGoroutines = append(disabledGoroutines, "volume-resizer")
+	}
+	if opt.DisableVolumeReplicaDestroyer {
+		disabledGoroutines = append(disabledGoroutines, "volume-replica-destroyer")
+	}
+	if opt.DisableVolumeReplicaCreator {
+		disabledGoroutines = append(disabledGoroutines, "volume-replica-creator")
+	}
+
 	// Run
-	slog.Info("megatest started",
+	logParams := []any{
 		"instance_id", instanceID,
 		"storage_classes", opt.StorageClasses,
 		"max_volumes", opt.MaxVolumes,
-	)
+	}
+	if len(disabledGoroutines) > 0 {
+		logParams = append(logParams, "disabled_goroutines", disabledGoroutines)
+	}
+	slog.Info("megatest started", logParams...)
 
 	if err := multiVolume.Run(ctx); err != nil {
 		slog.Error("megatest failed", "error", err)

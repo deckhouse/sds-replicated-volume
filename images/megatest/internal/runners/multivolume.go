@@ -77,8 +77,12 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	)
 	defer m.log.Info("multivolume orchestrator stopped")
 
-	// Start pod destroyers
-	m.startPodDestroyers(ctx)
+	// Start pod destroyers (if enabled)
+	if !m.cfg.DisablePodDestroyer {
+		m.startPodDestroyers(ctx)
+	} else {
+		m.log.Info("pod-destroyer goroutines are disabled")
+	}
 
 	// Main volume creation loop
 	for {
@@ -175,9 +179,12 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName, storageClass 
 	defer m.volumesMu.Unlock()
 
 	cfg := config.VolumeMainConfig{
-		StorageClassName: storageClass,
-		LifetimePeriod:   lifetime,
-		InitialSize:      resource.MustParse("100Mi"),
+		StorageClassName:              storageClass,
+		LifetimePeriod:                lifetime,
+		InitialSize:                   resource.MustParse("100Mi"),
+		DisableVolumeResizer:          m.cfg.DisableVolumeResizer,
+		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
+		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
 	}
 
 	volumeMain := NewVolumeMain(rvName, cfg, m.client, m.instanceID+"-"+rvName)
