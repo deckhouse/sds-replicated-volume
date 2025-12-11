@@ -1,6 +1,7 @@
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
   - [`drbd-resize-controller`](#drbd-resize-controller)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
@@ -30,6 +31,12 @@
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
   - [`rv-delete-propagation-controller`](#rv-delete-propagation-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1-1)
+  - [`rvr-missing-node-controller`](#rvr-missing-node-controller-1)
+    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3)
+  - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller-1)
+    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3-1)
+  - [`llv-owner-reference-controller`](#llv-owner-reference-controller-1)
+    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
   - [`rv-status-conditions-controller`](#rv-status-conditions-controller-1)
   - [`rv-gc-controller`](#rv-gc-controller-1)
   - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller-1)
@@ -47,8 +54,34 @@
 
 ## `drbd-resize-controller`
 
-### Уточнение
+### Статус: [OK | priority: 5 | complexity: 2]
+
+### Цель
+Выполнить команду `drbdadm resize`, когда желаемый размер диска больше
+фактического.
+
+Команда должна выполняться на `rvr.spec.type=Diskful` ноде с наименьшим
+`rvr.status.drbd.config.nodeId` для ресурса.
+
+Cм. существующую реализацию `drbdadm resize`.
+
+Предусловия для выполнения команды (AND):
+  - `rv.status.conditions[type=Ready].status=True`
+  - `rvr.status.drbd.initialSyncCompleted=true`
+  - `rv.status.actualSize != nil`
+  - `rv.size - rv.status.actualSize > 0`
+
+Поле `rv.status.actualSize` должно поддерживаться актуальным размером. Когда оно
+незадано - его требуется задать. После успешного изменения размера тома - его
+требуется обновить.
+
+Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
+
 Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+
+### Вывод 
+ - `rvr.status.drbd.errors.*`
+ - `rv.status.actualSize`
 
 ## `drbd-primary-controller`
 
@@ -242,6 +275,52 @@
 
 ### Вывод
  - удаляет `rvr`
+
+## `rvr-missing-node-controller`
+
+### Статус: [TBD | priority: 3 | complexity: 3]
+
+### Цель 
+Удаляет (без снятия финализатора) RVR с тех нод, которых больше нет в кластере.
+
+### Триггер 
+  - во время INIT/DELETE `corev1.Node`
+    - когда Node больше нет в кластере
+
+### Вывод 
+  - delete rvr
+
+## `rvr-node-cordon-controller`
+
+### Статус: [TBD | priority: 3 | complexity: 3]
+
+### Цель 
+Удаляет (без снятия финализатора) RVR с тех нод, которые помечены специальным
+образом как закордоненные (аннотация, а не `spec.cordon`).
+
+### Триггер 
+  - во время INIT/DELETE `corev1.Node`
+    - когда Node помечена специальным
+образом как закордоненные (аннотация, а не `spec.cordon`).
+
+### Вывод 
+  - delete rvr
+
+## `llv-owner-reference-controller`
+
+### Статус: [TBD | priority: 5 | complexity: 1]
+
+### Цель 
+
+Поддерживать `llv.metada.ownerReference`, указывающий на `rvr`.
+
+Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
+`sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
+
+### Вывод 
+ - `llv.metada.ownerReference`
+
+
 
 
 

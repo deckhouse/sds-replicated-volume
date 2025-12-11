@@ -18,10 +18,8 @@
 - [Акторы приложения: `agent`](#акторы-приложения-agent)
   - [`drbd-config-controller`](#drbd-config-controller)
     - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5)
-  - [`drbd-resize-controller`](#drbd-resize-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
@@ -30,11 +28,11 @@
   - [`rvr-scheduling-controller`](#rvr-scheduling-controller)
     - [Статус: \[OK | priority: 5 | complexity: 5\]](#статус-ok--priority-5--complexity-5-1)
   - [`rvr-status-config-node-id-controller`](#rvr-status-config-node-id-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-2)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
   - [`rvr-status-config-peers-controller`](#rvr-status-config-peers-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-1)
   - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-3)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-2)
   - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
   - [`rvr-access-count-controller`](#rvr-access-count-controller)
@@ -44,19 +42,13 @@
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
   - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
-    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
+    - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-3)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-3)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
-  - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
-    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3)
-  - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
-    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3-1)
-  - [`llv-owner-reference-controller`](#llv-owner-reference-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
 
 # Основные положения
 
@@ -360,35 +352,6 @@ TODO:
   - `rvr.status.drbd.errors.*`
   - `rvr.status.drbd.actual.*`
   - *.res, *.res_tmp файлы на ноде
-
-## `drbd-resize-controller`
-
-### Статус: [OK | priority: 5 | complexity: 2]
-
-### Цель
-Выполнить команду `drbdadm resize`, когда желаемый размер диска больше
-фактического.
-
-Команда должна выполняться на `rvr.spec.type=Diskful` ноде с наименьшим
-`rvr.status.drbd.config.nodeId` для ресурса.
-
-Cм. существующую реализацию `drbdadm resize`.
-
-Предусловия для выполнения команды (AND):
-  - `rv.status.conditions[type=Ready].status=True`
-  - `rvr.status.drbd.initialSyncCompleted=true`
-  - `rv.status.actualSize != nil`
-  - `rv.size - rv.status.actualSize > 0`
-
-Поле `rv.status.actualSize` должно поддерживаться актуальным размером. Когда оно
-незадано - его требуется задать. После успешного изменения размера тома - его
-требуется обновить.
-
-Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
-
-### Вывод 
- - `rvr.status.drbd.errors.*`
- - `rv.status.actualSize`
 
 ## `drbd-primary-controller`
 
@@ -775,49 +738,3 @@ if M > 1 {
    - генерируется новый
  - `rv.status.drbd.config.sharedSecretAlg`
    - выбирается из захардкоженного списка по порядку
-
-## `rvr-missing-node-controller`
-
-### Статус: [TBD | priority: 3 | complexity: 3]
-
-### Цель 
-Удаляет (без снятия финализатора) RVR с тех нод, которых больше нет в кластере.
-
-### Триггер 
-  - во время INIT/DELETE `corev1.Node`
-    - когда Node больше нет в кластере
-
-### Вывод 
-  - delete rvr
-
-## `rvr-node-cordon-controller`
-
-### Статус: [TBD | priority: 3 | complexity: 3]
-
-### Цель 
-Удаляет (без снятия финализатора) RVR с тех нод, которые помечены специальным
-образом как закордоненные (аннотация, а не `spec.cordon`).
-
-### Триггер 
-  - во время INIT/DELETE `corev1.Node`
-    - когда Node помечена специальным
-образом как закордоненные (аннотация, а не `spec.cordon`).
-
-### Вывод 
-  - delete rvr
-
-## `llv-owner-reference-controller`
-
-### Статус: [TBD | priority: 5 | complexity: 1]
-
-### Цель 
-
-Поддерживать `llv.metada.ownerReference`, указывающий на `rvr`.
-
-Чтобы выставить правильные настройки, требуется использовать функцию `SetControllerReference` из пакета
-`sigs.k8s.io/controller-runtime/pkg/controller/controllerutil`.
-
-### Вывод 
- - `llv.metada.ownerReference`
-
-
