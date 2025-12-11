@@ -1,24 +1,32 @@
 # Спецификация изменений Conditions (v1alpha3)
 
+## Терминология
+
+| Аббревиатура | Полное название | Описание |
+|--------------|-----------------|----------|
+| **RV** | ReplicatedVolume | Реплицируемый том |
+| **RVR** | ReplicatedVolumeReplica | Реплика тома (одна копия на одной ноде) |
+| **RSC** | ReplicatedStorageClass | Класс хранения для реплицируемых томов |
+| **LLV** | LvmLogicalVolume | Реализация BackingVolume через LVM |
+
+**Соглашения:**
+- `rv.field` / `rvr.field` — ссылка на поле объекта (lowercase)
+- `RV.Condition` / `RVR.Condition` — название условия (uppercase)
+
+---
+
 ## Обзор: RVR Conditions
 
-### Phase 1 — необходимо для работы системы
-
-| Condition | Статус | Описание | Контроллер | Reasons |
-|-----------|--------|----------|------------|---------|
-| `Scheduled` | существует | Нода выбрана | rvr-scheduling-controller | `ReplicaScheduled`, `WaitingForAnotherReplica`, `NoAvailableNodes`, ... |
-| `BackingVolumeCreated` | 🆕 новый | LLV создан и ready | rvr-volume-controller | `BackingVolumeReady`, `BackingVolumeNotReady`, `WaitingForLLV`, ... |
+| Condition | Статус | Описание | Устанавливает | Reasons |
+|-----------|--------|----------|---------------|---------|
+| `Scheduled` | существует | Нода выбрана | rvr-scheduling-controller | `ReplicaScheduled`, `WaitingForAnotherReplica`, `NoAvailableNodes`, `TopologyConstraintsFailed`, `InsufficientStorage` |
+| `BackingVolumeCreated` | 🆕 новый | BackingVolume создан и ready | rvr-volume-controller | `BackingVolumeReady`, `BackingVolumeNotReady`, `WaitingForBackingVolume`, `BackingVolumeCreationFailed`, `NotApplicable` |
 | `Initialized` | 🆕 новый | Инициализация (не снимается) | drbd-config-controller | `Initialized`, `WaitingForInitialSync`, `InitialSyncInProgress` |
-| `InQuorum` | переименован | Реплика в кворуме | rvr-status-conditions-controller | `InQuorum`, `QuorumLost` |
-| `InSync` | переименован | Данные синхронизированы | rvr-status-conditions-controller | `InSync`, `Synchronizing`, `OutOfSync`, `Inconsistent`, `Diskless` |
-| `Online` | 🆕 computed | Scheduled + Initialized + InQuorum | rvr-status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost` |
-| `IOReady` | 🆕 computed | Online + InSync | rvr-status-conditions-controller | `IOReady`, `Offline`, `OutOfSync` |
-
-### Phase 2 — расширение функциональности
-
-| Condition | Статус | Описание | Контроллер | Reasons |
-|-----------|--------|----------|------------|---------|
-| `Configured` | переименован | Конфигурация применена | rvr-status-conditions-controller | `Configured`, `ConfigurationFailed`, `AdjustmentFailed`, ... |
+| `InQuorum` | переименован | Реплика в кворуме | status-conditions-controller | `InQuorum`, `QuorumLost`, `NodeNotReady` |
+| `InSync` | переименован | Данные синхронизированы | status-conditions-controller | `InSync`, `Synchronizing`, `OutOfSync`, `Inconsistent`, `Diskless`, `NodeNotReady` |
+| `Configured` | переименован | Конфигурация применена | status-conditions-controller | `Configured`, `ConfigurationPending`, `ConfigurationFailed`, `MetadataCheckFailed`, `MetadataCreationFailed`, `StatusCheckFailed`, `ResourceUpFailed`, `AdjustmentFailed`, `WaitingForInitialSync`, `PromotionDemotionFailed`, `NodeNotReady` |
+| `Online` | 🆕 computed | Scheduled + Initialized + InQuorum | status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost`, `NodeNotReady` |
+| `IOReady` | 🆕 computed | Online + InSync | status-conditions-controller | `IOReady`, `Offline`, `OutOfSync`, `NodeNotReady` |
 | `Published` | переименован | Реплика Primary | rv-publish-controller | `Published`, `Unpublished`, `PublishPending` |
 
 ### Удаляемые
@@ -31,25 +39,18 @@
 
 ## Обзор: RV Conditions
 
-### Phase 1 — необходимо для работы системы
-
-| Condition | Статус | Описание | Контроллер | Reasons |
-|-----------|--------|----------|------------|---------|
+| Condition | Статус | Описание | Устанавливает | Reasons |
+|-----------|--------|----------|---------------|---------|
 | `QuorumConfigured` | существует | Конфигурация кворума | rv-status-config-quorum-controller | `QuorumConfigured`, `WaitingForReplicas` |
-| `DiskfulReplicaCountReached` | существует | Кол-во Diskful достигнуто | rvr-diskful-count-controller | `RequiredNumberOfReplicasIsAvailable`, `FirstReplicaIsBeingCreated` |
+| `DiskfulReplicaCountReached` | существует | Кол-во Diskful достигнуто | rvr-diskful-count-controller | `RequiredNumberOfReplicasIsAvailable`, `FirstReplicaIsBeingCreated`, `WaitingForFirstReplica` |
 | `SharedSecretAlgorithmSelected` | существует | Алгоритм shared secret | rv-status-config-shared-secret-controller | `AlgorithmSelected`, `UnableToSelectSharedSecretAlgorithm` |
-| `IOReady` | 🆕 новый | Достаточно RVR IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
-
-### Phase 2 — расширение функциональности
-
-| Condition | Статус | Описание | Контроллер | Reasons |
-|-----------|--------|----------|------------|---------|
-| `Scheduled` | 🆕 новый | Все RVR Scheduled | rv-status-conditions-controller | `AllReplicasScheduled`, `ReplicasNotScheduled` |
-| `BackingVolumeCreated` | 🆕 новый | Все Diskful LLV ready | rv-status-conditions-controller | `AllBackingVolumesReady`, `BackingVolumesNotReady` |
-| `Configured` | 🆕 новый | Все RVR Configured | rv-status-conditions-controller | `AllReplicasConfigured`, `ReplicasNotConfigured` |
-| `Initialized` | 🆕 новый | Достаточно RVR Initialized | rv-status-conditions-controller | `Initialized`, `WaitingForReplicas` |
-| `Quorum` | 🆕 новый | Кворум достигнут | rv-status-conditions-controller | `QuorumReached`, `QuorumLost` |
-| `DataQuorum` | 🆕 новый | Кворум данных Diskful | rv-status-conditions-controller | `DataQuorumReached`, `DataQuorumLost` |
+| `Scheduled` | 🆕 aggregate | Все RVR Scheduled | status-conditions-controller | `AllReplicasScheduled`, `ReplicasNotScheduled`, `SchedulingInProgress` |
+| `BackingVolumeCreated` | 🆕 aggregate | Все Diskful BackingVolume ready | status-conditions-controller | `AllBackingVolumesReady`, `BackingVolumesNotReady`, `WaitingForBackingVolumes` |
+| `Configured` | 🆕 aggregate | Все RVR Configured | status-conditions-controller | `AllReplicasConfigured`, `ReplicasNotConfigured`, `ConfigurationInProgress` |
+| `Initialized` | 🆕 threshold | Достаточно RVR Initialized | status-conditions-controller | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
+| `Quorum` | 🆕 compute | Кворум достигнут | status-conditions-controller | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
+| `DataQuorum` | 🆕 compute | Кворум данных Diskful | status-conditions-controller | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
+| `IOReady` | 🆕 compute | Достаточно RVR IOReady | status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 ### Удаляемые
 
@@ -61,8 +62,6 @@
 ---
 
 # RVR Conditions (`ReplicatedVolumeReplica.status.conditions[]`)
-
-## Phase 1 — необходимо для работы системы
 
 ### `type=Scheduled`
 
@@ -83,16 +82,16 @@
 
 - Обновляется: **rvr-volume-controller**.
 - `status`:
-  - `True` — LLV создан и готов (AND)
+  - `True` — BackingVolume создан и готов (AND)
     - `rvr.status.lvmLogicalVolumeName != ""`
-    - соответствующий LLV имеет `status.phase=Ready`
-  - `False` — LLV не создан или не ready
+    - соответствующий LLV (реализация BackingVolume) имеет `status.phase=Created`
+  - `False` — BackingVolume не создан или не ready
   - `Unknown` — не применимо для данного типа реплики
 - `reason`:
-  - `BackingVolumeReady` — LLV создан и имеет `phase=Ready`
-  - `BackingVolumeNotReady` — LLV создан, но ещё не ready
-  - `WaitingForLLV` — ожидание создания LLV
-  - `LLVCreationFailed` — ошибка создания LLV
+  - `BackingVolumeReady` — BackingVolume (LLV) создан и имеет `phase=Created`
+  - `BackingVolumeNotReady` — BackingVolume создан, но ещё не ready
+  - `WaitingForBackingVolume` — ожидание создания BackingVolume
+  - `BackingVolumeCreationFailed` — ошибка создания BackingVolume
   - `NotApplicable` — для `rvr.spec.type != Diskful` (diskless реплики)
 - Используется: **rvr-diskful-count-controller** — для определения готовности первой реплики.
 
@@ -114,36 +113,42 @@
 
 ### `type=InQuorum`
 
-- Обновляется: **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - Ранее: `Quorum`.
 - `status`:
   - `True` — реплика в кворуме
-    - `rvr.status.drbd.status.connection.quorum=true`
+    - `rvr.status.drbd.status.devices[0].quorum=true`
   - `False` — реплика вне кворума
+  - `Unknown` — нода недоступна (Node NotReady)
 - `reason`:
   - `InQuorum` — реплика участвует в кворуме
   - `QuorumLost` — реплика потеряла кворум (недостаточно подключений)
+  - `NodeNotReady` — нода недоступна, статус неизвестен
+- Примечание: `devices[0]` — в текущей версии RVR всегда использует один DRBD volume (индекс 0).
 - Примечание: для TieBreaker реплик логика может отличаться.
 
 ### `type=InSync`
 
-- Обновляется: **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - Ранее: `DevicesReady`.
 - `status`:
   - `True` — данные синхронизированы
-    - `rvr.status.drbd.status.connection.diskState = UpToDate`
+    - Diskful: `rvr.status.drbd.status.devices[0].diskState = UpToDate`
+    - Access/TieBreaker: `diskState = Diskless` (всегда True с reason `Diskless`)
   - `False` — данные не синхронизированы
+  - `Unknown` — нода недоступна (Node NotReady)
 - `reason`:
-  - `InSync` — данные полностью синхронизированы
+  - `InSync` — данные полностью синхронизированы (Diskful)
+  - `Diskless` — diskless реплика (Access/TieBreaker), данные получаются по сети
   - `Synchronizing` — синхронизация в процессе (есть progress %)
   - `OutOfSync` — данные рассинхронизированы, синхронизация не идёт
   - `Inconsistent` — данные в несогласованном состоянии
-  - `Diskless` — реплика без диска (Access type)
-- Применимость: для Diskful и TieBreaker реплик.
+  - `NodeNotReady` — нода недоступна, статус неизвестен
+- Применимость: все типы реплик.
 
 ### `type=Online`
 
-- Обновляется: **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - 🆕 Вычисляемый (computed).
 - `status`:
   - `True` — реплика онлайн (AND)
@@ -156,11 +161,12 @@
   - `Unscheduled` — реплика не назначена на ноду
   - `Uninitialized` — реплика не прошла инициализацию
   - `QuorumLost` — реплика вне кворума
+  - `NodeNotReady` — нода недоступна
 - Примечание: `Configured` НЕ учитывается — реплика может быть online с устаревшей конфигурацией.
 
 ### `type=IOReady`
 
-- Обновляется: **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - 🆕 Вычисляемый (computed).
 - `status`:
   - `True` — реплика готова к I/O (AND)
@@ -171,15 +177,12 @@
   - `IOReady` — реплика полностью готова к I/O операциям
   - `Offline` — реплика не онлайн (смотри `Online` condition)
   - `OutOfSync` — данные не синхронизированы (смотри `InSync` condition)
+  - `NodeNotReady` — нода недоступна
 - Используется: RV.IOReady вычисляется из RVR.IOReady.
-
----
-
-## Phase 2 — расширение функциональности
 
 ### `type=Configured`
 
-- Обновляется: **rvr-status-conditions-controller** / **drbd-config-controller** (agent).
+- Обновляется: **status-conditions-controller** (вычисляет из данных agent).
 - Ранее: `ConfigurationAdjusted`.
 - `status`:
   - `True` — конфигурация полностью применена (AND)
@@ -187,8 +190,10 @@
     - `rvr.status.drbd.errors.lastAdjustmentError == nil`
     - `rvr.status.drbd.errors.<...>Error == nil`
   - `False` — есть расхождения или ошибки
+  - `Unknown` — нода недоступна (Node NotReady)
 - `reason`:
   - `Configured` — конфигурация успешно применена
+  - `ConfigurationPending` — ожидание применения конфигурации
   - `ConfigurationFailed` — общая ошибка конфигурации
   - `MetadataCheckFailed` — ошибка проверки DRBD метаданных (`drbdadm dump-md`)
   - `MetadataCreationFailed` — ошибка создания DRBD метаданных (`drbdadm create-md`)
@@ -197,6 +202,7 @@
   - `AdjustmentFailed` — ошибка применения конфигурации (`drbdadm adjust`)
   - `WaitingForInitialSync` — ожидание начальной синхронизации перед продолжением
   - `PromotionDemotionFailed` — ошибка переключения primary/secondary
+  - `NodeNotReady` — нода недоступна, статус неизвестен
 - `message`: детали ошибки из `rvr.status.drbd.errors.*`
 - Примечание: может "мигать" при изменении параметров — это нормально.
 - Примечание: НЕ включает publish и resize — они отделены.
@@ -214,6 +220,7 @@
   - `Unpublished` — реплика является Secondary
   - `PublishPending` — ожидание перехода в Primary
 - Применимость: только для `Access` и `Diskful` реплик.
+- Примечание: `TieBreaker` не может быть Primary напрямую — требуется сначала изменить тип на `Access`.
 - Примечание: НЕ учитывает состояние I/O — только факт публикации.
 
 ### Удаляемые conditions
@@ -226,8 +233,6 @@
 ---
 
 # RV Conditions (`ReplicatedVolume.status.conditions[]`)
-
-## Phase 1 — необходимо для работы системы
 
 ### `type=QuorumConfigured`
 
@@ -255,7 +260,7 @@
   - `RequiredNumberOfReplicasIsAvailable` — все требуемые реплики созданы
   - `FirstReplicaIsBeingCreated` — создаётся первая реплика
   - `WaitingForFirstReplica` — ожидание готовности первой реплики
-- Примечание: контролирует создание Diskful реплик, первая реплика должна быть ready перед созданием остальных.
+- Примечание: контролирует создание Diskful реплик, первая реплика должна быть Initialized перед созданием остальных.
 
 ### `type=SharedSecretAlgorithmSelected`
 
@@ -273,25 +278,24 @@
 
 ### `type=IOReady`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - 🆕 Новый condition.
 - `status`:
   - `True` — достаточно реплик готовы к I/O
     - достаточное количество RVR (согласно QMR + RSC) имеют `IOReady=True`
+    - QMR = quorumMinimumRedundancy (минимум Diskful реплик для кворума данных)
+    - RSC = ReplicatedStorageClass (определяет требования репликации)
   - `False` — недостаточно готовых реплик
 - `reason`:
   - `IOReady` — volume готов к I/O операциям
   - `InsufficientIOReadyReplicas` — недостаточно IOReady реплик
   - `NoIOReadyReplicas` — нет ни одной IOReady реплики
+- TODO: уточнить точную формулу threshold для IOReady (предположительно >= 1 реплика).
 - Используется: **rv-publish-controller**, **drbd-resize-controller**, **drbd-primary-controller**.
-
----
-
-## Phase 2 — расширение функциональности
 
 ### `type=Scheduled`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — все реплики назначены на ноды
     - все RVR имеют `Scheduled=True`
@@ -303,23 +307,23 @@
 
 ### `type=BackingVolumeCreated`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
-  - `True` — все LLV созданы и готовы
+  - `True` — все BackingVolume созданы и готовы
     - все Diskful RVR имеют `BackingVolumeCreated=True`
-  - `False` — есть неготовые LLV
+  - `False` — есть неготовые BackingVolume
 - `reason`:
-  - `AllBackingVolumesReady` — все LLV готовы
-  - `BackingVolumesNotReady` — есть неготовые LLV
-  - `WaitingForBackingVolumes` — ожидание создания LLV
+  - `AllBackingVolumesReady` — все BackingVolume готовы
+  - `BackingVolumesNotReady` — есть неготовые BackingVolume
+  - `WaitingForBackingVolumes` — ожидание создания BackingVolume
 
 ### `type=Configured`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — все реплики сконфигурированы
     - все RVR имеют `Configured=True`
-  - `False` — есть несконфигурированные реплики
+  - `False` — есть несконфигурированные реплики или Unknown
 - `reason`:
   - `AllReplicasConfigured` — все реплики сконфигурированы
   - `ReplicasNotConfigured` — есть несконфигурированные реплики
@@ -327,7 +331,7 @@
 
 ### `type=Initialized`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — достаточно реплик инициализировано (один раз, далее НЕ снимается)
     - достаточное количество RVR (согласно `rsc.spec.replication`) имеют `Initialized=True`
@@ -343,7 +347,7 @@
 
 ### `type=Quorum`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — есть кворум
     - количество RVR с `InQuorum=True` >= `rv.status.drbd.config.quorum`
@@ -366,7 +370,7 @@
 
 ### `type=DataQuorum`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — есть кворум данных (только Diskful реплики)
     - количество Diskful RVR с `InQuorum=True` >= `rv.status.drbd.config.quorumMinimumRedundancy`
@@ -398,19 +402,19 @@
 - `diskfulReplicaCount`
   - Тип: string.
   - Формат: `current/desired` (например, `3/3`).
-  - Обновляется: **rv-status-conditions-controller**.
+  - Обновляется: **status-conditions-controller**.
   - Описание: количество Diskful реплик / желаемое количество.
 
 - `diskfulReplicasInSync`
   - Тип: string.
   - Формат: `current/total` (например, `2/3`).
-  - Обновляется: **rv-status-conditions-controller**.
+  - Обновляется: **status-conditions-controller**.
   - Описание: количество синхронизированных Diskful реплик / всего Diskful реплик.
 
 - `publishedAndIOReadyCount`
   - Тип: string.
   - Формат: `current/requested` (например, `1/1`).
-  - Обновляется: **rv-status-conditions-controller**.
+  - Обновляется: **status-conditions-controller**.
   - Описание: количество опубликованных и IOReady реплик / запрошено для публикации.
 
 ---
@@ -421,7 +425,7 @@
 
 ### `type=QuorumAtRisk`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — кворум есть, но на грани (AND)
     - `Quorum=True`
@@ -436,7 +440,7 @@
 
 ### `type=DataQuorumAtRisk`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — кворум данных под угрозой (OR)
     - `DataQuorum=True` AND количество Diskful RVR с `InQuorum=True` == QMR (ровно на границе)
@@ -452,7 +456,7 @@
 
 ### `type=DataAtRisk`
 
-- Обновляется: **rv-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — данные в единственном экземпляре
     - количество Diskful RVR с `InSync=True` == 1
@@ -465,7 +469,7 @@
 
 ### `type=SplitBrain`
 
-- Обновляется: **rv-status-conditions-controller** или **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — обнаружен split-brain
   - `False` — split-brain не обнаружен
@@ -484,7 +488,7 @@
 
 ### `type=FullyConnected`
 
-- Обновляется: **rvr-status-conditions-controller**.
+- Обновляется: **status-conditions-controller**.
 - `status`:
   - `True` — есть связь со всеми peers
     - `len(rvr.status.drbd.status.connections) == len(rvr.status.drbd.config.peers)`
@@ -514,84 +518,268 @@
 
 ---
 
-# Summary: Conditions по контроллерам
+# Спецификация: status-conditions-controller
 
-## RVR Controllers
+## Цель
 
-### rvr-scheduling-controller
-| Condition | Действие |
-|-----------|----------|
-| `Scheduled` | set |
+Один контроллер для вычисления и обновления всех conditions для RV и RVR.
+Объединяет логику `rvr-status-conditions-controller` и `rv-status-conditions-controller` для избежания race conditions.
 
-### rvr-volume-controller
-| Condition | Действие |
-|-----------|----------|
-| `BackingVolumeCreated` | set |
+## Архитектура
 
-### drbd-config-controller (agent)
-| Condition | Действие |
-|-----------|----------|
-| `Initialized` | set |
-| `Configured` | set (частично) |
+```go
+builder.ControllerManagedBy(mgr).
+    For(&v1alpha3.ReplicatedVolume{}).
+    Owns(&v1alpha3.ReplicatedVolumeReplica{}).
+    // Watch Nodes для обнаружения node failures.
+    // Нужен mapper: Node → RV (через RVR.spec.nodeName).
+    Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(nodeToRVMapper)).
+    Complete(rec)
+```
 
-### rv-publish-controller
-| Condition | Действие |
-|-----------|----------|
-| `Published` | set |
+### Триггеры
 
-### rvr-status-conditions-controller
-| Condition | Действие |
-|-----------|----------|
-| `Configured` | set/compute |
-| `InQuorum` | set |
-| `InSync` | set |
-| `Online` | compute |
-| `IOReady` | compute |
-| `FullyConnected` | set (future) |
+| Событие | Request содержит |
+|---------|------------------|
+| RV создан/изменён/удалён | RV name |
+| RVR изменён (через ownerReference) | RV name (owner) |
+| Node изменилась | RV name (через mapper) |
 
-## RV Controllers
+## Логика Reconcile
 
-### rv-status-conditions-controller
-| Condition | Действие | Источник |
-|-----------|----------|----------|
-| `Scheduled` | aggregate | from RVR.Scheduled |
-| `BackingVolumeCreated` | aggregate | from RVR.BackingVolumeCreated |
-| `Configured` | aggregate | from RVR.Configured |
-| `Initialized` | aggregate | from RVR.Initialized |
-| `Quorum` | compute | RVR.InQuorum + config |
-| `DataQuorum` | compute | Diskful RVR.InQuorum + QMR |
-| `IOReady` | compute | RVR.IOReady + thresholds |
-| `QuorumAtRisk` | compute (future) | Quorum margin |
-| `DataQuorumAtRisk` | compute (future) | DataQuorum margin |
-| `DataAtRisk` | compute (future) | InSync count |
-| `SplitBrain` | compute (future) | DRBD status |
+```
+1. Get RV
+   - return if NotFound (deleted)
+
+2. List all RVR for this RV
+   - by ownerReference or label
+
+3. For each RVR:
+   a. Get Node by rvr.spec.nodeName
+   b. Check Node.Ready condition (см. Node Availability Check)
+   c. If Node NotReady:
+      - Set all conditions to Unknown/False with reason NodeNotReady:
+        - InQuorum = Unknown
+        - InSync = Unknown
+        - Configured = Unknown
+        - Online = False
+        - IOReady = False
+   d. Else compute conditions:
+      - InQuorum: from drbd.status.devices[0].quorum
+      - InSync: from drbd.status.devices[0].diskState
+      - Configured: compare drbd.actual.* vs config.*
+      - Online: Scheduled ∧ Initialized ∧ InQuorum
+      - IOReady: Online ∧ InSync
+   e. Compare with current RVR.status.conditions
+   f. Patch RVR ONLY if conditions changed (idempotency)
+
+4. Aggregate RVR conditions → RV conditions
+   - Scheduled: ALL RVR.Scheduled=True
+   - BackingVolumeCreated: ALL Diskful RVR.BackingVolumeCreated=True
+   - Configured: ALL RVR.Configured=True (Unknown counts as False)
+   - Initialized: count(Initialized=True) >= threshold
+   - Quorum: count(InQuorum=True) >= quorum config
+   - DataQuorum: count(Diskful InQuorum=True) >= QMR
+   - IOReady: count(IOReady=True) >= threshold
+     // TODO: определить threshold для IOReady (предположительно >= 1)
+
+5. Update RV counters
+   - diskfulReplicaCount: current/desired
+   - diskfulReplicasInSync: current/total
+   - publishedAndIOReadyCount: current/requested
+
+6. Compare with current RV.status.conditions
+7. Patch RV ONLY if conditions or counters changed
+```
+
+## Node Availability Check
+
+Для каждого RVR проверяем доступность ноды:
+
+```
+1. Get Node by rvr.spec.nodeName
+   - If Node not found: reason = NodeNotFound
+
+2. Check node.status.conditions[type=Ready]
+   - status=True → node OK, compute conditions normally
+   - status=False → node failing
+   - status=Unknown → node unreachable (kubelet not reporting)
+
+If Node NotReady (False or Unknown):
+   RVR.InQuorum     = Unknown, reason = NodeNotReady
+   RVR.InSync       = Unknown, reason = NodeNotReady
+   RVR.Configured   = Unknown, reason = NodeNotReady
+   RVR.Online       = False,   reason = NodeNotReady
+   RVR.IOReady      = False,   reason = NodeNotReady
+```
+
+**Время обнаружения:**
+- ~40s через kubelet heartbeat timeout (по умолчанию)
+- Быстрее через DRBD: если нода падает, DRBD агент на других нодах обнаружит потерю connection 
+  и обновит свой `rvr.status.drbd.status.connections[]`. Это изменение триггерит reconcile 
+  для status-conditions-controller, который увидит потерю кворума раньше, чем Node станет NotReady.
+
+## Node to RV Mapper
+
+```go
+func nodeToRVMapper(ctx context.Context, node client.Object) []reconcile.Request {
+    // Находим все RVR на этой ноде
+    rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+    cl.List(ctx, rvrList, client.MatchingFields{"spec.nodeName": node.GetName()})
+    
+    // Собираем уникальные RV
+    rvNames := make(map[string]struct{})
+    for _, rvr := range rvrList.Items {
+        rvNames[rvr.Spec.ReplicatedVolumeName] = struct{}{}
+    }
+    
+    // Формируем requests
+    requests := make([]reconcile.Request, 0, len(rvNames))
+    for name := range rvNames {
+        requests = append(requests, reconcile.Request{
+            NamespacedName: types.NamespacedName{Name: name},
+        })
+    }
+    return requests
+}
+```
+
+**Примечание:** Требуется индекс по `spec.nodeName` для эффективного поиска.
+
 
 ---
 
 # Влияние на контроллеры
 
-## Требуется изменить
+## Существующие контроллеры (требуют изменений)
 
-- **rvr-diskful-count-controller**
-  - Было: проверяет `rvr.status.conditions[type=Ready].status=True`
-  - Стало: проверяет `rvr.status.conditions[type=Initialized].status=True`
-  - Альтернатива: `BackingVolumeCreated=True` для первой реплики
+### rvr-diskful-count-controller
 
-- **rvr-gc-controller**
-  - Было: проверяет `Ready=True && FullyConnected=True`
-  - Стало: проверяет `Online=True` или `IOReady=True`
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RVR.`Initialized` | read | проверяет status=True для первой реплики |
+| RVR.`BackingVolumeCreated` | read | проверяет status=True для первой реплики |
+| RV.`DiskfulReplicaCountReached` | set | count(Diskful RVR) >= rsc.spec.replication (первая реплика должна быть Initialized) |
 
-- **rv-publish-controller**
-  - Было: проверяет `rv.status.conditions[type=Ready].status=True`
-  - Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+**Изменения:**
+- Было: проверяет `rvr.status.conditions[type=Ready].status=True`
+- Стало: проверяет `rvr.status.conditions[type=Initialized].status=True`
+- Альтернатива: `BackingVolumeCreated=True` для первой реплики
 
-- **drbd-resize-controller** (agent)
-  - Было: проверяет `rv.status.conditions[type=Ready].status=True`
-  - Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+### rvr-gc-controller
 
-- **drbd-primary-controller** (agent)
-  - Было: проверяет `rv.status.conditions[type=Ready].status=True`
-  - Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RVR.`Online` | read | проверяет status=True перед удалением |
+| RVR.`IOReady` | read | проверяет status=True перед удалением |
+
+**Изменения:**
+- Было: проверяет `Ready=True && FullyConnected=True`
+- Стало: проверяет `Online=True` или `IOReady=True`
+
+### rv-publish-controller
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RV.`IOReady` | read | проверяет status=True перед публикацией |
+| RVR.`Online` | read | выбирает реплику для публикации |
+| RVR.`Published` | set | role == Primary → True |
+
+**Изменения:**
+- Было: проверяет `rv.status.conditions[type=Ready].status=True`
+- Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+
+### drbd-resize-controller (agent)
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RV.`IOReady` | read | проверяет status=True перед resize |
+
+**Изменения:**
+- Было: проверяет `rv.status.conditions[type=Ready].status=True`
+- Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+
+### drbd-primary-controller (agent)
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RV.`IOReady` | read | проверяет status=True перед promote |
+
+**Изменения:**
+- Было: проверяет `rv.status.conditions[type=Ready].status=True`
+- Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+
+## Новые контроллеры
+
+### status-conditions-controller
+
+Один контроллер для всех computed/aggregated conditions.
+
+**Спецификация:** См. раздел "Спецификация: status-conditions-controller" выше.
+
+#### RVR Conditions
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| `InQuorum` | set | quorum == true → True |
+| `InSync` | set | diskState == UpToDate → True |
+| `Configured` | compute | actual.* == config.* && no errors → True |
+| `Online` | compute | Scheduled ∧ Initialized ∧ InQuorum → True |
+| `IOReady` | compute | Online ∧ InSync → True |
+| `FullyConnected` | set (future) | all connections established → True |
+
+#### RV Conditions
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| `Scheduled` | aggregate | ALL RVR.Scheduled=True → True |
+| `BackingVolumeCreated` | aggregate | ALL Diskful RVR.BackingVolumeCreated=True → True |
+| `Configured` | aggregate | ALL RVR.Configured=True → True |
+| `Initialized` | threshold | count(Initialized=True) >= threshold → True |
+| `Quorum` | compute | count(InQuorum=True) >= quorum → True |
+| `DataQuorum` | compute | count(Diskful InQuorum=True) >= QMR → True |
+| `IOReady` | compute | count(IOReady=True) >= threshold → True |
+| `QuorumAtRisk` | compute (future) | Quorum=True && margin=0 → True |
+| `DataQuorumAtRisk` | compute (future) | DataQuorum=True && margin=0 → True |
+| `DataAtRisk` | compute (future) | count(InSync=True) == 1 → True |
+| `SplitBrain` | compute (future) | split-brain detected → True |
+
+#### RV Counters
+| Counter | Описание |
+|---------|----------|
+| `diskfulReplicaCount` | current/desired |
+| `diskfulReplicasInSync` | current/total |
+| `publishedAndIOReadyCount` | current/requested |
+
+## Контроллеры без изменений
+
+### rvr-scheduling-controller
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RVR.`Scheduled` | set | node selected by topology → True |
+
+### rvr-volume-controller
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RVR.`BackingVolumeCreated` | set | LLV.status.phase == Created → True |
+
+### drbd-config-controller (agent)
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RVR.`Initialized` | set | initial sync completed → True (не снимается) |
+
+### rv-status-config-quorum-controller
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RV.`QuorumConfigured` | set | quorum/QMR calculated and set → True |
+
+### rv-status-config-shared-secret-controller
+
+| Condition | Действие | Логика |
+|-----------|----------|--------|
+| RV.`SharedSecretAlgorithmSelected` | set | working algorithm found → True |
 
 ---
 
