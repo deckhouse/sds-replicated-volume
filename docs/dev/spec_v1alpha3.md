@@ -44,7 +44,7 @@
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-2)
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
-  - [`rvr-gc-controller`](#rvr-gc-controller)
+  - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-4)
     - [Контекст](#контекст)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
@@ -703,7 +703,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   - Обновление для уже существующих: `llv.metadata.ownerReference` - вынесли в отдельный контроллер [`llv-owner-reference-controller`](#llv-owner-reference-controller)
   - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
-## `rvr-gc-controller`
+## `rvr-quorum-and-publish-constrained-release-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 2]
 
@@ -718,7 +718,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Цель 
 
-Цель `rvr-gc-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
+Цель `rvr-quorum-and-publish-constrained-release-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
 кластер к этому готов. Условия готовности:
 
 - количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
