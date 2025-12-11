@@ -95,12 +95,12 @@ spec:
     #   kernel-lt             --> kernel-lt-devel
     #   kernel-lt-core        --> kernel-lt-devel
     package_name="$(rpm -qf --qf "%{NAME}\t" "/lib/modules/${kernel_version_in_use}" | awk '{printf "%s", $1}' | sed 's/\(-modules-core\)\?$//g; s/\(-core\)\?$/-devel/g')"
-    bb-dnf-install "${package_name}-${kernel_version_in_use}"
+    bb-yum-install "${package_name}-${kernel_version_in_use}"
 
     # Remove unused kernel-headers
     packages_to_remove="$(rpm -q "$package_name" | grep -Ev "^${package_name}-${kernel_version_in_use}$" || true)"
     if [ -n "$packages_to_remove" ]; then
-      bb-dnf-remove $packages_to_remove
+      bb-yum-remove $packages_to_remove
     fi
 
     if [ -e "/proc/drbd" ]; then
@@ -140,7 +140,7 @@ spec:
       fi
     fi
 
-    bb-dnf-install make gcc bind-utils patch mokutil
+    bb-yum-install make gcc bind-utils patch mokutil
     check_sb_state="$(mokutil --sb-state || echo "Not supported")"
     if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
       bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
