@@ -23,6 +23,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/k8sclient"
@@ -32,6 +33,8 @@ import (
 )
 
 func main() {
+	start := time.Now()
+
 	// Parse options
 	var opt Opt
 	opt.Parse()
@@ -88,7 +91,7 @@ func main() {
 	}()
 
 	// Run
-	slog.Info("starting megatest",
+	slog.Info("megatest started",
 		"instance_id", instanceID,
 		"storage_classes", opt.StorageClasses,
 		"max_volumes", opt.MaxVolumes,
@@ -99,5 +102,5 @@ func main() {
 		os.Exit(1)
 	}
 
-	slog.Info("megatest completed")
+	slog.Info("megatest finished", "duration", time.Since(start).String())
 }
