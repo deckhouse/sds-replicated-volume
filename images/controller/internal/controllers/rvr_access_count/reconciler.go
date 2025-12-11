@@ -61,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Skip if RV is being deleted - Kubernetes GC will delete RVRs via ownerReference
+	// Skip if RV is being deleted - this case will be handled by another controller
 	if rv.DeletionTimestamp != nil {
 		log.Info("ReplicatedVolume is being deleted, skipping")
 		return reconcile.Result{}, nil
@@ -100,7 +100,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Build maps of nodes with replicas.
 	// We need to know:
-	// - Which nodes have "data presence" (Diskful/TieBreaker) - Access not needed there
+	// - Which nodes have "data presence" (Diskful) - Access not needed there
+	// - Which nodes have  TieBreaker RVRs - there is no need to create Access RVRs for them, because TieBreaker can be converted to Access by another controller
 	// - Which nodes have Access RVRs - to track what exists for deletion logic
 	nodesWithDiskfulOrTieBreaker := make(map[string]struct{})
 	nodesWithAccess := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
@@ -122,10 +123,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			// Both Diskful and TieBreaker mean node has "presence" in DRBD cluster.
 			nodesWithDiskfulOrTieBreaker[nodeName] = struct{}{}
 		case v1alpha3.ReplicaTypeAccess:
-			// Only track non-deleting Access RVRs to avoid recreating during deletion
-			if rvr.DeletionTimestamp == nil {
-				nodesWithAccess[nodeName] = rvr
-			}
+			nodesWithAccess[nodeName] = rvr
 		default:
 			log.Error(ErrUnknownRVRType, "Skipping", "rvr", rvr.Name, "type", rvr.Spec.Type)
 		}
@@ -134,8 +132,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// CREATE logic:
 	// We need Access RVR on a node if:
 	// 1. Node is in publishOn (pod wants to run there)
-	// 2. Node has NO Diskful/TieBreaker (can't access data locally)
-	// 3. Node has NO Access RVR yet (avoid duplicates)
+	// 2. Node has NO Diskful (can't access data locally)
+	// 3. Node has NO TieBreaker (other controller will convert it to access)
+	// 4. Node has NO Access RVR yet (avoid duplicates)
 	nodesNeedingAccess := make([]string, 0)
 	for _, nodeName := range rv.Spec.PublishOn {
 		_, hasDiskfulOrTieBreaker := nodesWithDiskfulOrTieBreaker[nodeName]
@@ -170,7 +169,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		_, inPublishOn := publishOnSet[nodeName]
 		_, inPublishedOn := publishedOnSet[nodeName]
 
-		if !inPublishOn && !inPublishedOn {
+		if !inPublishOn && !inPublishedOn && rvr.DeletionTimestamp.IsZero() {
 			accessRVRsToDelete = append(accessRVRsToDelete, rvr)
 		}
 	}
