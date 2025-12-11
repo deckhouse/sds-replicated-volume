@@ -80,7 +80,7 @@ type PodDestroyerConfig struct {
 type MultiVolumeConfig struct {
 	StorageClasses []string
 	MaxVolumes     int
-	Step           Count
+	VolumeStep     Count
 	StepPeriod     Duration
 	VolumePeriod   Duration
 }
@@ -141,9 +141,8 @@ func DefaultMultiVolumeConfig(storageClasses []string, maxVolumes int) MultiVolu
 	return MultiVolumeConfig{
 		StorageClasses: storageClasses,
 		MaxVolumes:     maxVolumes,
-		Step:           Count{Min: 1, Max: 3},
+		VolumeStep:     Count{Min: 1, Max: 3},
 		StepPeriod:     Duration{Min: 10 * time.Second, Max: 30 * time.Second},
 		VolumePeriod:   Duration{Min: 60 * time.Second, Max: 300 * time.Second},
 	}
 }
-

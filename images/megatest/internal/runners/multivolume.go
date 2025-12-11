@@ -93,7 +93,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 		currentCount := int(m.runningVolumes.Load())
 		if currentCount < m.cfg.MaxVolumes {
 			// Determine how many to create
-			toCreate := randomInt(m.cfg.Step.Min, m.cfg.Step.Max)
+			toCreate := randomInt(m.cfg.VolumeStep.Min, m.cfg.VolumeStep.Max)
 
 			for i := 0; i < toCreate; i++ {
 				// Select random storage class
@@ -233,4 +233,3 @@ func (m *MultiVolume) cleanup() {
 
 	m.log.Info("cleanup complete")
 }
-

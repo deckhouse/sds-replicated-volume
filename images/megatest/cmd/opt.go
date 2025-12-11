@@ -29,8 +29,8 @@ type Opt struct {
 	StorageClasses []string
 	Kubeconfig     string
 	MaxVolumes     int
-	StepMin        int
-	StepMax        int
+	VolumeStepMin  int
+	VolumeStepMax  int
 	StepPeriodMin  time.Duration
 	StepPeriodMax  time.Duration
 	VolPeriodMin   time.Duration
@@ -49,12 +49,12 @@ func (o *Opt) Parse() {
 				return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
 			}
 
-			if o.StepMin < 1 {
-				return errors.New("step-min must be at least 1")
+			if o.VolumeStepMin < 1 {
+				return errors.New("volume-step-min must be at least 1")
 			}
 
-			if o.StepMax < o.StepMin {
-				return errors.New("step-max must be greater than or equal to step-min")
+			if o.VolumeStepMax < o.VolumeStepMin {
+				return errors.New("volume-step-max must be greater than or equal to volume-step-min")
 			}
 
 			if o.StepPeriodMin <= 0 {
@@ -91,8 +91,8 @@ func (o *Opt) Parse() {
 	rootCmd.Flags().StringSliceVarP(&o.StorageClasses, "storage-classes", "", nil, "Comma-separated list of storage class names to use (required)")
 	rootCmd.Flags().StringVarP(&o.Kubeconfig, "kubeconfig", "", "", "Path to kubeconfig file")
 	rootCmd.Flags().IntVarP(&o.MaxVolumes, "max-volumes", "", 10, "Maximum number of concurrent ReplicatedVolumes")
-	rootCmd.Flags().IntVarP(&o.StepMin, "step-min", "", 1, "Minimum number of ReplicatedVolumes to create per step")
-	rootCmd.Flags().IntVarP(&o.StepMax, "step-max", "", 3, "Maximum number of ReplicatedVolumes to create per step")
+	rootCmd.Flags().IntVarP(&o.VolumeStepMin, "volume-step-min", "", 1, "Minimum number of ReplicatedVolumes to create per step")
+	rootCmd.Flags().IntVarP(&o.VolumeStepMax, "volume-step-max", "", 3, "Maximum number of ReplicatedVolumes to create per step")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMin, "step-period-min", "", 10*time.Second, "Minimum wait between creation steps")
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between creation steps")
 	rootCmd.Flags().DurationVarP(&o.VolPeriodMin, "vol-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")

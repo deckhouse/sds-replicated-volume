@@ -66,7 +66,7 @@ func main() {
 	cfg := config.MultiVolumeConfig{
 		StorageClasses: opt.StorageClasses,
 		MaxVolumes:     opt.MaxVolumes,
-		Step:           config.Count{Min: opt.StepMin, Max: opt.StepMax},
+		VolumeStep:     config.Count{Min: opt.VolumeStepMin, Max: opt.VolumeStepMax},
 		StepPeriod:     config.Duration{Min: opt.StepPeriodMin, Max: opt.StepPeriodMax},
 		VolumePeriod:   config.Duration{Min: opt.VolPeriodMin, Max: opt.VolPeriodMax},
 	}
