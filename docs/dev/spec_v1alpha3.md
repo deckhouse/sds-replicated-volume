@@ -22,7 +22,6 @@
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2)
   - [`drbd-primary-controller`](#drbd-primary-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-1)
-  - [`rvr-drbd-status-controller`](#rvr-drbd-status-controller)
   - [`rvr-status-config-address-controller`](#rvr-status-config-address-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3)
 - [Акторы приложения: `controller`](#акторы-приложения-controller)
@@ -53,14 +52,11 @@
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
     - [Статус: \[OK | priority: 3 | complexity: 3\]](#статус-ok--priority-3--complexity-3)
   - [`rvr-missing-node-controller`](#rvr-missing-node-controller)
+    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3)
   - [`rvr-node-cordon-controller`](#rvr-node-cordon-controller)
-  - [`rvr-status-conditions-controller`](#rvr-status-conditions-controller)
-    - [Статус: \[TBD | priority: 5 | complexity: 2\]](#статус-tbd--priority-5--complexity-2)
+    - [Статус: \[TBD | priority: 3 | complexity: 3\]](#статус-tbd--priority-3--complexity-3-1)
   - [`llv-owner-reference-controller`](#llv-owner-reference-controller)
     - [Статус: \[TBD | priority: 5 | complexity: 1\]](#статус-tbd--priority-5--complexity-1)
-  - [`rv-status-conditions-controller`](#rv-status-conditions-controller)
-  - [`rv-gc-controller`](#rv-gc-controller)
-  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller)
 
 # Основные положения
 
@@ -422,15 +418,6 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 ### Вывод 
   - `rvr.status.drbd.errors.*`
 
-## `rvr-drbd-status-controller`
-
-### Цель 
-
-### Триггер 
-  - 
-### Вывод 
-  - 
-
 ## `rvr-status-config-address-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 3]
@@ -791,6 +778,8 @@ if M > 1 {
 
 ## `rvr-missing-node-controller`
 
+### Статус: [TBD | priority: 3 | complexity: 3]
+
 ### Цель 
 Удаляет (без снятия финализатора) RVR с тех нод, которых больше нет в кластере.
 
@@ -803,6 +792,8 @@ if M > 1 {
 
 ## `rvr-node-cordon-controller`
 
+### Статус: [TBD | priority: 3 | complexity: 3]
+
 ### Цель 
 Удаляет (без снятия финализатора) RVR с тех нод, которые помечены специальным
 образом как закордоненные (аннотация, а не `spec.cordon`).
@@ -814,70 +805,6 @@ if M > 1 {
 
 ### Вывод 
   - delete rvr
-
-## `rvr-status-conditions-controller`
-
-### Статус: [TBD | priority: 5 | complexity: 2]
-
-### Цель
-
-Поддерживать вычисляемые поля для отображения пользователю.
-
-- `rvr.status.conditions[type=<>]`
-  - `Quorum`
-    - `status`
-      - `True`
-        - `rvr.status.drbd.status.devices[0].quorum=true`
-      - `False` - иначе
-        - `reason` - в соответствии с причиной
-  - `InSync`
-    - `status`
-      - `True`
-        - `rvr.status.drbd.status.devices[0].diskState=UpToDate`
-      - `False` - иначе
-        - `reason` - в соответствии с причиной
-  - `Scheduled` - управляется `rvr-scheduling-controller`, не менять
-  - `Configured`
-    - `status`
-      - `True` (AND)
-        - если все поля в `rvr.status.drbd.actual.*` равны соответствующим
-      полям-источникам в `rv.status.drbd.config` или `rvr.status.drbd.config`
-        - `rvr.status.drbd.errors.lastAdjustmentError == nil`
-        - `rvr.status.drbd.errors.lastPromotionError == nil`
-        - `rvr.status.drbd.errors.lastResizeError == nil`
-        - `rvr.status.drbd.errors.<...>Error == nil`
-      - `False` - иначе
-        - `reason` - в соответствии с причиной
-        - `message` - сформировать из `rvr.status.drbd.errors.<...>Error`
-  - `Ready`
-    - `status`
-      - `True` (AND)
-        - `Quorum=True`
-        - `InSync!=False`
-        - `Scheduled=True`
-        - `Configured=True`
-      - `False` - инчае
-        - `reason` - в соответствии с причиной
-  - `VolumeAccessReady` - существует только для `Access` и `Diskful` реплик
-    - `status`
-      - `True` (AND)
-        - `rvr.status.drbd.status.role==Primary`
-        - нет проблем с I/O (см. константы `ReasonDiskIOSuspended<...>`)
-        - `Quorum=True`
-      - `False` - иначе
-        - `reason`
-          - `NotPublished` - если не Primary
-          - `IOSuspendedByQuorum`
-          - `IOSuspendedBy<...>` - (см. константы `ReasonDiskIOSuspended<...>`)
-          - `IOSuspendedBySnapshotter` - добавить константу на будущее
-
-TODO: коннекты между разными узлами
-TODO: что ещё нужно для UI (%sync?)?
-TODO: SharedSecretAlgorithmSelected .reason=UnableToSelectSharedSecretAlgorithm
-TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Error` ?
-
-### Вывод 
-  - `rvr.status.conditions`
 
 ## `llv-owner-reference-controller`
 
@@ -893,10 +820,4 @@ TODO: AddressConfigured - мб заменить на `rvr.status.errors.<...>Err
 ### Вывод 
  - `llv.metada.ownerReference`
 
-
-## `rv-status-conditions-controller`
-
-## `rv-gc-controller`
-
-## `tie-breaker-removal-controller`
 

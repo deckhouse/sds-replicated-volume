@@ -30,6 +30,9 @@
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
   - [`rv-delete-propagation-controller`](#rv-delete-propagation-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1-1)
+  - [`rv-status-conditions-controller`](#rv-status-conditions-controller-1)
+  - [`rv-gc-controller`](#rv-gc-controller-1)
+  - [`tie-breaker-removal-controller`](#tie-breaker-removal-controller-1)
 
 # Акторы приложения: `agent`
 
@@ -239,3 +242,17 @@
 
 ### Вывод
  - удаляет `rvr`
+
+
+
+## `rv-status-conditions-controller`
+### Цель
+### Вывод
+
+## `rv-gc-controller`
+### Цель
+### Вывод
+
+## `tie-breaker-removal-controller`
+### Цель
+### Вывод
