@@ -18,6 +18,7 @@ package rvrownerreferencecontroller
 
 import (
 	"context"
+	"reflect"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -72,10 +73,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
+	if ownerReferencesUnchanged(originalRVR, rvr) {
+		return reconcile.Result{}, nil
+	}
+
 	if err := r.cl.Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		log.Error(err, "unable to patch ReplicatedVolumeReplica ownerReference", "rvr", rvr.Name)
 		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
+}
+
+func ownerReferencesUnchanged(before, after *v1alpha3.ReplicatedVolumeReplica) bool {
+	return reflect.DeepEqual(before.OwnerReferences, after.OwnerReferences)
 }

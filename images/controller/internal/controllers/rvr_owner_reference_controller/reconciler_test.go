@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -72,7 +73,10 @@ var _ = Describe("Reconciler", func() {
 
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "rv1",
+					UID:  "good-uid",
+				},
 			}
 			rvr = &v1alpha3.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr1"},
@@ -105,7 +109,7 @@ var _ = Describe("Reconciler", func() {
 			)))
 		})
 
-		When("has DeletionTimestamp", func() {
+		When("ReplicatedVolumeReplica has DeletionTimestamp", func() {
 			BeforeEach(func() {
 				rvr.Finalizers = []string{"test-finalizer"}
 			})
@@ -115,11 +119,19 @@ var _ = Describe("Reconciler", func() {
 				got := &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.DeletionTimestamp).NotTo(BeNil())
+				Expect(got.Finalizers).To(ContainElement("test-finalizer"))
+				Expect(got.OwnerReferences).To(BeEmpty())
 			})
 
 			It("skips reconciliation", func(ctx SpecContext) {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.DeletionTimestamp).NotTo(BeNil())
+				Expect(got.Finalizers).To(ContainElement("test-finalizer"))
+				Expect(got.OwnerReferences).To(BeEmpty())
 			})
 		})
 
@@ -146,6 +158,10 @@ var _ = Describe("Reconciler", func() {
 			It("ignores missing ReplicatedVolume", func(ctx SpecContext) {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.OwnerReferences).To(BeEmpty())
 			})
 		})
 
@@ -164,6 +180,111 @@ var _ = Describe("Reconciler", func() {
 			It("returns error from client", func(ctx SpecContext) {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("Patch for ReplicatedVolumeReplica fails", func() {
+			BeforeEach(func() {
+				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						return errors.NewInternalError(fmt.Errorf("test error"))
+					},
+				})
+			})
+
+			It("returns error from client", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).To(HaveOccurred())
+			})
+		})
+
+		When("ReplicatedVolumeReplica has another ownerReference", func() {
+			BeforeEach(func() {
+				rvr.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name: "other-owner",
+					},
+				}
+			})
+
+			It("sets another ownerReference to the corresponding ReplicatedVolume and keeps the original ownerReference", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.OwnerReferences).To(HaveLen(2))
+				Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
+					HaveField("Name", Equal(rv.Name)),
+					HaveField("Kind", Equal("ReplicatedVolume")),
+					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					HaveField("Controller", Not(BeNil())),
+					HaveField("BlockOwnerDeletion", Not(BeNil())),
+				)))
+				Expect(got.OwnerReferences).To(ContainElement(HaveField("Name", Equal("other-owner"))))
+			})
+		})
+
+		When("ReplicatedVolumeReplica already has ownerReference to the correct ReplicatedVolume", func() {
+			BeforeEach(func() {
+				rvr.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:               "rv1",
+						Kind:               "ReplicatedVolume",
+						APIVersion:         "storage.deckhouse.io/v1alpha3",
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
+						UID:                "good-uid",
+					},
+				}
+
+				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
+						return errors.NewInternalError(fmt.Errorf("test error"))
+					},
+				})
+			})
+
+			It("do nothing and returns no error", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.OwnerReferences).To(HaveLen(1))
+				Expect(got.OwnerReferences).To(ContainElement(HaveField("Name", Equal("rv1"))))
+			})
+		})
+
+		When("ReplicatedVolumeReplica already has ownerReference to the ReplicatedVolume with different UID", func() {
+			BeforeEach(func() {
+				rvr.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:               "rv1",
+						Kind:               "ReplicatedVolume",
+						APIVersion:         "storage.deckhouse.io/v1alpha3",
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
+						UID:                "bad-uid",
+					},
+				}
+			})
+
+			It("sets ownerReference to the corresponding ReplicatedVolume", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.OwnerReferences).To(HaveLen(1))
+				Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
+					HaveField("Name", Equal(rv.Name)),
+					HaveField("Kind", Equal("ReplicatedVolume")),
+					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					HaveField("Controller", Not(BeNil())),
+					HaveField("BlockOwnerDeletion", Not(BeNil())),
+					HaveField("UID", Equal(types.UID("good-uid"))),
+				)))
 			})
 		})
 	})
