@@ -27,7 +27,6 @@
 | `Configured` | переименован | Конфигурация применена | status-conditions-controller | `Configured`, `ConfigurationPending`, `ConfigurationFailed`, ...errors..., `NodeNotReady`, `AgentNotReady` |
 | `Online` | 🆕 computed | Scheduled + Initialized + InQuorum | status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost`, `NodeNotReady`, `AgentNotReady` |
 | `IOReady` | 🆕 computed | Online + InSync (safe) | status-conditions-controller | `IOReady`, `Offline`, `OutOfSync`, `Synchronizing`, `NodeNotReady`, `AgentNotReady` |
-| `DRBDIOReady` | 🆕 computed | DRBD может I/O | status-conditions-controller | `DRBDIOReady`, `Offline`, `QuorumLost`, `IOSuspended`, `IOFailuresForced`, `DiskStateInvalid`, `NodeNotReady`, `AgentNotReady` |
 | `Published` | переименован | Реплика Primary | rv-publish-controller | `Published`, `Unpublished`, `PublishPending` |
 
 ### Удаляемые
@@ -197,201 +196,6 @@
 - **Примечание:** Более строгий чем `DRBDIOReady`. Гарантирует что данные полностью синхронизированы.
 - **Promote:** Переключение реплики Secondary→Primary. Требует `IOReady=True` чтобы гарантировать актуальность данных и избежать split-brain.
 
-### `type=DRBDIOReady`
-
-- Обновляется: **status-conditions-controller**.
-- 🆕 Вычисляемый (computed).
-- **Назначение:** Отражает реальную способность DRBD обрабатывать I/O (включая во время синхронизации).
-- `status`:
-  - `True` — DRBD **технически** может обрабатывать I/O (AND)
-    - `Online=True`
-    - `InQuorum=True`
-    - `drbd.status.suspended=false`
-    - `drbd.status.forceIOFailures=false`
-    - `diskState` in [`UpToDate`, `SyncSource`, `SyncTarget`, `Diskless`]
-  - `False` — DRBD не может обрабатывать I/O
-- `reason`:
-  - `DRBDIOReady` — DRBD готов к I/O операциям
-  - `Offline` — реплика не онлайн (смотри `Online` condition)
-  - `QuorumLost` — потерян кворум, I/O заблокирован
-  - `IOSuspended` — I/O приостановлен DRBD (suspended=true)
-  - `IOFailuresForced` — I/O failures форсированы (forceIOFailures=true)
-  - `DiskStateInvalid` — diskState не позволяет I/O (`Inconsistent`, `Outdated`)
-  - `NodeNotReady` — нода недоступна
-  - `AgentNotReady` — agent pod не работает
-- **Примечание:** `InSync` НЕ требуется — DRBD может обрабатывать I/O во время синхронизации (SyncSource/SyncTarget).
-- **Сравнение с IOReady:** Во время синхронизации `DRBDIOReady=True`, но `IOReady=False`.
-
----
-
-## Когда использовать IOReady vs DRBDIOReady
-
-### `IOReady=True` — Нормальные операции (безопасные)
-
-```
-Состояние: Primary потерян, есть Secondary с UpToDate
-
-  node-1: Primary, DEAD/NotReady
-  node-2: Secondary, UpToDate, IOReady=True ✅
-  node-3: Secondary, UpToDate, IOReady=True ✅
-
-Действие: Автоматический promote node-2 → Primary
-  ✅ Данные 100% синхронизированы
-  ✅ Нет потери данных
-  ✅ Нет split-brain
-```
-
-| Операция | IOReady | Результат |
-|----------|---------|-----------|
-| **Promote** | ✅ True | ✅ Безопасно — данные полные |
-| **Resize** | ✅ True | ✅ Безопасно — все реплики синхронны |
-| **Snapshot** | ✅ True | ✅ Консистентный snapshot |
-| **Rolling update** | ✅ True | ✅ Можно безопасно мигрировать |
-
-### `DRBDIOReady=True`, `IOReady=False` — Disaster Recovery (с рисками)
-
-```
-Сценарий: Primary ПОТЕРЯН НАВСЕГДА, все Secondary в SyncTarget
-
-  node-1: Primary, DESTROYED (диск потерян)
-  node-2: Secondary, SyncTarget 60%, DRBDIOReady=True, IOReady=False ⚠️
-  node-3: Secondary, SyncTarget 40%, DRBDIOReady=True, IOReady=False ⚠️
-
-Решение: Emergency promote node-2 (лучший кандидат)
-  ⚠️ Потеря ~40% данных
-  ⚠️ Требуется manual --force
-  ⚠️ Только если Primary точно не вернётся
-```
-
-**Риски promote при `IOReady=False`:**
-
-| Риск | Описание |
-|------|----------|
-| **Потеря данных** | Несинхронизированная часть данных будет потеряна |
-| **Split-brain** | Если Primary ещё жив — два Primary одновременно |
-| **Inconsistent state** | Приложение увидит неполные данные |
-| **Manual recovery** | После восстановления нужен ручной resolution |
-
-### Операции по условиям
-
-| Операция | Условие | Комментарий | Подтверждено |
-|----------|---------|-------------|--------------|
-| **Read/Write I/O** | `DRBDIOReady=True` | DRBD обрабатывает I/O даже во время sync | ✅ Да |
-| **Pod mount** | `DRBDIOReady=True` | Volume доступен для workload | ✅ Да |
-| **Promote (normal)** | `IOReady=True` | Автоматический failover без потери данных | ✅ Да |
-| **Promote (DR)** | `DRBDIOReady=True` | ⚠️ Emergency only, manual `--force`, потеря данных | ✅ Да |
-| **Resize** | `IOReady=True` | Все реплики должны быть синхронны | ⚠️ Предположение |
-| **Snapshot** | `IOReady=True` | Гарантия консистентности | ⚠️ Предположение |
-| **Delete replica** | `DRBDIOReady=True` | ⚠️ Осторожно при удалении SyncSource | ⚠️ Предположение |
-
-### Использование в контроллерах
-
-| Контроллер | Условие | Действие |
-|------------|---------|----------|
-| `rv-publish-controller` | `IOReady=True` | Normal promote (подтверждено) |
-| `rv-publish-controller` | `DRBDIOReady=True` + manual `--force` | DR promote (подтверждено) |
-| `drbd-resize-controller` | `IOReady=True` | Resize volume (предположение) |
-| `drbd-primary-controller` | `IOReady=True` | Switch primary (подтверждено)
-| Мониторинг/UI | `DRBDIOReady` | Показать что I/O работает (sync в процессе) |
-
-### Резюме
-
-```
-IOReady     = "Безопасно для критических операций" (promote, resize, snapshot)
-DRBDIOReady = "DRBD может I/O" (мониторинг, DR failover, обычный I/O)
-
-Правило: Используй IOReady для автоматических операций.
-         DRBDIOReady только для мониторинга и emergency DR.
-```
-
----
-
-## Источники: Почему `IOReady=True` требуется для Promote
-
-### Важное уточнение
-
-**Различие между двумя сценариями:**
-- **Primary ОСТАЁТСЯ Primary во время sync** = ✅ OK, I/O работает нормально
-- **Promote Secondary→Primary ВО ВРЕМЯ sync** = ❌ Опасно, требует `--force`
-
-Наш `IOReady` condition относится ко **второму сценарию** — выбор нового Primary после потери текущего.
-
-### Реальные обсуждения и документация
-
-**1. Linux Kernel Mailing List (Google Groups)**
-
-> "disallow promotion during resync handshake, avoid deadlock and hard reset"
-
-- **Ссылка:** https://groups.google.com/g/linux.kernel/c/nrZzOENTv3M
-- **Проблема:** Promote во время resync handshake вызывает deadlock и hard reset системы
-
-**2. Server Fault — реальный опыт операторов**
-
-> "As long as you're certain that the future peer's disk is going to be the same size, or bigger than, the Primary you're about to force promote, then you shouldn't run into any troubles: `# drbdadm primary <res> --force`"
-
-- **Ссылка:** https://serverfault.com/questions/890422/how-to-force-drbd-for-a-self-synchronization
-- **Вывод:** `--force` требуется для promote когда данные не UpToDate
-
-**3. LINBIT Forum — реальный случай Split-brain**
-
-> "Во время синхронизации размонтируйте C и смонтируйте B, заставляя B автоматически стать основным узлом."
-
-Описан реальный случай split-brain при promote во время sync в DRBD 9.2.13.
-
-- **Ссылка:** https://forums.linbit.com/t/split-brain-issue-in-drbd-9-2-13/762
-
-**4. DRBD Sync Documentation (wiki.zohead.com)**
-
-> "Во время синхронизации данные на резервном узле частично устарели и частично уже обновлены, что делает их состояние 'несогласованным'. Это состояние может привести к проблемам, если узел с несогласованными данными будет повышен до Primary."
-
-- **Ссылка:** https://wiki.zohead.com/技术/存储/DRBD/DRBD同步速率机制.md
-
-**5. MySQL/DRBD Documentation**
-
-> "Both replication and synchronization can take place at the same time. The block devices can be synchronized while they are actively being used by the primary node."
-
-- **Ссылка:** https://tool.oschina.net/uploads/apidocs/mysql-5.5-en/ha-overview.html
-- **Вывод:** Primary может работать во время sync, но это не то же что promote Secondary→Primary
-
-**6. Ubuntu Man Pages (drbdsetup)**
-
-> "auto-promote возможно только если состояние кластера это позволяет"
-
-- **Ссылка:** https://manpages.ubuntu.com/manpages/xenial/man8/drbdsetup-9.0.8.html
-
-**7. Официальная документация DRBD 9**
-
-- **User Guide:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/
-- **Disk States:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-disk-states
-- **Quorum:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-quorum
-- **Resync:** https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/#s-resync
-
-### Подтверждённые факты
-
-| Факт | Источник |
-|------|----------|
-| Deadlock при promote во время resync handshake | Google Groups |
-| `--force` нужен для promote не-UpToDate | Server Fault |
-| Split-brain при promote во время sync | LINBIT Forum |
-| Primary может продолжать I/O во время sync | MySQL/DRBD docs |
-| Данные Inconsistent = частично устаревшие | wiki.zohead.com |
-| auto-promote зависит от состояния кластера | Ubuntu man pages |
-
-### Не найдено прямого подтверждения
-
-| Утверждение | Статус | Комментарий |
-|-------------|--------|-------------|
-| Resize требует UpToDate | ⚠️ Предположение | Логично, но не найдено в документации |
-| Snapshot требует UpToDate | ⚠️ Предположение | Логично для консистентности |
-| DRBD явно "отклоняет" promote | ⚠️ Косвенно | Нужен `--force`, но явного сообщения не найдено |
-
-### Выводы для нашей архитектуры
-
-1. **`IOReady=True`** = diskState UpToDate = безопасный автоматический promote
-2. **`IOReady=False`** = sync в процессе = promote только с `--force` (DR сценарий)
-3. **`DRBDIOReady=True`** = DRBD может I/O, но promote Secondary→Primary опасен
-
----
 
 ### `type=Configured`
 
@@ -448,7 +252,7 @@ DRBDIOReady = "DRBD может I/O" (мониторинг, DR failover, обыч
 
 # RV Conditions (`ReplicatedVolume.status.conditions[]`)
 
-### `type=QuorumConfigured`
+### `type=QuorumConfigured`  - убрать
 
 - Обновляется: **rv-status-config-quorum-controller**.
 - Существующий condition (без изменений).
@@ -462,7 +266,7 @@ DRBDIOReady = "DRBD может I/O" (мониторинг, DR failover, обыч
   - `WaitingForReplicas` — ожидание готовности реплик для расчёта кворума
 - Примечание: показывает что **настройки** кворума применены, а не что кворум **достигнут** (для этого есть `Quorum`).
 
-### `type=DiskfulReplicaCountReached`
+### `type=DiskfulReplicaCountReached` - удалить(?) - копирует частично `type=IOReady` + counter по diskfull репликам.
 
 - Обновляется: **rvr-diskful-count-controller**.
 - Существующий condition (без изменений).
@@ -475,20 +279,6 @@ DRBDIOReady = "DRBD может I/O" (мониторинг, DR failover, обыч
   - `FirstReplicaIsBeingCreated` — создаётся первая реплика
   - `WaitingForFirstReplica` — ожидание готовности первой реплики
 - Примечание: контролирует создание Diskful реплик, первая реплика должна быть Initialized перед созданием остальных.
-
-### `type=SharedSecretAlgorithmSelected`
-
-- Обновляется: **rv-status-config-shared-secret-controller**.
-- Существующий condition (без изменений).
-- `status`:
-  - `True` — алгоритм shared secret выбран и работает
-    - `rv.status.drbd.config.sharedSecretAlg` установлен
-    - нет ошибок на репликах
-  - `False` — не удалось выбрать рабочий алгоритм
-- `reason`:
-  - `AlgorithmSelected` — алгоритм успешно выбран
-  - `UnableToSelectSharedSecretAlgorithm` — все алгоритмы исчерпаны, ни один не работает
-- Алгоритмы (в порядке приоритета): `sha256`, `sha1`.
 
 ### `type=IOReady`
 
