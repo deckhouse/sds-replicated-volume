@@ -177,27 +177,31 @@ spec:
     # - /usr/src/linux-headers-${kernel_version_in_use}
     # - /usr/src/linux-headers-${kernel_version_in_use}-generic (or other flavor)
     # Both should be included in the archive if they exist
-    KERNEL_HEADERS_DIRS=""
     KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
+    TAR_ARGS=""
     
     if [ -d "/usr/src/linux-headers-${kernel_version_in_use}" ]; then
-      KERNEL_HEADERS_DIRS="/usr/src/linux-headers-${kernel_version_in_use}"
+      TAR_ARGS="/usr/src/linux-headers-${kernel_version_in_use}"
       
       # Check for flavor-specific directory (e.g., -generic)
       # If it exists, include it in archive and use flavor-specific version for API
       if [ -d "/usr/src/linux-headers-${kernel_version_in_use}-generic" ]; then
-        KERNEL_HEADERS_DIRS="$KERNEL_HEADERS_DIRS /usr/src/linux-headers-${kernel_version_in_use}-generic"
+        TAR_ARGS="$TAR_ARGS /usr/src/linux-headers-${kernel_version_in_use}-generic"
         KERNEL_VERSION_FOR_API="${kernel_version_in_use}-generic"
+        bb-log-info "Found both kernel headers directories, will archive both"
+      else
+        bb-log-info "Found base kernel headers directory only"
       fi
     elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
       # Resolve symlink if it exists (for other Debian-like distributions)
-      KERNEL_HEADERS_DIRS="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+      TAR_ARGS="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+      bb-log-info "Using kernel headers from /lib/modules via symlink"
     else
       bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
       exit 1
     fi
 
-    bb-log-info "Using kernel headers from: $KERNEL_HEADERS_DIRS"
+    bb-log-info "Archiving kernel headers: $TAR_ARGS"
 
     # Archive kernel headers and send build request
     bb-log-info "Sending build request to DRBD build server"
@@ -205,7 +209,8 @@ spec:
     
     # Check if response is a file (cached) or JSON (new build)
     # Archive all kernel headers directories found (as shown in the instruction)
-    HTTP_CODE=$(tar -czf - $KERNEL_HEADERS_DIRS | \
+    # Using $TAR_ARGS without quotes allows bash to split multiple paths into separate arguments
+    HTTP_CODE=$(tar -czf - $TAR_ARGS | \
       curl -s -w '%{http_code}' -X POST \
       -H "Content-Type: application/gzip" \
       -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
