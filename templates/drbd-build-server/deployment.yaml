@@ -73,7 +73,7 @@ spec:
         - -addr=:2021
         - -cache-dir=/var/cache/drbd-build-server
         - -drbd-dir=/drbd
-        - -drbd-version=9.2.12
+        - -drbd-version={{ .Values.sdsReplicatedVolume.internal.drbdVersion }}
         - -log-level
 {{- if eq .Values.sdsReplicatedVolume.logLevel "ERROR" }}
         - error
