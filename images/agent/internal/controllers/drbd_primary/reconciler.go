@@ -42,6 +42,10 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
+const (
+	reconcileAfter = 10 * time.Second
+)
+
 // NewReconciler is a small helper constructor that is primarily useful for tests.
 func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, cfg env.Config) *Reconciler {
 	return &Reconciler{
@@ -64,7 +68,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	err := r.cl.Get(ctx, req.NamespacedName, rvr)
 	if err != nil {
 		log.Error(err, "getting ReplicatedVolumeReplica")
-		return reconcile.Result{}, err
+		return reconcile.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Check if this RVR belongs to this node
+	if rvr.Spec.NodeName != r.cfg.NodeName() {
+		log.V(4).Info("ReplicatedVolumeReplica does not belong to this node, skipping")
+		return reconcile.Result{}, nil
 	}
 
 	if !rvr.DeletionTimestamp.IsZero() {
@@ -78,17 +88,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Check if this RVR belongs to this node
-	if rvr.Spec.NodeName != r.cfg.NodeName() {
-		log.V(4).Info("ReplicatedVolumeReplica does not belong to this node, skipping")
-		return reconcile.Result{}, nil
-	}
-
-	if !rvr.Status.DRBD.Actual.InitialSyncCompleted {
-		log.V(4).Info("Initial sync not completed, skipping")
-		return reconcile.Result{}, nil
-	}
-
 	// Check if ReplicatedVolume is Ready
 	// TODO: condition type v1alpha3.ConditionTypeReady is used here!
 	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
@@ -97,8 +96,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 	if !ready {
-		log.V(4).Info("ReplicatedVolume is not Ready, skipping", "rvName", rvr.Spec.ReplicatedVolumeName)
-		return reconcile.Result{}, nil
+		log.V(4).Info("ReplicatedVolume is not Ready, requeuing", "rvName", rvr.Spec.ReplicatedVolumeName)
+		return reconcile.Result{
+			RequeueAfter: reconcileAfter,
+		}, nil
 	}
 
 	desiredPrimary := *rvr.Status.DRBD.Config.Primary
@@ -234,7 +235,7 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, st
 		return false, "ReplicatedVolumeReplica does not have a nodeName"
 	}
 
-	if rvr.Status == nil || rvr.Status.DRBD == nil {
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil || rvr.Status.DRBD.Actual == nil {
 		return false, "DRBD status not initialized"
 	}
 
@@ -243,8 +244,8 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, st
 		return false, "DRBD config primary not set"
 	}
 
-	if rvr.Status.DRBD.Status == nil {
-		return false, "DRBD status not available"
+	if !rvr.Status.DRBD.Actual.InitialSyncCompleted {
+		return false, "Initial sync not completed, skipping"
 	}
 
 	return true, ""
@@ -259,5 +260,10 @@ func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error)
 	if err != nil {
 		return false, err
 	}
+
+	if rv.Status == nil {
+		return false, nil
+	}
+
 	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeReady), nil
 }
