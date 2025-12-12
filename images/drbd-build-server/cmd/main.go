@@ -50,6 +50,7 @@ var (
 	flagCacheDir     = flag.String("cache-dir", "/var/cache/drbd-build-server", "Path to cache directory for built modules")
 	flagMaxBytesBody = flag.Int64("maxbytesbody", 100*1024*1024, "Maximum number of bytes in the body (100MB)")
 	flagKeepTmpDir   = flag.Bool("keeptmpdir", false, "Do not delete the temporary directory, useful for debugging")
+	flagMakeClean    = flag.Bool("make-clean", false, "Run 'make clean' before building DRBD modules")
 	flagCertFile     = flag.String("certfile", "", "Path to a TLS cert file")
 	flagKeyFile      = flag.String("keyfile", "", "Path to a TLS key file")
 	flagVersion      = flag.Bool("version", false, "Print version and exit")
@@ -89,6 +90,7 @@ type server struct {
 	cacheDir     string
 	maxBytesBody int64
 	keepTmpDir   bool
+	makeClean    bool // Whether to run 'make clean' before building
 	spaasURL     string
 	logger       *slog.Logger // Structured logger
 
@@ -157,6 +159,7 @@ func main() {
 		cacheDir:     *flagCacheDir,
 		maxBytesBody: *flagMaxBytesBody,
 		keepTmpDir:   *flagKeepTmpDir,
+		makeClean:    *flagMakeClean,
 		spaasURL:     spaasURL,
 		logger:       logger,
 		jobs:         make(map[string]*BuildJob),
@@ -767,18 +770,22 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	s.logger.Debug("Environment variables set", "job_id", jobID, "KVER", kernelVersion, "KDIR", kernelBuildDir, "SPAAS_URL", s.spaasURL)
 
 	// Clean previous build
-	// s.logger.Debug("Running 'make clean'", "job_id", jobID)
-	// cmd := exec.Command("make", "clean")
-	// cmd.Env = env
-	// cmd.Stdout = os.Stdout
-	// cmd.Stderr = os.Stderr
-	// cmd.Dir = drbdDir
-	// if err := cmd.Run(); err != nil {
-	// 	// Don't fail on clean errors
-	// 	s.logger.Debug("make clean failed (ignored)", "job_id", jobID, "error", err)
-	// } else {
-	// 	s.logger.Debug("'make clean' completed successfully", "job_id", jobID)
-	// }
+	if s.makeClean {
+		s.logger.Debug("Running 'make clean'", "job_id", jobID)
+		cmd := exec.Command("make", "clean")
+		cmd.Env = env
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		cmd.Dir = drbdDir
+		if err := cmd.Run(); err != nil {
+			// Don't fail on clean errors
+			s.logger.Debug("make clean failed (ignored)", "job_id", jobID, "error", err)
+		} else {
+			s.logger.Debug("'make clean' completed successfully", "job_id", jobID)
+		}
+	} else {
+		s.logger.Debug("Skipping 'make clean' (disabled via flag)", "job_id", jobID)
+	}
 
 	// Check and update submodules if needed (required by make module)
 	// This ensures all submodules are initialized before building
@@ -845,6 +852,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 
 // fixMakefilePaths fixes absolute paths in Makefiles to point to the extracted kernel headers location.
 // It replaces paths like /usr/src/linux-headers-* with kernelHeadersDir/usr/src/linux-headers-*
+// Debian has hardcoded paths in Makefiles, so we need to fix them.
 func (s *server) fixMakefilePaths(kernelHeadersDir, jobID string) error {
 	s.logger.Debug("Fixing Makefile paths", "job_id", jobID, "kernel_headers_dir", kernelHeadersDir)
 
@@ -1077,56 +1085,20 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 }
 
 func extractTarGz(r io.Reader, destDir string) error {
-	gzReader, err := gzip.NewReader(r)
-	if err != nil {
-		return fmt.Errorf("failed to create gzip reader: %v", err)
-	}
-	defer gzReader.Close()
-
-	tarReader := tar.NewReader(gzReader)
-
-	for {
-		header, err := tarReader.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return fmt.Errorf("failed to read tar entry: %v", err)
-		}
-
-		targetPath := filepath.Join(destDir, header.Name)
-
-		// Security: prevent directory traversal
-		if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(destDir)+string(os.PathSeparator)) &&
-			filepath.Clean(targetPath) != filepath.Clean(destDir) {
-			return fmt.Errorf("invalid path in archive: %s", header.Name)
-		}
-
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, os.FileMode(header.Mode)); err != nil {
-				return fmt.Errorf("failed to create directory %s: %v", targetPath, err)
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
-				return fmt.Errorf("failed to create parent directory: %v", err)
-			}
-			file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return fmt.Errorf("failed to create file %s: %v", targetPath, err)
-			}
-			if _, err := io.Copy(file, tarReader); err != nil {
-				file.Close()
-				return fmt.Errorf("failed to write file %s: %v", targetPath, err)
-			}
-			file.Close()
-		case tar.TypeSymlink:
-			if err := os.Symlink(header.Linkname, targetPath); err != nil {
-				return fmt.Errorf("failed to create symlink %s -> %s: %v", targetPath, header.Linkname, err)
-			}
-		}
+	// Create the destination directory if it doesn't exist
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %v", err)
 	}
 
+	// Prepare the tar command
+	cmd := exec.Command("tar", "-xzf", "-", "-C", destDir)
+	cmd.Stdin = r
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to extract tar.gz archive with tar: %v", err)
+	}
 	return nil
 }
 
