@@ -75,10 +75,10 @@ var _ = Describe("Reconciler", func() {
 		rec = drbdprimary.NewReconciler(cl, GinkgoLogr, scheme, cfg)
 	})
 
-	It("returns error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
+	It("ignores NotFound when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
 		Expect(rec.Reconcile(ctx, reconcile.Request{
 			NamespacedName: types.NamespacedName{Name: "not-existing-rvr"},
-		})).Error().To(HaveOccurred())
+		})).NotTo(Requeue())
 	})
 
 	When("Get fails with non-NotFound error", func() {
@@ -174,12 +174,28 @@ var _ = Describe("Reconciler", func() {
 			Entry("no NodeName", func() { rvr.Spec.NodeName = "" }),
 			Entry("nil Status", func() { rvr.Status = nil }),
 			Entry("nil Status.DRBD", func() { rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Actual", func() {
+				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha3.DRBD{
+						Config: &v1alpha3.DRBDConfig{Primary: boolPtr(true)},
+						Status: &v1alpha3.DRBDStatus{},
+						Actual: nil,
+					},
+				}
+			}),
 			Entry("nil Status.DRBD.Config", func() { rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: nil}} }),
 			Entry("nil Status.DRBD.Config.Primary", func() {
-				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Primary: nil}}}
+				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha3.DRBD{
+						Config: &v1alpha3.DRBDConfig{Primary: nil},
+						Status: &v1alpha3.DRBDStatus{},
+						Actual: &v1alpha3.DRBDActual{},
+					},
+				}
 			}),
 			Entry("nil Status.DRBD.Status", func() {
-				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Primary: boolPtr(true)}, Status: nil}}
+				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Primary: boolPtr(true)}, Status: nil}}
 			}),
 			func(setup func()) {
 				BeforeEach(func() {
@@ -271,8 +287,8 @@ var _ = Describe("Reconciler", func() {
 				rv.Status.Conditions[0].Status = metav1.ConditionFalse
 			})
 
-			It("should skip and return no error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+			It("should requeue", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rvr))).To(Requeue())
 			})
 		})
 
