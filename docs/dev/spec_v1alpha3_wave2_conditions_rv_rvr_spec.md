@@ -535,31 +535,35 @@
 builder.ControllerManagedBy(mgr).
     For(&v1alpha3.ReplicatedVolume{}).
     Owns(&v1alpha3.ReplicatedVolumeReplica{}).
-    // Watch Nodes для обнаружения node failures.
-    // Нужен mapper: Node → RV (через RVR.spec.nodeName).
-    Watches(&corev1.Node{}, handler.EnqueueRequestsFromMapFunc(nodeToRVMapper)).
-    // Watch Agent Pods для обнаружения agent failures.
-    // Нужен mapper: Pod → RV (через pod.spec.nodeName → RVR.spec.nodeName → RV).
+    // Watch Agent Pods для быстрого обнаружения agent failures.
     // Predicate: только pods с label app=sds-drbd-agent.
     Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(agentPodToRVMapper),
         builder.WithPredicates(agentPodPredicate)).
     Complete(rec)
 
-// agentPodPredicate фильтрует только agent pods
-var agentPodPredicate = predicate.NewPredicateFuncs(func(obj client.Object) bool {
-    pod := obj.(*corev1.Pod)
-    return pod.Labels["app"] == "sds-drbd-agent"
-})
+// Reconcile возвращает RequeueAfter для периодической проверки
+return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 ```
+
+**Почему без Node Watch:**
+- Node heartbeats генерируют события каждые ~10 секунд с каждой ноды
+- Это создаёт лишнюю нагрузку на reconciler
+- Node.Ready проверяется через `Get()` внутри reconcile
+- DRBD agents на живых нодах быстрее обнаружат потерю connection
+
+**Периодический poll (20 сек):**
+- Fallback для случаев когда events пропущены
+- Гарантирует обновление status даже без внешних триггеров
 
 ### Триггеры
 
-| Событие | Request содержит |
-|---------|------------------|
-| RV создан/изменён/удалён | RV name |
-| RVR изменён (через ownerReference) | RV name (owner) |
-| Node изменилась | RV name (через mapper) |
-| Agent Pod изменился | RV name (через mapper) |
+| Событие | Request содержит | Скорость |
+|---------|------------------|----------|
+| RV создан/изменён/удалён | RV name | Мгновенно |
+| RVR изменён (через ownerReference) | RV name (owner) | Мгновенно |
+| Agent Pod изменился | RV name (через mapper) | Мгновенно |
+| Периодический requeue | RV name | Каждые 20 сек |
+| DRBD connection loss (через RVR update) | RV name (owner) | ~секунды |
 
 ## Логика Reconcile
 
@@ -571,33 +575,19 @@ var agentPodPredicate = predicate.NewPredicateFuncs(func(obj client.Object) bool
    - by ownerReference or label
 
 3. For each RVR:
-   a. Get Node by rvr.spec.nodeName
+   a. Get Node by rvr.spec.nodeName (через r.Get(), не Watch)
    b. Check Node.Ready condition
    c. Check Agent Pod status on this node
    d. If Node NotReady:
-      - Set all conditions to Unknown/False with reason NodeNotReady:
-        - InQuorum = Unknown
-        - InSync = Unknown
-        - Configured = Unknown
-        - Online = False
-        - IOReady = False
-        - DRBDIOReady = False
+      - Set all conditions to Unknown/False with reason NodeNotReady
    e. Else if Agent NotReady:
-      - Set all conditions to Unknown/False with reason AgentNotReady:
-        - InQuorum = Unknown
-        - InSync = Unknown
-        - Configured = Unknown
-        - Online = False
-        - IOReady = False
-        - DRBDIOReady = False
+      - Set all conditions to Unknown/False with reason AgentNotReady
    f. Else compute conditions:
       - InQuorum: from drbd.status.devices[0].quorum
       - InSync: from drbd.status.devices[0].diskState
       - Configured: compare drbd.actual.* vs config.*
       - Online: Scheduled ∧ Initialized ∧ InQuorum
       - IOReady: Online ∧ InSync (strict: requires UpToDate)
-      - DRBDIOReady: Online ∧ InQuorum ∧ ¬suspended ∧ ¬forceIOFailures ∧ validDiskState
-        // validDiskState = diskState in [UpToDate, SyncSource, SyncTarget, Diskless]
    g. Compare with current RVR.status.conditions
    h. Patch RVR ONLY if conditions changed (idempotency)
 
@@ -618,14 +608,15 @@ var agentPodPredicate = predicate.NewPredicateFuncs(func(obj client.Object) bool
 
 6. Compare with current RV.status.conditions
 7. Patch RV ONLY if conditions or counters changed
+8. return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 ```
 
 ## Node/Agent Availability Check
 
-Для каждого RVR проверяем доступность ноды И agent pod:
+Для каждого RVR проверяем доступность ноды И agent pod (Node проверяется через `Get()`, не Watch):
 
 ```
-1. Get Node by rvr.spec.nodeName
+1. Get Node by rvr.spec.nodeName (r.Get(), не Watch)
    - If Node not found: reason = NodeNotFound
 
 2. Check node.status.conditions[type=Ready]
@@ -645,7 +636,6 @@ If Node NotReady (False or Unknown):
    RVR.Configured   = Unknown, reason = NodeNotReady
    RVR.Online       = False,   reason = NodeNotReady
    RVR.IOReady      = False,   reason = NodeNotReady
-   RVR.DRBDIOReady  = False,   reason = NodeNotReady
 
 If Agent NotReady (Node OK, but Agent not running):
    RVR.InQuorum     = Unknown, reason = AgentNotReady
@@ -653,7 +643,6 @@ If Agent NotReady (Node OK, but Agent not running):
    RVR.Configured   = Unknown, reason = AgentNotReady
    RVR.Online       = False,   reason = AgentNotReady
    RVR.IOReady      = False,   reason = AgentNotReady
-   RVR.DRBDIOReady  = False,   reason = AgentNotReady
 ```
 
 **Сценарии Agent NotReady:**
@@ -667,39 +656,20 @@ If Agent NotReady (Node OK, but Agent not running):
 
 | Метод | Что обнаруживает | Скорость |
 |-------|------------------|----------|
-| Node.Ready watch | Node failure | ~40s (kubelet heartbeat timeout) |
-| Agent Pod watch | Agent crash/OOM/evict | ~секунды |
-| DRBD connections | Network partition, node failure | ~секунды |
+| Agent Pod watch | Agent crash/OOM/evict | Мгновенно |
+| DRBD connections (через RVR update) | Network partition, node failure | ~секунды |
+| Периодический poll (20 сек) | Node failure (через Get) | До 20 сек |
+
+**Почему без Node Watch:**
+- Node heartbeats генерируют события каждые ~10 секунд
+- Это создаёт лишнюю нагрузку на reconciler
+- DRBD agents на живых нодах обнаружат потерю connection быстрее
+- Периодический poll (20 сек) достаточен как fallback
 
 **Примечание о DRBD:**
 Если нода падает, DRBD агент на других нодах обнаружит потерю connection 
 и обновит свой `rvr.status.drbd.status.connections[]`. Это изменение триггерит reconcile 
-для status-conditions-controller, который увидит потерю кворума раньше, чем Node станет NotReady.
-
-## Node to RV Mapper
-
-```go
-func nodeToRVMapper(ctx context.Context, node client.Object) []reconcile.Request {
-    // Находим все RVR на этой ноде
-    rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-    cl.List(ctx, rvrList, client.MatchingFields{"spec.nodeName": node.GetName()})
-    
-    // Собираем уникальные RV
-    rvNames := make(map[string]struct{})
-    for _, rvr := range rvrList.Items {
-        rvNames[rvr.Spec.ReplicatedVolumeName] = struct{}{}
-    }
-    
-    // Формируем requests
-    requests := make([]reconcile.Request, 0, len(rvNames))
-    for name := range rvNames {
-        requests = append(requests, reconcile.Request{
-            NamespacedName: types.NamespacedName{Name: name},
-        })
-    }
-    return requests
-}
-```
+для status-conditions-controller через `Owns(RVR)`, который увидит потерю кворума раньше, чем Node станет NotReady.
 
 **Примечание:** Требуется индекс по `spec.nodeName` для эффективного поиска.
 
