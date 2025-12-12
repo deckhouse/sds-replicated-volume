@@ -41,9 +41,9 @@
 
 | Condition | Статус | Описание | Устанавливает | Reasons |
 |-----------|--------|----------|---------------|---------|
-| `QuorumConfigured` | существует | Конфигурация кворума | rv-status-config-quorum-controller | `QuorumConfigured`, `WaitingForReplicas` |
+| ~~`QuorumConfigured`~~ | ❌ убрать | ~~Конфигурация кворума~~ | - | Дублирует `rv.status.drbd.config.quorum != nil` |
 | `DiskfulReplicaCountReached` | существует | Кол-во Diskful достигнуто | rvr-diskful-count-controller | `RequiredNumberOfReplicasIsAvailable`, `FirstReplicaIsBeingCreated`, `WaitingForFirstReplica` |
-| `SharedSecretAlgorithmSelected` | существует | Алгоритм shared secret | rv-status-config-shared-secret-controller | `AlgorithmSelected`, `UnableToSelectSharedSecretAlgorithm` |
+| ~~`SharedSecretAlgorithmSelected`~~ | ❌ убрать | ~~Алгоритм shared secret~~ | - | Дублирует `rv.status.drbd.config.sharedSecret != ""` |
 | `Scheduled` | 🆕 aggregate | Все RVR Scheduled | status-conditions-controller | `AllReplicasScheduled`, `ReplicasNotScheduled`, `SchedulingInProgress` |
 | `BackingVolumeCreated` | 🆕 aggregate | Все Diskful BackingVolume ready | status-conditions-controller | `AllBackingVolumesReady`, `BackingVolumesNotReady`, `WaitingForBackingVolumes` |
 | `Configured` | 🆕 aggregate | Все RVR Configured | status-conditions-controller | `AllReplicasConfigured`, `ReplicasNotConfigured`, `ConfigurationInProgress` |
@@ -58,6 +58,8 @@
 |-----------|---------|
 | ~~`Ready`~~ | Непонятная семантика |
 | ~~`AllReplicasReady`~~ | Зависел от Ready |
+| ~~`QuorumConfigured`~~ | Дублирует `rv.status.drbd.config.quorum != nil` |
+| ~~`SharedSecretAlgorithmSelected`~~ | Дублирует `rv.status.drbd.config.sharedSecret != ""` |
 
 ---
 
@@ -423,7 +425,7 @@
 
 ---
 
-# Future Conditions (следующий этап)
+# Future Conditions in wave3 (следующий этап)
 
 ## RV Future Conditions
 
@@ -535,25 +537,22 @@
 builder.ControllerManagedBy(mgr).
     For(&v1alpha3.ReplicatedVolume{}).
     Owns(&v1alpha3.ReplicatedVolumeReplica{}).
-    // Watch Agent Pods для быстрого обнаружения agent failures.
+    // Watch Agent Pods для обнаружения agent failures.
     // Predicate: только pods с label app=sds-drbd-agent.
     Watches(&corev1.Pod{}, handler.EnqueueRequestsFromMapFunc(agentPodToRVMapper),
         builder.WithPredicates(agentPodPredicate)).
     Complete(rec)
 
-// Reconcile возвращает RequeueAfter для периодической проверки
-return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+// Без periodic poll — триггеры только от events
+return ctrl.Result{}, nil
 ```
 
-**Почему без Node Watch:**
-- Node heartbeats генерируют события каждые ~10 секунд с каждой ноды
-- Это создаёт лишнюю нагрузку на reconciler
-- Node.Ready проверяется через `Get()` внутри reconcile
-- DRBD agents на живых нодах быстрее обнаружат потерю connection
-
-**Периодический poll (20 сек):**
-- Fallback для случаев когда events пропущены
-- Гарантирует обновление status даже без внешних триггеров
+**Проверка Agent Pod + Node.Ready:**
+- Проверяем Agent Pod status через Watch
+- Если agent не работает — дополнительно проверяем Node.Ready через `Get()`
+- Если node NotReady → reason = `NodeNotReady`
+- Если node Ready → reason = `AgentNotReady`
+- DRBD agents на живых нодах обнаружат потерю connection
 
 ### Триггеры
 
@@ -561,8 +560,7 @@ return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 |---------|------------------|----------|
 | RV создан/изменён/удалён | RV name | Мгновенно |
 | RVR изменён (через ownerReference) | RV name (owner) | Мгновенно |
-| Agent Pod изменился | RV name (через mapper) | Мгновенно |
-| Периодический requeue | RV name | Каждые 20 сек |
+| Agent Pod изменился | RV name (через mapper) | ~секунды (pod status update) |
 | DRBD connection loss (через RVR update) | RV name (owner) | ~секунды |
 
 ## Логика Reconcile
@@ -575,14 +573,13 @@ return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
    - by ownerReference or label
 
 3. For each RVR:
-   a. Get Node by rvr.spec.nodeName (через r.Get(), не Watch)
-   b. Check Node.Ready condition
-   c. Check Agent Pod status on this node
-   d. If Node NotReady:
-      - Set all conditions to Unknown/False with reason NodeNotReady
-   e. Else if Agent NotReady:
-      - Set all conditions to Unknown/False with reason AgentNotReady
-   f. Else compute conditions:
+   a. Check Agent Pod status on rvr.spec.nodeName
+   b. If Agent NotReady:
+      - Get Node by rvr.spec.nodeName (через r.Get())
+      - If node.Ready == False/Unknown → reason = NodeNotReady
+      - Else → reason = AgentNotReady
+      - Set all conditions to Unknown/False with determined reason
+   c. Else compute conditions:
       - InQuorum: from drbd.status.devices[0].quorum
       - InSync: from drbd.status.devices[0].diskState
       - Configured: compare drbd.actual.* vs config.*
@@ -608,44 +605,40 @@ return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
 
 6. Compare with current RV.status.conditions
 7. Patch RV ONLY if conditions or counters changed
-8. return ctrl.Result{RequeueAfter: 20 * time.Second}, nil
+8. return ctrl.Result{}, nil  // Без periodic poll
 ```
 
-## Node/Agent Availability Check
+## Agent/Node Availability Check
 
-Для каждого RVR проверяем доступность ноды И agent pod (Node проверяется через `Get()`, не Watch):
+Для каждого RVR проверяем Agent Pod status + Node.Ready для точных reasons:
 
 ```
-1. Get Node by rvr.spec.nodeName (r.Get(), не Watch)
-   - If Node not found: reason = NodeNotFound
-
-2. Check node.status.conditions[type=Ready]
-   - status=True → node OK
-   - status=False → node failing
-   - status=Unknown → node unreachable (kubelet not reporting)
-
-3. If Node OK, check Agent Pod:
+1. Get Agent Pod:
    - Get Pod with labels: app=sds-drbd-agent, spec.nodeName=rvr.spec.nodeName
-   - If Pod not found: reason = AgentNotReady
-   - If Pod.status.phase != Running: reason = AgentNotReady
-   - If Pod.status.conditions[type=Ready].status != True: reason = AgentNotReady
+   - If Pod not found OR Pod.status.phase != Running OR Pod.Ready != True:
+     → Agent NotReady, продолжаем к шагу 2
 
-If Node NotReady (False or Unknown):
-   RVR.InQuorum     = Unknown, reason = NodeNotReady
-   RVR.InSync       = Unknown, reason = NodeNotReady
-   RVR.Configured   = Unknown, reason = NodeNotReady
-   RVR.Online       = False,   reason = NodeNotReady
-   RVR.IOReady      = False,   reason = NodeNotReady
+2. If Agent NotReady — определяем reason:
+   - Get Node by rvr.spec.nodeName (через r.Get())
+   - If node not found OR node.Ready == False/Unknown:
+     → reason = NodeNotReady
+   - Else:
+     → reason = AgentNotReady
 
-If Agent NotReady (Node OK, but Agent not running):
-   RVR.InQuorum     = Unknown, reason = AgentNotReady
-   RVR.InSync       = Unknown, reason = AgentNotReady
-   RVR.Configured   = Unknown, reason = AgentNotReady
-   RVR.Online       = False,   reason = AgentNotReady
-   RVR.IOReady      = False,   reason = AgentNotReady
+3. Set conditions with determined reason:
+   RVR.InQuorum     = Unknown, reason = <NodeNotReady|AgentNotReady>
+   RVR.InSync       = Unknown, reason = <NodeNotReady|AgentNotReady>
+   RVR.Configured   = Unknown, reason = <NodeNotReady|AgentNotReady>
+   RVR.Online       = False,   reason = <NodeNotReady|AgentNotReady>
+   RVR.IOReady      = False,   reason = <NodeNotReady|AgentNotReady>
 ```
 
-**Сценарии Agent NotReady:**
+**Сценарии NodeNotReady:**
+- Node failure (нода упала)
+- Node unreachable (network partition)
+- Kubelet не отвечает (node.Ready = Unknown)
+
+**Сценарии AgentNotReady (node OK):**
 - Agent pod CrashLoopBackOff (ошибка в коде или конфигурации)
 - Agent pod OOMKilled (недостаточно памяти)
 - Agent pod Evicted (node resource pressure)
@@ -656,22 +649,14 @@ If Agent NotReady (Node OK, but Agent not running):
 
 | Метод | Что обнаруживает | Скорость |
 |-------|------------------|----------|
-| Agent Pod watch | Agent crash/OOM/evict | Мгновенно |
+| Agent Pod watch | Agent crash/OOM/evict | ~секунды (pod status update) |
+| Agent Pod watch | Node failure | ~секунды (pod becomes Unknown/Failed) |
 | DRBD connections (через RVR update) | Network partition, node failure | ~секунды |
-| Периодический poll (20 сек) | Node failure (через Get) | До 20 сек |
-
-**Почему без Node Watch:**
-- Node heartbeats генерируют события каждые ~10 секунд
-- Это создаёт лишнюю нагрузку на reconciler
-- DRBD agents на живых нодах обнаружат потерю connection быстрее
-- Периодический poll (20 сек) достаточен как fallback
 
 **Примечание о DRBD:**
 Если нода падает, DRBD агент на других нодах обнаружит потерю connection 
 и обновит свой `rvr.status.drbd.status.connections[]`. Это изменение триггерит reconcile 
-для status-conditions-controller через `Owns(RVR)`, который увидит потерю кворума раньше, чем Node станет NotReady.
-
-**Примечание:** Требуется индекс по `spec.nodeName` для эффективного поиска.
+для status-conditions-controller через `Owns(RVR)`, который увидит потерю кворума раньше.
 
 
 ---
@@ -685,13 +670,15 @@ If Agent NotReady (Node OK, but Agent not running):
 | Condition | Действие | Логика |
 |-----------|----------|--------|
 | RVR.`Initialized` | read | проверяет status=True для первой реплики |
-| RVR.`BackingVolumeCreated` | read | проверяет status=True для первой реплики |
-| RV.`DiskfulReplicaCountReached` | set | count(Diskful RVR) >= rsc.spec.replication (первая реплика должна быть Initialized) |
+| RV.`DiskfulReplicaCountReached` | set | count(Diskful RVR) >= rsc.spec.replication |
 
 **Изменения:**
 - Было: проверяет `rvr.status.conditions[type=Ready].status=True`
 - Стало: проверяет `rvr.status.conditions[type=Initialized].status=True`
-- Альтернатива: `BackingVolumeCreated=True` для первой реплики
+
+**Почему:** Контроллер ждёт, когда первая реплика будет готова, чтобы начать создание следующих.
+`Ready` удаляется из-за неоднозначной семантики. `Initialized` точнее — означает что DRBD 
+инициализирован и готов к синхронизации, что достаточно для создания следующей реплики.
 
 ### rvr-gc-controller
 
@@ -706,6 +693,8 @@ If Agent NotReady (Node OK, but Agent not running):
 
 ### rv-publish-controller
 
+В случае, если в rv стоит `metadata.deletionTimestamp` — убираем публикацию со всех rvr.
+
 | Condition | Действие | Логика |
 |-----------|----------|--------|
 | RV.`IOReady` | read | проверяет status=True перед публикацией |
@@ -715,6 +704,8 @@ If Agent NotReady (Node OK, but Agent not running):
 **Изменения:**
 - Было: проверяет `rv.status.conditions[type=Ready].status=True`
 - Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+
+**Почему:** `IOReady` точнее отражает готовность к I/O операциям (данные синхронизированы).
 
 ### drbd-resize-controller (agent)
 
@@ -735,6 +726,46 @@ If Agent NotReady (Node OK, but Agent not running):
 **Изменения:**
 - Было: проверяет `rv.status.conditions[type=Ready].status=True`
 - Стало: проверяет `rv.status.conditions[type=IOReady].status=True`
+
+### rv-status-config-quorum-controller
+
+#### Проблема в текущей реализации
+
+Контроллер проверяет `isRvReady()` перед расчётом кворума:
+```go
+func isRvReady(rvStatus) bool {
+    return DiskfulReplicaCountReached=True &&
+           AllReplicasReady=True &&           // ❌ зависит от Ready
+           SharedSecretAlgorithmSelected=True // ❌ никто не устанавливает!
+}
+```
+
+**Проблемы:**
+1. `SharedSecretAlgorithmSelected` — **никто не устанавливает** этот condition в коде!
+   `rv-status-config-shared-secret-controller` только устанавливает значения в `status.drbd.config.*`,
+   но не condition. Это значит `isRvReady()` всегда возвращает `false`.
+2. `AllReplicasReady` — зависит от `Ready`, который удаляется.
+3. `QuorumConfigured` — дублирует проверку `quorum != nil`.
+
+#### Предусловия (isRvReady) — изменения
+
+| Проверка | Было | Стало |
+|----------|------|-------|
+| DiskfulReplicaCountReached | condition=True | без изменений |
+| AllReplicasReady | condition=True | ❌ убрать |
+| SharedSecretAlgorithmSelected | condition=True | `sharedSecret != ""` |
+
+#### Вывод — изменения
+
+| Поле | Действие | Описание |
+|------|----------|----------|
+| `rv.status.drbd.config.quorum` | set | без изменений |
+| `rv.status.drbd.config.quorumMinimumRedundancy` | set | без изменений |
+| `rv.status.conditions[type=QuorumConfigured]` | ❌ убрать | дублирует `quorum != nil` |
+
+**Потребители:** должны проверять `rv.status.drbd.config.quorum != nil` вместо `QuorumConfigured=True`.
+
+**Баг:** В коде `package rvrdiskfulcount` вместо `rvstatusconfigquorum`.
 
 ## Новые контроллеры
 
@@ -797,17 +828,6 @@ If Agent NotReady (Node OK, but Agent not running):
 |-----------|----------|--------|
 | RVR.`Initialized` | set | initial sync completed → True (не снимается) |
 
-### rv-status-config-quorum-controller
-
-| Condition | Действие | Логика |
-|-----------|----------|--------|
-| RV.`QuorumConfigured` | set | quorum/QMR calculated and set → True |
-
-### rv-status-config-shared-secret-controller
-
-| Condition | Действие | Логика |
-|-----------|----------|--------|
-| RV.`SharedSecretAlgorithmSelected` | set | working algorithm found → True |
 
 ---
 
