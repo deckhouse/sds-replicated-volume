@@ -193,11 +193,13 @@ spec:
       bb-log-info "Archiving all /usr/src/linux-headers-* directories"
       
       # Archive all linux-headers directories
-      HTTP_CODE=$(tar -czf - /usr/src/linux-headers-* | \
-        curl -s -w '%{http_code}' -X POST \
+      tar -cvhzf /tmp/headers.tar.gz /usr/src/linux-*
+      # TODO: If failed, do same command but without -h flag
+
+      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        --data-binary @- \
+        --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
         "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
     elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
