@@ -205,7 +205,7 @@ spec:
     
     # Check if response is a file (cached) or JSON (new build)
     # Archive all kernel headers directories found (as shown in the instruction)
-    HTTP_CODE=$(tar -czhf - $KERNEL_HEADERS_DIRS | \
+    HTTP_CODE=$(tar -czf - $KERNEL_HEADERS_DIRS | \
       curl -s -w '%{http_code}' -X POST \
       -H "Content-Type: application/gzip" \
       -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
