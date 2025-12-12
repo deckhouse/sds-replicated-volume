@@ -79,10 +79,6 @@ shell:
           patch \
           perl \
           build-essential \
-<<<<<<< HEAD
-          glibc-devel \
-=======
->>>>>>> 3db2cab (upd)
       && ln -sf /usr/bin/python3 /usr/bin/python \
       && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
   setup:
