@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -467,6 +468,16 @@ func (s *server) buildModule(job *BuildJob, headersData []byte) {
 	}
 	s.logger.Debug("Successfully extracted kernel headers", "job_id", jobID, "kernel_headers_dir", kernelHeadersDir)
 
+	// Fix paths in Makefiles to point to extracted kernel headers location
+	if err := s.fixMakefilePaths(kernelHeadersDir, jobID); err != nil {
+		job.mu.Lock()
+		job.Status = StatusFailed
+		job.Error = fmt.Sprintf("Failed to fix Makefile paths: %v", err)
+		job.mu.Unlock()
+		s.logger.Error("Build failed", "job_id", jobID, "error", job.Error)
+		return
+	}
+
 	// Find the kernel build directory
 	buildDir, err := s.findKernelBuildDir(kernelHeadersDir, job.KernelVersion, jobID)
 	if err != nil {
@@ -829,6 +840,67 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	}
 	s.logger.Debug("Modules installed successfully", "job_id", jobID, "output_dir", outputDir)
 
+	return nil
+}
+
+// fixMakefilePaths fixes absolute paths in Makefiles to point to the extracted kernel headers location.
+// It replaces paths like /usr/src/linux-headers-* with kernelHeadersDir/usr/src/linux-headers-*
+func (s *server) fixMakefilePaths(kernelHeadersDir, jobID string) error {
+	s.logger.Debug("Fixing Makefile paths", "job_id", jobID, "kernel_headers_dir", kernelHeadersDir)
+
+	// Pattern to match absolute paths like /usr/src/linux-headers-*
+	// Matches paths that may include subdirectories or files (e.g., /usr/src/linux-headers-*/Makefile)
+	pathPattern := regexp.MustCompile(`(/usr/src/linux-headers-[^\s\n]+)`)
+	fixedCount := 0
+
+	err := filepath.WalkDir(kernelHeadersDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Only process Makefile files
+		if d.IsDir() || d.Name() != "Makefile" {
+			return nil
+		}
+
+		// Read Makefile content
+		content, err := os.ReadFile(path)
+		if err != nil {
+			s.logger.Warn("Failed to read Makefile", "job_id", jobID, "path", path, "error", err)
+			return nil // Continue processing other files
+		}
+
+		originalContent := string(content)
+		modified := false
+
+		// Replace all absolute paths with paths relative to kernelHeadersDir
+		newContent := pathPattern.ReplaceAllStringFunc(originalContent, func(match string) string {
+			// Convert absolute path to path relative to kernelHeadersDir
+			// Example: /usr/src/linux-headers-6.1.0-37-common/Makefile -> kernelHeadersDir/usr/src/linux-headers-6.1.0-37-common/Makefile
+			newPath := filepath.Join(kernelHeadersDir, strings.TrimPrefix(match, "/"))
+			modified = true
+			s.logger.Debug("Replacing path in Makefile", "job_id", jobID, "old", match, "new", newPath)
+			return newPath
+		})
+
+		// Write back if modified
+		if modified {
+			if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
+				s.logger.Warn("Failed to write Makefile", "job_id", jobID, "path", path, "error", err)
+				return nil // Continue processing other files
+			}
+			fixedCount++
+			s.logger.Debug("Fixed Makefile paths", "job_id", jobID, "path", path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to walk kernel headers directory: %v", err)
+	}
+
+	s.logger.Info("Fixed Makefile paths", "job_id", jobID, "fixed_count", fixedCount)
 	return nil
 }
 
