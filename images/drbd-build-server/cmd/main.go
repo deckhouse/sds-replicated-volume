@@ -916,7 +916,8 @@ func (s *server) fixMakefilePaths(kernelHeadersDir, jobID string) error {
 // It tries multiple locations in order:
 // 1. Standard location: /lib/modules/KVER/build
 // 2. Alternative location: /usr/src/linux-headers-KVER
-// 3. Search for any Makefile in the extracted headers
+// 3. Additional CentOS/RHEL location: /usr/src/kernels/KVER
+// 4. Search for any Makefile in the extracted headers
 // Returns the build directory path or an error if not found.
 func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID string) (string, error) {
 	s.logger.Debug("Searching for kernel build directory", "job_id", jobID)
@@ -945,7 +946,19 @@ func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID strin
 		s.logger.Debug("Alternative location exists but Makefile not found", "job_id", jobID)
 	}
 
-	// Step 3: Search for any Makefile in the extracted headers
+	// Step 3: Try CentOS/RHEL location (/usr/src/kernels/KVER)
+	buildDir = filepath.Join(kernelHeadersDir, "usr", "src", "kernels", kernelVersion)
+	s.logger.Debug("Trying CentOS/RHEL location", "job_id", jobID, "build_dir", buildDir)
+	if info, err := os.Stat(buildDir); err == nil && info.IsDir() {
+		makefilePath := filepath.Join(buildDir, "Makefile")
+		if _, err := os.Stat(makefilePath); err == nil {
+			s.logger.Debug("Found build directory in CentOS/RHEL location", "job_id", jobID)
+			return buildDir, nil
+		}
+		s.logger.Debug("CentOS/RHEL location exists but Makefile not found", "job_id", jobID)
+	}
+
+	// Step 4: Search for any Makefile in the extracted headers
 	s.logger.Debug("Standard locations not found, searching for Makefile", "job_id", jobID)
 	matches, err := filepath.Glob(filepath.Join(kernelHeadersDir, "**", "Makefile"))
 	if err != nil {
@@ -964,9 +977,9 @@ func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID strin
 		}
 	}
 
-	// Step 4: Validation failed - return error
-	return "", fmt.Errorf("kernel build directory not found for version %s. Searched in: %s/lib/modules/%s/build, %s/usr/src/linux-headers-%s, and all Makefiles in archive",
-		kernelVersion, kernelHeadersDir, kernelVersion, kernelHeadersDir, kernelVersion)
+	// Step 5: Validation failed - return error
+	return "", fmt.Errorf("kernel build directory not found for version %s. Searched in: %s/lib/modules/%s/build, %s/usr/src/linux-headers-%s, %s/usr/src/kernels/%s, and all Makefiles in archive",
+		kernelVersion, kernelHeadersDir, kernelVersion, kernelHeadersDir, kernelVersion, kernelHeadersDir, kernelVersion)
 }
 
 // prepareDRBDForBuild prepares an isolated DRBD source directory for a build.
