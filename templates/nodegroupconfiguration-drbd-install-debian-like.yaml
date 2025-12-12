@@ -42,7 +42,7 @@ spec:
     kernel_version_in_use="$(uname -r)"
 
     CLUSTER_DNS="{{ .Values.global.discovery.clusterDNSAddress }}"
-    SPAAS_FQDN="spaas.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
+    DRBD_BUILD_SERVER_FQDN="drbd-build-server.d8-{{ .Chart.Name }}.svc.{{ .Values.global.discovery.clusterDomain }}"
 
     MODULE_REGISTRY_AUTH="$(echo {{ .Values.sdsReplicatedVolume.registry.dockercfg }} | base64 -d | jq -r '.auths[].auth // ""' | base64 -d)"
     {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.58" .Values.global.deckhouseVersion) }}
@@ -137,26 +137,14 @@ spec:
       fi
     fi
 
-    # Check, if we need gcc version 12
-    gccVersion="$(cat /proc/version | grep -q x86_64-linux-gnu-gcc-12 && echo gcc-12 || echo gcc)"
-    bb-apt-install make bind9-host patch mokutil $gccVersion
-    check_sb_state="$(mokutil --sb-state || echo "Not supported")"
-    if [[ "$check_sb_state" == "SecureBoot enabled" ]]; then
-      bb-log-info "SecureBoot is enabled. Please manually install DRBD version  {{ $.Values.sdsReplicatedVolume.internal.drbdVersion }} or higher."
-      exit 0
-    fi
-
-    {{- if or (hasPrefix "dev" .Values.global.deckhouseVersion) (hasSuffix "dev" .Values.global.deckhouseVersion) (semverCompare ">=1.63" .Values.global.deckhouseVersion) }}
-    bb-package-module-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REPOSITORY" "sds-replicated-volume"
-    {{- else }}
-    bb-rp-from-module-image-install "drbd:{{ include "helm_lib_module_image_digest" (list . "drbd" "sdsReplicatedVolume") }}" "$MODULE_REGISTRY_AUTH" "$MODULE_SCHEME" "$MODULE_REGISTRY_ADDRESS" "$MODULE_REGISTRY_PATH"
-    {{- end }}
+    # Install curl for API calls
+    bb-apt-install curl bind9-host
 
     attempt=0
-    until SPAAS_IP="$(host -t A "$SPAAS_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
+    until DRBD_BUILD_SERVER_IP="$(host -t A "$DRBD_BUILD_SERVER_FQDN" "$CLUSTER_DNS" | awk '/has address/ { print $4 }')"
     do
       if [ $attempt -gt 60 ]; then
-        bb-log-info "Cluster DNS isn't accessible, can't get SPAAS service IP for DRBD building"
+        bb-log-info "Cluster DNS isn't accessible, can't get DRBD build server service IP"
         exit 1
       fi
 
@@ -165,29 +153,141 @@ spec:
       sleep 10
     done
 
-    bb-log-info "Cluster DNS responded, got SPAAS service IP"
+    bb-log-info "Cluster DNS responded, got DRBD build server service IP"
 
-    export SPAAS_URL="https://${SPAAS_IP}:2020"
+    DRBD_BUILD_SERVER_URL="http://${DRBD_BUILD_SERVER_IP}:2021"
 
     attempt=0
-    until [[ "$(d8-curl -ks -w '%{http_code}' -o /dev/null $SPAAS_URL'/api/v1/hello')" == "200" ]]
+    until [[ "$(curl -ks -w '%{http_code}' -o /dev/null $DRBD_BUILD_SERVER_URL'/api/v1/hello')" == "200" ]]
     do
       if [ $attempt -gt 60 ]; then
-        bb-log-info "SPAAS service isn't accessible, can't continue DRBD building"
+        bb-log-info "DRBD build server isn't accessible, can't continue DRBD building"
         exit 1
       fi
 
       ((attempt=attempt+1))
-      bb-log-info "Waiting for SPAAS service is being accessible (try #$attempt)"
+      bb-log-info "Waiting for DRBD build server to be accessible (try #$attempt)"
       sleep 10
     done
 
-    bb-log-info "SPAAS service is accessible, starting DRBD building"
+    bb-log-info "DRBD build server is accessible, starting DRBD building"
 
-    cd /opt/deckhouse/drbd
-    make clean || true
-    make
-    make install
+    # Find kernel headers directory
+    KERNEL_HEADERS_DIR=""
+    if [ -d "/usr/src/linux-headers-${kernel_version_in_use}" ]; then
+      KERNEL_HEADERS_DIR="/usr/src/linux-headers-${kernel_version_in_use}"
+    elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
+      # Resolve symlink if it exists
+      KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+    else
+      bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
+      exit 1
+    fi
+
+    bb-log-info "Using kernel headers from: $KERNEL_HEADERS_DIR"
+
+    # Archive kernel headers and send build request
+    bb-log-info "Sending build request to DRBD build server"
+    MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
+    
+    # Check if response is a file (cached) or JSON (new build)
+    # Use -h flag to follow symlinks in the archive
+    HTTP_CODE=$(tar -czfh - -C "$(dirname "$KERNEL_HEADERS_DIR")" "$(basename "$KERNEL_HEADERS_DIR")" | \
+      curl -s -w '%{http_code}' -X POST \
+      -H "Content-Type: application/gzip" \
+      -H "X-Kernel-Version: ${kernel_version_in_use}" \
+      --data-binary @- \
+      -o "$MODULES_TAR" \
+      "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${kernel_version_in_use}")
+
+    if [ "$HTTP_CODE" == "200" ]; then
+      # Modules were served directly from cache
+      bb-log-info "Modules retrieved from cache"
+    elif [ "$HTTP_CODE" == "202" ]; then
+      # Build job was created, need to poll for status
+      BUILD_RESPONSE=$(cat "$MODULES_TAR")
+      rm -f "$MODULES_TAR"
+      
+      JOB_ID=$(echo "$BUILD_RESPONSE" | jq -r '.job_id // empty')
+      if [ -z "$JOB_ID" ]; then
+        bb-log-info "Failed to get job_id from build server response: $BUILD_RESPONSE"
+        exit 1
+      fi
+
+      bb-log-info "Build job created, job_id: $JOB_ID"
+
+      # Poll for build status
+      attempt=0
+      while true; do
+        if [ $attempt -gt 300 ]; then
+          bb-log-info "Build timeout exceeded (50 minutes)"
+          exit 1
+        fi
+
+        STATUS_RESPONSE=$(curl -s "$DRBD_BUILD_SERVER_URL/api/v1/status/$JOB_ID")
+        STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status // empty')
+        ERROR=$(echo "$STATUS_RESPONSE" | jq -r '.error // empty')
+
+        if [ "$STATUS" == "completed" ]; then
+          bb-log-info "Build completed successfully"
+          break
+        elif [ "$STATUS" == "failed" ]; then
+          bb-log-info "Build failed: $ERROR"
+          exit 1
+        elif [ "$STATUS" == "building" ] || [ "$STATUS" == "pending" ]; then
+          ((attempt=attempt+1))
+          if [ $((attempt % 6)) -eq 0 ]; then
+            bb-log-info "Build in progress (status: $STATUS, attempt #$attempt)"
+          fi
+          sleep 10
+        else
+          bb-log-info "Unknown build status: $STATUS"
+          exit 1
+        fi
+      done
+
+      # Download built modules
+      bb-log-info "Downloading built DRBD modules"
+      curl -s -o "$MODULES_TAR" "$DRBD_BUILD_SERVER_URL/api/v1/download/$JOB_ID"
+    else
+      bb-log-info "Unexpected HTTP code from build server: $HTTP_CODE"
+      exit 1
+    fi
+
+    if [ ! -f "$MODULES_TAR" ] || [ ! -s "$MODULES_TAR" ]; then
+      bb-log-info "Failed to download DRBD modules"
+      exit 1
+    fi
+
+    # Extract and install modules
+    bb-log-info "Installing DRBD modules"
+    MODULES_DIR="/tmp/drbd-modules-${kernel_version_in_use}"
+    mkdir -p "$MODULES_DIR"
+    if ! tar -xzf "$MODULES_TAR" -C "$MODULES_DIR"; then
+      bb-log-info "Failed to extract DRBD modules archive"
+      exit 1
+    fi
+
+    # Find and copy .ko files to /lib/modules
+    # The archive contains modules with relative paths from the build output
+    MODULES_DEST="/lib/modules/${kernel_version_in_use}/kernel/drivers/block"
+    mkdir -p "$MODULES_DEST"
+    
+    # Find all .ko files in the extracted archive and copy them to the destination
+    KO_COUNT=0
+    while IFS= read -r ko_file; do
+      cp "$ko_file" "$MODULES_DEST/"
+      bb-log-info "Installed module: $(basename "$ko_file")"
+      KO_COUNT=$((KO_COUNT + 1))
+    done < <(find "$MODULES_DIR" -name "*.ko" -type f)
+    
+    if [ "$KO_COUNT" -eq 0 ]; then
+      bb-log-info "No .ko files found in the downloaded archive"
+      exit 1
+    fi
+    
+    bb-log-info "Installed $KO_COUNT DRBD module(s)"
+
     if [ -e "/etc/modules" ]; then
       if grep -q -E '^drbd$' /etc/modules; then
         sed -i '/^drbd$/d' /etc/modules
@@ -197,6 +297,9 @@ spec:
     depmod
     modprobe drbd
     modprobe dm-thin-pool
+
+    # Cleanup
+    rm -rf "$MODULES_DIR" "$MODULES_TAR"
 
     if [ -e "/proc/drbd" ]; then
       current_version="$(cat /proc/drbd | grep 'version:' | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')"
