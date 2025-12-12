@@ -193,9 +193,9 @@ spec:
       bb-log-info "Archiving all /usr/src/linux-headers-* directories"
       
       # Archive all linux-headers directories, try with -h first, then fallback without -h if it fails
-      if ! tar -cvhzf /tmp/headers.tar.gz /usr/src/linux-* 2>/dev/null; then
+      if ! tar -chzf /tmp/headers.tar.gz /usr/src/linux-* 2>/dev/null; then
         bb-log-info "tar with -h failed, retrying without -h"
-        tar -cvzf /tmp/headers.tar.gz /usr/src/linux-*
+        tar -czf /tmp/headers.tar.gz /usr/src/linux-*
       fi
 
       HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \

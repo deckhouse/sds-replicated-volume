@@ -767,23 +767,23 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	s.logger.Debug("Environment variables set", "job_id", jobID, "KVER", kernelVersion, "KDIR", kernelBuildDir, "SPAAS_URL", s.spaasURL)
 
 	// Clean previous build
-	s.logger.Debug("Running 'make clean'", "job_id", jobID)
-	cmd := exec.Command("make", "clean")
-	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Dir = drbdDir
-	if err := cmd.Run(); err != nil {
-		// Don't fail on clean errors
-		s.logger.Debug("make clean failed (ignored)", "job_id", jobID, "error", err)
-	} else {
-		s.logger.Debug("'make clean' completed successfully", "job_id", jobID)
-	}
+	// s.logger.Debug("Running 'make clean'", "job_id", jobID)
+	// cmd := exec.Command("make", "clean")
+	// cmd.Env = env
+	// cmd.Stdout = os.Stdout
+	// cmd.Stderr = os.Stderr
+	// cmd.Dir = drbdDir
+	// if err := cmd.Run(); err != nil {
+	// 	// Don't fail on clean errors
+	// 	s.logger.Debug("make clean failed (ignored)", "job_id", jobID, "error", err)
+	// } else {
+	// 	s.logger.Debug("'make clean' completed successfully", "job_id", jobID)
+	// }
 
 	// Check and update submodules if needed (required by make module)
 	// This ensures all submodules are initialized before building
 	s.logger.Debug("Checking submodules", "job_id", jobID)
-	cmd = exec.Command("make", "check-submods")
+	cmd := exec.Command("make", "check-submods")
 	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
