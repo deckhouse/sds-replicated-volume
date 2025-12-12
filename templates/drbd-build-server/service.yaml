@@ -1,0 +1,14 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: drbd-build-server
+  namespace: d8-{{ .Chart.Name }}
+  {{- include "helm_lib_module_labels" (list . (dict "app" "drbd-build-server")) | nindent 2 }}
+spec:
+  ports:
+  - name: http
+    port: 2021
+    targetPort: http
+  selector:
+    app: drbd-build-server
