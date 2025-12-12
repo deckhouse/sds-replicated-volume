@@ -195,7 +195,7 @@
   - `NodeNotReady` — нода недоступна
   - `AgentNotReady` — agent pod не работает
 - Используется: RV.IOReady вычисляется из RVR.IOReady.
-- **Примечание:** Более строгий чем `DRBDIOReady`. Гарантирует что данные полностью синхронизированы.
+- **Примечание:** Гарантирует что данные полностью синхронизированы (diskState=UpToDate).
 - **Promote:** Переключение реплики Secondary→Primary. Требует `IOReady=True` чтобы гарантировать актуальность данных и избежать split-brain.
 
 
@@ -680,7 +680,7 @@ return ctrl.Result{}, nil
 `Ready` удаляется из-за неоднозначной семантики. `Initialized` точнее — означает что DRBD 
 инициализирован и готов к синхронизации, что достаточно для создания следующей реплики.
 
-### rvr-gc-controller
+### rvr-finalizer-release-controller (заменяет rvr-quorum-and-publish-constrained-release-controller)
 
 | Condition | Действие | Логика |
 |-----------|----------|--------|
@@ -742,18 +742,37 @@ func isRvReady(rvStatus) bool {
 
 **Проблемы:**
 1. `SharedSecretAlgorithmSelected` — **никто не устанавливает** этот condition в коде!
-   `rv-status-config-shared-secret-controller` только устанавливает значения в `status.drbd.config.*`,
-   но не condition. Это значит `isRvReady()` всегда возвращает `false`.
 2. `AllReplicasReady` — зависит от `Ready`, который удаляется.
 3. `QuorumConfigured` — дублирует проверку `quorum != nil`.
 
-#### Предусловия (isRvReady) — изменения
+#### Решение — новые предусловия
+
+```go
+func isReadyForQuorum(rv) bool {
+    return DiskfulReplicaCountReached=True &&  // все diskful реплики созданы
+           RV.Configured=True                   // все реплики сконфигурированы
+}
+```
 
 | Проверка | Было | Стало |
 |----------|------|-------|
-| DiskfulReplicaCountReached | condition=True | без изменений |
+| DiskfulReplicaCountReached | condition=True | без изменений (существует) |
 | AllReplicasReady | condition=True | ❌ убрать |
-| SharedSecretAlgorithmSelected | condition=True | `sharedSecret != ""` |
+| SharedSecretAlgorithmSelected | condition=True | ❌ убрать — заменено `RV.Configured` |
+| — | — | 🆕 `RV.Configured=True` |
+
+#### Почему `RV.Configured` достаточно (без отдельной проверки sharedSecret)
+
+`RV.Configured=True` означает что **ВСЕ** `RVR.Configured=True`.
+
+`RVR.Configured=True` проверяет (см. spec выше):
+- `actual.sharedSecret == config.sharedSecret`
+- `actual.sharedSecretAlg == config.sharedSecretAlg`
+- все остальные `actual.*` == `config.*`
+- нет ошибок adjust
+
+**Вывод:** Если `RV.Configured=True`, то sharedSecret **уже применён** на всех репликах.
+Отдельный condition `SharedSecretAlgorithmSelected` не нужен.
 
 #### Вывод — изменения
 
@@ -765,7 +784,7 @@ func isRvReady(rvStatus) bool {
 
 **Потребители:** должны проверять `rv.status.drbd.config.quorum != nil` вместо `QuorumConfigured=True`.
 
-**Баг:** В коде `package rvrdiskfulcount` вместо `rvstatusconfigquorum`.
+**FYI: Баг в коде:** `package rvrdiskfulcount` вместо `rvstatusconfigquorum`.
 
 ## Новые контроллеры
 
@@ -783,7 +802,6 @@ func isRvReady(rvStatus) bool {
 | `Configured` | compute | actual.* == config.* && no errors → True |
 | `Online` | compute | Scheduled ∧ Initialized ∧ InQuorum → True |
 | `IOReady` | compute | Online ∧ InSync → True (strict: requires UpToDate) |
-| `DRBDIOReady` | compute | Online ∧ InQuorum ∧ ¬suspended ∧ validDiskState → True |
 | `FullyConnected` | set (future) | all connections established → True |
 
 #### RV Conditions
