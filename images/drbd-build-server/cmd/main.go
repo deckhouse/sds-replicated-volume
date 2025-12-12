@@ -261,12 +261,12 @@ func (s *server) buildModuleHandler() http.HandlerFunc {
 		}
 
 		// Validate kernel version format
-		// Kernel version format: X.Y.Z[-flavor] or X.Y.Z[-flavor]-build
-		// Examples: 5.15.0, 5.15.0-generic, 5.15.0-86-generic
-		kernelVersionRegex := regexp.MustCompile(`^\d+\.\d+\.\d+(-[a-zA-Z0-9_-]+)?(-[0-9]+)?$`)
+		// Kernel version format: X.Y.Z[-flavor] where flavor can contain dots, dashes, underscores, and alphanumeric characters
+		// Examples: 5.15.0, 5.15.0-generic, 5.15.0-86-generic, 6.6.26-1.red80.x86_64, 6.1.0-37-cloud-amd64
+		kernelVersionRegex := regexp.MustCompile(`^\d+\.\d+\.\d+(-[a-zA-Z0-9_.-]+)?$`)
 		if !kernelVersionRegex.MatchString(kernelVersion) {
 			s.logger.Error("Invalid kernel version format", "remote_addr", remoteAddr, "kernel_version", kernelVersion)
-			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid kernel version format. Expected format: X.Y.Z[-flavor] or X.Y.Z[-flavor]-build")
+			s.errorf(http.StatusBadRequest, remoteAddr, w, "Invalid kernel version format. Expected format: X.Y.Z[-flavor]")
 			return
 		}
 

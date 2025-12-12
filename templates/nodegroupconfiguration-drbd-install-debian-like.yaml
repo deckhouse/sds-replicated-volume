@@ -204,18 +204,28 @@ spec:
         --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
         "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+      
+      # Cleanup temporary headers archive
+      rm -f /tmp/headers.tar.gz
     elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
       # Fallback: use /lib/modules/.../build (for other Debian-like distributions)
       KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
       bb-log-info "Using kernel headers from /lib/modules via symlink: $KERNEL_HEADERS_DIR"
       
-      HTTP_CODE=$(tar -czf - "$KERNEL_HEADERS_DIR" | \
-        curl -s -w '%{http_code}' -X POST \
+      # Archive kernel headers directory
+      if ! tar --hard-dereference -chzf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR" 2>/dev/null; then
+        tar --hard-dereference -czf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR"
+      fi
+      
+      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
         -H "Content-Type: application/gzip" \
         -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
-        --data-binary @- \
+        --data-binary @/tmp/headers.tar.gz \
         -o "$MODULES_TAR" \
         "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+      
+      # Cleanup temporary headers archive
+      rm -f /tmp/headers.tar.gz
     else
       bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
       exit 1

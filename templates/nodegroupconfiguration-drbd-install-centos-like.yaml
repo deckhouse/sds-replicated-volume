@@ -175,33 +175,59 @@ spec:
 
     bb-log-info "DRBD build server is accessible, starting DRBD building"
 
-    # Find kernel headers directory
-    KERNEL_HEADERS_DIR=""
-    if [ -d "/usr/src/kernels/${kernel_version_in_use}" ]; then
-      KERNEL_HEADERS_DIR="/usr/src/kernels/${kernel_version_in_use}"
+    # Find kernel headers directories
+    # In CentOS/RHEL, archive all /usr/src/kernels/* directories (all versions)
+    KERNEL_VERSION_FOR_API="${kernel_version_in_use}"
+    MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
+    
+    # Archive kernel headers and send build request
+    bb-log-info "Sending build request to DRBD build server"
+    
+    # Check if there are kernel headers in /usr/src/kernels/
+    if ls -d /usr/src/kernels/* >/dev/null 2>&1; then
+      HEADERS_DIRS=$(ls -d /usr/src/kernels/* 2>/dev/null)
+      
+      bb-log-info "Found kernel headers directories: $HEADERS_DIRS"
+      bb-log-info "Archiving all /usr/src/kernels/* directories"
+      
+      # Archive all kernels directories, try with --hard-dereference first, then fallback without it if it fails
+      if ! tar --hard-dereference -chzf /tmp/headers.tar.gz /usr/src/kernels/* 2>/dev/null; then
+        bb-log-info "tar with --hard-dereference failed, retrying without it"
+        tar --hard-dereference -czf /tmp/headers.tar.gz /usr/src/kernels/*
+      fi
+
+      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+        -H "Content-Type: application/gzip" \
+        -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+        --data-binary @/tmp/headers.tar.gz \
+        -o "$MODULES_TAR" \
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+      
+      # Cleanup temporary headers archive
+      rm -f /tmp/headers.tar.gz
     elif [ -d "/lib/modules/${kernel_version_in_use}/build" ]; then
-      # Resolve symlink if it exists
+      # Fallback: use /lib/modules/.../build
       KERNEL_HEADERS_DIR="$(readlink -f "/lib/modules/${kernel_version_in_use}/build")"
+      bb-log-info "Using kernel headers from /lib/modules via symlink: $KERNEL_HEADERS_DIR"
+      
+      # Archive kernel headers directory
+      if ! tar --hard-dereference -chzf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR" 2>/dev/null; then
+        tar --hard-dereference -czf /tmp/headers.tar.gz "$KERNEL_HEADERS_DIR"
+      fi
+      
+      HTTP_CODE=$(curl -s -w '%{http_code}' -X POST \
+        -H "Content-Type: application/gzip" \
+        -H "X-Kernel-Version: ${KERNEL_VERSION_FOR_API}" \
+        --data-binary @/tmp/headers.tar.gz \
+        -o "$MODULES_TAR" \
+        "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${KERNEL_VERSION_FOR_API}")
+      
+      # Cleanup temporary headers archive
+      rm -f /tmp/headers.tar.gz
     else
       bb-log-info "Kernel headers directory not found for version ${kernel_version_in_use}"
       exit 1
     fi
-
-    bb-log-info "Using kernel headers from: $KERNEL_HEADERS_DIR"
-
-    # Archive kernel headers and send build request
-    bb-log-info "Sending build request to DRBD build server"
-    MODULES_TAR="/tmp/drbd-modules-${kernel_version_in_use}.tar.gz"
-    
-    # Check if response is a file (cached) or JSON (new build)
-    # Use -h flag to follow symlinks in the archive
-    HTTP_CODE=$(tar -czfh - -C "$(dirname "$KERNEL_HEADERS_DIR")" "$(basename "$KERNEL_HEADERS_DIR")" | \
-      curl -s -w '%{http_code}' -X POST \
-      -H "Content-Type: application/gzip" \
-      -H "X-Kernel-Version: ${kernel_version_in_use}" \
-      --data-binary @- \
-      -o "$MODULES_TAR" \
-      "$DRBD_BUILD_SERVER_URL/api/v1/build?kernel_version=${kernel_version_in_use}")
 
     if [ "$HTTP_CODE" == "200" ]; then
       # Modules were served directly from cache
