@@ -10,12 +10,13 @@ config:
       - GOPROXY
       - SOURCE_REPO
       - SOURCE_REPO_TAG
+
+    allowUncommittedFiles:
+      - "base_images.yml"
   secrets:
     allowValueIds:
       - REGISTRY_USER
       - REGISTRY_PASSWORD
-    allowUncommittedFiles:
-      - "base_images.yml"
   stapel:
     mount:
       allowBuildDir: true
