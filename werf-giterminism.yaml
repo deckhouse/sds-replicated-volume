@@ -10,7 +10,6 @@ config:
       - GOPROXY
       - SOURCE_REPO
       - SOURCE_REPO_TAG
-
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:
