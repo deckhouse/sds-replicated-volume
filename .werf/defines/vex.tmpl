@@ -2,40 +2,5 @@
   {{- $context := index . 0 }}
   {{- $imageName := index . 1 }}
 ---
-image: {{ $imageName }}-vex-artifact
-fromImage: base/vex
-final: true
-secrets:
-- id: REGISTRY_USER
-  env: REGISTRY_USER
-- id: REGISTRY_PASSWORD
-  env: REGISTRY_PASSWORD
-git:
-- add: /images/{{ $imageName }}/known_vulnerabilities.vex
-  to: /known_vulnerabilities.vex
-  stageDependencies:
-    install:
-    - "**/*"
-dependencies:
-- image: {{ $imageName }}
-  before: install
-  imports:
-  - type: ImageDigest
-    targetEnv: IMAGE_DIGEST
-  - type: ImageRepo
-    targetEnv: IMAGE_REPO
-shell:
-  install:
-  - export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
-  - export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
-  - |
-    cosign attest \
-      --replace \
-      --registry-username="${REGISTRY_USER}" \
-      --registry-password="${REGISTRY_PASSWORD}" \
-      --predicate /known_vulnerabilities.vex \
-      --type openvex \
-      --tlog-upload=false \
-      -y \
-      "${IMAGE_REPO}@${IMAGE_DIGEST}"
+
 {{- end }}
