@@ -2,5 +2,14 @@
   {{- $context := index . 0 }}
   {{- $imageName := index . 1 }}
 ---
+image: {{ $imageName }}-vex-artifact
+fromImage: base/vex
+final: true
 
+git:
+- add: /images/{{ $imageName }}/known_vulnerabilities.vex
+  to: /known_vulnerabilities.vex
+  stageDependencies:
+    install:
+    - "**/*"
 {{- end }}
