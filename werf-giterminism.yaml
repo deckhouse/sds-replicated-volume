@@ -10,6 +10,8 @@ config:
       - GOPROXY
       - SOURCE_REPO
       - SOURCE_REPO_TAG
+      - REGISTRY_USER
+      - REGISTRY_PASSWORD
     allowUncommittedFiles:
       - "base_images.yml"
   stapel:
