@@ -1,0 +1,3 @@
+Changes:
+  - Switch from yum to dnf for package installation on CentOS-like distributions
+  - Fixed vulnerabilities
