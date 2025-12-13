@@ -13,7 +13,7 @@ config:
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:
-    allowValueIds:
+    allowEnvVariables:
       - REGISTRY_USER
       - REGISTRY_PASSWORD
   stapel:
