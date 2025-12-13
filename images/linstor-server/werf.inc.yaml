@@ -390,4 +390,4 @@ docker:
     k8s-await-election: {{ $.Versions.LINSTOR_K8S_AWAIT_ELECTION }}
     piraeus-entry: {{ $.Versions.LINSTOR_SERVER_PIRAEUS }}
 ---
-{{- include "vex mitigation" (list $ (printf "%s" $.ImageName)) }}
+{{- include "vex mitigation" (list (printf "%s" $.ImageName)) }}

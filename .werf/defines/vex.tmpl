@@ -1,6 +1,5 @@
 {{- define "vex mitigation" }}
-  {{- $context := index . 0 }}
-  {{- $imageName := index . 1 }}
+  {{- $imageName := index . 0 }}
 ---
 image: vex-artifact
 fromImage: base/vex
@@ -8,7 +7,7 @@ final: true
 
 git:
 - add: /images/{{ $imageName }}/known_vulnerabilities.vex
-  to: /{{ printf "image: %s" $context | nindent 2 }}known_vulnerabilities.vex
+  to: /known_vulnerabilities.vex
   stageDependencies:
     install:
     - "**/*"
