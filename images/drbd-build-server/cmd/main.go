@@ -735,7 +735,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	// Change to DRBD directory
 	originalDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get current directory: %v", err)
+		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 	defer func() {
 		if err := os.Chdir(originalDir); err != nil {
@@ -745,7 +745,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 
 	s.logger.Debug("Changing to DRBD directory", "job_id", jobID, "drbd_dir", drbdDir)
 	if err := os.Chdir(drbdDir); err != nil {
-		return fmt.Errorf("failed to change to DRBD directory %s: %v", drbdDir, err)
+		return fmt.Errorf("failed to change to DRBD directory %s: %w", drbdDir, err)
 	}
 
 	// Verify DRBD Makefile exists
@@ -810,14 +810,14 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	cmd.Stderr = os.Stderr
 	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("make module failed: %v", err)
+		return fmt.Errorf("make module failed: %w", err)
 	}
 	buildDuration := time.Since(startTime)
 	s.logger.Debug("'make module' completed successfully", "job_id", jobID, "duration", buildDuration)
 
 	s.logger.Debug("MkdirAll", "job_id", jobID, "duration", buildDuration)
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return fmt.Errorf("failed to create outputDir: %v", err)
+		return fmt.Errorf("failed to create outputDir: %w", err)
 	}
 
 	//env = append(
@@ -843,7 +843,7 @@ func (s *server) buildDRBD(kernelVersion, kernelBuildDir, outputDir, drbdDir, jo
 	cmd.Stderr = os.Stderr
 	cmd.Dir = drbdDir
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("make install failed: %v", err)
+		return fmt.Errorf("make install failed: %w", err)
 	}
 	s.logger.Debug("Modules installed successfully", "job_id", jobID, "output_dir", outputDir)
 
@@ -905,7 +905,7 @@ func (s *server) fixMakefilePaths(kernelHeadersDir, jobID string) error {
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to walk kernel headers directory: %v", err)
+		return fmt.Errorf("failed to walk kernel headers directory: %w", err)
 	}
 
 	s.logger.Info("Fixed Makefile paths", "job_id", jobID, "fixed_count", fixedCount)
@@ -962,7 +962,7 @@ func (s *server) findKernelBuildDir(kernelHeadersDir, kernelVersion, jobID strin
 	s.logger.Debug("Standard locations not found, searching for Makefile", "job_id", jobID)
 	matches, err := filepath.Glob(filepath.Join(kernelHeadersDir, "**", "Makefile"))
 	if err != nil {
-		return "", fmt.Errorf("failed to search for Makefile: %v", err)
+		return "", fmt.Errorf("failed to search for Makefile: %w", err)
 	}
 	s.logger.Debug("Found Makefile(s) in extracted headers", "job_id", jobID, "count", len(matches))
 
@@ -989,7 +989,7 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 
 	// Create destination directory
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create DRBD build directory: %v", err)
+		return fmt.Errorf("failed to create DRBD build directory: %w", err)
 	}
 
 	// Check if base DRBD directory exists
@@ -999,7 +999,7 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 				// Copy existing DRBD directory
 				s.logger.Info("Copying DRBD source", "job_id", jobID, "src", s.drbdDir, "dst", destDir)
 				if err := copyDirectory(s.drbdDir, destDir, jobID, s.logger); err != nil {
-					return fmt.Errorf("failed to copy DRBD directory: %v", err)
+					return fmt.Errorf("failed to copy DRBD directory: %w", err)
 				}
 				s.logger.Debug("DRBD source copied successfully", "job_id", jobID)
 				return nil
@@ -1014,7 +1014,7 @@ func (s *server) prepareDRBDForBuild(destDir, jobID string) error {
 
 	s.logger.Info("Cloning DRBD repository", "job_id", jobID, "version", s.drbdVersion)
 	if err := s.cloneDRBDRepoToDir(s.drbdVersion, s.drbdRepo, destDir, jobID); err != nil {
-		return fmt.Errorf("failed to clone DRBD repository: %v", err)
+		return fmt.Errorf("failed to clone DRBD repository: %w", err)
 	}
 	s.logger.Debug("DRBD repository cloned successfully", "job_id", jobID)
 	return nil
@@ -1030,7 +1030,7 @@ func copyDirectory(src, dst, jobID string, logger *slog.Logger) error {
 	cmd := exec.Command("cp", "-a", src+"/.", dst)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("failed to copy directory: %v, output: %s", err, string(output))
+		return fmt.Errorf("failed to copy directory: %w, output: %s", err, string(output))
 	}
 
 	logger.Debug("Directory copied successfully", "job_id", jobID)
@@ -1051,7 +1051,7 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git clone failed: %v", err)
+		return fmt.Errorf("git clone failed: %w", err)
 	}
 
 	// Get git hash before removing .git directory
@@ -1072,7 +1072,7 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("git submodule update failed: %v", err)
+		return fmt.Errorf("git submodule update failed: %w", err)
 	}
 
 	// Remove .git directory
@@ -1085,12 +1085,12 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 	gitRevisionPath := filepath.Join(destDir, "drbd", ".drbd_git_revision")
 	gitRevisionDir := filepath.Dir(gitRevisionPath)
 	if err := os.MkdirAll(gitRevisionDir, 0755); err != nil {
-		return fmt.Errorf("failed to create drbd directory: %v", err)
+		return fmt.Errorf("failed to create drbd directory: %w", err)
 	}
 
 	gitRevisionContent := fmt.Sprintf("GIT-hash:%s\n", gitHash)
 	if err := os.WriteFile(gitRevisionPath, []byte(gitRevisionContent), 0644); err != nil {
-		return fmt.Errorf("failed to create .drbd_git_revision file: %v", err)
+		return fmt.Errorf("failed to create .drbd_git_revision file: %w", err)
 	}
 	s.logger.Debug("Created drbd/.drbd_git_revision", "job_id", jobID, "git_hash", gitHash)
 
@@ -1100,7 +1100,7 @@ func (s *server) cloneDRBDRepoToDir(version, repoURL, destDir, jobID string) err
 func extractTarGz(r io.Reader, destDir string) error {
 	// Create the destination directory if it doesn't exist
 	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return fmt.Errorf("failed to create destination directory: %v", err)
+		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
 	// Prepare the tar command
@@ -1110,7 +1110,7 @@ func extractTarGz(r io.Reader, destDir string) error {
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("failed to extract tar.gz archive with tar: %v", err)
+		return fmt.Errorf("failed to extract tar.gz archive with tar: %w", err)
 	}
 	return nil
 }
@@ -1146,12 +1146,12 @@ func createTarGz(w io.Writer, files []string, baseDir string) error {
 		fullPath := filepath.Join(baseDir, file)
 		info, err := os.Stat(fullPath)
 		if err != nil {
-			return fmt.Errorf("failed to stat file %s: %v", fullPath, err)
+			return fmt.Errorf("failed to stat file %s: %w", fullPath, err)
 		}
 
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
-			return fmt.Errorf("failed to create tar header for %s: %v", file, err)
+			return fmt.Errorf("failed to create tar header for %s: %w", file, err)
 		}
 
 		// Use forward slashes and preserve relative path structure
@@ -1159,17 +1159,17 @@ func createTarGz(w io.Writer, files []string, baseDir string) error {
 		header.Format = tar.FormatGNU
 
 		if err := tarWriter.WriteHeader(header); err != nil {
-			return fmt.Errorf("failed to write tar header for %s: %v", file, err)
+			return fmt.Errorf("failed to write tar header for %s: %w", file, err)
 		}
 
 		fileReader, err := os.Open(fullPath)
 		if err != nil {
-			return fmt.Errorf("failed to open file %s: %v", fullPath, err)
+			return fmt.Errorf("failed to open file %s: %w", fullPath, err)
 		}
 
 		if _, err := io.Copy(tarWriter, fileReader); err != nil {
 			fileReader.Close()
-			return fmt.Errorf("failed to write file %s to tar: %v", file, err)
+			return fmt.Errorf("failed to write file %s to tar: %w", file, err)
 		}
 
 		fileReader.Close()
