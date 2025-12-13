@@ -10,6 +10,8 @@ config:
       - GOPROXY
       - SOURCE_REPO
       - SOURCE_REPO_TAG
+  secrets:
+    allowValueIds:
       - REGISTRY_USER
       - REGISTRY_PASSWORD
     allowUncommittedFiles:
