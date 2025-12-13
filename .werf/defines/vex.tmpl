@@ -6,6 +6,9 @@ image: vex-artifact
 fromImage: base/vex
 final: true
 
+{{ printf "image: %s" $context | nindent 2 }}
+{{ printf "image: %s-vex-artifact" $imageName | nindent 2 }}
+
 git:
 - add: /images/{{ $imageName }}/known_vulnerabilities.vex
   to: /known_vulnerabilities.vex
