@@ -1,6 +1,5 @@
 {{- define "vex mitigation" }}
-  {{- $context := index . 0 }}
-  {{- $imageName := index . 1 }}
+  {{- $imageName := index . 0 }}
 ---
 image: {{ $imageName }}-vex-artifact
 fromImage: base/vex
