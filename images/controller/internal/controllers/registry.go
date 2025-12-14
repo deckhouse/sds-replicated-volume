@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
@@ -34,17 +35,7 @@ import (
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
-var registry = []func(mgr manager.Manager) error{
-	// rvrdiskfulcount.BuildController,
-	// rvr_status_config_peers.BuildController,
-	// rvstatusconfigdeviceminor.BuildController,
-	// rvrtiebreakercount.BuildController,
-	// rvrstatusconfigpeers.BuildController,
-	// rvrstatusconfignodeid.BuildController,
-	// rvstatusconfigdeviceminor.BuildController,
-	// rvstatusconfigsharedsecret.BuildController,
-	// rvrvolume.BuildController,
-}
+var registry = []func(mgr manager.Manager) error{}
 
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
@@ -58,6 +49,7 @@ func init() {
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrownerreferencecontroller.BuildController)
 	registry = append(registry, rvrqnpccontroller.BuildController)
+	registry = append(registry, rvfinalizer.BuildController)
 
 	// ...
 }
