@@ -54,9 +54,20 @@ var _ = Describe("Reconciler", func() {
 		rec *rvstatusconfigsharedsecret.Reconciler
 	)
 
+	// Algorithm shortcuts for readability.
+	// NOTE: Tests assume at least 2 algorithms in SharedSecretAlgorithms().
+	// If list shrinks to 1, tests will panic (intentionally) as signal to review logic.
+	algs := v1alpha3.SharedSecretAlgorithms
+	firstAlg := func() string { return algs()[0] }
+	secondAlg := func() string { return algs()[1] }
+	lastAlg := func() string { return algs()[len(algs())-1] }
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed(), "should add v1alpha3 to scheme")
+		// Ensure test assumptions are met
+		Expect(len(algs())).To(BeNumerically(">=", 2),
+			"tests require at least 2 algorithms to test switching logic")
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
@@ -100,7 +111,7 @@ var _ = Describe("Reconciler", func() {
 			By("Verifying shared secret was generated")
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
 			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Not(BeEmpty())), "shared secret should be set")
-			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "should use first algorithm (sha256)")
+			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should use first algorithm ("+firstAlg()+")")
 		})
 
 		When("RVR exists without errors", func() {
@@ -134,7 +145,7 @@ var _ = Describe("Reconciler", func() {
 				By("Verifying shared secret was generated despite RVR without errors")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
 				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Not(BeEmpty())), "shared secret should be set even with RVR without errors")
-				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "should use first algorithm (sha256)")
+				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should use first algorithm ("+firstAlg()+")")
 			})
 		})
 
@@ -144,7 +155,7 @@ var _ = Describe("Reconciler", func() {
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: v1alpha3.SharedSecretAlgSHA256,
+							SharedSecretAlg: firstAlg(),
 						},
 					},
 				}
@@ -160,7 +171,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying nothing changed after first reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "algorithm should remain unchanged")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain unchanged ("+firstAlg()+")")
 
 					By("Second reconcile: should still not change anything (idempotent)")
 					Expect(rec.Reconcile(ctx, reconcile.Request{
@@ -170,7 +181,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying nothing changed after second reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "algorithm should remain sha256, not switch to sha1")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain "+firstAlg()+", not switch")
 				})
 			})
 
@@ -193,7 +204,7 @@ var _ = Describe("Reconciler", func() {
 						},
 					}
 					rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
-						UnsupportedAlg: v1alpha3.SharedSecretAlgSHA256,
+						UnsupportedAlg: firstAlg(),
 					}
 				})
 
@@ -202,14 +213,14 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("switches to next algorithm and is idempotent", func(ctx SpecContext) {
-					By("First reconcile: switching algorithm SHA256 -> SHA1")
+					By("First reconcile: switching algorithm " + firstAlg() + " -> " + secondAlg())
 					Expect(rec.Reconcile(ctx, reconcile.Request{
 						NamespacedName: types.NamespacedName{Name: "test-rv"},
 					})).ToNot(Requeue(), "first reconciliation should succeed")
 
-					By("Verifying algorithm was switched to SHA1")
+					By("Verifying algorithm was switched to " + secondAlg())
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA1)), "should switch to next algorithm (sha1)")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "should switch to next algorithm ("+secondAlg()+")")
 					// Secret is not regenerated if it already exists (idempotency check in controller)
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged when switching algorithm")
 					firstSecret := rv.Status.DRBD.Config.SharedSecret
@@ -222,7 +233,7 @@ var _ = Describe("Reconciler", func() {
 
 					By("Verifying nothing changed on second reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA1)), "algorithm should remain SHA1")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "algorithm should remain "+secondAlg())
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal(firstSecret)), "secret should remain unchanged")
 				})
 
@@ -230,7 +241,7 @@ var _ = Describe("Reconciler", func() {
 					var rvr2, rvrOtherRV *v1alpha3.ReplicatedVolumeReplica
 
 					BeforeEach(func() {
-						// RVR2: SHA1 (index 1) - maximum index
+						// RVR2: lastAlg - maximum index (all exhausted)
 						rvr2 = &v1alpha3.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-2",
@@ -246,7 +257,7 @@ var _ = Describe("Reconciler", func() {
 							},
 						}
 						rvr2.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
-							UnsupportedAlg: v1alpha3.SharedSecretAlgSHA1,
+							UnsupportedAlg: lastAlg(),
 						}
 
 						// RVR for another RV - should be ignored
@@ -265,7 +276,7 @@ var _ = Describe("Reconciler", func() {
 							},
 						}
 						rvrOtherRV.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
-							UnsupportedAlg: v1alpha3.SharedSecretAlgSHA256,
+							UnsupportedAlg: firstAlg(),
 						}
 					})
 
@@ -280,9 +291,9 @@ var _ = Describe("Reconciler", func() {
 							NamespacedName: types.NamespacedName{Name: "test-rv"},
 						})).ToNot(Requeue(), "reconciliation should succeed")
 
-						By("Verifying algorithm was not changed (SHA1 is last, all exhausted)")
+						By("Verifying algorithm was not changed (" + lastAlg() + " is last, all exhausted)")
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "should remain SHA256 (all exhausted)")
+						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should remain "+firstAlg()+" (all exhausted)")
 					})
 				})
 
@@ -306,7 +317,7 @@ var _ = Describe("Reconciler", func() {
 							},
 						}
 						rvrWithAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
-							UnsupportedAlg: v1alpha3.SharedSecretAlgSHA256,
+							UnsupportedAlg: firstAlg(),
 						}
 
 						// RVR with error but empty UnsupportedAlg
@@ -361,9 +372,9 @@ var _ = Describe("Reconciler", func() {
 							NamespacedName: types.NamespacedName{Name: "test-rv"},
 						})).ToNot(Requeue(), "reconciliation should succeed")
 
-						By("Verifying algorithm switched to SHA1 (next after SHA256, ignoring empty and unknown)")
+						By("Verifying algorithm switched to " + secondAlg() + " (next after " + firstAlg() + ", ignoring empty and unknown)")
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA1)), "should switch to SHA1 using valid algorithm, ignoring empty and unknown")
+						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "should switch to "+secondAlg()+" using valid algorithm, ignoring empty and unknown")
 					})
 
 					When("all RVRs have empty UnsupportedAlg", func() {
@@ -383,7 +394,7 @@ var _ = Describe("Reconciler", func() {
 
 							By("Verifying algorithm was not changed (cannot determine which algorithm is unsupported)")
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-							Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha3.SharedSecretAlgSHA256)), "algorithm should remain SHA256 (cannot switch without knowing which algorithm is unsupported)")
+							Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain "+firstAlg()+" (cannot switch without knowing which algorithm is unsupported)")
 						})
 					})
 				})
@@ -418,7 +429,7 @@ var _ = Describe("Reconciler", func() {
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: v1alpha3.SharedSecretAlgSHA256,
+							SharedSecretAlg: firstAlg(),
 						},
 					},
 				}
