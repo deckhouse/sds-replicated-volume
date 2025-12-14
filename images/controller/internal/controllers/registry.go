@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
@@ -36,14 +37,13 @@ var registry = []func(mgr manager.Manager) error{}
 func init() {
 	registry = append(registry, rvrdiskfulcount.BuildController)
 	registry = append(registry, rvrtiebreakercount.BuildController)
-
-	// TODO issues/333 register new controllers here
 	registry = append(registry, rvstatusconfigquorum.BuildController)
 	registry = append(registry, rvrstatusconfigpeers.BuildController)
 	registry = append(registry, rvrstatusconfignodeid.BuildController)
 	registry = append(registry, rvstatusconfigdeviceminor.BuildController)
 	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
+	registry = append(registry, rvfinalizer.BuildController)
 	// ...
 }
 
