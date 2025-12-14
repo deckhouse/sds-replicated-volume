@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -39,8 +38,6 @@ type MultiVolume struct {
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
-	volumesMu      sync.Mutex
-	volumesCancels map[string]context.CancelFunc
 }
 
 // NewMultiVolume creates a new MultiVolume orchestrator
@@ -49,10 +46,9 @@ func NewMultiVolume(
 	client *kubeutils.Client,
 ) *MultiVolume {
 	return &MultiVolume{
-		cfg:            cfg,
-		client:         client,
-		log:            slog.Default().With("runner", "multivolume"),
-		volumesCancels: make(map[string]context.CancelFunc),
+		cfg:    cfg,
+		client: client,
+		log:    slog.Default().With("runner", "multivolume"),
 	}
 }
 
@@ -129,15 +125,6 @@ func (m *MultiVolume) cleanup(reason error) {
 	log.Info("started")
 	defer log.Info("finished")
 
-	// Stop all volume-mains
-	m.volumesMu.Lock()
-	for rvName, cancel := range m.volumesCancels {
-		log.Info("stopping volume-main", "rv_name", rvName)
-		cancel()
-	}
-	m.volumesMu.Unlock()
-
-	// Wait for all volumes to finish
 	for m.runningVolumes.Load() > 0 {
 		log.Info("waiting for volumes to stop", "remaining", m.runningVolumes.Load())
 		time.Sleep(1 * time.Second)
@@ -156,16 +143,11 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 	volumeMain := NewVolumeMain(rvName, cfg, m.client)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
-	m.volumesMu.Lock()
-	m.volumesCancels[rvName] = cancel
-	m.volumesMu.Unlock()
 	m.runningVolumes.Add(1)
 
 	go func() {
 		defer func() {
-			m.volumesMu.Lock()
-			delete(m.volumesCancels, rvName)
-			m.volumesMu.Unlock()
+			cancel()
 			m.runningVolumes.Add(-1)
 		}()
 
