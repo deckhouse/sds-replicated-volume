@@ -73,25 +73,38 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !isThisReplicaCountEnoughForQuorum(rv, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
-	}
+	if rv.DeletionTimestamp == nil {
+		if !isThisReplicaCountEnoughForQuorum(rv, replicasForRV, rvr.Name) {
+			log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
 
-	if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
-	}
+		if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
+			log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
 
-	if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
-		log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
+		if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
+			log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
+	} else {
+		for i := range replicasForRV {
+			if isDeletingReplicaPublished(rv, replicasForRV[i].Spec.NodeName) {
+				log.Info("cluster is not ready for RVR GC: one replica is still published. Requeue after",
+					"seconds", requeueAfterSec,
+					"replicaName", replicasForRV[i].Name)
+				return reconcile.Result{
+					RequeueAfter: requeueAfterSec * time.Second,
+				}, nil
+			}
+		}
 	}
 
 	if err := r.removeControllerFinalizer(ctx, rvr, log); err != nil {
@@ -175,13 +188,7 @@ func isDeletingReplicaPublished(
 		return false
 	}
 
-	for _, nodeName := range rv.Status.PublishedOn {
-		if nodeName == deletingRVRNodeName {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(rv.Status.PublishedOn, deletingRVRNodeName)
 }
 
 func hasEnoughDiskfulReplicasForReplication(
