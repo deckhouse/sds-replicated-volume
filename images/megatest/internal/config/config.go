@@ -18,6 +18,8 @@ package config
 
 import (
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // Duration represents a time duration range with min and max values
@@ -40,6 +42,16 @@ type MultiVolumeConfig struct {
 	StepPeriod                    DurationMinMax
 	VolumePeriod                  DurationMinMax
 	DisablePodDestroyer           bool
+	DisableVolumeResizer          bool
+	DisableVolumeReplicaDestroyer bool
+	DisableVolumeReplicaCreator   bool
+}
+
+// VolumeMainConfig configures the volume-main goroutine
+type VolumeMainConfig struct {
+	StorageClassName              string
+	VolumeLifetime                time.Duration
+	InitialSize                   resource.Quantity
 	DisableVolumeResizer          bool
 	DisableVolumeReplicaDestroyer bool
 	DisableVolumeReplicaCreator   bool

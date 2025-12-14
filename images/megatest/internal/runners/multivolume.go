@@ -20,10 +20,15 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
+	"github.com/google/uuid"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
@@ -31,20 +36,23 @@ type MultiVolume struct {
 	cfg    config.MultiVolumeConfig
 	client *kubeutils.Client
 	log    *slog.Logger
-	rLog   *slog.Logger
+
+	// Tracking running volumes
+	runningVolumes atomic.Int32
+	volumesMu      sync.Mutex
+	volumesCancels map[string]context.CancelFunc
 }
 
 // NewMultiVolume creates a new MultiVolume orchestrator
 func NewMultiVolume(
 	cfg config.MultiVolumeConfig,
-	log *slog.Logger,
 	client *kubeutils.Client,
 ) *MultiVolume {
 	return &MultiVolume{
-		cfg:    cfg,
-		client: client,
-		log:    log,
-		rLog:   log.With("runner", "multivolume"),
+		cfg:            cfg,
+		client:         client,
+		log:            slog.Default().With("runner", "multivolume"),
+		volumesCancels: make(map[string]context.CancelFunc),
 	}
 }
 
@@ -64,47 +72,105 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 		disabledRunners = append(disabledRunners, "volume-replica-creator")
 	}
 
-	m.rLog.Info("multivolume started", "disabled_runners", disabledRunners)
-	defer m.rLog.Info("multivolume finished")
+	m.log.Info("started", "disabled_runners", disabledRunners)
+	defer m.log.Info("finished")
 
 	if m.cfg.DisablePodDestroyer {
-		m.rLog.Debug("pod-destroyer runner are disabled")
+		m.log.Debug("pod-destroyer runner are disabled")
 	} else {
 		//m.startPodDestroyers(ctx)
-		m.rLog.Info("pod-destroyer runner are enabled")
+		m.log.Info("pod-destroyer runner are enabled")
 	}
 
 	// Main volume creation loop
 	for {
 		select {
 		case <-ctx.Done():
-			m.rLog.Info("ctx done 1111")
 			m.cleanup()
 			return nil
 		default:
 		}
 
-		m.startVolumeMain(ctx)
+		// Check if we can create more volumes
+		currentVolumes := int(m.runningVolumes.Load())
+		if currentVolumes < m.cfg.MaxVolumes {
+			// Determine how many to create
+			toCreate := randomInt(m.cfg.VolumeStep.Min, m.cfg.VolumeStep.Max)
+			m.log.Debug("create volumes", "count", toCreate)
 
-		select {
-		case <-ctx.Done():
-			m.rLog.Info("ctx done 2222")
+			for i := 0; i < toCreate; i++ {
+				// Select random storage class
+				//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+				storageClass := m.cfg.StorageClasses[rand.Intn(len(m.cfg.StorageClasses))]
+
+				// Select random volume period
+				volumeLifetime := randomDuration(m.cfg.VolumePeriod)
+
+				// Generate unique name
+				rvName := fmt.Sprintf("mgt-%s", uuid.New().String())
+
+				// Start volume-main
+				m.startVolumeMain(ctx, rvName, storageClass, volumeLifetime)
+			}
+		}
+
+		// Wait before next iteration
+		randomDuration := randomDuration(m.cfg.StepPeriod)
+		m.log.Debug("wait before next iteration", "duration", randomDuration.String())
+		if err := waitWithContext(ctx, randomDuration); err != nil {
 			m.cleanup()
 			return nil
-		case <-time.After(30 * time.Second):
 		}
 	}
 }
 
 func (m *MultiVolume) cleanup() {
-	m.rLog.Info("cleanup")
-}
+	m.log.Info("cleanup")
 
-func (m *MultiVolume) startVolumeMain(ctx context.Context) {
-	m.rLog.Info("startVolumeMain")
-	_ = ctx
-	for i := 0; i < 3; i++ {
-		m.rLog.Debug(fmt.Sprintf("-- %d", i))
+	// Stop all volume-mains
+	m.volumesMu.Lock()
+	for rvName, cancel := range m.volumesCancels {
+		m.log.Info("stopping volume-main", "rv_name", rvName)
+		cancel()
+	}
+	m.volumesMu.Unlock()
+
+	// Wait for all volumes to finish
+	for m.runningVolumes.Load() > 0 {
+		m.log.Info("waiting for volumes to stop", "remaining", m.runningVolumes.Load())
 		time.Sleep(1 * time.Second)
 	}
+
+	m.log.Info("cleanup complete")
+}
+
+func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
+	cfg := config.VolumeMainConfig{
+		StorageClassName:              storageClass,
+		VolumeLifetime:                volumeLifetime,
+		InitialSize:                   resource.MustParse("100Mi"),
+		DisableVolumeResizer:          m.cfg.DisableVolumeResizer,
+		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
+		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
+	}
+	volumeMain := NewVolumeMain(rvName, cfg, m.client)
+
+	volumeCtx, cancel := context.WithCancel(ctx)
+	m.volumesMu.Lock()
+	m.volumesCancels[rvName] = cancel
+	m.volumesMu.Unlock()
+	m.runningVolumes.Add(1)
+
+	go func() {
+		defer func() {
+			m.volumesMu.Lock()
+			delete(m.volumesCancels, rvName)
+			m.volumesMu.Unlock()
+			m.runningVolumes.Add(-1)
+		}()
+
+		if err := volumeMain.Run(volumeCtx); err != nil {
+			m.log.Error("volume-main error", "error", err, "rv_name", rvName, "storage_class", storageClass, "volume_lifetime", volumeLifetime.String())
+		}
+	}()
 }

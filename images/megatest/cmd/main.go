@@ -43,11 +43,12 @@ func main() {
 	}
 	logHandler := &slogh.Handler{}
 	log := slog.New(logHandler)
+	slog.SetDefault(log)
 
 	start := time.Now()
 	log.Info("megatest started")
 	defer func() {
-		log.Info("Reconcile finished", "duration", time.Since(start).String())
+		log.Info("megatest finished", "duration", time.Since(start).String())
 	}()
 
 	// Setup signal handling
@@ -59,14 +60,14 @@ func main() {
 
 	go func() {
 		sig := <-sigChan
-		slog.Info("received signal, shutting down", "signal", sig)
+		log.Info("received signal, shutting down", "signal", sig)
 		cancel()
 	}()
 
 	// Create Kubernetes client
 	kubeClient, err := kubeutils.NewClientWithKubeconfig(opt.Kubeconfig)
 	if err != nil {
-		slog.Error("failed to create Kubernetes client", "error", err)
+		log.Error("failed to create Kubernetes client", "error", err)
 		os.Exit(1)
 	}
 
@@ -82,9 +83,9 @@ func main() {
 		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
-	err = runners.NewMultiVolume(cfg, log, kubeClient).Run(ctx)
+	err = runners.NewMultiVolume(cfg, kubeClient).Run(ctx)
 	if err != nil {
-		slog.Error("failed to run multivolume", "error", err)
+		log.Error("failed to run multivolume", "error", err)
 		os.Exit(1)
 	}
 

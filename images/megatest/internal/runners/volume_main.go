@@ -1,0 +1,95 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package runners
+
+import (
+	"context"
+	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
+
+	"log/slog"
+
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
+)
+
+const (
+	rvCreateTimeout = 10 * time.Minute
+	rvDeleteTimeout = 10 * time.Minute
+)
+
+// VolumeMain manages the lifecycle of a single ReplicatedVolume and its sub-runners
+type VolumeMain struct {
+	rvName         string
+	storageClass   string
+	volumeLifetime time.Duration
+	initialSize    resource.Quantity
+	client         *kubeutils.Client
+	log            *slog.Logger
+
+	// Disable flags for sub-runners
+	disableVolumeResizer          bool
+	disableVolumeReplicaDestroyer bool
+	disableVolumeReplicaCreator   bool
+}
+
+// NewVolumeMain creates a new VolumeMain
+func NewVolumeMain(
+	rvName string,
+	cfg config.VolumeMainConfig,
+	client *kubeutils.Client,
+) *VolumeMain {
+	return &VolumeMain{
+		rvName:                        rvName,
+		storageClass:                  cfg.StorageClassName,
+		volumeLifetime:                cfg.VolumeLifetime,
+		initialSize:                   cfg.InitialSize,
+		client:                        client,
+		log:                           slog.Default().With("runner", "volume-main", "rv_name", rvName, "storage_class", cfg.StorageClassName, "volume_lifetime", cfg.VolumeLifetime),
+		disableVolumeResizer:          cfg.DisableVolumeResizer,
+		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
+		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
+	}
+}
+
+// Run executes the full lifecycle of a volume
+func (v *VolumeMain) Run(ctx context.Context) error {
+	v.log.Info("started")
+	defer v.log.Info("finished")
+
+	// Create lifetime context
+	lifetimeCtx, lifetimeCancel := context.WithTimeout(ctx, v.volumeLifetime)
+	defer lifetimeCancel()
+
+	for i := 0; i < 3; i++ {
+		v.log.Debug("iteration", "iteration", i)
+		time.Sleep(1 * time.Second)
+	}
+
+	// Wait for lifetime to expire or context to be cancelled
+	<-lifetimeCtx.Done()
+
+	// Cleanup sequence
+	v.cleanup(ctx)
+
+	return nil
+}
+
+func (v *VolumeMain) cleanup(ctx context.Context) {
+	v.log.Info("cleanup")
+}
