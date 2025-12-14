@@ -85,11 +85,17 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	<-lifetimeCtx.Done()
 
 	// Cleanup sequence
-	v.cleanup(ctx)
+	v.cleanup(ctx, lifetimeCtx)
 
 	return nil
 }
 
-func (v *VolumeMain) cleanup(ctx context.Context) {
-	v.log.Info("cleanup")
+func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
+	reason := ctx.Err()
+	if reason == nil {
+		reason = lifetimeCtx.Err()
+	}
+	log := v.log.With("reason", reason, "func", "cleanup")
+	log.Info("started")
+	defer log.Info("finished")
 }

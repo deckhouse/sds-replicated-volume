@@ -86,7 +86,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			m.cleanup()
+			m.cleanup(ctx.Err())
 			return nil
 		default:
 		}
@@ -116,32 +116,32 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 
 		// Wait before next iteration
 		randomDuration := randomDuration(m.cfg.StepPeriod)
-		m.log.Debug("wait before next iteration", "duration", randomDuration.String())
+		m.log.Debug("wait before next iteration of volume creation", "duration", randomDuration.String())
 		if err := waitWithContext(ctx, randomDuration); err != nil {
-			m.cleanup()
+			m.cleanup(err)
 			return nil
 		}
 	}
 }
 
-func (m *MultiVolume) cleanup() {
-	m.log.Info("cleanup")
+func (m *MultiVolume) cleanup(reason error) {
+	log := m.log.With("reason", reason, "func", "cleanup")
+	log.Info("started")
+	defer log.Info("finished")
 
 	// Stop all volume-mains
 	m.volumesMu.Lock()
 	for rvName, cancel := range m.volumesCancels {
-		m.log.Info("stopping volume-main", "rv_name", rvName)
+		log.Info("stopping volume-main", "rv_name", rvName)
 		cancel()
 	}
 	m.volumesMu.Unlock()
 
 	// Wait for all volumes to finish
 	for m.runningVolumes.Load() > 0 {
-		m.log.Info("waiting for volumes to stop", "remaining", m.runningVolumes.Load())
+		log.Info("waiting for volumes to stop", "remaining", m.runningVolumes.Load())
 		time.Sleep(1 * time.Second)
 	}
-
-	m.log.Info("cleanup complete")
 }
 
 func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storageClass string, volumeLifetime time.Duration) {
