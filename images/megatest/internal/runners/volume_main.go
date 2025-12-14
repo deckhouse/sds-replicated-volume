@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"math/rand"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -76,10 +77,14 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	lifetimeCtx, lifetimeCancel := context.WithTimeout(ctx, v.volumeLifetime)
 	defer lifetimeCancel()
 
-	for i := 0; i < 3; i++ {
-		v.log.Debug("iteration", "iteration", i)
-		time.Sleep(1 * time.Second)
+	// Determine initial publish nodes (random distribution: 0=30%, 1=60%, 2=10%)
+	numberOfPublishedNodes := v.getRundomNumberForNodes()
+	publishedNodes, err := v.getPublishedNodes(ctx, numberOfPublishedNodes)
+	if err != nil {
+		v.log.Error("failed to get published nodes", "error", err)
+		return err
 	}
+	v.log.Debug("published nodes", "nodes", publishedNodes)
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -98,4 +103,35 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log := v.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
 	defer log.Info("finished")
+}
+
+func (v *VolumeMain) getRundomNumberForNodes() int {
+	// 0 nodes = 30%, 1 node = 60%, 2 nodes = 10%
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	r := rand.Float64()
+	switch {
+	case r < 0.30:
+		return 0
+	case r < 0.90:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func (v *VolumeMain) getPublishedNodes(ctx context.Context, count int) ([]string, error) {
+	if count == 0 {
+		return nil, nil
+	}
+
+	nodes, err := v.client.GetRandomNodes(ctx, count)
+	if err != nil {
+		return nil, err
+	}
+
+	names := make([]string, len(nodes))
+	for i, node := range nodes {
+		names[i] = node.Name
+	}
+	return names, nil
 }

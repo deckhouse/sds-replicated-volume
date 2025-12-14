@@ -17,7 +17,9 @@ limitations under the License.
 package kubeutils
 
 import (
+	"context"
 	"fmt"
+	"math/rand/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -71,4 +73,35 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 	}
 
 	return &Client{cl: cl, scheme: scheme}, nil
+}
+
+// GetRandoxmNodes selects n random unique nodes from the cluster
+func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, error) {
+	nodes, err := c.ListNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(nodes) < n {
+		n = len(nodes)
+	}
+
+	// Fisher-Yates shuffle and take first n
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	rand.Shuffle(len(nodes), func(i, j int) {
+		nodes[i], nodes[j] = nodes[j], nodes[i]
+	})
+
+	return nodes[:n], nil
+}
+
+// ListNodes returns all nodes in the cluster with label storage.deckhouse.io/sds-replicated-volume-node=""
+func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	nodeList := &corev1.NodeList{}
+	err := c.cl.List(ctx, nodeList, client.MatchingLabels{
+		"storage.deckhouse.io/sds-replicated-volume-node": "",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return nodeList.Items, nil
 }

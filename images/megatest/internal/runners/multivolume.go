@@ -151,8 +151,6 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 			m.runningVolumes.Add(-1)
 		}()
 
-		if err := volumeMain.Run(volumeCtx); err != nil {
-			m.log.Error("volume-main error", "error", err, "rv_name", rvName, "storage_class", storageClass, "volume_lifetime", volumeLifetime.String())
-		}
+		_ = volumeMain.Run(volumeCtx)
 	}()
 }
