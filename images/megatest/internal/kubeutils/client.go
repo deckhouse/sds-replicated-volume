@@ -105,3 +105,13 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	}
 	return nodeList.Items, nil
 }
+
+// CreateRV creates a new ReplicatedVolume
+func (c *Client) CreateRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
+	return c.cl.Create(ctx, rv)
+}
+
+// DeleteRV creates a new ReplicatedVolume
+func (c *Client) DeleteRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
+	return c.cl.Delete(ctx, rv)
+}

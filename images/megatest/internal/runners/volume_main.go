@@ -22,9 +22,11 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"log/slog"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -78,13 +80,19 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	defer lifetimeCancel()
 
 	// Determine initial publish nodes (random distribution: 0=30%, 1=60%, 2=10%)
-	numberOfPublishedNodes := v.getRundomNumberForNodes()
-	publishedNodes, err := v.getPublishedNodes(ctx, numberOfPublishedNodes)
+	numberOfPublishNodes := v.getRundomNumberForNodes()
+	publishNodes, err := v.getPublishNodes(ctx, numberOfPublishNodes)
 	if err != nil {
 		v.log.Error("failed to get published nodes", "error", err)
 		return err
 	}
-	v.log.Debug("published nodes", "nodes", publishedNodes)
+	v.log.Debug("published nodes", "nodes", publishNodes)
+
+	// Create RV
+	if err := v.createRV(ctx, publishNodes); err != nil {
+		v.log.Error("failed to create RV", "error", err)
+		return err
+	}
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -103,6 +111,13 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log := v.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
 	defer log.Info("finished")
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
+	defer cleanupCancel()
+
+	if err := v.deleteRV(cleanupCtx); err != nil {
+		v.log.Error("failed to delete RV", "error", err)
+	}
 }
 
 func (v *VolumeMain) getRundomNumberForNodes() int {
@@ -119,7 +134,7 @@ func (v *VolumeMain) getRundomNumberForNodes() int {
 	}
 }
 
-func (v *VolumeMain) getPublishedNodes(ctx context.Context, count int) ([]string, error) {
+func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, error) {
 	if count == 0 {
 		return nil, nil
 	}
@@ -134,4 +149,47 @@ func (v *VolumeMain) getPublishedNodes(ctx context.Context, count int) ([]string
 		names[i] = node.Name
 	}
 	return names, nil
+}
+
+func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error {
+	// Ensure PublishOn is never nil (use empty slice instead)
+	publishOn := publishNodes
+	if publishOn == nil {
+		publishOn = []string{}
+	}
+
+	rv := &v1alpha3.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: v.rvName,
+		},
+		Spec: v1alpha3.ReplicatedVolumeSpec{
+			Size:                       v.initialSize,
+			ReplicatedStorageClassName: v.storageClass,
+			PublishOn:                  publishOn,
+		},
+	}
+
+	err := v.client.CreateRV(ctx, rv)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (v *VolumeMain) deleteRV(ctx context.Context) error {
+	rv := &v1alpha3.ReplicatedVolume{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: v.rvName,
+		},
+	}
+
+	err := v.client.DeleteRV(ctx, rv)
+	if err != nil {
+		return err
+	}
+
+	// TODO: Wait for deletion
+
+	return nil
 }
