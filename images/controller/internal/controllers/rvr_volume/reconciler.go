@@ -125,7 +125,7 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 		}
 	}
 
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
