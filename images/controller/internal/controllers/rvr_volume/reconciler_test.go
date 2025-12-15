@@ -306,7 +306,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			When("RVR does not have DeletionTimestamp", func() {
-					DescribeTableSubtree("when RVR is not diskful because",
+				DescribeTableSubtree("when RVR is not diskful because",
 					Entry("Type is Access", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeAccess }),
 					Entry("Type is TieBreaker", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeTieBreaker }),
 					func(setup func()) {
