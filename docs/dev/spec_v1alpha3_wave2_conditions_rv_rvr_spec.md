@@ -670,85 +670,27 @@ builder.ControllerManagedBy(mgr).
 
 ### rvr-diskful-count-controller
 
-| Поле | Действие | Логика |
-|------|----------|--------|
-| RVR.`Initialized` | read | проверяет status=True для первой реплики |
-| ~~RV.`DiskfulReplicaCountReached`~~ | ~~set~~ | ❌ убрать — заменено счётчиком |
-
-**Изменения:**
-- Было: проверяет `rvr.status.conditions[type=Ready].status=True`
-- Стало: проверяет `rvr.status.conditions[type=Initialized].status=True`
-- Было: устанавливает `rv.status.conditions[type=DiskfulReplicaCountReached]`
-- Стало: не устанавливает condition (счётчик обновляется `rv-status-conditions-controller`)
-
-**Почему удалён condition:**
-1. Дублирует информацию из счётчика `diskfulReplicaCount`
-2. Избегает race condition между контроллерами
-3. Счётчик обновляется атомарно в одном месте (`rv-status-conditions-controller`)
-
-**Почему Initialized вместо Ready:**
-`Ready` удаляется из-за неоднозначной семантики. `Initialized` точнее — означает что DRBD 
-инициализирован и готов к синхронизации, что достаточно для создания следующей реплики.
+| Изменение | Описание |
+|-----------|----------|
+| Read: `Ready` → `Initialized` | Проверяем `Initialized=True` вместо `Ready=True` |
+| ❌ Убрать: `DiskfulReplicaCountReached` | Дублирует счётчик `diskfulReplicaCount` |
 
 ### rv-status-config-quorum-controller
 
-#### Проблема в текущей реализации
+| Изменение | Описание |
+|-----------|----------|
+| ❌ Убрать: `QuorumConfigured` | Дублирует `quorum != nil` |
+| ❌ Убрать: `AllReplicasReady` | Зависит от удалённого `Ready` |
+| ❌ Убрать: `DiskfulReplicaCountReached` | Использовать счётчик `diskfulReplicaCount` |
+| 🆕 Read: `RV.Configured` | Заменяет все проверки sharedSecret |
 
-Контроллер проверяет `isRvReady()` перед расчётом кворума:
+**Новая логика `isReadyForQuorum`(пример):**
 ```go
-func isRvReady(rvStatus) bool {
-    return DiskfulReplicaCountReached=True &&
-           AllReplicasReady=True  // ❌ зависит от Ready
-}
+current, desired := parseDiskfulReplicaCount(rv.status.diskfulReplicaCount)
+return current >= desired && current > 0 && RV.Configured=True
 ```
 
-**Проблемы:**
-1. `AllReplicasReady` — зависит от `Ready`, который удаляется.
-2. `DiskfulReplicaCountReached` — дублирует информацию из счётчика.
-3. `QuorumConfigured` — дублирует проверку `quorum != nil`.
-
-#### Решение — новые предусловия
-
-```go
-func isReadyForQuorum(rv) bool {
-    // Используем счётчик вместо condition DiskfulReplicaCountReached
-    current, desired := parseDiskfulReplicaCount(rv.status.diskfulReplicaCount)
-    return current >= desired && current > 0 &&
-           RV.Configured=True  // все реплики сконфигурированы
-}
-```
-
-| Проверка | Было | Стало |
-|----------|------|-------|
-| DiskfulReplicaCountReached | condition=True | ❌ убрать — заменено счётчиком `diskfulReplicaCount` |
-| AllReplicasReady | condition=True | ❌ убрать |
-| — | — | счётчик `diskfulReplicaCount` (current >= desired) |
-| — | — | `RV.Configured=True` |
-
-
-#### Почему `RV.Configured` достаточно (без отдельной проверки sharedSecret)
-
-`RV.Configured=True` означает что **ВСЕ** `RVR.Configured=True`.
-
-`RVR.Configured=True` проверяет (см. spec выше):
-- `actual.sharedSecret == config.sharedSecret`
-- `actual.sharedSecretAlg == config.sharedSecretAlg`
-- все остальные `actual.*` == `config.*`
-- нет ошибок adjust
-
-**Вывод:** Если `RV.Configured=True`, то sharedSecret **уже применён** на всех репликах.
-
-#### Вывод — изменения
-
-| Поле | Действие | Описание |
-|------|----------|----------|
-| `rv.status.drbd.config.quorum` | set | без изменений |
-| `rv.status.drbd.config.quorumMinimumRedundancy` | set | без изменений |
-| `rv.status.conditions[type=QuorumConfigured]` | ❌ убрать | дублирует `quorum != nil` |
-
-**Потребители:** должны проверять `rv.status.drbd.config.quorum != nil` вместо `QuorumConfigured=True`.
-
-**FYI: Баг в коде:** `package rvrdiskfulcount` вместо `rvstatusconfigquorum`.
+**Потребители `QuorumConfigured`:** проверять `rv.status.drbd.config.quorum != nil`.
 
 ---
 
