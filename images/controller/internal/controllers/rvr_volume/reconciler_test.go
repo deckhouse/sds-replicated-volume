@@ -258,6 +258,9 @@ var _ = Describe("Reconciler", func() {
 
 							It("should fail if deleting LLV failed", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("deleting llv")))
+
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+								Expect(rvr).To(HaveBackingVolumeCreatedConditionDeletionFailed())
 							})
 						})
 
@@ -323,6 +326,9 @@ var _ = Describe("Reconciler", func() {
 
 							It("should call reconcileLLVDeletion", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+								Expect(rvr).To(HaveBackingVolumeCreatedConditionNotApplicable())
 							})
 						})
 
@@ -346,6 +352,9 @@ var _ = Describe("Reconciler", func() {
 
 							It("should reconcile successfully without error", func(ctx SpecContext) {
 								Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
+
+								Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+								Expect(rvr).To(HaveBackingVolumeCreatedConditionNotApplicable())
 							})
 						})
 					})
@@ -537,6 +546,7 @@ var _ = Describe("Reconciler", func() {
 
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
+						Expect(rvr).To(HaveBackingVolumeCreatedConditionNotReady())
 					})
 
 					When("ActualType was Access before switching to Diskful", func() {
@@ -720,6 +730,9 @@ var _ = Describe("Reconciler", func() {
 
 						It("should fail if creating LLV failed", func(ctx SpecContext) {
 							Expect(rec.Reconcile(ctx, RequestFor(rvr))).Error().To(MatchError(ContainSubstring("creating LVMLogicalVolume")))
+
+							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+							Expect(rvr).To(HaveBackingVolumeCreatedConditionCreationFailed())
 						})
 					})
 
@@ -804,6 +817,7 @@ var _ = Describe("Reconciler", func() {
 
 								Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 								Expect(rvr).To(HaveLVMLogicalVolumeName(llv.Name))
+								Expect(rvr).To(HaveBackingVolumeCreatedConditionReady())
 							})
 
 							When("updating status fails", func() {
@@ -1118,6 +1132,10 @@ var _ = Describe("Reconciler", func() {
 			llvName := llvList.Items[0].Name
 			Expect(llvName).To(Equal(rvr.Name))
 
+			// Verify condition is set to NotReady after LLV creation
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
+			Expect(rvr).To(HaveBackingVolumeCreatedConditionNotReady())
+
 			// Step 2: Set LLV phase to Pending and reconcile - should not update RVR status
 			// Get the created LLV
 			llv := &snc.LVMLogicalVolume{}
@@ -1154,7 +1172,10 @@ var _ = Describe("Reconciler", func() {
 				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 				return updatedRVR
-			}).WithContext(ctx).Should(HaveLVMLogicalVolumeName(rvr.Name))
+			}).WithContext(ctx).Should(And(
+				HaveLVMLogicalVolumeName(rvr.Name),
+				HaveBackingVolumeCreatedConditionReady(),
+			))
 
 			// Get updatedRVR for next steps
 			updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
@@ -1183,9 +1204,10 @@ var _ = Describe("Reconciler", func() {
 			// Step 6: Reconcile again - should clear LVMLogicalVolumeName from status
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-			// Verify status was cleared
+			// Verify status was cleared and condition is set to NotApplicable
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 			Expect(updatedRVR).To(HaveNoLVMLogicalVolumeName())
+			Expect(updatedRVR).To(HaveBackingVolumeCreatedConditionNotApplicable())
 
 			// Step 7: Change type back to Diskful - should create LLV again
 			updatedRVR.Spec.Type = v1alpha3.ReplicaTypeDiskful
