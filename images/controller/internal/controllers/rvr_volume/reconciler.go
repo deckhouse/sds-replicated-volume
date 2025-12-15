@@ -81,7 +81,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if !rvr.DeletionTimestamp.IsZero() {
-		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
+		return reconcile.Result{}, wrapReconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
@@ -91,10 +91,28 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// RVR is not diskful, so we need to delete the LLV if it exists and the actual type is the same as the spec type.
 	if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
-		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
+		return reconcile.Result{}, wrapReconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
 	return reconcile.Result{}, nil
+}
+
+// wrapReconcileLLVDeletion wraps reconcileLLVDeletion and updates the BackingVolumeCreated condition.
+func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+	if err := reconcileLLVDeletion(ctx, cl, log, rvr); err != nil {
+		reconcileErr := err
+		// TODO: can write an error in the message?
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed"); conditionErr != nil {
+			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
+		}
+		return reconcileErr
+	}
+
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
+		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
+	}
+
+	return nil
 }
 
 // reconcileLLVDeletion handles deletion of LVMLogicalVolume associated with the RVR.
@@ -123,10 +141,6 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 		if err := deleteLLV(ctx, cl, llv, log); err != nil {
 			return fmt.Errorf("deleting llv: %w", err)
 		}
-	}
-
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
-		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
 	return nil

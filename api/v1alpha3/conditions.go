@@ -151,5 +151,6 @@ const (
 
 // Condition reasons for [ConditionTypeBackingVolumeCreated] condition
 const (
-	ReasonNotApplicable = "NotApplicable"
+	ReasonNotApplicable               = "NotApplicable"
+	ReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed"
 )
