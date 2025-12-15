@@ -84,13 +84,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
-	// "Diskful" will appear as a variable after merging rvr-diskfull-count-controller.
-	if rvr.Spec.Type == "Diskful" && rvr.Spec.NodeName != "" {
+	if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.Spec.NodeName != "" {
 		return reconcile.Result{}, reconcileLLVNormal(ctx, r.cl, r.scheme, log, rvr)
 	}
 
 	// RVR is not diskful, so we need to delete the LLV if it exists and the actual type is the same as the spec type.
-	if rvr.Spec.Type != "Diskful" && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
+	if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
 		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 

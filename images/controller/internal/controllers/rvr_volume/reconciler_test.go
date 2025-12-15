@@ -112,7 +112,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "test-rv",
-					Type:                 "Diskful",
+					Type:                 v1alpha3.ReplicaTypeDiskful,
 					NodeName:             "node-1",
 				},
 			}
@@ -306,9 +306,9 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			When("RVR does not have DeletionTimestamp", func() {
-				DescribeTableSubtree("when RVR is not diskful because",
-					Entry("Type is Access", func() { rvr.Spec.Type = "Access" }),
-					Entry("Type is TieBreaker", func() { rvr.Spec.Type = "TieBreaker" }),
+					DescribeTableSubtree("when RVR is not diskful because",
+					Entry("Type is Access", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeAccess }),
+					Entry("Type is TieBreaker", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeTieBreaker }),
 					func(setup func()) {
 						BeforeEach(func() {
 							setup()
@@ -329,7 +329,7 @@ var _ = Describe("Reconciler", func() {
 						When("ActualType does not match Spec.Type", func() {
 							BeforeEach(func() {
 								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-									ActualType:           "Diskful",
+									ActualType:           v1alpha3.ReplicaTypeDiskful,
 									LVMLogicalVolumeName: "keep-llv",
 								}
 							})
@@ -352,12 +352,12 @@ var _ = Describe("Reconciler", func() {
 
 				When("RVR is Diskful", func() {
 					BeforeEach(func() {
-						rvr.Spec.Type = "Diskful"
+						rvr.Spec.Type = v1alpha3.ReplicaTypeDiskful
 					})
 
 					DescribeTableSubtree("when RVR cannot create LLV because",
 						Entry("NodeName is empty", func() { rvr.Spec.NodeName = "" }),
-						Entry("Type is not Diskful", func() { rvr.Spec.Type = "Access" }),
+						Entry("Type is not Diskful", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeAccess }),
 						func(setup func()) {
 							BeforeEach(func() {
 								setup()
@@ -371,7 +371,7 @@ var _ = Describe("Reconciler", func() {
 					When("RVR has NodeName and is Diskful", func() {
 						BeforeEach(func() {
 							rvr.Spec.NodeName = "node-1"
-							rvr.Spec.Type = "Diskful"
+							rvr.Spec.Type = v1alpha3.ReplicaTypeDiskful
 						})
 
 						When("Status is nil", func() {
@@ -427,7 +427,7 @@ var _ = Describe("Reconciler", func() {
 					},
 					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-rv",
-						Type:                 "Diskful",
+						Type:                 v1alpha3.ReplicaTypeDiskful,
 						NodeName:             "node-1",
 					},
 				}
@@ -542,7 +542,7 @@ var _ = Describe("Reconciler", func() {
 					When("ActualType was Access before switching to Diskful", func() {
 						BeforeEach(func() {
 							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								ActualType: "Access",
+								ActualType: v1alpha3.ReplicaTypeAccess,
 							}
 						})
 
@@ -902,10 +902,10 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "type-switch-rv",
-					Type:                 "Access",
+					Type:                 v1alpha3.ReplicaTypeAccess,
 				},
 				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-					ActualType:           "Access",
+					ActualType:           v1alpha3.ReplicaTypeAccess,
 					LVMLogicalVolumeName: "type-switch-llv",
 				},
 			}
@@ -973,10 +973,10 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "mismatch-rv",
-					Type:                 "Access",
+					Type:                 v1alpha3.ReplicaTypeAccess,
 				},
 				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-					ActualType:           "Diskful",
+					ActualType:           v1alpha3.ReplicaTypeDiskful,
 					LVMLogicalVolumeName: "keep-llv",
 				},
 			}
@@ -1025,7 +1025,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "test-rv",
-					Type:                 "Diskful",
+					Type:                 v1alpha3.ReplicaTypeDiskful,
 					NodeName:             "node-1",
 				},
 				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
@@ -1162,7 +1162,7 @@ var _ = Describe("Reconciler", func() {
 
 			// Step 4: Change RVR type to Access - LLV should remain
 			// updatedRVR already obtained above
-			updatedRVR.Spec.Type = "Access"
+			updatedRVR.Spec.Type = v1alpha3.ReplicaTypeAccess
 			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
@@ -1172,7 +1172,7 @@ var _ = Describe("Reconciler", func() {
 			// Step 5: Set actualType to Access - LLV should be deleted
 			// Get fresh RVR state
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
-			updatedRVR.Status.ActualType = "Access"
+			updatedRVR.Status.ActualType = v1alpha3.ReplicaTypeAccess
 			Expect(cl.Status().Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
@@ -1188,7 +1188,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRVR).To(HaveNoLVMLogicalVolumeName())
 
 			// Step 7: Change type back to Diskful - should create LLV again
-			updatedRVR.Spec.Type = "Diskful"
+			updatedRVR.Spec.Type = v1alpha3.ReplicaTypeDiskful
 			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 

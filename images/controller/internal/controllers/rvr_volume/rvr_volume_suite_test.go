@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func TestRvrVolume(t *testing.T) {
@@ -115,7 +116,7 @@ func NotHaveFinalizer(finalizerName string) gomegatypes.GomegaMatcher {
 
 // BeDiskful returns a matcher that checks if RVR is diskful
 func BeDiskful() gomegatypes.GomegaMatcher {
-	return HaveField("Spec.Type", Equal("Diskful"))
+	return HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful))
 }
 
 // BeNonDiskful returns a matcher that checks if RVR is not diskful
