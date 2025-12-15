@@ -269,7 +269,6 @@
 ### `type=QuorumConfigured`  - убрать
 
 - Обновляется: **rv-status-config-quorum-controller**.
-- Существующий condition (без изменений).
 - `status`:
   - `True` — конфигурация кворума применена
     - `rv.status.drbd.config.quorum` установлен
@@ -283,7 +282,6 @@
 ### `type=DiskfulReplicaCountReached` - удалить - копирует частично `type=IOReady` + counter по diskfull репликам.
 
 - Обновляется: **rvr-diskful-count-controller**.
-- Существующий condition (без изменений).
 - `status`:
   - `True` — достигнуто требуемое количество Diskful реплик
     - количество RVR с `spec.type=Diskful` >= требуемое по `rsc.spec.replication`
