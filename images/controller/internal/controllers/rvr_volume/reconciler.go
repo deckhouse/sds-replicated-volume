@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -309,4 +310,40 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 	}
 
 	return "", "", fmt.Errorf("no LVMVolumeGroup found in ReplicatedStoragePool %s for node %s", storagePoolName, nodeName)
+}
+
+// updateBackingVolumeCreatedCondition updates the BackingVolumeCreated condition on the RVR status
+// with the provided status, reason, and message. It checks if the condition already has the same
+// parameters before updating to avoid unnecessary status patches.
+// Returns true if the condition was updated, false if no update was needed.
+func updateBackingVolumeCreatedCondition(status *v1alpha3.ReplicatedVolumeReplicaStatus, conditionStatus metav1.ConditionStatus, reason, message string) bool {
+	// Initialize status if needed
+	if status == nil {
+		return false
+	}
+
+	// Check if condition is already set correctly
+	if status.Conditions != nil {
+		cond := meta.FindStatusCondition(status.Conditions, v1alpha3.ConditionTypeBackingVolumeCreated)
+		if cond != nil &&
+			cond.Status == conditionStatus &&
+			cond.Reason == reason &&
+			cond.Message == message {
+			// Already set correctly, no need to update
+			return false
+		}
+	}
+
+	// Apply changes
+	meta.SetStatusCondition(
+		&status.Conditions,
+		metav1.Condition{
+			Type:    v1alpha3.ConditionTypeBackingVolumeCreated,
+			Status:  conditionStatus,
+			Reason:  reason,
+			Message: message,
+		},
+	)
+
+	return true
 }
