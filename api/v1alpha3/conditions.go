@@ -153,4 +153,7 @@ const (
 const (
 	ReasonNotApplicable               = "NotApplicable"
 	ReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed"
+	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
+	ReasonBackingVolumeReady          = "BackingVolumeReady"
+	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
 )
