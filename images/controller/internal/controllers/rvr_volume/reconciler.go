@@ -79,7 +79,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if rvr.DeletionTimestamp != nil {
+	if !rvr.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, reconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
