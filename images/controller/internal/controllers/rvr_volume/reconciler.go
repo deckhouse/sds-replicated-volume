@@ -125,6 +125,10 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 		}
 	}
 
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
+		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
+	}
+
 	return nil
 }
 
@@ -316,7 +320,15 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 // with the provided status, reason, and message. It checks if the condition already has the same
 // parameters before updating to avoid unnecessary status patches.
 // Returns error if the patch failed, nil otherwise.
-func updateBackingVolumeCreatedCondition(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica, conditionStatus metav1.ConditionStatus, reason, message string) error {
+func updateBackingVolumeCreatedCondition(
+	ctx context.Context,
+	cl client.Client,
+	log logr.Logger,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	conditionStatus metav1.ConditionStatus,
+	reason,
+	message string,
+) error {
 	// Initialize status if needed
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
@@ -333,6 +345,8 @@ func updateBackingVolumeCreatedCondition(ctx context.Context, cl client.Client, 
 			return nil
 		}
 	}
+
+	log.V(4).Info("Updating BackingVolumeCreated condition", "status", conditionStatus, "reason", reason, "message", message)
 
 	// Create patch before making changes
 	patch := client.MergeFrom(rvr.DeepCopy())
