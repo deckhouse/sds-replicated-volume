@@ -17,7 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-type UpHandler struct {
+type UpAndAdjustHandler struct {
 	cl       client.Client
 	log      *slog.Logger
 	rvr      *v1alpha3.ReplicatedVolumeReplica
@@ -27,7 +27,7 @@ type UpHandler struct {
 	nodeName string
 }
 
-func (h *UpHandler) Handle(ctx context.Context) error {
+func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 	if err := h.ensureRVRFinalizers(ctx); err != nil {
 		return err
 	}
@@ -41,14 +41,19 @@ func (h *UpHandler) Handle(ctx context.Context) error {
 
 	err := h.handleDRBDOperation(ctx)
 
-	var drbdErr drbdAPIError
+	// reset all drbd errors
+	if h.rvr.Status.DRBD.Errors != nil {
+		resetAllDRBDAPIErrors(h.rvr.Status.DRBD.Errors)
+	}
 
+	// save last drbd error
+	var drbdErr drbdAPIError
 	if errors.As(err, &drbdErr) {
 		if h.rvr.Status.DRBD.Errors == nil {
 			h.rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
 		}
 
-		drbdErr.ToDRBDErrors(h.rvr.Status.DRBD.Errors)
+		drbdErr.WriteDRBDError(h.rvr.Status.DRBD.Errors)
 	}
 
 	if patchErr := h.cl.Status().Patch(ctx, h.rvr, statusPatch); patchErr != nil {
@@ -58,7 +63,7 @@ func (h *UpHandler) Handle(ctx context.Context) error {
 	return err
 }
 
-func (h *UpHandler) ensureRVRFinalizers(ctx context.Context) error {
+func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.rvr.DeepCopy())
 	if !slices.Contains(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer) {
 		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer)
@@ -72,7 +77,7 @@ func (h *UpHandler) ensureRVRFinalizers(ctx context.Context) error {
 	return nil
 }
 
-func (h *UpHandler) ensureLLVFinalizers(ctx context.Context) error {
+func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.llv.DeepCopy())
 	if !slices.Contains(h.llv.Finalizers, v1alpha3.AgentAppFinalizer) {
 		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha3.AgentAppFinalizer)
@@ -83,16 +88,37 @@ func (h *UpHandler) ensureLLVFinalizers(ctx context.Context) error {
 	return nil
 }
 
-func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
+func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
+	hasCrypto, err := kernelHasCrypto(h.rv.Status.DRBD.Config.SharedSecretAlg)
+	if err != nil {
+		return err
+	}
+	if !hasCrypto {
+		return sharedSecretAlgUnsupportedError{
+			error: fmt.Errorf(
+				"shared secret alg is unsupported by the kernel: %s",
+				h.rv.Status.DRBD.Config.SharedSecretAlg,
+			),
+			unsupportedAlg: h.rv.Status.DRBD.Config.SharedSecretAlg,
+		}
+	}
+	return nil
+}
+
+func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	rvName := h.rvr.Spec.ReplicatedVolumeName
 
 	// prepare patch for status errors/actual fields
-
 	if h.rvr.Status == nil {
 		h.rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
 	if h.rvr.Status.DRBD == nil {
 		h.rvr.Status.DRBD = &v1alpha3.DRBD{}
+	}
+
+	// validate that shared secret alg is supported
+	if err := h.validateSharedSecretAlg(); err != nil {
+		return err
 	}
 
 	// write config to temp file
@@ -132,7 +158,7 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 			h.rvr.Status.DRBD != nil &&
 			h.rvr.Status.DRBD.Status != nil &&
 			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
-			h.rvr.Status.DRBD.Status.Devices[0].DiskState != "UpToDate"
+			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
 
 		alreadyCompleted := h.rvr.Status != nil &&
 			h.rvr.Status.DRBD != nil &&
@@ -180,7 +206,7 @@ func (h *UpHandler) handleDRBDOperation(ctx context.Context) error {
 	return nil
 }
 
-func (h *UpHandler) writeResourceConfig(filepath string) error {
+func (h *UpAndAdjustHandler) writeResourceConfig(filepath string) error {
 	rootSection := &drbdconf.Section{}
 
 	err := drbdconf.Marshal(
@@ -216,7 +242,7 @@ func (h *UpHandler) writeResourceConfig(filepath string) error {
 	return nil
 }
 
-func (h *UpHandler) generateResourceConfig() *v9.Resource {
+func (h *UpAndAdjustHandler) generateResourceConfig() *v9.Resource {
 	res := &v9.Resource{
 		Name: h.rvr.Spec.ReplicatedVolumeName,
 		Net: &v9.Net{
@@ -265,7 +291,7 @@ func (h *UpHandler) generateResourceConfig() *v9.Resource {
 	return res
 }
 
-func (h *UpHandler) populateResourceForNode(
+func (h *UpAndAdjustHandler) populateResourceForNode(
 	res *v9.Resource,
 	nodeName string,
 	nodeID uint,

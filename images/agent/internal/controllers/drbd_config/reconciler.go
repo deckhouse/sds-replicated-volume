@@ -18,15 +18,17 @@ package drbdconfig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
 )
 
 type Reconciler struct {
@@ -36,7 +38,135 @@ type Reconciler struct {
 	nodeName string
 }
 
-var _ reconcile.TypedReconciler[Request] = &Reconciler{}
+var _ reconcile.Reconciler = &Reconciler{}
+
+func (r *Reconciler) Reconcile(
+	ctx context.Context,
+	req reconcile.Request,
+) (reconcile.Result, error) {
+
+	log := r.log.With("rvName", req.Name)
+
+	rv, rvr, err := r.selectRVR(ctx, req, log)
+	if err != nil {
+		return reconcile.Result{}, err
+	}
+
+	if rvr == nil {
+		log.Info("RVR not found for this node - skip")
+		return reconcile.Result{}, nil
+	}
+
+	log = log.With("rvrName", rvr.Name)
+
+	var llv *v1alpha1.LVMLogicalVolume
+	if rvr.Spec.Type == "Diskful" && rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
+		if llv, err = r.selectLLV(ctx, log, rvr.Status.LVMLogicalVolumeName); err != nil {
+			return reconcile.Result{}, err
+		}
+		log = log.With("llvName", llv.Name)
+	}
+
+	if rvr.DeletionTimestamp != nil {
+		log.Info("deletionTimestamp on rvr, check finalizers")
+
+		for _, f := range rvr.Finalizers {
+			if f != v1alpha3.AgentAppFinalizer {
+				log.Info("non-agent finalizer found, ignore")
+				return reconcile.Result{}, nil
+			}
+		}
+
+		log.Info("down resource")
+
+		h := &DownHandler{
+			cl:  r.cl,
+			log: log.With("handler", "down"),
+			rvr: rvr,
+			llv: llv,
+		}
+
+		return reconcile.Result{}, h.Handle(ctx)
+	} else if !rvrFullyInitialized(log, rv, rvr) {
+		return reconcile.Result{}, nil
+	} else {
+		h := &UpAndAdjustHandler{
+			cl:       r.cl,
+			log:      log.With("handler", "upAndAdjust"),
+			rvr:      rvr,
+			rv:       rv,
+			llv:      llv,
+			nodeName: r.nodeName,
+		}
+
+		if llv != nil {
+			if h.lvg, err = r.selectLVG(ctx, log, llv.Spec.LVMVolumeGroupName); err != nil {
+				return reconcile.Result{}, err
+			}
+		}
+		return reconcile.Result{}, h.Handle(ctx)
+	}
+}
+
+func (r *Reconciler) selectRVR(
+	ctx context.Context,
+	req reconcile.Request,
+	log *slog.Logger,
+) (*v1alpha3.ReplicatedVolume, *v1alpha3.ReplicatedVolumeReplica, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
+	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
+	}
+
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, rvrList); err != nil {
+		return nil, nil, u.LogError(log, fmt.Errorf("listing rvr: %w", err))
+	}
+
+	var rvr *v1alpha3.ReplicatedVolumeReplica
+	for rvrItem := range uslices.Ptrs(rvrList.Items) {
+		if rvrItem.Spec.NodeName == r.nodeName && rvrItem.Spec.ReplicatedVolumeName == req.Name {
+			if rvr != nil {
+				return nil, nil,
+					u.LogError(
+						log.With("firstRVR", rvr.Name).With("secondRVR", rvrItem.Name),
+						errors.New("selecting rvr: more then one rvr exists"),
+					)
+			}
+			rvr = rvrItem
+		}
+	}
+
+	return rv, rvr, nil
+}
+
+func (r *Reconciler) selectLLV(
+	ctx context.Context,
+	log *slog.Logger,
+	llvName string,
+) (*v1alpha1.LVMLogicalVolume, error) {
+	llv := &v1alpha1.LVMLogicalVolume{}
+	if err := r.cl.Get(
+		ctx,
+		client.ObjectKey{Name: llvName},
+		llv,
+	); err != nil {
+		return nil, u.LogError(log, fmt.Errorf("getting llv: %w", err))
+	}
+	return llv, nil
+}
+
+func (r *Reconciler) selectLVG(
+	ctx context.Context,
+	log *slog.Logger,
+	lvgName string,
+) (*v1alpha1.LVMVolumeGroup, error) {
+	lvg := &v1alpha1.LVMVolumeGroup{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: lvgName}, lvg); err != nil {
+		return nil, u.LogError(log, fmt.Errorf("getting lvg: %w", err))
+	}
+	return lvg, nil
+}
 
 // NewReconciler constructs a Reconciler; exported for tests.
 func NewReconciler(cl client.Client, rdr client.Reader, log *slog.Logger, nodeName string) *Reconciler {
@@ -46,199 +176,14 @@ func NewReconciler(cl client.Client, rdr client.Reader, log *slog.Logger, nodeNa
 	return &Reconciler{
 		cl:       cl,
 		rdr:      rdr,
-		log:      log,
+		log:      log.With("nodeName", nodeName),
 		nodeName: nodeName,
 	}
 }
 
-func (r *Reconciler) OnRVUpdate(
-	ctx context.Context,
-	rvOld *v1alpha3.ReplicatedVolume,
-	rvNew *v1alpha3.ReplicatedVolume,
-	q TQueue,
-) {
-	if rvNew.Status == nil || rvNew.Status.DRBD == nil ||
-		rvNew.Status.DRBD.Config == nil || rvNew.Status.DRBD.Config.SharedSecretAlg == "" {
-		return
-	}
-
-	if rvOld.Status == nil || rvOld.Status.DRBD == nil || rvOld.Status.DRBD.Config == nil ||
-		rvOld.Status.DRBD.Config.SharedSecretAlg != rvNew.Status.DRBD.Config.SharedSecretAlg {
-		q.Add(
-			SharedSecretAlgRequest{
-				RVName:          rvNew.Name,
-				SharedSecretAlg: rvNew.Status.DRBD.Config.SharedSecretAlg,
-			},
-		)
-	}
-}
-
-func (r *Reconciler) OnRVRCreateOrUpdate(
-	ctx context.Context,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
-	q TQueue,
-) {
-	if !r.rvrOnThisNode(rvr) {
-		return
-	}
-
-	if rvr.DeletionTimestamp != nil {
-		r.log.Info("deletionTimestamp, check finalizers", "rvrName", rvr.Name)
-
-		for _, f := range rvr.Finalizers {
-			if f != v1alpha3.AgentAppFinalizer {
-				r.log.Info("non-agent finalizer found, ignore", "rvrName", rvr.Name)
-				return
-			}
-		}
-
-		r.log.Debug("down resource", "rvrName", rvr.Name)
-		q.Add(DownRequest{rvr.Name})
-		return
-	}
-
-	rv := &v1alpha3.ReplicatedVolume{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}, rv); err != nil {
-		r.log.Error("getting rv", "err", err, "rvrName", rvr.Name)
-		return
-	}
-
-	if !r.rvrInitialized(rvr, rv) {
-		return
-	}
-
-	r.log.Debug("up resource", "rvrName", rvr.Name)
-	q.Add(UpRequest{rvr.Name})
-}
-
-func (r *Reconciler) Reconcile(
-	ctx context.Context,
-	req Request,
-) (reconcile.Result, error) {
-	if rvrReq, ok := req.(RVRRequest); ok {
-		return r.reconcileRVRRequest(ctx, rvrReq)
-	}
-	return r.reconcileOtherRequest(ctx, req)
-}
-
-func (r *Reconciler) reconcileOtherRequest(
-	ctx context.Context,
-	req Request,
-) (reconcile.Result, error) {
-	switch typedReq := req.(type) {
-	case SharedSecretAlgRequest:
-		handler := SharedSecretAlgHandler{
-			cl:              r.cl,
-			rdr:             r.rdr,
-			log:             r.log.With("handler", "sharedSecretAlg"),
-			nodeName:        r.nodeName,
-			rvName:          typedReq.RVName,
-			sharedSecretAlg: typedReq.SharedSecretAlg,
-		}
-		return reconcile.Result{}, handler.Handle(ctx)
-	default:
-		r.log.Error("unknown req type", "typedReq", typedReq)
-		return reconcile.Result{}, e.ErrNotImplemented
-	}
-}
-
-func (r *Reconciler) reconcileRVRRequest(
-	ctx context.Context,
-	req RVRRequest,
-) (reconcile.Result, error) {
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.RVRRequestRVRName()}, rvr); err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			// deleted
-			return reconcile.Result{}, nil
-		}
-		return reconcile.Result{}, fmt.Errorf("get rvr: %w", err)
-	}
-	if !r.rvrOnThisNode(rvr) {
-		r.log.Error("rvr to be reconciled is not on this node")
-		return reconcile.Result{}, nil
-	}
-
-	var llv *v1alpha1.LVMLogicalVolume
-	if rvr.Spec.Type == "Diskful" {
-		llv = &v1alpha1.LVMLogicalVolume{}
-		if err := r.cl.Get(
-			ctx,
-			client.ObjectKey{Name: rvr.Status.LVMLogicalVolumeName},
-			llv,
-		); err != nil {
-			r.log.Error("getting llv", "err", err)
-			return reconcile.Result{}, err
-		}
-	}
-
-	switch typedReq := req.(type) {
-	case UpRequest:
-		rv := &v1alpha3.ReplicatedVolume{}
-		if err := r.cl.Get(ctx, client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}, rv); err != nil {
-			r.log.Error("getting rv", "err", err)
-			return reconcile.Result{}, err
-		}
-
-		if !r.rvrInitialized(rvr, rv) {
-			r.log.Error("rvr to be reconciled is not initialized")
-			return reconcile.Result{}, nil
-		}
-
-		handler := &UpHandler{
-			cl:       r.cl,
-			log:      r.log.With("handler", "up"),
-			rvr:      rvr,
-			rv:       rv,
-			llv:      llv,
-			nodeName: r.nodeName,
-		}
-
-		if llv != nil {
-			handler.lvg = &v1alpha1.LVMVolumeGroup{}
-			if err := r.cl.Get(
-				ctx,
-				client.ObjectKey{Name: handler.llv.Spec.LVMVolumeGroupName},
-				handler.lvg,
-			); err != nil {
-				r.log.Error("getting lvg", "err", err)
-				return reconcile.Result{}, err
-			}
-		}
-
-		return reconcile.Result{}, handler.Handle(ctx)
-	case DownRequest:
-		handler := &DownHandler{
-			cl:  r.cl,
-			log: r.log.With("handler", "down"),
-			rvr: rvr,
-			llv: llv,
-		}
-		return reconcile.Result{}, handler.Handle(ctx)
-	default:
-		r.log.Error("unknown req type", "typedReq", typedReq)
-		return reconcile.Result{}, e.ErrNotImplemented
-	}
-}
-
-func (r *Reconciler) rvrOnThisNode(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
-	if rvr.Spec.NodeName == "" {
-		return false
-	}
-	if rvr.Spec.NodeName != r.nodeName {
-		r.log.Debug("invalid node - skip",
-			"rvrName", rvr.Name,
-			"rvrNodeName", rvr.Spec.NodeName,
-			"nodeName", r.nodeName,
-		)
-		return false
-	}
-	return true
-}
-
-func (r *Reconciler) rvrInitialized(rvr *v1alpha3.ReplicatedVolumeReplica, rv *v1alpha3.ReplicatedVolume) bool {
+func rvrFullyInitialized(log *slog.Logger, rv *v1alpha3.ReplicatedVolume, rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	var logNotInitializedField = func(field string) {
-		r.log.Debug("rvr not initialized", "field", field)
+		log.Info("rvr not initialized", "field", field)
 	}
 
 	if rvr.Spec.ReplicatedVolumeName == "" {

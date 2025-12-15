@@ -17,24 +17,15 @@ limitations under the License.
 package drbdconfig
 
 import (
-	"context"
 	"log/slog"
-
-	"k8s.io/client-go/util/workqueue"
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
-	e "github.com/deckhouse/sds-replicated-volume/images/agent/internal/errors"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
-
-type TReq = Request
-type TQueue = workqueue.TypedRateLimitingInterface[TReq]
 
 func BuildController(mgr manager.Manager) error {
 	cfg, err := env.GetConfig()
@@ -42,53 +33,27 @@ func BuildController(mgr manager.Manager) error {
 		return err
 	}
 
-	var rec = &Reconciler{
-		cl:       mgr.GetClient(),
-		rdr:      mgr.GetAPIReader(),
-		log:      slog.Default(),
-		nodeName: cfg.NodeName(),
-	}
+	log := slog.Default().With("name", ControllerName)
 
-	err = builder.TypedControllerManagedBy[TReq](mgr).
-		Named(ControllerName).
-		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				CreateFunc: func(
-					ctx context.Context,
-					e event.TypedCreateEvent[client.Object],
-					q TQueue,
-				) {
-					rvr := e.Object.(*v1alpha3.ReplicatedVolumeReplica)
-					rec.OnRVRCreateOrUpdate(ctx, rvr, q)
-				},
-				UpdateFunc: func(
-					ctx context.Context,
-					e event.TypedUpdateEvent[client.Object],
-					q TQueue,
-				) {
-					rvr := e.ObjectNew.(*v1alpha3.ReplicatedVolumeReplica)
-					rec.OnRVRCreateOrUpdate(ctx, rvr, q)
-				},
-			}).
-		Watches(
-			&v1alpha3.ReplicatedVolume{},
-			&handler.TypedFuncs[client.Object, TReq]{
-				UpdateFunc: func(
-					ctx context.Context,
-					e event.TypedUpdateEvent[client.Object],
-					q TQueue,
-				) {
-					rvOld := e.ObjectOld.(*v1alpha3.ReplicatedVolume)
-					rvNew := e.ObjectNew.(*v1alpha3.ReplicatedVolume)
-					rec.OnRVUpdate(ctx, rvOld, rvNew, q)
-				},
-			}).
-		Complete(rec)
+	rec := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetAPIReader(),
+		log,
+		cfg.NodeName(),
+	)
 
-	if err != nil {
-		return u.LogError(rec.log, e.ErrUnknownf("building controller: %w", err))
-	}
-
-	return nil
+	return u.LogError(
+		log,
+		builder.ControllerManagedBy(mgr).
+			Named(ControllerName).
+			For(&v1alpha3.ReplicatedVolume{}).
+			Watches(
+				&v1alpha3.ReplicatedVolumeReplica{},
+				handler.EnqueueRequestForOwner(
+					mgr.GetScheme(),
+					mgr.GetRESTMapper(),
+					&v1alpha3.ReplicatedVolume{},
+				),
+			).
+			Complete(rec))
 }
