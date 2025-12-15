@@ -315,28 +315,31 @@ func getLVMVolumeGroupNameAndThinPoolName(ctx context.Context, cl client.Client,
 // updateBackingVolumeCreatedCondition updates the BackingVolumeCreated condition on the RVR status
 // with the provided status, reason, and message. It checks if the condition already has the same
 // parameters before updating to avoid unnecessary status patches.
-// Returns true if the condition was updated, false if no update was needed.
-func updateBackingVolumeCreatedCondition(status *v1alpha3.ReplicatedVolumeReplicaStatus, conditionStatus metav1.ConditionStatus, reason, message string) bool {
+// Returns error if the patch failed, nil otherwise.
+func updateBackingVolumeCreatedCondition(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica, conditionStatus metav1.ConditionStatus, reason, message string) error {
 	// Initialize status if needed
-	if status == nil {
-		return false
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
 
 	// Check if condition is already set correctly
-	if status.Conditions != nil {
-		cond := meta.FindStatusCondition(status.Conditions, v1alpha3.ConditionTypeBackingVolumeCreated)
+	if rvr.Status.Conditions != nil {
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeBackingVolumeCreated)
 		if cond != nil &&
 			cond.Status == conditionStatus &&
 			cond.Reason == reason &&
 			cond.Message == message {
 			// Already set correctly, no need to update
-			return false
+			return nil
 		}
 	}
 
+	// Create patch before making changes
+	patch := client.MergeFrom(rvr.DeepCopy())
+
 	// Apply changes
 	meta.SetStatusCondition(
-		&status.Conditions,
+		&rvr.Status.Conditions,
 		metav1.Condition{
 			Type:    v1alpha3.ConditionTypeBackingVolumeCreated,
 			Status:  conditionStatus,
@@ -345,5 +348,6 @@ func updateBackingVolumeCreatedCondition(status *v1alpha3.ReplicatedVolumeReplic
 		},
 	)
 
-	return true
+	// Patch the status in Kubernetes
+	return cl.Status().Patch(ctx, rvr, patch)
 }
