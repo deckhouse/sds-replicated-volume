@@ -6,9 +6,9 @@ replace github.com/deckhouse/sds-replicated-volume/lib/go/common => ../../lib/go
 
 require (
 	github.com/deckhouse/sds-common-lib v0.6.3
-	github.com/deckhouse/sds-replicated-volume/lib/go/common v0.0.0-00010101000000-000000000000
 	github.com/onsi/ginkgo/v2 v2.27.2
 	github.com/onsi/gomega v1.38.2
+	github.com/spf13/afero v1.12.0
 	golang.org/x/sync v0.18.0
 )
 
@@ -162,7 +162,6 @@ require (
 	github.com/sivchari/tenv v1.12.1 // indirect
 	github.com/sonatard/noctx v0.1.0 // indirect
 	github.com/sourcegraph/go-diff v0.7.0 // indirect
-	github.com/spf13/afero v1.12.0 // indirect
 	github.com/spf13/cast v1.5.0 // indirect
 	github.com/spf13/cobra v1.9.1 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
@@ -194,6 +193,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.3 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20250210185358-939b2ce775ac // indirect
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/tools v0.38.0 // indirect
@@ -211,6 +211,7 @@ require (
 
 require (
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
+	github.com/deckhouse/sds-node-configurator/api v0.0.0-20251112082451-591b11c7b2da
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-20251121101523-5ed5ba65d062
 	github.com/emicklei/go-restful/v3 v3.13.0 // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect

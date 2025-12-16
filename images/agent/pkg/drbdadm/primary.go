@@ -18,41 +18,54 @@ package drbdadm
 
 import (
 	"context"
-	"errors"
-	"os/exec"
 )
 
-func ExecutePrimary(ctx context.Context, resource string) error {
+func ExecutePrimary(ctx context.Context, resource string) CommandError {
 	args := PrimaryArgs(resource)
-	cmd := exec.CommandContext(ctx, Command, args...)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          string(out),
+			exitCode:        errToExitCode(err),
+		}
 	}
 
 	return nil
 }
 
-func ExecutePrimaryForce(ctx context.Context, resource string) error {
+func ExecutePrimaryForce(ctx context.Context, resource string) CommandError {
 	args := PrimaryForceArgs(resource)
-	cmd := exec.CommandContext(ctx, Command, args...)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          string(out),
+			exitCode:        errToExitCode(err),
+		}
 	}
 
 	return nil
 }
 
-func ExecuteSecondary(ctx context.Context, resource string) error {
+func ExecuteSecondary(ctx context.Context, resource string) CommandError {
 	args := SecondaryArgs(resource)
-	cmd := exec.CommandContext(ctx, Command, args...)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          string(out),
+			exitCode:        errToExitCode(err),
+		}
 	}
 
 	return nil

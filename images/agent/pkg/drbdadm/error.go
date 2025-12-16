@@ -16,23 +16,34 @@ limitations under the License.
 
 package drbdadm
 
-import (
-	"context"
-)
+type CommandError interface {
+	error
+	CommandWithArgs() []string
+	Output() string
+	ExitCode() int
+}
 
-func ExecuteResize(ctx context.Context, resource string) CommandError {
-	args := ResizeArgs(resource)
-	cmd := ExecCommandContext(ctx, Command, args...)
+var _ CommandError = &commandError{}
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return &commandError{
-			error:           err,
-			commandWithArgs: append([]string{Command}, args...),
-			output:          string(out),
-			exitCode:        errToExitCode(err),
-		}
-	}
+type commandError struct {
+	error
+	commandWithArgs []string
+	output          string
+	exitCode        int
+}
 
-	return nil
+func (e *commandError) CommandWithArgs() []string {
+	return e.commandWithArgs
+}
+
+func (e *commandError) Error() string {
+	return e.error.Error()
+}
+
+func (e *commandError) ExitCode() int {
+	return e.exitCode
+}
+
+func (e *commandError) Output() string {
+	return e.output
 }
