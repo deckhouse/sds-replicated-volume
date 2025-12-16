@@ -19,8 +19,6 @@ package drbdadm
 import (
 	"bytes"
 	"context"
-	"errors"
-	"os/exec"
 	"strings"
 )
 
@@ -28,26 +26,29 @@ import (
 // - (true, nil) if it exits with code 0
 // - (false, nil) if it exits with code 1 and contains "No valid meta data found"
 // - (false, error) for any other case
-func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, error) {
-	cmd := exec.CommandContext(ctx, Command, DumpMDArgs(resource)...)
+func ExecuteDumpMDMetadataExists(ctx context.Context, resource string) (bool, CommandError) {
+	args := DumpMDArgs(resource)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	cmd.SetStderr(&stderr)
 
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
 	}
 
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		exitCode := exitErr.ExitCode()
-		output := stderr.String()
+	exitCode := errToExitCode(err)
+	output := stderr.String()
 
-		if exitCode == 1 && strings.Contains(output, "No valid meta data found") {
-			return false, nil
-		}
+	if exitCode == 1 && strings.Contains(output, "No valid meta data found") {
+		return false, nil
 	}
 
-	return false, errors.Join(err, errors.New(stderr.String()))
+	return false, &commandError{
+		error:           err,
+		commandWithArgs: append([]string{Command}, args...),
+		output:          output,
+		exitCode:        exitCode,
+	}
 }

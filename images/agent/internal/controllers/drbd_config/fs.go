@@ -14,25 +14,21 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdadm
+package drbdconfig
 
 import (
-	"context"
+	"path/filepath"
+
+	"github.com/spf13/afero"
 )
 
-func ExecuteResize(ctx context.Context, resource string) CommandError {
-	args := ResizeArgs(resource)
-	cmd := ExecCommandContext(ctx, Command, args...)
+// FS wraps the filesystem to allow swap in tests; use FS for all file I/O.
+var FS = &afero.Afero{Fs: afero.NewOsFs()}
 
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return &commandError{
-			error:           err,
-			commandWithArgs: append([]string{Command}, args...),
-			output:          string(out),
-			exitCode:        errToExitCode(err),
-		}
-	}
+var ResourcesDir = "/var/lib/sds-replicated-volume-agent.d/"
 
-	return nil
+func FilePaths(rvName string) (regularFilePath, tempFilePath string) {
+	regularFilePath = filepath.Join(ResourcesDir, rvName+".res")
+	tempFilePath = regularFilePath + "_tmp"
+	return
 }
