@@ -60,7 +60,7 @@ type SchedulerExtenderClient struct {
 }
 
 func NewSchedulerHTTPClient() *SchedulerExtenderClient {
-	extURL := os.Getenv("SCHEDULER_EXTENDER_URL") // TODO init in the other place
+	extURL := os.Getenv("SCHEDULER_EXTENDER_URL") // TODO init in the other place later
 	if extURL == "" {
 		// No scheduler-extender URL configured — disable external capacity filtering.
 		return nil
