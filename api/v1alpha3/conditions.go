@@ -53,6 +53,9 @@ const (
 
 	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
 	ConditionTypeAddressConfigured = "AddressConfigured"
+
+	// [ConditionTypeScheduled] indicates whether replica has been scheduled onto a node
+	ConditionTypeScheduled = "Scheduled"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -64,6 +67,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeQuorum:                {false},
 	ConditionTypeDiskIOSuspended:       {false},
 	ConditionTypeAddressConfigured:     {false},
+	ConditionTypeScheduled:             {false},
 }
 
 // Condition reasons for [ConditionTypeReady] condition
@@ -122,6 +126,12 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
+)
+
+// Condition reasons for [ConditionTypeScheduled] condition
+const (
+	ReasonReplicaScheduled         = "ReplicaScheduled"
+	ReasonWaitingForAnotherReplica = "WaitingForAnotherReplica"
 )
 
 // Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition

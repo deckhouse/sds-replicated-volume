@@ -11,11 +11,11 @@ import (
 const controllerName = "rvr-scheduling-controller"
 
 func BuildController(mgr manager.Manager) error {
-	r := &Reconciler{
-		cl:     mgr.GetClient(),
-		log:    mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
-		scheme: mgr.GetScheme(),
-	}
+	r := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
+		mgr.GetScheme(),
+	)
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
