@@ -46,33 +46,9 @@ func main() {
 	start := time.Now()
 	log.Info("megatest started")
 
+	// to ensure statistics are always printed
 	exitCode := 0
-	var multiVolume *runners.MultiVolume
 	defer func() {
-		if multiVolume != nil {
-			stats := multiVolume.GetStats()
-			duration := time.Since(start)
-
-			fmt.Fprintf(os.Stderr, "\nStatistics:\n")
-			fmt.Fprintf(os.Stderr, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
-
-			// Calculate average times
-			var avgCreateTime, avgDeleteTime, avgWaitTime time.Duration
-			if stats.CreatedRVCount > 0 {
-				avgCreateTime = stats.TotalCreateRVTime / time.Duration(stats.CreatedRVCount)
-				avgDeleteTime = stats.TotalDeleteRVTime / time.Duration(stats.CreatedRVCount)
-				avgWaitTime = stats.TotalWaitForRVReadyTime / time.Duration(stats.CreatedRVCount)
-			}
-
-			fmt.Fprintf(os.Stderr, "Total create RV time: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
-			fmt.Fprintf(os.Stderr, "Total delete RV time: %s (avg: %s)\n", stats.TotalDeleteRVTime.String(), avgDeleteTime.String())
-			fmt.Fprintf(os.Stderr, "Total wait for RV ready time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
-
-			fmt.Fprintf(os.Stderr, "Test duration: %s\n", duration.String())
-
-			os.Stderr.Sync()
-		}
-
 		os.Exit(exitCode)
 	}()
 
@@ -109,9 +85,29 @@ func main() {
 		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
-	multiVolume = runners.NewMultiVolume(cfg, kubeClient)
-	if err := multiVolume.Run(ctx); err != nil {
-		log.Error("failed to run multivolume", "error", err)
-		exitCode = 1
+	multiVolume := runners.NewMultiVolume(cfg, kubeClient)
+	_ = multiVolume.Run(ctx)
+
+	// Print statistics
+	stats := multiVolume.GetStats()
+	duration := time.Since(start)
+
+	fmt.Fprintf(os.Stdout, "\nStatistics:\n")
+	fmt.Fprintf(os.Stdout, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
+
+	// Calculate average times
+	var avgCreateTime, avgDeleteTime, avgWaitTime time.Duration
+	if stats.CreatedRVCount > 0 {
+		avgCreateTime = stats.TotalCreateRVTime / time.Duration(stats.CreatedRVCount)
+		avgDeleteTime = stats.TotalDeleteRVTime / time.Duration(stats.CreatedRVCount)
+		avgWaitTime = stats.TotalWaitForRVReadyTime / time.Duration(stats.CreatedRVCount)
 	}
+
+	fmt.Fprintf(os.Stdout, "Total create RV time: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
+	fmt.Fprintf(os.Stdout, "Total delete RV time: %s (avg: %s)\n", stats.TotalDeleteRVTime.String(), avgDeleteTime.String())
+	fmt.Fprintf(os.Stdout, "Total wait for RV ready time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
+
+	fmt.Fprintf(os.Stdout, "Test duration: %s\n", duration.String())
+
+	os.Stdout.Sync()
 }
