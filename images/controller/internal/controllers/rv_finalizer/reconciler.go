@@ -22,9 +22,10 @@ import (
 	"log/slog"
 	"slices"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
@@ -58,7 +59,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
 
 		log.Info("finalizer added to rv")
-
 	} else if rvFinalizerMayNeedToBeRemoved(rv) {
 		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 		if err := r.cl.List(ctx, rvrList); err != nil {
