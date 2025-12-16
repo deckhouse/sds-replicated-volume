@@ -19,7 +19,6 @@ package runners
 import (
 	"context"
 	"log/slog"
-	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
@@ -62,17 +61,15 @@ func (v *VolumeReplicaCreator) Run(ctx context.Context) error {
 
 		// Perform delete
 		if err := v.doCreate(ctx); err != nil {
-			v.log.Error("destroy failed", "error", err)
+			v.log.Error("create failed", "error", err)
 			// Continue even on failure
 		}
 	}
 }
 
 func (v *VolumeReplicaCreator) doCreate(ctx context.Context) error {
-	for i := 0; i < 5; i++ {
-		v.log.Debug("creating random replica", "attempt", i)
-		time.Sleep(1 * time.Second)
-	}
+	_ = ctx
+	v.log.Debug("creating random replica ******************************")
 
 	return nil
 }

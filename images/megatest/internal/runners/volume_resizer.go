@@ -24,52 +24,51 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
-// VolumeReplicaDestroyer periodically deletes random replicas from a volume
-// It does NOT wait for deletion to succeed
-type VolumeReplicaDestroyer struct {
+// VolumeResizer periodically increases the size of a ReplicatedVolume
+type VolumeResizer struct {
 	rvName string
-	cfg    config.VolumeReplicaDestroyerConfig
+	cfg    config.VolumeResizerConfig
 	client *kubeutils.Client
 	log    *slog.Logger
 }
 
-// NewVolumeReplicaDestroyer creates a new VolumeReplicaDestroyer
-func NewVolumeReplicaDestroyer(
+// NewVolumeResizer creates a new VolumeResizer
+func NewVolumeResizer(
 	rvName string,
-	cfg config.VolumeReplicaDestroyerConfig,
+	cfg config.VolumeResizerConfig,
 	client *kubeutils.Client,
-	periodrMinMax []int,
-) *VolumeReplicaDestroyer {
-	return &VolumeReplicaDestroyer{
+	periodMinMax []int,
+	stepMinMax []string,
+) *VolumeResizer {
+	return &VolumeResizer{
 		rvName: rvName,
 		cfg:    cfg,
 		client: client,
-		log:    slog.Default().With("runner", "volume-replica-destroyer", "rv_name", rvName, "period_min_max", periodrMinMax),
+		log:    slog.Default().With("runner", "volume-resizer", "rv_name", rvName, "period_min_max", periodMinMax, "step_min_max", stepMinMax),
 	}
 }
 
-// Run starts the destroy cycle until context is cancelled
-func (v *VolumeReplicaDestroyer) Run(ctx context.Context) error {
+// Run starts the resize cycle until context is cancelled
+func (v *VolumeResizer) Run(ctx context.Context) error {
 	v.log.Info("started")
 	defer v.log.Info("finished")
 
 	for {
-		// Wait random duration before delete
+		// Wait random duration before resize
 		if err := waitRandomWithContext(ctx, v.cfg.Period); err != nil {
 			return nil
 		}
 
-		// Perform delete
-		if err := v.doDestroy(ctx); err != nil {
-			v.log.Error("destroy failed", "error", err)
+		// Perform resize
+		if err := v.doResize(ctx); err != nil {
+			v.log.Error("resize failed", "error", err)
 			// Continue even on failure
 		}
 	}
 }
 
-func (v *VolumeReplicaDestroyer) doDestroy(ctx context.Context) error {
+func (v *VolumeResizer) doResize(ctx context.Context) error {
+	v.log.Debug("resizing volume -------------------------------------")
 	_ = ctx
-	v.log.Debug("destroying random replica ===============================")
-
 	return nil
 }

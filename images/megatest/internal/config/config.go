@@ -34,6 +34,12 @@ type StepMinMax struct {
 	Max int
 }
 
+// Size represents a size range with min and max values
+type SizeMinMax struct {
+	Min resource.Quantity
+	Max resource.Quantity
+}
+
 // MultiVolumeConfig configures the multivolume orchestrator
 type MultiVolumeConfig struct {
 	StorageClasses                []string
@@ -70,4 +76,10 @@ type VolumeReplicaDestroyerConfig struct {
 // VolumeReplicaCreatorConfig configures the volume-replica-creator goroutine
 type VolumeReplicaCreatorConfig struct {
 	Period DurationMinMax
+}
+
+// VolumeResizerConfig configures the volume-resizer goroutine
+type VolumeResizerConfig struct {
+	Period DurationMinMax
+	Step   SizeMinMax
 }

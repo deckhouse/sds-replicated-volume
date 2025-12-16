@@ -38,10 +38,13 @@ const (
 )
 
 var (
-	publisher1MinMax       = []int{30, 60}
-	publisher2MinMax       = []int{100, 200}
-	replicaDestroyerMinMax = []int{30, 300}
-	replicaCreatorMinMax   = []int{30, 300}
+	publisher1PeriodMinMax       = []int{30, 60}
+	publisher2PeriodMinMax       = []int{100, 200}
+	replicaDestroyerPeriodMinMax = []int{30, 300}
+	replicaCreatorPeriodMinMax   = []int{30, 300}
+
+	volumeResizerPeriodMinMax = []int{50, 50}
+	volumeResizerStepMinMax   = []string{"51Mi", "101Mi"}
 )
 
 // VolumeMain manages the lifecycle of a single ReplicatedVolume and its sub-runners
@@ -277,21 +280,21 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 	// Create publisher configs
 	publisher1Cfg := config.VolumePublisherConfig{
 		Period: config.DurationMinMax{
-			Min: time.Duration(publisher1MinMax[0]) * time.Second,
-			Max: time.Duration(publisher1MinMax[1]) * time.Second,
+			Min: time.Duration(publisher1PeriodMinMax[0]) * time.Second,
+			Max: time.Duration(publisher1PeriodMinMax[1]) * time.Second,
 		},
 	}
 	publisher2Cfg := config.VolumePublisherConfig{
 		Period: config.DurationMinMax{
-			Min: time.Duration(publisher2MinMax[0]) * time.Second,
-			Max: time.Duration(publisher2MinMax[1]) * time.Second,
+			Min: time.Duration(publisher2PeriodMinMax[0]) * time.Second,
+			Max: time.Duration(publisher2PeriodMinMax[1]) * time.Second,
 		},
 	}
 
 	// Create runners
 	publishers := []*VolumePublisher{
-		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, publisher1MinMax),
-		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, publisher2MinMax),
+		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, publisher1PeriodMinMax),
+		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, publisher2PeriodMinMax),
 	}
 
 	// Start publishers
@@ -308,13 +311,6 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		}(pub)
 	}
 
-	// Start resizer
-	if v.disableVolumeResizer {
-		v.log.Debug("volume-resizer runner is disabled")
-	} else {
-		v.log.Debug("volume-resizer runner is enabled")
-	}
-
 	// Start replica destroyer
 	if v.disableVolumeReplicaDestroyer {
 		v.log.Debug("volume-replica-destroyer runner is disabled")
@@ -322,11 +318,11 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		v.log.Debug("volume-replica-destroyer runner is enabled")
 		replicaDestroyerCfg := config.VolumeReplicaDestroyerConfig{
 			Period: config.DurationMinMax{
-				Min: time.Duration(replicaDestroyerMinMax[0]) * time.Second,
-				Max: time.Duration(replicaDestroyerMinMax[1]) * time.Second,
+				Min: time.Duration(replicaDestroyerPeriodMinMax[0]) * time.Second,
+				Max: time.Duration(replicaDestroyerPeriodMinMax[1]) * time.Second,
 			},
 		}
-		replicaDestroyer := NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, replicaDestroyerMinMax)
+		replicaDestroyer := NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, replicaDestroyerPeriodMinMax)
 		destroyerCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			v.runningSubRunners.Add(1)
@@ -346,11 +342,11 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		v.log.Debug("volume-replica-creator runner is enabled")
 		replicaCreatorCfg := config.VolumeReplicaCreatorConfig{
 			Period: config.DurationMinMax{
-				Min: time.Duration(replicaCreatorMinMax[0]) * time.Second,
-				Max: time.Duration(replicaCreatorMinMax[1]) * time.Second,
+				Min: time.Duration(replicaCreatorPeriodMinMax[0]) * time.Second,
+				Max: time.Duration(replicaCreatorPeriodMinMax[1]) * time.Second,
 			},
 		}
-		replicaCreator := NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, replicaCreatorMinMax)
+		replicaCreator := NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, replicaCreatorPeriodMinMax)
 		creatorCtx, cancel := context.WithCancel(ctx)
 		go func() {
 			v.runningSubRunners.Add(1)
@@ -360,6 +356,34 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 			}()
 
 			_ = replicaCreator.Run(creatorCtx)
+		}()
+	}
+
+	// Start resizer
+	if v.disableVolumeResizer {
+		v.log.Debug("volume-resizer runner is disabled")
+	} else {
+		v.log.Debug("volume-resizer runner is enabled")
+		volumeResizerCfg := config.VolumeResizerConfig{
+			Period: config.DurationMinMax{
+				Min: time.Duration(volumeResizerPeriodMinMax[0]) * time.Second,
+				Max: time.Duration(volumeResizerPeriodMinMax[1]) * time.Second,
+			},
+			Step: config.SizeMinMax{
+				Min: resource.MustParse(volumeResizerStepMinMax[0]),
+				Max: resource.MustParse(volumeResizerStepMinMax[1]),
+			},
+		}
+		volumeResizer := NewVolumeResizer(v.rvName, volumeResizerCfg, v.client, volumeResizerPeriodMinMax, volumeResizerStepMinMax)
+		resizerCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			v.runningSubRunners.Add(1)
+			defer func() {
+				cancel()
+				v.runningSubRunners.Add(-1)
+			}()
+
+			_ = volumeResizer.Run(resizerCtx)
 		}()
 	}
 }

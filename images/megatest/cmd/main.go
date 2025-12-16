@@ -37,7 +37,10 @@ func main() {
 	opt.Parse()
 
 	err := slogh.UpdateConfig(
-		slogh.Config{Level: slogh.LevelDebug, Format: slogh.FormatText, Callsite: slogh.CallsiteDisabled},
+		slogh.Config{
+			Level:    slogh.LevelDebug,
+			Format:   slogh.FormatText,
+			Callsite: slogh.CallsiteDisabled},
 	)
 	if err != nil {
 		panic(err)

@@ -21,8 +21,6 @@ import (
 	"log/slog"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
@@ -36,20 +34,14 @@ type VolumeChecker struct {
 	rvName string
 	client *kubeutils.Client
 	log    *slog.Logger
-
-	// Last observed state
-	lastReady  metav1.ConditionStatus
-	lastQuorum bool
 }
 
 // NewVolumeChecker creates a new VolumeChecker for the given RV
 func NewVolumeChecker(rvName string, client *kubeutils.Client) *VolumeChecker {
 	return &VolumeChecker{
-		rvName:     rvName,
-		client:     client,
-		log:        slog.Default().With("runner", "volume-checker", "rv_name", rvName),
-		lastReady:  metav1.ConditionUnknown,
-		lastQuorum: false,
+		rvName: rvName,
+		client: client,
+		log:    slog.Default().With("runner", "volume-checker", "rv_name", rvName),
 	}
 }
 
@@ -66,13 +58,17 @@ func (v *VolumeChecker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			_ = v.check(ctx)
+			if err := v.check(ctx); err != nil {
+				v.log.Error("checking failed", "error", err)
+				// Continue even on failure
+			}
 		}
 	}
 }
 
 func (v *VolumeChecker) check(ctx context.Context) error {
-	v.log.Debug("checking volume -------------------------------------")
+	_ = ctx
+	v.log.Debug("checking volume ++++++++++++++++++++++++++++++")
 
 	return nil
 }
