@@ -18,16 +18,20 @@ package drbdadm
 
 import (
 	"context"
-	"errors"
-	"os/exec"
 )
 
-func ExecuteUp(ctx context.Context, resource string) error {
-	cmd := exec.CommandContext(ctx, Command, UpArgs(resource)...)
+func ExecuteUp(ctx context.Context, resource string) CommandError {
+	args := UpArgs(resource)
+	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return errors.Join(err, errors.New(string(out)))
+		return &commandError{
+			error:           err,
+			commandWithArgs: append([]string{Command}, args...),
+			output:          string(out),
+			exitCode:        errToExitCode(err),
+		}
 	}
 
 	return nil

@@ -20,8 +20,8 @@ import (
 	"context"
 )
 
-func ExecuteResize(ctx context.Context, resource string) CommandError {
-	args := ResizeArgs(resource)
+func ExecuteShNop(ctx context.Context, configToTest string, configToExclude string) CommandError {
+	args := ShNopArgs(configToTest, configToExclude)
 	cmd := ExecCommandContext(ctx, Command, args...)
 
 	out, err := cmd.CombinedOutput()

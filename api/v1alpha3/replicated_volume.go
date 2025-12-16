@@ -85,11 +85,6 @@ type ReplicatedVolumeStatus struct {
 }
 
 // +k8s:deepcopy-gen=true
-type MessageError struct {
-	Message string `json:"message,omitempty"`
-}
-
-// +k8s:deepcopy-gen=true
 type ReplicatedVolumeStatusErrors struct {
 	// +patchStrategy=merge
 	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
