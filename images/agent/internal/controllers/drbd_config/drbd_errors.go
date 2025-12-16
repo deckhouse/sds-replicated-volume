@@ -43,7 +43,7 @@ type sharedSecretAlgUnsupportedError struct {
 
 // [drbdAPIError]
 
-var allDRBDAPIErrors []drbdAPIError = []drbdAPIError{
+var allDRBDAPIErrors = []drbdAPIError{
 	configurationCommandError{},
 	fileSystemOperationError{},
 	sharedSecretAlgUnsupportedError{},

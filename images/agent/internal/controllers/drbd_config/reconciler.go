@@ -43,7 +43,6 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
-
 	log := r.log.With("rvName", req.Name)
 
 	rv, rvr, err := r.selectRVR(ctx, req, log)
@@ -66,7 +65,8 @@ func (r *Reconciler) Reconcile(
 		log = log.With("llvName", llv.Name)
 	}
 
-	if rvr.DeletionTimestamp != nil {
+	switch {
+	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
 		for _, f := range rvr.Finalizers {
@@ -86,9 +86,9 @@ func (r *Reconciler) Reconcile(
 		}
 
 		return reconcile.Result{}, h.Handle(ctx)
-	} else if !rvrFullyInitialized(log, rv, rvr) {
+	case !rvrFullyInitialized(log, rv, rvr):
 		return reconcile.Result{}, nil
-	} else {
+	default:
 		h := &UpAndAdjustHandler{
 			cl:       r.cl,
 			log:      log.With("handler", "upAndAdjust"),

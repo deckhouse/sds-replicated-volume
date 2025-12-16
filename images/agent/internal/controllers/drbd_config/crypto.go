@@ -22,7 +22,7 @@ import (
 	"strings"
 )
 
-var kernelHasCryptoOkCache map[string]struct{} = map[string]struct{}{}
+var kernelHasCryptoOkCache = map[string]struct{}{}
 
 func kernelHasCrypto(name string) (bool, error) {
 	if _, ok := kernelHasCryptoOkCache[name]; ok {

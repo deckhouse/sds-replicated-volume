@@ -21,16 +21,17 @@ import (
 	"fmt"
 	"log/slog"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
+
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
 
 type managerConfig interface {

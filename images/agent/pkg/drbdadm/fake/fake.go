@@ -41,7 +41,7 @@ func (b *Exec) Setup(t *testing.T) {
 
 	i := 0
 
-	drbdadm.ExecCommandContext = func(ctx context.Context, name string, args ...string) drbdadm.Cmd {
+	drbdadm.ExecCommandContext = func(_ context.Context, name string, args ...string) drbdadm.Cmd {
 		if len(b.cmds) <= i {
 			t.Fatalf("expected %d command executions, got more", len(b.cmds))
 		}
@@ -92,7 +92,9 @@ func (c *ExpectedCmd) SetStderr(w io.Writer) {
 
 func (c *ExpectedCmd) Run() error {
 	if c.stderr != nil {
-		io.Copy(c.stderr, bytes.NewBuffer(c.ResultOutput))
+		if _, err := io.Copy(c.stderr, bytes.NewBuffer(c.ResultOutput)); err != nil {
+			return err
+		}
 	}
 	return c.ResultErr
 }

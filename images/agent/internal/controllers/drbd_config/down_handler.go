@@ -22,11 +22,12 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/spf13/afero"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
-	"github.com/spf13/afero"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type DownHandler struct {

@@ -25,7 +25,6 @@ import (
 	"testing"
 	"time"
 
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/spf13/afero"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
@@ -103,7 +103,6 @@ func setupDiscardLogger(t *testing.T) {
 }
 
 func TestReconciler_Reconcile(t *testing.T) {
-
 	testCases := []*reconcileTestCase{
 		{
 			name: "empty cluster",
@@ -293,7 +292,6 @@ func TestReconciler_Reconcile(t *testing.T) {
 		t.Run(
 			tc.name,
 			func(t *testing.T) {
-
 				resetMemFS(t)
 				if tc.needsResourcesDir {
 					ensureResourcesDir(t)
@@ -335,7 +333,6 @@ func TestReconciler_Reconcile(t *testing.T) {
 				if tc.postCheck != nil {
 					tc.postCheck(t, cl)
 				}
-
 			},
 		)
 	}
@@ -398,6 +395,7 @@ func disklessRVR(name string, address v1alpha3.Address, peers ...map[string]v1al
 	return readyRVR(name, rvrTypeAccess, testNodeIDLocal, address, firstMapOrNil(peers), "")
 }
 
+//nolint:unparam // accepts name for readability and potential future cases
 func diskfulRVR(name string, address v1alpha3.Address, llvName string, peers ...map[string]v1alpha3.Peer) *v1alpha3.ReplicatedVolumeReplica {
 	return readyRVR(name, rvrTypeDiskful, testNodeIDLocal, address, firstMapOrNil(peers), llvName)
 }
@@ -457,6 +455,7 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 	}
 }
 
+//nolint:unparam // keep secret configurable for future scenarios
 func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
@@ -537,6 +536,7 @@ func deletingRVR(name, llvName string) *v1alpha3.ReplicatedVolumeReplica {
 	}
 }
 
+//nolint:unparam // keep name configurable for clarity and reuse
 func newLLV(name, lvgName, lvName string) *snc.LVMLogicalVolume {
 	return &snc.LVMLogicalVolume{
 		ObjectMeta: v1.ObjectMeta{

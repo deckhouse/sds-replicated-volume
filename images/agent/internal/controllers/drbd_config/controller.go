@@ -19,12 +19,13 @@ package drbdconfig
 import (
 	"log/slog"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 func BuildController(mgr manager.Manager) error {

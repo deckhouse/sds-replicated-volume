@@ -24,13 +24,14 @@ import (
 	"os"
 	"slices"
 
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type UpAndAdjustHandler struct {
