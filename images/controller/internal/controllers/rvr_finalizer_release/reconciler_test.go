@@ -185,11 +185,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: "Diskful",
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha3.ConditionTypeOnline,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   "FullyConnected",
+							Type:   v1alpha3.ConditionTypeIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
