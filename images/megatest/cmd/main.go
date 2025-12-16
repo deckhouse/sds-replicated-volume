@@ -87,10 +87,8 @@ func main() {
 		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
-	err = runners.NewMultiVolume(cfg, kubeClient).Run(ctx)
-	if err != nil {
+	if err := runners.NewMultiVolume(cfg, kubeClient).Run(ctx); err != nil {
 		log.Error("failed to run multivolume", "error", err)
 		exitCode = 1
-		return
 	}
 }
