@@ -76,16 +76,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Update conditions if changed
 	// setCondition modifies rvr in-memory and returns true if changed;
-	// single Update sends all changes together.
+	// single Patch sends all changes together.
 	// changed will be true even if only one of the conditions is changed.
+	rvrCopy := rvr.DeepCopy()
 	changed := false
 	changed = r.setCondition(rvr, v1alpha3.ConditionTypeOnline, onlineStatus, onlineReason, onlineMessage) || changed
 	changed = r.setCondition(rvr, v1alpha3.ConditionTypeIOReady, ioReadyStatus, ioReadyReason, ioReadyMessage) || changed
 
 	if changed {
 		log.V(1).Info("Updating conditions", "online", onlineStatus, "onlineReason", onlineReason, "ioReady", ioReadyStatus, "ioReadyReason", ioReadyReason)
-		if err := r.cl.Status().Update(ctx, rvr); err != nil {
-			log.Error(err, "Updating RVR status")
+		if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(rvrCopy)); err != nil {
+			log.Error(err, "Patching RVR status")
 			return reconcile.Result{}, err
 		}
 	}
@@ -112,6 +113,7 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 		client.MatchingLabels{AgentPodLabel: AgentPodValue},
 	); err != nil {
 		log.Error(err, "Listing agent pods")
+		// TODO: think about other reasons
 		return false, v1alpha3.ReasonAgentNotReady
 	}
 
@@ -120,6 +122,7 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 	for i := range podList.Items {
 		if podList.Items[i].Spec.NodeName == nodeName {
 			agentPod = &podList.Items[i]
+			// TODO: can be multiple agent pods on the same node
 			break
 		}
 	}
@@ -219,19 +222,13 @@ func (r *Reconciler) calculateIOReady(rvr *v1alpha3.ReplicatedVolumeReplica, onl
 
 // setCondition sets a condition on the RVR and returns true if it was changed.
 func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, conditionType string, status metav1.ConditionStatus, reason, message string) bool {
-	existing := meta.FindStatusCondition(rvr.Status.Conditions, conditionType)
-	if existing != nil && existing.Status == status && existing.Reason == reason && existing.Message == message {
-		return false
-	}
-
-	meta.SetStatusCondition(&rvr.Status.Conditions, metav1.Condition{
+	return meta.SetStatusCondition(&rvr.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,
 		Reason:             reason,
 		Message:            message,
 		ObservedGeneration: rvr.Generation,
 	})
-	return true
 }
 
 // extractReasonAndMessage extracts reason and message from source condition.
