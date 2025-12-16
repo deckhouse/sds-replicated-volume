@@ -25,7 +25,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/deckhouse/sds-common-lib/slogh"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/runners"
@@ -36,16 +35,11 @@ func main() {
 	var opt Opt
 	opt.Parse()
 
-	err := slogh.UpdateConfig(
-		slogh.Config{
-			Level:    slogh.LevelDebug,
-			Format:   slogh.FormatText,
-			Callsite: slogh.CallsiteDisabled},
-	)
-	if err != nil {
-		panic(err)
-	}
-	logHandler := &slogh.Handler{}
+	// Setup logger with stdout output
+	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     slog.LevelDebug,
+		AddSource: false,
+	})
 	log := slog.New(logHandler)
 	slog.SetDefault(log)
 
