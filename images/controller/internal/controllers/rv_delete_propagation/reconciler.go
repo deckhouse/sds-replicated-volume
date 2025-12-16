@@ -21,9 +21,10 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
