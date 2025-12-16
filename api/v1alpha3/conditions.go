@@ -130,8 +130,11 @@ const (
 
 // Condition reasons for [ConditionTypeScheduled] condition
 const (
-	ReasonReplicaScheduled         = "ReplicaScheduled"
-	ReasonWaitingForAnotherReplica = "WaitingForAnotherReplica"
+	ReasonReplicaScheduled               = "ReplicaScheduled"
+	ReasonWaitingForAnotherReplica       = "WaitingForAnotherReplica"
+	ReasonSchedulingTopologyConflict     = "SchedulingTopologyConflict"
+	ReasonSchedulingInsufficientReplicas = "SchedulingInsufficientReplicas"
+	ReasonSchedulingNoCandidateNodes     = "SchedulingNoCandidateNodes"
 )
 
 // Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition

@@ -2,6 +2,7 @@ package rvr_scheduling_controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -20,6 +21,12 @@ import (
 )
 
 const nodeZoneLabel = "topology.kubernetes.io/zone"
+
+var (
+	errSchedulingTopologyConflict     = errors.New("scheduling topology conflict")
+	errSchedulingInsufficientReplicas = errors.New("scheduling insufficient replicas")
+	errSchedulingNoCandidateNodes     = errors.New("scheduling no candidate nodes")
+)
 
 type tieBreakerContext struct {
 	unscheduled         []*v1alpha3.ReplicatedVolumeReplica
@@ -69,26 +76,30 @@ func (r *Reconciler) Reconcile(
 
 	// Phase 1: place Diskful replicas for Local access mode (respecting publishOn and topology).
 	if err := r.scheduleDiskfulLocalPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
+		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
 		return reconcile.Result{}, err
 	}
 
 	// Phase 2: place remaining Diskful replicas for non-Local access modes (respecting topology and capacity).
 	if err := r.scheduleDiskfulPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
+		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
 		return reconcile.Result{}, err
 	}
 
 	// Phase 3: place Access replicas on publishOn nodes that still lack any replica.
 	if err := r.scheduleAccessPhase(ctx, rv, replicasForRV, log); err != nil {
+		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
 		return reconcile.Result{}, err
 	}
 
 	// Phase 4: place TieBreaker replicas according to topology and existing placements.
 	if err := r.scheduleTieBreakerPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
+		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
 		return reconcile.Result{}, err
 	}
 
 	// Finally, update Scheduled conditions on all replicas based on their NodeName.
-	if err := r.updateScheduledConditions(ctx, replicasForRV, log); err != nil {
+	if err := r.updateScheduledConditions(ctx, replicasForRV, nil, log); err != nil {
 		log.Error(err, "failed to update Scheduled conditions on replicas")
 		return reconcile.Result{}, err
 	}
@@ -213,7 +224,8 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 		log,
 	)
 	if err != nil {
-		return err
+		// Topology constraints for Diskful & Local phase are violated.
+		return fmt.Errorf("%w: %v", errSchedulingTopologyConflict, err)
 	}
 
 	// Nothing to do if all publishOn nodes already have at least one replica.
@@ -225,7 +237,12 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 	// If there are not enough free Diskful replicas to cover all such nodes, fail scheduling for this phase.
 	// Spec «Diskful & Local»: if at least one publishOn node cannot get a Diskful replica — treat as scheduling error.
 	if len(unscheduledDiskfulReplicas) < len(nodesToSchedule) {
-		return fmt.Errorf("not enough Diskful replicas to cover publishOn nodes: have %d, need %d", len(unscheduledDiskfulReplicas), len(nodesToSchedule))
+		return fmt.Errorf(
+			"%w: not enough Diskful replicas to cover publishOn nodes: have %d, need %d",
+			errSchedulingInsufficientReplicas,
+			len(unscheduledDiskfulReplicas),
+			len(nodesToSchedule),
+		)
 	}
 
 	// Assign free Diskful replicas to publishOn nodes that do not have any replica yet.
@@ -468,7 +485,10 @@ func (r *Reconciler) planTieBreakerTransZonal(
 		}
 
 		if chosenNode == "" {
-			return nil, fmt.Errorf("cannot schedule TieBreaker: no free node in zones with minimal replica count")
+			return nil, fmt.Errorf(
+				"%w: cannot schedule TieBreaker: no free node in zones with minimal replica count",
+				errSchedulingNoCandidateNodes,
+			)
 		}
 
 		assignments = append(assignments, tieBreakerAssignment{
@@ -500,7 +520,12 @@ func (r *Reconciler) planTieBreakerZonal(
 		if targetZone == "" {
 			targetZone = zone
 		} else if targetZone != zone {
-			return nil, fmt.Errorf("cannot satisfy Zonal topology: replicas already exist in multiple zones (%s, %s)", targetZone, zone)
+			return nil, fmt.Errorf(
+				"%w: cannot satisfy Zonal topology: replicas already exist in multiple zones (%s, %s)",
+				errSchedulingTopologyConflict,
+				targetZone,
+				zone,
+			)
 		}
 	}
 
@@ -513,7 +538,10 @@ func (r *Reconciler) planTieBreakerZonal(
 	}
 
 	if targetZone == "" {
-		return nil, fmt.Errorf("cannot determine target zone for Zonal topology")
+		return nil, fmt.Errorf(
+			"%w: cannot determine target zone for Zonal topology",
+			errSchedulingTopologyConflict,
+		)
 	}
 
 	// Collect free nodes in the chosen zone.
@@ -707,10 +735,10 @@ func getUnscheduledReplicasList(
 func (r *Reconciler) updateScheduledConditions(
 	ctx context.Context,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	schedulingErr error,
 	log logr.Logger,
 ) error {
-	for i := range replicasForRV {
-		rvr := &replicasForRV[i]
+	for _, rvr := range replicasForRV {
 
 		patch := client.MergeFrom(rvr.DeepCopy())
 
@@ -725,6 +753,20 @@ func (r *Reconciler) updateScheduledConditions(
 		if rvr.Spec.NodeName != "" {
 			status = metav1.ConditionTrue
 			reason = v1alpha3.ReasonReplicaScheduled
+		} else if schedulingErr != nil {
+			switch {
+			case errors.Is(schedulingErr, errSchedulingTopologyConflict):
+				reason = v1alpha3.ReasonSchedulingTopologyConflict
+				message = schedulingErr.Error()
+			case errors.Is(schedulingErr, errSchedulingInsufficientReplicas):
+				reason = v1alpha3.ReasonSchedulingInsufficientReplicas
+				message = schedulingErr.Error()
+			case errors.Is(schedulingErr, errSchedulingNoCandidateNodes):
+				reason = v1alpha3.ReasonSchedulingNoCandidateNodes
+				message = schedulingErr.Error()
+			default:
+				reason = v1alpha3.ReasonWaitingForAnotherReplica
+			}
 		}
 
 		meta.SetStatusCondition(
@@ -738,7 +780,7 @@ func (r *Reconciler) updateScheduledConditions(
 			},
 		)
 
-		if err := r.cl.Status().Patch(ctx, rvr, patch); err != nil {
+		if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
 			if apierrors.IsNotFound(err) {
 				continue
 			}
