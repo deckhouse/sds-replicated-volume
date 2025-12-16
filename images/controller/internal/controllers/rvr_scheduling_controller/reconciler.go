@@ -1,3 +1,19 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvr_scheduling_controller
 
 import (
@@ -215,14 +231,7 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 
 	// Apply topology constraints (Any/Zonal/TransZonal) to the publishOn nodes without replicas.
 	// Spec «Diskful & Local»: apply topology (Any / Zonal / TransZonal) constraints to publishOn nodes.
-	nodesToSchedule, err := r.applyDiskfulLocalTopology(
-		ctx,
-		rv,
-		rsc,
-		replicasForRV,
-		publishNodesWithoutAnyReplica,
-		log,
-	)
+	nodesToSchedule, err := r.applyDiskfulLocalTopology(ctx, rsc, replicasForRV, publishNodesWithoutAnyReplica, log)
 	if err != nil {
 		// Topology constraints for Diskful & Local phase are violated.
 		return fmt.Errorf("%w: %v", errSchedulingTopologyConflict, err)
@@ -399,7 +408,6 @@ func (r *Reconciler) scheduleAccessPhase(
 
 func (r *Reconciler) buildTieBreakerContext(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
@@ -580,7 +588,7 @@ func (r *Reconciler) planTieBreakerZonal(
 
 func (r *Reconciler) planTieBreakerAny(
 	ctxData tieBreakerContext,
-) ([]tieBreakerAssignment, error) {
+) []tieBreakerAssignment {
 	// Collect all nodes that passed topology filter and do not yet host any replica of this RV.
 	candidateNodes := make([]string, 0, len(ctxData.nodeNameToRSCZone))
 	for nodeName := range ctxData.nodeNameToRSCZone {
@@ -608,7 +616,7 @@ func (r *Reconciler) planTieBreakerAny(
 		ctxData.nodesWithAnyReplica[nodeName] = true
 	}
 
-	return assignments, nil
+	return assignments
 }
 
 func (r *Reconciler) patchReplicaWithNodeName(
@@ -658,7 +666,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 ) error {
 	// Build common context for TieBreaker scheduling (unscheduled replicas, topology-filtered nodes, existing placements).
 	// Spec «TieBreaker»: build context with unscheduled TieBreaker replicas and nodes that already hold any replica.
-	ctxData, err := r.buildTieBreakerContext(ctx, rv, rsc, replicasForRV, log)
+	ctxData, err := r.buildTieBreakerContext(ctx, rsc, replicasForRV, log)
 	if err != nil {
 		return err
 	}
@@ -676,7 +684,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	case "Zonal":
 		assignments, err = r.planTieBreakerZonal(ctxData, replicasForRV)
 	default:
-		assignments, err = r.planTieBreakerAny(ctxData)
+		assignments = r.planTieBreakerAny(ctxData)
 	}
 
 	if err != nil {
@@ -867,7 +875,6 @@ func buildDiskfulLocalCandidates(
 
 func (r *Reconciler) applyDiskfulLocalTopology(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	publishNodesWithoutAnyReplica []string,
