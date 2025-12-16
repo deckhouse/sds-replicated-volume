@@ -61,3 +61,13 @@ type VolumeMainConfig struct {
 type VolumePublisherConfig struct {
 	Period DurationMinMax
 }
+
+// VolumeReplicaDestroyerConfig configures the volume-replica-destroyer goroutine
+type VolumeReplicaDestroyerConfig struct {
+	Period DurationMinMax
+}
+
+// VolumeReplicaCreatorConfig configures the volume-replica-creator goroutine
+type VolumeReplicaCreatorConfig struct {
+	Period DurationMinMax
+}

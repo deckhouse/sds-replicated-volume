@@ -38,8 +38,10 @@ const (
 )
 
 var (
-	publisher1MinMax = []int{30, 60}
-	publisher2MinMax = []int{100, 200}
+	publisher1MinMax       = []int{30, 60}
+	publisher2MinMax       = []int{100, 200}
+	replicaDestroyerMinMax = []int{30, 300}
+	replicaCreatorMinMax   = []int{30, 300}
 )
 
 // VolumeMain manages the lifecycle of a single ReplicatedVolume and its sub-runners
@@ -318,6 +320,23 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		v.log.Debug("volume-replica-destroyer runner is disabled")
 	} else {
 		v.log.Debug("volume-replica-destroyer runner is enabled")
+		replicaDestroyerCfg := config.VolumeReplicaDestroyerConfig{
+			Period: config.DurationMinMax{
+				Min: time.Duration(replicaDestroyerMinMax[0]) * time.Second,
+				Max: time.Duration(replicaDestroyerMinMax[1]) * time.Second,
+			},
+		}
+		replicaDestroyer := NewVolumeReplicaDestroyer(v.rvName, replicaDestroyerCfg, v.client, replicaDestroyerMinMax)
+		destroyerCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			v.runningSubRunners.Add(1)
+			defer func() {
+				cancel()
+				v.runningSubRunners.Add(-1)
+			}()
+
+			_ = replicaDestroyer.Run(destroyerCtx)
+		}()
 	}
 
 	// Start replica creator
@@ -325,5 +344,22 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 		v.log.Debug("volume-replica-creator runner is disabled")
 	} else {
 		v.log.Debug("volume-replica-creator runner is enabled")
+		replicaCreatorCfg := config.VolumeReplicaCreatorConfig{
+			Period: config.DurationMinMax{
+				Min: time.Duration(replicaCreatorMinMax[0]) * time.Second,
+				Max: time.Duration(replicaCreatorMinMax[1]) * time.Second,
+			},
+		}
+		replicaCreator := NewVolumeReplicaCreator(v.rvName, replicaCreatorCfg, v.client, replicaCreatorMinMax)
+		creatorCtx, cancel := context.WithCancel(ctx)
+		go func() {
+			v.runningSubRunners.Add(1)
+			defer func() {
+				cancel()
+				v.runningSubRunners.Add(-1)
+			}()
+
+			_ = replicaCreator.Run(creatorCtx)
+		}()
 	}
 }
