@@ -72,7 +72,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Calculate conditions
 	onlineStatus, onlineReason, onlineMessage := r.calculateOnline(rvr, agentReady, unavailabilityReason)
-	ioReadyStatus, ioReadyReason, ioReadyMessage := r.calculateIOReady(rvr, onlineStatus, onlineReason, agentReady, unavailabilityReason)
+	ioReadyStatus, ioReadyReason, ioReadyMessage := r.calculateIOReady(rvr, onlineStatus, agentReady, unavailabilityReason)
 
 	// Update conditions if changed
 	// setCondition modifies rvr in-memory and returns true if changed;
@@ -196,7 +196,7 @@ func (r *Reconciler) calculateOnline(rvr *v1alpha3.ReplicatedVolumeReplica, agen
 // calculateIOReady computes the IOReady condition status, reason, and message.
 // IOReady = Online AND InSync
 // Copies reason and message from source condition when False.
-func (r *Reconciler) calculateIOReady(rvr *v1alpha3.ReplicatedVolumeReplica, onlineStatus metav1.ConditionStatus, _ string, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
+func (r *Reconciler) calculateIOReady(rvr *v1alpha3.ReplicatedVolumeReplica, onlineStatus metav1.ConditionStatus, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
 	// If agent/node is not available, return False with appropriate reason
 	if !agentReady && unavailabilityReason != "" {
 		return metav1.ConditionFalse, unavailabilityReason, ""
