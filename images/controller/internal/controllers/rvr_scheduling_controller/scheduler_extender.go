@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/go-logr/logr"
 
@@ -37,12 +38,24 @@ type schedulerExtenderResponse struct {
 	LVGS []schedulerExtenderResponseLVG `json:"lvgs"`
 }
 
-type schedulerExtenderClient struct {
+type SchedulerExtenderClient struct {
 	httpClient *http.Client
 	url        string
 }
 
-func (c *schedulerExtenderClient) filterNodesBySchedulerExtender(
+func NewSchedulerHTTPClient() *SchedulerExtenderClient {
+	extURL := os.Getenv("SCHEDULER_EXTENDER_URL") // TODO init in the other place
+	if extURL == "" {
+		// No scheduler-extender URL configured — disable external capacity filtering.
+		return nil
+	}
+	return &SchedulerExtenderClient{
+		httpClient: http.DefaultClient,
+		url:        extURL,
+	}
+}
+
+func (c *SchedulerExtenderClient) filterNodesBySchedulerExtender(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	lvgToNodeNamesMap map[string][]string,
