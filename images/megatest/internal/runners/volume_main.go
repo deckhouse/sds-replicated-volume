@@ -138,7 +138,7 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	}
 
 	// Start checker after Ready (to monitor for state changes)
-	//v.startVolumeChecker(lifetimeCtx)
+	v.startVolumeChecker(lifetimeCtx)
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -362,4 +362,18 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 			_ = replicaCreator.Run(creatorCtx)
 		}()
 	}
+}
+
+func (v *VolumeMain) startVolumeChecker(ctx context.Context) {
+	volumeChecker := NewVolumeChecker(v.rvName, v.client)
+	checkerCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		v.runningSubRunners.Add(1)
+		defer func() {
+			cancel()
+			v.runningSubRunners.Add(-1)
+		}()
+
+		_ = volumeChecker.Run(checkerCtx)
+	}()
 }
