@@ -14,25 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdadm
+package rvrstatusconditions
 
-import (
-	"context"
+const (
+	// RvrStatusConditionsControllerName is the name of the rvr-status-conditions controller
+	RvrStatusConditionsControllerName = "rvr_status_conditions_controller"
+
+	// AgentPodLabel is the label key used to identify agent pods
+	AgentPodLabel = "app"
+
+	// AgentPodValue is the label value used to identify agent pods
+	AgentPodValue = "agent"
 )
-
-func ExecuteResize(ctx context.Context, resource string) CommandError {
-	args := ResizeArgs(resource)
-	cmd := ExecCommandContext(ctx, Command, args...)
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return &commandError{
-			error:           err,
-			commandWithArgs: append([]string{Command}, args...),
-			output:          string(out),
-			exitCode:        errToExitCode(err),
-		}
-	}
-
-	return nil
-}

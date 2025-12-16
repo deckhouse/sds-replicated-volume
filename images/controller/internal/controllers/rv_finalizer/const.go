@@ -14,25 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdadm
+package rvfinalizer
 
-import (
-	"context"
-)
-
-func ExecuteResize(ctx context.Context, resource string) CommandError {
-	args := ResizeArgs(resource)
-	cmd := ExecCommandContext(ctx, Command, args...)
-
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return &commandError{
-			error:           err,
-			commandWithArgs: append([]string{Command}, args...),
-			output:          string(out),
-			exitCode:        errToExitCode(err),
-		}
-	}
-
-	return nil
-}
+var ControllerName = "rv_finalizer_controller"

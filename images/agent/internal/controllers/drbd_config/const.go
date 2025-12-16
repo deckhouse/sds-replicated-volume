@@ -14,18 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package lang
+package drbdconfig
 
-func If[T any](cond bool, valueTrue, valueFalse T) T {
-	if cond {
-		return valueTrue
-	}
-	return valueFalse
-}
-
-func IfFunc[T any](cond bool, valueTrue, valueFalse func() T) T {
-	if cond {
-		return valueTrue()
-	}
-	return valueFalse()
-}
+var ControllerName = "drbd_config_controller"

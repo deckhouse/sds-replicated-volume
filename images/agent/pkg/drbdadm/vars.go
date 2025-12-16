@@ -34,6 +34,10 @@ var AdjustArgs = func(resource string) []string {
 	return []string{"adjust", resource}
 }
 
+var ShNopArgs = func(configToTest string, configToExclude string) []string {
+	return []string{"--config-to-test", configToTest, "--config-to-exclude", configToExclude, "sh-nop"}
+}
+
 var CreateMDArgs = func(resource string) []string {
 	return []string{"create-md", "--max-peers=7", "--force", resource}
 }
