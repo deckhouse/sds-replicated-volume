@@ -11,25 +11,15 @@ import (
 )
 
 type Exec struct {
-	t    *testing.T
-	cmds []cmd
+	cmds []*ExpectedCmd
 }
 
-func NewExec(t *testing.T) *Exec {
-	return &Exec{t: t}
+func (b *Exec) ExpectCommands(cmds ...*ExpectedCmd) {
+	b.cmds = append(b.cmds, cmds...)
 }
 
-func (b *Exec) ExpectCommand(name string, args []string, resultOutput []byte, resultErr error) {
-	b.cmds = append(b.cmds, cmd{
-		name:         name,
-		args:         args,
-		resultOutput: resultOutput,
-		resultErr:    resultErr,
-	})
-}
-
-func (b *Exec) Setup() {
-	b.t.Helper()
+func (b *Exec) Setup(t *testing.T) {
+	t.Helper()
 
 	tmp := drbdadm.ExecCommandContext
 
@@ -37,58 +27,58 @@ func (b *Exec) Setup() {
 
 	drbdadm.ExecCommandContext = func(ctx context.Context, name string, args ...string) drbdadm.Cmd {
 		if len(b.cmds) <= i {
-			b.t.Fatalf("expected %d command executions, got more", len(b.cmds))
+			t.Fatalf("expected %d command executions, got more", len(b.cmds))
 		}
-		cmd := &b.cmds[i]
+		cmd := b.cmds[i]
 
 		if !cmd.Matches(name, args...) {
-			b.t.Fatalf("ExecCommandContext was called with unexpected arguments (call index %d)", i)
+			t.Fatalf("ExecCommandContext was called with unexpected arguments (call index %d)", i)
 		}
 
 		i++
 		return cmd
 	}
 
-	b.t.Cleanup(func() {
+	t.Cleanup(func() {
 		// actual cleanup
 		drbdadm.ExecCommandContext = tmp
 
 		// assert all commands executed
 		if i != len(b.cmds) {
-			b.t.Errorf("expected %d command executions, got %d", len(b.cmds), i)
+			t.Errorf("expected %d command executions, got %d", len(b.cmds), i)
 		}
 	})
 }
 
-type cmd struct {
-	name string
-	args []string
+type ExpectedCmd struct {
+	Name string
+	Args []string
 
-	resultOutput []byte
-	resultErr    error
+	ResultOutput []byte
+	ResultErr    error
 
 	stderr io.Writer
 }
 
-var _ drbdadm.Cmd = &cmd{}
+var _ drbdadm.Cmd = &ExpectedCmd{}
 
-func (c *cmd) Matches(name string, args ...string) bool {
-	return c.name == name && slices.Equal(c.args, args)
+func (c *ExpectedCmd) Matches(name string, args ...string) bool {
+	return c.Name == name && slices.Equal(c.Args, args)
 }
 
-func (c *cmd) CombinedOutput() ([]byte, error) {
-	return c.resultOutput, c.resultErr
+func (c *ExpectedCmd) CombinedOutput() ([]byte, error) {
+	return c.ResultOutput, c.ResultErr
 }
 
-func (c *cmd) SetStderr(w io.Writer) {
+func (c *ExpectedCmd) SetStderr(w io.Writer) {
 	c.stderr = w
 }
 
-func (c *cmd) Run() error {
+func (c *ExpectedCmd) Run() error {
 	if c.stderr != nil {
-		io.Copy(c.stderr, bytes.NewBuffer(c.resultOutput))
+		io.Copy(c.stderr, bytes.NewBuffer(c.ResultOutput))
 	}
-	return c.resultErr
+	return c.ResultErr
 }
 
 type ExitErr struct{ Code int }

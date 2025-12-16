@@ -37,7 +37,6 @@ func BuildController(mgr manager.Manager) error {
 
 	rec := NewReconciler(
 		mgr.GetClient(),
-		mgr.GetAPIReader(),
 		log,
 		cfg.NodeName(),
 	)

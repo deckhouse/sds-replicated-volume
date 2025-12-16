@@ -27,13 +27,12 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	"github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
 	cl       client.Client
-	rdr      client.Reader
 	log      *slog.Logger
 	nodeName string
 }
@@ -59,7 +58,7 @@ func (r *Reconciler) Reconcile(
 
 	log = log.With("rvrName", rvr.Name)
 
-	var llv *v1alpha1.LVMLogicalVolume
+	var llv *snc.LVMLogicalVolume
 	if rvr.Spec.Type == "Diskful" && rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
 		if llv, err = r.selectLLV(ctx, log, rvr.Status.LVMLogicalVolumeName); err != nil {
 			return reconcile.Result{}, err
@@ -144,8 +143,8 @@ func (r *Reconciler) selectLLV(
 	ctx context.Context,
 	log *slog.Logger,
 	llvName string,
-) (*v1alpha1.LVMLogicalVolume, error) {
-	llv := &v1alpha1.LVMLogicalVolume{}
+) (*snc.LVMLogicalVolume, error) {
+	llv := &snc.LVMLogicalVolume{}
 	if err := r.cl.Get(
 		ctx,
 		client.ObjectKey{Name: llvName},
@@ -160,8 +159,8 @@ func (r *Reconciler) selectLVG(
 	ctx context.Context,
 	log *slog.Logger,
 	lvgName string,
-) (*v1alpha1.LVMVolumeGroup, error) {
-	lvg := &v1alpha1.LVMVolumeGroup{}
+) (*snc.LVMVolumeGroup, error) {
+	lvg := &snc.LVMVolumeGroup{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: lvgName}, lvg); err != nil {
 		return nil, u.LogError(log, fmt.Errorf("getting lvg: %w", err))
 	}
@@ -169,13 +168,12 @@ func (r *Reconciler) selectLVG(
 }
 
 // NewReconciler constructs a Reconciler; exported for tests.
-func NewReconciler(cl client.Client, rdr client.Reader, log *slog.Logger, nodeName string) *Reconciler {
+func NewReconciler(cl client.Client, log *slog.Logger, nodeName string) *Reconciler {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Reconciler{
 		cl:       cl,
-		rdr:      rdr,
 		log:      log.With("nodeName", nodeName),
 		nodeName: nodeName,
 	}
