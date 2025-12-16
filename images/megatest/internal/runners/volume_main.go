@@ -58,6 +58,9 @@ type VolumeMain struct {
 
 	// Tracking running volumes
 	runningSubRunners atomic.Int32
+
+	// Statistics
+	createdRVCount *atomic.Int64
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -65,6 +68,7 @@ func NewVolumeMain(
 	rvName string,
 	cfg config.VolumeMainConfig,
 	client *kubeutils.Client,
+	createdRVCount *atomic.Int64,
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -76,6 +80,7 @@ func NewVolumeMain(
 		disableVolumeResizer:          cfg.DisableVolumeResizer,
 		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
 		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
+		createdRVCount:                createdRVCount,
 	}
 }
 
@@ -190,6 +195,11 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
 		return err
+	}
+
+	// Increment statistics counter on successful creation
+	if v.createdRVCount != nil {
+		v.createdRVCount.Add(1)
 	}
 
 	return nil

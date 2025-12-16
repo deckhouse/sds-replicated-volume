@@ -30,6 +30,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// Stats contains statistics about the test run
+type Stats struct {
+	CreatedRVCount int64
+}
+
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
 type MultiVolume struct {
 	cfg    config.MultiVolumeConfig
@@ -38,6 +43,9 @@ type MultiVolume struct {
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
+
+	// Statistics
+	createdRVCount atomic.Int64
 }
 
 // NewMultiVolume creates a new MultiVolume orchestrator
@@ -120,6 +128,13 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	}
 }
 
+// GetStats returns statistics about the test run
+func (m *MultiVolume) GetStats() Stats {
+	return Stats{
+		CreatedRVCount: m.createdRVCount.Load(),
+	}
+}
+
 func (m *MultiVolume) cleanup(reason error) {
 	log := m.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
@@ -140,7 +155,7 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
 	}
-	volumeMain := NewVolumeMain(rvName, cfg, m.client)
+	volumeMain := NewVolumeMain(rvName, cfg, m.client, &m.createdRVCount)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
 

@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -49,8 +50,18 @@ func main() {
 	log.Info("megatest started")
 
 	exitCode := 0
+	var multiVolume *runners.MultiVolume
 	defer func() {
-		log.Info("megatest finished", "duration", time.Since(start).String())
+		if multiVolume != nil {
+			stats := multiVolume.GetStats()
+			duration := time.Since(start)
+
+			fmt.Fprintf(os.Stderr, "\nStatistics:\n")
+			fmt.Fprintf(os.Stderr, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
+			fmt.Fprintf(os.Stderr, "Test duration: %s\n", duration.String())
+			os.Stderr.Sync()
+		}
+
 		os.Exit(exitCode)
 	}()
 
@@ -87,7 +98,8 @@ func main() {
 		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
-	if err := runners.NewMultiVolume(cfg, kubeClient).Run(ctx); err != nil {
+	multiVolume = runners.NewMultiVolume(cfg, kubeClient)
+	if err := multiVolume.Run(ctx); err != nil {
 		log.Error("failed to run multivolume", "error", err)
 		exitCode = 1
 	}
