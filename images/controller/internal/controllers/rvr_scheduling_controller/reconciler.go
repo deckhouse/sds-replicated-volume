@@ -109,7 +109,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Phase 4: place TieBreaker replicas according to topology and existing placements.
-	if err := r.scheduleTieBreakerPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
+	if err := r.scheduleTieBreakerPhase(ctx, rsc, replicasForRV, log); err != nil {
 		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
 		return reconcile.Result{}, err
 	}
@@ -659,7 +659,6 @@ func (r *Reconciler) applyTieBreakerAssignments(
 
 func (r *Reconciler) scheduleTieBreakerPhase(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
@@ -747,7 +746,6 @@ func (r *Reconciler) updateScheduledConditions(
 	log logr.Logger,
 ) error {
 	for _, rvr := range replicasForRV {
-
 		patch := client.MergeFrom(rvr.DeepCopy())
 
 		if rvr.Status == nil {
