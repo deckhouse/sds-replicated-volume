@@ -16,7 +16,41 @@ limitations under the License.
 
 package v1alpha3
 
-// Condition types for [ReplicatedVolumeReplica] status
+// =============================================================================
+// Condition types managed by rvr_status_conditions controller
+// =============================================================================
+
+const (
+	// [ConditionTypeOnline] indicates whether replica is online (Scheduled AND Initialized AND InQuorum)
+	ConditionTypeOnline = "Online"
+
+	// [ConditionTypeIOReady] indicates whether replica is ready for I/O operations (Online AND InSync)
+	ConditionTypeIOReady = "IOReady"
+)
+
+// =============================================================================
+// Condition types read by rvr_status_conditions controller (managed by other controllers)
+// =============================================================================
+
+const (
+	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
+	ConditionTypeScheduled = "Scheduled"
+
+	// [ConditionTypeInitialized] indicates whether replica has been initialized (does not reset after True)
+	ConditionTypeInitialized = "Initialized"
+
+	// [ConditionTypeInQuorum] indicates whether replica is in quorum
+	ConditionTypeInQuorum = "InQuorum"
+
+	// [ConditionTypeInSync] indicates whether replica data is synchronized
+	ConditionTypeInSync = "InSync"
+)
+
+// =============================================================================
+// Condition types for other controllers (not used by rvr_status_conditions)
+// =============================================================================
+
+// RVR condition types
 const (
 	// [ConditionTypeReady] indicates whether the replica is ready and operational
 	ConditionTypeReady = "Ready"
@@ -39,6 +73,15 @@ const (
 	// [ConditionTypeDiskIOSuspended] indicates whether replica IO is suspended
 	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
 
+	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
+	ConditionTypeAddressConfigured = "AddressConfigured"
+
+	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
+	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
+)
+
+// RV condition types
+const (
 	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
 	ConditionTypeQuorumConfigured = "QuorumConfigured"
 
@@ -50,12 +93,6 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-
-	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
-	ConditionTypeAddressConfigured = "AddressConfigured"
-
-	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
-	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -68,7 +105,46 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeDiskIOSuspended:       {false},
 	ConditionTypeAddressConfigured:     {false},
 	ConditionTypeBackingVolumeCreated:  {false},
+	ConditionTypeScheduled:             {false},
+	ConditionTypeInitialized:           {false},
+	ConditionTypeInQuorum:              {false},
+	ConditionTypeInSync:                {false},
+	ConditionTypeOnline:                {false},
+	ConditionTypeIOReady:               {false},
 }
+
+// Replication values for [ReplicatedStorageClass] spec
+const (
+	ReplicationNone                       = "None"
+	ReplicationAvailability               = "Availability"
+	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
+)
+
+// =============================================================================
+// Condition reasons used by rvr_status_conditions controller
+// =============================================================================
+
+// Condition reasons for [ConditionTypeOnline] condition
+const (
+	ReasonOnline        = "Online"
+	ReasonUnscheduled   = "Unscheduled"
+	ReasonUninitialized = "Uninitialized"
+	ReasonQuorumLost    = "QuorumLost"
+	ReasonNodeNotReady  = "NodeNotReady"
+	ReasonAgentNotReady = "AgentNotReady"
+)
+
+// Condition reasons for [ConditionTypeIOReady] condition
+const (
+	ReasonIOReady   = "IOReady"
+	ReasonOffline   = "Offline"
+	ReasonOutOfSync = "OutOfSync"
+	// ReasonNodeNotReady and ReasonAgentNotReady are also used for IOReady
+)
+
+// =============================================================================
+// Condition reasons reserved for other controllers (not used yet)
+// =============================================================================
 
 // Condition reasons for [ConditionTypeReady] condition
 const (
@@ -134,13 +210,6 @@ const (
 	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
 )
 
-// Replication values for [ReplicatedStorageClass] spec
-const (
-	ReplicationNone                       = "None"
-	ReplicationAvailability               = "Availability"
-	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
-)
-
 // Condition reasons for [ConditionTypeAddressConfigured] condition
 const (
 	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
@@ -156,4 +225,9 @@ const (
 	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
 	ReasonBackingVolumeReady          = "BackingVolumeReady"
 	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
+)
+
+// Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)
+const (
+	ReasonSynchronizing = "Synchronizing"
 )
