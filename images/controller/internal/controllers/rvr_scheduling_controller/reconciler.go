@@ -170,27 +170,32 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 	log logr.Logger,
 ) error {
 	// This phase is only relevant when VolumeAccess is Local.
+	// Spec «Diskful & Local»: phase works only when rsc.spec.volumeAccess == Local.
 	if rsc.Spec.VolumeAccess != "Local" {
 		return nil
 	}
 	// Without publishOn targets there is nothing to schedule in this phase.
+	// Spec «Diskful & Local»: phase is active only when rv.spec.publishOn is set.
 	if len(rv.Spec.PublishOn) == 0 {
 		return nil
 	}
 
 	// Discover nodes that have LVGs belonging to the storage pool referenced by the RSC.
+	// Spec «Diskful & Local»: intersect candidate nodes with LVG nodes from rsp.spec.lvmVolumeGroups (storagePool).
 	lvgToNodeNamesMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
 	if err != nil {
 		return err
 	}
 
 	// Optionally filter LVG-backed nodes by capacity using the scheduler-extender.
+	// Spec «Diskful & Local»: account for capacity via scheduler-extender.
 	allowedDiskfulNodes, err := r.filterLVGNodesByCapacity(ctx, rv, lvgToNodeNamesMap)
 	if err != nil {
 		return err
 	}
 
 	// Build a list of free Diskful replicas and publishOn nodes that currently have no replicas.
+	// Spec «Diskful & Local»: take publishOn nodes that do not yet host any replica (any type) and free Diskful replicas.
 	unscheduledDiskfulReplicas, publishNodesWithoutAnyReplica := buildDiskfulLocalCandidates(
 		rv,
 		replicasForRV,
@@ -198,6 +203,7 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 	)
 
 	// Apply topology constraints (Any/Zonal/TransZonal) to the publishOn nodes without replicas.
+	// Spec «Diskful & Local»: apply topology (Any / Zonal / TransZonal) constraints to publishOn nodes.
 	nodesToSchedule, err := r.applyDiskfulLocalTopology(
 		ctx,
 		rv,
@@ -211,16 +217,19 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 	}
 
 	// Nothing to do if all publishOn nodes already have at least one replica.
+	// Spec «Diskful & Local»: if every publishOn node already has a replica, nothing to do.
 	if len(nodesToSchedule) == 0 {
 		return nil
 	}
 
 	// If there are not enough free Diskful replicas to cover all such nodes, fail scheduling for this phase.
+	// Spec «Diskful & Local»: if at least one publishOn node cannot get a Diskful replica — treat as scheduling error.
 	if len(unscheduledDiskfulReplicas) < len(nodesToSchedule) {
 		return fmt.Errorf("not enough Diskful replicas to cover publishOn nodes: have %d, need %d", len(unscheduledDiskfulReplicas), len(nodesToSchedule))
 	}
 
 	// Assign free Diskful replicas to publishOn nodes that do not have any replica yet.
+	// Spec «Diskful & Local»: finally assign Diskful replicas to all remaining publishOn nodes.
 	for i, nodeName := range nodesToSchedule {
 		rvr := unscheduledDiskfulReplicas[i]
 		if err := r.patchReplicaWithNodeName(ctx, rvr, nodeName, log, "Failed to patch replica"); err != nil {
@@ -239,17 +248,20 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	log logr.Logger,
 ) error {
 	// Non-Local Diskful scheduling is skipped when access mode is Local.
+	// Spec «Diskful (non-Local)»: skip this phase when volumeAccess is Local.
 	if rsc.Spec.VolumeAccess == "Local" {
 		return nil
 	}
 
 	// Collect all Diskful replicas that are not bound to any node.
+	// Spec «Diskful (non-Local)»: consider only Diskful replicas that are not yet scheduled.
 	unscheduledDiskfulReplicas := getUnscheduledReplicasList(replicasForRV, v1alpha3.ReplicaTypeDiskful)
 	if len(unscheduledDiskfulReplicas) == 0 {
 		return nil
 	}
 
 	// Discover LVG-backed nodes for the storage pool defined in the RSC.
+	// Spec «Diskful (non-Local)»: intersect candidate nodes with LVG nodes from rsp.spec.lvmVolumeGroups (storagePool).
 	rspLvgsToNodesMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
 	if err != nil {
 		log.Error(err, "failed to determine diskful candidate nodes")
@@ -257,27 +269,32 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	}
 
 	// Optionally narrow down LVG nodes by capacity via scheduler-extender.
+	// Spec «Diskful (non-Local)»: account for capacity via scheduler-extender.
 	capacityFilteredDiskfulNodes, err := r.filterLVGNodesByCapacity(ctx, rv, rspLvgsToNodesMap)
 	if err != nil {
 		return err
 	}
 
 	// Track nodes that already host any replica of this RV.
+	// Spec «Diskful (non-Local)»: exclude nodes that already host any replica of this RV (any type).
 	nodesWithAnyReplica := getNodesWithAnyReplicaMap(replicasForRV)
 
 	// Build a map of node -> zone for all cluster nodes.
+	// Spec «Diskful (non-Local)»: build node->zone map for future topology checks.
 	rawNodeNameToZone, err := r.getNodeNameToZoneMap(ctx, log)
 	if err != nil {
 		return err
 	}
 
 	// Filter nodes according to RSC topology type and allowed zones.
+	// Spec «Diskful (non-Local)»: filter nodes according to rsc.spec.topology and rsc.spec.zones.
 	nodeNameToRSCZone, err := filterNodesByRSCTopology(rawNodeNameToZone, rsc)
 	if err != nil {
 		return err
 	}
 
 	// Start from all publishOn nodes.
+	// Spec «Diskful (non-Local)»: try to honor rv.spec.publishOn by preferring these nodes when possible.
 	allPublishNodes := getPublishOnNodeSet(rv)
 	// Intersect publishOn nodes with capacity-allowed LVG nodes if extender filtering was applied.
 	nodesToPublishOn := allPublishNodes
@@ -291,6 +308,8 @@ func (r *Reconciler) scheduleDiskfulPhase(
 		nodesToPublishOn = filtered
 	}
 
+	// Place replicas according to topology (Any / Zonal / TransZonal).
+	// Spec «Diskful (non-Local)»: place replicas according to topology (Any / Zonal / TransZonal).
 	switch rsc.Spec.Topology {
 	case "Any":
 		return r.scheduleDiskfulAnyTopology(ctx, unscheduledDiskfulReplicas, nodesWithAnyReplica, nodesToPublishOn, log)
@@ -310,14 +329,17 @@ func (r *Reconciler) scheduleAccessPhase(
 	log logr.Logger,
 ) error {
 	// This phase is only relevant when publishOn is set; otherwise there is no explicit Access placement.
+	// Spec «Access»: phase works only when rv.spec.publishOn is set.
 	if len(rv.Spec.PublishOn) == 0 {
 		return nil
 	}
 
 	// Build a set of target nodes from rv.spec.publishOn.
+	// Spec «Access»: use rv.spec.publishOn as the target node set.
 	publishNodeSet := getPublishOnNodeSet(rv)
 
 	// Track nodes that already have any replica of this RV and collect Access replicas without nodeName.
+	// Spec «Access»: exclude nodes that already host any replica of this RV (any type) and collect free Access replicas.
 	nodesWithAnyReplica := getNodesWithAnyReplicaMap(replicasForRV)
 	unscheduledAccessReplicas := getUnscheduledReplicasList(replicasForRV, v1alpha3.ReplicaTypeAccess)
 
@@ -327,6 +349,7 @@ func (r *Reconciler) scheduleAccessPhase(
 	}
 
 	// Prefer nodes from publishOn that do not yet have any replica of this RV.
+	// Spec «Access»: prefer publishOn nodes that still have no replica of this RV.
 	var candidateNodes []string
 	for nodeName := range publishNodeSet {
 		if !nodesWithAnyReplica[nodeName] {
@@ -339,6 +362,7 @@ func (r *Reconciler) scheduleAccessPhase(
 	}
 
 	// We are not required to place all Access replicas or to cover all publishOn nodes.
+	// Spec «Access»: it is allowed to have publishOn nodes without Access replicas and Access replicas without placement.
 	nodesToFill := len(candidateNodes)
 	if len(unscheduledAccessReplicas) < nodesToFill {
 		nodesToFill = len(unscheduledAccessReplicas)
@@ -605,6 +629,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	log logr.Logger,
 ) error {
 	// Build common context for TieBreaker scheduling (unscheduled replicas, topology-filtered nodes, existing placements).
+	// Spec «TieBreaker»: build context with unscheduled TieBreaker replicas and nodes that already hold any replica.
 	ctxData, err := r.buildTieBreakerContext(ctx, rv, rsc, replicasForRV, log)
 	if err != nil {
 		return err
@@ -615,6 +640,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	}
 
 	// Choose a planning strategy based on topology type.
+	// Spec «TieBreaker»: choose a placement strategy depending on rsc.spec.topology.
 	var assignments []tieBreakerAssignment
 	switch rsc.Spec.Topology {
 	case "TransZonal":
@@ -630,6 +656,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	}
 
 	// Apply all planned assignments to the cluster.
+	// Spec «TieBreaker»: apply planned placements by setting rvr.spec.nodeName for TieBreaker replicas.
 	return r.applyTieBreakerAssignments(ctx, assignments, log)
 }
 
