@@ -6,12 +6,6 @@ image: {{ $imageName }}-vex-artifact
 fromImage: tools/coreutils
 final: true
 
-#secrets:
-#- id: REGISTRY_USER
-#  env: REGISTRY_USER
-#- id: REGISTRY_PASSWORD
-#  env: REGISTRY_PASSWORD
-
 git:
 - add: /images/{{ $imageName }}/known_vulnerabilities.vex
   to: /known_vulnerabilities.vex
@@ -52,13 +46,9 @@ import:
 
 shell:
   install:
-#  - export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
-#  - export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
   - |
     cosign attest \
       --replace \
-#      --registry-username="${REGISTRY_USER}" \
-#      --registry-password="${REGISTRY_PASSWORD}" \
       --predicate /known_vulnerabilities.vex \
       --type openvex \
       --tlog-upload=false \
