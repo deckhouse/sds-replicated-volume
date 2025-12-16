@@ -264,6 +264,7 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) 
 	//	return time.Since(startTime), err
 	//}
 	for i := 0; i < 5; i++ {
+		v.log.Debug("waiting for RV to become ready", "attempt", i)
 		time.Sleep(1 * time.Second)
 	}
 
