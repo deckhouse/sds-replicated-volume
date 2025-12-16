@@ -72,10 +72,10 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	defer m.log.Info("finished")
 
 	if m.cfg.DisablePodDestroyer {
-		m.log.Debug("pod-destroyer runner are disabled")
+		m.log.Debug("pod-destroyer runners are disabled")
 	} else {
 		//m.startPodDestroyers(ctx)
-		m.log.Info("pod-destroyer runner are enabled")
+		m.log.Info("pod-destroyer runners are enabled")
 	}
 
 	// Main volume creation loop
@@ -143,9 +143,9 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 	volumeMain := NewVolumeMain(rvName, cfg, m.client)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
-	m.runningVolumes.Add(1)
 
 	go func() {
+		m.runningVolumes.Add(1)
 		defer func() {
 			cancel()
 			m.runningVolumes.Add(-1)

@@ -56,3 +56,8 @@ type VolumeMainConfig struct {
 	DisableVolumeReplicaDestroyer bool
 	DisableVolumeReplicaCreator   bool
 }
+
+// VolumePublisherConfig configures the volume-publisher goroutine
+type VolumePublisherConfig struct {
+	Period DurationMinMax
+}

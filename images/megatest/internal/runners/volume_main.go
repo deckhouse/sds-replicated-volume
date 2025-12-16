@@ -19,6 +19,7 @@ package runners
 import (
 	"context"
 	"math/rand"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -32,8 +33,13 @@ import (
 )
 
 const (
-	rvCreateTimeout = 10 * time.Minute
-	rvDeleteTimeout = 10 * time.Minute
+	rvCreateTimeout = 1 * time.Minute
+	rvDeleteTimeout = 1 * time.Minute
+)
+
+var (
+	publisher1MinMax = []int{30, 60}
+	publisher2MinMax = []int{100, 200}
 )
 
 // VolumeMain manages the lifecycle of a single ReplicatedVolume and its sub-runners
@@ -49,6 +55,9 @@ type VolumeMain struct {
 	disableVolumeResizer          bool
 	disableVolumeReplicaDestroyer bool
 	disableVolumeReplicaCreator   bool
+
+	// Tracking running volumes
+	runningSubRunners atomic.Int32
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -94,6 +103,10 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Start all sub-runners immediately after RV creation
+	// They will operate while we wait for Ready
+	v.startSubRunners(lifetimeCtx)
+
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
 
@@ -117,6 +130,11 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 
 	if err := v.deleteRV(cleanupCtx); err != nil {
 		v.log.Error("failed to delete RV", "error", err)
+	}
+
+	for v.runningSubRunners.Load() > 0 {
+		log.Info("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
+		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -192,4 +210,61 @@ func (v *VolumeMain) deleteRV(ctx context.Context) error {
 	// TODO: Wait for deletion
 
 	return nil
+}
+
+func (v *VolumeMain) startSubRunners(ctx context.Context) {
+	// Create publisher configs
+	publisher1Cfg := config.VolumePublisherConfig{
+		Period: config.DurationMinMax{
+			Min: time.Duration(publisher1MinMax[0]) * time.Second,
+			Max: time.Duration(publisher1MinMax[1]) * time.Second,
+		},
+	}
+	publisher2Cfg := config.VolumePublisherConfig{
+		Period: config.DurationMinMax{
+			Min: time.Duration(publisher2MinMax[0]) * time.Second,
+			Max: time.Duration(publisher2MinMax[1]) * time.Second,
+		},
+	}
+
+	// Create runners
+	publishers := []*VolumePublisher{
+		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, publisher1MinMax),
+		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, publisher2MinMax),
+	}
+
+	// Start publishers
+	for _, pub := range publishers {
+		publisherCtx, cancel := context.WithCancel(ctx)
+		go func(p *VolumePublisher) {
+			v.runningSubRunners.Add(1)
+			defer func() {
+				cancel()
+				v.runningSubRunners.Add(-1)
+			}()
+
+			_ = p.Run(publisherCtx)
+		}(pub)
+	}
+
+	// Start resizer
+	if v.disableVolumeResizer {
+		v.log.Debug("volume-resizer runner is disabled")
+	} else {
+		v.log.Debug("volume-resizer runner is enabled")
+	}
+
+	// Start replica destroyer
+	if v.disableVolumeReplicaDestroyer {
+		v.log.Debug("volume-replica-destroyer runner is disabled")
+	} else {
+		v.log.Debug("volume-replica-destroyer runner is enabled")
+	}
+
+	// Start replica creator
+	if v.disableVolumeReplicaCreator {
+		v.log.Debug("volume-replica-creator runner is disabled")
+	} else {
+		v.log.Debug("volume-replica-creator runner is enabled")
+	}
 }

@@ -47,8 +47,11 @@ func main() {
 
 	start := time.Now()
 	log.Info("megatest started")
+
+	exitCode := 0
 	defer func() {
 		log.Info("megatest finished", "duration", time.Since(start).String())
+		os.Exit(exitCode)
 	}()
 
 	// Setup signal handling
@@ -68,7 +71,8 @@ func main() {
 	kubeClient, err := kubeutils.NewClientWithKubeconfig(opt.Kubeconfig)
 	if err != nil {
 		log.Error("failed to create Kubernetes client", "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
 
 	// Create multivolume config
@@ -86,8 +90,7 @@ func main() {
 	err = runners.NewMultiVolume(cfg, kubeClient).Run(ctx)
 	if err != nil {
 		log.Error("failed to run multivolume", "error", err)
-		os.Exit(1)
+		exitCode = 1
+		return
 	}
-
-	os.Exit(0)
 }
