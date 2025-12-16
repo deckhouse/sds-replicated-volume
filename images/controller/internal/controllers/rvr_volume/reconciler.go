@@ -102,7 +102,7 @@ func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Lo
 	if err := reconcileLLVDeletion(ctx, cl, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed"); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
@@ -151,7 +151,7 @@ func wrapReconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runti
 	if err := reconcileLLVNormal(ctx, cl, scheme, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeCreationFailed, "Backing volume creation failed"); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeCreationFailed, "Backing volume creation failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
@@ -187,6 +187,9 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 
 	log.Info("LVMLogicalVolume found, checking if it is ready", "llvName", llv.Name)
 	if !isLLVPhaseCreated(llv) {
+		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
+			return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
+		}
 		log.Info("LVMLogicalVolume is not ready, returning nil to wait for next reconcile event", "llvName", llv.Name)
 		return nil
 	}
