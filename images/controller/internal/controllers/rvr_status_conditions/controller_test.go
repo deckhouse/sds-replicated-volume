@@ -39,12 +39,12 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 	}
 
 	tests := []struct {
-		name       string
-		objects    []client.Object
-		inputObj   client.Object
-		wantNil    bool
-		wantEmpty  bool
-		wantNames  []string
+		name      string
+		objects   []client.Object
+		inputObj  client.Object
+		wantNil   bool
+		wantEmpty bool
+		wantNames []string
 	}{
 		{
 			name:     "non-Pod object returns nil",
