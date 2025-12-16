@@ -78,7 +78,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Phase 3: place Access replicas on publishOn nodes that still lack any replica.
-	if err := r.scheduleAccessPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
+	if err := r.scheduleAccessPhase(ctx, rv, replicasForRV, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -280,7 +280,7 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	// Start from all publishOn nodes.
 	allPublishNodes := getPublishOnNodeSet(rv)
 	// Intersect publishOn nodes with capacity-allowed LVG nodes if extender filtering was applied.
-	capacityFilteredPublishNodes := allPublishNodes
+	nodesToPublishOn := allPublishNodes
 	if capacityFilteredDiskfulNodes != nil {
 		filtered := make(map[string]struct{}, len(allPublishNodes))
 		for nodeName := range allPublishNodes {
@@ -288,16 +288,16 @@ func (r *Reconciler) scheduleDiskfulPhase(
 				filtered[nodeName] = struct{}{}
 			}
 		}
-		capacityFilteredPublishNodes = filtered
+		nodesToPublishOn = filtered
 	}
 
 	switch rsc.Spec.Topology {
 	case "Any":
-		return r.scheduleDiskfulAnyTopology(ctx, unscheduledDiskfulReplicas, nodesWithAnyReplica, capacityFilteredPublishNodes, log)
+		return r.scheduleDiskfulAnyTopology(ctx, unscheduledDiskfulReplicas, nodesWithAnyReplica, nodesToPublishOn, log)
 	case "Zonal":
-		return r.scheduleDiskfulZonalTopology(ctx, unscheduledDiskfulReplicas, replicasForRV, nodesWithAnyReplica, capacityFilteredPublishNodes, nodeNameToRSCZone, log)
+		return r.scheduleDiskfulZonalTopology(ctx, unscheduledDiskfulReplicas, replicasForRV, nodesWithAnyReplica, nodesToPublishOn, nodeNameToRSCZone, log)
 	case "TransZonal":
-		return r.scheduleDiskfulTransZonalTopology(ctx, unscheduledDiskfulReplicas, replicasForRV, nodesWithAnyReplica, capacityFilteredPublishNodes, nodeNameToRSCZone, log)
+		return r.scheduleDiskfulTransZonalTopology(ctx, unscheduledDiskfulReplicas, replicasForRV, nodesWithAnyReplica, nodesToPublishOn, nodeNameToRSCZone, log)
 	default:
 		return nil
 	}
@@ -306,7 +306,6 @@ func (r *Reconciler) scheduleDiskfulPhase(
 func (r *Reconciler) scheduleAccessPhase(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
-	rsc *v1alpha1.ReplicatedStorageClass,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
@@ -320,7 +319,7 @@ func (r *Reconciler) scheduleAccessPhase(
 
 	// Track nodes that already have any replica of this RV and collect Access replicas without nodeName.
 	nodesWithAnyReplica := getNodesWithAnyReplicaMap(replicasForRV)
-	unscheduledAccessReplicas := getUnscheduledReplicasList(replicasForRV, "Access")
+	unscheduledAccessReplicas := getUnscheduledReplicasList(replicasForRV, v1alpha3.ReplicaTypeAccess)
 
 	if len(unscheduledAccessReplicas) == 0 {
 		// All Access replicas are already scheduled; nothing to do.
@@ -366,7 +365,7 @@ func (r *Reconciler) buildTieBreakerContext(
 ) (tieBreakerContext, error) {
 	// Start with unscheduled TieBreaker replicas and a map of nodes that already host any replica of this RV.
 	ctxData := tieBreakerContext{
-		unscheduled:         getUnscheduledReplicasList(replicasForRV, "TieBreaker"),
+		unscheduled:         getUnscheduledReplicasList(replicasForRV, v1alpha3.ReplicaTypeTieBreaker),
 		nodesWithAnyReplica: getNodesWithAnyReplicaMap(replicasForRV),
 	}
 
@@ -1051,17 +1050,17 @@ func (r *Reconciler) scheduleDiskfulAnyTopology(
 	ctx context.Context,
 	unscheduledDiskfulReplicas []*v1alpha3.ReplicatedVolumeReplica,
 	nodesWithAnyReplica map[string]bool,
-	publishNodeSet map[string]struct{},
+	nodesToPublishOn map[string]struct{},
 	log logr.Logger,
 ) error {
 	// If there are no publishOn nodes, nothing to schedule in "Any" topology.
-	if len(publishNodeSet) == 0 {
+	if len(nodesToPublishOn) == 0 {
 		return nil
 	}
 
 	// Select publishOn nodes that do not yet host any replica of this RV.
 	var candidateNodes []string
-	for nodeName := range publishNodeSet {
+	for nodeName := range nodesToPublishOn {
 		if !nodesWithAnyReplica[nodeName] {
 			candidateNodes = append(candidateNodes, nodeName)
 		}
@@ -1095,7 +1094,7 @@ func (r *Reconciler) scheduleDiskfulZonalTopology(
 	unscheduledDiskfulReplicas []*v1alpha3.ReplicatedVolumeReplica,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	nodesWithAnyReplica map[string]bool,
-	publishNodeSet map[string]struct{},
+	nodesToPublishOn map[string]struct{},
 	nodeNameToRSCZone map[string]string,
 	log logr.Logger,
 ) error {
@@ -1124,7 +1123,7 @@ func (r *Reconciler) scheduleDiskfulZonalTopology(
 	if len(zonesWithDiskfulReplicas) > 0 {
 		targetZone = zonesWithDiskfulReplicas[0]
 	} else {
-		for nodeName := range publishNodeSet {
+		for nodeName := range nodesToPublishOn {
 			if zone, ok := nodeNameToRSCZone[nodeName]; ok {
 				targetZone = zone
 				break
@@ -1139,7 +1138,7 @@ func (r *Reconciler) scheduleDiskfulZonalTopology(
 	// - that do not yet host any replica of this RV;
 	// - that are located in the target zone.
 	var candidateNodes []string
-	for nodeName := range publishNodeSet {
+	for nodeName := range nodesToPublishOn {
 		if nodesWithAnyReplica[nodeName] {
 			continue
 		}
@@ -1187,7 +1186,7 @@ func (r *Reconciler) scheduleDiskfulTransZonalTopology(
 	unscheduledDiskfulReplicas []*v1alpha3.ReplicatedVolumeReplica,
 	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
 	nodesWithAnyReplica map[string]bool,
-	publishNodeSet map[string]struct{},
+	nodesToPublishOn map[string]struct{},
 	nodeNameToZone map[string]string,
 	log logr.Logger,
 ) error {
@@ -1212,7 +1211,7 @@ func (r *Reconciler) scheduleDiskfulTransZonalTopology(
 	// that does not yet contain any Diskful replica of this RV.
 	for _, rvr := range unscheduledDiskfulReplicas {
 		var candidatesInNewZones []string
-		for nodeName := range publishNodeSet {
+		for nodeName := range nodesToPublishOn {
 			if nodesWithAnyReplica[nodeName] {
 				continue
 			}
