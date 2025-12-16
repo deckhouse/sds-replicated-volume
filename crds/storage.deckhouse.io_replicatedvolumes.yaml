@@ -175,6 +175,7 @@ spec:
                   duplicateDeviceMinor:
                     properties:
                       message:
+                        maxLength: 1024
                         type: string
                     type: object
                 type: object

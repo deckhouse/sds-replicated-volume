@@ -21,20 +21,23 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/config"
+	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
+	drbdprimary "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_primary"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
-var registry []func(mgr manager.Manager, cfg config.Config) error
+var registry []func(mgr manager.Manager) error
 
 func init() {
 	registry = append(registry, rvrstatusconfigaddress.BuildController)
+	registry = append(registry, drbdconfig.BuildController)
+	registry = append(registry, drbdprimary.BuildController)
 	// ...
 }
 
-func BuildAll(mgr manager.Manager, cfg config.Config) error {
+func BuildAll(mgr manager.Manager) error {
 	for i, buildCtl := range registry {
-		err := buildCtl(mgr, cfg)
+		err := buildCtl(mgr)
 		if err != nil {
 			return fmt.Errorf("building controller %d: %w", i, err)
 		}
