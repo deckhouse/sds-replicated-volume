@@ -101,9 +101,9 @@
     - выходит
 ## multivolume(list sc, max_vol, step_min, step_max, step_period_min, step_period_max, vol_period_min, vol_period_max)
   - запускает:
-    - pod-destroyer(agent, 1, 2, 30, 60\)
+    - pod-destroyer(agent, 1, 2, 30, 60)
     - pod-destroyer(controller, 1, 3, 30, 60)
-    - pod-destroyer(api-server, 1, 3, 120, 240)
+    - pod-destroyer(kube-apiserver, 1, 3, 120, 240) - ПОКА НЕ ДЕЛАЕМ!
   - в цикле
     - если количество запущенных volume_main < max_vol
       - выбирает случайным образом количество для запуска (step_min, step_max), может превышать max_vol
