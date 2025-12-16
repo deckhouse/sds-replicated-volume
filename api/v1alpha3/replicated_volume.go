@@ -82,6 +82,18 @@ type ReplicatedVolumeStatus struct {
 	// +patchStrategy=merge
 	// +optional
 	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
+
+	// DiskfulReplicaCount shows current/desired diskful replicas (e.g. "2/3")
+	// +optional
+	DiskfulReplicaCount string `json:"diskfulReplicaCount,omitempty"`
+
+	// DiskfulReplicasInSync shows current/total diskful replicas that are InSync (e.g. "2/3")
+	// +optional
+	DiskfulReplicasInSync string `json:"diskfulReplicasInSync,omitempty"`
+
+	// PublishedAndIOReadyCount shows current/requested replicas that are both published and IOReady (e.g. "1/2")
+	// +optional
+	PublishedAndIOReadyCount string `json:"publishedAndIOReadyCount,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true
