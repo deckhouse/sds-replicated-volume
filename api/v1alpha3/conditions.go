@@ -56,6 +56,8 @@ const (
 
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled onto a node
 	ConditionTypeScheduled = "Scheduled"
+	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
+	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -68,6 +70,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeDiskIOSuspended:       {false},
 	ConditionTypeAddressConfigured:     {false},
 	ConditionTypeScheduled:             {false},
+	ConditionTypeBackingVolumeCreated:  {false},
 }
 
 // Condition reasons for [ConditionTypeReady] condition
@@ -163,4 +166,13 @@ const (
 	ReasonNodeIPNotFound                = "NodeIPNotFound"
 	ReasonPortSettingsNotFound          = "PortSettingsNotFound"
 	ReasonNoFreePortAvailable           = "NoFreePortAvailable"
+)
+
+// Condition reasons for [ConditionTypeBackingVolumeCreated] condition
+const (
+	ReasonNotApplicable               = "NotApplicable"
+	ReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed"
+	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
+	ReasonBackingVolumeReady          = "BackingVolumeReady"
+	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
 )

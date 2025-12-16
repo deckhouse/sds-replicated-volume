@@ -21,6 +21,16 @@ import (
 	"strings"
 )
 
+// Replica type values for [ReplicatedVolumeReplica] spec.type field
+const (
+	// ReplicaTypeDiskful represents a diskful replica that stores data on disk
+	ReplicaTypeDiskful = "Diskful"
+	// ReplicaTypeAccess represents a diskless replica for data access
+	ReplicaTypeAccess = "Access"
+	// ReplicaTypeTieBreaker represents a diskless replica for quorum
+	ReplicaTypeTieBreaker = "TieBreaker"
+)
+
 // DRBD node ID constants for ReplicatedVolumeReplica
 const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica

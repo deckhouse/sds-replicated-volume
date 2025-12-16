@@ -14,18 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package lang
+package v1alpha1
 
-func If[T any](cond bool, valueTrue, valueFalse T) T {
-	if cond {
-		return valueTrue
-	}
-	return valueFalse
-}
-
-func IfFunc[T any](cond bool, valueTrue, valueFalse func() T) T {
-	if cond {
-		return valueTrue()
-	}
-	return valueFalse()
-}
+// VolumeAccess values for [ReplicatedStorageClass] spec.volumeAccess field
+const (
+	// VolumeAccessLocal requires data to be accessed only from nodes with Diskful replicas
+	VolumeAccessLocal = "Local"
+	// VolumeAccessPreferablyLocal prefers local access but allows remote if needed
+	VolumeAccessPreferablyLocal = "PreferablyLocal"
+	// VolumeAccessEventuallyLocal will eventually migrate to local access
+	VolumeAccessEventuallyLocal = "EventuallyLocal"
+	// VolumeAccessAny allows access from any node
+	VolumeAccessAny = "Any"
+)
