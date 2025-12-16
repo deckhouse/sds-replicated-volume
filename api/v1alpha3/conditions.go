@@ -153,13 +153,6 @@ const (
 	ReplicationConsistencyAndAvailability = "ConsistencyAndAvailability"
 )
 
-// Replica type values for [ReplicatedVolumeReplica] spec
-const (
-	ReplicaTypeDiskful    = "Diskful"
-	ReplicaTypeAccess     = "Access"
-	ReplicaTypeTieBreaker = "TieBreaker"
-)
-
 // Condition reasons for [ConditionTypeAddressConfigured] condition
 const (
 	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
