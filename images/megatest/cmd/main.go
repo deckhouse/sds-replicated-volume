@@ -58,7 +58,21 @@ func main() {
 
 			fmt.Fprintf(os.Stderr, "\nStatistics:\n")
 			fmt.Fprintf(os.Stderr, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
+
+			// Calculate average times
+			var avgCreateTime, avgDeleteTime, avgWaitTime time.Duration
+			if stats.CreatedRVCount > 0 {
+				avgCreateTime = stats.TotalCreateRVTime / time.Duration(stats.CreatedRVCount)
+				avgDeleteTime = stats.TotalDeleteRVTime / time.Duration(stats.CreatedRVCount)
+				avgWaitTime = stats.TotalWaitForRVReadyTime / time.Duration(stats.CreatedRVCount)
+			}
+
+			fmt.Fprintf(os.Stderr, "Total create RV time: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
+			fmt.Fprintf(os.Stderr, "Total delete RV time: %s (avg: %s)\n", stats.TotalDeleteRVTime.String(), avgDeleteTime.String())
+			fmt.Fprintf(os.Stderr, "Total wait for RV ready time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
+
 			fmt.Fprintf(os.Stderr, "Test duration: %s\n", duration.String())
+
 			os.Stderr.Sync()
 		}
 

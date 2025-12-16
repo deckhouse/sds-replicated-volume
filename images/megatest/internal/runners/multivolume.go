@@ -32,7 +32,10 @@ import (
 
 // Stats contains statistics about the test run
 type Stats struct {
-	CreatedRVCount int64
+	CreatedRVCount          int64
+	TotalCreateRVTime       time.Duration
+	TotalDeleteRVTime       time.Duration
+	TotalWaitForRVReadyTime time.Duration
 }
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
@@ -45,7 +48,10 @@ type MultiVolume struct {
 	runningVolumes atomic.Int32
 
 	// Statistics
-	createdRVCount atomic.Int64
+	createdRVCount          atomic.Int64
+	totalCreateRVTime       atomic.Int64 // nanoseconds
+	totalDeleteRVTime       atomic.Int64 // nanoseconds
+	totalWaitForRVReadyTime atomic.Int64 // nanoseconds
 }
 
 // NewMultiVolume creates a new MultiVolume orchestrator
@@ -131,7 +137,10 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 // GetStats returns statistics about the test run
 func (m *MultiVolume) GetStats() Stats {
 	return Stats{
-		CreatedRVCount: m.createdRVCount.Load(),
+		CreatedRVCount:          m.createdRVCount.Load(),
+		TotalCreateRVTime:       time.Duration(m.totalCreateRVTime.Load()),
+		TotalDeleteRVTime:       time.Duration(m.totalDeleteRVTime.Load()),
+		TotalWaitForRVReadyTime: time.Duration(m.totalWaitForRVReadyTime.Load()),
 	}
 }
 
@@ -155,7 +164,7 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
 	}
-	volumeMain := NewVolumeMain(rvName, cfg, m.client, &m.createdRVCount)
+	volumeMain := NewVolumeMain(rvName, cfg, m.client, &m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
 

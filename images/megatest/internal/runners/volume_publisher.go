@@ -94,10 +94,14 @@ func (v *VolumePublisher) cleanup(reason error) {
 
 func (v *VolumePublisher) doPublish(ctx context.Context) error {
 	v.log.Debug("publishing to random node")
+	// TODO: Wait for publish success
+
 	return nil
 }
 
 func (v *VolumePublisher) doUnpublish(ctx context.Context) error {
 	v.log.Debug("unpublishing from random node")
+	// TODO: Wait for unpublish success
+
 	return nil
 }

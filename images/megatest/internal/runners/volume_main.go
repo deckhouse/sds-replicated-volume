@@ -60,7 +60,10 @@ type VolumeMain struct {
 	runningSubRunners atomic.Int32
 
 	// Statistics
-	createdRVCount *atomic.Int64
+	createdRVCount          *atomic.Int64
+	totalCreateRVTime       *atomic.Int64 // nanoseconds
+	totalDeleteRVTime       *atomic.Int64 // nanoseconds
+	totalWaitForRVReadyTime *atomic.Int64 // nanoseconds
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -69,6 +72,9 @@ func NewVolumeMain(
 	cfg config.VolumeMainConfig,
 	client *kubeutils.Client,
 	createdRVCount *atomic.Int64,
+	totalCreateRVTime *atomic.Int64,
+	totalDeleteRVTime *atomic.Int64,
+	totalWaitForRVReadyTime *atomic.Int64,
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -81,6 +87,9 @@ func NewVolumeMain(
 		disableVolumeReplicaDestroyer: cfg.DisableVolumeReplicaDestroyer,
 		disableVolumeReplicaCreator:   cfg.DisableVolumeReplicaCreator,
 		createdRVCount:                createdRVCount,
+		totalCreateRVTime:             totalCreateRVTime,
+		totalDeleteRVTime:             totalDeleteRVTime,
+		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
 	}
 }
 
@@ -103,14 +112,31 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	v.log.Debug("published nodes", "nodes", publishNodes)
 
 	// Create RV
-	if err := v.createRV(ctx, publishNodes); err != nil {
+	createDuration, err := v.createRV(ctx, publishNodes)
+	if err != nil {
 		v.log.Error("failed to create RV", "error", err)
 		return err
+	}
+	if v.totalCreateRVTime != nil {
+		v.totalCreateRVTime.Add(createDuration.Nanoseconds())
 	}
 
 	// Start all sub-runners immediately after RV creation
 	// They will operate while we wait for Ready
 	v.startSubRunners(lifetimeCtx)
+
+	// Wait for RV to become ready
+	waitDuration, err := v.waitForRVReady(lifetimeCtx)
+	if err != nil {
+		v.log.Error("failed waiting for RV to become ready", "error", err)
+		// Continue to cleanup
+	}
+	if v.totalWaitForRVReadyTime != nil {
+		v.totalWaitForRVReadyTime.Add(waitDuration.Nanoseconds())
+	}
+
+	// Start checker after Ready (to monitor for state changes)
+	//v.startVolumeChecker(lifetimeCtx)
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -133,8 +159,12 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
 	defer cleanupCancel()
 
-	if err := v.deleteRV(cleanupCtx); err != nil {
+	deleteDuration, err := v.deleteRV(cleanupCtx)
+	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
+	}
+	if v.totalDeleteRVTime != nil {
+		v.totalDeleteRVTime.Add(deleteDuration.Nanoseconds())
 	}
 
 	for v.runningSubRunners.Load() > 0 {
@@ -174,7 +204,9 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 	return names, nil
 }
 
-func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error {
+func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.Duration, error) {
+	startTime := time.Now()
+
 	// Ensure PublishOn is never nil (use empty slice instead)
 	publishOn := publishNodes
 	if publishOn == nil {
@@ -194,7 +226,7 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
-		return err
+		return time.Since(startTime), err
 	}
 
 	// Increment statistics counter on successful creation
@@ -202,10 +234,12 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) error 
 		v.createdRVCount.Add(1)
 	}
 
-	return nil
+	return time.Since(startTime), nil
 }
 
-func (v *VolumeMain) deleteRV(ctx context.Context) error {
+func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
+	startTime := time.Now()
+
 	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -214,12 +248,26 @@ func (v *VolumeMain) deleteRV(ctx context.Context) error {
 
 	err := v.client.DeleteRV(ctx, rv)
 	if err != nil {
-		return err
+		return time.Since(startTime), err
 	}
 
 	// TODO: Wait for deletion
 
-	return nil
+	return time.Since(startTime), nil
+}
+
+func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
+	startTime := time.Now()
+
+	//err := v.client.WaitForRVReady(ctx, v.rvName, rvCreateTimeout)
+	//if err != nil {
+	//	return time.Since(startTime), err
+	//}
+	for i := 0; i < 5; i++ {
+		time.Sleep(1 * time.Second)
+	}
+
+	return time.Since(startTime), nil
 }
 
 func (v *VolumeMain) startSubRunners(ctx context.Context) {
