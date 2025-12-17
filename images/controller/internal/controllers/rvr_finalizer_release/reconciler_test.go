@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrqnpccontroller_test
+package rvrfinalizerrelease_test
 
 import (
 	"context"
@@ -34,14 +34,14 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvrqnpccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_quorum_and_publish_constrained_release_controller"
+	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
 )
 
 var _ = Describe("Reconcile", func() {
 	var (
 		scheme *runtime.Scheme
 		cl     client.WithWatch
-		rec    *rvrqnpccontroller.Reconciler
+		rec    *rvrfinalizerrelease.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -58,7 +58,7 @@ var _ = Describe("Reconcile", func() {
 			WithScheme(scheme)
 
 		cl = builder.Build()
-		rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
@@ -185,11 +185,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: "Diskful",
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha3.ConditionTypeOnline,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   "FullyConnected",
+							Type:   v1alpha3.ConditionTypeIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -313,7 +313,7 @@ var _ = Describe("Reconcile", func() {
 						})
 
 					cl = builder.Build()
-					rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+					rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 				})
 
 				It("removes only controller finalizer", func(ctx SpecContext) {
@@ -349,7 +349,7 @@ var _ = Describe("Reconcile", func() {
 					})
 
 				cl = builder.Build()
-				rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+				rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 
 				_, err := rec.Reconcile(ctx, RequestFor(rvr))
 				Expect(err).To(MatchError(expectedErr))
@@ -369,7 +369,7 @@ var _ = Describe("Reconcile", func() {
 					})
 
 				cl = builder.Build()
-				rec = rvrqnpccontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+				rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 
 				_, err := rec.Reconcile(ctx, RequestFor(rvr))
 				Expect(err).To(MatchError(expectedErr))
