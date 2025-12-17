@@ -2,7 +2,6 @@
 # do not remove this image: used in external audits (DKP CSE)
 image: {{ .ImageName }}-src-artifact
 fromImage: builder/src
-fromCacheVersion: 2025-12-17
 final: false
 git:
   - add: /
@@ -49,6 +48,7 @@ shell:
     - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     - cd /src/drbd-utils
+    - ls -l .
     - ./autogen.sh
     - ./configure --prefix=/ --sysconfdir=/etc --localstatedir=/var --without-manual
     - make
