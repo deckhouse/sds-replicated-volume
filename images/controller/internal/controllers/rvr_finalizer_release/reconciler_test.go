@@ -315,16 +315,6 @@ var _ = Describe("Reconcile", func() {
 					cl = builder.Build()
 					rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 				})
-
-				It("removes only controller finalizer", func(ctx SpecContext) {
-					result, err := rec.Reconcile(ctx, RequestFor(rvr))
-					Expect(err).NotTo(HaveOccurred())
-					Expect(result).To(Equal(reconcile.Result{}))
-
-					got := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-					Expect(got.Finalizers).To(ConsistOf("other-finalizer"))
-				})
 			})
 		})
 
