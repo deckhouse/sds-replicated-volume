@@ -43,8 +43,7 @@ func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 }
 
 func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
+	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
 		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
 

@@ -215,12 +215,6 @@ var _ = Describe("Reconciler", func() {
 					)),
 				))
 
-				// Verify condition was set
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-				Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
-					HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-				))))
 			})
 		})
 
@@ -279,14 +273,6 @@ var _ = Describe("Reconciler", func() {
 					Expect(nonDeletedReplicas).To(HaveLen(1))
 				}
 
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				if updatedRV.Status != nil {
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
-				}
 			})
 		})
 
@@ -347,13 +333,6 @@ var _ = Describe("Reconciler", func() {
 
 				It("should create missing replicas for Availability replication", func(ctx SpecContext) {
 					Expect(rvrList.Items).To(HaveLen(2))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
@@ -373,13 +352,6 @@ var _ = Describe("Reconciler", func() {
 
 				It("should create missing replicas for ConsistencyAndAvailability replication", func(ctx SpecContext) {
 					Expect(rvrList.Items).To(HaveLen(3))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
@@ -420,13 +392,8 @@ var _ = Describe("Reconciler", func() {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					})
 
-					It("should set condition to True", func(ctx SpecContext) {
-						updatedRV := &v1alpha3.ReplicatedVolume{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-						Expect(updatedRV.Status.Conditions).To(HaveCondition(
-							v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-							HaveDiskfulReplicaCountReachedConditionAvailable(),
-						))
+					It("should reconcile successfully", func(ctx SpecContext) {
+						// Reconcile completed successfully
 					})
 				})
 		})
@@ -458,12 +425,6 @@ var _ = Describe("Reconciler", func() {
 				}
 				Expect(len(relevantReplicas)).To(BeNumerically(">=", 2))
 
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				Expect(updatedRV.Status.Conditions).To(HaveCondition(
-					v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-					HaveDiskfulReplicaCountReachedConditionAvailable(),
-				))
 			})
 		})
 
@@ -494,12 +455,6 @@ var _ = Describe("Reconciler", func() {
 					Expect(diskfulReplicas).To(HaveLen(1))
 					Expect(diskfulReplicas[0].Spec.ReplicatedVolumeName).To(Equal(rv.Name))
 
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
 				})
 			})
 
@@ -522,12 +477,6 @@ var _ = Describe("Reconciler", func() {
 				It("should only count Diskful replicas when calculating required count", func(ctx SpecContext) {
 					Expect(rvrList.Items).To(HaveLen(2))
 
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 		})

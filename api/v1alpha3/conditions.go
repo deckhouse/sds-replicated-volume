@@ -85,9 +85,6 @@ const (
 	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
 	ConditionTypeQuorumConfigured = "QuorumConfigured"
 
-	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
-	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
-
 	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
 	ConditionTypeAllReplicasReady = "AllReplicasReady"
 
@@ -202,12 +199,6 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
-)
-
-// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
-const (
-	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
-	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
 )
 
 // Condition reasons for [ConditionTypeAddressConfigured] condition

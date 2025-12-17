@@ -130,14 +130,6 @@ var _ = Describe("Reconciler", func() {
 			Entry("because Conditions is empty", func() {
 				rv.Status.Conditions = []metav1.Condition{}
 			}),
-			Entry("because DiskfulReplicaCountReached is false", func() {
-				rv.Status.Conditions = []metav1.Condition{
-					{
-						Type:   v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						Status: metav1.ConditionFalse,
-					},
-				}
-			}),
 			Entry("because AllReplicasReady is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
@@ -157,10 +149,6 @@ var _ = Describe("Reconciler", func() {
 			Entry("because multiple conditions are missing", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						Status: metav1.ConditionFalse,
-					},
-					{
 						Type:   v1alpha3.ConditionTypeAllReplicasReady,
 						Status: metav1.ConditionFalse,
 					},
@@ -171,10 +159,6 @@ var _ = Describe("Reconciler", func() {
 		When("ReplicatedVolume is ready", func() {
 			BeforeEach(func() {
 				rv.Status.Conditions = []metav1.Condition{
-					{
-						Type:   v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						Status: metav1.ConditionTrue,
-					},
 					{
 						Type:   v1alpha3.ConditionTypeAllReplicasReady,
 						Status: metav1.ConditionTrue,
