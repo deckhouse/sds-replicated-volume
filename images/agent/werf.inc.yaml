@@ -2,6 +2,7 @@
 # do not remove this image: used in external audits (DKP CSE)
 image: {{ .ImageName }}-src-artifact
 fromImage: builder/src
+fromCacheVersion: 2025-12-17
 final: false
 git:
   - add: /
