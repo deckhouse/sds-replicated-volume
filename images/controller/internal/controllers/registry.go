@@ -50,7 +50,6 @@ func init() {
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrownerreferencecontroller.BuildController)
-	registry = append(registry, rvrqnpccontroller.BuildController)
 	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrfinalizerrelease.BuildController)
 	registry = append(registry, rvfinalizer.BuildController)
