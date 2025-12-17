@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
@@ -36,7 +37,10 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-const nodeZoneLabel = "topology.kubernetes.io/zone"
+const (
+	nodeZoneLabel = "topology.kubernetes.io/zone"
+	requeueAfter  = 10 * time.Second
+)
 
 var (
 	errSchedulingTopologyConflict     = errors.New("scheduling topology conflict")
@@ -82,17 +86,28 @@ func (r *Reconciler) Reconcile(
 
 	// Load ReplicatedVolume, its ReplicatedStorageClass and all relevant replicas.
 	// The helper may also return an early reconcile.Result (e.g. when RV is not ready yet).
-	rv, rsc, replicasForRV, res, err := r.prepareSchedulingContext(ctx, req, log)
+	rv, rsc, replicasForRV, skipReconcile, err := r.prepareSchedulingContext(ctx, req, log)
+	if err != nil {
+		log.Error(err, "failed to prepare scheduling context")
+		return reconcile.Result{}, err
+	}
+	if skipReconcile {
+		return reconcile.Result{}, nil
+	}
+
+	unscheduledDiskfulReplicas := getUnscheduledReplicasList(replicasForRV, v1alpha3.ReplicaTypeDiskful)
+	if len(unscheduledDiskfulReplicas) == 0 {
+		return reconcile.Result{}, nil
+	}
+
+	lvgToNodeNamesMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
-	if res != nil {
-		return *res, nil
-	}
 
 	// Phase 1: place Diskful replicas for Local access mode (respecting publishOn and topology).
-	if err := r.scheduleDiskfulLocalPhase(ctx, rv, rsc, replicasForRV, log); err != nil {
-		_ = r.updateScheduledConditions(ctx, replicasForRV, err, log)
+	if err := r.scheduleDiskfulLocalPhase(ctx, rv, rsc, unscheduledDiskfulReplicas, lvgToNodeNamesMap, log); err != nil {
+		// _ = r.updateScheduledConditions(ctx, replicasForRV, err, log) // TODO: move to another to another controller
 		return reconcile.Result{}, err
 	}
 
@@ -129,6 +144,7 @@ func isRVReady(status *v1alpha3.ReplicatedVolumeStatus) bool {
 		return false
 	}
 
+	// TODO: reconsider this condition
 	return meta.IsStatusConditionTrue(status.Conditions, v1alpha3.ConditionTypeReady)
 }
 
@@ -136,45 +152,42 @@ func (r *Reconciler) prepareSchedulingContext(
 	ctx context.Context,
 	req reconcile.Request,
 	log logr.Logger,
-) (*v1alpha3.ReplicatedVolume, *v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, *reconcile.Result, error) {
+) (*v1alpha3.ReplicatedVolume, *v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, bool, error) {
 	// Fetch the target ReplicatedVolume for this reconcile request.
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		// If the volume no longer exists, exit reconciliation without error.
 		if apierrors.IsNotFound(err) {
-			return nil, nil, nil, &reconcile.Result{}, nil
+			log.V(1).Info("ReplicatedVolume not found, skipping")
+			return nil, nil, nil, true, nil
 		}
 		log.Error(err, "unable to get ReplicatedVolume")
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 
 	// Do not schedule until status is present, RV is Ready and has a storage class reference.
 	if rv.Status == nil {
-		return nil, nil, nil, &reconcile.Result{}, nil
+		return nil, nil, nil, true, nil
 	}
 	if !isRVReady(rv.Status) {
-		return nil, nil, nil, &reconcile.Result{}, nil
+		return nil, nil, nil, true, nil
 	}
 	if rv.Spec.ReplicatedStorageClassName == "" {
-		return nil, nil, nil, &reconcile.Result{}, nil
+		return nil, nil, nil, true, nil
 	}
 
 	// Load the referenced ReplicatedStorageClass.
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		if apierrors.IsNotFound(err) {
-			// If the class is missing, just requeue later.
-			return nil, nil, nil, &reconcile.Result{}, nil
-		}
 		log.Error(err, "unable to get ReplicatedStorageClass")
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 
 	// List all ReplicatedVolumeReplica resources in the cluster.
 	replicaList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, replicaList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, false, err
 	}
 
 	// Keep only replicas that belong to this RV and are not being deleted.
@@ -186,14 +199,15 @@ func (r *Reconciler) prepareSchedulingContext(
 		replicasForRV = append(replicasForRV, rvr)
 	}
 
-	return rv, rsc, replicasForRV, nil, nil
+	return rv, rsc, replicasForRV, false, nil
 }
 
 func (r *Reconciler) scheduleDiskfulLocalPhase(
 	ctx context.Context,
 	rv *v1alpha3.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	unscheduledDiskfulReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	lvgToNodeNamesMap map[string][]string,
 	log logr.Logger,
 ) error {
 	// This phase is only relevant when VolumeAccess is Local.
@@ -209,10 +223,10 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 
 	// Discover nodes that have LVGs belonging to the storage pool referenced by the RSC.
 	// Spec «Diskful & Local»: intersect candidate nodes with LVG nodes from rsp.spec.lvmVolumeGroups (storagePool).
-	lvgToNodeNamesMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
-	if err != nil {
-		return err
-	}
+	// lvgToNodeNamesMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
+	// if err != nil {
+	// 	return err
+	// }
 
 	// Optionally filter LVG-backed nodes by capacity using the scheduler-extender.
 	// Spec «Diskful & Local»: account for capacity via scheduler-extender.
@@ -261,6 +275,7 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 		if err := r.patchReplicaWithNodeName(ctx, rvr, nodeName, log, "Failed to patch replica"); err != nil {
 			return err
 		}
+
 	}
 
 	return nil
@@ -275,9 +290,10 @@ func (r *Reconciler) scheduleDiskfulPhase(
 ) error {
 	// Non-Local Diskful scheduling is skipped when access mode is Local.
 	// Spec «Diskful (non-Local)»: skip this phase when volumeAccess is Local.
-	if rsc.Spec.VolumeAccess == "Local" {
-		return nil
-	}
+	// TODO: reconsider this
+	// if rsc.Spec.VolumeAccess == "Local" {
+	// 	return nil
+	// }
 
 	// Collect all Diskful replicas that are not bound to any node.
 	// Spec «Diskful (non-Local)»: consider only Diskful replicas that are not yet scheduled.
