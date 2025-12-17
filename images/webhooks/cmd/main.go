@@ -24,6 +24,7 @@ import (
 
 	"github.com/sirupsen/logrus"
 	kwhlogrus "github.com/slok/kubewebhook/v2/pkg/log/logrus"
+	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -60,6 +61,7 @@ const (
 	RSCValidatorID = "RSCValidator"
 	RSPValidatorID = "RSPValidator"
 	SCValidatorID  = "SCValidator"
+	PVCValidatorID = "PVCValidator"
 )
 
 func main() {
@@ -87,10 +89,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	pvcValidatingWebhookHandler, err := handlers.GetValidatingWebhookHandler(handlers.PVCValidate, PVCValidatorID, &corev1.PersistentVolumeClaim{}, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating pvcValidatingWebhookHandler: %s", err)
+		os.Exit(1)
+	}
+
 	mux := http.NewServeMux()
 	mux.Handle("/rsc-validate", rscValidatingWebhookHandler)
 	mux.Handle("/sc-validate", scValidatingWebhookHandler)
 	mux.Handle("/rsp-validate", rspValidatingWebhookHandler)
+	mux.Handle("/pvc-validate", pvcValidatingWebhookHandler)
 	mux.HandleFunc("/healthz", httpHandlerHealthz)
 
 	logger.Infof("Listening on %s", port)
