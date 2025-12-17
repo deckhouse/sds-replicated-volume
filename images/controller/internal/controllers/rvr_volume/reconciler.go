@@ -80,7 +80,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() && !v1alpha3.HasExternalFinalizers(rvr.ObjectMeta) {
+	if !rvr.DeletionTimestamp.IsZero() {
 		return reconcile.Result{}, wrapReconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
