@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
@@ -49,6 +50,7 @@ func init() {
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrownerreferencecontroller.BuildController)
+	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrfinalizerrelease.BuildController)
 	registry = append(registry, rvfinalizer.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
