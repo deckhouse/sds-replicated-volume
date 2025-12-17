@@ -56,6 +56,8 @@ shell:
     - cat .git/HEAD
     - pwd
     - stat .git
+    - id
+    - chown -R root:root /src/drbd-utils
     - git rev-parse HEAD
     - make
     - make install DESTDIR=/drbd-utils
