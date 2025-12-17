@@ -149,3 +149,14 @@ type DRBDResourceConfig struct {
 	// +kubebuilder:validation:Maximum=1048575
 	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }
+
+func HasExternalFinalizers(meta metav1.ObjectMeta) bool {
+	for _, f := range meta.Finalizers {
+		if f == ControllerAppFinalizer || f == AgentAppFinalizer {
+			continue
+		}
+		return true
+	}
+
+	return false
+}
