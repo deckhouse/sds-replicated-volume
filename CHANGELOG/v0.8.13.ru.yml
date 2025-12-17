@@ -1,0 +1,4 @@
+Изменения:
+  - Замена yum на dnf в конфигурации nodegroupconfiguration-drbd-install-centos-like.yaml для сборки drbd
+  - Исправление CVE
+  - Обновление документации

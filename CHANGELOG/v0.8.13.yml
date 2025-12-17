@@ -1,0 +1,4 @@
+Changes:
+  - Switched from yum to dnf in centos-like nodes group configuration for drbd build
+  - Fix CVE
+  - Updated documentation
