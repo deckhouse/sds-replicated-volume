@@ -17,9 +17,12 @@ git:
       - images/{{ $.ImageName }}/werf.yaml
 shell:
   install:
+    - git --version
     - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/drbd-utils
     - cd /src/drbd-utils
+    - ls -la .git/
     - git submodule update --init --recursive
+    - ls -la .git/
     #- rm -rf /src/drbd-utils/.git # needed for make
 
 ---
