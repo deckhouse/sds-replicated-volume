@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 // Reconciler computes Online and IOReady conditions for ReplicatedVolumeReplica
@@ -102,9 +101,9 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 		return false, v1alpha3.ReasonUnscheduled
 	}
 
-	// AgentNamespace is taken from rv.ControllerConfigMapNamespace
+	// AgentNamespace is taken from v1alpha3.ModuleNamespace
 	// Agent pods run in the same namespace as controller
-	agentNamespace := rv.ControllerConfigMapNamespace
+	agentNamespace := v1alpha3.ModuleNamespace
 
 	// List agent pods on this node
 	podList := &corev1.PodList{}
