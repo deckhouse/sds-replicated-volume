@@ -174,7 +174,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonBackingVolumeReady},
 					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonConfigurationAdjustmentSucceeded},
-					dataInitialized:          &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
+					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
 					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonIOReady},
@@ -184,7 +184,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonBackingVolumeReady},
 					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonConfigurationAdjustmentSucceeded},
-					dataInitialized:          &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
+					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
 					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonIOReady},
@@ -211,7 +211,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonBackingVolumeReady},
 					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonConfigurationAdjustmentSucceeded},
-					dataInitialized:          &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
+					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
 					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha3.ReasonIOReady},
@@ -330,7 +330,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			rvrs: []testRVR{
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha3.ReplicaTypeDiskful,
-					scheduled:   &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
+					scheduled:       &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					dataInitialized: &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 				},
 			},
@@ -344,12 +344,12 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			rvrs: []testRVR{
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha3.ReplicaTypeDiskful,
-					scheduled:   &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
+					scheduled:       &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					dataInitialized: &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha3.ReplicaTypeDiskful,
-					scheduled:   &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
+					scheduled:       &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
 					dataInitialized: &testCondition{status: metav1.ConditionFalse, reason: "WaitingForInitialSync", message: "waiting for sync"},
 				},
 			},
