@@ -31,8 +31,8 @@ import:
   - image: {{ .ImageName }}-src-artifact
     add: /src
     to: /src
-    #includePaths:
-    #  - drbd-utils
+    includePaths:
+      - drbd-utils
     before: install
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
@@ -48,7 +48,7 @@ shell:
     - {{ $.Root.ALT_CLEANUP_CMD }}
   install:
     - cd /src/drbd-utils
-    - ls -l .
+    - ls -la .
     - ./autogen.sh
     - ./configure --prefix=/ --sysconfdir=/etc --localstatedir=/var --without-manual
     - make
