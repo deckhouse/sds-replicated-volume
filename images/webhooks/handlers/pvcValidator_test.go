@@ -203,8 +203,12 @@ func Test_PVCValidate(t *testing.T) {
 
 			// Setup fake client
 			scheme := runtime.NewScheme()
-			storagev1.AddToScheme(scheme)
-			v1.AddToScheme(scheme)
+			if err := storagev1.AddToScheme(scheme); err != nil {
+				t.Fatalf("Failed to add storagev1 to scheme: %v", err)
+			}
+			if err := v1.AddToScheme(scheme); err != nil {
+				t.Fatalf("Failed to add v1 to scheme: %v", err)
+			}
 
 			objs := make([]client.Object, 0, len(tt.storageClasses))
 			for _, sc := range tt.storageClasses {
@@ -214,7 +218,7 @@ func Test_PVCValidate(t *testing.T) {
 
 			// Mock kubeClientFactory to return fake client
 			originalFactory := kubeClientFactory
-			kubeClientFactory = func(kubeconfigPath string) (client.Client, error) {
+			kubeClientFactory = func(_ string) (client.Client, error) {
 				return cl, nil
 			}
 			defer func() {

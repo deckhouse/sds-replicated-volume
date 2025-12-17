@@ -42,9 +42,7 @@ const (
 )
 
 // kubeClientFactory allows injecting a custom client factory for testing
-var kubeClientFactory = func(kubeconfigPath string) (client.Client, error) {
-	return NewKubeClient(kubeconfigPath)
-}
+var kubeClientFactory = NewKubeClient
 
 func PVCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav1.Object) (*kwhvalidating.ValidatorResult, error) {
 	pvc, ok := obj.(*v1.PersistentVolumeClaim)
