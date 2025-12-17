@@ -1,3 +1,5 @@
 Changes:
   - Switch from yum to dnf for package installation on CentOS-like distributions
-  - Fixed vulnerabilities
+  - Fix CVE
+  - Updated documentation
+  - Increased liveness probe timeout for linstor-controller to 60 seconds
