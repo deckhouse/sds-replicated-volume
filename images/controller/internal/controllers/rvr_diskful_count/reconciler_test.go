@@ -187,7 +187,6 @@ var _ = Describe("Reconciler", func() {
 				It("should return an error", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(errorMatcher)
 				})
-
 			})
 
 		When("replication is None", func() {
@@ -214,7 +213,6 @@ var _ = Describe("Reconciler", func() {
 						))),
 					)),
 				))
-
 			})
 		})
 
@@ -261,7 +259,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should create one new replica", func(ctx SpecContext) {
+			It("should create one new replica", func() {
 				var nonDeletedReplicas []v1alpha3.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
 					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
@@ -272,7 +270,6 @@ var _ = Describe("Reconciler", func() {
 				if len(nonDeletedBefore) == 0 {
 					Expect(nonDeletedReplicas).To(HaveLen(1))
 				}
-
 			})
 		})
 
@@ -331,7 +328,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for Availability replication", func(ctx SpecContext) {
+				It("should create missing replicas for Availability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
 				})
 			})
@@ -350,7 +347,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for ConsistencyAndAvailability replication", func(ctx SpecContext) {
+				It("should create missing replicas for ConsistencyAndAvailability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(3))
 				})
 			})
@@ -392,8 +389,10 @@ var _ = Describe("Reconciler", func() {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					})
 
-					It("should reconcile successfully", func(ctx SpecContext) {
-						// Reconcile completed successfully
+					It("should not create additional replicas when required count is reached", func(ctx SpecContext) {
+						Expect(cl.List(ctx, rvrList)).To(Succeed())
+						// Verify that the number of replicas matches the expected count
+						Expect(rvrList.Items).To(HaveLen(len(replicas)))
 					})
 				})
 		})
@@ -416,7 +415,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should only count non-deleted replicas", func(ctx SpecContext) {
+			It("should only count non-deleted replicas", func() {
 				var relevantReplicas []v1alpha3.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
 					if rvr.Spec.ReplicatedVolumeName == rv.Name {
@@ -424,7 +423,6 @@ var _ = Describe("Reconciler", func() {
 					}
 				}
 				Expect(len(relevantReplicas)).To(BeNumerically(">=", 2))
-
 			})
 		})
 
@@ -443,7 +441,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should ignore non-Diskful replicas and only count Diskful ones", func(ctx SpecContext) {
+				It("should ignore non-Diskful replicas and only count Diskful ones", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
 
 					var diskfulReplicas []v1alpha3.ReplicatedVolumeReplica
@@ -454,7 +452,6 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(diskfulReplicas).To(HaveLen(1))
 					Expect(diskfulReplicas[0].Spec.ReplicatedVolumeName).To(Equal(rv.Name))
-
 				})
 			})
 
@@ -474,9 +471,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should only count Diskful replicas when calculating required count", func(ctx SpecContext) {
+				It("should only count Diskful replicas when calculating required count", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
-
 				})
 			})
 		})
