@@ -96,14 +96,14 @@
   - `NotApplicable` — для `rvr.spec.type != Diskful` (diskless реплики)
 - Используется: **rvr-diskful-count-controller** — для определения готовности первой реплики.
 
-### `type=Initialized`
+### `type=DataInitialized`
 
 - Обновляется: на агенте (предположительно **drbd-config-controller**).
 - `status`:
-  - `True` — реплика прошла инициализацию (не снимается!)
+  - `True` — реплика `rvr.spec.type==Diskful` и прошла инициализацию (не снимается!)
     - DRBD ресурс создан и поднят
     - Начальная синхронизация завершена (если требовалась)
-  - `False` — инициализация не завершена
+  - `False` — инициализация не завершена, либо реплика `rvr.spec.type!=Diskful`
 - `reason`:
   - `Initialized` — реплика успешно инициализирована
   - `WaitingForInitialSync` — ожидание завершения начальной синхронизации
