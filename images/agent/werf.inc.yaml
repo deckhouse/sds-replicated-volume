@@ -52,14 +52,15 @@ shell:
     - ./configure --prefix=/ --sysconfdir=/etc --localstatedir=/var --without-manual
     - ls -la .
     - which git
+    - git --version
     - ls -la .git/
     - cat .git/HEAD
     - pwd
-    - stat .git
     - id
     - echo $GIT_DIR
     - export GIT_DIR=/src/drbd-utils/.git
     - echo $GIT_DIR
+    - stat $GIT_DIR
     - git rev-parse HEAD
     - make
     - make install DESTDIR=/drbd-utils
