@@ -76,6 +76,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
+	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+		log.Info("ReplicatedVolume does not have controller finalizer, ignoring reconcile request")
+		return reconcile.Result{}, nil
+	}
+
 	if rv.DeletionTimestamp != nil {
 		log.Info("ReplicatedVolume is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil

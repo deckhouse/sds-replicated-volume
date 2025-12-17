@@ -117,6 +117,11 @@ func (r *Reconciler) selectRVR(
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
 	}
 
+	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+		log.Info("no controller finalizer on rv, skipping")
+		return rv, nil, nil
+	}
+
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		return nil, nil, u.LogError(log, fmt.Errorf("listing rvr: %w", err))

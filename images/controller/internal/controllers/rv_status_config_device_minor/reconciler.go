@@ -59,6 +59,11 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
+		return reconcile.Result{}, nil
+	}
+
 	// List all RVs to collect used deviceMinors
 	rvList := &v1alpha3.ReplicatedVolumeList{}
 	if err := r.cl.List(ctx, rvList); err != nil {

@@ -73,8 +73,11 @@ var _ = Describe("Reconciler", func() {
 		var rvrList []*v1alpha3.ReplicatedVolumeReplica
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-rv"},
-				Status:     &v1alpha3.ReplicatedVolumeStatus{Conditions: []metav1.Condition{}},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-rv",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
+				Status: &v1alpha3.ReplicatedVolumeStatus{Conditions: []metav1.Condition{}},
 			}
 			rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 0, 5)
 			for i, rvrType := range []string{"Diskful", "Diskful", "Diskful", "Access", "Access"} {

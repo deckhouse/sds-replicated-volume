@@ -124,13 +124,20 @@ var _ = Describe("Reconciler", func() {
 		var rvrList *v1alpha3.ReplicatedVolumeReplicaList
 		BeforeEach(func() {
 			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"}}
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
+			}
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-rv"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-rv",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
-					ReplicatedStorageClassName: rsc.Name},
+					ReplicatedStorageClassName: rsc.Name,
+				},
 				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{}}}
+					Conditions: []metav1.Condition{},
+				},
+			}
 			rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
 		})
 		JustBeforeEach(func(ctx SpecContext) {

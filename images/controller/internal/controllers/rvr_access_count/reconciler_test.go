@@ -95,8 +95,9 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -401,8 +402,9 @@ var _ = Describe("Reconciler", func() {
 			testError = errors.New("RSC get error")
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -446,8 +448,9 @@ var _ = Describe("Reconciler", func() {
 			testError = errors.New("List RVRs error")
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -493,8 +496,9 @@ var _ = Describe("Reconciler", func() {
 			testError = errors.New("Create RVR error")
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -541,8 +545,9 @@ var _ = Describe("Reconciler", func() {
 			testError = errors.New("Delete RVR error")
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",

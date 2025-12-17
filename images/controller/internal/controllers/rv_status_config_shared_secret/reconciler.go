@@ -58,6 +58,11 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
+	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
+		return reconcile.Result{}, nil
+	}
+
 	// Check if sharedSecret is not set - generate new one
 	if rv.Status == nil || rv.Status.DRBD == nil || rv.Status.DRBD.Config == nil || rv.Status.DRBD.Config.SharedSecret == "" {
 		return r.reconcileGenerateSharedSecret(ctx, rv, log)

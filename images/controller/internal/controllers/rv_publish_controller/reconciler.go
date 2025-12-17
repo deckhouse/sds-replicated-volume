@@ -353,6 +353,10 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 // shouldSkipRV returns true when, according to spec, rv-publish-controller
 // should not perform any actions for the given ReplicatedVolume.
 func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+		return true
+	}
+
 	// controller works only when status is initialized
 	if rv.Status == nil {
 		return true
