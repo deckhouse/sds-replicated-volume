@@ -160,7 +160,7 @@ func isThisReplicaCountEnoughForQuorum(
 		return true
 	}
 
-	readyAndConnected := 0
+	onlineReplicaCount := 0
 	for _, rvr := range replicasForRV {
 		if rvr.Name == deletingRVRName {
 			continue
@@ -168,13 +168,12 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Status == nil {
 			continue
 		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, "Ready") &&
-			meta.IsStatusConditionTrue(rvr.Status.Conditions, "FullyConnected") {
-			readyAndConnected++
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeOnline) {
+			onlineReplicaCount++
 		}
 	}
 
-	return readyAndConnected >= quorum
+	return onlineReplicaCount >= quorum
 }
 
 func isDeletingReplicaPublished(
@@ -206,7 +205,7 @@ func hasEnoughDiskfulReplicasForReplication(
 		requiredDiskful = 1
 	}
 
-	actualDiskful := 0
+	ioReadyDiskfullCount := 0
 	for _, rvr := range replicasForRV {
 		if rvr.Name == deletingRVRName {
 			continue
@@ -217,18 +216,21 @@ func hasEnoughDiskfulReplicasForReplication(
 		if rvr.Status == nil {
 			continue
 		}
+		if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful {
+			continue
+		}
 		if rvr.Status.ActualType != v1alpha3.ReplicaTypeDiskful {
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, "Ready") {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeIOReady) {
 			continue
 		}
 
-		actualDiskful++
+		ioReadyDiskfullCount++
 	}
 
-	return actualDiskful >= requiredDiskful
+	return ioReadyDiskfullCount >= requiredDiskful
 }
 
 func (r *Reconciler) removeControllerFinalizer(
