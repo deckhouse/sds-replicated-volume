@@ -154,18 +154,18 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 
 		// === Agent/Node not ready ===
 		{
-			name:              "Agent not ready, Node ready → Online=False (AgentNotReady), IOReady=False (AgentNotReady)",
+			name:              "Agent pod missing, Node ready → Online=False (AgentPodMissing), IOReady=False (AgentPodMissing)",
 			scheduled:         u.Ptr(true),
 			initialized:       u.Ptr(true),
 			inQuorum:          u.Ptr(true),
 			inSync:            u.Ptr(true),
-			agentReady:        false,
+			agentReady:        false, // no agent pod created
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha3.ReasonAgentNotReady,
+			wantOnlineReason:  v1alpha3.ReasonAgentPodMissing,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha3.ReasonAgentNotReady,
+			wantIOReadyReason: v1alpha3.ReasonAgentPodMissing,
 		},
 		{
 			name:              "Node not ready → Online=False (NodeNotReady), IOReady=False (NodeNotReady)",
@@ -313,14 +313,14 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Build RVR
-	rvr := &v1alpha3.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "test-rvr",
-		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-rvr",
+				},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 			NodeName: nodeName,
-		},
-		Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+				},
+				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
 			Conditions: buildConditions(tc),
 		},
 	}
@@ -340,34 +340,34 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 		nodeReadyStatus := corev1.ConditionFalse
 		if tc.nodeReady {
 			nodeReadyStatus = corev1.ConditionTrue
-		}
-		node := &corev1.Node{
+			}
+			node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{Name: nodeName},
-			Status: corev1.NodeStatus{
-				Conditions: []corev1.NodeCondition{
+				Status: corev1.NodeStatus{
+					Conditions: []corev1.NodeCondition{
 					{Type: corev1.NodeReady, Status: nodeReadyStatus},
+					},
 				},
-			},
-		}
+			}
 		objects = append(objects, node)
 	}
 
 	// Add Agent pod if ready
 	if tc.agentReady {
-		agentPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
+			agentPod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
 				Name:      "agent-" + nodeName,
-				Namespace: rv.ControllerConfigMapNamespace,
+					Namespace: rv.ControllerConfigMapNamespace,
 				Labels:    map[string]string{AgentPodLabel: AgentPodValue},
-			},
+					},
 			Spec: corev1.PodSpec{NodeName: nodeName},
-			Status: corev1.PodStatus{
-				Phase: corev1.PodRunning,
-				Conditions: []corev1.PodCondition{
-					{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+					Conditions: []corev1.PodCondition{
+						{Type: corev1.PodReady, Status: corev1.ConditionTrue},
+					},
 				},
-			},
-		}
+			}
 		objects = append(objects, agentPod)
 	}
 
@@ -382,9 +382,9 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	rec := NewReconciler(cl, logr.Discard())
 
 	// Run reconcile
-	_, err := rec.Reconcile(ctx, reconcile.Request{
-		NamespacedName: types.NamespacedName{Name: "test-rvr"},
-	})
+			_, err := rec.Reconcile(ctx, reconcile.Request{
+				NamespacedName: types.NamespacedName{Name: "test-rvr"},
+			})
 	if err != nil {
 		t.Fatalf("reconcile failed: %v", err)
 	}
@@ -451,7 +451,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "Initialized"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha3.ConditionTypeInitialized,
+			Type:   v1alpha3.ConditionTypeDataInitialized,
 			Status: status,
 			Reason: reason,
 		})

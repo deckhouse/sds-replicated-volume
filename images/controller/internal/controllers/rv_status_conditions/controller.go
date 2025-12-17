@@ -25,7 +25,7 @@ import (
 )
 
 func BuildController(mgr manager.Manager) error {
-	log := mgr.GetLogger().WithName(RVStatusConditionsControllerName)
+	log := mgr.GetLogger().WithName(RVStatusConditionsControllerName).WithName("Reconciler")
 
 	rec := NewReconciler(mgr.GetClient(), log)
 

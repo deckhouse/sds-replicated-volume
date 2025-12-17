@@ -20,7 +20,6 @@ import (
 	"context"
 	"reflect"
 	"strconv"
-	"strings"
 
 	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -83,7 +82,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
 	}
 
-	// Calculate all conditions
+	// Calculate all conditions using simple RV-level reasons from spec
 	r.calculateScheduled(patchedRV, rvrs)
 	r.calculateBackingVolumeCreated(patchedRV, rvrs)
 	r.calculateConfigured(patchedRV, rvrs)
@@ -113,65 +112,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-// rvrConditionInfo holds info about an RVR and its condition for aggregation
-type rvrConditionInfo struct {
-	name    string
-	reason  string
-	message string
-}
-
-// aggregateCondition aggregates condition info from multiple RVRs into a single reason and message.
-// If all RVRs have the same reason, that reason is used.
-// If RVRs have different reasons, ReasonMultipleReasons is used.
-// Message format: "<rvr_name> - <reason> - <message, if exists>"
-func aggregateCondition(failedRVRs []rvrConditionInfo) (reason, message string) {
-	if len(failedRVRs) == 0 {
-		return "", ""
-	}
-
-	if len(failedRVRs) == 1 {
-		info := failedRVRs[0]
-		reason = info.reason
-		// Message format: "<name> - <reason> - <message>" or "<name> - <reason>"
-		if info.message != "" {
-			message = info.name + " - " + info.reason + " - " + info.message
-		} else {
-			message = info.name + " - " + info.reason
-		}
-		return reason, message
-	}
-
-	// Check if all reasons are the same
-	firstReason := failedRVRs[0].reason
-	allSame := true
-	for _, info := range failedRVRs[1:] {
-		if info.reason != firstReason {
-			allSame = false
-			break
-		}
-	}
-
-	if allSame {
-		reason = firstReason
-	} else {
-		reason = v1alpha3.ReasonMultipleReasons
-	}
-
-	// Build aggregated message
-	// Message format: "<name> - <reason> - <message>, <name> - <reason>, ..."
-	var parts []string
-	for _, info := range failedRVRs {
-		if info.message != "" {
-			parts = append(parts, info.name+" - "+info.reason+" - "+info.message)
-		} else {
-			parts = append(parts, info.name+" - "+info.reason)
-		}
-	}
-	message = strings.Join(parts, ", ")
-
-	return reason, message
-}
-
 // getRVRCondition gets a condition from RVR status by type
 func getRVRCondition(rvr *v1alpha3.ReplicatedVolumeReplica, conditionType string) *metav1.Condition {
 	if rvr.Status == nil {
@@ -185,33 +125,19 @@ func getRVRCondition(rvr *v1alpha3.ReplicatedVolumeReplica, conditionType string
 	return nil
 }
 
-// collectRVRConditionStatus iterates over RVRs, checks the specified condition type,
-// and returns count of successful RVRs along with info about failed ones.
-// When condition doesn't exist on RVR, message format: "<conditionType> condition not found"
-func collectRVRConditionStatus(rvrs []v1alpha3.ReplicatedVolumeReplica, conditionType string) (successCount int, failedRVRs []rvrConditionInfo) {
+// countRVRCondition counts how many RVRs have the specified condition with status True
+func countRVRCondition(rvrs []v1alpha3.ReplicatedVolumeReplica, conditionType string) int {
+	count := 0
 	for _, rvr := range rvrs {
 		cond := getRVRCondition(&rvr, conditionType)
 		if cond != nil && cond.Status == metav1.ConditionTrue {
-			successCount++
-		} else {
-			info := rvrConditionInfo{name: rvr.Name}
-			if cond != nil {
-				// Copy reason and message from RVR condition
-				info.reason = cond.Reason
-				info.message = cond.Message
-			} else {
-				// Condition not found - generate message from condition type
-				info.reason = reasonUnknown
-				info.message = conditionType + conditionNotFoundSuffix
-			}
-			failedRVRs = append(failedRVRs, info)
+			count++
 		}
 	}
-	return successCount, failedRVRs
+	return count
 }
 
-// filterDiskfulRVRs returns only Diskful type replicas from the list.
-// Used for conditions that apply only to data-holding replicas (BackingVolume, DataQuorum).
+// filterDiskfulRVRs returns only Diskful type replicas from the list
 func filterDiskfulRVRs(rvrs []v1alpha3.ReplicatedVolumeReplica) []v1alpha3.ReplicatedVolumeReplica {
 	var diskfulRVRs []v1alpha3.ReplicatedVolumeReplica
 	for _, rvr := range rvrs {
@@ -222,10 +148,11 @@ func filterDiskfulRVRs(rvrs []v1alpha3.ReplicatedVolumeReplica) []v1alpha3.Repli
 	return diskfulRVRs
 }
 
-// calculateScheduled aggregates Scheduled condition from all RVRs.
-// RV is Scheduled when ALL RVRs are scheduled.
+// calculateScheduled: RV is Scheduled when ALL RVRs are scheduled
+// Reasons: AllReplicasScheduled, ReplicasNotScheduled, SchedulingInProgress
 func (r *Reconciler) calculateScheduled(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
-	if len(rvrs) == 0 {
+	total := len(rvrs)
+	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVScheduled,
 			Status:  metav1.ConditionFalse,
@@ -235,9 +162,9 @@ func (r *Reconciler) calculateScheduled(rv *v1alpha3.ReplicatedVolume, rvrs []v1
 		return
 	}
 
-	scheduledCount, failedRVRs := collectRVRConditionStatus(rvrs, v1alpha3.ConditionTypeScheduled)
+	scheduledCount := countRVRCondition(rvrs, v1alpha3.ConditionTypeScheduled)
 
-	if scheduledCount == len(rvrs) {
+	if scheduledCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:   v1alpha3.ConditionTypeRVScheduled,
 			Status: metav1.ConditionTrue,
@@ -246,22 +173,21 @@ func (r *Reconciler) calculateScheduled(rv *v1alpha3.ReplicatedVolume, rvrs []v1
 		return
 	}
 
-	reason, message := aggregateCondition(failedRVRs)
-
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVScheduled,
 		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
+		Reason:  v1alpha3.ReasonReplicasNotScheduled,
+		Message: strconv.Itoa(scheduledCount) + "/" + strconv.Itoa(total) + " replicas scheduled",
 	})
 }
 
-// calculateBackingVolumeCreated aggregates BackingVolumeCreated condition from Diskful RVRs only.
-// Access/TieBreaker replicas don't have backing volumes, so they are excluded.
+// calculateBackingVolumeCreated: RV is BackingVolumeCreated when ALL Diskful RVRs have backing volumes
+// Reasons: AllBackingVolumesReady, BackingVolumesNotReady, WaitingForBackingVolumes
 func (r *Reconciler) calculateBackingVolumeCreated(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
 	diskfulRVRs := filterDiskfulRVRs(rvrs)
+	total := len(diskfulRVRs)
 
-	if len(diskfulRVRs) == 0 {
+	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVBackingVolumeCreated,
 			Status:  metav1.ConditionFalse,
@@ -271,9 +197,9 @@ func (r *Reconciler) calculateBackingVolumeCreated(rv *v1alpha3.ReplicatedVolume
 		return
 	}
 
-	readyCount, failedRVRs := collectRVRConditionStatus(diskfulRVRs, v1alpha3.ConditionTypeRVRBackingVolumeCreated)
+	readyCount := countRVRCondition(diskfulRVRs, v1alpha3.ConditionTypeRVRBackingVolumeCreated)
 
-	if readyCount == len(diskfulRVRs) {
+	if readyCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:   v1alpha3.ConditionTypeRVBackingVolumeCreated,
 			Status: metav1.ConditionTrue,
@@ -282,20 +208,19 @@ func (r *Reconciler) calculateBackingVolumeCreated(rv *v1alpha3.ReplicatedVolume
 		return
 	}
 
-	reason, message := aggregateCondition(failedRVRs)
-
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVBackingVolumeCreated,
 		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
+		Reason:  v1alpha3.ReasonBackingVolumesNotReady,
+		Message: strconv.Itoa(readyCount) + "/" + strconv.Itoa(total) + " backing volumes ready",
 	})
 }
 
-// calculateConfigured aggregates ConfigurationAdjusted condition from all RVRs.
-// RV is Configured when ALL RVRs have their DRBD configuration applied.
+// calculateConfigured: RV is Configured when ALL RVRs are configured
+// Reasons: AllReplicasConfigured, ReplicasNotConfigured, ConfigurationInProgress
 func (r *Reconciler) calculateConfigured(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
-	if len(rvrs) == 0 {
+	total := len(rvrs)
+	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVConfigured,
 			Status:  metav1.ConditionFalse,
@@ -305,9 +230,9 @@ func (r *Reconciler) calculateConfigured(rv *v1alpha3.ReplicatedVolume, rvrs []v
 		return
 	}
 
-	configuredCount, failedRVRs := collectRVRConditionStatus(rvrs, v1alpha3.ConditionTypeConfigurationAdjusted)
+	configuredCount := countRVRCondition(rvrs, v1alpha3.ConditionTypeConfigurationAdjusted)
 
-	if configuredCount == len(rvrs) {
+	if configuredCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:   v1alpha3.ConditionTypeRVConfigured,
 			Status: metav1.ConditionTrue,
@@ -316,13 +241,11 @@ func (r *Reconciler) calculateConfigured(rv *v1alpha3.ReplicatedVolume, rvrs []v
 		return
 	}
 
-	reason, message := aggregateCondition(failedRVRs)
-
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVConfigured,
 		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: message,
+		Reason:  v1alpha3.ReasonReplicasNotConfigured,
+		Message: strconv.Itoa(configuredCount) + "/" + strconv.Itoa(total) + " replicas configured",
 	})
 }
 
@@ -341,16 +264,15 @@ func (r *Reconciler) getInitializedThreshold(rsc *v1alpha1.ReplicatedStorageClas
 	}
 }
 
-// calculateInitialized aggregates InitialSync condition from RVRs.
-// Unlike other conditions, RV is Initialized when THRESHOLD number of RVRs completed initial sync.
-// Threshold depends on replication mode: None=1, Availability=2, ConsistencyAndAvailability=3.
+// calculateInitialized: RV is Initialized when THRESHOLD number of RVRs are initialized
+// Reads RVR.DataInitialized condition (set by drbd-config-controller on agent)
+// Threshold: None=1, Availability=2, ConsistencyAndAvailability=3
+// Reasons: Initialized, InitializationInProgress, WaitingForReplicas
 func (r *Reconciler) calculateInitialized(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica, rsc *v1alpha1.ReplicatedStorageClass) {
 	threshold := r.getInitializedThreshold(rsc)
-
-	initializedCount, failedRVRs := collectRVRConditionStatus(rvrs, v1alpha3.ConditionTypeInitialSync)
+	initializedCount := countRVRCondition(rvrs, v1alpha3.ConditionTypeDataInitialized)
 
 	if initializedCount >= threshold {
-		// Message format: "<count>/<threshold> replicas initialized"
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVInitialized,
 			Status:  metav1.ConditionTrue,
@@ -360,26 +282,37 @@ func (r *Reconciler) calculateInitialized(rv *v1alpha3.ReplicatedVolume, rvrs []
 		return
 	}
 
-	reason, message := aggregateCondition(failedRVRs)
+	// Determine reason: WaitingForReplicas if no replicas, InitializationInProgress if some progress
+	reason := v1alpha3.ReasonInitializationInProgress
+	if len(rvrs) == 0 {
+		reason = v1alpha3.ReasonWaitingForReplicas
+	}
 
-	// Message format: "<count>/<threshold> replicas initialized. <aggregated_message>"
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVInitialized,
 		Status:  metav1.ConditionFalse,
 		Reason:  reason,
-		Message: strconv.Itoa(initializedCount) + "/" + strconv.Itoa(threshold) + " replicas initialized. " + message,
+		Message: strconv.Itoa(initializedCount) + "/" + strconv.Itoa(threshold) + " replicas initialized",
 	})
 }
 
-// calculateQuorum aggregates Quorum condition from all RVRs (including diskless).
-// Quorum requires MAJORITY of replicas to be in quorum (total/2 + 1).
-// Note: Unlike other conditions, we use RV-level reasons (QuorumReached/Degraded/Lost)
-// because quorum is a computed state, not just aggregation. Message still contains RVR details.
+// calculateQuorum: RV has Quorum when majority of RVRs (total/2 + 1) are in quorum
+// Reasons: QuorumReached, QuorumDegraded, QuorumLost
 func (r *Reconciler) calculateQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
 	total := len(rvrs)
-	quorumNeeded := (total / 2) + 1
+	if total == 0 {
+		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
+			Type:    v1alpha3.ConditionTypeRVQuorum,
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha3.ReasonQuorumLost,
+			Message: messageNoReplicasFound,
+		})
+		return
+	}
 
-	inQuorumCount, failedRVRs := collectRVRConditionStatus(rvrs, v1alpha3.ConditionTypeQuorum)
+	quorumNeeded := (total / 2) + 1
+	// Read RVR.InQuorum condition per spec
+	inQuorumCount := countRVRCondition(rvrs, v1alpha3.ConditionTypeInQuorum)
 
 	if inQuorumCount >= quorumNeeded {
 		reason := v1alpha3.ReasonQuorumReached
@@ -387,7 +320,6 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v1alp
 			// Quorum achieved but some replicas are out - degraded state
 			reason = v1alpha3.ReasonQuorumDegraded
 		}
-		// Message format: "<count>/<total> replicas in quorum"
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVQuorum,
 			Status:  metav1.ConditionTrue,
@@ -397,26 +329,21 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v1alp
 		return
 	}
 
-	// Quorum lost - use RV-level reason, but include RVR details in message
-	_, message := aggregateCondition(failedRVRs)
-
-	// Message format: "<count>/<total> replicas in quorum. <aggregated_message>"
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVQuorum,
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha3.ReasonQuorumLost,
-		Message: strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " replicas in quorum. " + message,
+		Message: strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " replicas in quorum",
 	})
 }
 
-// calculateDataQuorum aggregates Quorum condition from Diskful RVRs only.
-// DataQuorum ensures enough DATA-holding replicas are in quorum for data safety.
-// Required count is QMR (QuorumMinimumRedundancy) from DRBD config, or majority if not set.
-// Note: Uses RV-level reasons (DataQuorumReached/Degraded/Lost) - see calculateQuorum comment.
+// calculateDataQuorum: RV has DataQuorum when QMR number of Diskful RVRs are in quorum
+// QMR (QuorumMinimumRedundancy) from DRBD config, or majority if not set
+// Reasons: DataQuorumReached, DataQuorumDegraded, DataQuorumLost
 func (r *Reconciler) calculateDataQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
 	diskfulRVRs := filterDiskfulRVRs(rvrs)
-
 	total := len(diskfulRVRs)
+
 	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVDataQuorum,
@@ -427,8 +354,7 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v
 		return
 	}
 
-	// QMR (QuorumMinimumRedundancy) - minimum diskful replicas needed for data safety
-	// If not set in DRBD config, fall back to majority
+	// QMR from DRBD config or fallback to majority
 	var qmr int
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		qmr = int(rv.Status.DRBD.Config.QuorumMinimumRedundancy)
@@ -437,14 +363,14 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v
 		qmr = (total / 2) + 1
 	}
 
-	inQuorumCount, failedRVRs := collectRVRConditionStatus(diskfulRVRs, v1alpha3.ConditionTypeQuorum)
+	// Read RVR.InQuorum condition per spec
+	inQuorumCount := countRVRCondition(diskfulRVRs, v1alpha3.ConditionTypeInQuorum)
 
 	if inQuorumCount >= qmr {
 		reason := v1alpha3.ReasonDataQuorumReached
 		if inQuorumCount < total {
 			reason = v1alpha3.ReasonDataQuorumDegraded
 		}
-		// Message format: "<count>/<total> diskful replicas in quorum (QMR=<qmr>)"
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVDataQuorum,
 			Status:  metav1.ConditionTrue,
@@ -454,39 +380,34 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha3.ReplicatedVolume, rvrs []v
 		return
 	}
 
-	// DataQuorum lost - use RV-level reason, but include RVR details in message
-	_, message := aggregateCondition(failedRVRs)
-
-	// Message format: "<count>/<total> diskful replicas in quorum (QMR=<qmr>). <aggregated_message>"
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVDataQuorum,
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha3.ReasonDataQuorumLost,
-		Message: strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " diskful replicas in quorum (QMR=" + strconv.Itoa(qmr) + "). " + message,
+		Message: strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " diskful replicas in quorum (QMR=" + strconv.Itoa(qmr) + ")",
 	})
 }
 
-// calculateIOReady aggregates DevicesReady condition from all RVRs.
-// RV is IOReady when THRESHOLD number of RVRs have their devices ready for I/O.
-// Threshold depends on replication mode (same as Initialized).
-// Special case: if NO replicas are IOReady, use specific reason NoIOReadyReplicas.
+// calculateIOReady: RV is IOReady when THRESHOLD number of RVRs have IOReady=True
+// Reads RVR.IOReady condition per spec
+// Threshold depends on replication mode (same as Initialized)
+// Reasons: IOReady, InsufficientIOReadyReplicas, NoIOReadyReplicas
 func (r *Reconciler) calculateIOReady(rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica, rsc *v1alpha1.ReplicatedStorageClass) {
 	threshold := r.getInitializedThreshold(rsc)
-
-	ioReadyCount, failedRVRs := collectRVRConditionStatus(rvrs, v1alpha3.ConditionTypeDevicesReady)
+	total := len(rvrs)
+	ioReadyCount := countRVRCondition(rvrs, v1alpha3.ConditionTypeIOReady)
 
 	if ioReadyCount >= threshold {
-		// Message format: "<count>/<total> replicas IOReady"
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVIOReady,
 			Status:  metav1.ConditionTrue,
 			Reason:  v1alpha3.ReasonRVIOReady,
-			Message: strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(len(rvrs)) + " replicas IOReady",
+			Message: strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(total) + " replicas IOReady",
 		})
 		return
 	}
 
-	// Special case: complete I/O unavailability is more severe than partial
+	// No IOReady replicas is more severe than partial
 	if ioReadyCount == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 			Type:    v1alpha3.ConditionTypeRVIOReady,
@@ -497,22 +418,15 @@ func (r *Reconciler) calculateIOReady(rv *v1alpha3.ReplicatedVolume, rvrs []v1al
 		return
 	}
 
-	// Partial I/O readiness - some replicas ready but not enough
-	reason, message := aggregateCondition(failedRVRs)
-
-	// Message format: "<count>/<total> replicas IOReady. <aggregated_message>"
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
 		Type:    v1alpha3.ConditionTypeRVIOReady,
 		Status:  metav1.ConditionFalse,
-		Reason:  reason,
-		Message: strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(len(rvrs)) + " replicas IOReady. " + message,
+		Reason:  v1alpha3.ReasonInsufficientIOReadyReplicas,
+		Message: strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(total) + " replicas IOReady (need " + strconv.Itoa(threshold) + ")",
 	})
 }
 
-// calculateCounters computes status counters for the RV:
-// - DiskfulReplicaCount: "current/total" where current = diskful RVRs with BackingVolumeCreated
-// - DiskfulReplicasInSync: "synced/total" where synced = diskful RVRs with DevicesReady
-// - PublishedAndIOReadyCount: "ready/published" where ready = RVRs on published nodes that are IOReady
+// calculateCounters computes status counters for the RV
 func (r *Reconciler) calculateCounters(patchedRV *v1alpha3.ReplicatedVolume, rv *v1alpha3.ReplicatedVolume, rvrs []v1alpha3.ReplicatedVolumeReplica) {
 	var diskfulTotal, diskfulCurrent int
 	var diskfulInSync int
@@ -529,28 +443,26 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha3.ReplicatedVolume, rv 
 	for _, rvr := range rvrs {
 		if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
 			diskfulTotal++
-			// diskfulCurrent: has backing volume (LVM volume created)
 			cond := getRVRCondition(&rvr, v1alpha3.ConditionTypeRVRBackingVolumeCreated)
 			if cond != nil && cond.Status == metav1.ConditionTrue {
 				diskfulCurrent++
 			}
-			// diskfulInSync: devices are ready and up-to-date
-			inSyncCond := getRVRCondition(&rvr, v1alpha3.ConditionTypeDevicesReady)
+			// Use InSync condition per spec
+			inSyncCond := getRVRCondition(&rvr, v1alpha3.ConditionTypeInSync)
 			if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
 				diskfulInSync++
 			}
 		}
 
-		// publishedAndIOReady: replica is on a node where RV is published AND can serve I/O
 		if _, published := publishedSet[rvr.Spec.NodeName]; published {
-			ioReadyCond := getRVRCondition(&rvr, v1alpha3.ConditionTypeDevicesReady)
+			// Use IOReady condition per spec
+			ioReadyCond := getRVRCondition(&rvr, v1alpha3.ConditionTypeIOReady)
 			if ioReadyCond != nil && ioReadyCond.Status == metav1.ConditionTrue {
 				publishedAndIOReady++
 			}
 		}
 	}
 
-	// Counter format: "<current>/<total>"
 	patchedRV.Status.DiskfulReplicaCount = strconv.Itoa(diskfulCurrent) + "/" + strconv.Itoa(diskfulTotal)
 	patchedRV.Status.DiskfulReplicasInSync = strconv.Itoa(diskfulInSync) + "/" + strconv.Itoa(diskfulTotal)
 	patchedRV.Status.PublishedAndIOReadyCount = strconv.Itoa(publishedAndIOReady) + "/" + strconv.Itoa(len(rv.Spec.PublishOn))

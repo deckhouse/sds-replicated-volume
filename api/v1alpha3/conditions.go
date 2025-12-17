@@ -81,8 +81,9 @@ const (
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
 	ConditionTypeScheduled = "Scheduled"
 
-	// [ConditionTypeInitialized] indicates whether replica has been initialized (does not reset after True)
-	ConditionTypeInitialized = "Initialized"
+	// [ConditionTypeDataInitialized] indicates whether replica data has been initialized (does not reset after True)
+	// Note: drbd-config-controller (agent) sets this condition
+	ConditionTypeDataInitialized = "DataInitialized"
 
 	// [ConditionTypeInQuorum] indicates whether replica is in quorum
 	ConditionTypeInQuorum = "InQuorum"
@@ -144,7 +145,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeAddressConfigured:     {false},
 	ConditionTypeBackingVolumeCreated:  {false},
 	ConditionTypeScheduled:             {false},
-	ConditionTypeInitialized:           {false},
+	ConditionTypeDataInitialized:       {false},
 	ConditionTypeInQuorum:              {false},
 	ConditionTypeInSync:                {false},
 	ConditionTypeOnline:                {false},
@@ -174,12 +175,14 @@ const (
 
 // Condition reasons for [ConditionTypeOnline] condition
 const (
-	ReasonOnline        = "Online"
-	ReasonUnscheduled   = "Unscheduled"
-	ReasonUninitialized = "Uninitialized"
-	ReasonQuorumLost    = "QuorumLost"
-	ReasonNodeNotReady  = "NodeNotReady"
-	ReasonAgentNotReady = "AgentNotReady"
+	ReasonOnline             = "Online"
+	ReasonUnscheduled        = "Unscheduled"
+	ReasonUninitialized      = "Uninitialized"
+	ReasonQuorumLost         = "QuorumLost"
+	ReasonNodeNotReady       = "NodeNotReady"
+	ReasonAgentNotReady      = "AgentNotReady"
+	ReasonAgentPodMissing    = "AgentPodMissing"    // No agent pod found on node
+	ReasonAgentStatusUnknown = "AgentStatusUnknown" // Can't determine status (API error)
 )
 
 // Condition reasons for [ConditionTypeIOReady] condition
@@ -286,9 +289,9 @@ const (
 
 // Condition reasons for [ConditionTypeRVScheduled] condition
 const (
-	ReasonAllReplicasScheduled   = "AllReplicasScheduled"
-	ReasonReplicasNotScheduled   = "ReplicasNotScheduled"
-	ReasonSchedulingInProgress   = "SchedulingInProgress"
+	ReasonAllReplicasScheduled = "AllReplicasScheduled"
+	ReasonReplicasNotScheduled = "ReplicasNotScheduled"
+	ReasonSchedulingInProgress = "SchedulingInProgress"
 )
 
 // Condition reasons for [ConditionTypeRVBackingVolumeCreated] condition
@@ -328,7 +331,7 @@ const (
 
 // Condition reasons for [ConditionTypeRVIOReady] condition
 const (
-	ReasonRVIOReady                 = "IOReady"
+	ReasonRVIOReady                   = "IOReady"
 	ReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas"
-	ReasonNoIOReadyReplicas         = "NoIOReadyReplicas"
+	ReasonNoIOReadyReplicas           = "NoIOReadyReplicas"
 )

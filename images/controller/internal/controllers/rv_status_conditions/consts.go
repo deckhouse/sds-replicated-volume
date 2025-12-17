@@ -19,13 +19,6 @@ package rvstatusconditions
 const (
 	RVStatusConditionsControllerName = "rv_status_conditions"
 
-	// reasonUnknown is used when RVR condition is not found
-	reasonUnknown = "Unknown"
-
-	// conditionNotFoundSuffix is appended to condition type when condition is missing
-	// Full message format: "<conditionType> condition not found"
-	conditionNotFoundSuffix = " condition not found"
-
 	// Status messages for empty replica cases
 	messageNoReplicasFound        = "No replicas found"
 	messageNoDiskfulReplicasFound = "No diskful replicas found"

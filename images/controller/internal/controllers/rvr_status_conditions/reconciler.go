@@ -68,7 +68,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Check agent availability and determine reason if not available
-	agentReady, unavailabilityReason := r.checkAgentAvailability(ctx, rvr.Spec.NodeName, log)
+	agentReady, unavailabilityReason, shouldRetry := r.checkAgentAvailability(ctx, rvr.Spec.NodeName, log)
 
 	// Calculate conditions
 	onlineStatus, onlineReason, onlineMessage := r.calculateOnline(rvr, agentReady, unavailabilityReason)
@@ -91,15 +91,20 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	}
 
+	// If we couldn't determine agent status, trigger requeue
+	if shouldRetry {
+		return reconcile.Result{}, errors.NewServiceUnavailable("agent status unknown, retrying")
+	}
+
 	return reconcile.Result{}, nil
 }
 
 // checkAgentAvailability checks if the agent pod is available on the given node.
-// Returns (agentReady, unavailabilityReason).
-// If agent is not ready, it determines whether the reason is NodeNotReady or AgentNotReady.
-func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string, log logr.Logger) (bool, string) {
+// Returns (agentReady, unavailabilityReason, shouldRetry).
+// If shouldRetry is true, caller should return error to trigger requeue.
+func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string, log logr.Logger) (bool, string, bool) {
 	if nodeName == "" {
-		return false, v1alpha3.ReasonUnscheduled
+		return false, v1alpha3.ReasonUnscheduled, false
 	}
 
 	// AgentNamespace is taken from rv.ControllerConfigMapNamespace
@@ -112,55 +117,65 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 		client.InNamespace(agentNamespace),
 		client.MatchingLabels{AgentPodLabel: AgentPodValue},
 	); err != nil {
-		log.Error(err, "Listing agent pods")
-		// TODO: think about other reasons
-		return false, v1alpha3.ReasonAgentNotReady
+		log.Error(err, "Listing agent pods, will retry")
+		// Hybrid: set status to Unknown AND return error to requeue
+		return false, v1alpha3.ReasonAgentStatusUnknown, true
 	}
 
-	// Find agent pod on this node
+	// Find agent pod on this node (skip terminating pods)
 	var agentPod *corev1.Pod
 	for i := range podList.Items {
-		if podList.Items[i].Spec.NodeName == nodeName {
-			agentPod = &podList.Items[i]
-			// TODO: can be multiple agent pods on the same node
-			break
+		pod := &podList.Items[i]
+		if pod.Spec.NodeName != nodeName {
+			continue
 		}
+		// Skip terminating pods (e.g., during rollout restart)
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		agentPod = pod
+		break
 	}
 
-	// Check if agent pod exists and is ready
-	agentReady := false
-	if agentPod != nil && agentPod.Status.Phase == corev1.PodRunning {
+	// No agent pod found on this node
+	if agentPod == nil {
+		// Check if it's a node issue or missing pod
+		if r.isNodeNotReady(ctx, nodeName, log) {
+			return false, v1alpha3.ReasonNodeNotReady, false
+		}
+		return false, v1alpha3.ReasonAgentPodMissing, false
+	}
+
+	// Check if agent pod is ready
+	if agentPod.Status.Phase == corev1.PodRunning {
 		for _, cond := range agentPod.Status.Conditions {
 			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
-				agentReady = true
-				break
+				return true, "", false
 			}
 		}
 	}
 
-	if agentReady {
-		return true, ""
+	// Pod exists but not ready - check if node issue
+	if r.isNodeNotReady(ctx, nodeName, log) {
+		return false, v1alpha3.ReasonNodeNotReady, false
 	}
+	return false, v1alpha3.ReasonAgentNotReady, false
+}
 
-	// Agent not ready - determine reason by checking node status
+// isNodeNotReady checks if the node is not ready
+func (r *Reconciler) isNodeNotReady(ctx context.Context, nodeName string, log logr.Logger) bool {
 	node := &corev1.Node{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: nodeName}, node); err != nil {
 		log.V(1).Info("Node not found, assuming NodeNotReady", "nodeName", nodeName)
-		return false, v1alpha3.ReasonNodeNotReady
+		return true
 	}
 
-	// Check Node.Ready condition
 	for _, cond := range node.Status.Conditions {
 		if cond.Type == corev1.NodeReady {
-			if cond.Status != corev1.ConditionTrue {
-				return false, v1alpha3.ReasonNodeNotReady
-			}
-			break
+			return cond.Status != corev1.ConditionTrue
 		}
 	}
-
-	// Node is ready but agent is not
-	return false, v1alpha3.ReasonAgentNotReady
+	return false
 }
 
 // calculateOnline computes the Online condition status, reason, and message.
@@ -179,8 +194,8 @@ func (r *Reconciler) calculateOnline(rvr *v1alpha3.ReplicatedVolumeReplica, agen
 		return metav1.ConditionFalse, reason, message
 	}
 
-	// Check Initialized condition
-	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInitialized)
+	// Check DataInitialized condition (set by drbd-config-controller on agent)
+	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 	if initializedCond == nil || initializedCond.Status != metav1.ConditionTrue {
 		reason, message := extractReasonAndMessage(initializedCond, v1alpha3.ReasonUninitialized, "Initialized")
 		return metav1.ConditionFalse, reason, message
