@@ -57,7 +57,9 @@ shell:
     - pwd
     - stat .git
     - id
-    - chown -R root:root /src/drbd-utils
+    - echo $GIT_DIR
+    - export GIT_DIR=/src/drbd-utils/.git
+    - echo $GIT_DIR
     - git rev-parse HEAD
     - make
     - make install DESTDIR=/drbd-utils
