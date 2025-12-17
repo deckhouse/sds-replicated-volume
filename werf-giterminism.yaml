@@ -12,10 +12,6 @@ config:
       - SOURCE_REPO_TAG
     allowUncommittedFiles:
       - "base_images.yml"
-  secrets:
-    allowEnvVariables:
-      - REGISTRY_USER
-      - REGISTRY_PASSWORD
   stapel:
     mount:
       allowBuildDir: true
