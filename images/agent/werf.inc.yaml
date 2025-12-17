@@ -61,6 +61,8 @@ shell:
     - export GIT_DIR=/src/drbd-utils/.git
     - echo $GIT_DIR
     - stat $GIT_DIR
+    - mkdir -p .git/refs
+    - ls -la .git/
     - git rev-parse HEAD
     - make
     - make install DESTDIR=/drbd-utils
