@@ -53,6 +53,9 @@ shell:
     - ls -la .
     - which git
     - ls -la .git/
+    - cat .git/HEAD
+    - pwd
+    - stat .git
     - git rev-parse HEAD
     - make
     - make install DESTDIR=/drbd-utils
