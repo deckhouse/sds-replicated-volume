@@ -213,7 +213,7 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVo
 	deletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
 	nonDeletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
 	for _, rvr := range totalRvrMap {
-		if rvr.DeletionTimestamp != nil {
+		if !rvr.DeletionTimestamp.IsZero() {
 			deletedRvrMap[rvr.Name] = rvr
 		} else {
 			nonDeletedRvrMap[rvr.Name] = rvr
