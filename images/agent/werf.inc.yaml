@@ -31,8 +31,8 @@ import:
   - image: {{ .ImageName }}-src-artifact
     add: /src
     to: /src
-    includePaths:
-      - drbd-utils
+    #includePaths:
+    #  - drbd-utils
     before: install
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
