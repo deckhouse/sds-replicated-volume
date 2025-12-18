@@ -14,26 +14,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrqnpccontroller
+package rvfinalizer
 
 import (
+	"log/slog"
+
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-const ControllerName = "rvr-quorum-and-publish-constrained-release-controller"
-
 func BuildController(mgr manager.Manager) error {
+	log := slog.Default().With("name", ControllerName)
+
 	rec := NewReconciler(
 		mgr.GetClient(),
-		mgr.GetLogger().WithName(ControllerName).WithName("Reconciler"),
-		mgr.GetScheme(),
+		log,
 	)
 
-	return builder.ControllerManagedBy(mgr).
-		Named(ControllerName).
-		For(&v1alpha3.ReplicatedVolumeReplica{}).
-		Complete(rec)
+	return u.LogError(
+		log,
+		builder.ControllerManagedBy(mgr).
+			Named(ControllerName).
+			For(&v1alpha3.ReplicatedVolume{}).
+			Watches(
+				&v1alpha3.ReplicatedVolumeReplica{},
+				handler.EnqueueRequestForOwner(
+					mgr.GetScheme(),
+					mgr.GetRESTMapper(),
+					&v1alpha3.ReplicatedVolume{},
+				),
+			).
+			Complete(rec))
 }
