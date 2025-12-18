@@ -112,7 +112,6 @@ func (r *Reconciler) processFinalizers(
 	}
 
 	return false, nil
-
 }
 
 func (r *Reconciler) rvHasRVRs(ctx context.Context, log *slog.Logger, rvName string) (bool, error) {
