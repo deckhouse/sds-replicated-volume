@@ -66,4 +66,4 @@ docker:
     version: all
     linstor-scheduler-extender: {{ $.Versions.LINSTOR_SCHEDULER_EXTENDER }}
 ---
-{{- include "vex mitigation" (list $ (printf "%s/%s" $.ModuleName $.ImageName)) }}
+{{- include "vex mitigation" (list $ $.ImageName) }}
