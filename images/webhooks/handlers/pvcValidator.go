@@ -42,11 +42,11 @@ const (
 )
 
 var pvcRwxDefaultAllowedUsernames = []string{
-	"system:serviceaccount:kube-system:persistent-volume-binder",
 	"system:kube-scheduler",
+	"system:serviceaccount:kube-system:persistent-volume-binder",
+	"system:serviceaccount:kube-system:pvc-protection-controller",
 	"system:serviceaccount:d8-virtualization:cdi-sa",
 	"system:serviceaccount:d8-virtualization:virtualization-controller",
-	"system:serviceaccount:kube-system:pvc-protection-controller",
 }
 
 // kubeClientFactory allows injecting a custom client factory for testing
