@@ -82,9 +82,6 @@ const (
 
 // RV condition types
 const (
-	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
-	ConditionTypeQuorumConfigured = "QuorumConfigured"
-
 	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
 	ConditionTypeAllReplicasReady = "AllReplicasReady"
 

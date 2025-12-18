@@ -181,10 +181,6 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify finalizers were added to RVRs
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrList[0]), rvrList[0])).To(Succeed())
-
-				// Verify QuorumConfigured condition is set
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-				Expect(rv.Status.Conditions).To(HaveQuorumConfiguredCondition(metav1.ConditionTrue, "QuorumConfigured"))
 			})
 
 			It("should handle multiple replicas with diskful and diskless", func(ctx SpecContext) {
@@ -217,12 +213,11 @@ var _ = Describe("Reconciler", func() {
 						},
 					})).NotTo(Requeue())
 
-					// Verify quorum is 0 (not set) and QuorumConfigured condition is still set
+					// Verify quorum is 0 (not set)
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
 					Expect(rv).To(SatisfyAll(
 						HaveField("Status.DRBD.Config.Quorum", Equal(byte(0))),
 						HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(byte(0))),
-						HaveField("Status.Conditions", HaveQuorumConfiguredCondition(metav1.ConditionTrue)),
 					))
 				})
 			})
@@ -264,7 +259,6 @@ var _ = Describe("Reconciler", func() {
 						Expect(rv).To(SatisfyAll(
 							HaveField("Status.DRBD.Config.Quorum", Equal(expectedQuorum)),
 							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(expectedQmr)),
-							HaveField("Status.Conditions", HaveQuorumConfiguredCondition(metav1.ConditionTrue)),
 						))
 					})
 				},
@@ -360,17 +354,6 @@ var _ = Describe("Reconciler", func() {
 		})
 	})
 })
-
-func HaveQuorumConfiguredCondition(status metav1.ConditionStatus, reason ...string) OmegaMatcher {
-	matchers := []OmegaMatcher{
-		HaveField("Type", Equal(v1alpha3.ConditionTypeQuorumConfigured)),
-		HaveField("Status", Equal(status)),
-	}
-	if len(reason) > 0 {
-		matchers = append(matchers, HaveField("Reason", Equal(reason[0])))
-	}
-	return ContainElement(SatisfyAll(matchers...))
-}
 
 var _ = Describe("CalculateQuorum", func() {
 	DescribeTable("should calculate correct quorum and qmr values",

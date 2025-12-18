@@ -141,15 +141,6 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus.DRBD.Config.Quorum = quorum
 	rvStatus.DRBD.Config.QuorumMinimumRedundancy = qmr
 
-	if !conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeQuorumConfigured) {
-		conditions.Set(rvStatus, metav1.Condition{
-			Type:    v1alpha3.ConditionTypeQuorumConfigured,
-			Status:  metav1.ConditionTrue,
-			Reason:  "QuorumConfigured", // TODO: change reason
-			Message: "Quorum configuration completed",
-		})
-		changed = true
-	}
 	return changed
 }
 
