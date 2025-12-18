@@ -18,7 +18,10 @@ package rvrdiskfulcount
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -162,7 +165,36 @@ func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
 	return
 }
 
+// parseDiskfulReplicaCount parses the diskfulReplicaCount string in format "current/desired"
+// and returns current and desired counts. Returns (0, 0, error) if parsing fails.
+func parseDiskfulReplicaCount(diskfulReplicaCount string) (current, desired int, err error) {
+	if diskfulReplicaCount == "" {
+		return 0, 0, fmt.Errorf("diskfulReplicaCount is empty")
+	}
+
+	parts := strings.Split(diskfulReplicaCount, "/")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid diskfulReplicaCount format: expected 'current/desired', got '%s'", diskfulReplicaCount)
+	}
+
+	current, err = strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse current count: %w", err)
+	}
+
+	desired, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse desired count: %w", err)
+	}
+
+	return current, desired, nil
+}
+
 func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
+	current, desired, err := parseDiskfulReplicaCount(rvStatus.DiskfulReplicaCount)
+	if err != nil {
+		return false
+	}
+
+	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeConfigured)
 }

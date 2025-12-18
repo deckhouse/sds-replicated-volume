@@ -90,6 +90,9 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
+
+	// [ConditionTypeConfigured] indicates whether ReplicatedVolume is configured and ready
+	ConditionTypeConfigured = "Configured"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
