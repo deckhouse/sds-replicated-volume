@@ -13,6 +13,8 @@ config:
       - /COSIGN_.+/
       - REGISTRY_USER
       - REGISTRY_PASSWORD
+      - ACTIONS_ID_TOKEN_REQUEST_TOKEN
+      - ACTIONS_ID_TOKEN_REQUEST_URL
     allowUncommittedFiles:
       - "base_images.yml"
   secrets:
