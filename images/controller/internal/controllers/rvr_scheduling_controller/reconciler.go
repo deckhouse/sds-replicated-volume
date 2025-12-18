@@ -325,9 +325,7 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 		return fmt.Errorf("%w: %v", errSchedulingTopologyConflict, err)
 	}
 
-	// Spec «Diskful & Local»: if every publishOn node already has a replica, nothing to do.
 	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
-		// TODO: ERR
 		return fmt.Errorf("%w: no candidate nodes found", errSchedulingNoCandidateNodes)
 	}
 
@@ -336,25 +334,14 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 		return fmt.Errorf("%w: %v", errSchedulingNoCandidateNodes, err) // TODO: change error
 	}
 
-	// If there are not enough free Diskful replicas to cover all such nodes, fail scheduling for this phase.
-	// Spec «Diskful & Local»: if at least one publishOn node cannot get a Diskful replica — treat as scheduling error.
-	// if len(unscheduledDiskfulReplicas) < len(nodesToSchedule) {
-	// 	return fmt.Errorf(
-	// 		"%w: not enough Diskful replicas to cover publishOn nodes: have %d, need %d",
-	// 		errSchedulingInsufficientReplicas,
-	// 		len(unscheduledDiskfulReplicas),
-	// 		len(nodesToSchedule),
-	// 	)
-	// }
+	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
+		return fmt.Errorf("%w: no candidate nodes found", errSchedulingNoCandidateNodes)
+	}
 
-	// Assign free Diskful replicas to publishOn nodes that do not have any replica yet.
-	// Spec «Diskful & Local»: finally assign Diskful replicas to all remaining publishOn nodes.
-	// for i, nodeName := range nodesToSchedule {
-	// 	rvr := unscheduledDiskfulReplicas[i]
-	// 	if err := r.patchReplicaWithNodeName(ctx, rvr, nodeName, log, "Failed to patch replica"); err != nil {
-	// 		return err
-	// 	}
-	// }
+	err = r.setNodesToRVReplicas(ctx, sctx, sctx.UnscheduledDiskfulReplicas, sctx.ScheduledDiskfulReplicas)
+	if err != nil {
+		return fmt.Errorf("%w: %v", err, err)
+	}
 
 	return nil
 }

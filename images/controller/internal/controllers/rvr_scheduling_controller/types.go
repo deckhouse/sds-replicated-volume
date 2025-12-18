@@ -36,6 +36,8 @@ type SchedulingContext struct {
 	SpLvgToNodeInfoMap             map[string]LvgNodeInfo // {lvgName: {NodeName, ThinPoolName}}
 	RscNodes                       []string
 	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
+	// RVRs with nodes assigned in this reconcile
+	RVRsToSchedule []*v1alpha3.ReplicatedVolumeReplica
 }
 
 type NodeCandidate struct {
