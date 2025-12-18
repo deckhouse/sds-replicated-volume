@@ -396,3 +396,4 @@ docker:
     k8s-await-election: {{ include "get_oss_version_by_id" (list "LINSTOR_K8S_AWAIT_ELECTION" $.Root) }}
     piraeus-entry: {{ include "get_oss_version_by_id" (list "LINSTOR_SERVER_PIRAEUS" $.Root) }}
 ---
+{{- include "vex mitigation" (list $ $.ImageName) }}
