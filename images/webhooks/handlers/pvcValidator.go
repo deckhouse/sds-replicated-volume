@@ -34,8 +34,9 @@ import (
 )
 
 const (
-	pvcRwxAllowedUsernamesEnv = "PVC_RWX_ALLOWED_USERNAMES" // comma-separated
-	pvcRwxAllowedGroupsEnv    = "PVC_RWX_ALLOWED_GROUPS"    // comma-separated
+	pvcRwxAllowedUsernamesEnv     = "PVC_RWX_ALLOWED_USERNAMES"                      // comma-separated
+	pvcRwxAllowedGroupsEnv        = "PVC_RWX_ALLOWED_GROUPS"                         // comma-separated
+	pvcRwxDefaultAllowedUsernames = "system:serviceaccount:d8-virtualization:cdi-sa" // comma-separated
 
 	storageClassIsDefaultAnnotation     = "storageclass.kubernetes.io/is-default-class"
 	storageClassIsDefaultBetaAnnotation = "storageclass.beta.kubernetes.io/is-default-class"
@@ -77,10 +78,7 @@ func PVCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	allowedUsernames := splitCommaEnv(pvcRwxAllowedUsernamesEnv)
 	allowedGroups := splitCommaEnv(pvcRwxAllowedGroupsEnv)
 	if len(allowedUsernames) == 0 && len(allowedGroups) == 0 {
-		allowedUsernames = []string{
-			"system:serviceaccount:d8-virtualization:virtualization-controller",
-			"system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller",
-		}
+		allowedUsernames = strings.Split(pvcRwxDefaultAllowedUsernames, ",")
 	}
 
 	if userAllowed(arReview.UserInfo.Username, arReview.UserInfo.Groups, allowedUsernames, allowedGroups) {
@@ -109,8 +107,8 @@ func pvcRequestsRWX(pvc *v1.PersistentVolumeClaim) bool {
 
 func resolvePVCStorageClass(ctx context.Context, cl client.Client, pvc *v1.PersistentVolumeClaim) (*storagev1.StorageClass, error) {
 	// Explicit StorageClassName.
-	if pvc.Spec.StorageClassName != nil && strings.TrimSpace(*pvc.Spec.StorageClassName) != "" {
-		scName := strings.TrimSpace(*pvc.Spec.StorageClassName)
+	if pvc.Spec.StorageClassName != nil && *pvc.Spec.StorageClassName != "" {
+		scName := *pvc.Spec.StorageClassName
 		return getStorageClass(ctx, cl, scName)
 	}
 
