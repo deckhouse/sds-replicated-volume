@@ -30,23 +30,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-// CalculateQuorum calculates quorum and quorum minimum redundancy values
-// based on the number of diskful and total replicas.
-func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
-	if diskfulCount > 1 {
-		quorum = byte(max(2, all/2+1))
-
-		// TODO: Revisit this logic — QMR should not be set when ReplicatedStorageClass.spec.replication == Availability.
-		qmr = byte(max(2, diskfulCount/2+1))
-	}
-	return
-}
-
-func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
-}
-
 type Reconciler struct {
 	cl  client.Client
 	sch *runtime.Scheme
@@ -165,4 +148,21 @@ func updateReplicatedVolumeIfNeeded(
 		changed = true
 	}
 	return changed
+}
+
+// CalculateQuorum calculates quorum and quorum minimum redundancy values
+// based on the number of diskful and total replicas.
+func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
+	if diskfulCount > 1 {
+		quorum = byte(max(2, all/2+1))
+
+		// TODO: Revisit this logic — QMR should not be set when ReplicatedStorageClass.spec.replication == Availability.
+		qmr = byte(max(2, diskfulCount/2+1))
+	}
+	return
+}
+
+func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
+	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
+		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
 }
