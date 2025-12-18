@@ -95,12 +95,9 @@ var _ = Describe("Reconcile", func() {
 			rv  *v1alpha3.ReplicatedVolume
 			rsc *v1alpha1.ReplicatedStorageClass
 			rvr *v1alpha3.ReplicatedVolumeReplica
-			// now time.Time
 		)
 
 		BeforeEach(func() {
-			// now = time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC)
-
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rsc-1",
