@@ -56,6 +56,18 @@ const (
 
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
+
+	// [ConditionTypeDataInitialized] indicates whether replica has successfully initialized
+	ConditionTypeDataInitialized = "DataInitialized"
+
+	// [ConditionTypeInQuorum] indicates whether replica is in quorum
+	ConditionTypeInQuorum = "InQuorum"
+
+	// [ConditionTypeInSync] indicates whether replica has been successfully synced
+	ConditionTypeInSync = "InSync"
+
+	// [ConditionTypeConfigured] indicates whether replica has been successfully configured
+	ConditionTypeConfigured = "Configured"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -156,4 +168,24 @@ const (
 	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
 	ReasonBackingVolumeReady          = "BackingVolumeReady"
 	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
+)
+
+// Condition reasons for [ConditionTypeDataInitialized] condition
+const (
+	ReasonInitialized = "Initialized"
+)
+
+// Condition reasons for [ConditionTypeInQuorum] condition
+const (
+	ReasonQuorum = "Quorum"
+)
+
+// Condition reasons for [ConditionTypeInSync] condition
+const (
+	ReasonInSync = "InSync"
+)
+
+// Condition reasons for [ConditionTypeConfigured] condition
+const (
+	ReasonConfigured = "Configured"
 )
