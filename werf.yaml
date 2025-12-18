@@ -11,7 +11,6 @@ build:
 ---
 {{ tpl (.Files.Get ".werf/base-images.yaml") $ }}
 {{ tpl (.Files.Get ".werf/werf-base-for-vex.yaml") $ }}
-{{ tpl (.Files.Get ".werf/werf-base-for-oras.yaml") $ }}
 {{ tpl (.Files.Get ".werf/consts.yaml") $ }}
 {{ tpl (.Files.Get ".werf/choose-edition.yaml") $ }}
 {{ tpl (.Files.Get ".werf/utils.yaml") $ }}
