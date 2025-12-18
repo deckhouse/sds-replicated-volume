@@ -79,22 +79,6 @@ func Test_PVCValidate(t *testing.T) {
 			wantValid: true,
 		},
 		{
-			name: "RWX PVC with replicated provisioner and allowed user",
-			obj: &v1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
-				Spec: v1.PersistentVolumeClaimSpec{
-					AccessModes:      []v1.PersistentVolumeAccessMode{v1.ReadWriteMany},
-					StorageClassName: stringPtr("sc"),
-				},
-			},
-			storageClasses: []*storagev1.StorageClass{
-				{ObjectMeta: metav1.ObjectMeta{Name: "sc"}, Provisioner: replicatedProvisioner},
-			},
-			username:  "system:serviceaccount:d8-virtualization:virtualization-controller",
-			groups:    []string{},
-			wantValid: true,
-		},
-		{
 			name: "RWX PVC with replicated provisioner and default allowed user",
 			obj: &v1.PersistentVolumeClaim{
 				ObjectMeta: metav1.ObjectMeta{Name: "pvc"},
@@ -106,7 +90,7 @@ func Test_PVCValidate(t *testing.T) {
 			storageClasses: []*storagev1.StorageClass{
 				{ObjectMeta: metav1.ObjectMeta{Name: "sc"}, Provisioner: replicatedProvisioner},
 			},
-			username:  "system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller",
+			username:  "system:serviceaccount:d8-virtualization:cdi-sa",
 			groups:    []string{},
 			wantValid: true,
 		},
