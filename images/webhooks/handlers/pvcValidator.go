@@ -34,9 +34,9 @@ import (
 )
 
 const (
-	pvcRwxAllowedUsernamesEnv     = "PVC_RWX_ALLOWED_USERNAMES"                      // comma-separated
-	pvcRwxAllowedGroupsEnv        = "PVC_RWX_ALLOWED_GROUPS"                         // comma-separated
-	pvcRwxDefaultAllowedUsernames = "system:serviceaccount:d8-virtualization:cdi-sa" // comma-separated
+	pvcRwxAllowedUsernamesEnv     = "PVC_RWX_ALLOWED_USERNAMES"                                                                                                       // comma-separated
+	pvcRwxAllowedGroupsEnv        = "PVC_RWX_ALLOWED_GROUPS"                                                                                                          // comma-separated
+	pvcRwxDefaultAllowedUsernames = "system:serviceaccount:kube-system:persistent-volume-binder,system:kube-scheduler,system:serviceaccount:d8-virtualization:cdi-sa" // comma-separated
 
 	storageClassIsDefaultAnnotation     = "storageclass.kubernetes.io/is-default-class"
 	storageClassIsDefaultBetaAnnotation = "storageclass.beta.kubernetes.io/is-default-class"
