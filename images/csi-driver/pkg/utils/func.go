@@ -279,7 +279,7 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] ReplicatedVolume found: %+v", traceID, name, rv))
 	log.Trace(fmt.Sprintf("[DeleteReplicatedVolume][traceID:%s][volumeID:%s] Removing finalizer %s if exists", traceID, name, SDSReplicatedVolumeCSIFinalizer))
 
-	removed, err := removeRVFinalizerIfExist(ctx, kc, log, rv, SDSReplicatedVolumeCSIFinalizer)
+	removed, err := removervdeletepropagationIfExist(ctx, kc, log, rv, SDSReplicatedVolumeCSIFinalizer)
 	if err != nil {
 		return fmt.Errorf("remove finalizers from ReplicatedVolume %s: %w", name, err)
 	}
@@ -294,7 +294,7 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	return err
 }
 
-func removeRVFinalizerIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *v1alpha2.ReplicatedVolume, finalizer string) (bool, error) {
+func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *v1alpha2.ReplicatedVolume, finalizer string) (bool, error) {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		removed := false
 		for i, val := range rv.Finalizers {
@@ -309,18 +309,18 @@ func removeRVFinalizerIfExist(ctx context.Context, kc client.Client, log *logger
 			return false, nil
 		}
 
-		log.Trace(fmt.Sprintf("[removeRVFinalizerIfExist] removing finalizer %s from ReplicatedVolume %s", finalizer, rv.Name))
+		log.Trace(fmt.Sprintf("[removervdeletepropagationIfExist] removing finalizer %s from ReplicatedVolume %s", finalizer, rv.Name))
 		err := kc.Update(ctx, rv)
 		if err == nil {
 			return true, nil
 		}
 
 		if !kerrors.IsConflict(err) {
-			return false, fmt.Errorf("[removeRVFinalizerIfExist] error updating ReplicatedVolume %s: %w", rv.Name, err)
+			return false, fmt.Errorf("[removervdeletepropagationIfExist] error updating ReplicatedVolume %s: %w", rv.Name, err)
 		}
 
 		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[removeRVFinalizerIfExist] conflict while updating ReplicatedVolume %s, retrying...", rv.Name))
+			log.Trace(fmt.Sprintf("[removervdeletepropagationIfExist] conflict while updating ReplicatedVolume %s, retrying...", rv.Name))
 			select {
 			case <-ctx.Done():
 				return false, ctx.Err()
@@ -328,7 +328,7 @@ func removeRVFinalizerIfExist(ctx context.Context, kc client.Client, log *logger
 				time.Sleep(KubernetesAPIRequestTimeout * time.Second)
 				freshRV, getErr := GetReplicatedVolume(ctx, kc, rv.Name)
 				if getErr != nil {
-					return false, fmt.Errorf("[removeRVFinalizerIfExist] error getting ReplicatedVolume %s after update conflict: %w", rv.Name, getErr)
+					return false, fmt.Errorf("[removervdeletepropagationIfExist] error getting ReplicatedVolume %s after update conflict: %w", rv.Name, getErr)
 				}
 				*rv = *freshRV
 			}
