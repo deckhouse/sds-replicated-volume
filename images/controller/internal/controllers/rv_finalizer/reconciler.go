@@ -84,21 +84,35 @@ func (r *Reconciler) processFinalizers(
 		}
 	} // it doesn't matter otherwise
 
-	switch {
-	case !rvHasFinalizer && (!rvDeleted || hasRVRs):
-		rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
-		log.Info("finalizer added to rv")
-		return true, nil
-	case rvHasFinalizer && rvDeleted && !hasRVRs:
+	if !rvDeleted {
+		if !rvHasFinalizer {
+			rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+			log.Info("finalizer added to rv")
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if hasRVRs {
+		if !rvHasFinalizer {
+			rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+			log.Info("finalizer added to rv")
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if rvHasFinalizer {
 		rv.Finalizers = slices.DeleteFunc(
 			rv.Finalizers,
 			func(f string) bool { return f == v1alpha3.ControllerAppFinalizer },
 		)
 		log.Info("finalizer deleted from rv")
 		return true, nil
-	default:
-		return false, nil
 	}
+
+	return false, nil
+
 }
 
 func (r *Reconciler) rvHasRVRs(ctx context.Context, log *slog.Logger, rvName string) (bool, error) {
