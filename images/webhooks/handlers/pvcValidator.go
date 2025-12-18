@@ -34,13 +34,20 @@ import (
 )
 
 const (
-	pvcRwxAllowedUsernamesEnv     = "PVC_RWX_ALLOWED_USERNAMES"                                                                                                       // comma-separated
-	pvcRwxAllowedGroupsEnv        = "PVC_RWX_ALLOWED_GROUPS"                                                                                                          // comma-separated
-	pvcRwxDefaultAllowedUsernames = "system:serviceaccount:kube-system:persistent-volume-binder,system:kube-scheduler,system:serviceaccount:d8-virtualization:cdi-sa" // comma-separated
+	pvcRwxAllowedUsernamesEnv = "PVC_RWX_ALLOWED_USERNAMES" // comma-separated
+	pvcRwxAllowedGroupsEnv    = "PVC_RWX_ALLOWED_GROUPS"    // comma-separated
 
 	storageClassIsDefaultAnnotation     = "storageclass.kubernetes.io/is-default-class"
 	storageClassIsDefaultBetaAnnotation = "storageclass.beta.kubernetes.io/is-default-class"
 )
+
+var pvcRwxDefaultAllowedUsernames = []string{
+	"system:serviceaccount:kube-system:persistent-volume-binder",
+	"system:kube-scheduler",
+	"system:serviceaccount:d8-virtualization:cdi-sa",
+	"system:serviceaccount:d8-virtualization:virtualization-controller",
+	"system:serviceaccount:kube-system:pvc-protection-controller",
+}
 
 // kubeClientFactory allows injecting a custom client factory for testing
 var kubeClientFactory = NewKubeClient
@@ -78,7 +85,7 @@ func PVCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 	allowedUsernames := splitCommaEnv(pvcRwxAllowedUsernamesEnv)
 	allowedGroups := splitCommaEnv(pvcRwxAllowedGroupsEnv)
 	if len(allowedUsernames) == 0 && len(allowedGroups) == 0 {
-		allowedUsernames = strings.Split(pvcRwxDefaultAllowedUsernames, ",")
+		allowedUsernames = pvcRwxDefaultAllowedUsernames
 	}
 
 	if userAllowed(arReview.UserInfo.Username, arReview.UserInfo.Groups, allowedUsernames, allowedGroups) {
