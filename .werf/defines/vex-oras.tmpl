@@ -1,0 +1,44 @@
+{{- define "vex oras mitigation" }}
+  {{- $ctx := index . 0 }}
+  {{- $imageName := index . 1 }}
+---
+image: {{ $imageName }}-vex-artifact
+fromImage: base/vex-oras
+final: true
+secrets:
+- id: REGISTRY_USER
+  env: REGISTRY_USER
+- id: REGISTRY_PASSWORD
+  env: REGISTRY_PASSWORD
+git:
+- add: /images/{{ $imageName }}/known_vulnerabilities.vex
+  to: /known_vulnerabilities.vex
+  stageDependencies:
+    install:
+    - "**/*"
+dependencies:
+- image: {{ $imageName }}
+  before: install
+  imports:
+  - type: ImageDigest
+    targetEnv: IMAGE_DIGEST
+  - type: ImageRepo
+    targetEnv: IMAGE_REPO
+shell:
+  install:
+  - export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
+  - export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
+  - |
+    curl -sSfL https://github.com/oras-project/oras/releases/download/v1.3.0/oras_1.3.0_linux_amd64.tar.gz | tar -xzOf - oras > /usr/bin/oras
+    chmod u+x /usr/bin/oras
+    curl -sSfL https://github.com/openvex/vexctl/releases/download/v0.4.1/vexctl-linux-amd64 -o /usr/bin/vexctl
+    chmod u+x /usr/bin/vexctl
+
+    vexctl attest known_vulnerabilities.vex | jq -Rs '{
+      payloadType: "application/vnd.in-toto+json",
+      payload: (gsub("\n"; "") | @base64)
+    }' > attestation.json
+
+    oras push "${IMAGE_REPO}:${IMAGE_DIGEST//:/-}.att" sds-attestation.json --artifact-type='application/vnd.in-toto+json'
+
+{{- end }}
