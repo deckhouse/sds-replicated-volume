@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rv "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 func TestAgentPodToRVRMapper(t *testing.T) {
@@ -71,7 +70,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "some-pod",
-					Namespace: rv.ControllerConfigMapNamespace,
+					Namespace: v1alpha3.ModuleNamespace,
 					Labels:    map[string]string{"app": "other"},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -84,7 +83,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: rv.ControllerConfigMapNamespace,
+					Namespace: v1alpha3.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 			},
@@ -101,7 +100,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: rv.ControllerConfigMapNamespace,
+					Namespace: v1alpha3.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -127,7 +126,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: rv.ControllerConfigMapNamespace,
+					Namespace: v1alpha3.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},

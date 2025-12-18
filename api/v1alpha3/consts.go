@@ -14,10 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package cluster
+package v1alpha3
 
-const (
-	MaxNodeID    = uint(7)
-	MinNodeMinor = uint(0)
-	MaxNodeMinor = uint(1048576)
-)
+const ModuleNamespace = "d8-sds-replicated-volume"

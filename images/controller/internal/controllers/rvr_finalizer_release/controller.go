@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrqnpccontroller
+package rvrfinalizerrelease
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -23,7 +23,7 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-const ControllerName = "rvr-quorum-and-publish-constrained-release-controller"
+const ControllerName = "rvr-finalizer-release-controller"
 
 func BuildController(mgr manager.Manager) error {
 	rec := NewReconciler(

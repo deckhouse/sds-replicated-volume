@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrqnpccontroller
+package rvrfinalizerrelease
 
 import (
 	"context"
@@ -30,7 +30,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const requeueAfterSec = 10
@@ -73,25 +72,38 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !isThisReplicaCountEnoughForQuorum(rv, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
-	}
+	if rv.DeletionTimestamp == nil {
+		if !isThisReplicaCountEnoughForQuorum(rv, replicasForRV, rvr.Name) {
+			log.Info("cluster is not ready for RVR GC: quorum condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
 
-	if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
-		log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
-	}
+		if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
+			log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
 
-	if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
-		log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
-		return reconcile.Result{
-			RequeueAfter: requeueAfterSec * time.Second,
-		}, nil
+		if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
+			log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
+			return reconcile.Result{
+				RequeueAfter: requeueAfterSec * time.Second,
+			}, nil
+		}
+	} else {
+		for i := range replicasForRV {
+			if isDeletingReplicaPublished(rv, replicasForRV[i].Spec.NodeName) {
+				log.Info("cluster is not ready for RVR GC: one replica is still published. Requeue after",
+					"seconds", requeueAfterSec,
+					"replicaName", replicasForRV[i].Name)
+				return reconcile.Result{
+					RequeueAfter: requeueAfterSec * time.Second,
+				}, nil
+			}
+		}
 	}
 
 	if err := r.removeControllerFinalizer(ctx, rvr, log); err != nil {
@@ -147,7 +159,7 @@ func isThisReplicaCountEnoughForQuorum(
 		return true
 	}
 
-	readyAndConnected := 0
+	onlineReplicaCount := 0
 	for _, rvr := range replicasForRV {
 		if rvr.Name == deletingRVRName {
 			continue
@@ -155,13 +167,12 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Status == nil {
 			continue
 		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, "Ready") &&
-			meta.IsStatusConditionTrue(rvr.Status.Conditions, "FullyConnected") {
-			readyAndConnected++
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeOnline) {
+			onlineReplicaCount++
 		}
 	}
 
-	return readyAndConnected >= quorum
+	return onlineReplicaCount >= quorum
 }
 
 func isDeletingReplicaPublished(
@@ -175,13 +186,7 @@ func isDeletingReplicaPublished(
 		return false
 	}
 
-	for _, nodeName := range rv.Status.PublishedOn {
-		if nodeName == deletingRVRNodeName {
-			return true
-		}
-	}
-
-	return false
+	return slices.Contains(rv.Status.PublishedOn, deletingRVRNodeName)
 }
 
 func hasEnoughDiskfulReplicasForReplication(
@@ -199,7 +204,7 @@ func hasEnoughDiskfulReplicasForReplication(
 		requiredDiskful = 1
 	}
 
-	actualDiskful := 0
+	ioReadyDiskfullCount := 0
 	for _, rvr := range replicasForRV {
 		if rvr.Name == deletingRVRName {
 			continue
@@ -210,18 +215,21 @@ func hasEnoughDiskfulReplicasForReplication(
 		if rvr.Status == nil {
 			continue
 		}
+		if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful {
+			continue
+		}
 		if rvr.Status.ActualType != v1alpha3.ReplicaTypeDiskful {
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, "Ready") {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeIOReady) {
 			continue
 		}
 
-		actualDiskful++
+		ioReadyDiskfullCount++
 	}
 
-	return actualDiskful >= requiredDiskful
+	return ioReadyDiskfullCount >= requiredDiskful
 }
 
 func (r *Reconciler) removeControllerFinalizer(
@@ -243,7 +251,7 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	oldFinalizersLen := len(current.Finalizers)
-	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == rvreconcile.ControllerFinalizerName })
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha3.ControllerAppFinalizer })
 
 	if oldFinalizersLen == len(current.Finalizers) {
 		return nil

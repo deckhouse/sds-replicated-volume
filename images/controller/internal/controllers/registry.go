@@ -21,14 +21,15 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
+	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
 	rvrownerreferencecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference_controller"
-	rvrqnpccontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_quorum_and_publish_constrained_release_controller"
 	rvrstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_conditions"
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
@@ -49,7 +50,8 @@ func init() {
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrownerreferencecontroller.BuildController)
-	registry = append(registry, rvrqnpccontroller.BuildController)
+	registry = append(registry, rvdeletepropagation.BuildController)
+	registry = append(registry, rvrfinalizerrelease.BuildController)
 	registry = append(registry, rvfinalizer.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
 
