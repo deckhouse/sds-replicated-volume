@@ -101,6 +101,22 @@ moduleStatus: preview
    EOF
    ```
 
+{{< alert level="warning" >}}
+Параметр [dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) рекомендуется указывать в момент включения модуля.
+
+Уже добавленные лейблы `storage.deckhouse.io/sds-replicated-volume-node: ""` не удаляются автоматически, так как в текущей версии control-plane нет механизма автоматической эвакуации данных с узлов кластера.
+
+Если требуется убрать ресурсы модуля с узла, необходимо:
+
+1. Вручную запустить скрипт эвакуации данных `evict.sh` (расположен в контейнере `linstor-server`).
+2. После эвакуации удалить с узла лейбл:
+
+   ```shell
+   kubectl label node <node-name> storage.deckhouse.io/sds-replicated-volume-node-
+   ```
+
+{{< /alert >}}
+
 1. Дождитесь пока модуль `sds-replicated-volume` перейдёт в состояние `Ready`:
 
    ```shell
