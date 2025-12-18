@@ -17,11 +17,13 @@ limitations under the License.
 package rvr_scheduling_controller
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
-
-	"github.com/go-logr/logr"
 )
 
 type schedulerExtenderLVG struct {
@@ -54,100 +56,133 @@ type SchedulerExtenderClient struct {
 	url        string
 }
 
-func NewSchedulerHTTPClient() *SchedulerExtenderClient {
+func NewSchedulerHTTPClient() (*SchedulerExtenderClient, error) {
 	extURL := os.Getenv("SCHEDULER_EXTENDER_URL") // TODO init in the other place later
 	if extURL == "" {
 		// No scheduler-extender URL configured — disable external capacity filtering.
-		return nil
+		return nil, errors.New("scheduler-extender URL is not configured")
 	}
 	return &SchedulerExtenderClient{
 		httpClient: http.DefaultClient,
 		url:        extURL,
-	}
+	}, nil
 }
 
 func (c *SchedulerExtenderClient) filterNodesBySchedulerExtender(
 	ctx context.Context,
 	sctx *SchedulingContext,
-	log logr.Logger,
-) (map[string]struct{}, error) {
-	return nil, nil
-	// Build LVG list from keys of the LVG->nodes map; thinPoolName is not known at this level.
-	// reqLVGs := make([]schedulerExtenderLVG, 0, len(lvgToNodeNamesMap))
-	// for name := range lvgToNodeNamesMap {
-	// 	reqLVGs = append(reqLVGs, schedulerExtenderLVG{Name: name})
-	// }
+) error {
+	// Collect all candidate nodes from ZonesToNodeCandidatesMap
+	candidateNodes := make(map[string]struct{})
+	for _, candidates := range sctx.ZonesToNodeCandidatesMap {
+		for _, candidate := range candidates {
+			candidateNodes[candidate.Name] = struct{}{}
+		}
+	}
 
-	// if len(reqLVGs) == 0 {
-	// 	// No LVGs to check — which also implies no candidate nodes.
-	// 	return map[string]struct{}{}, nil
-	// }
+	// Build LVG list from SpLvgToNodeInfoMap, but only for nodes in ZonesToNodeCandidatesMap
+	reqLVGs := make([]schedulerExtenderLVG, 0, len(sctx.SpLvgToNodeInfoMap))
+	for lvgName, info := range sctx.SpLvgToNodeInfoMap {
+		// Skip LVGs whose nodes are not in the candidate list
+		if _, ok := candidateNodes[info.NodeName]; !ok {
+			continue
+		}
+		reqLVGs = append(reqLVGs, schedulerExtenderLVG{
+			Name:         lvgName,
+			ThinPoolName: info.ThinPoolName,
+		})
+	}
 
-	// volType := "thick" // TODO get the real type from RSP
-	// size := rv.Spec.Size.Value()
+	if len(reqLVGs) == 0 {
+		// No LVGs to check — no candidate nodes have LVGs from the storage pool
+		return fmt.Errorf("no candidate nodes have LVGs from storage pool %s", sctx.Rsc.Spec.StoragePool)
+	}
 
-	// reqBody := schedulerExtenderRequest{
-	// 	LVGS: reqLVGs,
-	// 	Volume: schedulerExtenderVolume{
-	// 		Name: rv.Name,
-	// 		Size: size,
-	// 		Type: volType,
-	// 	},
-	// }
+	var volType string
+	switch sctx.Rsp.Spec.Type {
+	case "LVMThin":
+		volType = "thin"
+	case "LVM":
+		volType = "thick"
+	default:
+		return fmt.Errorf("RSP volume type is not supported: %s", sctx.Rsp.Spec.Type)
+	}
+	size := sctx.Rv.Spec.Size.Value()
 
-	// data, err := json.Marshal(reqBody)
-	// if err != nil {
-	// 	log.Error(err, "unable to marshal scheduler-extender request")
-	// 	return nil, err
-	// }
+	reqBody := schedulerExtenderRequest{
+		LVGS: reqLVGs,
+		Volume: schedulerExtenderVolume{
+			Name: sctx.Rv.Name,
+			Size: size,
+			Type: volType,
+		},
+	}
 
-	// httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
-	// if err != nil {
-	// 	log.Error(err, "unable to build scheduler-extender request")
-	// 	return nil, err
-	// }
-	// httpReq.Header.Set("Content-Type", "application/json")
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		sctx.log.Error(err, "unable to marshal scheduler-extender request")
+		return fmt.Errorf("unable to marshal scheduler-extender request: %w", err)
+	}
 
-	// resp, err := c.httpClient.Do(httpReq)
-	// if err != nil {
-	// 	log.Error(err, "scheduler-extender request failed")
-	// 	return nil, err
-	// }
-	// defer resp.Body.Close()
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
+	if err != nil {
+		sctx.log.Error(err, "unable to build scheduler-extender request")
+		return fmt.Errorf("unable to build scheduler-extender request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
 
-	// if resp.StatusCode != http.StatusOK {
-	// 	log.Error(fmt.Errorf("unexpected status %d from scheduler-extender", resp.StatusCode), "scheduler-extender returned non-200 status")
-	// 	return nil, fmt.Errorf("scheduler-extender returned unexpected status %d", resp.StatusCode)
-	// }
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		sctx.log.Error(err, "scheduler-extender request failed")
+		return fmt.Errorf("scheduler-extender request failed: %w", err)
+	}
+	defer resp.Body.Close()
 
-	// var respBody schedulerExtenderResponse
-	// if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-	// 	log.Error(err, "unable to decode scheduler-extender response")
-	// 	return nil, err
-	// }
+	if resp.StatusCode != http.StatusOK {
+		sctx.log.Error(nil, "scheduler-extender returned non-200 status", "status", resp.StatusCode)
+		return fmt.Errorf("scheduler-extender returned unexpected status %d", resp.StatusCode)
+	}
 
-	// if len(respBody.LVGS) == 0 {
-	// 	return map[string]struct{}{}, nil
-	// }
+	var respBody schedulerExtenderResponse
+	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
+		sctx.log.Error(err, "unable to decode scheduler-extender response")
+		return fmt.Errorf("unable to decode scheduler-extender response: %w", err)
+	}
 
-	// allowedLVGs := make(map[string]struct{}, len(respBody.LVGS))
-	// for _, l := range respBody.LVGS {
-	// 	allowedLVGs[l.Name] = struct{}{}
-	// }
+	// Build map of LVG name -> score from response
+	lvgScores := make(map[string]int, len(respBody.LVGS))
+	for _, lvg := range respBody.LVGS {
+		lvgScores[lvg.Name] = lvg.Score
+	}
 
-	// nodesWithLVG := make(map[string]struct{})
-	// for lvgName, nodes := range lvgToNodeNamesMap {
-	// 	if _, ok := allowedLVGs[lvgName]; !ok {
-	// 		continue
-	// 	}
-	// 	for _, n := range nodes {
-	// 		nodesWithLVG[n] = struct{}{}
-	// 	}
-	// }
+	// Build map of node -> score based on LVG scores
+	// Node gets the score of its LVG (if LVG is in the response)
+	nodeScores := make(map[string]int)
+	for lvgName, info := range sctx.SpLvgToNodeInfoMap {
+		if score, ok := lvgScores[lvgName]; ok {
+			nodeScores[info.NodeName] = score
+		}
+	}
 
-	// if len(nodesWithLVG) == 0 {
-	// 	return map[string]struct{}{}, nil
-	// }
+	// Filter ZonesToNodeCandidatesMap: keep only nodes that have score (i.e., their LVG was returned)
+	// and update their scores
+	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
+		filteredCandidates := make([]NodeCandidate, 0, len(candidates))
+		for _, candidate := range candidates {
+			if score, ok := nodeScores[candidate.Name]; ok {
+				filteredCandidates = append(filteredCandidates, NodeCandidate{
+					Name:  candidate.Name,
+					Score: score,
+				})
+			}
+			// Node not in response — skip (no capacity)
+		}
+		if len(filteredCandidates) > 0 {
+			sctx.ZonesToNodeCandidatesMap[zone] = filteredCandidates
+		} else {
+			delete(sctx.ZonesToNodeCandidatesMap, zone)
+		}
+	}
 
-	// return nodesWithLVG, nil
+	return nil
 }

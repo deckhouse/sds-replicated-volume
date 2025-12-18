@@ -19,9 +19,11 @@ package rvr_scheduling_controller
 import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/go-logr/logr"
 )
 
 type SchedulingContext struct {
+	log                            logr.Logger
 	Rv                             *v1alpha3.ReplicatedVolume
 	Rsc                            *v1alpha1.ReplicatedStorageClass
 	Rsp                            *v1alpha1.ReplicatedStoragePool
@@ -30,6 +32,18 @@ type SchedulingContext struct {
 	NodesOfRvReplicas              []string
 	PublishOnNodesWithoutRvReplica []string
 	UnscheduledDiskfulReplicas     []*v1alpha3.ReplicatedVolumeReplica
-	SpLvgToNodeNamesMap            map[string][]string
+	ScheduledDiskfulReplicas       []*v1alpha3.ReplicatedVolumeReplica
+	SpLvgToNodeInfoMap             map[string]LvgNodeInfo // {lvgName: {NodeName, ThinPoolName}}
 	RscNodes                       []string
+	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
+}
+
+type NodeCandidate struct {
+	Name  string
+	Score int
+}
+
+type LvgNodeInfo struct {
+	NodeName     string
+	ThinPoolName string
 }
