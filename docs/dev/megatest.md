@@ -103,15 +103,15 @@
   - запускает:
     - pod-destroyer(agent, 1, 2, 30, 60)
     - pod-destroyer(controller, 1, 3, 30, 60)
-    - pod-destroyer(kube-apiserver, 1, 3, 120, 240) - ПОКА НЕ ДЕЛАЕМ!
+    - pod-destroyer(kube-apiserver, 1, 3, 120, 240) - ПОКА НЕ ДЕЛАЕМ (т.е. kube-apiserver это статичный под)!
   - в цикле
     - если количество запущенных volume_main < max_vol
       - выбирает случайным образом количество для запуска (step_min, step_max), может превышать max_vol
       - в цикле для каждого N
-        - выбирает случайный sc
+        - выбирает случайный scName
         - выбирает случайный vol_period
-        - генерирует случайное имя
-        - запускает volume-main(rv, sc, vol_period)
+        - генерирует случайное имя rvName
+        - запускает volume-main(rvName, scName, vol_period)
     - ждет рандом(step_period_min, step_period_max)
   - когда ей посылают сигнал окончания
     - останавливает всё запущенное
