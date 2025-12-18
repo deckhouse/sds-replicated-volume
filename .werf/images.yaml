@@ -2,6 +2,13 @@
 
 {{- range $path, $content := $ImagesBuildFiles  }}
   {{ $ctx := (dict "ImageName" ($path | split "/")._1 "Root" $ "Versions" $.VERSIONS) }}
+  # cosign
+  {{- $_ := set $ctx "RegistryUser" (env "REGISTRY_USER" "") }}
+  {{- $_ := set $ctx "RegistryPassword" (env "REGISTRY_PASSWORD" "") }}
+  {{- $_ := set $ctx "CosignVaultAdress" (env "COSIGN_VAULTADRESS" "") }}
+  {{- $_ := set $ctx "CosignVaultToken" (env "COSIGN_VAULTTOKEN" "") }}
+  {{- $_ := set $ctx "CosignVaultKey" (env "COSIGN_VAULTKEY" "") }}
+  {{- $_ := set $ctx "CosignTransitSecret" (env "COSIGN_TRANSITSECRET" "") }}
 ---
   {{- /* For Dockerfile just render it from the folder. */ -}}
   {{- if not (regexMatch "/werf.inc.yaml$" $path) }}

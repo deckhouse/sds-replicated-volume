@@ -1,10 +1,11 @@
 {{- define "vex mitigation" }}
-  {{- $context := index . 0 }}
+  {{- $ctx := index . 0 }}
   {{- $imageName := index . 1 }}
 ---
 image: {{ $imageName }}-vex-artifact
 fromImage: base/vex
 final: true
+  {{- if and (lt (len $ctx.CosignVaultAdress) 1) (lt (len $ctx.CosignVaultToken) 1) (lt (len $ctx.CosignVaultKey) 1) (lt (len $ctx.CosignTransitSecret) 1)}}
 secrets:
 - id: REGISTRY_USER
   env: REGISTRY_USER
@@ -22,6 +23,7 @@ secrets:
   env: ACTIONS_ID_TOKEN_REQUEST_TOKEN
 - id: ACTIONS_ID_TOKEN_REQUEST_URL
   env: ACTIONS_ID_TOKEN_REQUEST_URL
+{{- end }}
 git:
 - add: /images/{{ $imageName }}/known_vulnerabilities.vex
   to: /known_vulnerabilities.vex
@@ -38,6 +40,7 @@ dependencies:
     targetEnv: IMAGE_REPO
 shell:
   install:
+  - echo "Start cosign"
   - export REGISTRY_USER="$(cat /run/secrets/REGISTRY_USER)"
   - export REGISTRY_PASSWORD="$(cat /run/secrets/REGISTRY_PASSWORD)"
   - export VAULT_ADDR="$(cat /run/secrets/COSIGN_VAULT_ADDRESS)"
@@ -47,16 +50,19 @@ shell:
   - export ACTIONS_ID_TOKEN_REQUEST_TOKEN="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_TOKEN)"
   - export ACTIONS_ID_TOKEN_REQUEST_URL="$(cat /run/secrets/ACTIONS_ID_TOKEN_REQUEST_URL)"
   - |
-    if -z "${VAULT_ADDR}" || -z "${COSIGN_VAULT_KEY} || -z "${COSIGN_AUTH_ROLE}"; then
+    echo "Print VAULT_ADDR: ${VAULT_ADDR}"
+    echo "Print COSIGN_VAULT_KEY: ${COSIGN_VAULT_KEY}"
+    echo "Print COSIGN_AUTH_ROLE: ${COSIGN_AUTH_ROLE}"
+    if [[ -z "${VAULT_ADDR}" || -z "${COSIGN_VAULT_KEY}" || -z "${COSIGN_AUTH_ROLE}" ]]; then
       export COSIGN_PASSWORD=""
       cosign generate-key-pair
-      KEY="cosign.key"
+      export KEY="cosign.key"
     else
       ACTIONS_ID_TOKEN=$(jq -r .value <<< $(curl -fsH "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=github-access-aud" )) \
       VAULT_TOKEN="$(curl -X POST "${VAULT_ADDR}/v1/auth/github/login" -d '{"role":"'${COSIGN_AUTH_ROLE}'","jwt":"'${ACTIONS_ID_TOKEN}'"}' | jq -r '.auth.client_token')" \
-      KEY="hashivault://${COSIGN_VAULT_KEY}"
+      export KEY="hashivault://${COSIGN_VAULT_KEY}"
     fi
-
+    echo "Cosign attesting"
     cosign attest \
       --replace \
       --registry-username="${REGISTRY_USER}" \
