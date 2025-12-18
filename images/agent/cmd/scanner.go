@@ -26,12 +26,14 @@ import (
 	"slices"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
-	. "github.com/deckhouse/sds-common-lib/utils"
+	u "github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -89,12 +91,12 @@ func (s *Scanner) Run() error {
 		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
 			s.log.Debug("added resource update event", "resource", ev)
 			if err := s.batcher.Add(ev); err != nil {
-				return LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
+				return u.LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
 			}
 		}
 
 		if err != nil && s.ctx.Err() == nil {
-			return LogError(s.log, fmt.Errorf("run events2: %w", err))
+			return u.LogError(s.log, fmt.Errorf("run events2: %w", err))
 		}
 
 		if err != nil && s.ctx.Err() != nil {
@@ -178,7 +180,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 			statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 			if err != nil {
-				return LogError(log, fmt.Errorf("getting statusResult: %w", err))
+				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
@@ -195,7 +197,7 @@ func (s *Scanner) ConsumeBatches() error {
 				},
 			)
 			if err != nil {
-				return LogError(log, fmt.Errorf("listing rvr: %w", err))
+				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 			}
 
 			for _, item := range batch {
@@ -230,7 +232,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 				if err != nil {
-					return LogError(
+					return u.LogError(
 						log,
 						fmt.Errorf("updating replica status: %w", err),
 					)
@@ -257,11 +259,110 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	}
 	copyStatusFields(rvr.Status.DRBD.Status, resource)
 
+	s.updateReplicaStatusConditionDataInitialized(rvr, resource)
+	s.updateReplicaStatusConditionInQuorum(rvr, resource)
+
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
 	}
 
 	return nil
+}
+
+func (s *Scanner) updateReplicaStatusConditionDataInitialized(
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	resource *drbdsetup.Resource,
+) {
+	diskful := rvr.Spec.Type == "Diskful"
+
+	if !diskful {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:               v1alpha3.ConditionTypeDataInitialized,
+				Status:             v1.ConditionFalse,
+				Reason:             v1alpha3.ReasonNotApplicableToDiskless,
+				ObservedGeneration: rvr.Generation,
+			},
+		)
+		return
+	}
+
+	alreadyTrue := meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
+	if alreadyTrue {
+		return
+	}
+
+	becameTrue := len(resource.Devices) > 0 && resource.Devices[0].DiskState == "UpToDate"
+	if becameTrue {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:               v1alpha3.ConditionTypeDataInitialized,
+				Status:             v1.ConditionTrue,
+				Reason:             v1alpha3.ReasonDiskHasBeenSeenInUpToDateState,
+				ObservedGeneration: rvr.Generation,
+			},
+		)
+		return
+	}
+
+	alreadyFalse := meta.IsStatusConditionFalse(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
+	if alreadyFalse {
+		return
+	}
+
+	meta.SetStatusCondition(
+		&rvr.Status.Conditions,
+		v1.Condition{
+			Type:               v1alpha3.ConditionTypeDataInitialized,
+			Status:             v1.ConditionFalse,
+			Reason:             v1alpha3.ReasonDiskNeverWasInUpToDateState,
+			ObservedGeneration: rvr.Generation,
+		},
+	)
+}
+
+func (s *Scanner) updateReplicaStatusConditionInQuorum(
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	resource *drbdsetup.Resource,
+) {
+	if len(resource.Devices) == 0 {
+		s.log.Warn("no devices reported by DRBD")
+		return
+	}
+
+	newCond := v1.Condition{Type: v1alpha3.ConditionTypeInQuorum}
+	var condUpdated bool
+
+	inQuorum := resource.Devices[0].Quorum
+
+	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInQuorum)
+	if oldCond == nil || oldCond.Status == v1.ConditionUnknown {
+		// initial setup - simpler message
+		if inQuorum {
+			newCond.Status, newCond.Reason = v1.ConditionTrue, v1alpha3.ReasonInQuorumInQuorum
+		} else {
+			newCond.Status, newCond.Reason = v1.ConditionFalse, v1alpha3.ReasonInQuorumQuorumLost
+		}
+		condUpdated = true
+	} else {
+		if inQuorum && oldCond.Status != v1.ConditionTrue {
+			// switch to true
+			newCond.Status, newCond.Reason = v1.ConditionTrue, v1alpha3.ReasonInQuorumInQuorum
+			newCond.Message = fmt.Sprintf("Quorum achieved after being lost for %v", time.Since(oldCond.LastTransitionTime.Time))
+			condUpdated = true
+		} else if !inQuorum && oldCond.Status != v1.ConditionFalse {
+			// switch to false
+			newCond.Status, newCond.Reason = v1.ConditionFalse, v1alpha3.ReasonInQuorumQuorumLost
+			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
+			condUpdated = true
+		}
+	}
+
+	if condUpdated {
+		meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
+	}
 }
 
 func copyStatusFields(
@@ -285,7 +386,7 @@ func copyStatusFields(
 		target.Devices = append(target.Devices, v1alpha3.DeviceStatus{
 			Volume:       d.Volume,
 			Minor:        d.Minor,
-			DiskState:    d.DiskState,
+			DiskState:    v1alpha3.ParseDiskState(d.DiskState),
 			Client:       d.Client,
 			Open:         d.Open,
 			Quorum:       d.Quorum,
@@ -305,7 +406,7 @@ func copyStatusFields(
 		conn := v1alpha3.ConnectionStatus{
 			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
-			ConnectionState: c.ConnectionState,
+			ConnectionState: v1alpha3.ParseConnectionState(c.ConnectionState),
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
@@ -336,8 +437,8 @@ func copyStatusFields(
 		for _, pd := range c.PeerDevices {
 			conn.PeerDevices = append(conn.PeerDevices, v1alpha3.PeerDeviceStatus{
 				Volume:                 pd.Volume,
-				ReplicationState:       pd.ReplicationState,
-				PeerDiskState:          pd.PeerDiskState,
+				ReplicationState:       v1alpha3.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:          v1alpha3.ParseDiskState(pd.PeerDiskState),
 				PeerClient:             pd.PeerClient,
 				ResyncSuspended:        pd.ResyncSuspended,
 				OutOfSync:              pd.OutOfSync,

@@ -36,8 +36,9 @@ const (
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
 	ConditionTypeScheduled = "Scheduled"
 
-	// [ConditionTypeInitialized] indicates whether replica has been initialized (does not reset after True)
-	ConditionTypeInitialized = "Initialized"
+	// [ConditionTypeDataInitialized] indicates whether replica has been initialized.
+	// Does not reset after True, unless replica type has changed.
+	ConditionTypeDataInitialized = "DataInitialized"
 
 	// [ConditionTypeInQuorum] indicates whether replica is in quorum
 	ConditionTypeInQuorum = "InQuorum"
@@ -106,7 +107,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeAddressConfigured:     {false},
 	ConditionTypeBackingVolumeCreated:  {false},
 	ConditionTypeScheduled:             {false},
-	ConditionTypeInitialized:           {false},
+	ConditionTypeDataInitialized:       {false},
 	ConditionTypeInQuorum:              {false},
 	ConditionTypeInSync:                {false},
 	ConditionTypeOnline:                {false},
@@ -229,12 +230,15 @@ const (
 
 // Condition reasons for [ConditionTypeDataInitialized] condition
 const (
-	ReasonInitialized = "Initialized"
+	ReasonNotApplicableToDiskless        = "NotApplicableToDiskless"
+	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
+	ReasonDiskNeverWasInUpToDateState    = "DiskNeverWasInUpToDateState"
 )
 
 // Condition reasons for [ConditionTypeInQuorum] condition
 const (
-	ReasonQuorum = "Quorum"
+	ReasonInQuorumInQuorum   = "InQuorum"
+	ReasonInQuorumQuorumLost = "QuorumLost"
 )
 
 // Condition reasons for [ConditionTypeInSync] condition
