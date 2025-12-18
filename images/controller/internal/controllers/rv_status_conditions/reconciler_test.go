@@ -17,7 +17,6 @@ limitations under the License.
 package rvstatusconditions
 
 import (
-	"context"
 	"strings"
 	"testing"
 
@@ -25,9 +24,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -36,18 +35,18 @@ import (
 
 func setupScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
-	scheme := runtime.NewScheme()
-	if err := v1alpha1.AddToScheme(scheme); err != nil {
+	s := scheme.Scheme
+	if err := v1alpha1.AddToScheme(s); err != nil {
 		t.Fatalf("failed to add v1alpha1 to scheme: %v", err)
 	}
-	if err := v1alpha3.AddToScheme(scheme); err != nil {
+	if err := v1alpha3.AddToScheme(s); err != nil {
 		t.Fatalf("failed to add v1alpha3 to scheme: %v", err)
 	}
-	return scheme
+	return s
 }
 
 func newTestReconciler(cl client.Client) *Reconciler {
-	return NewReconciler(cl, logr.New(log.NullLogSink{}))
+	return NewReconciler(cl, logr.Discard())
 }
 
 // conditionTestCase represents a single test case for condition calculation
@@ -105,11 +104,11 @@ type expectedCondition struct {
 }
 
 func TestReconciler_RVNotFound(t *testing.T) {
-	ctx := context.Background()
-	scheme := setupScheme(t)
+	ctx := t.Context()
+	s := setupScheme(t)
 
 	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
+		WithScheme(s).
 		WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
 		Build()
 
@@ -128,8 +127,8 @@ func TestReconciler_RVNotFound(t *testing.T) {
 }
 
 func TestReconciler_RSCNotFound(t *testing.T) {
-	ctx := context.Background()
-	scheme := setupScheme(t)
+	ctx := t.Context()
+	s := setupScheme(t)
 
 	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -141,7 +140,7 @@ func TestReconciler_RSCNotFound(t *testing.T) {
 	}
 
 	cl := fake.NewClientBuilder().
-		WithScheme(scheme).
+		WithScheme(s).
 		WithObjects(rv).
 		WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
 		Build()
@@ -444,8 +443,8 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 
 func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	t.Helper()
-	ctx := context.Background()
-	scheme := setupScheme(t)
+	ctx := t.Context()
+	s := setupScheme(t)
 
 	// Create RV
 	rv := &v1alpha3.ReplicatedVolume{
@@ -481,7 +480,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 
 	// Build client
 	builder := fake.NewClientBuilder().
-		WithScheme(scheme).
+		WithScheme(s).
 		WithObjects(rv, rsc).
 		WithStatusSubresource(&v1alpha3.ReplicatedVolume{}, &v1alpha3.ReplicatedVolumeReplica{})
 
