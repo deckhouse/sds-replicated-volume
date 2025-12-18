@@ -50,6 +50,10 @@ shell:
     - cd /src/drbd-utils
     - ./autogen.sh
     - ./configure --prefix=/ --sysconfdir=/etc --localstatedir=/var --without-manual
+      # Fix the command startup error:
+      # 'git rev-parse HEAD'
+      # fatal: not a git repository (or any of the parent directories): .git
+    - if ! test -e .git/refs;then echo "-- mkdir -p .git/refs" ;mkdir -p .git/refs ;fi
     - make
     - make install DESTDIR=/drbd-utils
     - sed -i 's/usage-count\s*yes;/usage-count no;/' /drbd-utils/etc/drbd.d/global_common.conf
