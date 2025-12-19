@@ -24,7 +24,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -33,16 +32,14 @@ import (
 )
 
 type Reconciler struct {
-	cl     client.Client
-	log    logr.Logger
-	scheme *runtime.Scheme
+	cl  client.Client
+	log logr.Logger
 }
 
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 	return &Reconciler{
-		cl:     cl,
-		log:    log,
-		scheme: scheme,
+		cl:  cl,
+		log: log,
 	}
 }
 
@@ -274,47 +271,29 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		publishSet[nodeName] = struct{}{}
 	}
 
-	for _, rvr := range replicasForRV {
+	for i := range replicasForRV {
+		rvr := &replicasForRV[i]
+
 		if rvr.Spec.NodeName == "" {
+			if err := r.patchRVRStatusConditions(ctx, log, rvr, false); err != nil {
+				// TODO: may be proceed, join errors and return later?
+				return err
+			}
 			continue
 		}
 
 		_, shouldBePrimary := publishSet[rvr.Spec.NodeName]
 
-		patchedRVR := rvr.DeepCopy()
-
-		if shouldBePrimary && patchedRVR.Spec.Type == "TieBreaker" {
-			patchedRVR.Spec.Type = "Access"
-			if err := r.cl.Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
-				if !apierrors.IsNotFound(err) {
-					log.Error(err, "unable to patch ReplicatedVolumeReplica type to Access")
-					return err
-				}
-			}
-		}
-		if patchedRVR.Status == nil {
-			patchedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
-		}
-		if patchedRVR.Status.DRBD == nil {
-			patchedRVR.Status.DRBD = &v1alpha3.DRBD{}
-		}
-		if patchedRVR.Status.DRBD.Config == nil {
-			patchedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
-		}
-
-		currentPrimaryValue := false
-		if patchedRVR.Status.DRBD.Config.Primary != nil {
-			currentPrimaryValue = *patchedRVR.Status.DRBD.Config.Primary
-		}
-		if currentPrimaryValue != shouldBePrimary {
-			patchedRVR.Status.DRBD.Config.Primary = &shouldBePrimary
-		}
-
-		if err := r.cl.Status().Patch(ctx, patchedRVR, client.MergeFrom(&rvr)); err != nil {
-			if !apierrors.IsNotFound(err) {
-				log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
+		if shouldBePrimary && rvr.Spec.Type == "TieBreaker" {
+			if err := r.patchRVRTypeToAccess(ctx, log, rvr); err != nil {
+				// TODO: may be proceed, join errors and return later?
 				return err
 			}
+		}
+
+		if err := r.patchRVRPrimary(ctx, log, rvr, shouldBePrimary); err != nil {
+			// TODO: may be proceed, join errors and return later?
+			return err
 		}
 	}
 
@@ -347,6 +326,83 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		// RV was deleted concurrently; nothing left to publish for
 	}
 
+	return nil
+}
+
+func (r *Reconciler) patchRVRTypeToAccess(
+	ctx context.Context,
+	log logr.Logger,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+) error {
+	originalRVR := rvr.DeepCopy()
+
+	rvr.Spec.Type = "Access"
+	if err := r.cl.Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to patch ReplicatedVolumeReplica type to Access")
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) patchRVRPrimary(
+	ctx context.Context,
+	log logr.Logger,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	shouldBePrimary bool,
+) error {
+	originalRVR := rvr.DeepCopy()
+
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+	}
+	if rvr.Status.DRBD == nil {
+		rvr.Status.DRBD = &v1alpha3.DRBD{}
+	}
+	if rvr.Status.DRBD.Config == nil {
+		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+	}
+
+	currentPrimaryValue := false
+	if rvr.Status.DRBD.Config.Primary != nil {
+		currentPrimaryValue = *rvr.Status.DRBD.Config.Primary
+	}
+	if currentPrimaryValue != shouldBePrimary {
+		rvr.Status.DRBD.Config.Primary = &shouldBePrimary
+	}
+
+	rvr.UpdateStatusConditionPublished(shouldBePrimary)
+
+	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to patch ReplicatedVolumeReplica primary", "rvr", rvr.Name)
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) patchRVRStatusConditions(
+	ctx context.Context,
+	log logr.Logger,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
+	shouldBePrimary bool,
+) error {
+	originalRVR := rvr.DeepCopy()
+
+	if rvr.Status == nil {
+		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+	}
+
+	rvr.UpdateStatusConditionPublished(shouldBePrimary)
+
+	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "unable to patch ReplicatedVolumeReplica status conditions", "rvr", rvr.Name)
+			return err
+		}
+	}
 	return nil
 }
 

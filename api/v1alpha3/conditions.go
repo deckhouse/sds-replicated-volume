@@ -78,6 +78,9 @@ const (
 
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
+
+	// [ConditionTypePublished] indicates whether the replica has been published
+	ConditionTypePublished = "Published"
 )
 
 // RV condition types
@@ -230,4 +233,13 @@ const (
 // Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)
 const (
 	ReasonSynchronizing = "Synchronizing"
+)
+
+// Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)
+const (
+	// status=True
+	ReasonPublished = "Published"
+	// status=False
+	ReasonUnpublished    = "Unpublished"
+	ReasonPublishPending = "PublishPending"
 )
