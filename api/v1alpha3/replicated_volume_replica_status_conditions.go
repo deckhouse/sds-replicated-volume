@@ -237,11 +237,12 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	}
 
 	if rvr.Status.DRBD.Errors != nil {
-		if rvr.Status.DRBD.Errors.FileSystemOperationError != nil {
+		switch {
+		case rvr.Status.DRBD.Errors.FileSystemOperationError != nil:
 			cond.Status = v1.ConditionFalse
 			cond.Reason = ReasonFileSystemOperationFailed
 			cond.Message = rvr.Status.DRBD.Errors.FileSystemOperationError.Message
-		} else if rvr.Status.DRBD.Errors.ConfigurationCommandError != nil {
+		case rvr.Status.DRBD.Errors.ConfigurationCommandError != nil:
 			cond.Status = v1.ConditionFalse
 			cond.Reason = ReasonConfigurationCommandFailed
 			cond.Message = fmt.Sprintf(
@@ -249,14 +250,14 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 				rvr.Status.DRBD.Errors.ConfigurationCommandError.Command,
 				rvr.Status.DRBD.Errors.ConfigurationCommandError.ExitCode,
 			)
-		} else if rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil {
+		case rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil:
 			cond.Status = v1.ConditionFalse
 			cond.Reason = ReasonSharedSecretAlgSelectionFailed
 			cond.Message = fmt.Sprintf(
 				"Algorithm %s is not supported by node kernel",
 				rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg,
 			)
-		} else if rvr.Status.DRBD.Errors.LastPrimaryError != nil {
+		case rvr.Status.DRBD.Errors.LastPrimaryError != nil:
 			cond.Status = v1.ConditionFalse
 			cond.Reason = ReasonPromoteFailed
 			cond.Message = fmt.Sprintf(
@@ -264,7 +265,7 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 				rvr.Status.DRBD.Errors.LastPrimaryError.Command,
 				rvr.Status.DRBD.Errors.LastPrimaryError.ExitCode,
 			)
-		} else if rvr.Status.DRBD.Errors.LastSecondaryError != nil {
+		case rvr.Status.DRBD.Errors.LastSecondaryError != nil:
 			cond.Status = v1.ConditionFalse
 			cond.Reason = ReasonDemoteFailed
 			cond.Message = fmt.Sprintf(
