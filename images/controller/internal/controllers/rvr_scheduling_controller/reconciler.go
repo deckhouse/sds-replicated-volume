@@ -548,15 +548,7 @@ func (r *Reconciler) assignReplicasTransZonalTopology(
 	replicaType := unscheduledReplicas[0].Spec.Type
 
 	// Count already scheduled replicas of the same type per zone
-	zoneReplicaCount := make(map[string]int)
-	for _, rvr := range sctx.RvrList {
-		if rvr.Spec.Type != replicaType || rvr.Spec.NodeName == "" {
-			continue
-		}
-		if zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]; ok {
-			zoneReplicaCount[zone]++
-		}
-	}
+	zoneReplicaCount := countReplicasByZone(sctx.RvrList, replicaType, sctx.NodeNameToZone)
 
 	// Track used nodes in this scheduling round (copy from sctx to allow modifications)
 	usedNodes := make(map[string]struct{}, len(sctx.NodesWithAnyReplica))
@@ -742,13 +734,13 @@ func (r *Reconciler) scheduleAccessPhase(
 	candidateNodes := sctx.PublishOnNodesWithoutRvReplica
 	if len(candidateNodes) == 0 {
 		// All publishOn nodes already have replicas; nothing to do.
-		// Spec «Access»: допустимо иметь реплики, которые никуда не запланировались
+		// Spec «Access»: it is allowed to have replicas that could not be scheduled
 		return nil
 	}
 
 	// We are not required to place all Access replicas or to cover all publishOn nodes.
-	// Spec «Access»: допустимо иметь ноды в rv.spec.publishOn, на которые не хватило реплик
-	// Spec «Access»: допустимо иметь реплики, которые никуда не запланировались
+	// Spec «Access»: it is allowed to have nodes in rv.spec.publishOn without enough replicas
+	// Spec «Access»: it is allowed to have replicas that could not be scheduled
 	nodesToFill := len(candidateNodes)
 	if len(unscheduledAccessReplicas) < nodesToFill {
 		nodesToFill = len(unscheduledAccessReplicas)
@@ -806,25 +798,15 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 }
 
 // scheduleTieBreakerTransZonal schedules TieBreaker replicas for TransZonal topology.
-// Spec «TieBreaker»: для TransZonal - каждый rvr планируем в зону с самым маленьким количеством реплик.
-// Если зон с самым маленьким количеством несколько - то в любую из них.
-// Если в зонах с самым маленьким количеством реплик нет ни одного свободного узла - ошибка невозможности планирования.
+// Spec «TieBreaker»: for TransZonal - schedule each rvr to the zone with the smallest number of replicas.
+// If there are multiple zones with the smallest number - choose any of them.
+// If there are no free nodes in zones with the smallest number of replicas - return scheduling error.
 func (r *Reconciler) scheduleTieBreakerTransZonal(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
 	// Count how many replicas (any type) already exist in each zone.
-	zoneReplicaCount := make(map[string]int)
-	for _, rvr := range sctx.RvrList {
-		if rvr.Spec.NodeName == "" {
-			continue
-		}
-		zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]
-		if !ok || zone == "" {
-			continue
-		}
-		zoneReplicaCount[zone]++
-	}
+	zoneReplicaCount := countAllReplicasByZone(sctx.RvrList, sctx.NodeNameToZone)
 
 	// Build zone -> available nodes map (nodes without any replica)
 	zoneToAvailableNodes := make(map[string][]string)
@@ -873,7 +855,7 @@ func (r *Reconciler) scheduleTieBreakerTransZonal(
 		}
 
 		if selectedZone == "" {
-			// Spec «TieBreaker»: если в зонах с самым маленьким количеством реплик нет ни одного свободного узла - ошибка
+			// Spec «TieBreaker»: if there are no free nodes in zones with minimal replica count - return error
 			return nil, fmt.Errorf(
 				"%w: cannot schedule TieBreaker: no free node in zones with minimal replica count",
 				errSchedulingNoCandidateNodes,
@@ -902,7 +884,7 @@ func (r *Reconciler) scheduleTieBreakerTransZonal(
 }
 
 // scheduleTieBreakerZonal schedules TieBreaker replicas for Zonal topology.
-// Spec «TieBreaker»: для Zonal - исключаем узлы из других зон.
+// Spec «TieBreaker»: for Zonal - exclude nodes from other zones.
 func (r *Reconciler) scheduleTieBreakerZonal(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
@@ -982,7 +964,7 @@ func (r *Reconciler) scheduleTieBreakerZonal(
 }
 
 // scheduleTieBreakerIgnored schedules TieBreaker replicas for Ignored topology.
-// Spec «TieBreaker»: для Any/Ignored - зоны не учитываются.
+// Spec «TieBreaker»: for Any/Ignored - zones are not considered.
 func (r *Reconciler) scheduleTieBreakerIgnored(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
@@ -1302,6 +1284,43 @@ func (r *Reconciler) applyTopologyFilter(
 		return fmt.Errorf("unknown RSC topology: %s", sctx.Rsc.Spec.Topology)
 	}
 	return nil
+}
+
+// countReplicasByZone counts how many replicas of a specific type are scheduled in each zone.
+func countReplicasByZone(
+	replicas []*v1alpha3.ReplicatedVolumeReplica,
+	replicaType string,
+	nodeNameToZone map[string]string,
+) map[string]int {
+	zoneReplicaCount := make(map[string]int)
+	for _, rvr := range replicas {
+		if rvr.Spec.Type != replicaType || rvr.Spec.NodeName == "" {
+			continue
+		}
+		if zone, ok := nodeNameToZone[rvr.Spec.NodeName]; ok {
+			zoneReplicaCount[zone]++
+		}
+	}
+	return zoneReplicaCount
+}
+
+// countAllReplicasByZone counts how many replicas (any type) are scheduled in each zone.
+func countAllReplicasByZone(
+	replicas []*v1alpha3.ReplicatedVolumeReplica,
+	nodeNameToZone map[string]string,
+) map[string]int {
+	zoneReplicaCount := make(map[string]int)
+	for _, rvr := range replicas {
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+		zone, ok := nodeNameToZone[rvr.Spec.NodeName]
+		if !ok || zone == "" {
+			continue
+		}
+		zoneReplicaCount[zone]++
+	}
+	return zoneReplicaCount
 }
 
 // groupCandidateNodesByZone groups candidate nodes by their zones, filtering by allowed zones
