@@ -220,8 +220,11 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					rvrList = rvrList[:1]
 				})
 
-				It("returns error", func(ctx SpecContext) {
-					reconcileAndExpectError(ctx, "not enough unscheduled Diskful replicas")
+				It("schedules available replicas successfully", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+					updated := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKey{Name: rvrList[0].Name}, updated)).To(Succeed())
+					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
 				})
 			})
 
@@ -232,8 +235,8 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					rvrList[0].Spec.NodeName = "node-a"
 				})
 
-				It("returns error", func(ctx SpecContext) {
-					reconcileAndExpectError(ctx, "for Zonal topology")
+				It("returns error when no candidate nodes in target zone", func(ctx SpecContext) {
+					reconcileAndExpectError(ctx, "no candidate nodes")
 				})
 			})
 		})
@@ -245,8 +248,9 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			})
 
 			When("publishOn nodes are in the same zone", func() {
-				It("returns error", func(ctx SpecContext) {
-					reconcileAndExpectError(ctx, "topology")
+				It("schedules replicas in available zone", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
 				})
 			})
 

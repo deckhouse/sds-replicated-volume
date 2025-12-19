@@ -23,7 +23,7 @@ import (
 )
 
 type SchedulingContext struct {
-	log                            logr.Logger
+	Log                            logr.Logger
 	Rv                             *v1alpha3.ReplicatedVolume
 	Rsc                            *v1alpha1.ReplicatedStorageClass
 	Rsp                            *v1alpha1.ReplicatedStoragePool
@@ -33,8 +33,8 @@ type SchedulingContext struct {
 	PublishOnNodesWithoutRvReplica []string
 	UnscheduledDiskfulReplicas     []*v1alpha3.ReplicatedVolumeReplica
 	ScheduledDiskfulReplicas       []*v1alpha3.ReplicatedVolumeReplica
-	SpLvgToNodeInfoMap             map[string]LvgNodeInfo // {lvgName: {NodeName, ThinPoolName}}
-	RscNodes                       []string
+	RspLvgToNodeInfoMap            map[string]LvgNodeInfo // {lvgName: {NodeName, ThinPoolName}}
+	RspNodes                       []string
 	NodeNameToZone                 map[string]string          // {nodeName: zoneName}
 	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
 	// RVRs with nodes assigned in this reconcile

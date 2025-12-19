@@ -81,8 +81,8 @@ func (c *SchedulerExtenderClient) filterNodesBySchedulerExtender(
 	}
 
 	// Build LVG list from SpLvgToNodeInfoMap, but only for nodes in ZonesToNodeCandidatesMap
-	reqLVGs := make([]schedulerExtenderLVG, 0, len(sctx.SpLvgToNodeInfoMap))
-	for lvgName, info := range sctx.SpLvgToNodeInfoMap {
+	reqLVGs := make([]schedulerExtenderLVG, 0, len(sctx.RspLvgToNodeInfoMap))
+	for lvgName, info := range sctx.RspLvgToNodeInfoMap {
 		// Skip LVGs whose nodes are not in the candidate list
 		if _, ok := candidateNodes[info.NodeName]; !ok {
 			continue
@@ -120,32 +120,32 @@ func (c *SchedulerExtenderClient) filterNodesBySchedulerExtender(
 
 	data, err := json.Marshal(reqBody)
 	if err != nil {
-		sctx.log.Error(err, "unable to marshal scheduler-extender request")
+		sctx.Log.Error(err, "unable to marshal scheduler-extender request")
 		return fmt.Errorf("unable to marshal scheduler-extender request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(data))
 	if err != nil {
-		sctx.log.Error(err, "unable to build scheduler-extender request")
+		sctx.Log.Error(err, "unable to build scheduler-extender request")
 		return fmt.Errorf("unable to build scheduler-extender request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		sctx.log.Error(err, "scheduler-extender request failed")
+		sctx.Log.Error(err, "scheduler-extender request failed")
 		return fmt.Errorf("scheduler-extender request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		sctx.log.Error(nil, "scheduler-extender returned non-200 status", "status", resp.StatusCode)
+		sctx.Log.Error(nil, "scheduler-extender returned non-200 status", "status", resp.StatusCode)
 		return fmt.Errorf("scheduler-extender returned unexpected status %d", resp.StatusCode)
 	}
 
 	var respBody schedulerExtenderResponse
 	if err := json.NewDecoder(resp.Body).Decode(&respBody); err != nil {
-		sctx.log.Error(err, "unable to decode scheduler-extender response")
+		sctx.Log.Error(err, "unable to decode scheduler-extender response")
 		return fmt.Errorf("unable to decode scheduler-extender response: %w", err)
 	}
 
@@ -158,7 +158,7 @@ func (c *SchedulerExtenderClient) filterNodesBySchedulerExtender(
 	// Build map of node -> score based on LVG scores
 	// Node gets the score of its LVG (if LVG is in the response)
 	nodeScores := make(map[string]int)
-	for lvgName, info := range sctx.SpLvgToNodeInfoMap {
+	for lvgName, info := range sctx.RspLvgToNodeInfoMap {
 		if score, ok := lvgScores[lvgName]; ok {
 			nodeScores[info.NodeName] = score
 		}
