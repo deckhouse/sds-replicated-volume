@@ -69,7 +69,7 @@ func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedV
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha3.ConditionTypeIOReady,
+					Type:   v1alpha3.ConditionTypeDataInitialized,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -494,7 +494,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvr.Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful))
 
 				if rvr.Status != nil && rvr.Status.Conditions != nil {
-					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeIOReady)
+					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 					if readyCond != nil {
 						Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 					}
@@ -508,7 +508,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1))
 
-				// Set IOReady condition to True on the existing replica
+				// Set DataInitialized condition to True on the existing replica
 				rvr = &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, types.NamespacedName{Name: rvrList.Items[0].Name}, rvr)).To(Succeed())
 
@@ -519,9 +519,9 @@ var _ = Describe("Reconciler", func() {
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha3.ConditionTypeIOReady,
+						Type:   v1alpha3.ConditionTypeDataInitialized,
 						Status: metav1.ConditionTrue,
-						Reason: v1alpha3.ReasonIOReady,
+						Reason: "DataInitialized",
 					},
 				)
 				Expect(cl.Status().Patch(ctx, rvr, patch)).To(Succeed())

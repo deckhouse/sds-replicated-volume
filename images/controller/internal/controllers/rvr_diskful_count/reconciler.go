@@ -222,13 +222,13 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVo
 	return deletedRvrMap, nonDeletedRvrMap
 }
 
-// isRvrReady checks if the ReplicatedVolumeReplica has IOReady condition set to True.
-// Returns false if Status is nil, Conditions is nil, IOReady condition is not found, or IOReady condition status is not True.
+// isRvrReady checks if the ReplicatedVolumeReplica has DataInitialized condition set to True.
+// Returns false if Status is nil, Conditions is nil, DataInitialized condition is not found, or DataInitialized condition status is not True.
 func isRvrReady(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	if rvr.Status == nil || rvr.Status.Conditions == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeIOReady)
+	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.

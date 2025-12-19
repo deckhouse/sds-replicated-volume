@@ -78,6 +78,9 @@ const (
 
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
+
+	// [ConditionTypeDataInitialized] indicates whether replica data has been initialized
+	ConditionTypeDataInitialized = "DataInitialized"
 )
 
 // RV condition types
@@ -108,6 +111,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeInSync:                {false},
 	ConditionTypeOnline:                {false},
 	ConditionTypeIOReady:               {false},
+	ConditionTypeDataInitialized:       {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
