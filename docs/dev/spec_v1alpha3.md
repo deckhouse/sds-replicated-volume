@@ -444,7 +444,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 Четыре последовательные фазы:
 
-- Размещение `Diskful` & `Local` (`rsc.spec.volumeAccess==Local`)
+<!-- - Размещение `Diskful` & `Local` (`rsc.spec.volumeAccess==Local`)
   - фаза работает только если `rsc.spec.volumeAccess==Local`
   - фаза работает только если `rv.spec.publishOn` задан и не на всех нодах из `rv.spec.publishOn` есть реплики
   - берём оставшиеся узлы из `rv.spec.publishOn` и пытаемся на них разместить реплики
@@ -455,7 +455,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
     - `Any` - зоны не учитываются, реплики размещаются по произвольным нодам
   - учитываем место
     - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
-  - если хотя бы на одну ноду из `rv.spec.publishOn` не удалось разместить реплику - ошибка невозможности планирования
+  - если хотя бы на одну ноду из `rv.spec.publishOn` не удалось разместить реплику - ошибка невозможности планирования -->
 - Размещение `Diskful` (не `Local`)
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
   - учитываем topology
@@ -594,7 +594,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в запросе на публикацию `rv.spec.publishOn` и приводить в соответствие реплики на этой ноде, проставляя им `rvr.status.drbd.config.primary`. 
 
 В случае, если `rsc.spec.volumeAccess==Local`, но реплика не `rvr.spec.type==Diskful`,
-либо её нет вообще, промоут невозможен, и требуется обновить rvr и прекратить реконсайл:
+либо её нет вообще, промоут невозможен, и требуется обновить rv и прекратить реконсайл:
    - `rv.status.conditions[type=PublishSucceeded].status=False`
    - `rv.status.conditions[type=PublishSucceeded].reason=UnableToProvideLocalVolumeAccess`
    - `rv.status.conditions[type=PublishSucceeded].message=<сообщение для пользователя>`
