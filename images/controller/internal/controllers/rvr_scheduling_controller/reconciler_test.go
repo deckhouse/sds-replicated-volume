@@ -184,6 +184,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			cl = fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
 				Build()
 			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 		})
@@ -209,10 +210,26 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			Expect(assignedNodes).To(ContainElements(expectedNodes))
 		}
 
+		expectScheduledCondition := func(ctx context.Context, rvrName string, expectedStatus metav1.ConditionStatus, expectedReason string) {
+			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, updated)).To(Succeed())
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			Expect(cond).ToNot(BeNil(), "Scheduled condition should exist on RVR %s", rvrName)
+			Expect(cond.Status).To(Equal(expectedStatus), "Scheduled condition status mismatch on RVR %s", rvrName)
+			Expect(cond.Reason).To(Equal(expectedReason), "Scheduled condition reason mismatch on RVR %s", rvrName)
+		}
+
+		expectAllReplicasHaveScheduledConditionTrue := func(ctx context.Context) {
+			for _, rvr := range rvrList {
+				expectScheduledCondition(ctx, rvr.Name, metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
+			}
+		}
+
 		Context("Zonal topology", func() {
 			It("schedules replicas when all publishOn nodes are in the same zone", func(ctx SpecContext) {
 				reconcileAndExpectSuccess(ctx)
 				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+				expectAllReplicasHaveScheduledConditionTrue(ctx)
 			})
 
 			When("not enough replicas for publishOn nodes", func() {
@@ -225,6 +242,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					updated := &v1alpha3.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: rvrList[0].Name}, updated)).To(Succeed())
 					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
+					expectScheduledCondition(ctx, rvrList[0].Name, metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
 				})
 			})
 
@@ -251,6 +269,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				It("schedules replicas in available zone", func(ctx SpecContext) {
 					reconcileAndExpectSuccess(ctx)
 					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+					expectAllReplicasHaveScheduledConditionTrue(ctx)
 				})
 			})
 
@@ -262,6 +281,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				It("schedules replicas successfully", func(ctx SpecContext) {
 					reconcileAndExpectSuccess(ctx)
 					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+					expectAllReplicasHaveScheduledConditionTrue(ctx)
 				})
 			})
 		})
@@ -276,6 +296,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			It("schedules replicas on any publishOn nodes", func(ctx SpecContext) {
 				reconcileAndExpectSuccess(ctx)
 				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+				expectAllReplicasHaveScheduledConditionTrue(ctx)
 			})
 		})
 
@@ -327,6 +348,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				cl = fake.NewClientBuilder().
 					WithScheme(scheme).
 					WithRuntimeObjects(objects...).
+					WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
 					Build()
 				rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			})
@@ -353,6 +375,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
 					// Should be scheduled on node-a or node-b (publishOn nodes), not node-c or node-d
 					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
+					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
 				})
 			})
 
@@ -387,6 +410,8 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					assignedNodes := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
 					// Both should be on publishOn nodes
 					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
+					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
+					expectScheduledCondition(ctx, "rvr-2", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
 				})
 			})
 
@@ -433,6 +458,10 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
 					// Third replica goes to node-c or node-d
 					Expect(assignedNodes).To(ContainElement(BeElementOf("node-c", "node-d")))
+					// All replicas should have Scheduled=True condition
+					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
+					expectScheduledCondition(ctx, "rvr-2", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
+					expectScheduledCondition(ctx, "rvr-3", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
 				})
 			})
 

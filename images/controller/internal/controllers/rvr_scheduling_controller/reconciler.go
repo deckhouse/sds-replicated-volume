@@ -154,6 +154,17 @@ func (r *Reconciler) Reconcile(
 			}
 			return reconcile.Result{}, fmt.Errorf("failed to patch RVR %s: %w", rvr.Name, err)
 		}
+
+		// Set Scheduled condition to True for successfully scheduled replicas
+		if err := r.setScheduledConditionOnRVR(
+			ctx,
+			rvr,
+			metav1.ConditionTrue,
+			v1alpha3.ReasonSchedulingReplicaScheduled,
+			"",
+		); err != nil {
+			return reconcile.Result{}, fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
+		}
 	}
 
 	return reconcile.Result{}, nil
