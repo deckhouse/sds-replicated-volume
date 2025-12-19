@@ -65,8 +65,8 @@ const (
 	// [ConditionTypeDevicesReady] indicates whether all the devices in UpToDate state
 	ConditionTypeDevicesReady = "DevicesReady"
 
-	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
+	ConditionTypeConfigured = "ConditionTypeConfigured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -97,21 +97,21 @@ const (
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeReady:                 {false},
-	ConditionTypeInitialSync:           {false},
-	ConditionTypeIsPrimary:             {false},
-	ConditionTypeDevicesReady:          {false},
-	ConditionTypeConfigurationAdjusted: {false},
-	ConditionTypeQuorum:                {false},
-	ConditionTypeDiskIOSuspended:       {false},
-	ConditionTypeAddressConfigured:     {false},
-	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeScheduled:             {false},
-	ConditionTypeDataInitialized:       {false},
-	ConditionTypeInQuorum:              {false},
-	ConditionTypeInSync:                {false},
-	ConditionTypeOnline:                {false},
-	ConditionTypeIOReady:               {false},
+	ConditionTypeReady:                {false},
+	ConditionTypeInitialSync:          {false},
+	ConditionTypeIsPrimary:            {false},
+	ConditionTypeDevicesReady:         {false},
+	ConditionTypeConfigured:           {false},
+	ConditionTypeQuorum:               {false},
+	ConditionTypeDiskIOSuspended:      {false},
+	ConditionTypeAddressConfigured:    {false},
+	ConditionTypeBackingVolumeCreated: {false},
+	ConditionTypeScheduled:            {false},
+	ConditionTypeDataInitialized:      {false},
+	ConditionTypeInQuorum:             {false},
+	ConditionTypeInSync:               {false},
+	ConditionTypeOnline:               {false},
+	ConditionTypeIOReady:              {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -157,7 +157,7 @@ const (
 	ReasonReady                 = "Ready"
 )
 
-// Condition reasons for [ConditionTypeConfigurationAdjusted] condition
+// Condition reasons for [ConditionTypeConfigured] condition
 const (
 	ReasonConfigurationFailed                           = "ConfigurationFailed"
 	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
@@ -230,9 +230,10 @@ const (
 
 // Condition reasons for [ConditionTypeDataInitialized] condition
 const (
-	ReasonNotApplicableToDiskless        = "NotApplicableToDiskless"
-	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
-	ReasonDiskNeverWasInUpToDateState    = "DiskNeverWasInUpToDateState"
+	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
+	ReasonNotApplicableToDiskless         = "NotApplicableToDiskless"
+	ReasonDiskHasBeenSeenInUpToDateState  = "DiskHasBeenSeenInUpToDateState"
+	ReasonDiskNeverWasInUpToDateState     = "DiskNeverWasInUpToDateState"
 )
 
 // Condition reasons for [ConditionTypeInQuorum] condition
@@ -243,12 +244,30 @@ const (
 
 // Condition reasons for [ConditionTypeInSync] condition
 const (
+	// status=True
 	ReasonInSync = "InSync"
+
+	// status=False
+	ReasonDiskless         = "Diskless"
+	ReasonAttaching        = "Attaching"
+	ReasonDetaching        = "Detaching"
+	ReasonFailed           = "Failed"
+	ReasonNegotiating      = "Negotiating"
+	ReasonInconsistent     = "Inconsistent"
+	ReasonOutdated         = "Outdated"
+	ReasonUnknownDiskState = "UnknownDiskState"
 )
 
 // Condition reasons for [ConditionTypeConfigured] condition
 const (
+	// status=True
 	ReasonConfigured = "Configured"
+	// status=False
+	ReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
+	ReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
+	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
+	ReasonPromoteFailed                  = "PromoteFailed"
+	ReasonDemoteFailed                   = "DemoteFailed"
 )
 
 // Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)

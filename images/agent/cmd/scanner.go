@@ -26,8 +26,6 @@ import (
 	"slices"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/meta"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -259,110 +257,15 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	}
 	copyStatusFields(rvr.Status.DRBD.Status, resource)
 
-	s.updateReplicaStatusConditionDataInitialized(rvr, resource)
-	s.updateReplicaStatusConditionInQuorum(rvr, resource)
+	_ = rvr.UpdateStatusConditionDataInitialized()
+	_ = rvr.UpdateStatusConditionInQuorum()
+	_ = rvr.UpdateStatusConditionInSync()
 
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
 	}
 
 	return nil
-}
-
-func (s *Scanner) updateReplicaStatusConditionDataInitialized(
-	rvr *v1alpha3.ReplicatedVolumeReplica,
-	resource *drbdsetup.Resource,
-) {
-	diskful := rvr.Spec.Type == "Diskful"
-
-	if !diskful {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:               v1alpha3.ConditionTypeDataInitialized,
-				Status:             v1.ConditionFalse,
-				Reason:             v1alpha3.ReasonNotApplicableToDiskless,
-				ObservedGeneration: rvr.Generation,
-			},
-		)
-		return
-	}
-
-	alreadyTrue := meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
-	if alreadyTrue {
-		return
-	}
-
-	becameTrue := len(resource.Devices) > 0 && resource.Devices[0].DiskState == "UpToDate"
-	if becameTrue {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:               v1alpha3.ConditionTypeDataInitialized,
-				Status:             v1.ConditionTrue,
-				Reason:             v1alpha3.ReasonDiskHasBeenSeenInUpToDateState,
-				ObservedGeneration: rvr.Generation,
-			},
-		)
-		return
-	}
-
-	alreadyFalse := meta.IsStatusConditionFalse(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
-	if alreadyFalse {
-		return
-	}
-
-	meta.SetStatusCondition(
-		&rvr.Status.Conditions,
-		v1.Condition{
-			Type:               v1alpha3.ConditionTypeDataInitialized,
-			Status:             v1.ConditionFalse,
-			Reason:             v1alpha3.ReasonDiskNeverWasInUpToDateState,
-			ObservedGeneration: rvr.Generation,
-		},
-	)
-}
-
-func (s *Scanner) updateReplicaStatusConditionInQuorum(
-	rvr *v1alpha3.ReplicatedVolumeReplica,
-	resource *drbdsetup.Resource,
-) {
-	if len(resource.Devices) == 0 {
-		s.log.Warn("no devices reported by DRBD")
-		return
-	}
-
-	newCond := v1.Condition{Type: v1alpha3.ConditionTypeInQuorum}
-	var condUpdated bool
-
-	inQuorum := resource.Devices[0].Quorum
-
-	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInQuorum)
-	if oldCond == nil || oldCond.Status == v1.ConditionUnknown {
-		// initial setup - simpler message
-		if inQuorum {
-			newCond.Status, newCond.Reason = v1.ConditionTrue, v1alpha3.ReasonInQuorumInQuorum
-		} else {
-			newCond.Status, newCond.Reason = v1.ConditionFalse, v1alpha3.ReasonInQuorumQuorumLost
-		}
-		condUpdated = true
-	} else {
-		if inQuorum && oldCond.Status != v1.ConditionTrue {
-			// switch to true
-			newCond.Status, newCond.Reason = v1.ConditionTrue, v1alpha3.ReasonInQuorumInQuorum
-			newCond.Message = fmt.Sprintf("Quorum achieved after being lost for %v", time.Since(oldCond.LastTransitionTime.Time))
-			condUpdated = true
-		} else if !inQuorum && oldCond.Status != v1.ConditionFalse {
-			// switch to false
-			newCond.Status, newCond.Reason = v1.ConditionFalse, v1alpha3.ReasonInQuorumQuorumLost
-			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
-			condUpdated = true
-		}
-	}
-
-	if condUpdated {
-		meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
-	}
 }
 
 func copyStatusFields(
