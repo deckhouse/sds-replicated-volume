@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/go-logr/logr"
@@ -37,12 +36,16 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
-const nodeZoneLabel = "topology.kubernetes.io/zone"
+const (
+	nodeZoneLabel      = "topology.kubernetes.io/zone"
+	topologyIgnored    = "Ignored"
+	topologyZonal      = "Zonal"
+	topologyTransZonal = "TransZonal"
+)
 
 var (
-	errSchedulingTopologyConflict     = errors.New("scheduling topology conflict")
-	errSchedulingInsufficientReplicas = errors.New("scheduling insufficient replicas")
-	errSchedulingNoCandidateNodes     = errors.New("scheduling no candidate nodes")
+	errSchedulingTopologyConflict = errors.New("scheduling topology conflict")
+	errSchedulingNoCandidateNodes = errors.New("scheduling no candidate nodes")
 )
 
 type tieBreakerContext struct {
@@ -65,11 +68,11 @@ type Reconciler struct {
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
 
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*Reconciler, error) {
 	extenderClient, err := NewSchedulerHTTPClient()
 	if err != nil {
 		log.Error(err, "failed to create scheduler-extender client")
-		os.Exit(1) // TODO: implement graceful shutdown
+		return nil, err // TODO: implement graceful shutdown
 	}
 
 	// Initialize reconciler with Kubernetes client, logger, scheme and scheduler-extender client.
@@ -78,7 +81,7 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *R
 		log:            log,
 		scheme:         scheme,
 		extenderClient: extenderClient,
-	}
+	}, nil
 }
 
 func (r *Reconciler) Reconcile(
@@ -373,7 +376,12 @@ func (r *Reconciler) scheduleDiskfulLocalPhase(
 		return fmt.Errorf("%w: %v", err, err)
 	}
 
-	// Update context for subsequent phases
+	for _, rvr := range assignedReplicas {
+		if err := r.cl.Update(ctx, rvr); err != nil {
+			return fmt.Errorf("failed to update RVR %s: %w", rvr.Name, err)
+		}
+	}
+
 	sctx.UpdateAfterScheduling(assignedReplicas)
 
 	return nil
@@ -1289,7 +1297,7 @@ func (r *Reconciler) applyTopologyFilter(
 ) error {
 
 	switch sctx.Rsc.Spec.Topology {
-	case "Ignored":
+	case topologyIgnored:
 		sctx.log.V(1).Info("skipping topology filter for Ignored topology", "topology", sctx.Rsc.Spec.Topology)
 		// Create a fake zone "ignored" with all candidate nodes
 		nodeCandidates := make([]NodeCandidate, 0, len(candidateNodes))
@@ -1303,13 +1311,13 @@ func (r *Reconciler) applyTopologyFilter(
 			"ignored": nodeCandidates,
 		}
 		return nil
-	case "Zonal":
+	case topologyZonal:
 		// Create a map of zones to node candidates
 		err := r.makeZonalNodeCandidates(candidateNodes, sctx)
 		if err != nil {
 			return err
 		}
-	case "TransZonal":
+	case topologyTransZonal:
 		err := r.makeTransZonalNodeCandidates(candidateNodes, sctx)
 		if err != nil {
 			return err
@@ -1455,6 +1463,7 @@ func (r *Reconciler) makeTransZonalNodeCandidates(
 	}
 
 	// Verify publishOn nodes are in allowed zones
+	publishOnZones := make(map[string]string)
 	for _, nodeName := range sctx.RvPublishOnNodes {
 		zone, ok := sctx.NodeNameToZone[nodeName]
 		if !ok || zone == "" {
@@ -1463,6 +1472,18 @@ func (r *Reconciler) makeTransZonalNodeCandidates(
 		if _, ok := allowedZones[zone]; !ok {
 			return fmt.Errorf("%w: publishOn node %s is in zone %s which is not in allowed zones %v",
 				errSchedulingTopologyConflict, nodeName, zone, sctx.Rsc.Spec.Zones)
+		}
+		publishOnZones[nodeName] = zone
+	}
+
+	if sctx.Rsc.Spec.VolumeAccess == "Local" && len(sctx.RvPublishOnNodes) > 1 {
+		zonesSet := make(map[string]struct{})
+		for _, zone := range publishOnZones {
+			zonesSet[zone] = struct{}{}
+		}
+		if len(zonesSet) != len(sctx.RvPublishOnNodes) {
+			return fmt.Errorf("%w: TransZonal topology with Local volumeAccess requires publishOn nodes to be in different zones",
+				errSchedulingTopologyConflict)
 		}
 	}
 

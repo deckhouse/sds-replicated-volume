@@ -18,6 +18,10 @@ package rvr_scheduling_controller_test
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -41,14 +45,27 @@ import (
 
 var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 	var (
-		ctx     context.Context
-		scheme  *runtime.Scheme
-		builder *fake.ClientBuilder
-		cl      client.WithWatch
-		rec     *rvrschedulingcontroller.Reconciler
+		ctx        context.Context
+		scheme     *runtime.Scheme
+		builder    *fake.ClientBuilder
+		cl         client.WithWatch
+		rec        *rvrschedulingcontroller.Reconciler
+		mockServer *httptest.Server
 	)
 
 	BeforeEach(func() {
+		mockServer = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var req struct {
+				LVGS []struct{ Name string } `json:"lvgs"`
+			}
+			json.NewDecoder(r.Body).Decode(&req)
+			resp := map[string]any{"lvgs": []map[string]any{}}
+			for _, lvg := range req.LVGS {
+				resp["lvgs"] = append(resp["lvgs"].([]map[string]any), map[string]any{"name": lvg.Name, "score": 100})
+			}
+			json.NewEncoder(w).Encode(resp)
+		}))
+		os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
 		ctx = context.Background()
 		scheme = runtime.NewScheme()
 		utilruntime.Must(corev1.AddToScheme(scheme))
@@ -60,31 +77,48 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
 	})
 
-	JustBeforeEach(func() {
-		cl = builder.Build()
-		rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+	AfterEach(func() {
+		os.Unsetenv("SCHEDULER_EXTENDER_URL")
+		mockServer.Close()
 	})
 
-	Context("Diskful & Local phase", func() {
-		It("schedules diskful replicas on all publishOn nodes when topology and storage pool allow it", func() {
-			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
+	JustBeforeEach(func() {
+		cl = builder.Build()
+		rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+	})
+
+	FContext("Diskful & Local phase", func() {
+		var (
+			rv      *v1alpha3.ReplicatedVolume
+			rsc     *v1alpha1.ReplicatedStorageClass
+			nodeA   *corev1.Node
+			nodeB   *corev1.Node
+			rsp     *v1alpha1.ReplicatedStoragePool
+			lvgA    *snc.LVMVolumeGroup
+			lvgB    *snc.LVMVolumeGroup
+			rvrList []*v1alpha3.ReplicatedVolumeReplica
+		)
+
+		BeforeEach(func() {
+			rv = &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-local",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-local",
 					PublishOn:                  []string{"node-a", "node-b"},
 				},
 				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   v1alpha3.ConditionTypeReady,
-							Status: metav1.ConditionTrue,
-						},
-					},
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha3.ConditionTypeReady,
+						Status: metav1.ConditionTrue,
+					}},
 				},
 			}
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
+			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "rsc-local"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
 					StoragePool:  "pool-1",
@@ -94,304 +128,160 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				},
 			}
 
-			nodeA := &corev1.Node{
+			nodeA = &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   "node-a",
 					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
 				},
 			}
-			nodeB := &corev1.Node{
+			nodeB = &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:   "node-b",
 					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
 				},
 			}
 
-			rsp := &v1alpha1.ReplicatedStoragePool{
+			rsp = &v1alpha1.ReplicatedStoragePool{
 				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
 				Spec: v1alpha1.ReplicatedStoragePoolSpec{
 					Type: "LVM",
 					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
-						{Name: "vg-a"},
+						{Name: "vg-a"}, {Name: "vg-b"},
 					},
 				},
 			}
 
-			lvg := &snc.LVMVolumeGroup{
+			lvgA = &snc.LVMVolumeGroup{
 				ObjectMeta: metav1.ObjectMeta{Name: "vg-a"},
-				Spec: snc.LVMVolumeGroupSpec{
-					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"},
+				Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}},
+			}
+			lvgB = &snc.LVMVolumeGroup{
+				ObjectMeta: metav1.ObjectMeta{Name: "vg-b"},
+				Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-b"}}},
+			}
+
+			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-local",
+						Type:                 v1alpha3.ReplicaTypeDiskful,
+					},
 				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{Name: "node-a"},
-						{Name: "node-b"},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-local",
+						Type:                 v1alpha3.ReplicaTypeDiskful,
 					},
 				},
 			}
+		})
 
-			rvr1 := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-1",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-					NodeName:             "node-a",
-				},
+		JustBeforeEach(func() {
+			objects := []runtime.Object{rv, rsc, nodeA, nodeB, rsp, lvgA, lvgB}
+			for _, rvr := range rvrList {
+				objects = append(objects, rvr)
 			}
-			rvr2 := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-1",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-				},
-			}
-
 			cl = fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rsp, lvg, rvr1, rvr2).
+				WithRuntimeObjects(objects...).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		})
 
+		reconcileAndExpectSuccess := func(ctx context.Context) {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
+		}
 
-			updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
-			Expect(updatedRVR1.Spec.NodeName).To(Equal("node-a"))
-
-			updatedRVR2 := &v1alpha3.ReplicatedVolumeReplica{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updatedRVR2)).To(Succeed())
-			Expect(updatedRVR2.Spec.NodeName).To(Equal("node-b"))
-		})
-
-		It("returns error when there are not enough diskful replicas to cover all publishOn nodes", func() {
-			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-1"},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-local",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   v1alpha3.ConditionTypeReady,
-							Status: metav1.ConditionTrue,
-						},
-					},
-				},
-			}
-
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-local"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Local",
-					Topology:     "Zonal",
-					Zones:        []string{"zone-a"},
-				},
-			}
-
-			nodeA := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-
-			rsp := &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
-				Spec: v1alpha1.ReplicatedStoragePoolSpec{
-					Type: "LVM",
-					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
-						{Name: "vg-a"},
-					},
-				},
-			}
-
-			lvg := &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: "vg-a"},
-				Spec: snc.LVMVolumeGroupSpec{
-					Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-a"},
-				},
-				Status: snc.LVMVolumeGroupStatus{
-					Nodes: []snc.LVMVolumeGroupNode{
-						{Name: "node-a"},
-						{Name: "node-b"},
-					},
-				},
-			}
-
-			// Только одна Diskful-реплика при двух publishOn-нодах.
-			rvr1 := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-1",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-				},
-			}
-
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rsp, lvg, rvr1).
-				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-
+		reconcileAndExpectError := func(ctx context.Context, errSubstring string) {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("not enough Diskful replicas to cover publishOn nodes"))
+			Expect(err.Error()).To(ContainSubstring(errSubstring))
+		}
+
+		expectReplicasScheduledOnNodes := func(ctx context.Context, expectedNodes ...string) {
+			var assignedNodes []string
+			for _, rvr := range rvrList {
+				updated := &v1alpha3.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: rvr.Name}, updated)).To(Succeed())
+				assignedNodes = append(assignedNodes, updated.Spec.NodeName)
+			}
+			Expect(assignedNodes).To(ContainElements(expectedNodes))
+		}
+
+		Context("Zonal topology", func() {
+			It("schedules replicas when all publishOn nodes are in the same zone", func(ctx SpecContext) {
+				reconcileAndExpectSuccess(ctx)
+				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+			})
+
+			When("not enough replicas for publishOn nodes", func() {
+				BeforeEach(func() {
+					rvrList = rvrList[:1]
+				})
+
+				It("returns error", func(ctx SpecContext) {
+					reconcileAndExpectError(ctx, "not enough unscheduled Diskful replicas")
+				})
+			})
+
+			When("publishOn nodes span multiple zones", func() {
+				BeforeEach(func() {
+					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
+					nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
+					rvrList[0].Spec.NodeName = "node-a"
+				})
+
+				It("returns error", func(ctx SpecContext) {
+					reconcileAndExpectError(ctx, "for Zonal topology")
+				})
+			})
 		})
 
-		It("returns error for Zonal topology when publishOn nodes span multiple zones", func() {
-			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-local-zonal-error"},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-local-zonal-error",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   v1alpha3.ConditionTypeReady,
-							Status: metav1.ConditionTrue,
-						},
-					},
-				},
-			}
+		Context("TransZonal topology", func() {
+			BeforeEach(func() {
+				rsc.Spec.Topology = "TransZonal"
+				rsc.Spec.Zones = []string{"zone-a", "zone-b"}
+			})
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-local-zonal-error"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Local",
-					Topology:     "Zonal",
-					Zones:        []string{"zone-a", "zone-b"},
-				},
-			}
+			When("publishOn nodes are in the same zone", func() {
+				It("returns error", func(ctx SpecContext) {
+					reconcileAndExpectError(ctx, "topology")
+				})
+			})
 
-			nodeA := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-b"},
-				},
-			}
+			When("publishOn nodes are in different zones", func() {
+				BeforeEach(func() {
+					nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
+				})
 
-			// Уже есть Diskful в zone-a, publishOn включает ноду в zone-b — должна быть ошибка Zonal topology.
-			rvrExisting := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-local-zonal-existing"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-local-zonal-error",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-					NodeName:             "node-a",
-				},
-			}
-			rvrExtra := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-local-zonal-extra"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-local-zonal-error",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-				},
-			}
-
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrExisting, rvrExtra).
-				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-
-			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("cannot satisfy Zonal topology"))
+				It("schedules replicas successfully", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+				})
+			})
 		})
 
-		It("returns error for TransZonal topology when publishOn node is in an already used zone", func() {
-			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-local-transzonal-error"},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-local-transzonal-error",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   v1alpha3.ConditionTypeReady,
-							Status: metav1.ConditionTrue,
-						},
-					},
-				},
-			}
+		Context("Ignored topology", func() {
+			BeforeEach(func() {
+				rsc.Spec.Topology = "Ignored"
+				rsc.Spec.Zones = nil
+				nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
+			})
 
-			rsc := &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-local-transzonal-error"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Local",
-					Topology:     "TransZonal",
-					Zones:        []string{"zone-a"},
-				},
-			}
-
-			// Обе publishOn-ноды в одной зоне.
-			nodeA := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-
-			// Уже есть Diskful в zone-a, publishOn включает вторую ноду в той же зоне — должна быть ошибка TransZonal.
-			rvrExisting := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-local-transzonal-existing"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-local-transzonal-error",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-					NodeName:             "node-a",
-				},
-			}
-			rvrExtra := &v1alpha3.ReplicatedVolumeReplica{
-				ObjectMeta: metav1.ObjectMeta{Name: "rvr-local-transzonal-extra"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-					ReplicatedVolumeName: "rv-local-transzonal-error",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
-				},
-			}
-
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrExisting, rvrExtra).
-				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-
-			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("cannot satisfy TransZonal topology"))
+			It("schedules replicas on any publishOn nodes", func(ctx SpecContext) {
+				reconcileAndExpectSuccess(ctx)
+				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+			})
 		})
 	})
 
 	Context("Diskful phase (non-Local)", func() {
 		It("schedules diskful replicas on publishOn nodes allowed by storage pool for Any topology", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-any"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-any", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-diskful-any",
@@ -465,7 +355,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, rsp, nodeA, nodeB, lvgB, rvr1).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -477,7 +367,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("keeps all diskful replicas in a single zone for Zonal topology", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-zonal"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-zonal", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-diskful-zonal",
@@ -542,7 +432,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, nodeC, existing, rvr1).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -554,7 +444,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("distributes diskful replicas across zones for TransZonal topology", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-transzonal"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-diskful-transzonal", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-diskful-transzonal",
@@ -626,7 +516,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, nodeC, existing, rvr1, rvr2).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -645,7 +535,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 	Context("Access phase", func() {
 		It("schedules access replicas only on publishOn nodes without any replicas", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-access"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-access", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-access",
@@ -711,7 +601,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, diskful, access1, access2).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -729,7 +619,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("does nothing when all publishOn nodes already have replicas", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-access-full"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-access-full", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-access-full",
@@ -796,7 +686,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrA, rvrB, access).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -808,7 +698,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("sets Scheduled=True for replicas with nodeName and Scheduled=False for others", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-conditions"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-conditions", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-conditions",
@@ -864,7 +754,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
 				WithRuntimeObjects(rv, rsc, nodeA, scheduled, unscheduled).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -874,21 +764,21 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
 			Expect(condScheduled).ToNot(BeNil())
 			Expect(condScheduled.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condScheduled.Reason).To(Equal(v1alpha3.ReasonReplicaScheduled))
+			Expect(condScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
 
 			updatedUnscheduled := &v1alpha3.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-unscheduled"}, updatedUnscheduled)).To(Succeed())
 			condUnscheduled := meta.FindStatusCondition(updatedUnscheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
 			Expect(condUnscheduled).ToNot(BeNil())
 			Expect(condUnscheduled.Status).To(Equal(metav1.ConditionFalse))
-			Expect(condUnscheduled.Reason).To(Equal(v1alpha3.ReasonWaitingForAnotherReplica))
+			Expect(condUnscheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingWaitingForAnotherReplica))
 		})
 	})
 
 	Context("TieBreaker phase", func() {
 		It("distributes tiebreaker replicas across zones for TransZonal topology", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-transzonal"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-transzonal", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-tb-transzonal",
@@ -960,7 +850,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, nodeC, existing, tb1, tb2).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -977,7 +867,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("keeps all tiebreaker replicas in a single zone for Zonal topology", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-zonal"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-zonal", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-tb-zonal",
@@ -1034,7 +924,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, tb1, tb2).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
@@ -1050,7 +940,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("returns error for TransZonal topology when there are no free nodes in minimal replica zones", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-transzonal-error"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-transzonal-error", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-tb-transzonal-error",
@@ -1116,7 +1006,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrA, rvrB, tb).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())
@@ -1125,7 +1015,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 		It("returns error for Zonal topology when existing replicas are already in multiple zones", func() {
 			rv := &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-zonal-error"},
+				ObjectMeta: metav1.ObjectMeta{Name: "rv-tb-zonal-error", Finalizers: []string{v1alpha3.ControllerAppFinalizer}},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-tb-zonal-error",
@@ -1191,7 +1081,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				WithScheme(scheme).
 				WithRuntimeObjects(rv, rsc, nodeA, nodeB, rvrA, rvrB, tb).
 				Build()
-			rec = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).To(HaveOccurred())

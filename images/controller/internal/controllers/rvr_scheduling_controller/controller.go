@@ -27,11 +27,14 @@ import (
 const controllerName = "rvr-scheduling-controller"
 
 func BuildController(mgr manager.Manager) error {
-	r := NewReconciler(
+	r, err := NewReconciler(
 		mgr.GetClient(),
 		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
 		mgr.GetScheme(),
 	)
+	if err != nil {
+		return err
+	}
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
