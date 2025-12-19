@@ -101,7 +101,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Phase 2: place Access replicas.
-	if err := r.scheduleAccessPhase(ctx, sctx); err != nil {
+	if err := r.scheduleAccessPhase(sctx); err != nil {
 		reason := schedulingErrorToReason(err)
 		if setErr := r.setScheduledConditionOnAllRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
 			log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
@@ -110,7 +110,7 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Phase 3: place TieBreaker replicas.
-	if err := r.scheduleTieBreakerPhase(ctx, sctx); err != nil {
+	if err := r.scheduleTieBreakerPhase(sctx); err != nil {
 		reason := schedulingErrorToReason(err)
 		if setErr := r.setScheduledConditionOnAllRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
 			log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
@@ -706,7 +706,6 @@ func (r *Reconciler) assignReplicasTransZonalTopology(
 // }
 
 func (r *Reconciler) scheduleAccessPhase(
-	ctx context.Context,
 	sctx *SchedulingContext,
 ) error {
 	// Spec «Access»: phase works only when:
@@ -760,7 +759,6 @@ func (r *Reconciler) scheduleAccessPhase(
 }
 
 func (r *Reconciler) scheduleTieBreakerPhase(
-	ctx context.Context,
 	sctx *SchedulingContext,
 ) error {
 	// Get unscheduled TieBreaker replicas
@@ -779,11 +777,11 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 
 	switch sctx.Rsc.Spec.Topology {
 	case "TransZonal":
-		assignedReplicas, err = r.scheduleTieBreakerTransZonal(ctx, sctx, unscheduledTieBreakerReplicas)
+		assignedReplicas, err = r.scheduleTieBreakerTransZonal(sctx, unscheduledTieBreakerReplicas)
 	case "Zonal":
-		assignedReplicas, err = r.scheduleTieBreakerZonal(ctx, sctx, unscheduledTieBreakerReplicas)
+		assignedReplicas, err = r.scheduleTieBreakerZonal(sctx, unscheduledTieBreakerReplicas)
 	default:
-		assignedReplicas, err = r.scheduleTieBreakerIgnored(ctx, sctx, unscheduledTieBreakerReplicas)
+		assignedReplicas, err = r.scheduleTieBreakerIgnored(sctx, unscheduledTieBreakerReplicas)
 	}
 
 	if err != nil {
@@ -801,7 +799,6 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 // Если зон с самым маленьким количеством несколько - то в любую из них.
 // Если в зонах с самым маленьким количеством реплик нет ни одного свободного узла - ошибка невозможности планирования.
 func (r *Reconciler) scheduleTieBreakerTransZonal(
-	ctx context.Context,
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
@@ -896,7 +893,6 @@ func (r *Reconciler) scheduleTieBreakerTransZonal(
 // scheduleTieBreakerZonal schedules TieBreaker replicas for Zonal topology.
 // Spec «TieBreaker»: для Zonal - исключаем узлы из других зон.
 func (r *Reconciler) scheduleTieBreakerZonal(
-	ctx context.Context,
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
@@ -977,7 +973,6 @@ func (r *Reconciler) scheduleTieBreakerZonal(
 // scheduleTieBreakerIgnored schedules TieBreaker replicas for Ignored topology.
 // Spec «TieBreaker»: для Any/Ignored - зоны не учитываются.
 func (r *Reconciler) scheduleTieBreakerIgnored(
-	ctx context.Context,
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
