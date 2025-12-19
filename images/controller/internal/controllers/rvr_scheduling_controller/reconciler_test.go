@@ -85,7 +85,7 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 		rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 	})
 
-	FContext("Diskful & Local phase", func() {
+	FContext("Diskful phase", func() {
 		var (
 			rv      *v1alpha3.ReplicatedVolume
 			rsc     *v1alpha1.ReplicatedStorageClass
@@ -276,6 +276,187 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 			It("schedules replicas on any publishOn nodes", func(ctx SpecContext) {
 				reconcileAndExpectSuccess(ctx)
 				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
+			})
+		})
+
+		Context("PublishOn preference", func() {
+			var nodeC *corev1.Node
+			var nodeD *corev1.Node
+			var lvgC *snc.LVMVolumeGroup
+			var lvgD *snc.LVMVolumeGroup
+
+			BeforeEach(func() {
+				// Setup: 4 nodes (a, b, c, d) in same zone, but only node-a and node-b are in publishOn
+				rsc.Spec.Topology = "Ignored"
+				rsc.Spec.Zones = nil
+
+				nodeC = &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-c",
+						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
+					},
+				}
+				nodeD = &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:   "node-d",
+						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
+					},
+				}
+
+				// Add LVGs for new nodes
+				lvgC = &snc.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: "vg-c"},
+					Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-c"}}},
+				}
+				lvgD = &snc.LVMVolumeGroup{
+					ObjectMeta: metav1.ObjectMeta{Name: "vg-d"},
+					Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-d"}}},
+				}
+
+				// Update storage pool to include all nodes
+				rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "vg-a"}, {Name: "vg-b"}, {Name: "vg-c"}, {Name: "vg-d"},
+				}
+			})
+
+			JustBeforeEach(func() {
+				objects := []runtime.Object{rv, rsc, nodeA, nodeB, nodeC, nodeD, rsp, lvgA, lvgB, lvgC, lvgD}
+				for _, rvr := range rvrList {
+					objects = append(objects, rvr)
+				}
+				cl = fake.NewClientBuilder().
+					WithScheme(scheme).
+					WithRuntimeObjects(objects...).
+					Build()
+				rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			})
+
+			When("more candidate nodes than replicas", func() {
+				BeforeEach(func() {
+					// publishOn is [node-a, node-b], but we have 4 candidate nodes
+					// and only 1 replica to schedule
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("prefers publishOn nodes over other nodes", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+
+					updated := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
+					// Should be scheduled on node-a or node-b (publishOn nodes), not node-c or node-d
+					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
+				})
+			})
+
+			When("two replicas and two publishOn nodes among four candidates", func() {
+				BeforeEach(func() {
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("schedules both replicas on publishOn nodes", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+
+					updated1 := &v1alpha3.ReplicatedVolumeReplica{}
+					updated2 := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated1)).To(Succeed())
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updated2)).To(Succeed())
+
+					assignedNodes := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
+					// Both should be on publishOn nodes
+					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
+				})
+			})
+
+			When("more replicas than publishOn nodes", func() {
+				BeforeEach(func() {
+					// 3 replicas, but only 2 publishOn nodes
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("schedules publishOn nodes first, then other nodes", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+
+					updated1 := &v1alpha3.ReplicatedVolumeReplica{}
+					updated2 := &v1alpha3.ReplicatedVolumeReplica{}
+					updated3 := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated1)).To(Succeed())
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updated2)).To(Succeed())
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updated3)).To(Succeed())
+
+					assignedNodes := []string{updated1.Spec.NodeName, updated2.Spec.NodeName, updated3.Spec.NodeName}
+					// publishOn nodes (node-a, node-b) should be used
+					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
+					// Third replica goes to node-c or node-d
+					Expect(assignedNodes).To(ContainElement(BeElementOf("node-c", "node-d")))
+				})
+			})
+
+			When("no publishOn nodes specified", func() {
+				BeforeEach(func() {
+					rv.Spec.PublishOn = nil
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-local",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("schedules on any available node", func(ctx SpecContext) {
+					reconcileAndExpectSuccess(ctx)
+
+					updated := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
+					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b", "node-c", "node-d"))
+				})
 			})
 		})
 	})
