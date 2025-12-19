@@ -255,7 +255,8 @@ var _ = Describe("Reconciler", func() {
 
 						Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, rv)).To(Succeed())
 
-						expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all)
+						// Use ConsistencyAndAvailability for testing QMR calculation
+						expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
 						Expect(rv).To(SatisfyAll(
 							HaveField("Status.DRBD.Config.Quorum", Equal(expectedQuorum)),
 							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(expectedQmr)),
@@ -263,7 +264,8 @@ var _ = Describe("Reconciler", func() {
 					})
 				},
 				func(diskfulCount, all int) string {
-					expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all)
+					// Use ConsistencyAndAvailability for testing QMR calculation
+					expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
 					return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=%d", diskfulCount, all, expectedQuorum, expectedQmr)
 				},
 				Entry(nil, 1, 1),
@@ -358,7 +360,8 @@ var _ = Describe("Reconciler", func() {
 var _ = Describe("CalculateQuorum", func() {
 	DescribeTable("should calculate correct quorum and qmr values",
 		func(diskfulCount, all int, expectedQuorum, expectedQmr byte) {
-			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all)
+			// Use ConsistencyAndAvailability for testing QMR calculation
+			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
 			Expect(quorum).To(Equal(expectedQuorum))
 			Expect(qmr).To(Equal(expectedQmr))
 		},
