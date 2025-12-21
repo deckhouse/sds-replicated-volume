@@ -104,7 +104,7 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 				return err
 			}
 		default:
-			err := fmt.Errorf("unexpected number of nodes in rv.Spec.PublishOn: %d", len(rv.Spec.PublishOn))
+			err := fmt.Errorf("unexpected number of nodes in PublishOn: %d", len(rv.Spec.PublishOn))
 			log.Error("error", "error", err)
 			return err
 		}
@@ -119,7 +119,13 @@ func (v *VolumePublisher) cleanup(reason error) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
-	if err := v.unpublishCycle(cleanupCtx, ""); err != nil {
+	rv, err := v.client.GetRV(cleanupCtx, v.rvName)
+	if err != nil {
+		log.Error("failed to get RV for cleanup", "error", err)
+		return
+	}
+
+	if err := v.unpublishCycle(cleanupCtx, rv, ""); err != nil {
 		v.log.Error("failed to unpublishCycle", "error", err)
 	}
 }
@@ -163,10 +169,10 @@ func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.Replicated
 		return nil
 	}
 
-	originalRv := rv.DeepCopy()
+	originalRV := rv.DeepCopy()
 	rv.Spec.PublishOn = append(rv.Spec.PublishOn, nodeName)
 
-	err := v.client.PatchRV(ctx, originalRv, rv)
+	err := v.client.PatchRV(ctx, originalRV, rv)
 	if err != nil {
 		return fmt.Errorf("failed to patch RV with new publish node: %w", err)
 	}
@@ -174,9 +180,83 @@ func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.Replicated
 	return nil
 }
 
-func (v *VolumePublisher) doUnpublish(ctx context.Context) error {
-	v.log.Debug("unpublishing from random node")
-	// TODO: Wait for unpublish success
+func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "unpublishCycle")
+	log.Debug("started")
+	defer log.Debug("finished")
+
+	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doUnpublish", "error", err)
+		return err
+	}
+
+	// Wait for node(s) to be unpublished
+	for {
+		if nodeName == "" {
+			log.Debug("waiting for all nodes to be unpublished")
+		} else {
+			log.Debug("waiting for node to be unpublished")
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status == nil {
+			// If status is nil, consider it as unpublished
+			return nil
+		}
+
+		if nodeName == "" {
+			// Check if all nodes are unpublished
+			if len(rv.Status.PublishedOn) == 0 {
+				return nil
+			}
+		} else {
+			// Check if specific node is unpublished
+			if !slices.Contains(rv.Status.PublishedOn, nodeName) {
+				return nil
+			}
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (v *VolumePublisher) doUnpublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	originalRV := rv.DeepCopy()
+
+	if nodeName == "" {
+		// Unpublish from all nodes - make PublishOn empty
+		rv.Spec.PublishOn = []string{}
+	} else {
+		// Check if node is in PublishOn
+		if !slices.Contains(rv.Spec.PublishOn, nodeName) {
+			v.log.Debug("node not in PublishOn", "node_name", nodeName)
+			return nil
+		}
+
+		// Remove node from PublishOn
+		newPublishOn := make([]string, 0, len(rv.Spec.PublishOn))
+		for _, node := range rv.Spec.PublishOn {
+			if node != nodeName {
+				newPublishOn = append(newPublishOn, node)
+			}
+		}
+		rv.Spec.PublishOn = newPublishOn
+	}
+
+	err := v.client.PatchRV(ctx, originalRV, rv)
+	if err != nil {
+		return fmt.Errorf("failed to patch RV to unpublish node: %w", err)
+	}
 
 	return nil
 }
