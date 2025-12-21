@@ -22,6 +22,7 @@ import (
 	"math/rand/v2"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -129,4 +130,12 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVo
 		return nil, err
 	}
 	return rv, nil
+}
+
+// IsRVReady checks if a ReplicatedVolume is in IOReady condition
+func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
+	if rv.Status == nil {
+		return false
+	}
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
 }

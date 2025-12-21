@@ -280,16 +280,30 @@ func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (tim
 func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
 	startTime := time.Now()
 
-	//err := v.client.WaitForRVReady(ctx, v.rvName, rvCreateTimeout)
-	//if err != nil {
-	//	return time.Since(startTime), err
-	//}
-	for i := 0; i < 5; i++ {
-		v.log.Debug("waiting for RV to become ready", "attempt", i)
+	for {
+		v.log.Debug("waiting for RV to become ready")
+
+		select {
+		case <-ctx.Done():
+			return time.Since(startTime), ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			return time.Since(startTime), err
+		}
+
+		if v.client.IsRVReady(rv) {
+			return time.Since(startTime), nil
+		}
+
 		time.Sleep(1 * time.Second)
 	}
-
-	return time.Since(startTime), nil
 }
 
 func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) error {
