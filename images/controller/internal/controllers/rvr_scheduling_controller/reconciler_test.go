@@ -19,9 +19,11 @@ package rvr_scheduling_controller_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
@@ -43,10 +45,785 @@ import (
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 )
 
-var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
+// ClusterSetup defines a cluster configuration for tests
+type ClusterSetup struct {
+	Name         string
+	Zones        []string       // zones in cluster
+	RSCZones     []string       // zones in RSC (can be less than cluster zones)
+	NodesPerZone int            // nodes per zone
+	NodeScores   map[string]int // node -> score from scheduler extender
+}
+
+// ExistingReplica represents an already scheduled replica
+type ExistingReplica struct {
+	Type     string // Diskful, Access, TieBreaker
+	NodeName string
+}
+
+// ReplicasToSchedule defines how many replicas of each type need to be scheduled
+type ReplicasToSchedule struct {
+	Diskful    int
+	TieBreaker int
+}
+
+// ExpectedResult defines the expected outcome of a test
+type ExpectedResult struct {
+	Error           string   // expected error substring (empty if success)
+	DiskfulZones    []string // zones where Diskful replicas should be (nil = any)
+	TieBreakerZones []string // zones where TieBreaker replicas should be (nil = any)
+	DiskfulNodes    []string // specific nodes for Diskful (nil = check zones only)
+	TieBreakerNodes []string // specific nodes for TieBreaker (nil = check zones only)
+}
+
+// IntegrationTestCase defines a full integration test case
+type IntegrationTestCase struct {
+	Name       string
+	Cluster    string // reference to ClusterSetup.Name
+	Topology   string // Zonal, TransZonal, Ignored
+	PublishOn  []string
+	Existing   []ExistingReplica
+	ToSchedule ReplicasToSchedule
+	Expected   ExpectedResult
+}
+
+// generateNodes creates nodes for a cluster setup
+func generateNodes(setup ClusterSetup) ([]*corev1.Node, map[string]int) {
+	var nodes []*corev1.Node
+	scores := make(map[string]int)
+
+	for _, zone := range setup.Zones {
+		for i := 1; i <= setup.NodesPerZone; i++ {
+			nodeName := fmt.Sprintf("node-%s%d", zone[len(zone)-1:], i) // e.g., node-a1, node-a2
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:   nodeName,
+					Labels: map[string]string{"topology.kubernetes.io/zone": zone},
+				},
+			}
+			nodes = append(nodes, node)
+
+			// Use predefined score or generate based on position
+			if score, ok := setup.NodeScores[nodeName]; ok {
+				scores[nodeName] = score
+			} else {
+				// Default: first node in first zone gets highest score
+				scores[nodeName] = 100 - (len(nodes)-1)*10
+			}
+		}
+	}
+	return nodes, scores
+}
+
+// generateLVGs creates LVMVolumeGroups for nodes
+func generateLVGs(nodes []*corev1.Node) ([]*snc.LVMVolumeGroup, *v1alpha1.ReplicatedStoragePool) {
+	var lvgs []*snc.LVMVolumeGroup
+	var lvgRefs []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups
+
+	for _, node := range nodes {
+		lvgName := fmt.Sprintf("vg-%s", node.Name)
+		lvg := &snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: lvgName},
+			Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: node.Name}}},
+		}
+		lvgs = append(lvgs, lvg)
+		lvgRefs = append(lvgRefs, v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{Name: lvgName})
+	}
+
+	rsp := &v1alpha1.ReplicatedStoragePool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
+		Spec: v1alpha1.ReplicatedStoragePoolSpec{
+			Type:            "LVM",
+			LVMVolumeGroups: lvgRefs,
+		},
+	}
+
+	return lvgs, rsp
+}
+
+// createMockServer creates a mock scheduler extender server
+func createMockServer(scores map[string]int, lvgToNode map[string]string) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			LVGS []struct{ Name string } `json:"lvgs"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		resp := map[string]any{"lvgs": []map[string]any{}}
+		for _, lvg := range req.LVGS {
+			nodeName := lvgToNode[lvg.Name]
+			score := scores[nodeName]
+			if score == 0 {
+				score = 50 // default score
+			}
+			resp["lvgs"] = append(resp["lvgs"].([]map[string]any), map[string]any{"name": lvg.Name, "score": score})
+		}
+		json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// Cluster configurations
+var clusterConfigs = map[string]ClusterSetup{
+	"small-1z": {
+		Name:         "small-1z",
+		Zones:        []string{"zone-a"},
+		RSCZones:     []string{"zone-a"},
+		NodesPerZone: 2,
+		NodeScores:   map[string]int{"node-a1": 100, "node-a2": 80},
+	},
+	"small-1z-4n": {
+		Name:         "small-1z-4n",
+		Zones:        []string{"zone-a"},
+		RSCZones:     []string{"zone-a"},
+		NodesPerZone: 4,
+		NodeScores:   map[string]int{"node-a1": 100, "node-a2": 90, "node-a3": 80, "node-a4": 70},
+	},
+	"medium-2z": {
+		Name:         "medium-2z",
+		Zones:        []string{"zone-a", "zone-b"},
+		RSCZones:     []string{"zone-a", "zone-b"},
+		NodesPerZone: 2,
+		NodeScores:   map[string]int{"node-a1": 100, "node-a2": 80, "node-b1": 90, "node-b2": 70},
+	},
+	"medium-2z-4n": {
+		Name:         "medium-2z-4n",
+		Zones:        []string{"zone-a", "zone-b"},
+		RSCZones:     []string{"zone-a", "zone-b"},
+		NodesPerZone: 4,
+		NodeScores: map[string]int{
+			"node-a1": 100, "node-a2": 90, "node-a3": 80, "node-a4": 70,
+			"node-b1": 95, "node-b2": 85, "node-b3": 75, "node-b4": 65,
+		},
+	},
+	"large-3z": {
+		Name:         "large-3z",
+		Zones:        []string{"zone-a", "zone-b", "zone-c"},
+		RSCZones:     []string{"zone-a", "zone-b", "zone-c"},
+		NodesPerZone: 2,
+		NodeScores: map[string]int{
+			"node-a1": 100, "node-a2": 80,
+			"node-b1": 90, "node-b2": 70,
+			"node-c1": 85, "node-c2": 65,
+		},
+	},
+	"large-3z-3n": {
+		Name:         "large-3z-3n",
+		Zones:        []string{"zone-a", "zone-b", "zone-c"},
+		RSCZones:     []string{"zone-a", "zone-b", "zone-c"},
+		NodesPerZone: 3,
+		NodeScores: map[string]int{
+			"node-a1": 100, "node-a2": 90, "node-a3": 80,
+			"node-b1": 95, "node-b2": 85, "node-b3": 75,
+			"node-c1": 92, "node-c2": 82, "node-c3": 72,
+		},
+	},
+	"xlarge-4z": {
+		Name:         "xlarge-4z",
+		Zones:        []string{"zone-a", "zone-b", "zone-c", "zone-d"},
+		RSCZones:     []string{"zone-a", "zone-b", "zone-c"}, // zone-d NOT in RSC!
+		NodesPerZone: 2,
+		NodeScores: map[string]int{
+			"node-a1": 100, "node-a2": 80,
+			"node-b1": 90, "node-b2": 70,
+			"node-c1": 85, "node-c2": 65,
+			"node-d1": 95, "node-d2": 75,
+		},
+	},
+}
+
+var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
+	var (
+		scheme *runtime.Scheme
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		utilruntime.Must(corev1.AddToScheme(scheme))
+		utilruntime.Must(snc.AddToScheme(scheme))
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+		utilruntime.Must(v1alpha3.AddToScheme(scheme))
+	})
+
+	// Helper to run a test case
+	runTestCase := func(ctx context.Context, tc IntegrationTestCase) {
+		cluster := clusterConfigs[tc.Cluster]
+		Expect(cluster.Name).ToNot(BeEmpty(), "Unknown cluster: %s", tc.Cluster)
+
+		// Generate cluster resources
+		nodes, scores := generateNodes(cluster)
+		lvgs, rsp := generateLVGs(nodes)
+
+		// Build lvg -> node mapping for mock server
+		lvgToNode := make(map[string]string)
+		for _, lvg := range lvgs {
+			if len(lvg.Status.Nodes) > 0 {
+				lvgToNode[lvg.Name] = lvg.Status.Nodes[0].Name
+			}
+		}
+
+		// Create mock server
+		mockServer := createMockServer(scores, lvgToNode)
+		defer mockServer.Close()
+		os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+		defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+		// Create RSC
+		rsc := &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:  "pool-1",
+				VolumeAccess: "Any",
+				Topology:     tc.Topology,
+				Zones:        cluster.RSCZones,
+			},
+		}
+
+		// Create RV
+		rv := &v1alpha3.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-test",
+				Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+			},
+			Spec: v1alpha3.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-test",
+				PublishOn:                  tc.PublishOn,
+			},
+			Status: &v1alpha3.ReplicatedVolumeStatus{
+				Conditions: []metav1.Condition{{
+					Type:   v1alpha3.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
+			},
+		}
+
+		// Create RVRs
+		var rvrList []*v1alpha3.ReplicatedVolumeReplica
+		rvrIndex := 1
+
+		// Existing replicas (already scheduled)
+		for _, existing := range tc.Existing {
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-existing-%d", rvrIndex)},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 existing.Type,
+					NodeName:             existing.NodeName,
+				},
+			}
+			rvrList = append(rvrList, rvr)
+			rvrIndex++
+		}
+
+		// Diskful replicas to schedule
+		for i := 0; i < tc.ToSchedule.Diskful; i++ {
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-diskful-%d", i+1)},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha3.ReplicaTypeDiskful,
+				},
+			}
+			rvrList = append(rvrList, rvr)
+		}
+
+		// TieBreaker replicas to schedule
+		for i := 0; i < tc.ToSchedule.TieBreaker; i++ {
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-tiebreaker-%d", i+1)},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha3.ReplicaTypeTieBreaker,
+				},
+			}
+			rvrList = append(rvrList, rvr)
+		}
+
+		// Build objects list
+		objects := []runtime.Object{rv, rsc, rsp}
+		for _, node := range nodes {
+			objects = append(objects, node)
+		}
+		for _, lvg := range lvgs {
+			objects = append(objects, lvg)
+		}
+		for _, rvr := range rvrList {
+			objects = append(objects, rvr)
+		}
+
+		// Create client and reconciler
+		cl := fake.NewClientBuilder().
+			WithScheme(scheme).
+			WithRuntimeObjects(objects...).
+			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+			Build()
+		rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		Expect(err).ToNot(HaveOccurred())
+
+		// Reconcile
+		_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+
+		// Check result
+		if tc.Expected.Error != "" {
+			Expect(err).To(HaveOccurred(), "Expected error but got none")
+			Expect(err.Error()).To(ContainSubstring(tc.Expected.Error), "Error message mismatch")
+			return
+		}
+
+		Expect(err).ToNot(HaveOccurred(), "Unexpected error: %v", err)
+
+		// Verify Diskful replicas
+		var scheduledDiskful []string
+		var diskfulZones []string
+		for i := 0; i < tc.ToSchedule.Diskful; i++ {
+			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-diskful-%d", i+1)}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "Diskful replica %d not scheduled", i+1)
+			scheduledDiskful = append(scheduledDiskful, updated.Spec.NodeName)
+
+			// Find zone for this node
+			for _, node := range nodes {
+				if node.Name == updated.Spec.NodeName {
+					zone := node.Labels["topology.kubernetes.io/zone"]
+					if !slices.Contains(diskfulZones, zone) {
+						diskfulZones = append(diskfulZones, zone)
+					}
+					break
+				}
+			}
+		}
+
+		// Check Diskful zones
+		if tc.Expected.DiskfulZones != nil {
+			Expect(diskfulZones).To(ConsistOf(tc.Expected.DiskfulZones), "Diskful zones mismatch")
+		}
+
+		// Check Diskful nodes
+		if tc.Expected.DiskfulNodes != nil {
+			Expect(scheduledDiskful).To(ConsistOf(tc.Expected.DiskfulNodes), "Diskful nodes mismatch")
+		}
+
+		// Verify TieBreaker replicas
+		var scheduledTieBreaker []string
+		var tieBreakerZones []string
+		for i := 0; i < tc.ToSchedule.TieBreaker; i++ {
+			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-tiebreaker-%d", i+1)}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "TieBreaker replica %d not scheduled", i+1)
+			scheduledTieBreaker = append(scheduledTieBreaker, updated.Spec.NodeName)
+
+			// Find zone for this node
+			for _, node := range nodes {
+				if node.Name == updated.Spec.NodeName {
+					zone := node.Labels["topology.kubernetes.io/zone"]
+					if !slices.Contains(tieBreakerZones, zone) {
+						tieBreakerZones = append(tieBreakerZones, zone)
+					}
+					break
+				}
+			}
+		}
+
+		// Check TieBreaker zones
+		if tc.Expected.TieBreakerZones != nil {
+			Expect(tieBreakerZones).To(ConsistOf(tc.Expected.TieBreakerZones), "TieBreaker zones mismatch")
+		}
+
+		// Check TieBreaker nodes
+		if tc.Expected.TieBreakerNodes != nil {
+			Expect(scheduledTieBreaker).To(ConsistOf(tc.Expected.TieBreakerNodes), "TieBreaker nodes mismatch")
+		}
+
+		// Verify no node has multiple replicas
+		allScheduled := append(scheduledDiskful, scheduledTieBreaker...)
+		// Add existing replica nodes
+		for _, existing := range tc.Existing {
+			allScheduled = append(allScheduled, existing.NodeName)
+		}
+		nodeCount := make(map[string]int)
+		for _, node := range allScheduled {
+			nodeCount[node]++
+			Expect(nodeCount[node]).To(Equal(1), "Node %s has multiple replicas", node)
+		}
+	}
+
+	// ==================== ZONAL TOPOLOGY ====================
+	Context("Zonal Topology", func() {
+		zonalTestCases := []IntegrationTestCase{
+			{
+				Name:       "1. small-1z: D:2, TB:1 - all in zone-a",
+				Cluster:    "small-1z",
+				Topology:   "Zonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
+			},
+			{
+				Name:       "2. small-1z: publishOn node-a1 - D on node-a1",
+				Cluster:    "small-1z",
+				Topology:   "Zonal",
+				PublishOn:  []string{"node-a1"},
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
+				Expected:   ExpectedResult{DiskfulNodes: []string{"node-a1"}, TieBreakerNodes: []string{"node-a2"}},
+			},
+			{
+				Name:       "3. medium-2z: publishOn same zone - all in zone-a",
+				Cluster:    "medium-2z",
+				Topology:   "Zonal",
+				PublishOn:  []string{"node-a1", "node-a2"},
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
+			},
+			{
+				Name:       "4. medium-2z: publishOn different zones - pick one zone",
+				Cluster:    "medium-2z",
+				Topology:   "Zonal",
+				PublishOn:  []string{"node-a1", "node-b1"},
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{}, // any zone is ok
+			},
+			{
+				Name:       "5. medium-2z-4n: existing D in zone-a - new D and TB in zone-a",
+				Cluster:    "medium-2z-4n",
+				Topology:   "Zonal",
+				PublishOn:  nil,
+				Existing:   []ExistingReplica{{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"}},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}, TieBreakerZones: []string{"zone-a"}},
+			},
+			{
+				Name:      "6. medium-2z: existing D in different zones - topology conflict",
+				Cluster:   "medium-2z",
+				Topology:  "Zonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{Error: "multiple zones"},
+			},
+			{
+				Name:       "7. large-3z: no publishOn - pick best zone by score",
+				Cluster:    "large-3z",
+				Topology:   "Zonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
+				Expected:   ExpectedResult{}, // any zone, best score wins
+			},
+			{
+				Name:       "8. xlarge-4z: publishOn zone-d (not in RSC) - D in zone-d (targetZones priority)",
+				Cluster:    "xlarge-4z",
+				Topology:   "Zonal",
+				PublishOn:  []string{"node-d1"},
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-d"}, TieBreakerZones: []string{"zone-d"}},
+			},
+			{
+				Name:      "9. small-1z: all nodes occupied - no candidate nodes",
+				Cluster:   "small-1z",
+				Topology:  "Zonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{Error: "no candidate nodes"},
+			},
+			{
+				Name:       "10. medium-2z: TB only without Diskful - error",
+				Cluster:    "medium-2z",
+				Topology:   "Zonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{Error: "no Diskful replicas"},
+			},
+			{
+				Name:      "11. medium-2z-4n: existing D+TB in zone-a - new D in zone-a",
+				Cluster:   "medium-2z-4n",
+				Topology:  "Zonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
+			},
+			{
+				Name:      "12. medium-2z-4n: existing D+Access in zone-a - new TB in zone-a",
+				Cluster:   "medium-2z-4n",
+				Topology:  "Zonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-a"}},
+			},
+		}
+
+		for _, tc := range zonalTestCases {
+			tc := tc // capture
+			It(tc.Name, func(ctx SpecContext) {
+				runTestCase(ctx, tc)
+			})
+		}
+	})
+
+	// ==================== TRANSZONAL TOPOLOGY ====================
+	Context("TransZonal Topology", func() {
+		transZonalTestCases := []IntegrationTestCase{
+			{
+				Name:       "1. large-3z: D:3 - one per zone",
+				Cluster:    "large-3z",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a", "zone-b", "zone-c"}},
+			},
+			{
+				Name:       "2. large-3z: D:2, TB:1 - D in 2 zones, TB in 3rd",
+				Cluster:    "large-3z",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // distribution across 3 zones
+			},
+			{
+				Name:      "3. large-3z: existing D in zone-a,b - new D in zone-c",
+				Cluster:   "large-3z",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
+			},
+			{
+				Name:      "4. large-3z: existing D in zone-a,b - TB in zone-c",
+				Cluster:   "large-3z",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-c"}},
+			},
+			{
+				Name:       "5. medium-2z: existing D in zone-a - new D in zone-b",
+				Cluster:    "medium-2z",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   []ExistingReplica{{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"}},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-b"}},
+			},
+			{
+				Name:      "6. medium-2z: zones full, new D - cannot guarantee even",
+				Cluster:   "medium-2z",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{}, // will place in any zone with free node
+			},
+			{
+				Name:       "7. xlarge-4z: D:3, TB:1 - D in RSC zones only",
+				Cluster:    "xlarge-4z",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 1},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a", "zone-b", "zone-c"}},
+			},
+			{
+				Name:       "8. large-3z-3n: D:5, TB:1 - distribution 2-2-1",
+				Cluster:    "large-3z-3n",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 5, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // 2-2-1 distribution + 1 TB
+			},
+			{
+				Name:      "9. medium-2z: all nodes occupied - no candidate nodes",
+				Cluster:   "medium-2z",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{Error: "no candidate nodes"},
+			},
+			{
+				Name:       "10. large-3z: TB only, no existing - TB in any zone",
+				Cluster:    "large-3z",
+				Topology:   "TransZonal",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // any zone ok (all have 0 replicas)
+			},
+			{
+				Name:      "11. large-3z-3n: existing D+TB in zone-a,b - new D in zone-c",
+				Cluster:   "large-3z-3n",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
+			},
+			{
+				Name:      "12. large-3z-3n: existing D+Access across zones - new TB balances",
+				Cluster:   "large-3z-3n",
+				Topology:  "TransZonal",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-c"}}, // zone-c has 0 replicas
+			},
+		}
+
+		for _, tc := range transZonalTestCases {
+			tc := tc // capture
+			It(tc.Name, func(ctx SpecContext) {
+				runTestCase(ctx, tc)
+			})
+		}
+	})
+
+	// ==================== IGNORED TOPOLOGY ====================
+	Context("Ignored Topology", func() {
+		ignoredTestCases := []IntegrationTestCase{
+			{
+				Name:       "1. large-3z: D:2, TB:1 - best score wins",
+				Cluster:    "large-3z",
+				Topology:   "Ignored",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // any nodes, best score
+			},
+			{
+				Name:       "2. medium-2z: publishOn - prefer publishOn nodes",
+				Cluster:    "medium-2z",
+				Topology:   "Ignored",
+				PublishOn:  []string{"node-a1", "node-b1"},
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
+				Expected:   ExpectedResult{DiskfulNodes: []string{"node-a1", "node-b1"}},
+			},
+			{
+				Name:       "3. small-1z-4n: D:2, TB:2 - 4 replicas on 4 nodes",
+				Cluster:    "small-1z-4n",
+				Topology:   "Ignored",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 2},
+				Expected:   ExpectedResult{}, // all 4 nodes used
+			},
+			{
+				Name:       "4. xlarge-4z: D:3, TB:1 - any 4 nodes by score",
+				Cluster:    "xlarge-4z",
+				Topology:   "Ignored",
+				PublishOn:  nil,
+				Existing:   nil,
+				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // best 4 nodes
+			},
+			{
+				Name:      "5. small-1z: all nodes occupied - no candidate nodes",
+				Cluster:   "small-1z",
+				Topology:  "Ignored",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{Error: "no candidate nodes"},
+			},
+			{
+				Name:      "6. small-1z-4n: existing D+TB - new D on best remaining",
+				Cluster:   "small-1z-4n",
+				Topology:  "Ignored",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
+				Expected:   ExpectedResult{}, // any of remaining nodes
+			},
+			{
+				Name:      "7. small-1z-4n: existing D+Access - new TB",
+				Cluster:   "small-1z-4n",
+				Topology:  "Ignored",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // any of remaining nodes
+			},
+			{
+				Name:      "8. medium-2z-4n: existing mixed types - new D+TB",
+				Cluster:   "medium-2z-4n",
+				Topology:  "Ignored",
+				PublishOn: nil,
+				Existing: []ExistingReplica{
+					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-b1"},
+				},
+				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
+				Expected:   ExpectedResult{}, // best remaining nodes by score
+			},
+		}
+
+		for _, tc := range ignoredTestCases {
+			tc := tc // capture
+			It(tc.Name, func(ctx SpecContext) {
+				runTestCase(ctx, tc)
+			})
+		}
+	})
+})
+
+// ==================== ACCESS PHASE TESTS (kept separate) ====================
+var _ = Describe("Access Phase Tests", Ordered, func() {
 	var (
 		scheme     *runtime.Scheme
-		builder    *fake.ClientBuilder
 		cl         client.WithWatch
 		rec        *rvrschedulingcontroller.Reconciler
 		mockServer *httptest.Server
@@ -70,9 +847,6 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 		utilruntime.Must(snc.AddToScheme(scheme))
 		utilruntime.Must(v1alpha1.AddToScheme(scheme))
 		utilruntime.Must(v1alpha3.AddToScheme(scheme))
-		builder = fake.NewClientBuilder().
-			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
 	})
 
 	AfterEach(func() {
@@ -80,1176 +854,228 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 		mockServer.Close()
 	})
 
+	var (
+		rv                    *v1alpha3.ReplicatedVolume
+		rsc                   *v1alpha1.ReplicatedStorageClass
+		rsp                   *v1alpha1.ReplicatedStoragePool
+		lvgA                  *snc.LVMVolumeGroup
+		lvgB                  *snc.LVMVolumeGroup
+		nodeA                 *corev1.Node
+		nodeB                 *corev1.Node
+		rvrList               []*v1alpha3.ReplicatedVolumeReplica
+		withStatusSubresource bool
+	)
+
+	BeforeEach(func() {
+		rv = &v1alpha3.ReplicatedVolume{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:       "rv-access",
+				Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+			},
+			Spec: v1alpha3.ReplicatedVolumeSpec{
+				Size:                       resource.MustParse("10Gi"),
+				ReplicatedStorageClassName: "rsc-access",
+				PublishOn:                  []string{"node-a", "node-b"},
+			},
+			Status: &v1alpha3.ReplicatedVolumeStatus{
+				Conditions: []metav1.Condition{{
+					Type:   v1alpha3.ConditionTypeReady,
+					Status: metav1.ConditionTrue,
+				}},
+			},
+		}
+
+		rsc = &v1alpha1.ReplicatedStorageClass{
+			ObjectMeta: metav1.ObjectMeta{Name: "rsc-access"},
+			Spec: v1alpha1.ReplicatedStorageClassSpec{
+				StoragePool:  "pool-access",
+				VolumeAccess: "Any",
+				Topology:     "Ignored",
+			},
+		}
+
+		rsp = &v1alpha1.ReplicatedStoragePool{
+			ObjectMeta: metav1.ObjectMeta{Name: "pool-access"},
+			Spec: v1alpha1.ReplicatedStoragePoolSpec{
+				Type: "LVM",
+				LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
+					{Name: "vg-a"}, {Name: "vg-b"},
+				},
+			},
+		}
+
+		lvgA = &snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "vg-a"},
+			Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}},
+		}
+		lvgB = &snc.LVMVolumeGroup{
+			ObjectMeta: metav1.ObjectMeta{Name: "vg-b"},
+			Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-b"}}},
+		}
+
+		nodeA = &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-a",
+				Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
+			},
+		}
+		nodeB = &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   "node-b",
+				Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
+			},
+		}
+
+		rvrList = nil
+		withStatusSubresource = false
+	})
+
 	JustBeforeEach(func() {
+		objects := []runtime.Object{rv, rsc, rsp, lvgA, nodeA}
+		if lvgB != nil {
+			objects = append(objects, lvgB)
+		}
+		if nodeB != nil {
+			objects = append(objects, nodeB)
+		}
+		for _, rvr := range rvrList {
+			objects = append(objects, rvr)
+		}
+		builder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
+		if withStatusSubresource {
+			builder = builder.WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
+		}
 		cl = builder.Build()
 		rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 	})
 
-	FContext("Diskful phase", func() {
-		var (
-			rv      *v1alpha3.ReplicatedVolume
-			rsc     *v1alpha1.ReplicatedStorageClass
-			nodeA   *corev1.Node
-			nodeB   *corev1.Node
-			rsp     *v1alpha1.ReplicatedStoragePool
-			lvgA    *snc.LVMVolumeGroup
-			lvgB    *snc.LVMVolumeGroup
-			rvrList []*v1alpha3.ReplicatedVolumeReplica
-		)
-
+	When("one publishOn node has diskful replica", func() {
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-local",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
-				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-local",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
-						Status: metav1.ConditionTrue,
-					}},
-				},
-			}
-
-			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-local"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					StoragePool:  "pool-1",
-					VolumeAccess: "Local",
-					Topology:     "Zonal",
-					Zones:        []string{"zone-a"},
-				},
-			}
-
-			nodeA = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-
-			rsp = &v1alpha1.ReplicatedStoragePool{
-				ObjectMeta: metav1.ObjectMeta{Name: "pool-1"},
-				Spec: v1alpha1.ReplicatedStoragePoolSpec{
-					Type: "LVM",
-					LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
-						{Name: "vg-a"}, {Name: "vg-b"},
-					},
-				},
-			}
-
-			lvgA = &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: "vg-a"},
-				Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-a"}}},
-			}
-			lvgB = &snc.LVMVolumeGroup{
-				ObjectMeta: metav1.ObjectMeta{Name: "vg-b"},
-				Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-b"}}},
-			}
-
 			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
 				{
-					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful"},
 					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-local",
+						ReplicatedVolumeName: "rv-access",
 						Type:                 v1alpha3.ReplicaTypeDiskful,
+						NodeName:             "node-a",
 					},
 				},
 				{
-					ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
 					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-local",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						ReplicatedVolumeName: "rv-access",
+						Type:                 "Access",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-2"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-access",
+						Type:                 "Access",
 					},
 				},
 			}
 		})
 
-		JustBeforeEach(func() {
-			objects := []runtime.Object{rv, rsc, nodeA, nodeB, rsp, lvgA, lvgB}
-			for _, rvr := range rvrList {
-				objects = append(objects, rvr)
-			}
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
-				Build()
-			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-		})
-
-		reconcileAndExpectSuccess := func(ctx context.Context) {
+		It("schedules access replica only on free publishOn node", func(ctx SpecContext) {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
-		}
 
-		reconcileAndExpectError := func(ctx context.Context, errSubstring string) {
-			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring(errSubstring))
-		}
+			updated1 := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-1"}, updated1)).To(Succeed())
+			updated2 := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-2"}, updated2)).To(Succeed())
 
-		expectReplicasScheduledOnNodes := func(ctx context.Context, expectedNodes ...string) {
-			var assignedNodes []string
-			for _, rvr := range rvrList {
-				updated := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: rvr.Name}, updated)).To(Succeed())
-				assignedNodes = append(assignedNodes, updated.Spec.NodeName)
-			}
-			Expect(assignedNodes).To(ContainElements(expectedNodes))
-		}
-
-		expectScheduledCondition := func(ctx context.Context, rvrName string, expectedStatus metav1.ConditionStatus, expectedReason string) {
-			updated := &v1alpha3.ReplicatedVolumeReplica{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, updated)).To(Succeed())
-			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha3.ConditionTypeScheduled)
-			Expect(cond).ToNot(BeNil(), "Scheduled condition should exist on RVR %s", rvrName)
-			Expect(cond.Status).To(Equal(expectedStatus), "Scheduled condition status mismatch on RVR %s", rvrName)
-			Expect(cond.Reason).To(Equal(expectedReason), "Scheduled condition reason mismatch on RVR %s", rvrName)
-		}
-
-		expectAllReplicasHaveScheduledConditionTrue := func(ctx context.Context) {
-			for _, rvr := range rvrList {
-				expectScheduledCondition(ctx, rvr.Name, metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-			}
-		}
-
-		Context("Zonal topology", func() {
-			It("schedules replicas when all publishOn nodes are in the same zone", func(ctx SpecContext) {
-				reconcileAndExpectSuccess(ctx)
-				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
-				expectAllReplicasHaveScheduledConditionTrue(ctx)
-			})
-
-			When("not enough replicas for publishOn nodes", func() {
-				BeforeEach(func() {
-					rvrList = rvrList[:1]
-				})
-
-				It("schedules available replicas successfully", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-					updated := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: rvrList[0].Name}, updated)).To(Succeed())
-					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
-					expectScheduledCondition(ctx, rvrList[0].Name, metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-				})
-			})
-
-			When("publishOn nodes span multiple zones", func() {
-				BeforeEach(func() {
-					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-					nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-					rvrList[0].Spec.NodeName = "node-a"
-				})
-
-				It("returns error when no candidate nodes in target zone", func(ctx SpecContext) {
-					reconcileAndExpectError(ctx, "no candidate nodes")
-				})
-			})
-		})
-
-		Context("TransZonal topology", func() {
-			BeforeEach(func() {
-				rsc.Spec.Topology = "TransZonal"
-				rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-			})
-
-			When("publishOn nodes are in the same zone but RSC allows multiple zones", func() {
-				It("returns error because cannot guarantee even distribution", func(ctx SpecContext) {
-					// Both nodes are in zone-a, but RSC allows zone-a and zone-b
-					// We cannot place replicas in zone-b, so we can't guarantee even distribution
-					reconcileAndExpectError(ctx, "no available nodes")
-				})
-			})
-
-			When("publishOn nodes are in different zones", func() {
-				BeforeEach(func() {
-					nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-				})
-
-				It("schedules replicas successfully", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
-					expectAllReplicasHaveScheduledConditionTrue(ctx)
-				})
-			})
-		})
-
-		Context("Ignored topology", func() {
-			BeforeEach(func() {
-				rsc.Spec.Topology = "Ignored"
-				rsc.Spec.Zones = nil
-				nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-			})
-
-			It("schedules replicas on any publishOn nodes", func(ctx SpecContext) {
-				reconcileAndExpectSuccess(ctx)
-				expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
-				expectAllReplicasHaveScheduledConditionTrue(ctx)
-			})
-		})
-
-		Context("PublishOn preference", func() {
-			var nodeC *corev1.Node
-			var nodeD *corev1.Node
-			var lvgC *snc.LVMVolumeGroup
-			var lvgD *snc.LVMVolumeGroup
-
-			BeforeEach(func() {
-				// Setup: 4 nodes (a, b, c, d) in same zone, but only node-a and node-b are in publishOn
-				rsc.Spec.Topology = "Ignored"
-				rsc.Spec.Zones = nil
-
-				nodeC = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "node-c",
-						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-					},
-				}
-				nodeD = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "node-d",
-						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-					},
-				}
-
-				// Add LVGs for new nodes
-				lvgC = &snc.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: "vg-c"},
-					Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-c"}}},
-				}
-				lvgD = &snc.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: "vg-d"},
-					Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-d"}}},
-				}
-
-				// Update storage pool to include all nodes
-				rsp.Spec.LVMVolumeGroups = []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{
-					{Name: "vg-a"}, {Name: "vg-b"}, {Name: "vg-c"}, {Name: "vg-d"},
-				}
-			})
-
-			JustBeforeEach(func() {
-				objects := []runtime.Object{rv, rsc, nodeA, nodeB, nodeC, nodeD, rsp, lvgA, lvgB, lvgC, lvgD}
-				for _, rvr := range rvrList {
-					objects = append(objects, rvr)
-				}
-				cl = fake.NewClientBuilder().
-					WithScheme(scheme).
-					WithRuntimeObjects(objects...).
-					WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
-					Build()
-				rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-			})
-
-			When("more candidate nodes than replicas", func() {
-				BeforeEach(func() {
-					// publishOn is [node-a, node-b], but we have 4 candidate nodes
-					// and only 1 replica to schedule
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("prefers publishOn nodes over other nodes", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-
-					updated := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
-					// Should be scheduled on node-a or node-b (publishOn nodes), not node-c or node-d
-					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b"))
-					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-				})
-			})
-
-			When("two replicas and two publishOn nodes among four candidates", func() {
-				BeforeEach(func() {
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("schedules both replicas on publishOn nodes", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-
-					updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-					updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated1)).To(Succeed())
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updated2)).To(Succeed())
-
-					assignedNodes := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
-					// Both should be on publishOn nodes
-					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
-					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-					expectScheduledCondition(ctx, "rvr-2", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-				})
-			})
-
-			When("more replicas than publishOn nodes", func() {
-				BeforeEach(func() {
-					// 3 replicas, but only 2 publishOn nodes
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("schedules publishOn nodes first, then other nodes", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-
-					updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-					updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-					updated3 := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated1)).To(Succeed())
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updated2)).To(Succeed())
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-3"}, updated3)).To(Succeed())
-
-					assignedNodes := []string{updated1.Spec.NodeName, updated2.Spec.NodeName, updated3.Spec.NodeName}
-					// publishOn nodes (node-a, node-b) should be used
-					Expect(assignedNodes).To(ContainElements("node-a", "node-b"))
-					// Third replica goes to node-c or node-d
-					Expect(assignedNodes).To(ContainElement(BeElementOf("node-c", "node-d")))
-					// All replicas should have Scheduled=True condition
-					expectScheduledCondition(ctx, "rvr-1", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-					expectScheduledCondition(ctx, "rvr-2", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-					expectScheduledCondition(ctx, "rvr-3", metav1.ConditionTrue, v1alpha3.ReasonSchedulingReplicaScheduled)
-				})
-			})
-
-			When("no publishOn nodes specified", func() {
-				BeforeEach(func() {
-					rv.Spec.PublishOn = nil
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-local",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("schedules on any available node", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-
-					updated := &v1alpha3.ReplicatedVolumeReplica{}
-					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
-					Expect(updated.Spec.NodeName).To(BeElementOf("node-a", "node-b", "node-c", "node-d"))
-				})
-			})
+			nodeNames := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
+			Expect(nodeNames).To(ContainElement("node-b"))
+			Expect(nodeNames).To(ContainElement(""))
 		})
 	})
 
-	Context("Diskful phase (non-Local)", func() {
-		var (
-			rv      *v1alpha3.ReplicatedVolume
-			rsc     *v1alpha1.ReplicatedStorageClass
-			nodeA   *corev1.Node
-			nodeB   *corev1.Node
-			nodeC   *corev1.Node
-			rsp     *v1alpha1.ReplicatedStoragePool
-			lvgB    *snc.LVMVolumeGroup
-			rvrList []*v1alpha3.ReplicatedVolumeReplica
-		)
-
+	When("all publishOn nodes already have replicas", func() {
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-diskful",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
-				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-diskful",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
-						Status: metav1.ConditionTrue,
-					}},
-				},
-			}
-
-			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-diskful"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					VolumeAccess: "Any",
-					Topology:     "Any",
-				},
-			}
-
-			nodeA = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeC = nil
-			rsp = nil
-			lvgB = nil
-
 			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
 				{
-					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
 					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-diskful",
+						ReplicatedVolumeName: "rv-access",
+						Type:                 v1alpha3.ReplicaTypeDiskful,
+						NodeName:             "node-a",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-access",
+						Type:                 "Access",
+						NodeName:             "node-b",
+					},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-unscheduled"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-access",
+						Type:                 "Access",
+					},
+				},
+			}
+		})
+
+		It("does not schedule unscheduled access replica", func(ctx SpecContext) {
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-unscheduled"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal(""))
+		})
+	})
+
+	When("checking Scheduled condition", func() {
+		BeforeEach(func() {
+			rv.Spec.PublishOn = []string{"node-a", "node-b"}
+			withStatusSubresource = true
+			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-access",
+						Type:                 v1alpha3.ReplicaTypeDiskful,
+						NodeName:             "node-a",
+					},
+					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "rvr-to-schedule"},
+					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-access",
 						Type:                 v1alpha3.ReplicaTypeDiskful,
 					},
+					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
 				},
 			}
 		})
 
-		JustBeforeEach(func() {
-			objects := []runtime.Object{rv, rsc, nodeA, nodeB}
-			if nodeC != nil {
-				objects = append(objects, nodeC)
-			}
-			if rsp != nil {
-				objects = append(objects, rsp)
-			}
-			if lvgB != nil {
-				objects = append(objects, lvgB)
-			}
-			for _, rvr := range rvrList {
-				objects = append(objects, rvr)
-			}
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(objects...).
-				Build()
-			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-		})
+		It("sets Scheduled=True for all scheduled replicas", func(ctx SpecContext) {
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
 
-		Context("Any topology with storage pool constraint", func() {
-			BeforeEach(func() {
-				rsc.Spec.StoragePool = "pool-any"
-				rsp = &v1alpha1.ReplicatedStoragePool{
-					ObjectMeta: metav1.ObjectMeta{Name: "pool-any"},
-					Spec: v1alpha1.ReplicatedStoragePoolSpec{
-						Type:            "LVM",
-						LVMVolumeGroups: []v1alpha1.ReplicatedStoragePoolLVMVolumeGroups{{Name: "vg-b"}},
-					},
-				}
-				lvgB = &snc.LVMVolumeGroup{
-					ObjectMeta: metav1.ObjectMeta{Name: "vg-b"},
-					Spec:       snc.LVMVolumeGroupSpec{Local: snc.LVMVolumeGroupLocalSpec{NodeName: "node-b"}},
-					Status:     snc.LVMVolumeGroupStatus{Nodes: []snc.LVMVolumeGroupNode{{Name: "node-b"}}},
-				}
-			})
+			// Check already-scheduled replica gets condition fixed
+			updatedScheduled := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-scheduled"}, updatedScheduled)).To(Succeed())
+			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			Expect(condScheduled).ToNot(BeNil())
+			Expect(condScheduled.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
 
-			It("schedules replica on node allowed by storage pool", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
-				Expect(updated.Spec.NodeName).To(Equal("node-b"))
-			})
-		})
-
-		Context("Zonal topology", func() {
-			BeforeEach(func() {
-				rsc.Spec.Topology = "Zonal"
-				rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-				rv.Spec.PublishOn = []string{"node-a", "node-b", "node-c"}
-				nodeC = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "node-c",
-						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-b"},
-					},
-				}
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-existing"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-diskful",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-diskful",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-						},
-					},
-				}
-			})
-
-			It("keeps replicas in the same zone as existing ones", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated)).To(Succeed())
-				Expect(updated.Spec.NodeName).To(Equal("node-b"))
-			})
-		})
-
-		Context("TransZonal topology", func() {
-			BeforeEach(func() {
-				rsc.Spec.Topology = "TransZonal"
-				rsc.Spec.Zones = []string{"zone-a", "zone-b", "zone-c"}
-				rv.Spec.PublishOn = []string{"node-a", "node-b", "node-c"}
-				nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-				nodeC = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "node-c",
-						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-c"},
-					},
-				}
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-existing"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-diskful",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-diskful",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-diskful",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-						},
-					},
-				}
-			})
-
-			It("distributes replicas across different zones", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-				updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updated1)).To(Succeed())
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-2"}, updated2)).To(Succeed())
-
-				nodeNames := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
-				Expect(nodeNames).To(ContainElements("node-b", "node-c"))
-			})
-
-			When("zone with fewest replicas has no available nodes", func() {
-				BeforeEach(func() {
-					// Setup: 3 zones, 2 zones have replicas, 1 zone has 0 replicas but no nodes
-					// zone-a: 1 replica (node-a)
-					// zone-b: 1 replica (node-b)
-					// zone-c: 0 replicas, no nodes available (nodeC is nil)
-					rv.Spec.PublishOn = []string{"node-a", "node-b"}
-					nodeC = nil
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-a",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-b",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("returns error about uneven distribution", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("no available nodes"))
-				})
-			})
-
-			When("all zones have equal replica count", func() {
-				BeforeEach(func() {
-					// Setup: 2 zones with 1 replica each, new replica should be placed in any zone
-					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-					rv.Spec.PublishOn = []string{"node-a", "node-b"}
-					nodeC = nil
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-a",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-b",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-diskful",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-							},
-						},
-					}
-				})
-
-				It("returns error because no nodes are available", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("no candidate nodes"))
-				})
-			})
-		})
-	})
-
-	Context("Access phase", func() {
-		var (
-			rv                    *v1alpha3.ReplicatedVolume
-			rsc                   *v1alpha1.ReplicatedStorageClass
-			nodeA                 *corev1.Node
-			nodeB                 *corev1.Node
-			rvrList               []*v1alpha3.ReplicatedVolumeReplica
-			withStatusSubresource bool
-		)
-
-		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-access",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
-				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-access",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
-						Status: metav1.ConditionTrue,
-					}},
-				},
-			}
-
-			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-access"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					VolumeAccess: "Any",
-					Topology:     "Any",
-				},
-			}
-
-			nodeA = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-
-			rvrList = nil
-			withStatusSubresource = false
-		})
-
-		JustBeforeEach(func() {
-			objects := []runtime.Object{rv, rsc, nodeA}
-			if nodeB != nil {
-				objects = append(objects, nodeB)
-			}
-			for _, rvr := range rvrList {
-				objects = append(objects, rvr)
-			}
-			builder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
-			if withStatusSubresource {
-				builder = builder.WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
-			}
-			cl = builder.Build()
-			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-		})
-
-		When("one publishOn node has diskful replica", func() {
-			BeforeEach(func() {
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 "Access",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-2"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 "Access",
-						},
-					},
-				}
-			})
-
-			It("schedules access replica only on free publishOn node", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-1"}, updated1)).To(Succeed())
-				updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-2"}, updated2)).To(Succeed())
-
-				nodeNames := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
-				Expect(nodeNames).To(ContainElement("node-b"))
-				Expect(nodeNames).To(ContainElement(""))
-			})
-		})
-
-		When("all publishOn nodes already have replicas", func() {
-			BeforeEach(func() {
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 "Access",
-							NodeName:             "node-b",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-unscheduled"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 "Access",
-						},
-					},
-				}
-			})
-
-			It("does not schedule unscheduled access replica", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-unscheduled"}, updated)).To(Succeed())
-				Expect(updated.Spec.NodeName).To(Equal(""))
-			})
-		})
-
-		When("checking Scheduled condition", func() {
-			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-a"}
-				nodeB = nil
-				withStatusSubresource = true
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-						Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-unscheduled"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-access",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-						},
-						Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
-					},
-				}
-			})
-
-			It("sets Scheduled=True for scheduled and Scheduled=False for unscheduled", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updatedScheduled := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-scheduled"}, updatedScheduled)).To(Succeed())
-				condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
-				Expect(condScheduled).ToNot(BeNil())
-				Expect(condScheduled.Status).To(Equal(metav1.ConditionTrue))
-				Expect(condScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
-
-				updatedUnscheduled := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-unscheduled"}, updatedUnscheduled)).To(Succeed())
-				condUnscheduled := meta.FindStatusCondition(updatedUnscheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
-				Expect(condUnscheduled).ToNot(BeNil())
-				Expect(condUnscheduled.Status).To(Equal(metav1.ConditionFalse))
-				Expect(condUnscheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingWaitingForAnotherReplica))
-			})
-		})
-	})
-
-	Context("TieBreaker phase", func() {
-		var (
-			rv      *v1alpha3.ReplicatedVolume
-			rsc     *v1alpha1.ReplicatedStorageClass
-			nodeA   *corev1.Node
-			nodeB   *corev1.Node
-			nodeC   *corev1.Node
-			rvrList []*v1alpha3.ReplicatedVolumeReplica
-		)
-
-		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:       "rv-tb",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
-				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					Size:                       resource.MustParse("10Gi"),
-					ReplicatedStorageClassName: "rsc-tb",
-					PublishOn:                  []string{"node-a", "node-b"},
-				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
-						Status: metav1.ConditionTrue,
-					}},
-				},
-			}
-
-			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "rsc-tb"},
-				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					VolumeAccess: "Any",
-					Topology:     "Zonal",
-					Zones:        []string{"zone-a"},
-				},
-			}
-
-			nodeA = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-a",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeB = &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:   "node-b",
-					Labels: map[string]string{"topology.kubernetes.io/zone": "zone-a"},
-				},
-			}
-			nodeC = nil
-
-			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-tb",
-						Type:                 "TieBreaker",
-					},
-				},
-				{
-					ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-2"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-tb",
-						Type:                 "TieBreaker",
-					},
-				},
-			}
-		})
-
-		JustBeforeEach(func() {
-			objects := []runtime.Object{rv, rsc, nodeA, nodeB}
-			if nodeC != nil {
-				objects = append(objects, nodeC)
-			}
-			for _, rvr := range rvrList {
-				objects = append(objects, rvr)
-			}
-			cl = fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithRuntimeObjects(objects...).
-				Build()
-			rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
-		})
-
-		Context("Zonal topology", func() {
-			It("keeps all tiebreakers in the same zone", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-				updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-tb-1"}, updated1)).To(Succeed())
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-tb-2"}, updated2)).To(Succeed())
-
-				Expect(updated1.Spec.NodeName).ToNot(Equal(""))
-				Expect(updated2.Spec.NodeName).ToNot(Equal(""))
-			})
-
-			When("existing replicas are in multiple zones", func() {
-				BeforeEach(func() {
-					rv.Spec.PublishOn = nil
-					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-					nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-a",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-b",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 "TieBreaker",
-							},
-						},
-					}
-				})
-
-				It("returns error", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("cannot satisfy Zonal topology: replicas already exist in multiple zones"))
-				})
-			})
-		})
-
-		Context("TransZonal topology", func() {
-			BeforeEach(func() {
-				rsc.Spec.Topology = "TransZonal"
-				rsc.Spec.Zones = []string{"zone-a", "zone-b", "zone-c"}
-				rv.Spec.PublishOn = []string{"node-a", "node-b", "node-c"}
-				nodeB.Labels["topology.kubernetes.io/zone"] = "zone-b"
-				nodeC = &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:   "node-c",
-						Labels: map[string]string{"topology.kubernetes.io/zone": "zone-c"},
-					},
-				}
-				rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-existing"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-tb",
-							Type:                 v1alpha3.ReplicaTypeDiskful,
-							NodeName:             "node-a",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-tb",
-							Type:                 "TieBreaker",
-						},
-					},
-					{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-2"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: "rv-tb",
-							Type:                 "TieBreaker",
-						},
-					},
-				}
-			})
-
-			It("distributes tiebreakers across different zones", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-				Expect(err).ToNot(HaveOccurred())
-
-				updated1 := &v1alpha3.ReplicatedVolumeReplica{}
-				updated2 := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-tb-1"}, updated1)).To(Succeed())
-				Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-tb-2"}, updated2)).To(Succeed())
-
-				Expect(updated1.Spec.NodeName).ToNot(Equal(""))
-				Expect(updated2.Spec.NodeName).ToNot(Equal(""))
-				Expect(updated1.Spec.NodeName).ToNot(Equal(updated2.Spec.NodeName))
-			})
-
-			When("no free nodes in minimal replica zones", func() {
-				BeforeEach(func() {
-					rv.Spec.PublishOn = nil
-					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
-					nodeC = nil
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-a",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-b",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 "TieBreaker",
-							},
-						},
-					}
-				})
-
-				It("returns error", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("cannot schedule TieBreaker: no free node in zones with minimal replica count"))
-				})
-			})
-
-			When("zone with fewest replicas has no available nodes", func() {
-				BeforeEach(func() {
-					// Setup: 3 zones, 2 zones have replicas, 1 zone has 0 replicas but no nodes
-					// zone-a: 1 replica (node-a)
-					// zone-b: 1 replica (node-b)
-					// zone-c: 0 replicas, no nodes available
-					rv.Spec.PublishOn = nil
-					rsc.Spec.Zones = []string{"zone-a", "zone-b", "zone-c"}
-					nodeC = nil
-					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-a",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 v1alpha3.ReplicaTypeDiskful,
-								NodeName:             "node-b",
-							},
-						},
-						{
-							ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
-								ReplicatedVolumeName: "rv-tb",
-								Type:                 "TieBreaker",
-							},
-						},
-					}
-				})
-
-				It("returns error about uneven distribution", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-					Expect(err).To(HaveOccurred())
-					Expect(err.Error()).To(ContainSubstring("cannot schedule TieBreaker"))
-				})
-			})
+			// Check newly-scheduled replica gets NodeName and Scheduled condition
+			updatedNewlyScheduled := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-to-schedule"}, updatedNewlyScheduled)).To(Succeed())
+			Expect(updatedNewlyScheduled.Spec.NodeName).To(Equal("node-b"))
+			condNewlyScheduled := meta.FindStatusCondition(updatedNewlyScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			Expect(condNewlyScheduled).ToNot(BeNil())
+			Expect(condNewlyScheduled.Status).To(Equal(metav1.ConditionTrue))
+			Expect(condNewlyScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
 		})
 	})
 })

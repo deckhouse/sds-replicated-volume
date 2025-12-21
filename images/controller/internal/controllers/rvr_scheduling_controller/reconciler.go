@@ -126,6 +126,11 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	// Ensure all previously scheduled replicas have correct Scheduled condition
+	if err := r.ensureScheduledConditionOnExistingReplicas(ctx, sctx, log); err != nil {
+		return reconcile.Result{}, err
+	}
+
 	log.V(1).Info("reconciliation completed successfully", "totalScheduled", len(sctx.RVRsToSchedule))
 	return reconcile.Result{}, nil
 }
@@ -206,6 +211,66 @@ func (r *Reconciler) patchScheduledReplicas(
 			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
 		}
 	}
+	return nil
+}
+
+// ensureScheduledConditionOnExistingReplicas ensures that all already-scheduled replicas
+// (those that had NodeName set before this reconcile) have the correct Scheduled condition.
+// This handles cases where condition was missing or incorrect.
+func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
+	ctx context.Context,
+	sctx *SchedulingContext,
+	log logr.Logger,
+) error {
+	// Collect all scheduled replicas that were NOT scheduled in this cycle
+	alreadyScheduledReplicas := make([]*v1alpha3.ReplicatedVolumeReplica, 0)
+	alreadyScheduledReplicas = append(alreadyScheduledReplicas, sctx.ScheduledDiskfulReplicas...)
+
+	// Also check for scheduled Access and TieBreaker replicas from RvrList
+	for _, rvr := range sctx.RvrList {
+		if rvr.Spec.NodeName == "" {
+			continue // Skip unscheduled
+		}
+		// Skip if it was scheduled in this cycle
+		alreadyScheduled := true
+		for _, newlyScheduled := range sctx.RVRsToSchedule {
+			if rvr.Name == newlyScheduled.Name {
+				alreadyScheduled = false
+				break
+			}
+		}
+		if !alreadyScheduled {
+			continue
+		}
+		// Skip Diskful as they are already in ScheduledDiskfulReplicas
+		if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
+			continue
+		}
+		alreadyScheduledReplicas = append(alreadyScheduledReplicas, rvr)
+	}
+
+	for _, rvr := range alreadyScheduledReplicas {
+		// Check if condition is already correct
+		var cond *metav1.Condition
+		if rvr.Status != nil {
+			cond = meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+		}
+		if cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == v1alpha3.ReasonSchedulingReplicaScheduled {
+			continue // Already correct
+		}
+
+		log.V(2).Info("fixing Scheduled condition on existing replica", "rvr", rvr.Name)
+		if err := r.setScheduledConditionOnRVR(
+			ctx,
+			rvr,
+			metav1.ConditionTrue,
+			v1alpha3.ReasonSchedulingReplicaScheduled,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed to set Scheduled condition on existing RVR %s: %w", rvr.Name, err)
+		}
+	}
+
 	return nil
 }
 
@@ -723,17 +788,11 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 
 // getTieBreakerCandidateNodes returns nodes that can host TieBreaker replicas:
 // - Nodes without any replica of this RV
-// - Filtered by RSC zones if specified
+// Zone filtering is done later in applyTopologyFilter which considers scheduled Diskful replicas
 func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []string {
-	allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-
 	var candidateNodes []string
 	for nodeName := range sctx.NodeNameToZone {
 		if _, hasReplica := sctx.NodesWithAnyReplica[nodeName]; hasReplica {
-			continue
-		}
-		zone := sctx.NodeNameToZone[nodeName]
-		if _, ok := allowedZones[zone]; !ok {
 			continue
 		}
 		candidateNodes = append(candidateNodes, nodeName)
