@@ -84,7 +84,6 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("RVRScheduler").WithValues(
 		"traceID", traceID,
 		"rv", req.Name,
-		"namespace", req.Namespace,
 	)
 	log.V(1).Info("starting reconciliation cycle")
 
@@ -93,7 +92,6 @@ func (r *Reconciler) Reconcile(
 	sctx, failReason := r.prepareSchedulingContext(ctx, req, log)
 	if failReason != nil {
 		log.V(1).Info("RV not ready for scheduling", "reason", failReason.reason, "message", failReason.message)
-		// set conditions
 		if err := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, sctx.Rv, failReason, log); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -105,65 +103,27 @@ func (r *Reconciler) Reconcile(
 	// Phase 1: place Diskful replicas.
 	log.V(1).Info("starting Diskful phase", "unscheduledCount", len(sctx.UnscheduledDiskfulReplicas))
 	if err := r.scheduleDiskfulPhase(ctx, sctx); err != nil {
-		log.Error(err, "Diskful phase failed")
-		reason := schedulingErrorToReason(err)
-		if setErr := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
-			log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "Diskful", err, log)
 	}
-	log.V(1).Info("Diskful phase completed", "scheduledCount", len(sctx.RVRsToSchedule))
+	log.V(1).Info("Diskful phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
 	// Phase 2: place Access replicas.
-	log.V(1).Info("starting Access phase")
+	log.V(1).Info("starting Access phase", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
 	if err := r.scheduleAccessPhase(sctx); err != nil {
-		log.Error(err, "Access phase failed")
-		reason := schedulingErrorToReason(err)
-		if setErr := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
-			log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "Access", err, log)
 	}
-	log.V(1).Info("Access phase completed")
+	log.V(1).Info("Access phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
 	// Phase 3: place TieBreaker replicas.
-	log.V(1).Info("starting TieBreaker phase")
+	log.V(1).Info("starting TieBreaker phase", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas))
 	if err := r.scheduleTieBreakerPhase(sctx); err != nil {
-		log.Error(err, "TieBreaker phase failed")
-		reason := schedulingErrorToReason(err)
-		if setErr := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
-			log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
-		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "TieBreaker", err, log)
 	}
-	log.V(1).Info("TieBreaker phase completed")
+	log.V(1).Info("TieBreaker phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
-	log.V(1).Info("patching scheduled replicas", "count", len(sctx.RVRsToSchedule))
-	for _, rvr := range sctx.RVRsToSchedule {
-		log.V(2).Info("patching replica", "rvr", rvr.Name, "nodeName", rvr.Spec.NodeName, "type", rvr.Spec.Type)
-		// Create original state for patch (without NodeName)
-		original := rvr.DeepCopy()
-		original.Spec.NodeName = ""
-
-		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
-		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
-			if apierrors.IsNotFound(err) {
-				log.V(1).Info("replica not found during patch, skipping", "rvr", rvr.Name)
-				continue // Replica may have been deleted
-			}
-			return reconcile.Result{}, fmt.Errorf("failed to patch RVR %s: %w", rvr.Name, err)
-		}
-
-		// Set Scheduled condition to True for successfully scheduled replicas
-		if err := r.setScheduledConditionOnRVR(
-			ctx,
-			rvr,
-			metav1.ConditionTrue,
-			v1alpha3.ReasonSchedulingReplicaScheduled,
-			"",
-		); err != nil {
-			return reconcile.Result{}, fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
-		}
+	log.V(1).Info("patching scheduled replicas", "countTotal", len(sctx.RVRsToSchedule))
+	if err := r.patchScheduledReplicas(ctx, sctx, log); err != nil {
+		return reconcile.Result{}, err
 	}
 
 	log.V(1).Info("reconciliation completed successfully", "totalScheduled", len(sctx.RVRsToSchedule))
@@ -174,6 +134,23 @@ func (r *Reconciler) Reconcile(
 type rvNotReadyReason struct {
 	reason  string
 	message string
+}
+
+// handlePhaseError handles errors that occur during scheduling phases.
+// It logs the error, sets failed condition on RVRs, and returns the error.
+func (r *Reconciler) handlePhaseError(
+	ctx context.Context,
+	sctx *SchedulingContext,
+	phaseName string,
+	err error,
+	log logr.Logger,
+) error {
+	log.Error(err, phaseName+" phase failed")
+	reason := schedulingErrorToReason(err)
+	if setErr := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, sctx.Rv, reason, log); setErr != nil {
+		log.Error(setErr, "failed to set Scheduled condition on RVRs after scheduling error")
+	}
+	return err
 }
 
 // schedulingErrorToReason converts a scheduling error to rvNotReadyReason.
@@ -191,10 +168,50 @@ func schedulingErrorToReason(err error) *rvNotReadyReason {
 	}
 }
 
+// patchScheduledReplicas patches all scheduled replicas with their assigned node names
+// and sets the Scheduled condition to True.
+func (r *Reconciler) patchScheduledReplicas(
+	ctx context.Context,
+	sctx *SchedulingContext,
+	log logr.Logger,
+) error {
+	if len(sctx.RVRsToSchedule) == 0 {
+		log.V(1).Info("no scheduled replicas to patch")
+		return nil
+	}
+
+	for _, rvr := range sctx.RVRsToSchedule {
+		log.V(2).Info("patching replica", "rvr", rvr.Name, "nodeName", rvr.Spec.NodeName, "type", rvr.Spec.Type)
+		// Create original state for patch (without NodeName)
+		original := rvr.DeepCopy()
+		original.Spec.NodeName = ""
+
+		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
+		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
+			if apierrors.IsNotFound(err) {
+				log.V(1).Info("replica not found during patch, skipping", "rvr", rvr.Name)
+				continue // Replica may have been deleted
+			}
+			return fmt.Errorf("failed to patch RVR %s: %w", rvr.Name, err)
+		}
+
+		// Set Scheduled condition to True for successfully scheduled replicas
+		if err := r.setScheduledConditionOnRVR(
+			ctx,
+			rvr,
+			metav1.ConditionTrue,
+			v1alpha3.ReasonSchedulingReplicaScheduled,
+			"",
+		); err != nil {
+			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
+		}
+	}
+	return nil
+}
+
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
 // Returns nil if ready, or a reason struct if not ready.
 func isRVReadyToSchedule(rv *v1alpha3.ReplicatedVolume) *rvNotReadyReason {
-	// ReplicatedVolume is considered ready only when status is present and ConditionReady is true.
 	if rv.Status == nil {
 		return &rvNotReadyReason{
 			reason:  v1alpha3.ReasonSchedulingPending,
@@ -219,14 +236,14 @@ func isRVReadyToSchedule(rv *v1alpha3.ReplicatedVolume) *rvNotReadyReason {
 	if rv.Spec.ReplicatedStorageClassName == "" {
 		return &rvNotReadyReason{
 			reason:  v1alpha3.ReasonSchedulingPending,
-			message: "ReplicatedStorageClassName is not specified",
+			message: "ReplicatedStorageClassName is not specified in ReplicatedVolume spec",
 		}
 	}
 
 	if rv.Spec.Size.IsZero() {
 		return &rvNotReadyReason{
 			reason:  v1alpha3.ReasonSchedulingPending,
-			message: "ReplicatedVolume size is zero",
+			message: "ReplicatedVolume size is zero in ReplicatedVolume spec",
 		}
 	}
 
@@ -243,6 +260,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		// If the volume no longer exists, exit reconciliation without error.
 		if apierrors.IsNotFound(err) {
+			log.V(1).Info("ReplicatedVolume not found, skipping reconciliation")
 			return nil, nil
 		}
 		log.Error(err, "unable to get ReplicatedVolume")
@@ -295,7 +313,7 @@ func (r *Reconciler) prepareSchedulingContext(
 		}
 	}
 
-	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsc, log)
+	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsp, log)
 	if err != nil {
 		return nil, &rvNotReadyReason{
 			reason:  v1alpha3.ReasonSchedulingFailed,
@@ -324,7 +342,9 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	publishOnList := getPublishOnNodeList(rv)
 	scheduledDiskfulReplicas, unscheduledDiskfulReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeDiskful)
-	publishNodesWithoutAnyReplica := publishNodesWithoutAnyReplica(publishOnList, nodesWithRVReplica)
+	_, unscheduledAccessReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeAccess)
+	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeTieBreaker)
+	publishNodesWithoutAnyReplica := getPublishNodesWithoutAnyReplica(publishOnList, nodesWithRVReplica)
 
 	schedulingCtx := &SchedulingContext{
 		Log:                            log,
@@ -333,11 +353,13 @@ func (r *Reconciler) prepareSchedulingContext(
 		Rsp:                            rsp,
 		RvrList:                        replicasForRV,
 		PublishOnNodes:                 publishOnList,
+		PublishOnNodesWithoutRvReplica: publishNodesWithoutAnyReplica,
 		RspLvgToNodeInfoMap:            rspLvgToNodeInfoMap,
 		NodesWithAnyReplica:            nodesWithRVReplica,
 		UnscheduledDiskfulReplicas:     unscheduledDiskfulReplicas,
 		ScheduledDiskfulReplicas:       scheduledDiskfulReplicas,
-		PublishOnNodesWithoutRvReplica: publishNodesWithoutAnyReplica,
+		UnscheduledAccessReplicas:      unscheduledAccessReplicas,
+		UnscheduledTieBreakerReplicas:  unscheduledTieBreakerReplicas,
 		RspNodesWithoutReplica:         rspNodesWithoutReplica,
 		NodeNameToZone:                 nodeNameToZone,
 	}
@@ -351,7 +373,7 @@ func (r *Reconciler) scheduleDiskfulPhase(
 ) error {
 	if len(sctx.UnscheduledDiskfulReplicas) == 0 {
 		// Nothing to do if all Diskful replicas are already scheduled.
-		sctx.Log.V(1).Info("no unscheduled Diskful replicas")
+		sctx.Log.V(1).Info("no unscheduled Diskful replicas. Skipping Diskful phase.")
 		return nil
 	}
 
@@ -359,7 +381,7 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	sctx.Log.V(1).Info("Diskful phase: initial candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
 
 	// Apply topology constraints (Ignored/Zonal/TransZonal) to the nodes without replicas.
-	err := r.applyTopologyFilter(candidateNodes, sctx)
+	err := r.applyTopologyFilter(candidateNodes, true, sctx) // isDiskfulPhase=true
 	if err != nil {
 		// Topology constraints for Diskful & Local phase are violated.
 		return fmt.Errorf("%w: %v", errSchedulingTopologyConflict, err)
@@ -371,18 +393,19 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
 
 	// Apply capacity filtering using scheduler extender
-	err = r.applyCapacityFilter(ctx, sctx)
+	err = r.applyCapacityFilterAndScoreCandidates(ctx, sctx)
 	if err != nil {
 		return err
 	}
-	sctx.Log.V(1).Info("capacity filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
+	sctx.Log.V(1).Info("capacity filter applied and candidates scored", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
 
 	sctx.ApplyPublishOnBonus()
 	sctx.Log.V(1).Info("publishOn bonus applied")
 
-	assignedReplicas, err := r.setNodesToRVReplicas(sctx, sctx.UnscheduledDiskfulReplicas)
+	// Assign replicas: for Diskful count only Diskful replicas for zone balancing, strict mode (must place all)
+	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha3.ReplicaTypeDiskful, false)
 	if err != nil {
-		return fmt.Errorf("%w: %v", err, err)
+		return err
 	}
 	sctx.Log.V(1).Info("Diskful replicas assigned", "count", len(assignedReplicas))
 
@@ -391,14 +414,18 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	return nil
 }
 
-// setNodesToRVReplicas assigns nodes to unscheduled replicas based on topology and node scores.
+// assignReplicasToNodes assigns nodes to unscheduled replicas based on topology and node scores.
 // For Ignored topology: selects best nodes by score.
 // For Zonal topology: selects the best zone first (by total score), then best nodes from that zone.
 // For TransZonal topology: distributes replicas across zones, picking zones with fewer scheduled replicas first.
+// replicaTypeFilter: for TransZonal, which replica types to count for zone balancing (empty = all types).
+// bestEffort: if true, don't return error when not enough nodes (used for TieBreaker).
 // Note: This function returns the list of replicas that were assigned nodes in this call.
-func (r *Reconciler) setNodesToRVReplicas(
+func (r *Reconciler) assignReplicasToNodes(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	replicaTypeFilter string,
+	bestEffort bool,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
 		sctx.Log.Info("no unscheduled replicas to assign", "rv", sctx.Rv.Name)
@@ -406,54 +433,45 @@ func (r *Reconciler) setNodesToRVReplicas(
 	}
 
 	switch sctx.Rsc.Spec.Topology {
-	case "Ignored":
-		return r.assignReplicasIgnoredTopology(sctx, unscheduledReplicas)
-	case "Zonal":
-		return r.assignReplicasZonalTopology(sctx, unscheduledReplicas)
-	case "TransZonal":
-		return r.assignReplicasTransZonalTopology(sctx, unscheduledReplicas)
+	case topologyIgnored:
+		return r.assignReplicasIgnoredTopology(sctx, unscheduledReplicas, bestEffort)
+	case topologyZonal:
+		return r.assignReplicasZonalTopology(sctx, unscheduledReplicas, bestEffort)
+	case topologyTransZonal:
+		return r.assignReplicasTransZonalTopology(sctx, unscheduledReplicas, replicaTypeFilter)
 	default:
 		return nil, fmt.Errorf("unknown topology: %s", sctx.Rsc.Spec.Topology)
 	}
 }
 
 // assignReplicasIgnoredTopology assigns replicas to best nodes by score (ignoring zones).
-// It modifies rvr.Spec.NodeName and adds replicas to sctx.RVRsToSchedule for later patching.
+// If bestEffort=true, assigns as many as possible without error.
 // Returns the list of replicas that were assigned nodes.
 func (r *Reconciler) assignReplicasIgnoredTopology(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	bestEffort bool,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("assigning replicas with Ignored topology", "replicasCount", len(unscheduledReplicas))
-	// Collect all candidates from all zones and sort by score descending
+	sctx.Log.V(1).Info("assigning replicas with Ignored topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
+	// Collect all candidates from all zones
 	var allCandidates []NodeCandidate
 	for _, candidates := range sctx.ZonesToNodeCandidatesMap {
 		allCandidates = append(allCandidates, candidates...)
 	}
 	sctx.Log.V(2).Info("collected candidates", "count", len(allCandidates))
 
-	// Sort by score descending (higher score = better)
-	slices.SortFunc(allCandidates, func(a, b NodeCandidate) int {
-		return b.Score - a.Score // descending
-	})
-
 	// Assign nodes to replicas
 	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	usedNodes := make(map[string]struct{})
 	for _, rvr := range unscheduledReplicas {
-		var selectedNode string
-		for _, candidate := range allCandidates {
-			if _, used := usedNodes[candidate.Name]; !used {
-				selectedNode = candidate.Name
-				usedNodes[selectedNode] = struct{}{}
-				break
-			}
-		}
-
+		selectedNode, remaining := SelectAndRemoveBestNode(allCandidates)
 		if selectedNode == "" {
 			sctx.Log.V(1).Info("not enough candidate nodes for all replicas", "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
+			if bestEffort {
+				break // Best-effort: return what we have
+			}
 			return assignedReplicas, fmt.Errorf("%w: not enough candidate nodes for all replicas", errSchedulingNoCandidateNodes)
 		}
+		allCandidates = remaining
 
 		// Mark replica for scheduling
 		sctx.Log.V(2).Info("assigned replica to node", "rvr", rvr.Name, "node", selectedNode)
@@ -465,12 +483,14 @@ func (r *Reconciler) assignReplicasIgnoredTopology(
 }
 
 // assignReplicasZonalTopology selects the best zone first, then assigns replicas to best nodes in that zone.
+// If bestEffort=true, assigns as many as possible without error.
 // Returns the list of replicas that were assigned nodes.
 func (r *Reconciler) assignReplicasZonalTopology(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	bestEffort bool,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("assigning replicas with Zonal topology", "replicasCount", len(unscheduledReplicas))
+	sctx.Log.V(1).Info("assigning replicas with Zonal topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
 	// Find the best zone by combined metric: totalScore * len(candidates)
 	// This ensures zones with more nodes are preferred when scores are comparable
 	var bestZone string
@@ -492,33 +512,25 @@ func (r *Reconciler) assignReplicasZonalTopology(
 
 	if bestZone == "" {
 		sctx.Log.V(1).Info("no zones with candidates available")
+		if bestEffort {
+			return nil, nil // Best-effort: no candidates, no error
+		}
 		return nil, fmt.Errorf("%w: no zones with candidates available", errSchedulingNoCandidateNodes)
 	}
 	sctx.Log.V(1).Info("selected best zone", "zone", bestZone, "score", bestZoneScore)
 
-	// Get candidates from the best zone and sort by score descending
-	candidates := slices.Clone(sctx.ZonesToNodeCandidatesMap[bestZone])
-	slices.SortFunc(candidates, func(a, b NodeCandidate) int {
-		return b.Score - a.Score // descending
-	})
-
 	// Assign nodes to replicas
 	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	usedNodes := make(map[string]struct{})
 	for _, rvr := range unscheduledReplicas {
-		var selectedNode string
-		for _, candidate := range candidates {
-			if _, used := usedNodes[candidate.Name]; !used {
-				selectedNode = candidate.Name
-				usedNodes[selectedNode] = struct{}{}
-				break
-			}
-		}
-
+		selectedNode, remaining := SelectAndRemoveBestNode(sctx.ZonesToNodeCandidatesMap[bestZone])
 		if selectedNode == "" {
 			sctx.Log.V(1).Info("not enough candidate nodes in zone", "zone", bestZone, "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
+			if bestEffort {
+				break // Best-effort: return what we have
+			}
 			return assignedReplicas, fmt.Errorf("%w: not enough candidate nodes in zone %s for all replicas", errSchedulingNoCandidateNodes, bestZone)
 		}
+		sctx.ZonesToNodeCandidatesMap[bestZone] = remaining
 
 		// Mark replica for scheduling
 		sctx.Log.V(2).Info("assigned replica to node in zone", "rvr", rvr.Name, "node", selectedNode, "zone", bestZone)
@@ -535,89 +547,86 @@ func (r *Reconciler) assignReplicasZonalTopology(
 func (r *Reconciler) assignReplicasTransZonalTopology(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	replicaTypeFilter string,
 ) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
 		return nil, nil
 	}
 
-	// Determine the type of replicas being scheduled
-	replicaType := unscheduledReplicas[0].Spec.Type
-	sctx.Log.V(1).Info("assigning replicas with TransZonal topology", "replicasCount", len(unscheduledReplicas), "type", replicaType)
+	sctx.Log.V(1).Info("assigning replicas with TransZonal topology", "replicasCount", len(unscheduledReplicas), "replicaTypeFilter", replicaTypeFilter)
 
-	// Count already scheduled replicas of the same type per zone
-	zoneReplicaCount := countReplicasByZone(sctx.RvrList, replicaType, sctx.NodeNameToZone)
+	// Count already scheduled replicas per zone (filtered by type if specified)
+	zoneReplicaCount := countReplicasByZone(sctx.RvrList, replicaTypeFilter, sctx.NodeNameToZone)
 	sctx.Log.V(2).Info("current zone replica distribution", "zoneReplicaCount", zoneReplicaCount)
 
-	// Track used nodes in this scheduling round (copy from sctx to allow modifications)
-	usedNodes := make(map[string]struct{}, len(sctx.NodesWithAnyReplica))
-	for nodeName := range sctx.NodesWithAnyReplica {
-		usedNodes[nodeName] = struct{}{}
+	// Get all allowed zones for TransZonal topology
+	allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
+	sctx.Log.V(2).Info("allowed zones for TransZonal", "zones", allowedZones)
+
+	// Build set of zones that have available candidates
+	availableZones := make(map[string]struct{})
+	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
+		if len(candidates) > 0 {
+			availableZones[zone] = struct{}{}
+		}
 	}
 
 	// For each unscheduled replica, pick the zone with fewest replicas, then best node
 	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
 	for i, rvr := range unscheduledReplicas {
 		sctx.Log.V(2).Info("scheduling replica", "index", i, "rvr", rvr.Name)
+
+		// Find zone with minimum replica count among ALL allowed zones
+		globalMinZone, globalMinCount := findZoneWithMinReplicaCount(allowedZones, zoneReplicaCount)
+
 		// Find zone with minimum replica count that has available candidates
-		var selectedZone string
-		minCount := -1
-
-		for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
-			// Check if zone has any unused candidates
-			hasAvailable := false
-			for _, c := range candidates {
-				if _, used := usedNodes[c.Name]; !used {
-					hasAvailable = true
-					break
-				}
-			}
-			if !hasAvailable {
-				continue
-			}
-
-			count := zoneReplicaCount[zone]
-			if minCount == -1 || count < minCount {
-				minCount = count
-				selectedZone = zone
-			}
-		}
+		selectedZone, availableMinCount := findZoneWithMinReplicaCount(availableZones, zoneReplicaCount)
 
 		if selectedZone == "" {
-			// No more zones with available candidates - stop scheduling remaining replicas
-			// This is not an error for some replica types (e.g., Access, TieBreaker)
+			// No more zones with available candidates
 			sctx.Log.V(1).Info("no more zones with available candidates", "assigned", len(assignedReplicas), "total", len(unscheduledReplicas))
-			return assignedReplicas, nil
-		}
-		sctx.Log.V(2).Info("selected zone for replica", "zone", selectedZone, "replicaCount", minCount)
-
-		// Get candidates from selected zone and sort by score descending
-		candidates := sctx.ZonesToNodeCandidatesMap[selectedZone]
-		slices.SortFunc(candidates, func(a, b NodeCandidate) int {
-			return b.Score - a.Score // descending
-		})
-
-		// Find best unused node in this zone
-		var selectedNode string
-		for _, candidate := range candidates {
-			if _, used := usedNodes[candidate.Name]; !used {
-				selectedNode = candidate.Name
-				break
-			}
+			return nil, fmt.Errorf(
+				"%w: no zones with available nodes to place replica",
+				errSchedulingNoCandidateNodes,
+			)
 		}
 
+		// Check if we can guarantee even distribution:
+		// If the global minimum (across all allowed zones) is less than the minimum among available zones,
+		// it means there's a zone that should have replicas but has no available nodes.
+		if globalMinCount < availableMinCount {
+			sctx.Log.V(1).Info("cannot guarantee even distribution: zone with fewer replicas has no available nodes",
+				"unavailableZone", globalMinZone, "replicasInZone", globalMinCount, "minReplicasInAvailableZones", availableMinCount)
+			return nil, fmt.Errorf(
+				"%w: zone %q has %d replicas but no available nodes; replica should be placed there to maintain even distribution across zones",
+				errSchedulingNoCandidateNodes,
+				globalMinZone,
+				globalMinCount,
+			)
+		}
+
+		sctx.Log.V(2).Info("selected zone for replica", "zone", selectedZone, "replicaCount", availableMinCount)
+
+		// Select best node from zone and remove it from candidates
+		selectedNode, remaining := SelectAndRemoveBestNode(sctx.ZonesToNodeCandidatesMap[selectedZone])
 		if selectedNode == "" {
 			// No available node in this zone - stop scheduling remaining replicas
 			sctx.Log.V(1).Info("no available node in selected zone", "zone", selectedZone)
 			return assignedReplicas, nil
 		}
+		sctx.ZonesToNodeCandidatesMap[selectedZone] = remaining
 
-		// Mark replica for scheduling
+		// Update availableZones if zone has no more candidates
+		if len(remaining) == 0 {
+			delete(availableZones, selectedZone)
+		}
+
+		// Update replica node name
 		sctx.Log.V(2).Info("assigned replica to node", "rvr", rvr.Name, "node", selectedNode, "zone", selectedZone)
 		rvr.Spec.NodeName = selectedNode
 		assignedReplicas = append(assignedReplicas, rvr)
 
-		// Update tracking
-		usedNodes[selectedNode] = struct{}{}
+		// Update zone replica count
 		zoneReplicaCount[selectedZone]++
 	}
 
@@ -641,14 +650,11 @@ func (r *Reconciler) scheduleAccessPhase(
 		return nil
 	}
 
-	// Get unscheduled Access replicas
-	_, unscheduledAccessReplicas := getTypedReplicasLists(sctx.RvrList, v1alpha3.ReplicaTypeAccess)
-	if len(unscheduledAccessReplicas) == 0 {
-		// All Access replicas are already scheduled; nothing to do.
+	if len(sctx.UnscheduledAccessReplicas) == 0 {
 		sctx.Log.V(1).Info("no unscheduled Access replicas")
 		return nil
 	}
-	sctx.Log.V(1).Info("Access phase: processing replicas", "unscheduledCount", len(unscheduledAccessReplicas))
+	sctx.Log.V(1).Info("Access phase: processing replicas", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
 
 	// Spec «Access»: exclude nodes that already host any replica of this RV (any type)
 	// Use PublishOnNodesWithoutRvReplica which already contains publishOn nodes without any replica
@@ -664,16 +670,13 @@ func (r *Reconciler) scheduleAccessPhase(
 	// We are not required to place all Access replicas or to cover all publishOn nodes.
 	// Spec «Access»: it is allowed to have nodes in rv.spec.publishOn without enough replicas
 	// Spec «Access»: it is allowed to have replicas that could not be scheduled
-	nodesToFill := len(candidateNodes)
-	if len(unscheduledAccessReplicas) < nodesToFill {
-		nodesToFill = len(unscheduledAccessReplicas)
-	}
+	nodesToFill := min(len(candidateNodes), len(sctx.UnscheduledAccessReplicas))
 	sctx.Log.V(1).Info("Access phase: scheduling replicas", "nodesToFill", nodesToFill)
 
 	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	for i := 0; i < nodesToFill; i++ {
+	for i := range nodesToFill {
 		nodeName := candidateNodes[i]
-		rvr := unscheduledAccessReplicas[i]
+		rvr := sctx.UnscheduledAccessReplicas[i]
 
 		sctx.Log.V(2).Info("Access phase: assigning replica", "rvr", rvr.Name, "node", nodeName)
 		rvr.Spec.NodeName = nodeName
@@ -690,31 +693,23 @@ func (r *Reconciler) scheduleAccessPhase(
 func (r *Reconciler) scheduleTieBreakerPhase(
 	sctx *SchedulingContext,
 ) error {
-	// Get unscheduled TieBreaker replicas
-	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(sctx.RvrList, v1alpha3.ReplicaTypeTieBreaker)
-	if len(unscheduledTieBreakerReplicas) == 0 {
-		// All TieBreaker replicas are already scheduled; nothing to do.
+	if len(sctx.UnscheduledTieBreakerReplicas) == 0 {
 		sctx.Log.V(1).Info("no unscheduled TieBreaker replicas")
 		return nil
 	}
-	sctx.Log.V(1).Info("TieBreaker phase: processing replicas", "unscheduledCount", len(unscheduledTieBreakerReplicas), "topology", sctx.Rsc.Spec.Topology)
+	sctx.Log.V(1).Info("TieBreaker phase: processing replicas", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas), "topology", sctx.Rsc.Spec.Topology)
 
-	// Spec «TieBreaker»: exclude nodes that already have replicas of this RV (any type)
-	// NodesWithAnyReplica is already maintained in sctx
+	// Build candidate nodes (nodes without any replica of this RV)
+	candidateNodes := r.getTieBreakerCandidateNodes(sctx)
+	sctx.Log.V(2).Info("TieBreaker phase: candidate nodes", "count", len(candidateNodes))
 
-	// Choose a planning strategy based on topology type.
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	var err error
-
-	switch sctx.Rsc.Spec.Topology {
-	case "TransZonal":
-		assignedReplicas, err = r.scheduleTieBreakerTransZonal(sctx, unscheduledTieBreakerReplicas)
-	case "Zonal":
-		assignedReplicas, err = r.scheduleTieBreakerZonal(sctx, unscheduledTieBreakerReplicas)
-	default:
-		assignedReplicas, err = r.scheduleTieBreakerIgnored(sctx, unscheduledTieBreakerReplicas)
+	// Apply topology filter (isDiskfulPhase=false)
+	if err := r.applyTopologyFilter(candidateNodes, false, sctx); err != nil {
+		return err
 	}
 
+	// Assign replicas: count ALL replica types for zone balancing, strict mode (must place all)
+	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledTieBreakerReplicas, "", false)
 	if err != nil {
 		return err
 	}
@@ -726,240 +721,28 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	return nil
 }
 
-// scheduleTieBreakerTransZonal schedules TieBreaker replicas for TransZonal topology.
-// Spec «TieBreaker»: for TransZonal - schedule each rvr to the zone with the smallest number of replicas.
-// If there are multiple zones with the smallest number - choose any of them.
-// If there are no free nodes in zones with the smallest number of replicas - return scheduling error.
-func (r *Reconciler) scheduleTieBreakerTransZonal(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("TieBreaker TransZonal: starting", "replicasCount", len(unscheduledReplicas))
-	// Count how many replicas (any type) already exist in each zone.
-	zoneReplicaCount := countAllReplicasByZone(sctx.RvrList, sctx.NodeNameToZone)
-	sctx.Log.V(2).Info("TieBreaker TransZonal: zone replica distribution", "zoneReplicaCount", zoneReplicaCount)
+// getTieBreakerCandidateNodes returns nodes that can host TieBreaker replicas:
+// - Nodes without any replica of this RV
+// - Filtered by RSC zones if specified
+func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []string {
+	allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
 
-	// Build zone -> available nodes map (nodes without any replica)
-	zoneToAvailableNodes := make(map[string][]string)
-	for nodeName, zone := range sctx.NodeNameToZone {
-		if zone == "" {
-			continue
-		}
-		// Check if zone is allowed by RSC
-		if len(sctx.Rsc.Spec.Zones) > 0 && !slices.Contains(sctx.Rsc.Spec.Zones, zone) {
-			continue
-		}
-		// Exclude nodes that already have a replica
-		if _, hasReplica := sctx.NodesWithAnyReplica[nodeName]; hasReplica {
-			continue
-		}
-		zoneToAvailableNodes[zone] = append(zoneToAvailableNodes[zone], nodeName)
-	}
-	sctx.Log.V(2).Info("TieBreaker TransZonal: available nodes per zone", "zonesCount", len(zoneToAvailableNodes))
-
-	// Track used nodes during this scheduling round
-	usedNodes := make(map[string]struct{})
-
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	for _, rvr := range unscheduledReplicas {
-		// Find zone with minimum replica count that has available nodes
-		var selectedZone string
-		minCount := -1
-
-		for zone, availableNodes := range zoneToAvailableNodes {
-			// Check if zone has any unused nodes
-			hasUnused := false
-			for _, nodeName := range availableNodes {
-				if _, used := usedNodes[nodeName]; !used {
-					hasUnused = true
-					break
-				}
-			}
-			if !hasUnused {
-				continue
-			}
-
-			count := zoneReplicaCount[zone]
-			if minCount == -1 || count < minCount {
-				minCount = count
-				selectedZone = zone
-			}
-		}
-
-		if selectedZone == "" {
-			// Spec «TieBreaker»: if there are no free nodes in zones with minimal replica count - return error
-			sctx.Log.V(1).Info("TieBreaker TransZonal: no free node in zones with minimal replica count")
-			return nil, fmt.Errorf(
-				"%w: cannot schedule TieBreaker: no free node in zones with minimal replica count",
-				errSchedulingNoCandidateNodes,
-			)
-		}
-		sctx.Log.V(2).Info("TieBreaker TransZonal: selected zone", "zone", selectedZone, "replicaCount", minCount)
-
-		// Find first available node in selected zone
-		var selectedNode string
-		for _, nodeName := range zoneToAvailableNodes[selectedZone] {
-			if _, used := usedNodes[nodeName]; !used {
-				selectedNode = nodeName
-				break
-			}
-		}
-
-		// Assign node to replica
-		sctx.Log.V(2).Info("TieBreaker TransZonal: assigned replica", "rvr", rvr.Name, "node", selectedNode, "zone", selectedZone)
-		rvr.Spec.NodeName = selectedNode
-		assignedReplicas = append(assignedReplicas, rvr)
-
-		// Update tracking
-		usedNodes[selectedNode] = struct{}{}
-		zoneReplicaCount[selectedZone]++
-	}
-
-	sctx.Log.V(1).Info("TieBreaker TransZonal: completed", "assigned", len(assignedReplicas))
-	return assignedReplicas, nil
-}
-
-// scheduleTieBreakerZonal schedules TieBreaker replicas for Zonal topology.
-// Spec «TieBreaker»: for Zonal - exclude nodes from other zones.
-func (r *Reconciler) scheduleTieBreakerZonal(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("TieBreaker Zonal: starting", "replicasCount", len(unscheduledReplicas))
-	// Determine the target zone from already placed replicas
-	var targetZone string
-	for _, rvr := range sctx.RvrList {
-		if rvr.Spec.NodeName == "" {
-			continue
-		}
-		zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]
-		if !ok || zone == "" {
-			continue
-		}
-		if targetZone == "" {
-			targetZone = zone
-		} else if targetZone != zone {
-			sctx.Log.V(1).Info("TieBreaker Zonal: replicas in multiple zones", "zone1", targetZone, "zone2", zone)
-			return nil, fmt.Errorf(
-				"%w: cannot satisfy Zonal topology: replicas already exist in multiple zones (%s, %s)",
-				errSchedulingTopologyConflict,
-				targetZone,
-				zone,
-			)
-		}
-	}
-	sctx.Log.V(2).Info("TieBreaker Zonal: determined target zone", "targetZone", targetZone)
-
-	// If there is no existing replica, pick any zone allowed by the topology
-	if targetZone == "" {
-		if len(sctx.Rsc.Spec.Zones) > 0 {
-			targetZone = sctx.Rsc.Spec.Zones[0]
-		} else {
-			// Pick first available zone from nodes
-			for _, zone := range sctx.NodeNameToZone {
-				if zone != "" {
-					targetZone = zone
-					break
-				}
-			}
-		}
-	}
-
-	if targetZone == "" {
-		sctx.Log.V(1).Info("TieBreaker Zonal: cannot determine target zone")
-		return nil, fmt.Errorf(
-			"%w: cannot determine target zone for Zonal topology",
-			errSchedulingTopologyConflict,
-		)
-	}
-
-	// Collect available nodes in the target zone (excluding nodes with replicas)
-	var candidateNodes []string
-	for nodeName, zone := range sctx.NodeNameToZone {
-		if zone != targetZone {
-			continue
-		}
-		if _, hasReplica := sctx.NodesWithAnyReplica[nodeName]; hasReplica {
-			continue
-		}
-		candidateNodes = append(candidateNodes, nodeName)
-	}
-	sctx.Log.V(2).Info("TieBreaker Zonal: candidate nodes", "count", len(candidateNodes), "targetZone", targetZone)
-
-	// Schedule as many replicas as we have candidate nodes
-	limit := len(candidateNodes)
-	if len(unscheduledReplicas) < limit {
-		limit = len(unscheduledReplicas)
-	}
-	sctx.Log.V(2).Info("TieBreaker Zonal: scheduling", "limit", limit)
-
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	for i := 0; i < limit; i++ {
-		nodeName := candidateNodes[i]
-		rvr := unscheduledReplicas[i]
-
-		sctx.Log.V(2).Info("TieBreaker Zonal: assigned replica", "rvr", rvr.Name, "node", nodeName)
-		rvr.Spec.NodeName = nodeName
-		assignedReplicas = append(assignedReplicas, rvr)
-	}
-
-	sctx.Log.V(1).Info("TieBreaker Zonal: completed", "assigned", len(assignedReplicas))
-	return assignedReplicas, nil
-}
-
-// scheduleTieBreakerIgnored schedules TieBreaker replicas for Ignored topology.
-// Spec «TieBreaker»: for Any/Ignored - zones are not considered.
-func (r *Reconciler) scheduleTieBreakerIgnored(
-	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
-	sctx.Log.V(1).Info("TieBreaker Ignored: starting", "replicasCount", len(unscheduledReplicas))
-	// Collect all nodes that do not yet host any replica of this RV
 	var candidateNodes []string
 	for nodeName := range sctx.NodeNameToZone {
 		if _, hasReplica := sctx.NodesWithAnyReplica[nodeName]; hasReplica {
 			continue
 		}
-		// If zones are specified in RSC, filter by them
-		if len(sctx.Rsc.Spec.Zones) > 0 {
-			zone := sctx.NodeNameToZone[nodeName]
-			if !slices.Contains(sctx.Rsc.Spec.Zones, zone) {
-				continue
-			}
+		zone := sctx.NodeNameToZone[nodeName]
+		if _, ok := allowedZones[zone]; !ok {
+			continue
 		}
 		candidateNodes = append(candidateNodes, nodeName)
 	}
-	sctx.Log.V(2).Info("TieBreaker Ignored: candidate nodes", "count", len(candidateNodes))
-
-	// Schedule as many replicas as we have candidate nodes
-	limit := len(candidateNodes)
-	if len(unscheduledReplicas) < limit {
-		limit = len(unscheduledReplicas)
-	}
-	sctx.Log.V(2).Info("TieBreaker Ignored: scheduling", "limit", limit)
-
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
-	for i := 0; i < limit; i++ {
-		nodeName := candidateNodes[i]
-		rvr := unscheduledReplicas[i]
-
-		sctx.Log.V(2).Info("TieBreaker Ignored: assigned replica", "rvr", rvr.Name, "node", nodeName)
-		rvr.Spec.NodeName = nodeName
-		assignedReplicas = append(assignedReplicas, rvr)
-	}
-
-	sctx.Log.V(1).Info("TieBreaker Ignored: completed", "assigned", len(assignedReplicas))
-	return assignedReplicas, nil
+	return candidateNodes
 }
 
 func getPublishOnNodeList(rv *v1alpha3.ReplicatedVolume) []string {
-	// Convert publishOn slice to a set for fast membership checks.
-	publishNodeSet := make([]string, len(rv.Spec.PublishOn))
-	for i, nodeName := range rv.Spec.PublishOn {
-		publishNodeSet[i] = nodeName
-	}
-
-	return publishNodeSet
+	return slices.Clone(rv.Spec.PublishOn)
 }
 
 func getNodesWithRVReplicaSet(
@@ -1067,7 +850,7 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 			notReadyReason.reason,
 			notReadyReason.message,
 		); err != nil {
-			log.Error(err, "failed to set failed Scheduled condition on ReplicatedVolumeReplica", "rvr", "reason", "message", rvr.Name, notReadyReason.reason, notReadyReason.message)
+			log.Error(err, "failed to set Scheduled condition", "rvr", rvr.Name, "reason", notReadyReason.reason, "message", notReadyReason.message)
 			return err
 		}
 	}
@@ -1075,7 +858,7 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	return nil
 }
 
-func publishNodesWithoutAnyReplica(
+func getPublishNodesWithoutAnyReplica(
 	publishOnList []string,
 	nodesWithRVReplica map[string]struct{},
 ) []string {
@@ -1089,50 +872,121 @@ func publishNodesWithoutAnyReplica(
 	return publishNodesWithoutAnyReplica
 }
 
+// applyTopologyFilter groups candidate nodes by zones based on RSC topology.
+// isDiskfulPhase affects only Zonal topology:
+//   - true: falls back to publishOn or any allowed zone if no ScheduledDiskfulReplicas
+//   - false: returns error if no ScheduledDiskfulReplicas (TieBreaker needs Diskful zone)
+//
+// For Ignored and TransZonal, logic is the same for both phases.
 func (r *Reconciler) applyTopologyFilter(
 	candidateNodes []string,
+	isDiskfulPhase bool,
 	sctx *SchedulingContext,
 ) error {
-	sctx.Log.V(1).Info("applying topology filter", "topology", sctx.Rsc.Spec.Topology, "candidatesCount", len(candidateNodes))
+	sctx.Log.V(1).Info("applying topology filter", "topology", sctx.Rsc.Spec.Topology, "candidatesCount", len(candidateNodes), "isDiskfulPhase", isDiskfulPhase)
 
 	switch sctx.Rsc.Spec.Topology {
 	case topologyIgnored:
+		// Same for both phases: all candidates in single "zone"
 		sctx.Log.V(1).Info("topology filter: Ignored - creating single zone with all candidates")
-		// Create a fake zone "ignored" with all candidate nodes
 		nodeCandidates := make([]NodeCandidate, 0, len(candidateNodes))
 		for _, nodeName := range candidateNodes {
 			nodeCandidates = append(nodeCandidates, NodeCandidate{
 				Name:  nodeName,
-				Score: 0, // All nodes have equal score when topology is ignored
+				Score: 0,
 			})
 		}
 		sctx.ZonesToNodeCandidatesMap = map[string][]NodeCandidate{
-			"ignored": nodeCandidates,
+			topologyIgnored: nodeCandidates,
 		}
 		return nil
+
 	case topologyZonal:
 		sctx.Log.V(1).Info("topology filter: Zonal - grouping candidates by zone")
-		// Create a map of zones to node candidates
-		err := r.makeZonalNodeCandidates(candidateNodes, sctx)
-		if err != nil {
-			return err
-		}
+		return r.applyZonalTopologyFilter(candidateNodes, isDiskfulPhase, sctx)
+
 	case topologyTransZonal:
+		// Same for both phases: group by allowed zones
 		sctx.Log.V(1).Info("topology filter: TransZonal - distributing across zones")
-		err := r.makeTransZonalNodeCandidates(candidateNodes, sctx)
-		if err != nil {
-			return err
-		}
+		allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
+		sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
+		sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
+		return nil
+
 	default:
 		return fmt.Errorf("unknown RSC topology: %s", sctx.Rsc.Spec.Topology)
 	}
-	sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
+}
+
+// applyZonalTopologyFilter handles Zonal topology logic.
+// For isDiskfulPhase=true: ScheduledDiskfulReplicas -> publishOn -> any allowed zone
+// For isDiskfulPhase=false: ScheduledDiskfulReplicas -> ERROR (TieBreaker needs Diskful zone)
+func (r *Reconciler) applyZonalTopologyFilter(
+	candidateNodes []string,
+	isDiskfulPhase bool,
+	sctx *SchedulingContext,
+) error {
+	sctx.Log.V(1).Info("applyZonalTopologyFilter: starting", "candidatesCount", len(candidateNodes), "isDiskfulPhase", isDiskfulPhase)
+
+	// Find zones of already scheduled diskful replicas
+	var zonesWithScheduledDiskfulReplicas []string
+	for _, rvr := range sctx.ScheduledDiskfulReplicas {
+		zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]
+		if !ok || zone == "" {
+			return fmt.Errorf("scheduled diskful replica %s is on node %s without zone label for Zonal topology", rvr.Name, rvr.Spec.NodeName)
+		}
+		if !slices.Contains(zonesWithScheduledDiskfulReplicas, zone) {
+			zonesWithScheduledDiskfulReplicas = append(zonesWithScheduledDiskfulReplicas, zone)
+		}
+	}
+	sctx.Log.V(2).Info("applyZonalTopologyFilter: zones with scheduled diskful replicas", "zones", zonesWithScheduledDiskfulReplicas)
+
+	// For Zonal topology, all scheduled diskful replicas must be in the same zone
+	if len(zonesWithScheduledDiskfulReplicas) > 1 {
+		return fmt.Errorf("%w: scheduled diskful replicas are in multiple zones %v for Zonal topology",
+			errSchedulingTopologyConflict, zonesWithScheduledDiskfulReplicas)
+	}
+
+	// Determine target zones based on phase
+	var targetZones []string
+
+	if len(zonesWithScheduledDiskfulReplicas) > 0 {
+		// Use zone of scheduled Diskful replicas
+		targetZones = zonesWithScheduledDiskfulReplicas
+	} else if !isDiskfulPhase {
+		// TieBreaker phase: no ScheduledDiskfulReplicas is an error
+		return fmt.Errorf("%w: cannot schedule TieBreaker for Zonal topology: no Diskful replicas scheduled",
+			errSchedulingNoCandidateNodes)
+	} else {
+		// Diskful phase: fallback to publishOn zones
+		for _, nodeName := range sctx.PublishOnNodes {
+			zone, ok := sctx.NodeNameToZone[nodeName]
+			if !ok || zone == "" {
+				return fmt.Errorf("publishOn node %s has no zone label", nodeName)
+			}
+			if !slices.Contains(targetZones, zone) {
+				targetZones = append(targetZones, zone)
+			}
+		}
+		sctx.Log.V(2).Info("applyZonalTopologyFilter: publishOn zones", "zones", targetZones)
+		// If still empty, getAllowedZones will use rsc.spec.zones or all cluster zones
+	}
+
+	sctx.Log.V(2).Info("applyZonalTopologyFilter: target zones", "zones", targetZones)
+
+	// Build candidate nodes map
+	allowedZones := getAllowedZones(targetZones, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
+	sctx.Log.V(2).Info("applyZonalTopologyFilter: allowed zones", "zones", allowedZones)
+
+	// Group candidate nodes by zone
+	sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
+	sctx.Log.V(1).Info("applyZonalTopologyFilter: completed", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
 	return nil
 }
 
-// applyCapacityFilter filters nodes by available storage capacity using the scheduler extender.
+// applyCapacityFilterAndScoreCandidates filters nodes by available storage capacity using the scheduler extender.
 // It converts nodes to LVGs, queries the extender for capacity scores, and updates ZonesToNodeCandidatesMap.
-func (r *Reconciler) applyCapacityFilter(
+func (r *Reconciler) applyCapacityFilterAndScoreCandidates(
 	ctx context.Context,
 	sctx *SchedulingContext,
 ) error {
@@ -1224,7 +1078,9 @@ func (r *Reconciler) applyCapacityFilter(
 	return nil
 }
 
-// countReplicasByZone counts how many replicas of a specific type are scheduled in each zone.
+// countReplicasByZone counts how many replicas are scheduled in each zone.
+// If replicaType is not empty, only replicas of that type are counted.
+// If replicaType is empty, all replica types are counted.
 func countReplicasByZone(
 	replicas []*v1alpha3.ReplicatedVolumeReplica,
 	replicaType string,
@@ -1232,23 +1088,9 @@ func countReplicasByZone(
 ) map[string]int {
 	zoneReplicaCount := make(map[string]int)
 	for _, rvr := range replicas {
-		if rvr.Spec.Type != replicaType || rvr.Spec.NodeName == "" {
+		if replicaType != "" && rvr.Spec.Type != replicaType {
 			continue
 		}
-		if zone, ok := nodeNameToZone[rvr.Spec.NodeName]; ok {
-			zoneReplicaCount[zone]++
-		}
-	}
-	return zoneReplicaCount
-}
-
-// countAllReplicasByZone counts how many replicas (any type) are scheduled in each zone.
-func countAllReplicasByZone(
-	replicas []*v1alpha3.ReplicatedVolumeReplica,
-	nodeNameToZone map[string]string,
-) map[string]int {
-	zoneReplicaCount := make(map[string]int)
-	for _, rvr := range replicas {
 		if rvr.Spec.NodeName == "" {
 			continue
 		}
@@ -1288,91 +1130,6 @@ func (r *Reconciler) groupCandidateNodesByZone(
 	return zonesToCandidates
 }
 
-// makeZonalNodeCandidates creates ZonesToNodeCandidatesMap for Zonal topology.
-// It determines the target zone based on:
-// 1. Already scheduled diskful replicas (if any exist, use their zone)
-// 2. publishOn nodes (if specified, all must be in the same zone)
-// 3. rsc.spec.zones (if neither 1 nor 2, use allowed zones)
-// 4. All cluster zones (if rsc.spec.zones is empty)
-func (r *Reconciler) makeZonalNodeCandidates(
-	candidateNodes []string,
-	sctx *SchedulingContext,
-) error {
-	sctx.Log.V(1).Info("makeZonalNodeCandidates: starting", "candidatesCount", len(candidateNodes))
-	// Find zones of already scheduled diskful replicas
-	var zonesWithScheduledDiskfulReplicas []string
-	for _, rvr := range sctx.ScheduledDiskfulReplicas {
-		zone, ok := sctx.NodeNameToZone[rvr.Spec.NodeName]
-		if !ok || zone == "" {
-			return fmt.Errorf("scheduled diskful replica %s is on node %s without zone label for Zonal topology", rvr.Name, rvr.Spec.NodeName)
-		}
-		if !slices.Contains(zonesWithScheduledDiskfulReplicas, zone) {
-			zonesWithScheduledDiskfulReplicas = append(zonesWithScheduledDiskfulReplicas, zone)
-		}
-	}
-	sctx.Log.V(2).Info("makeZonalNodeCandidates: zones with scheduled diskful replicas", "zones", zonesWithScheduledDiskfulReplicas)
-
-	// For Zonal topology, all scheduled diskful replicas must be in the same zone
-	if len(zonesWithScheduledDiskfulReplicas) > 1 {
-		sctx.Log.V(1).Info("makeZonalNodeCandidates: diskful replicas in multiple zones", "zones", zonesWithScheduledDiskfulReplicas)
-		return fmt.Errorf("%w: scheduled diskful replicas are in multiple zones %v for Zonal topology",
-			errSchedulingTopologyConflict, zonesWithScheduledDiskfulReplicas)
-	}
-
-	// Find zones of publishOn nodes
-	var publishOnZones []string
-	for _, nodeName := range sctx.PublishOnNodes {
-		zone, ok := sctx.NodeNameToZone[nodeName]
-		if !ok || zone == "" {
-			return fmt.Errorf("publishOn node %s has no zone label", nodeName)
-		}
-		if !slices.Contains(publishOnZones, zone) {
-			publishOnZones = append(publishOnZones, zone)
-		}
-	}
-	sctx.Log.V(2).Info("makeZonalNodeCandidates: publishOn zones", "zones", publishOnZones)
-
-	// Determine the target zones
-	var targetZones []string
-
-	if len(zonesWithScheduledDiskfulReplicas) > 0 {
-		targetZones = zonesWithScheduledDiskfulReplicas
-	} else if len(publishOnZones) > 0 {
-		targetZones = publishOnZones
-	}
-	sctx.Log.V(2).Info("makeZonalNodeCandidates: target zones", "zones", targetZones)
-
-	// Build candidate nodes map
-	// If we have target zones, only include nodes from those zones
-	// Otherwise, include nodes from all allowed zones (rsc.spec.zones or all cluster zones)
-	allowedZones := getAllowedZones(targetZones, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-
-	// Group candidate nodes by zone
-	sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
-	sctx.Log.V(1).Info("makeZonalNodeCandidates: completed", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-	return nil
-}
-
-// makeTransZonalNodeCandidates creates ZonesToNodeCandidatesMap for TransZonal topology.
-// Unlike Zonal, it distributes replicas across different zones.
-// Rules:
-// - Does not consider already scheduled replicas
-// - Verifies publishOn nodes are in allowed zones
-// - Allowed zones come from rsc.spec.zones or all cluster zones if not specified
-func (r *Reconciler) makeTransZonalNodeCandidates(
-	candidateNodes []string,
-	sctx *SchedulingContext,
-) error {
-	sctx.Log.V(1).Info("makeTransZonalNodeCandidates: starting", "candidatesCount", len(candidateNodes))
-	// Determine allowed zones from RSC spec or all cluster zones
-	allowedZones := getAllowedZones(nil, sctx.Rsc.Spec.Zones, sctx.NodeNameToZone)
-
-	// Group candidate nodes by zone
-	sctx.ZonesToNodeCandidatesMap = r.groupCandidateNodesByZone(candidateNodes, allowedZones, sctx)
-	sctx.Log.V(1).Info("makeTransZonalNodeCandidates: completed", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-	return nil
-}
-
 // getAllowedZones determines which zones should be used for replica placement.
 // Priority order:
 // 1. If targetZones is provided and not empty, use those zones
@@ -1382,17 +1139,14 @@ func getAllowedZones(targetZones []string, rscZones []string, nodeNameToZone map
 	allowedZones := make(map[string]struct{})
 
 	if len(targetZones) > 0 {
-		// Use provided target zones
 		for _, zone := range targetZones {
 			allowedZones[zone] = struct{}{}
 		}
 	} else if len(rscZones) > 0 {
-		// Use zones from RSC spec
 		for _, zone := range rscZones {
 			allowedZones[zone] = struct{}{}
 		}
 	} else {
-		// Use all zones from cluster (collect unique zones)
 		for _, zone := range nodeNameToZone {
 			if zone != "" {
 				allowedZones[zone] = struct{}{}
@@ -1405,65 +1159,39 @@ func getAllowedZones(targetZones []string, rscZones []string, nodeNameToZone map
 
 func (r *Reconciler) getLVGToNodesByStoragePool(
 	ctx context.Context,
-	rsc *v1alpha1.ReplicatedStorageClass,
+	rsp *v1alpha1.ReplicatedStoragePool,
 	log logr.Logger,
-) (map[string]LvgNodeInfo, error) {
-	// If no storage pool is specified, do not restrict nodes by LVG.
-	if rsc.Spec.StoragePool == "" {
-		return nil, nil
+) (map[string]LvgInfo, error) {
+	if rsp == nil || len(rsp.Spec.LVMVolumeGroups) == 0 {
+		return nil, fmt.Errorf("storage pool does not define any LVGs")
 	}
 
-	// Load the referenced ReplicatedStoragePool.
-	rsp := &v1alpha1.ReplicatedStoragePool{}
-	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
-		// If the storage pool does not exist, do not add extra restrictions.
-		if apierrors.IsNotFound(err) {
-			return nil, nil
-		}
-		log.Error(err, "unable to get ReplicatedStoragePool", "name", rsc.Spec.StoragePool)
-		return nil, err
-	}
-
-	// If the pool does not define any LVGs, there is no LVG-based restriction.
-	if len(rsp.Spec.LVMVolumeGroups) == 0 {
-		return nil, fmt.Errorf("storage pool %s does not define any LVGs", rsc.Spec.StoragePool)
-	}
-
-	// Build a map of LVG names to their ThinPoolName from the storage pool spec.
-	rspLvgInfo := make(map[string]string, len(rsp.Spec.LVMVolumeGroups))
-	for _, g := range rsp.Spec.LVMVolumeGroups {
-		rspLvgInfo[g.Name] = g.ThinPoolName
-	}
-
-	// List all LVMVolumeGroup objects managed by node-configurator.
 	lvgList := &snc.LVMVolumeGroupList{}
 	if err := r.cl.List(ctx, lvgList); err != nil {
 		log.Error(err, "unable to list LVMVolumeGroup")
 		return nil, err
 	}
 
-	// Build a map LVG name -> LvgNodeInfo with node name and ThinPoolName.
-	lvgToNodeInfoMap := make(map[string]LvgNodeInfo)
-	for _, lvg := range lvgList.Items {
-		thinPoolName, ok := rspLvgInfo[lvg.Name]
-		if !ok {
+	// Build lookup map: LVG name -> LVG object
+	lvgByName := make(map[string]*snc.LVMVolumeGroup, len(lvgList.Items))
+	for i := range lvgList.Items {
+		lvgByName[lvgList.Items[i].Name] = &lvgList.Items[i]
+	}
+
+	// Build result map from RSP's LVGs
+	result := make(map[string]LvgInfo, len(rsp.Spec.LVMVolumeGroups))
+	for _, rspLvg := range rsp.Spec.LVMVolumeGroups {
+		lvg, ok := lvgByName[rspLvg.Name]
+		if !ok || len(lvg.Status.Nodes) == 0 {
 			continue
 		}
-		if len(lvg.Status.Nodes) == 0 {
-			continue
-		}
-		lvgToNodeInfoMap[lvg.Name] = LvgNodeInfo{
+		result[rspLvg.Name] = LvgInfo{
 			NodeName:     lvg.Status.Nodes[0].Name,
-			ThinPoolName: thinPoolName,
+			ThinPoolName: rspLvg.ThinPoolName,
 		}
 	}
 
-	if len(lvgToNodeInfoMap) == 0 {
-		// No LVG-backed nodes found; fall back to "no restriction".
-		return nil, nil
-	}
-
-	return lvgToNodeInfoMap, nil
+	return result, nil
 }
 
 func (r *Reconciler) getNodeNameToZoneMap(

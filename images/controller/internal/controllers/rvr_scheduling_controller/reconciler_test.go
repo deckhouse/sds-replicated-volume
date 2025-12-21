@@ -265,11 +265,11 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 				rsc.Spec.Zones = []string{"zone-a", "zone-b"}
 			})
 
-			When("publishOn nodes are in the same zone", func() {
-				It("schedules replicas in available zone", func(ctx SpecContext) {
-					reconcileAndExpectSuccess(ctx)
-					expectReplicasScheduledOnNodes(ctx, "node-a", "node-b")
-					expectAllReplicasHaveScheduledConditionTrue(ctx)
+			When("publishOn nodes are in the same zone but RSC allows multiple zones", func() {
+				It("returns error because cannot guarantee even distribution", func(ctx SpecContext) {
+					// Both nodes are in zone-a, but RSC allows zone-a and zone-b
+					// We cannot place replicas in zone-b, so we can't guarantee even distribution
+					reconcileAndExpectError(ctx, "no available nodes")
 				})
 			})
 
@@ -693,6 +693,88 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 
 				nodeNames := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
 				Expect(nodeNames).To(ContainElements("node-b", "node-c"))
+			})
+
+			When("zone with fewest replicas has no available nodes", func() {
+				BeforeEach(func() {
+					// Setup: 3 zones, 2 zones have replicas, 1 zone has 0 replicas but no nodes
+					// zone-a: 1 replica (node-a)
+					// zone-b: 1 replica (node-b)
+					// zone-c: 0 replicas, no nodes available (nodeC is nil)
+					rv.Spec.PublishOn = []string{"node-a", "node-b"}
+					nodeC = nil
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-a",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-b",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("returns error about uneven distribution", func(ctx SpecContext) {
+					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("no available nodes"))
+				})
+			})
+
+			When("all zones have equal replica count", func() {
+				BeforeEach(func() {
+					// Setup: 2 zones with 1 replica each, new replica should be placed in any zone
+					rsc.Spec.Zones = []string{"zone-a", "zone-b"}
+					rv.Spec.PublishOn = []string{"node-a", "node-b"}
+					nodeC = nil
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-a",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-b",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-diskful",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+							},
+						},
+					}
+				})
+
+				It("returns error because no nodes are available", func(ctx SpecContext) {
+					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("no candidate nodes"))
+				})
 			})
 		})
 	})
@@ -1123,6 +1205,49 @@ var _ = Describe("RvrSchedulingController Reconciler", Ordered, func() {
 					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(ContainSubstring("cannot schedule TieBreaker: no free node in zones with minimal replica count"))
+				})
+			})
+
+			When("zone with fewest replicas has no available nodes", func() {
+				BeforeEach(func() {
+					// Setup: 3 zones, 2 zones have replicas, 1 zone has 0 replicas but no nodes
+					// zone-a: 1 replica (node-a)
+					// zone-b: 1 replica (node-b)
+					// zone-c: 0 replicas, no nodes available
+					rv.Spec.PublishOn = nil
+					rsc.Spec.Zones = []string{"zone-a", "zone-b", "zone-c"}
+					nodeC = nil
+					rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-tb",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-a",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-tb",
+								Type:                 v1alpha3.ReplicaTypeDiskful,
+								NodeName:             "node-b",
+							},
+						},
+						{
+							ObjectMeta: metav1.ObjectMeta{Name: "rvr-tb-1"},
+							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								ReplicatedVolumeName: "rv-tb",
+								Type:                 "TieBreaker",
+							},
+						},
+					}
+				})
+
+				It("returns error about uneven distribution", func(ctx SpecContext) {
+					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(ContainSubstring("cannot schedule TieBreaker"))
 				})
 			})
 		})
