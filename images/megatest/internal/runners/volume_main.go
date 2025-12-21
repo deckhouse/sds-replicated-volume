@@ -38,8 +38,7 @@ const (
 )
 
 var (
-	publisher1PeriodMinMax       = []int{30, 60}
-	publisher2PeriodMinMax       = []int{100, 200}
+	publisherPeriodMinMax        = []int{30, 60}
 	replicaDestroyerPeriodMinMax = []int{30, 300}
 	replicaCreatorPeriodMinMax   = []int{30, 300}
 
@@ -277,39 +276,24 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) 
 }
 
 func (v *VolumeMain) startSubRunners(ctx context.Context) {
-	// Create publisher configs
-	publisher1Cfg := config.VolumePublisherConfig{
+	// Start publisher
+	publisherCfg := config.VolumePublisherConfig{
 		Period: config.DurationMinMax{
-			Min: time.Duration(publisher1PeriodMinMax[0]) * time.Second,
-			Max: time.Duration(publisher1PeriodMinMax[1]) * time.Second,
+			Min: time.Duration(publisherPeriodMinMax[0]) * time.Second,
+			Max: time.Duration(publisherPeriodMinMax[1]) * time.Second,
 		},
 	}
-	publisher2Cfg := config.VolumePublisherConfig{
-		Period: config.DurationMinMax{
-			Min: time.Duration(publisher2PeriodMinMax[0]) * time.Second,
-			Max: time.Duration(publisher2PeriodMinMax[1]) * time.Second,
-		},
-	}
+	publisher := NewVolumePublisher(v.rvName, publisherCfg, v.client, publisherPeriodMinMax)
+	publisherCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		v.runningSubRunners.Add(1)
+		defer func() {
+			cancel()
+			v.runningSubRunners.Add(-1)
+		}()
 
-	// Create runners
-	publishers := []*VolumePublisher{
-		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, publisher1PeriodMinMax),
-		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, publisher2PeriodMinMax),
-	}
-
-	// Start publishers
-	for _, pub := range publishers {
-		publisherCtx, cancel := context.WithCancel(ctx)
-		go func(p *VolumePublisher) {
-			v.runningSubRunners.Add(1)
-			defer func() {
-				cancel()
-				v.runningSubRunners.Add(-1)
-			}()
-
-			_ = p.Run(publisherCtx)
-		}(pub)
-	}
+		_ = publisher.Run(publisherCtx)
+	}()
 
 	// Start replica destroyer
 	if v.disableVolumeReplicaDestroyer {
