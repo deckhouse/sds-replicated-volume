@@ -167,3 +167,8 @@ func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
 	}
 	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
 }
+
+// PatchRV patches a ReplicatedVolume using merge patch strategy
+func (c *Client) PatchRV(ctx context.Context, originalRV *v1alpha3.ReplicatedVolume, updatedRV *v1alpha3.ReplicatedVolume) error {
+	return c.cl.Patch(ctx, updatedRV, client.MergeFrom(originalRV))
+}

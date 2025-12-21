@@ -22,7 +22,9 @@ import (
 	"log/slog"
 	"math/rand"
 	"slices"
+	"time"
 
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -69,36 +71,41 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 			return err
 		}
 		nodeName := nodes[0].Name
-		v.log.Debug("random node", "node_name", nodeName)
+		log := v.log.With("node_name", nodeName)
 
 		switch len(rv.Spec.PublishOn) {
 		case 0:
 			if v.isAPublishCycle() {
-				if err := v.RunPublishCycle(ctx, nodeName); err != nil {
+				if err := v.publishCycle(ctx, rv, nodeName); err != nil {
+					log.Error("failed to publishCycle", "error", err, "case", 0)
 					return err
 				}
 			} else {
-				if err := v.RunPublishAndUnpublishCycle(ctx, nodeName); err != nil {
+				if err := v.publishAndUnpublishCycle(ctx, rv, nodeName); err != nil {
+					log.Error("failed to publishAndUnpublishCycle", "error", err, "case", 0)
 					return err
 				}
 			}
 		case 1:
 			if slices.Contains(rv.Spec.PublishOn, nodeName) {
-				if err := v.RunUnpublishCycle(ctx, nodeName); err != nil {
+				if err := v.unpublishCycle(ctx, rv, nodeName); err != nil {
+					log.Error("failed to unpublishCycle", "error", err, "case", 1)
 					return err
 				}
 			} else {
-				if err := v.RunMigrationCycle(ctx, nodeName); err != nil {
+				if err := v.migrationCycle(ctx, rv, nodeName); err != nil {
+					log.Error("failed to migrationCycle", "error", err, "case", 1)
 					return err
 				}
 			}
 		case 2:
-			if err := v.RunUnpublishCycle(ctx, nodeName); err != nil {
+			if err := v.unpublishCycle(ctx, rv, nodeName); err != nil {
+				log.Error("failed to unpublishCycle", "error", err, "case", 2)
 				return err
 			}
 		default:
 			err := fmt.Errorf("unexpected number of nodes in rv.Spec.PublishOn: %d", len(rv.Spec.PublishOn))
-			v.log.Error("error", "error", err)
+			log.Error("error", "error", err)
 			return err
 		}
 	}
@@ -112,14 +119,57 @@ func (v *VolumePublisher) cleanup(reason error) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
-	if err := v.doUnpublish(cleanupCtx); err != nil {
-		v.log.Error("failed to unpublish", "error", err)
+	if err := v.unpublishCycle(cleanupCtx, ""); err != nil {
+		v.log.Error("failed to unpublishCycle", "error", err)
 	}
 }
 
-func (v *VolumePublisher) doPublish(ctx context.Context) error {
-	v.log.Debug("publishing to random node")
-	// TODO: Wait for publish success
+func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "publishCycle")
+	log.Debug("started")
+	defer log.Debug("finished")
+
+	if err := v.doPublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doPublish", "error", err)
+		return err
+	}
+
+	for {
+		log.Debug("waiting for node to be published")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status != nil && slices.Contains(rv.Status.PublishedOn, nodeName) {
+			return nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	// Check if node is already in PublishOn
+	if slices.Contains(rv.Spec.PublishOn, nodeName) {
+		v.log.Debug("node already in PublishOn", "node_name", nodeName)
+		return nil
+	}
+
+	originalRv := rv.DeepCopy()
+	rv.Spec.PublishOn = append(rv.Spec.PublishOn, nodeName)
+
+	err := v.client.PatchRV(ctx, originalRv, rv)
+	if err != nil {
+		return fmt.Errorf("failed to patch RV with new publish node: %w", err)
+	}
 
 	return nil
 }
