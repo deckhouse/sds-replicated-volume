@@ -24,6 +24,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 )
 
+const (
+	// CleanupTimeout is the timeout for cleanup operations
+	CleanupTimeout = 2 * time.Minute
+)
+
 // Runner represents a goroutine that can be started and stopped
 type Runner interface {
 	// Run starts the runner and blocks until the context is cancelled

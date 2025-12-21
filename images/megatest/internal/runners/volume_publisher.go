@@ -18,15 +18,13 @@ package runners
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
-	"time"
+	"math/rand"
+	"slices"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
-)
-
-const (
-	unpublishTimeout = 1 * time.Minute
 )
 
 // VolumePublisher periodically publishes and unpublishes a volume to random nodes
@@ -53,28 +51,55 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 	defer v.log.Info("finished")
 
 	for {
-		// Wait random duration before publish
 		if err := waitRandomWithContext(ctx, v.cfg.Period); err != nil {
 			v.cleanup(err)
 			return nil
 		}
 
-		// Publish to random node
-		if err := v.doPublish(ctx); err != nil {
-			v.log.Error("publish failed", "error", err)
-			// Continue even on failure
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			v.log.Error("failed to get RV", "error", err)
+			return err
 		}
 
-		// Wait random duration before unpublish
-		if err := waitRandomWithContext(ctx, v.cfg.Period); err != nil {
-			v.cleanup(err)
-			return nil
+		// get a random node
+		nodes, err := v.client.GetRandomNodes(ctx, 1)
+		if err != nil {
+			v.log.Error("failed to get random node", "error", err)
+			return err
 		}
+		nodeName := nodes[0].Name
+		v.log.Debug("random node", "node_name", nodeName)
 
-		// Unpublish
-		if err := v.doUnpublish(ctx); err != nil {
-			v.log.Error("unpublish failed", "error", err)
-			// Continue even on failure
+		switch len(rv.Spec.PublishOn) {
+		case 0:
+			if v.isAPublishCycle() {
+				if err := v.RunPublishCycle(ctx, nodeName); err != nil {
+					return err
+				}
+			} else {
+				if err := v.RunPublishAndUnpublishCycle(ctx, nodeName); err != nil {
+					return err
+				}
+			}
+		case 1:
+			if slices.Contains(rv.Spec.PublishOn, nodeName) {
+				if err := v.RunUnpublishCycle(ctx, nodeName); err != nil {
+					return err
+				}
+			} else {
+				if err := v.RunMigrationCycle(ctx, nodeName); err != nil {
+					return err
+				}
+			}
+		case 2:
+			if err := v.RunUnpublishCycle(ctx, nodeName); err != nil {
+				return err
+			}
+		default:
+			err := fmt.Errorf("unexpected number of nodes in rv.Spec.PublishOn: %d", len(rv.Spec.PublishOn))
+			v.log.Error("error", "error", err)
+			return err
 		}
 	}
 }
@@ -84,7 +109,7 @@ func (v *VolumePublisher) cleanup(reason error) {
 	log.Info("started")
 	defer log.Info("finished")
 
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), unpublishTimeout)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
 	if err := v.doUnpublish(cleanupCtx); err != nil {
@@ -104,4 +129,15 @@ func (v *VolumePublisher) doUnpublish(ctx context.Context) error {
 	// TODO: Wait for unpublish success
 
 	return nil
+}
+
+func (v *VolumePublisher) isAPublishCycle() bool {
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	r := rand.Float64()
+	switch {
+	case r < 0.10:
+		return true
+	default:
+		return false
+	}
 }

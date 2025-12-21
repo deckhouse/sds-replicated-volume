@@ -36,10 +36,6 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
-const (
-	rvDeleteTimeout = 2 * time.Minute
-)
-
 var (
 	publisherPeriodMinMax        = []int{30, 60}
 	replicaDestroyerPeriodMinMax = []int{30, 300}
@@ -164,7 +160,7 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log.Info("started")
 	defer log.Info("finished")
 
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
 	sigChan := make(chan os.Signal, 1)
