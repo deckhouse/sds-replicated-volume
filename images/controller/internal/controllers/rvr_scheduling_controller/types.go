@@ -28,13 +28,13 @@ type SchedulingContext struct {
 	Rsc                            *v1alpha1.ReplicatedStorageClass
 	Rsp                            *v1alpha1.ReplicatedStoragePool
 	RvrList                        []*v1alpha3.ReplicatedVolumeReplica
-	RvPublishOnNodes               []string
+	PublishOnNodes                 []string
 	NodesWithAnyReplica            map[string]struct{}
 	PublishOnNodesWithoutRvReplica []string
 	UnscheduledDiskfulReplicas     []*v1alpha3.ReplicatedVolumeReplica
 	ScheduledDiskfulReplicas       []*v1alpha3.ReplicatedVolumeReplica
 	RspLvgToNodeInfoMap            map[string]LvgNodeInfo // {lvgName: {NodeName, ThinPoolName}}
-	RspNodes                       []string
+	RspNodesWithoutReplica         []string
 	NodeNameToZone                 map[string]string          // {nodeName: zoneName}
 	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
 	// RVRs with nodes assigned in this reconcile
@@ -103,12 +103,12 @@ const publishOnScoreBonus = 1000
 // ApplyPublishOnBonus increases score for nodes in rv.spec.publishOn.
 // This ensures publishOn nodes are preferred when scheduling Diskful replicas.
 func (sctx *SchedulingContext) ApplyPublishOnBonus() {
-	if len(sctx.RvPublishOnNodes) == 0 {
+	if len(sctx.PublishOnNodes) == 0 {
 		return
 	}
 
-	publishOnSet := make(map[string]struct{}, len(sctx.RvPublishOnNodes))
-	for _, node := range sctx.RvPublishOnNodes {
+	publishOnSet := make(map[string]struct{}, len(sctx.PublishOnNodes))
+	for _, node := range sctx.PublishOnNodes {
 		publishOnSet[node] = struct{}{}
 	}
 
