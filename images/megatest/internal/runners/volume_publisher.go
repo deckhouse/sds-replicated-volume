@@ -73,6 +73,7 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 		nodeName := nodes[0].Name
 		log := v.log.With("node_name", nodeName)
 
+		// TODO: maybe it's necessary to collect time statistics by cycles?
 		switch len(rv.Spec.PublishOn) {
 		case 0:
 			if v.isAPublishCycle() {
@@ -140,6 +141,7 @@ func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha3.Replica
 		return err
 	}
 
+	// Wait for node to be published
 	for {
 		log.Debug("waiting for node to be published")
 
@@ -155,6 +157,81 @@ func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha3.Replica
 		}
 
 		if rv.Status != nil && slices.Contains(rv.Status.PublishedOn, nodeName) {
+			return nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "publishAndUnpublishCycle")
+	log.Debug("started")
+	defer log.Debug("finished")
+
+	// Step 1: Publish the node
+	if err := v.doPublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doPublish", "error", err)
+		return err
+	}
+
+	// Wait for node to be published
+	for {
+		log.Debug("waiting for node to be published")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status != nil && slices.Contains(rv.Status.PublishedOn, nodeName) {
+			break
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// Step 2: Random delay between publish and unpublish
+	randomDelay := randomDuration(v.cfg.Period)
+	log.Debug("waiting random delay before unpublish", "duration", randomDelay.String())
+	if err := waitWithContext(ctx, randomDelay); err != nil {
+		return err
+	}
+
+	// Step 3: Get fresh RV and unpublish
+	rv, err := v.client.GetRV(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+
+	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doUnpublish", "error", err)
+		return err
+	}
+
+	// Wait for node to be unpublished
+	for {
+		log.Debug("waiting for node to be unpublished")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		// If status is nil or node is not in PublishedOn, consider it as unpublished
+		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, nodeName) {
 			return nil
 		}
 
