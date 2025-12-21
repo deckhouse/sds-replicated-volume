@@ -239,6 +239,132 @@ func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1al
 	}
 }
 
+func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "migrationCycle")
+	log.Debug("started")
+	defer log.Debug("finished")
+
+	// Find the other node (not nodeName) from current PublishOn
+	// In case 1, there should be exactly one node in PublishOn
+	if len(rv.Spec.PublishOn) != 1 {
+		return fmt.Errorf("expected exactly one node in PublishOn for migration, got %d", len(rv.Spec.PublishOn))
+	}
+	otherNodeName := rv.Spec.PublishOn[0]
+	if otherNodeName == nodeName {
+		return fmt.Errorf("other node name equals selected node name: %s", nodeName)
+	}
+
+	// Step 1: Publish the selected node
+	if err := v.doPublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doPublish selected node", "error", err)
+		return err
+	}
+
+	// Wait for both nodes to be published
+	for {
+		log.Debug("waiting for both nodes to be published", "selected_node", nodeName, "other_node", otherNodeName)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status != nil &&
+			slices.Contains(rv.Status.PublishedOn, nodeName) &&
+			slices.Contains(rv.Status.PublishedOn, otherNodeName) {
+			break
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// Step 2: Random delay
+	randomDelay1 := randomDuration(v.cfg.Period)
+	log.Debug("waiting random delay before unpublishing other node", "duration", randomDelay1.String())
+	if err := waitWithContext(ctx, randomDelay1); err != nil {
+		return err
+	}
+
+	// Step 3: Get fresh RV and unpublish the other node
+	rv, err := v.client.GetRV(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+
+	if err := v.doUnpublish(ctx, rv, otherNodeName); err != nil {
+		log.Error("failed to doUnpublish other node", "error", err, "other_node", otherNodeName)
+		return err
+	}
+
+	// Wait for other node to be unpublished
+	for {
+		log.Debug("waiting for other node to be unpublished", "other_node", otherNodeName)
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, otherNodeName) {
+			break
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+
+	// Step 4: Random delay
+	randomDelay2 := randomDuration(v.cfg.Period)
+	log.Debug("waiting random delay before unpublishing selected node", "duration", randomDelay2.String())
+	if err := waitWithContext(ctx, randomDelay2); err != nil {
+		return err
+	}
+
+	// Step 5: Get fresh RV and unpublish the selected node
+	rv, err = v.client.GetRV(ctx, v.rvName)
+	if err != nil {
+		return err
+	}
+
+	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
+		log.Error("failed to doUnpublish selected node", "error", err)
+		return err
+	}
+
+	// Wait for selected node to be unpublished
+	for {
+		log.Debug("waiting for selected node to be unpublished")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			return err
+		}
+
+		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, nodeName) {
+			return nil
+		}
+
+		time.Sleep(1 * time.Second)
+	}
+}
+
 func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
 	// Check if node is already in PublishOn
 	if slices.Contains(rv.Spec.PublishOn, nodeName) {
