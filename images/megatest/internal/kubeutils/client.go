@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand/v2"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -34,8 +35,10 @@ import (
 
 // Client wraps a controller-runtime client with helper methods
 type Client struct {
-	cl     client.Client
-	scheme *runtime.Scheme
+	cl          client.Client
+	scheme      *runtime.Scheme
+	cachedNodes []corev1.Node
+	nodesMutex  sync.RWMutex
 }
 
 // NewClient creates a new Kubernetes client
@@ -101,7 +104,27 @@ func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, erro
 }
 
 // ListNodes returns all nodes in the cluster with label storage.deckhouse.io/sds-replicated-volume-node=""
+// The result is cached for the lifetime of the Client instance
 func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	c.nodesMutex.RLock()
+	if c.cachedNodes != nil {
+		nodes := make([]corev1.Node, len(c.cachedNodes))
+		copy(nodes, c.cachedNodes)
+		c.nodesMutex.RUnlock()
+		return nodes, nil
+	}
+	c.nodesMutex.RUnlock()
+
+	c.nodesMutex.Lock()
+	defer c.nodesMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if c.cachedNodes != nil {
+		nodes := make([]corev1.Node, len(c.cachedNodes))
+		copy(nodes, c.cachedNodes)
+		return nodes, nil
+	}
+
 	nodeList := &corev1.NodeList{}
 	err := c.cl.List(ctx, nodeList, client.MatchingLabels{
 		"storage.deckhouse.io/sds-replicated-volume-node": "",
@@ -109,7 +132,12 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nodeList.Items, nil
+
+	// Cache the result
+	c.cachedNodes = make([]corev1.Node, len(nodeList.Items))
+	copy(c.cachedNodes, nodeList.Items)
+
+	return c.cachedNodes, nil
 }
 
 // CreateRV creates a new ReplicatedVolume
