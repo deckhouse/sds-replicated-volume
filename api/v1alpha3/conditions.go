@@ -240,6 +240,9 @@ const (
 	// status=True
 	ReasonPublished = "Published"
 	// status=False
-	ReasonUnpublished    = "Unpublished"
-	ReasonPublishPending = "PublishPending"
+	ReasonUnpublished             = "Unpublished"
+	ReasonPublishPending          = "PublishPending"
+	ReasonPublishingNotApplicable = "PublishingNotApplicable"
+	// status=Unknown
+	ReasonPublishingNotInitialized = "PublishingNotInitialized"
 )

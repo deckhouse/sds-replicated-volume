@@ -16,24 +16,56 @@ limitations under the License.
 
 package v1alpha3
 
+import (
+	"k8s.io/apimachinery/pkg/api/meta"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrimary bool) error {
-	if rvr.Status == nil {
-		rvr.Status = &ReplicatedVolumeReplicaStatus{}
-	}
-
-	if rvr.Spec.NodeName == "" || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
-
-		// TODO
-		// meta.SetStatusCondition(
-		// 	&rvr.Status.Conditions,
-		// 	v1.Condition{
-		// 		Type: ConditionTypePublished,
-		// 		Status: ,
-		// 	},
-		// )
-
+	if rvr.Spec.Type != "Access" && rvr.Spec.Type != "Diskful" {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:   ConditionTypePublished,
+				Status: v1.ConditionFalse,
+				Reason: ReasonPublishingNotApplicable,
+			},
+		)
 		return nil
 	}
-	return nil
+	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+		if rvr.Status == nil {
+			rvr.Status = &ReplicatedVolumeReplicaStatus{}
+		}
 
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:   ConditionTypePublished,
+				Status: v1.ConditionUnknown,
+				Reason: ReasonPublishingNotInitialized,
+			},
+		)
+		return nil
+	}
+
+	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
+
+	cond := v1.Condition{Type: ConditionTypePublished}
+
+	if isPrimary {
+		cond.Status = v1.ConditionTrue
+		cond.Reason = ReasonPublished
+	} else {
+		cond.Status = v1.ConditionFalse
+		if shouldBePrimary {
+			cond.Reason = ReasonPublishPending
+		} else {
+			cond.Reason = ReasonUnpublished
+		}
+	}
+
+	meta.SetStatusCondition(&rvr.Status.Conditions, cond)
+
+	return nil
 }
