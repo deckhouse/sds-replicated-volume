@@ -37,7 +37,6 @@ import (
 )
 
 const (
-	rvCreateTimeout = 2 * time.Minute
 	rvDeleteTimeout = 2 * time.Minute
 )
 
