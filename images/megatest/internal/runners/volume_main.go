@@ -19,9 +19,13 @@ package runners
 import (
 	"context"
 	"math/rand"
+	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -33,8 +37,8 @@ import (
 )
 
 const (
-	rvCreateTimeout = 1 * time.Minute
-	rvDeleteTimeout = 1 * time.Minute
+	rvCreateTimeout = 2 * time.Minute
+	rvDeleteTimeout = 2 * time.Minute
 )
 
 var (
@@ -134,13 +138,14 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	if err != nil {
 		v.log.Error("failed waiting for RV to become ready", "error", err)
 		// Continue to cleanup
+	} else {
+		// Start checker after Ready (to monitor for state changes)
+		v.log.Debug("RV is ready, starting checker")
+		v.startVolumeChecker(lifetimeCtx)
 	}
 	if v.totalWaitForRVReadyTime != nil {
 		v.totalWaitForRVReadyTime.Add(waitDuration.Nanoseconds())
 	}
-
-	// Start checker after Ready (to monitor for state changes)
-	v.startVolumeChecker(lifetimeCtx)
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -163,7 +168,16 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
 	defer cleanupCancel()
 
-	deleteDuration, err := v.deleteRV(cleanupCtx)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		log.Info("received signal, shutting down", "signal", sig)
+		cleanupCancel()
+	}()
+
+	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
 	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
 	}
@@ -173,7 +187,7 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 
 	for v.runningSubRunners.Load() > 0 {
 		log.Info("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -241,7 +255,7 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.
 	return time.Since(startTime), nil
 }
 
-func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
+func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
 	startTime := time.Now()
 
 	rv := &v1alpha3.ReplicatedVolume{
@@ -255,7 +269,10 @@ func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
 		return time.Since(startTime), err
 	}
 
-	// TODO: Wait for deletion
+	err = v.WaitForRVDeleted(ctx, log)
+	if err != nil {
+		return time.Since(startTime), err
+	}
 
 	return time.Since(startTime), nil
 }
@@ -273,6 +290,28 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) 
 	}
 
 	return time.Since(startTime), nil
+}
+
+func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) error {
+	for {
+		log.Debug("waiting for RV to be deleted")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		_, err := v.client.GetRV(ctx, v.rvName)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		time.Sleep(1 * time.Second)
+	}
 }
 
 func (v *VolumeMain) startSubRunners(ctx context.Context) {

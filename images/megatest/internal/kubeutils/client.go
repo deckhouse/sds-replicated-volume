@@ -75,6 +75,11 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 	return &Client{cl: cl, scheme: scheme}, nil
 }
 
+// Client returns the underlying controller-runtime client
+func (c *Client) Client() client.Client {
+	return c.cl
+}
+
 // GetRandoxmNodes selects n random unique nodes from the cluster
 func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, error) {
 	nodes, err := c.ListNodes(ctx)
@@ -114,4 +119,14 @@ func (c *Client) CreateRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) er
 // DeleteRV creates a new ReplicatedVolume
 func (c *Client) DeleteRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
 	return c.cl.Delete(ctx, rv)
+}
+
+// GetRV returns a ReplicatedVolume by name
+func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVolume, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
+	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rv)
+	if err != nil {
+		return nil, err
+	}
+	return rv, nil
 }
