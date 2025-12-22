@@ -42,9 +42,11 @@ type Stats struct {
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
 type MultiVolume struct {
-	cfg    config.MultiVolumeConfig
-	client *kubeutils.Client
-	log    *slog.Logger
+	cfg                          config.MultiVolumeConfig
+	podDestroyerAgentConfig      config.PodDestroyerConfig
+	podDestroyerControllerConfig config.PodDestroyerConfig
+	client                       *kubeutils.Client
+	log                          *slog.Logger
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
@@ -63,12 +65,16 @@ type MultiVolume struct {
 // NewMultiVolume creates a new MultiVolume orchestrator
 func NewMultiVolume(
 	cfg config.MultiVolumeConfig,
+	podDestroyerAgentConfig config.PodDestroyerConfig,
+	podDestroyerControllerConfig config.PodDestroyerConfig,
 	client *kubeutils.Client,
 ) *MultiVolume {
 	return &MultiVolume{
-		cfg:    cfg,
-		client: client,
-		log:    slog.Default().With("runner", "multivolume"),
+		cfg:                          cfg,
+		podDestroyerAgentConfig:      podDestroyerAgentConfig,
+		podDestroyerControllerConfig: podDestroyerControllerConfig,
+		client:                       client,
+		log:                          slog.Default().With("runner", "multivolume"),
 	}
 }
 
@@ -94,8 +100,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	if m.cfg.DisablePodDestroyer {
 		m.log.Debug("pod-destroyer runners are disabled")
 	} else {
-		// m.startPodDestroyers(ctx)
-		m.log.Info("pod-destroyer runners are enabled")
+		m.startPodDestroyers(ctx, m.podDestroyerAgentConfig, m.podDestroyerControllerConfig)
 	}
 
 	// Main volume creation loop
@@ -200,5 +205,17 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 		}()
 
 		_ = volumeMain.Run(volumeCtx)
+	}()
+}
+
+func (m *MultiVolume) startPodDestroyers(ctx context.Context, agentCfg config.PodDestroyerConfig, controllerCfg config.PodDestroyerConfig) {
+	// Start agent destroyer
+	go func() {
+		_ = NewPodDestroyer(agentCfg, m.client).Run(ctx)
+	}()
+
+	// Start controller destroyer
+	go func() {
+		_ = NewPodDestroyer(controllerCfg, m.client).Run(ctx)
 	}()
 }

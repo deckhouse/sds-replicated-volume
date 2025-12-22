@@ -26,6 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
 	"k8s.io/apimachinery/pkg/watch"
@@ -408,4 +409,26 @@ func (c *Client) DeleteRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeRe
 // CreateRVR creates a ReplicatedVolumeReplica
 func (c *Client) CreateRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
 	return c.cl.Create(ctx, rvr)
+}
+
+// ListPods returns pods in namespace matching label selector
+func (c *Client) ListPods(ctx context.Context, namespace, labelSelector string) ([]corev1.Pod, error) {
+	podList := &corev1.PodList{}
+
+	selector, err := labels.Parse(labelSelector)
+	if err != nil {
+		return nil, fmt.Errorf("parsing label selector %q: %w", labelSelector, err)
+	}
+
+	err = c.cl.List(ctx, podList, client.InNamespace(namespace), client.MatchingLabelsSelector{Selector: selector})
+	if err != nil {
+		return nil, fmt.Errorf("listing pods in namespace %q with selector %q: %w", namespace, labelSelector, err)
+	}
+
+	return podList.Items, nil
+}
+
+// DeletePod deletes a pod (does not wait for deletion)
+func (c *Client) DeletePod(ctx context.Context, pod *corev1.Pod) error {
+	return c.cl.Delete(ctx, pod)
 }

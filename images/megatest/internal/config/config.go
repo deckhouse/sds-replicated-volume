@@ -83,3 +83,11 @@ type VolumeResizerConfig struct {
 	Period DurationMinMax
 	Step   SizeMinMax
 }
+
+// PodDestroyerConfig configures the pod-destroyer goroutine
+type PodDestroyerConfig struct {
+	Namespace     string
+	LabelSelector string
+	PodCount      StepMinMax
+	Period        DurationMinMax
+}
