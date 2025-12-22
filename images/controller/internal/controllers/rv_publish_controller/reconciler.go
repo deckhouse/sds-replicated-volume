@@ -18,6 +18,7 @@ package rvpublishcontroller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/go-logr/logr"
@@ -271,13 +272,13 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		publishSet[nodeName] = struct{}{}
 	}
 
+	var rvrPatchErr error
 	for i := range replicasForRV {
 		rvr := &replicasForRV[i]
 
 		if rvr.Spec.NodeName == "" {
 			if err := r.patchRVRStatusConditions(ctx, log, rvr, false); err != nil {
-				// TODO: may be proceed, join errors and return later?
-				return err
+				rvrPatchErr = errors.Join(rvrPatchErr, err)
 			}
 			continue
 		}
@@ -286,14 +287,14 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 
 		if shouldBePrimary && rvr.Spec.Type == "TieBreaker" {
 			if err := r.patchRVRTypeToAccess(ctx, log, rvr); err != nil {
-				// TODO: may be proceed, join errors and return later?
-				return err
+				rvrPatchErr = errors.Join(rvrPatchErr, err)
+				continue
 			}
 		}
 
 		if err := r.patchRVRPrimary(ctx, log, rvr, shouldBePrimary); err != nil {
-			// TODO: may be proceed, join errors and return later?
-			return err
+			rvrPatchErr = errors.Join(rvrPatchErr, err)
+			continue
 		}
 	}
 
@@ -321,9 +322,13 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 	if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to patch ReplicatedVolume publishedOn")
-			return err
+			return errors.Join(rvrPatchErr, err)
 		}
 		// RV was deleted concurrently; nothing left to publish for
+	}
+
+	if rvrPatchErr != nil {
+		return fmt.Errorf("errors during patching replicas for RV: %w", rvrPatchErr)
 	}
 
 	return nil
