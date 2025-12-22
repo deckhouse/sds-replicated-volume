@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,8 +68,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	err := r.cl.Get(ctx, req.NamespacedName, rvr)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.V(4).Info("ReplicatedVolumeReplica not found, skipping")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "getting ReplicatedVolumeReplica")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
 	// Check if this RVR belongs to this node
