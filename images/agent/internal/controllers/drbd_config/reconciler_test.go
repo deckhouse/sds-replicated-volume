@@ -278,6 +278,19 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:              "crypto algorithm matching is case insensitive (uppercase in config, lowercase in kernel)",
+			rv:                readyRVWithConfig(testRVSecret, "SHA256", 7, false),
+			rvr:               disklessRVR(testRVRName, addr(testNodeIPv4, port(201)), peersFrom(peerDisklessSpec(testPeerNodeName, testPeerNodeID, addr(testPeerIPv4, port(202))))),
+			needsResourcesDir: true,
+			cryptoAlgs:        []string{"sha256"}, // lowercase in kernel
+			expectedCommands:  disklessExpectedCommands(testRVName),
+			postCheck: func(t *testing.T, cl client.Client) {
+				rvr := fetchRVR(t, cl, testRVRName)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
+				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
+			},
+		},
 	}
 
 	setupMemFS(t)
