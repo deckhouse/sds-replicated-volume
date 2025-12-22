@@ -44,6 +44,9 @@ const (
 	// for rare cases (~1%) when Watch connection drops and events are missed.
 	// Every resync period, informer re-lists all RVs to ensure cache is accurate.
 	rvInformerResyncPeriod = 30 * time.Second
+
+	// nodesCacheTTL is the time-to-live for the nodes cache.
+	nodesCacheTTL = 30 * time.Second
 )
 
 // Client wraps a controller-runtime client with helper methods
@@ -52,9 +55,10 @@ type Client struct {
 	cfg    *rest.Config
 	scheme *runtime.Scheme
 
-	// Cached nodes (from HEAD)
-	cachedNodes []corev1.Node
-	nodesMutex  sync.RWMutex
+	// Cached nodes with TTL
+	cachedNodes    []corev1.Node
+	nodesCacheTime time.Time
+	nodesMutex     sync.RWMutex
 
 	// RV informer with dispatcher for VolumeCheckers.
 	// Uses dispatcher pattern instead of per-checker handlers for efficiency:
@@ -306,10 +310,10 @@ func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, erro
 }
 
 // ListNodes returns all nodes in the cluster with label storage.deckhouse.io/sds-replicated-volume-node=""
-// The result is cached for the lifetime of the Client instance
+// The result is cached with TTL of nodesCacheTTL
 func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	c.nodesMutex.RLock()
-	if c.cachedNodes != nil {
+	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
 		nodes := make([]corev1.Node, len(c.cachedNodes))
 		copy(nodes, c.cachedNodes)
 		c.nodesMutex.RUnlock()
@@ -321,7 +325,7 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	defer c.nodesMutex.Unlock()
 
 	// Double-check after acquiring write lock
-	if c.cachedNodes != nil {
+	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
 		nodes := make([]corev1.Node, len(c.cachedNodes))
 		copy(nodes, c.cachedNodes)
 		return nodes, nil
@@ -335,9 +339,10 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 		return nil, err
 	}
 
-	// Cache the result
+	// Cache the result with timestamp
 	c.cachedNodes = make([]corev1.Node, len(nodeList.Items))
 	copy(c.cachedNodes, nodeList.Items)
+	c.nodesCacheTime = time.Now()
 
 	return c.cachedNodes, nil
 }
