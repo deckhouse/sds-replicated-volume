@@ -230,6 +230,10 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	h.rvr.Status.ActualType = h.rvr.Spec.Type
 
+	// Update InSync condition now that ActualType is set.
+	// Scanner may have set it to Unknown (ReplicaNotInitialized) before ActualType was available.
+	_ = h.rvr.UpdateStatusConditionInSync()
+
 	return nil
 }
 
