@@ -468,7 +468,7 @@ func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries b
 			DRBD: &v1alpha3.DRBDResource{
 				Config: &v1alpha3.DRBDResourceConfig{
 					SharedSecret:            secret,
-					SharedSecretAlg:         alg,
+					SharedSecretAlg:         v1alpha3.SharedSecretAlg(alg),
 					AllowTwoPrimaries:       allowTwoPrimaries,
 					DeviceMinor:             &deviceMinor,
 					Quorum:                  1,

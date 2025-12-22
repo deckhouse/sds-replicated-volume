@@ -58,9 +58,9 @@ var _ = Describe("Reconciler", func() {
 	// NOTE: Tests assume at least 2 algorithms in SharedSecretAlgorithms().
 	// If list shrinks to 1, tests will panic (intentionally) as signal to review logic.
 	algs := v1alpha3.SharedSecretAlgorithms
-	firstAlg := func() string { return algs()[0] }
-	secondAlg := func() string { return algs()[1] }
-	lastAlg := func() string { return algs()[len(algs())-1] }
+	firstAlg := func() string { return string(algs()[0]) }
+	secondAlg := func() string { return string(algs()[1]) }
+	lastAlg := func() string { return string(algs()[len(algs())-1]) }
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
@@ -156,7 +156,7 @@ var _ = Describe("Reconciler", func() {
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: firstAlg(),
+							SharedSecretAlg: v1alpha3.SharedSecretAlg(firstAlg()),
 						},
 					},
 				}
@@ -430,7 +430,7 @@ var _ = Describe("Reconciler", func() {
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: firstAlg(),
+							SharedSecretAlg: v1alpha3.SharedSecretAlg(firstAlg()),
 						},
 					},
 				}

@@ -27,20 +27,23 @@ const (
 	RVMaxDeviceMinor = uint(1048575)
 )
 
+type SharedSecretAlg string
+
 // Shared secret hashing algorithms
 const (
 	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
-	SharedSecretAlgSHA256 = "sha256"
+	SharedSecretAlgSHA256 = "SHA256"
 	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
-	SharedSecretAlgSHA1 = "sha1"
+	SharedSecretAlgSHA1         = "SHA1"
+	SharedSecretAlgDummyForTest = "DummyForTest"
 )
 
 // SharedSecretAlgorithms returns the ordered list of supported shared secret algorithms.
 // The order matters: algorithms are tried sequentially when one fails on any replica.
-func SharedSecretAlgorithms() []string {
-	return []string{
+func SharedSecretAlgorithms() []SharedSecretAlg {
+	return []SharedSecretAlg{
 		// TODO: remove after testing
-		"dummyAlgorithmName_ForTestingPurposes-1",
+		"DummyForTest",
 		SharedSecretAlgSHA256,
 		SharedSecretAlgSHA1,
 	}
