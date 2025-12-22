@@ -29,6 +29,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
+const (
+	// publishCycleProbability is the probability of a publish cycle (vs unpublish)
+	publishCycleProbability = 0.10
+)
+
 // VolumePublisher periodically publishes and unpublishes a volume to random nodes
 type VolumePublisher struct {
 	rvName string
@@ -467,10 +472,5 @@ func (v *VolumePublisher) doUnpublish(ctx context.Context, rv *v1alpha3.Replicat
 func (v *VolumePublisher) isAPublishCycle() bool {
 	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
 	r := rand.Float64()
-	switch {
-	case r < 0.10:
-		return true
-	default:
-		return false
-	}
+	return r < publishCycleProbability
 }
