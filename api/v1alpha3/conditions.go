@@ -93,14 +93,6 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-
-	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
-	ConditionTypeAddressConfigured = "AddressConfigured"
-
-	// [ConditionTypeScheduled] indicates whether replica has been scheduled onto a node
-	ConditionTypeScheduled = "Scheduled"
-	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
-	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -114,7 +106,6 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeAddressConfigured:     {false},
 	ConditionTypeScheduled:             {false},
 	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeScheduled:             {false},
 	ConditionTypeInitialized:           {false},
 	ConditionTypeInQuorum:              {false},
 	ConditionTypeInSync:                {false},
