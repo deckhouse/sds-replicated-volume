@@ -275,6 +275,55 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	return nil
 }
 
+func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrimary bool) error {
+	if rvr.Spec.Type != "Access" && rvr.Spec.Type != "Diskful" {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:   ConditionTypePublished,
+				Status: v1.ConditionFalse,
+				Reason: ReasonPublishingNotApplicable,
+			},
+		)
+		return nil
+	}
+	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+		if rvr.Status == nil {
+			rvr.Status = &ReplicatedVolumeReplicaStatus{}
+		}
+
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:   ConditionTypePublished,
+				Status: v1.ConditionUnknown,
+				Reason: ReasonPublishingNotInitialized,
+			},
+		)
+		return nil
+	}
+
+	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
+
+	cond := v1.Condition{Type: ConditionTypePublished}
+
+	if isPrimary {
+		cond.Status = v1.ConditionTrue
+		cond.Reason = ReasonPublished
+	} else {
+		cond.Status = v1.ConditionFalse
+		if shouldBePrimary {
+			cond.Reason = ReasonPublishPending
+		} else {
+			cond.Reason = ReasonUnpublished
+		}
+	}
+
+	meta.SetStatusCondition(&rvr.Status.Conditions, cond)
+
+	return nil
+}
+
 func (rvr *ReplicatedVolumeReplica) validateStatusDRBDNotNil() error {
 	if err := validateArgNotNil(rvr.Status, "rvr.status"); err != nil {
 		return err
@@ -298,9 +347,8 @@ func (rvr *ReplicatedVolumeReplica) validateStatusDRBDStatusNotNil() error {
 func reasonForStatusTrue(diskful bool) string {
 	if diskful {
 		return ReasonInSync
-	} else {
-		return ReasonDiskless
 	}
+	return ReasonDiskless
 }
 
 func reasonForStatusFalseFromDiskState(diskState DiskState) string {
