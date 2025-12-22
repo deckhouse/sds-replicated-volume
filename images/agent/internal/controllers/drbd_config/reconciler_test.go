@@ -356,7 +356,8 @@ func (tc *reconcileTestCase) toObjects() (res []client.Object) {
 func testRV() *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 		},
 	}
 }
@@ -364,7 +365,8 @@ func testRV() *v1alpha3.ReplicatedVolume {
 func rvWithoutSecret() *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 		},
 		Status: &v1alpha3.ReplicatedVolumeStatus{
 			DRBD: &v1alpha3.DRBDResource{
@@ -459,7 +461,8 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha3.ReplicatedVolume {
 	return &v1alpha3.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 		},
 		Status: &v1alpha3.ReplicatedVolumeStatus{
 			DRBD: &v1alpha3.DRBDResource{

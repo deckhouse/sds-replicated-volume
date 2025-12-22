@@ -110,6 +110,11 @@ func (r *Reconciler) getReplicatedVolume(
 }
 
 func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+	if !v1alpha3.HasControllerFinalizer(rv) {
+		log.Info("No controller finalizer on ReplicatedVolume")
+		return true
+	}
+
 	if rv.Spec.ReplicatedStorageClassName == "" {
 		log.Info("Empty ReplicatedStorageClassName")
 		return true

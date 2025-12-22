@@ -261,6 +261,10 @@ func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error)
 		return false, err
 	}
 
+	if !v1alpha3.HasControllerFinalizer(rv) {
+		return false, nil
+	}
+
 	if rv.Status == nil {
 		return false, nil
 	}

@@ -80,7 +80,8 @@ var _ = Describe("Reconcile", func() {
 		BeforeEach(func() {
 			rv = v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "rv1",
+					Name:       "rv1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",

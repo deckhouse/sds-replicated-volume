@@ -108,8 +108,9 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
-					UID:  "test-uid",
+					Name:       "test-rv",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-storage-class",
@@ -313,10 +314,19 @@ var _ = Describe("Reconciler", func() {
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
-			})
 
-			JustBeforeEach(func(ctx SpecContext) {
-				Expect(cl.Delete(ctx, rv)).To(Succeed())
+				// Simulate RV NotFound error from API
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+							return apierrors.NewNotFound(schema.GroupResource{
+								Group:    "storage.deckhouse.io",
+								Resource: "replicatedvolumes",
+							}, key.Name)
+						}
+						return cl.Get(ctx, key, obj, opts...)
+					},
+				})
 			})
 
 			It("should return error", func(ctx SpecContext) {
