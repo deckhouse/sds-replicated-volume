@@ -50,6 +50,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
 	}
 
@@ -64,6 +68,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if hasChanged {
 		if err := r.cl.Patch(ctx, rv, patch); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				log.Info("ReplicatedVolume was deleted during reconciliation, skipping patch")
+				return reconcile.Result{}, nil
+			}
 			return reconcile.Result{}, fmt.Errorf("patching rv finalizers: %w", err)
 		}
 	}

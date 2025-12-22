@@ -129,10 +129,11 @@ func (r *Reconciler) getReplicatedStorageClass(
 ) (*v1alpha1.ReplicatedStorageClass, error) {
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		log.Error(err, "Can't get ReplicatedStorageClass")
 		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedStorageClass not found", "name", rv.Spec.ReplicatedStorageClassName)
 			return nil, nil
 		}
+		log.Error(err, "Can't get ReplicatedStorageClass")
 		return nil, err
 	}
 	return rsc, nil

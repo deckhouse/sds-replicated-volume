@@ -54,8 +54,12 @@ func (r *Reconciler) Reconcile(
 	// Get the ReplicatedVolume (parent resource)
 	var rv v1alpha3.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Getting ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
 	// List all RVRs and filter by replicatedVolumeName

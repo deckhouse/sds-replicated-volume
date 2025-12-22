@@ -47,6 +47,10 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Info("ReplicatedVolume not found, probably deleted", "req", req)
+			return reconcile.Result{}, nil
+		}
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
 	}
 

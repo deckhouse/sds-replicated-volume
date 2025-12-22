@@ -85,6 +85,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	if changed {
 		log.V(1).Info("Updating conditions", "online", onlineStatus, "onlineReason", onlineReason, "ioReady", ioReadyStatus, "ioReadyReason", ioReadyReason)
 		if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(rvrCopy)); err != nil {
+			if errors.IsNotFound(err) {
+				log.V(1).Info("ReplicatedVolumeReplica was deleted during reconciliation, skipping patch")
+				return reconcile.Result{}, nil
+			}
 			log.Error(err, "Patching RVR status")
 			return reconcile.Result{}, err
 		}

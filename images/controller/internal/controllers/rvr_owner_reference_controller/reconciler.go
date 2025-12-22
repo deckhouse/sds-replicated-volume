@@ -78,6 +78,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	if err := r.cl.Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolumeReplica was deleted during reconciliation, skipping patch", "rvr", rvr.Name)
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "unable to patch ReplicatedVolumeReplica ownerReference", "rvr", rvr.Name)
 		return reconcile.Result{}, err
 	}
