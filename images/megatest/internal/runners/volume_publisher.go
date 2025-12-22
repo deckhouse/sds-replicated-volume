@@ -177,32 +177,9 @@ func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1al
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	// Step 1: Publish the node
-	if err := v.doPublish(ctx, rv, nodeName); err != nil {
-		log.Error("failed to doPublish", "error", err)
+	// Step 1: Publish the node and wait for it to be published
+	if err := v.publishCycle(ctx, rv, nodeName); err != nil {
 		return err
-	}
-
-	// Wait for node to be published
-	for {
-		log.Debug("waiting for node to be published")
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		rv, err := v.client.GetRV(ctx, v.rvName)
-		if err != nil {
-			return err
-		}
-
-		if rv.Status != nil && slices.Contains(rv.Status.PublishedOn, nodeName) {
-			break
-		}
-
-		time.Sleep(1 * time.Second)
 	}
 
 	// Step 2: Random delay between publish and unpublish
@@ -218,33 +195,7 @@ func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1al
 		return err
 	}
 
-	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
-		log.Error("failed to doUnpublish", "error", err)
-		return err
-	}
-
-	// Wait for node to be unpublished
-	for {
-		log.Debug("waiting for node to be unpublished")
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		rv, err := v.client.GetRV(ctx, v.rvName)
-		if err != nil {
-			return err
-		}
-
-		// If status is nil or node is not in PublishedOn, consider it as unpublished
-		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, nodeName) {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-	}
+	return v.unpublishCycle(ctx, rv, nodeName)
 }
 
 func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
