@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -380,6 +381,11 @@ func reasonForStatusFalseFromDiskState(diskState DiskState) string {
 
 func validateArgNotNil(arg any, argName string) error {
 	if arg == nil {
+		return fmt.Errorf("expected '%s' to be non-nil", argName)
+	}
+	// Check for typed nil pointers (e.g., (*SomeStruct)(nil) passed as any)
+	v := reflect.ValueOf(arg)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
 		return fmt.Errorf("expected '%s' to be non-nil", argName)
 	}
 	return nil

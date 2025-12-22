@@ -621,10 +621,10 @@ func diskfulExpectedCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
 			ResultErr:    fakedrbdadm.ExitErr{Code: 1},
 		},
 		newExpectedCmd(drbdadm.Command, drbdadm.CreateMDArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(rvName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(rvName), "", nil),
 	}
 }
 
