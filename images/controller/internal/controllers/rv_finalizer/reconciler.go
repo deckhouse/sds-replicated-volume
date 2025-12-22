@@ -46,6 +46,8 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
+	r.log.Info("Reconciling", "req", req)
+
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
@@ -73,7 +75,7 @@ func (r *Reconciler) processFinalizers(
 	log *slog.Logger,
 	rv *v1alpha3.ReplicatedVolume,
 ) (hasChanged bool, err error) {
-	rvDeleted := rv.DeletionTimestamp == nil
+	rvDeleted := rv.DeletionTimestamp != nil
 	rvHasFinalizer := slices.Contains(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
 
 	var hasRVRs bool
