@@ -83,9 +83,7 @@ func (r *Reconciler) Reconcile(
 			}, nil
 		}
 
-		// Only check replication condition for diskful replicas, as deleting non-diskful replicas
-		// (TieBreaker, Access) doesn't affect the diskful replica count
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
+		if !hasEnoughDiskfulReplicasForReplication(rsc, replicasForRV, rvr.Name) {
 			log.Info("cluster is not ready for RVR GC: replication condition is not satisfied. Requeue after", "seconds", requeueAfterSec)
 			return reconcile.Result{
 				RequeueAfter: requeueAfterSec * time.Second,
