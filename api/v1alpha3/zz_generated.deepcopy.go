@@ -191,6 +191,16 @@ func (in *DRBDErrors) DeepCopyInto(out *DRBDErrors) {
 		*out = new(SharedSecretUnsupportedAlgError)
 		**out = **in
 	}
+	if in.LastPrimaryError != nil {
+		in, out := &in.LastPrimaryError, &out.LastPrimaryError
+		*out = new(CmdError)
+		**out = **in
+	}
+	if in.LastSecondaryError != nil {
+		in, out := &in.LastSecondaryError, &out.LastSecondaryError
+		*out = new(CmdError)
+		**out = **in
+	}
 	return
 }
 
