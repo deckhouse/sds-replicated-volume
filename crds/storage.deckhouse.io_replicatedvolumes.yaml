@@ -177,8 +177,9 @@ spec:
                         type: string
                       sharedSecretAlg:
                         enum:
-                        - sha256
-                        - sha1
+                        - SHA256
+                        - SHA1
+                        - DummyForTest
                         type: string
                     type: object
                 type: object
