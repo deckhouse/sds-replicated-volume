@@ -1,0 +1,49 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-linstor-scheduler-extender",
+  "author": "Deckhouse <contact@deckhouse.io>",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2024-0793"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает kube-controller-manager при обработке некорректных HPA v1 манифестов. linstor-scheduler-extender является расширением планировщика и не использует код kube-controller-manager"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-10220"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает устаревший механизм in-tree gitRepo volume. linstor-scheduler-extender не создаёт тома и не использует уязвимый код"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-5321"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/k8s.io/kubernetes@v1.25.16"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает kubelet на Windows при работе с логами контейнеров. linstor-scheduler-extender работает только на Linux и не использует код kubelet"
+    }
+  ],
+  "timestamp": "2025-12-11T00:00:00Z"
+}
+
