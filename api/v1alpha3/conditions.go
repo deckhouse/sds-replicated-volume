@@ -230,10 +230,13 @@ const (
 
 // Condition reasons for [ConditionTypeDataInitialized] condition
 const (
+	// status=Unknown
 	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
-	ReasonNotApplicableToDiskless         = "NotApplicableToDiskless"
-	ReasonDiskHasBeenSeenInUpToDateState  = "DiskHasBeenSeenInUpToDateState"
-	ReasonDiskNeverWasInUpToDateState     = "DiskNeverWasInUpToDateState"
+	// status=False
+	ReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
+	ReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
+	// status=True
+	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
 )
 
 // Condition reasons for [ConditionTypeInQuorum] condition
@@ -245,17 +248,19 @@ const (
 // Condition reasons for [ConditionTypeInSync] condition
 const (
 	// status=True
-	ReasonInSync = "InSync"
+	ReasonInSync   = "InSync"
+	ReasonDiskless = "Diskless"
 
 	// status=False
-	ReasonDiskless         = "Diskless"
-	ReasonAttaching        = "Attaching"
-	ReasonDetaching        = "Detaching"
-	ReasonFailed           = "Failed"
-	ReasonNegotiating      = "Negotiating"
-	ReasonInconsistent     = "Inconsistent"
-	ReasonOutdated         = "Outdated"
-	ReasonUnknownDiskState = "UnknownDiskState"
+	ReasonDiskLost                    = "DiskLost"
+	ReasonAttaching                   = "Attaching"
+	ReasonDetaching                   = "Detaching"
+	ReasonFailed                      = "Failed"
+	ReasonNegotiating                 = "Negotiating"
+	ReasonInconsistent                = "Inconsistent"
+	ReasonOutdated                    = "Outdated"
+	ReasonUnknownDiskState            = "UnknownDiskState"
+	ReasonInSyncReplicaNotInitialized = "ReplicaNotInitialized"
 )
 
 // Condition reasons for [ConditionTypeConfigured] condition

@@ -29,7 +29,7 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 		return nil
 	}
 
-	diskful := rvr.Spec.Type == "Diskful"
+	diskful := rvr.Spec.Type == ReplicaTypeDiskful
 
 	if !diskful {
 		meta.SetStatusCondition(
@@ -78,11 +78,6 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 		return nil
 	}
 
-	alreadyFalse := meta.IsStatusConditionFalse(rvr.Status.Conditions, ConditionTypeDataInitialized)
-	if alreadyFalse {
-		return nil
-	}
-
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		v1.Condition{
@@ -117,7 +112,6 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 
 	newCond := v1.Condition{Type: ConditionTypeInQuorum}
 	newCond.ObservedGeneration = rvr.Generation
-	var condUpdated bool
 
 	inQuorum := devices[0].Quorum
 
@@ -129,24 +123,19 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 		} else {
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 		}
-		condUpdated = true
 	} else {
 		if inQuorum && oldCond.Status != v1.ConditionTrue {
 			// switch to true
 			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInQuorumInQuorum
 			newCond.Message = fmt.Sprintf("Quorum achieved after being lost for %v", time.Since(oldCond.LastTransitionTime.Time))
-			condUpdated = true
 		} else if !inQuorum && oldCond.Status != v1.ConditionFalse {
 			// switch to false
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
-			condUpdated = true
 		}
 	}
 
-	if condUpdated {
-		meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
-	}
+	meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
 	return nil
 }
 
@@ -171,7 +160,20 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 	}
 	device := devices[0]
 
-	diskful := rvr.Spec.Type == "Diskful"
+	if rvr.Status.ActualType == "" {
+		meta.SetStatusCondition(
+			&rvr.Status.Conditions,
+			v1.Condition{
+				Type:    ConditionTypeInSync,
+				Status:  v1.ConditionUnknown,
+				Reason:  ReasonInSyncReplicaNotInitialized,
+				Message: "Replica's actual type is not yet initialized",
+			},
+		)
+		return nil
+	}
+
+	diskful := rvr.Status.ActualType == ReplicaTypeDiskful
 
 	var inSync bool
 	if diskful {
@@ -183,43 +185,35 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 	newCond := v1.Condition{Type: ConditionTypeInSync}
 	newCond.ObservedGeneration = rvr.Generation
 
-	var condUpdated bool
-
 	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, ConditionTypeInSync)
 
 	if oldCond == nil || oldCond.Status == v1.ConditionUnknown {
 		// initial setup - simpler message
 		if inSync {
-			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInSync
+			newCond.Status, newCond.Reason = v1.ConditionTrue, reasonForStatusTrue(diskful)
 		} else {
-			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonFromDiskState(device.DiskState)
+			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonForStatusFalseFromDiskState(device.DiskState)
 		}
-		condUpdated = true
 	} else {
 		if inSync && oldCond.Status != v1.ConditionTrue {
 			// switch to true
-			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInSync
+			newCond.Status, newCond.Reason = v1.ConditionTrue, reasonForStatusTrue(diskful)
 			newCond.Message = fmt.Sprintf(
 				"Became synced after being not in sync with reason %s for %v",
 				oldCond.Reason,
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
-			condUpdated = true
 		} else if !inSync && oldCond.Status != v1.ConditionFalse {
 			// switch to false
-			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonFromDiskState(device.DiskState)
+			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonForStatusFalseFromDiskState(device.DiskState)
 			newCond.Message = fmt.Sprintf(
 				"Became unsynced after being synced for %v",
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
-			condUpdated = true
 		}
 	}
 
-	if condUpdated {
-		meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
-	}
-
+	meta.SetStatusCondition(&rvr.Status.Conditions, newCond)
 	return nil
 }
 
@@ -301,10 +295,18 @@ func (rvr *ReplicatedVolumeReplica) validateStatusDRBDStatusNotNil() error {
 	return nil
 }
 
-func reasonFromDiskState(diskState DiskState) string {
+func reasonForStatusTrue(diskful bool) string {
+	if diskful {
+		return ReasonInSync
+	} else {
+		return ReasonDiskless
+	}
+}
+
+func reasonForStatusFalseFromDiskState(diskState DiskState) string {
 	switch diskState {
 	case DiskStateDiskless:
-		return ReasonDiskless
+		return ReasonDiskLost
 	case DiskStateAttaching:
 		return ReasonAttaching
 	case DiskStateDetaching:
