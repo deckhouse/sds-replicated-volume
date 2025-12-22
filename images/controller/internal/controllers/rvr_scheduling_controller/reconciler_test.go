@@ -140,7 +140,9 @@ func generateLVGs(nodes []*corev1.Node) ([]*snc.LVMVolumeGroup, *v1alpha1.Replic
 	return lvgs, rsp
 }
 
-// createMockServer creates a mock scheduler extender server
+// createMockServer creates a mock scheduler extender server.
+// Only LVGs found in lvgToNode are returned with their scores.
+// LVGs not found in lvgToNode are NOT returned (simulates "no space").
 func createMockServer(scores map[string]int, lvgToNode map[string]string) *httptest.Server {
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
@@ -149,10 +151,14 @@ func createMockServer(scores map[string]int, lvgToNode map[string]string) *httpt
 		json.NewDecoder(r.Body).Decode(&req)
 		resp := map[string]any{"lvgs": []map[string]any{}}
 		for _, lvg := range req.LVGS {
-			nodeName := lvgToNode[lvg.Name]
+			nodeName, ok := lvgToNode[lvg.Name]
+			if !ok {
+				// LVG not configured - don't include in response (simulates no space)
+				continue
+			}
 			score := scores[nodeName]
 			if score == 0 {
-				score = 50 // default score
+				score = 50 // default score if not explicitly configured
 			}
 			resp["lvgs"] = append(resp["lvgs"].([]map[string]any), map[string]any{"name": lvg.Name, "score": score})
 		}
@@ -591,13 +597,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a", "zone-b", "zone-c"}},
 			},
 			{
-				Name:       "2. large-3z: D:2, TB:1 - D in 2 zones, TB in 3rd",
+				Name:       "2. large-3z: D:2, TB:1 - even distribution across 3 zones",
 				Cluster:    "large-3z",
 				Topology:   "TransZonal",
 				PublishOn:  nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
-				Expected:   ExpectedResult{}, // distribution across 3 zones
+				// TransZonal distributes replicas evenly across zones
+				// D:2 go to 2 different zones, TB goes to 3rd zone
+				// Exact zone selection depends on map iteration order, so we just verify coverage
+				Expected: ExpectedResult{}, // all 3 zones should be covered (verified by runTestCase)
 			},
 			{
 				Name:      "3. large-3z: existing D in zone-a,b - new D in zone-c",
@@ -725,13 +734,18 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 	Context("Ignored Topology", func() {
 		ignoredTestCases := []IntegrationTestCase{
 			{
-				Name:       "1. large-3z: D:2, TB:1 - best score wins",
+				Name:       "1. large-3z: D:2, TB:1 - Diskful uses best scores",
 				Cluster:    "large-3z",
 				Topology:   "Ignored",
 				PublishOn:  nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
-				Expected:   ExpectedResult{}, // any nodes, best score
+				// Scores: node-a1(100), node-b1(90) - D:2 get best 2 nodes
+				// TieBreaker doesn't use scheduler extender (no disk space needed)
+				Expected: ExpectedResult{
+					DiskfulNodes: []string{"node-a1", "node-b1"},
+					// TieBreaker goes to any remaining node (no score-based selection)
+				},
 			},
 			{
 				Name:       "2. medium-2z: publishOn - prefer publishOn nodes",
@@ -817,6 +831,160 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				runTestCase(ctx, tc)
 			})
 		}
+	})
+
+	// ==================== EXTENDER FILTERING ====================
+	Context("Extender Filtering", func() {
+		It("returns error when extender filters out all nodes (no space)", func(ctx SpecContext) {
+			cluster := clusterConfigs["medium-2z"]
+
+			// Generate cluster resources
+			nodes, _ := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			// Create mock server that returns EMPTY lvgs (simulates no space on any node)
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				resp := map[string]any{"lvgs": []map[string]any{}}
+				json.NewEncoder(w).Encode(resp)
+			}))
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "Ignored",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha3.ConditionTypeReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha3.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("no nodes with sufficient storage space"))
+		})
+
+		It("filters nodes where extender doesn't return LVG", func(ctx SpecContext) {
+			cluster := clusterConfigs["medium-2z"]
+
+			nodes, scores := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			// Only include zone-a LVGs in mapping - zone-b will be filtered out
+			lvgToNode := make(map[string]string)
+			for _, lvg := range lvgs {
+				if len(lvg.Status.Nodes) > 0 {
+					nodeName := lvg.Status.Nodes[0].Name
+					// Only include node-a* nodes
+					if nodeName == "node-a1" || nodeName == "node-a2" {
+						lvgToNode[lvg.Name] = nodeName
+					}
+				}
+			}
+
+			mockServer := createMockServer(scores, lvgToNode)
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "Ignored",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha3.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
+				Spec: v1alpha3.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha3.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha3.ConditionTypeReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+			rvr := &v1alpha3.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha3.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			// Must be on zone-a node since zone-b was filtered out
+			Expect(updated.Spec.NodeName).To(Or(Equal("node-a1"), Equal("node-a2")))
+		})
 	})
 })
 
@@ -927,7 +1095,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		}
 
 		rvrList = nil
-		withStatusSubresource = false
+		withStatusSubresource = true // Enable by default - reconciler always writes status
 	})
 
 	JustBeforeEach(func() {
@@ -946,7 +1114,9 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			builder = builder.WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
 		}
 		cl = builder.Build()
-		rec, _ = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		var err error
+		rec, err = rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+		Expect(err).ToNot(HaveOccurred())
 	})
 
 	When("one publishOn node has diskful replica", func() {
@@ -1034,7 +1204,6 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 	When("checking Scheduled condition", func() {
 		BeforeEach(func() {
 			rv.Spec.PublishOn = []string{"node-a", "node-b"}
-			withStatusSubresource = true
 			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},
