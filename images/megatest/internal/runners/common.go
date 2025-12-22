@@ -24,6 +24,11 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 )
 
+const (
+	// CleanupTimeout is the timeout for cleanup operations
+	CleanupTimeout = 2 * time.Minute
+)
+
 // Runner represents a goroutine that can be started and stopped
 type Runner interface {
 	// Run starts the runner and blocks until the context is cancelled
@@ -40,13 +45,13 @@ func randomDuration(d config.DurationMinMax) time.Duration {
 	return d.Min + time.Duration(rand.Int63n(int64(delta)))
 }
 
-// randomInt returns a random int between min and max (inclusive)
-func randomInt(min, max int) int {
-	if max <= min {
-		return min
+// randomInt returns a random int between minVal and maxVal (inclusive)
+func randomInt(minVal, maxVal int) int {
+	if maxVal <= minVal {
+		return minVal
 	}
 	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
-	return min + rand.Intn(max-min+1)
+	return minVal + rand.Intn(maxVal-minVal+1)
 }
 
 // waitWithContext waits for the specified duration or until context is cancelled

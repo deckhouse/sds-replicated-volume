@@ -171,7 +171,7 @@ func (m *MultiVolume) cleanup(reason error) {
 
 	for m.runningVolumes.Load() > 0 {
 		log.Info("waiting for volumes to stop", "remaining", m.runningVolumes.Load())
-		time.Sleep(1 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 }
 
