@@ -249,6 +249,12 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 			continue
 		}
 
+		// Skip replicas without a node (unscheduled replicas or TieBreaker without node assignment)
+		// as they are not configured by the agent and won't have actual.allowTwoPrimaries set
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+
 		if rvr.Status == nil ||
 			rvr.Status.DRBD == nil ||
 			rvr.Status.DRBD.Actual == nil ||

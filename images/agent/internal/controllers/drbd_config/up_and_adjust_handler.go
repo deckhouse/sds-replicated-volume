@@ -221,6 +221,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		h.rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 	}
 	h.rvr.Status.DRBD.Actual.InitialSyncCompleted = true
+	h.rvr.Status.DRBD.Actual.AllowTwoPrimaries = h.rv.Status.DRBD.Config.AllowTwoPrimaries
 	if h.llv != nil {
 		h.rvr.Status.DRBD.Actual.Disk = v1alpha1.SprintDRBDDisk(
 			h.lvg.Spec.ActualVGNameOnTheNode,
