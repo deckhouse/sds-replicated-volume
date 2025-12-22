@@ -66,7 +66,7 @@ const (
 	ConditionTypeDevicesReady = "DevicesReady"
 
 	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigured = "ConditionTypeConfigured"
+	ConditionTypeConfigured = "Configured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -100,21 +100,6 @@ const (
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeReady:                 {false},
-	ConditionTypeInitialSync:           {false},
-	ConditionTypeIsPrimary:             {false},
-	ConditionTypeDevicesReady:          {false},
-	ConditionTypeConfigurationAdjusted: {false},
-	ConditionTypeQuorum:                {false},
-	ConditionTypeDiskIOSuspended:       {false},
-	ConditionTypeAddressConfigured:     {false},
-	ConditionTypeScheduled:             {false},
-	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeInitialized:           {false},
-	ConditionTypeInQuorum:              {false},
-	ConditionTypeInSync:                {false},
-	ConditionTypeOnline:                {false},
-	ConditionTypeIOReady:               {false},
 	ConditionTypeReady:                {false},
 	ConditionTypeInitialSync:          {false},
 	ConditionTypeIsPrimary:            {false},
@@ -123,13 +108,14 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeQuorum:               {false},
 	ConditionTypeDiskIOSuspended:      {false},
 	ConditionTypeAddressConfigured:    {false},
-	ConditionTypeBackingVolumeCreated: {false},
 	ConditionTypeScheduled:            {false},
+	ConditionTypeBackingVolumeCreated: {false},
 	ConditionTypeDataInitialized:      {false},
 	ConditionTypeInQuorum:             {false},
 	ConditionTypeInSync:               {false},
 	ConditionTypeOnline:               {false},
 	ConditionTypeIOReady:              {false},
+	ConditionTypePublished:            {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
