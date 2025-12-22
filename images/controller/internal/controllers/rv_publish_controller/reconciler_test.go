@@ -67,7 +67,7 @@ var _ = Describe("Reconcile", func() {
 
 	JustBeforeEach(func() {
 		cl = builder.Build()
-		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}))
 	})
 
 	It("returns nil when ReplicatedVolume not found", func(ctx SpecContext) {
@@ -80,7 +80,8 @@ var _ = Describe("Reconcile", func() {
 		BeforeEach(func() {
 			rv = v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "rv1",
+					Name:       "rv1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",

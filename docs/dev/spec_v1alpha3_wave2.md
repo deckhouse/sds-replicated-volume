@@ -145,6 +145,9 @@ Cм. существующую реализацию `drbdadm resize`.
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
 `sds-replicated-volume.storage.deckhouse.io/*` (нет чужих), новые реплики не создаются.
 
+### Добавление
+- начинать работу только если у RV  status.condition[type=IOReady].status=True
+
 ## `rv-publish-controller`
 
 ### Уточнение

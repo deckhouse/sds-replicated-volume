@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvpublishcontroller
+package rvr_scheduling_controller
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -24,12 +24,17 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
+const controllerName = "rvr-scheduling-controller"
+
 func BuildController(mgr manager.Manager) error {
-	const controllerName = "rv_publish_controller"
-
-	log := mgr.GetLogger().WithName(controllerName)
-
-	var rec = NewReconciler(mgr.GetClient(), log)
+	r, err := NewReconciler(
+		mgr.GetClient(),
+		mgr.GetLogger().WithName(controllerName).WithName("Reconciler"),
+		mgr.GetScheme(),
+	)
+	if err != nil {
+		return err
+	}
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
@@ -38,5 +43,5 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha3.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolume{}),
 		).
-		Complete(rec)
+		Complete(r)
 }

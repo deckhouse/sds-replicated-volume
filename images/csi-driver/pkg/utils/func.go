@@ -32,7 +32,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -197,9 +197,9 @@ func CreateReplicatedVolume(
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-	rvSpec v1alpha2.ReplicatedVolumeSpec,
-) (*v1alpha2.ReplicatedVolume, error) {
-	rv := &v1alpha2.ReplicatedVolume{
+	rvSpec v1alpha3.ReplicatedVolumeSpec,
+) (*v1alpha3.ReplicatedVolume, error) {
+	rv := &v1alpha3.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
@@ -215,8 +215,8 @@ func CreateReplicatedVolume(
 }
 
 // GetReplicatedVolume gets a ReplicatedVolume resource
-func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*v1alpha2.ReplicatedVolume, error) {
-	rv := &v1alpha2.ReplicatedVolume{}
+func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*v1alpha3.ReplicatedVolume, error) {
+	rv := &v1alpha3.ReplicatedVolume{}
 	err := kc.Get(ctx, client.ObjectKey{Name: name}, rv)
 	return rv, err
 }
@@ -254,7 +254,7 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.Status != nil {
-			readyCond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha2.ConditionTypeReady)
+			readyCond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
 			if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
 				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready", traceID, name))
 				return attemptCounter, nil
@@ -294,7 +294,7 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	return err
 }
 
-func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *v1alpha2.ReplicatedVolume, finalizer string) (bool, error) {
+func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *v1alpha3.ReplicatedVolume, finalizer string) (bool, error) {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		removed := false
 		for i, val := range rv.Finalizers {
@@ -339,8 +339,8 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 }
 
 // GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
-func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*v1alpha2.ReplicatedVolumeReplica, error) {
-	rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
+func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*v1alpha3.ReplicatedVolumeReplica, error) {
+	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 	err := kc.List(
 		ctx,
 		rvrList,
@@ -361,17 +361,18 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 }
 
 // GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
-func GetDRBDDevicePath(rvr *v1alpha2.ReplicatedVolumeReplica) (string, error) {
-	if rvr.Status == nil || rvr.Status.DRBD == nil || len(rvr.Status.DRBD.Devices) == 0 {
+func GetDRBDDevicePath(rvr *v1alpha3.ReplicatedVolumeReplica) (string, error) {
+	if rvr.Status == nil || rvr.Status.DRBD == nil ||
+		rvr.Status.DRBD.Status == nil || len(rvr.Status.DRBD.Status.Devices) == 0 {
 		return "", fmt.Errorf("DRBD status not available or no devices found")
 	}
 
-	minor := rvr.Status.DRBD.Devices[0].Minor
+	minor := rvr.Status.DRBD.Status.Devices[0].Minor
 	return fmt.Sprintf("/dev/drbd%d", minor), nil
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume
-func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *v1alpha2.ReplicatedVolume, newSize resource.Quantity) error {
+func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *v1alpha3.ReplicatedVolume, newSize resource.Quantity) error {
 	rv.Spec.Size = newSize
 	return kc.Update(ctx, rv)
 }
@@ -379,27 +380,13 @@ func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *v1alpha2.
 // BuildReplicatedVolumeSpec builds ReplicatedVolumeSpec from parameters
 func BuildReplicatedVolumeSpec(
 	size resource.Quantity,
-	lvmType string,
-	volumeGroups []v1alpha2.LVGRef,
-	replicas byte,
-	topology string,
-	volumeAccess string,
-	sharedSecret string,
 	publishRequested []string,
-	zones []string,
-) v1alpha2.ReplicatedVolumeSpec {
-	return v1alpha2.ReplicatedVolumeSpec{
-		Size:             size,
-		Replicas:         replicas,
-		SharedSecret:     sharedSecret,
-		Topology:         topology,
-		VolumeAccess:     volumeAccess,
-		PublishRequested: publishRequested,
-		Zones:            zones,
-		LVM: v1alpha2.LVMSpec{
-			Type:            lvmType,
-			LVMVolumeGroups: volumeGroups,
-		},
+	rscName string,
+) v1alpha3.ReplicatedVolumeSpec {
+	return v1alpha3.ReplicatedVolumeSpec{
+		Size:                       size,
+		PublishOn:                  publishRequested,
+		ReplicatedStorageClassName: rscName,
 	}
 }
 
@@ -412,7 +399,7 @@ func AddPublishRequested(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 
 		// Check if node is already in publishRequested
-		for _, existingNode := range rv.Spec.PublishRequested {
+		for _, existingNode := range rv.Spec.PublishOn {
 			if existingNode == nodeName {
 				log.Info(fmt.Sprintf("[AddPublishRequested][traceID:%s][volumeID:%s][node:%s] Node already in publishRequested", traceID, volumeName, nodeName))
 				return nil
@@ -420,12 +407,12 @@ func AddPublishRequested(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 
 		// Check if we can add more nodes (max 2)
-		if len(rv.Spec.PublishRequested) >= 2 {
+		if len(rv.Spec.PublishOn) >= 2 {
 			return fmt.Errorf("cannot add node %s to publishRequested: maximum of 2 nodes already present", nodeName)
 		}
 
 		// Add node to publishRequested
-		rv.Spec.PublishRequested = append(rv.Spec.PublishRequested, nodeName)
+		rv.Spec.PublishOn = append(rv.Spec.PublishOn, nodeName)
 
 		log.Info(fmt.Sprintf("[AddPublishRequested][traceID:%s][volumeID:%s][node:%s] Adding node to publishRequested", traceID, volumeName, nodeName))
 		err = kc.Update(ctx, rv)
@@ -465,9 +452,9 @@ func RemovePublishRequested(ctx context.Context, kc client.Client, log *logger.L
 
 		// Check if node is in publishRequested
 		found := false
-		for i, existingNode := range rv.Spec.PublishRequested {
+		for i, existingNode := range rv.Spec.PublishOn {
 			if existingNode == nodeName {
-				rv.Spec.PublishRequested = slices.Delete(rv.Spec.PublishRequested, i, i+1)
+				rv.Spec.PublishOn = slices.Delete(rv.Spec.PublishOn, i, i+1)
 				found = true
 				break
 			}
@@ -531,11 +518,11 @@ func WaitForPublishProvided(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishProvided))
+				log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishedOn))
 			}
 
 			// Check if node is in publishProvided
-			for _, publishedNode := range rv.Status.PublishProvided {
+			for _, publishedNode := range rv.Status.PublishedOn {
 				if publishedNode == nodeName {
 					log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Node is now in publishProvided", traceID, volumeName, nodeName))
 					return nil
@@ -580,12 +567,12 @@ func WaitForPublishRemoved(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishProvided))
+				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishedOn))
 			}
 
 			// Check if node is NOT in publishProvided
 			found := false
-			for _, publishedNode := range rv.Status.PublishProvided {
+			for _, publishedNode := range rv.Status.PublishedOn {
 				if publishedNode == nodeName {
 					found = true
 					break

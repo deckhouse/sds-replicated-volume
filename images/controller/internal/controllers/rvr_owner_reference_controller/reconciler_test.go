@@ -110,28 +110,61 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("ReplicatedVolumeReplica has DeletionTimestamp", func() {
-			BeforeEach(func() {
-				rvr.Finalizers = []string{"test-finalizer"}
+			const externalFinalizer = "test-finalizer"
+
+			When("has only controller finalizer", func() {
+				BeforeEach(func() {
+					rvr.Finalizers = []string{v1alpha3.ControllerAppFinalizer}
+				})
+
+				JustBeforeEach(func(ctx SpecContext) {
+					Expect(cl.Delete(ctx, rvr)).To(Succeed())
+					got := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+					Expect(got.DeletionTimestamp).NotTo(BeNil())
+					Expect(got.Finalizers).To(ContainElement(v1alpha3.ControllerAppFinalizer))
+					Expect(got.OwnerReferences).To(BeEmpty())
+				})
+
+				It("skips reconciliation", func(ctx SpecContext) {
+					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+					Expect(err).NotTo(HaveOccurred())
+
+					got := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+					Expect(got.DeletionTimestamp).NotTo(BeNil())
+					Expect(got.Finalizers).To(ContainElement(v1alpha3.ControllerAppFinalizer))
+					Expect(got.OwnerReferences).To(BeEmpty())
+				})
 			})
 
-			JustBeforeEach(func(ctx SpecContext) {
-				Expect(cl.Delete(ctx, rvr)).To(Succeed())
-				got := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-				Expect(got.DeletionTimestamp).NotTo(BeNil())
-				Expect(got.Finalizers).To(ContainElement("test-finalizer"))
-				Expect(got.OwnerReferences).To(BeEmpty())
-			})
+			When("has external finalizer in addition to controller finalizer", func() {
+				BeforeEach(func() {
+					rvr.Finalizers = []string{v1alpha3.ControllerAppFinalizer, externalFinalizer}
+				})
 
-			It("skips reconciliation", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
-				Expect(err).NotTo(HaveOccurred())
+				JustBeforeEach(func(ctx SpecContext) {
+					Expect(cl.Delete(ctx, rvr)).To(Succeed())
+					got := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+					Expect(got.DeletionTimestamp).NotTo(BeNil())
+					Expect(got.Finalizers).To(ContainElement(externalFinalizer))
+				})
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-				Expect(got.DeletionTimestamp).NotTo(BeNil())
-				Expect(got.Finalizers).To(ContainElement("test-finalizer"))
-				Expect(got.OwnerReferences).To(BeEmpty())
+				It("still sets ownerReference", func(ctx SpecContext) {
+					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+					Expect(err).NotTo(HaveOccurred())
+
+					got := &v1alpha3.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+					Expect(got.DeletionTimestamp).NotTo(BeNil())
+					Expect(got.Finalizers).To(ContainElement(externalFinalizer))
+					Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
+						HaveField("Name", Equal(rv.Name)),
+						HaveField("Kind", Equal("ReplicatedVolume")),
+						HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					)))
+				})
 			})
 		})
 

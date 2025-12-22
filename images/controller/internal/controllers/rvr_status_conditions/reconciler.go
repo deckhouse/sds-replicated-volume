@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 // Reconciler computes Online and IOReady conditions for ReplicatedVolumeReplica
@@ -107,9 +106,9 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 		return false, v1alpha3.ReasonUnscheduled, false
 	}
 
-	// AgentNamespace is taken from rv.ControllerConfigMapNamespace
+	// AgentNamespace is taken from v1alpha3.ModuleNamespace
 	// Agent pods run in the same namespace as controller
-	agentNamespace := rv.ControllerConfigMapNamespace
+	agentNamespace := v1alpha3.ModuleNamespace
 
 	// List agent pods on this node
 	podList := &corev1.PodList{}
@@ -194,7 +193,7 @@ func (r *Reconciler) calculateOnline(rvr *v1alpha3.ReplicatedVolumeReplica, agen
 		return metav1.ConditionFalse, reason, message
 	}
 
-	// Check DataInitialized condition (set by drbd-config-controller on agent)
+	// Check Initialized condition
 	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 	if initializedCond == nil || initializedCond.Status != metav1.ConditionTrue {
 		reason, message := extractReasonAndMessage(initializedCond, v1alpha3.ReasonUninitialized, "Initialized")

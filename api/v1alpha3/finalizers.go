@@ -16,6 +16,28 @@ limitations under the License.
 
 package v1alpha3
 
+import (
+	"slices"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 const AgentAppFinalizer = "sds-replicated-volume.storage.deckhouse.io/agent"
 
 const ControllerAppFinalizer = "sds-replicated-volume.storage.deckhouse.io/controller"
+
+func isExternalFinalizer(f string) bool {
+	return f != ControllerAppFinalizer && f != AgentAppFinalizer
+}
+
+func HasExternalFinalizers(obj metav1.Object) bool {
+	return slices.ContainsFunc(obj.GetFinalizers(), isExternalFinalizer)
+}
+
+func HasControllerFinalizer(obj metav1.Object) bool {
+	return slices.Contains(obj.GetFinalizers(), ControllerAppFinalizer)
+}
+
+func HasAgentFinalizer(obj metav1.Object) bool {
+	return slices.Contains(obj.GetFinalizers(), AgentAppFinalizer)
+}

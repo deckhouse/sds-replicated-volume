@@ -77,7 +77,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() {
+	if !rvr.DeletionTimestamp.IsZero() && !v1alpha3.HasExternalFinalizers(rvr) {
 		log.Info("ReplicatedVolumeReplica is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil
 	}
@@ -259,6 +259,10 @@ func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error)
 	err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv)
 	if err != nil {
 		return false, err
+	}
+
+	if !v1alpha3.HasControllerFinalizer(rv) {
+		return false, nil
 	}
 
 	if rv.Status == nil {

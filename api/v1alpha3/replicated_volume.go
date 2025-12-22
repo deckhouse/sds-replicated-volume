@@ -83,17 +83,10 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
 
-	// DiskfulReplicaCount shows current/desired diskful replicas (e.g. "2/3")
+	// DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
+	// Example: "2/3" means 2 current diskful replicas out of 3 desired
 	// +optional
 	DiskfulReplicaCount string `json:"diskfulReplicaCount,omitempty"`
-
-	// DiskfulReplicasInSync shows current/total diskful replicas that are InSync (e.g. "2/3")
-	// +optional
-	DiskfulReplicasInSync string `json:"diskfulReplicasInSync,omitempty"`
-
-	// PublishedAndIOReadyCount shows current/requested replicas that are both published and IOReady (e.g. "1/2")
-	// +optional
-	PublishedAndIOReadyCount string `json:"publishedAndIOReadyCount,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

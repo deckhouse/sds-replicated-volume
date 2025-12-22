@@ -81,8 +81,8 @@ const (
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
 	ConditionTypeScheduled = "Scheduled"
 
-	// [ConditionTypeDataInitialized] indicates whether replica data has been initialized (does not reset after True)
-	// Note: drbd-config-controller (agent) sets this condition
+	// [ConditionTypeDataInitialized] indicates whether replica has been initialized.
+	// Does not reset after True, unless replica type has changed.
 	ConditionTypeDataInitialized = "DataInitialized"
 
 	// [ConditionTypeInQuorum] indicates whether replica is in quorum
@@ -118,8 +118,8 @@ const (
 	// [ConditionTypeDevicesReady] indicates whether all the devices in UpToDate state
 	ConditionTypeDevicesReady = "DevicesReady"
 
-	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
+	ConditionTypeConfigured = "Configured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -132,24 +132,42 @@ const (
 
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
+
+	// [ConditionTypePublished] indicates whether the replica has been published
+	ConditionTypePublished = "Published"
+)
+
+// RV condition types
+const (
+	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
+	ConditionTypeAllReplicasReady = "AllReplicasReady"
+
+	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
+	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeReady:                 {false},
-	ConditionTypeInitialSync:           {false},
-	ConditionTypeIsPrimary:             {false},
-	ConditionTypeDevicesReady:          {false},
-	ConditionTypeConfigurationAdjusted: {false},
-	ConditionTypeQuorum:                {false},
-	ConditionTypeDiskIOSuspended:       {false},
-	ConditionTypeAddressConfigured:     {false},
-	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeScheduled:             {false},
-	ConditionTypeDataInitialized:       {false},
-	ConditionTypeInQuorum:              {false},
-	ConditionTypeInSync:                {false},
-	ConditionTypeOnline:                {false},
-	ConditionTypeIOReady:               {false},
+	// Conditions managed by rvr_status_conditions controller
+	ConditionTypeOnline:  {false},
+	ConditionTypeIOReady: {false},
+
+	// Conditions read by rvr_status_conditions controller
+	ConditionTypeScheduled:       {false},
+	ConditionTypeDataInitialized: {false},
+	ConditionTypeInQuorum:        {false},
+	ConditionTypeInSync:          {false},
+
+	// Other RVR conditions
+	ConditionTypeReady:                {false},
+	ConditionTypeInitialSync:          {false},
+	ConditionTypeIsPrimary:            {false},
+	ConditionTypeDevicesReady:         {false},
+	ConditionTypeConfigured:           {false},
+	ConditionTypeQuorum:               {false},
+	ConditionTypeDiskIOSuspended:      {false},
+	ConditionTypeAddressConfigured:    {false},
+	ConditionTypeBackingVolumeCreated: {false},
+	ConditionTypePublished:            {false},
 }
 
 var ReplicatedVolumeConditions = map[string]struct{ UseObservedGeneration bool }{
@@ -207,7 +225,7 @@ const (
 	ReasonReady                 = "Ready"
 )
 
-// Condition reasons for [ConditionTypeConfigurationAdjusted] condition
+// Condition reasons for [ConditionTypeConfigured] condition
 const (
 	ReasonConfigurationFailed                           = "ConfigurationFailed"
 	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
@@ -255,6 +273,17 @@ const (
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
 )
 
+// Condition reasons for [ConditionTypeScheduled] condition
+const (
+	ReasonSchedulingReplicaScheduled         = "ReplicaScheduled"
+	ReasonSchedulingWaitingForAnotherReplica = "WaitingForAnotherReplica"
+	ReasonSchedulingPending                  = "SchedulingPending"
+	ReasonSchedulingFailed                   = "SchedulingFailed"
+	ReasonSchedulingTopologyConflict         = "TopologyConstraintsFailed"
+	ReasonSchedulingNoCandidateNodes         = "NoAvailableNodes"
+	ReasonSchedulingInsufficientStorage      = "InsufficientStorage"
+)
+
 // Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
 const (
 	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
@@ -278,60 +307,66 @@ const (
 	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
 )
 
+// Condition reasons for [ConditionTypeDataInitialized] condition
+const (
+	// status=Unknown
+	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
+	// status=False
+	ReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
+	ReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
+	// status=True
+	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
+)
+
+// Condition reasons for [ConditionTypeInQuorum] condition
+const (
+	ReasonInQuorumInQuorum   = "InQuorum"
+	ReasonInQuorumQuorumLost = "QuorumLost"
+)
+
+// Condition reasons for [ConditionTypeInSync] condition
+const (
+	// status=True
+	ReasonInSync   = "InSync"
+	ReasonDiskless = "Diskless"
+
+	// status=False
+	ReasonDiskLost                    = "DiskLost"
+	ReasonAttaching                   = "Attaching"
+	ReasonDetaching                   = "Detaching"
+	ReasonFailed                      = "Failed"
+	ReasonNegotiating                 = "Negotiating"
+	ReasonInconsistent                = "Inconsistent"
+	ReasonOutdated                    = "Outdated"
+	ReasonUnknownDiskState            = "UnknownDiskState"
+	ReasonInSyncReplicaNotInitialized = "ReplicaNotInitialized"
+)
+
+// Condition reasons for [ConditionTypeConfigured] condition
+const (
+	// status=True
+	ReasonConfigured = "Configured"
+	// status=False
+	ReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
+	ReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
+	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
+	ReasonPromoteFailed                  = "PromoteFailed"
+	ReasonDemoteFailed                   = "DemoteFailed"
+)
+
 // Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)
 const (
 	ReasonSynchronizing = "Synchronizing"
 )
 
-// =============================================================================
-// Condition reasons used by rv_status_conditions controller
-// =============================================================================
-
-// Condition reasons for [ConditionTypeRVScheduled] condition
+// Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)
 const (
-	ReasonAllReplicasScheduled = "AllReplicasScheduled"
-	ReasonReplicasNotScheduled = "ReplicasNotScheduled"
-	ReasonSchedulingInProgress = "SchedulingInProgress"
-)
-
-// Condition reasons for [ConditionTypeRVBackingVolumeCreated] condition
-const (
-	ReasonAllBackingVolumesReady   = "AllBackingVolumesReady"
-	ReasonBackingVolumesNotReady   = "BackingVolumesNotReady"
-	ReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
-)
-
-// Condition reasons for [ConditionTypeRVConfigured] condition
-const (
-	ReasonAllReplicasConfigured   = "AllReplicasConfigured"
-	ReasonReplicasNotConfigured   = "ReplicasNotConfigured"
-	ReasonConfigurationInProgress = "ConfigurationInProgress"
-)
-
-// Condition reasons for [ConditionTypeRVInitialized] condition
-const (
-	ReasonInitialized              = "Initialized"
-	ReasonInitializationInProgress = "InitializationInProgress"
-	ReasonWaitingForReplicas       = "WaitingForReplicas"
-)
-
-// Condition reasons for [ConditionTypeRVQuorum] condition
-const (
-	ReasonQuorumReached  = "QuorumReached"
-	ReasonQuorumDegraded = "QuorumDegraded"
-	// ReasonQuorumLost is already defined in rvr_status_conditions reasons
-)
-
-// Condition reasons for [ConditionTypeRVDataQuorum] condition
-const (
-	ReasonDataQuorumReached  = "DataQuorumReached"
-	ReasonDataQuorumLost     = "DataQuorumLost"
-	ReasonDataQuorumDegraded = "DataQuorumDegraded"
-)
-
-// Condition reasons for [ConditionTypeRVIOReady] condition
-const (
-	ReasonRVIOReady                   = "IOReady"
-	ReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas"
-	ReasonNoIOReadyReplicas           = "NoIOReadyReplicas"
+	// status=True
+	ReasonPublished = "Published"
+	// status=False
+	ReasonUnpublished             = "Unpublished"
+	ReasonPublishPending          = "PublishPending"
+	ReasonPublishingNotApplicable = "PublishingNotApplicable"
+	// status=Unknown
+	ReasonPublishingNotInitialized = "PublishingNotInitialized"
 )

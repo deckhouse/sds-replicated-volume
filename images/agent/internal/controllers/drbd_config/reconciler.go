@@ -69,11 +69,9 @@ func (r *Reconciler) Reconcile(
 	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
-		for _, f := range rvr.Finalizers {
-			if f != v1alpha3.AgentAppFinalizer {
-				log.Info("non-agent finalizer found, ignore")
-				return reconcile.Result{}, nil
-			}
+		if v1alpha3.HasExternalFinalizers(rvr) {
+			log.Info("non-agent finalizer found, ignore")
+			return reconcile.Result{}, nil
 		}
 
 		log.Info("down resource")
@@ -115,6 +113,11 @@ func (r *Reconciler) selectRVR(
 	rv := &v1alpha3.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
+	}
+
+	if !v1alpha3.HasControllerFinalizer(rv) {
+		log.Info("no controller finalizer on rv, skipping")
+		return rv, nil, nil
 	}
 
 	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}

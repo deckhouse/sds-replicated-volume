@@ -32,7 +32,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const (
@@ -111,6 +110,11 @@ func (r *Reconciler) getReplicatedVolume(
 }
 
 func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+	if !v1alpha3.HasControllerFinalizer(rv) {
+		log.Info("No controller finalizer on ReplicatedVolume")
+		return true
+	}
+
 	if rv.Spec.ReplicatedStorageClassName == "" {
 		log.Info("Empty ReplicatedStorageClassName")
 		return true
@@ -243,7 +247,7 @@ func (r *Reconciler) syncTieBreakers(
 			rvr := &v1alpha3.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: rv.Name + "-tiebreaker-",
-					Finalizers:   []string{rvreconcile.ControllerFinalizerName},
+					Finalizers:   []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,

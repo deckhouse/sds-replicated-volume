@@ -100,8 +100,9 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
-					UID:  "test-uid",
+					Name:       "test-rv",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -111,8 +112,9 @@ var _ = Describe("Reconciler", func() {
 
 			otherRv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "other-rv",
-					UID:  "other-uid",
+					Name:       "other-rv",
+					UID:        "other-uid",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
