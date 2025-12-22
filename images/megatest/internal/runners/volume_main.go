@@ -66,6 +66,9 @@ type VolumeMain struct {
 	totalCreateRVTime       *atomic.Int64 // nanoseconds
 	totalDeleteRVTime       *atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime *atomic.Int64 // nanoseconds
+
+	// Callback to register checker stats in MultiVolume
+	registerCheckerStats func(*CheckerStats)
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -77,6 +80,7 @@ func NewVolumeMain(
 	totalCreateRVTime *atomic.Int64,
 	totalDeleteRVTime *atomic.Int64,
 	totalWaitForRVReadyTime *atomic.Int64,
+	registerCheckerStats func(*CheckerStats),
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -92,6 +96,7 @@ func NewVolumeMain(
 		totalCreateRVTime:             totalCreateRVTime,
 		totalDeleteRVTime:             totalDeleteRVTime,
 		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
+		registerCheckerStats:          registerCheckerStats,
 	}
 }
 
@@ -171,17 +176,25 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 		cleanupCancel()
 	}()
 
+	//  Wait for ALL sub-runners to stop (including VolumeChecker)
+waitLoop:
+	for {
+		select {
+		case <-cleanupCtx.Done():
+			log.Info("cleanup interrupted, skipping sub-runners wait", "remaining", v.runningSubRunners.Load())
+			break waitLoop
+		default:
+		}
+		log.Debug("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
 	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
 	}
 	if v.totalDeleteRVTime != nil {
 		v.totalDeleteRVTime.Add(deleteDuration.Nanoseconds())
-	}
-
-	for v.runningSubRunners.Load() > 0 {
-		log.Info("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
-		time.Sleep(500 * time.Millisecond)
 	}
 }
 
@@ -420,7 +433,13 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 }
 
 func (v *VolumeMain) startVolumeChecker(ctx context.Context) {
-	volumeChecker := NewVolumeChecker(v.rvName, v.client)
+	// Create stats for this checker and register in MultiVolume
+	stats := &CheckerStats{RVName: v.rvName}
+	if v.registerCheckerStats != nil {
+		v.registerCheckerStats(stats)
+	}
+
+	volumeChecker := NewVolumeChecker(v.rvName, v.client, stats)
 	checkerCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		v.runningSubRunners.Add(1)

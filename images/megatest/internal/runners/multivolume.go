@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -53,6 +54,10 @@ type MultiVolume struct {
 	totalCreateRVTime       atomic.Int64 // nanoseconds
 	totalDeleteRVTime       atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime atomic.Int64 // nanoseconds
+
+	// Checker stats from all VolumeCheckers
+	checkerStatsMu sync.Mutex
+	checkerStats   []*CheckerStats
 }
 
 // NewMultiVolume creates a new MultiVolume orchestrator
@@ -89,7 +94,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	if m.cfg.DisablePodDestroyer {
 		m.log.Debug("pod-destroyer runners are disabled")
 	} else {
-		//m.startPodDestroyers(ctx)
+		// m.startPodDestroyers(ctx)
 		m.log.Info("pod-destroyer runners are enabled")
 	}
 
@@ -145,6 +150,20 @@ func (m *MultiVolume) GetStats() Stats {
 	}
 }
 
+// AddCheckerStats registers stats from a VolumeChecker
+func (m *MultiVolume) AddCheckerStats(stats *CheckerStats) {
+	m.checkerStatsMu.Lock()
+	defer m.checkerStatsMu.Unlock()
+	m.checkerStats = append(m.checkerStats, stats)
+}
+
+// GetCheckerStats returns all collected checker stats
+func (m *MultiVolume) GetCheckerStats() []*CheckerStats {
+	m.checkerStatsMu.Lock()
+	defer m.checkerStatsMu.Unlock()
+	return m.checkerStats
+}
+
 func (m *MultiVolume) cleanup(reason error) {
 	log := m.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
@@ -165,7 +184,11 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 		DisableVolumeReplicaDestroyer: m.cfg.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   m.cfg.DisableVolumeReplicaCreator,
 	}
-	volumeMain := NewVolumeMain(rvName, cfg, m.client, &m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime)
+	volumeMain := NewVolumeMain(
+		rvName, cfg, m.client,
+		&m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime,
+		m.AddCheckerStats,
+	)
 
 	volumeCtx, cancel := context.WithCancel(ctx)
 
