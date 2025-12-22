@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/spf13/afero"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -81,8 +82,13 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 }
 
 func (h *DownHandler) removeFinalizerFromRVR(ctx context.Context) error {
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer) {
+		return nil
+	}
 	patch := client.MergeFrom(h.rvr.DeepCopy())
-	h.rvr.SetFinalizers(nil)
+	h.rvr.Finalizers = slices.DeleteFunc(h.rvr.Finalizers, func(f string) bool {
+		return f == v1alpha1.AgentAppFinalizer
+	})
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching rvr finalizers: %w", err)
 	}
@@ -90,8 +96,16 @@ func (h *DownHandler) removeFinalizerFromRVR(ctx context.Context) error {
 }
 
 func (h *DownHandler) removeFinalizerFromLLV(ctx context.Context) error {
+	if h.llv == nil {
+		return nil
+	}
+	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentAppFinalizer) {
+		return nil
+	}
 	patch := client.MergeFrom(h.llv.DeepCopy())
-	h.llv.SetFinalizers(nil)
+	h.llv.Finalizers = slices.DeleteFunc(h.llv.Finalizers, func(f string) bool {
+		return f == v1alpha1.AgentAppFinalizer
+	})
 	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
 		return fmt.Errorf("patching llv finalizers: %w", err)
 	}
