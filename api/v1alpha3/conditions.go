@@ -72,7 +72,7 @@ const (
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
 
-	// [ConditionTypeConfigurationAdjusted] indicates whether the configuration adjustment for RVR is completed
+	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
 )
 
@@ -211,23 +211,23 @@ const (
 
 // Condition reasons for [ConditionTypeRVScheduled] condition
 const (
-	ReasonSchedulingInProgress = "SchedulingInProgress"
 	ReasonAllReplicasScheduled = "AllReplicasScheduled"
 	ReasonReplicasNotScheduled = "ReplicasNotScheduled"
+	ReasonSchedulingInProgress = "SchedulingInProgress"
 )
 
 // Condition reasons for [ConditionTypeRVBackingVolumeCreated] condition
 const (
-	ReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
 	ReasonAllBackingVolumesReady   = "AllBackingVolumesReady"
 	ReasonBackingVolumesNotReady   = "BackingVolumesNotReady"
+	ReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
 )
 
 // Condition reasons for [ConditionTypeRVConfigured] condition
 const (
-	ReasonConfigurationInProgress = "ConfigurationInProgress"
 	ReasonAllReplicasConfigured   = "AllReplicasConfigured"
 	ReasonReplicasNotConfigured   = "ReplicasNotConfigured"
+	ReasonConfigurationInProgress = "ConfigurationInProgress"
 )
 
 // Condition reasons for [ConditionTypeRVInitialized] condition
