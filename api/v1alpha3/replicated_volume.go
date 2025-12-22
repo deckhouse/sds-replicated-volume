@@ -82,6 +82,11 @@ type ReplicatedVolumeStatus struct {
 	// +patchStrategy=merge
 	// +optional
 	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
+
+	// DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
+	// Example: "2/3" means 2 current diskful replicas out of 3 desired
+	// +optional
+	DiskfulReplicaCount string `json:"diskfulReplicaCount,omitempty"`
 }
 
 // +k8s:deepcopy-gen=true

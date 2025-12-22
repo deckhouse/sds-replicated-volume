@@ -69,7 +69,7 @@ func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedV
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha3.ConditionTypeReady,
+					Type:   v1alpha3.ConditionTypeDataInitialized,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -229,7 +229,6 @@ var _ = Describe("Reconciler", func() {
 				It("should return an error", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(errorMatcher)
 				})
-
 			})
 
 		When("replication is None", func() {
@@ -256,13 +255,6 @@ var _ = Describe("Reconciler", func() {
 						))),
 					)),
 				))
-
-				// Verify condition was set
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-				Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
-					HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-				))))
 			})
 		})
 
@@ -309,7 +301,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should create one new replica", func(ctx SpecContext) {
+			It("should create one new replica", func() {
 				var nonDeletedReplicas []v1alpha3.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
 					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
@@ -319,15 +311,6 @@ var _ = Describe("Reconciler", func() {
 				Expect(len(nonDeletedReplicas)).To(BeNumerically(">=", 1))
 				if len(nonDeletedBefore) == 0 {
 					Expect(nonDeletedReplicas).To(HaveLen(1))
-				}
-
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				if updatedRV.Status != nil {
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
 				}
 			})
 		})
@@ -387,15 +370,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for Availability replication", func(ctx SpecContext) {
+				It("should create missing replicas for Availability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
@@ -413,15 +389,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for ConsistencyAndAvailability replication", func(ctx SpecContext) {
+				It("should create missing replicas for ConsistencyAndAvailability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(3))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
@@ -462,13 +431,10 @@ var _ = Describe("Reconciler", func() {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					})
 
-					It("should set condition to True", func(ctx SpecContext) {
-						updatedRV := &v1alpha3.ReplicatedVolume{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-						Expect(updatedRV.Status.Conditions).To(HaveCondition(
-							v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-							HaveDiskfulReplicaCountReachedConditionAvailable(),
-						))
+					It("should not create additional replicas when required count is reached", func(ctx SpecContext) {
+						Expect(cl.List(ctx, rvrList)).To(Succeed())
+						// Verify that the number of replicas matches the expected count
+						Expect(rvrList.Items).To(HaveLen(len(replicas)))
 					})
 				})
 		})
@@ -491,7 +457,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should only count non-deleted replicas", func(ctx SpecContext) {
+			It("should only count non-deleted replicas", func() {
 				var relevantReplicas []v1alpha3.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
 					if rvr.Spec.ReplicatedVolumeName == rv.Name {
@@ -499,13 +465,6 @@ var _ = Describe("Reconciler", func() {
 					}
 				}
 				Expect(len(relevantReplicas)).To(BeNumerically(">=", 2))
-
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				Expect(updatedRV.Status.Conditions).To(HaveCondition(
-					v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-					HaveDiskfulReplicaCountReachedConditionAvailable(),
-				))
 			})
 		})
 
@@ -524,7 +483,7 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should ignore non-Diskful replicas and only count Diskful ones", func(ctx SpecContext) {
+				It("should ignore non-Diskful replicas and only count Diskful ones", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
 
 					var diskfulReplicas []v1alpha3.ReplicatedVolumeReplica
@@ -535,13 +494,6 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(diskfulReplicas).To(HaveLen(1))
 					Expect(diskfulReplicas[0].Spec.ReplicatedVolumeName).To(Equal(rv.Name))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
 				})
 			})
 
@@ -561,15 +513,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should only count Diskful replicas when calculating required count", func(ctx SpecContext) {
+				It("should only count Diskful replicas when calculating required count", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 		})
@@ -591,7 +536,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvr.Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful))
 
 				if rvr.Status != nil && rvr.Status.Conditions != nil {
-					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 					if readyCond != nil {
 						Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 					}
@@ -605,7 +550,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1))
 
-				// Set Ready condition to True on the existing replica
+				// Set DataInitialized condition to True on the existing replica
 				rvr = &v1alpha3.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, types.NamespacedName{Name: rvrList.Items[0].Name}, rvr)).To(Succeed())
 
@@ -616,9 +561,9 @@ var _ = Describe("Reconciler", func() {
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha3.ConditionTypeReady,
+						Type:   v1alpha3.ConditionTypeDataInitialized,
 						Status: metav1.ConditionTrue,
-						Reason: v1alpha3.ReasonReady,
+						Reason: "DataInitialized",
 					},
 				)
 				Expect(cl.Status().Patch(ctx, rvr, patch)).To(Succeed())

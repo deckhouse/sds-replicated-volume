@@ -86,12 +86,6 @@ const (
 
 // RV condition types
 const (
-	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
-	ConditionTypeQuorumConfigured = "QuorumConfigured"
-
-	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
-	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
-
 	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
 	ConditionTypeAllReplicasReady = "AllReplicasReady"
 
@@ -100,6 +94,17 @@ const (
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
+	// Conditions managed by rvr_status_conditions controller
+	ConditionTypeOnline:  {false},
+	ConditionTypeIOReady: {false},
+
+	// Conditions read by rvr_status_conditions controller
+	ConditionTypeScheduled:       {false},
+	ConditionTypeDataInitialized: {false},
+	ConditionTypeInQuorum:        {false},
+	ConditionTypeInSync:          {false},
+
+	// Other RVR conditions
 	ConditionTypeReady:                {false},
 	ConditionTypeInitialSync:          {false},
 	ConditionTypeIsPrimary:            {false},
@@ -108,13 +113,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeQuorum:               {false},
 	ConditionTypeDiskIOSuspended:      {false},
 	ConditionTypeAddressConfigured:    {false},
-	ConditionTypeScheduled:            {false},
 	ConditionTypeBackingVolumeCreated: {false},
-	ConditionTypeDataInitialized:      {false},
-	ConditionTypeInQuorum:             {false},
-	ConditionTypeInSync:               {false},
-	ConditionTypeOnline:               {false},
-	ConditionTypeIOReady:              {false},
 	ConditionTypePublished:            {false},
 }
 

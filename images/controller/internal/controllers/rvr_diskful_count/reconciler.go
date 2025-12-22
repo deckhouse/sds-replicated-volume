@@ -127,17 +127,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			return reconcile.Result{}, err
 		}
 
-		err = patchDiskfulReplicaCountReachedCondition(
-			ctx, r.cl, log, rv,
-			metav1.ConditionFalse,
-			v1alpha3.ReasonFirstReplicaIsBeingCreated,
-			fmt.Sprintf("Created non-deleted replica, need %d diskful replicas", neededNumberOfReplicas),
-		)
-		if err != nil {
-			log.Error(err, "setting DiskfulReplicaCountReached condition")
-		}
-
-		return reconcile.Result{}, err
+		return reconcile.Result{}, nil
 
 	case len(nonDeletedRvrMap) == 1:
 		// Need to wait until RVR becomes Ready.
@@ -175,19 +165,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 	} else {
 		log.Info("No replicas to create")
-	}
-
-	// TODO: wait for all replicas to be created and ready before setting the condition
-	// Set condition that required number of replicas is reached
-	err = patchDiskfulReplicaCountReachedCondition(
-		ctx, r.cl, log, rv,
-		metav1.ConditionTrue,
-		v1alpha3.ReasonRequiredNumberOfReplicasIsAvailable,
-		fmt.Sprintf("Required number of diskful replicas is reached: %d", neededNumberOfReplicas),
-	)
-	if err != nil {
-		log.Error(err, "setting DiskfulReplicaCountReached condition")
-		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
@@ -241,7 +218,7 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVo
 	deletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
 	nonDeletedRvrMap = make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(totalRvrMap))
 	for _, rvr := range totalRvrMap {
-		if rvr.DeletionTimestamp != nil {
+		if !rvr.DeletionTimestamp.IsZero() {
 			deletedRvrMap[rvr.Name] = rvr
 		} else {
 			nonDeletedRvrMap[rvr.Name] = rvr
@@ -250,13 +227,13 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha3.ReplicatedVo
 	return deletedRvrMap, nonDeletedRvrMap
 }
 
-// isRvrReady checks if the ReplicatedVolumeReplica has Ready condition set to True.
-// Returns false if Status is nil, Conditions is nil, Ready condition is not found, or Ready condition status is not True.
+// isRvrReady checks if the ReplicatedVolumeReplica has DataInitialized condition set to True.
+// Returns false if Status is nil, Conditions is nil, DataInitialized condition is not found, or DataInitialized condition status is not True.
 func isRvrReady(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 	if rvr.Status == nil || rvr.Status.Conditions == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.
@@ -287,36 +264,4 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme
 	log.Info("Created ReplicatedVolumeReplica", "name", rvr.Name)
 
 	return nil
-}
-
-// patchDiskfulReplicaCountReachedCondition patches the DiskfulReplicaCountReached condition
-// on the ReplicatedVolume status with the provided status, reason, and message.
-func patchDiskfulReplicaCountReachedCondition(
-	ctx context.Context,
-	cl client.Client,
-	log logr.Logger,
-	rv *v1alpha3.ReplicatedVolume,
-	status metav1.ConditionStatus,
-	reason string,
-	message string,
-) error {
-	log.V(4).Info(fmt.Sprintf("Setting %s condition", v1alpha3.ConditionTypeDiskfulReplicaCountReached), "status", status, "reason", reason, "message", message)
-
-	patch := client.MergeFrom(rv.DeepCopy())
-
-	if rv.Status == nil {
-		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
-	}
-	meta.SetStatusCondition(
-		&rv.Status.Conditions,
-		metav1.Condition{
-			Type:               v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-			Status:             status,
-			Reason:             reason,
-			Message:            message,
-			ObservedGeneration: rv.Generation,
-		},
-	)
-
-	return cl.Status().Patch(ctx, rv, patch)
 }
