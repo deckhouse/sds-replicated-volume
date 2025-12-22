@@ -137,6 +137,7 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	if err != nil {
 		v.log.Error("failed waiting for RV to become ready", "error", err)
 		// Continue to cleanup
+		// TODO: run volume-checker before cleanup
 	} else {
 		// Start checker after Ready (to monitor for state changes)
 		v.log.Debug("RV is ready, starting checker")

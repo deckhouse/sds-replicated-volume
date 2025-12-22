@@ -105,6 +105,9 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 				}
 			}
 		case 2:
+			if !slices.Contains(rv.Spec.PublishOn, nodeName) {
+				nodeName = rv.Spec.PublishOn[0]
+			}
 			if err := v.unpublishCycle(ctx, rv, nodeName); err != nil {
 				log.Error("failed to unpublishCycle", "error", err, "case", 2)
 				return err
