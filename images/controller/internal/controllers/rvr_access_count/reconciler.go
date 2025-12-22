@@ -62,7 +62,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Skip if RV is being deleted (and no foreign finalizers) - this case will be handled by another controller
-	if rv.DeletionTimestamp != nil && !v1alpha3.HasExternalFinalizers(rv.ObjectMeta) {
+	if rv.DeletionTimestamp != nil && !v1alpha3.HasExternalFinalizers(rv) {
 		log.Info("ReplicatedVolume is being deleted, skipping")
 		return reconcile.Result{}, nil
 	}
