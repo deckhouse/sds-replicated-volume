@@ -87,7 +87,23 @@ func main() {
 		DisableVolumeReplicaDestroyer: opt.DisableVolumeReplicaDestroyer,
 		DisableVolumeReplicaCreator:   opt.DisableVolumeReplicaCreator,
 	}
-	multiVolume := runners.NewMultiVolume(cfg, kubeClient)
+
+	// Create pod-destroyer configs
+	podDestroyerAgentConfig := config.PodDestroyerConfig{
+		Namespace:     opt.PodDestroyerAgentNamespace,
+		LabelSelector: opt.PodDestroyerAgentLabelSelector,
+		PodCount:      config.StepMinMax{Min: opt.PodDestroyerAgentPodCountMin, Max: opt.PodDestroyerAgentPodCountMax},
+		Period:        config.DurationMinMax{Min: opt.PodDestroyerAgentPeriodMin, Max: opt.PodDestroyerAgentPeriodMax},
+	}
+
+	podDestroyerControllerConfig := config.PodDestroyerConfig{
+		Namespace:     opt.PodDestroyerControllerNamespace,
+		LabelSelector: opt.PodDestroyerControllerLabelSelector,
+		PodCount:      config.StepMinMax{Min: opt.PodDestroyerControllerPodCountMin, Max: opt.PodDestroyerControllerPodCountMax},
+		Period:        config.DurationMinMax{Min: opt.PodDestroyerControllerPeriodMin, Max: opt.PodDestroyerControllerPeriodMax},
+	}
+
+	multiVolume := runners.NewMultiVolume(cfg, podDestroyerAgentConfig, podDestroyerControllerConfig, kubeClient)
 	_ = multiVolume.Run(ctx)
 
 	// Print statistics
