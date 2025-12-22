@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/hooks/go
 
-go 1.24.9
+go 1.24.11
 
 require (
 	github.com/cloudflare/cfssl v1.6.5

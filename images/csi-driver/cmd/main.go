@@ -33,7 +33,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/kubeclient"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/config"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/driver"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
@@ -73,7 +73,7 @@ func main() {
 	cl, err := kubeclient.New(
 		snc.AddToScheme,
 		v1alpha1.AddToScheme,
-		v1alpha2.AddToScheme,
+		v1alpha3.AddToScheme,
 		clientgoscheme.AddToScheme,
 		extv1.AddToScheme,
 		v1.AddToScheme,

@@ -44,11 +44,6 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedStorageClassList{},
 		&ReplicatedStoragePool{},
 		&ReplicatedStoragePoolList{},
-		&DRBDCluster{},
-		&DRBDClusterList{},
-		&DRBDResource{},
-		&DRBDResourceList{},
-		&DRBDNodeList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil
