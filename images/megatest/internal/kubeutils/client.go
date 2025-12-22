@@ -24,6 +24,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -44,6 +45,9 @@ const (
 	// for rare cases (~1%) when Watch connection drops and events are missed.
 	// Every resync period, informer re-lists all RVs to ensure cache is accurate.
 	rvInformerResyncPeriod = 30 * time.Second
+
+	// nodesCacheTTL is the time-to-live for the nodes cache.
+	nodesCacheTTL = 30 * time.Second
 )
 
 // Client wraps a controller-runtime client with helper methods
@@ -51,6 +55,11 @@ type Client struct {
 	cl     client.Client
 	cfg    *rest.Config
 	scheme *runtime.Scheme
+
+	// Cached nodes with TTL
+	cachedNodes    []corev1.Node
+	nodesCacheTime time.Time
+	nodesMutex     sync.RWMutex
 
 	// RV informer with dispatcher for VolumeCheckers.
 	// Uses dispatcher pattern instead of per-checker handlers for efficiency:
@@ -277,7 +286,12 @@ func (c *Client) GetRVFromCache(name string) (*v1alpha3.ReplicatedVolume, error)
 	return rv, nil
 }
 
-// GetRandoxmNodes selects n random unique nodes from the cluster
+// Client returns the underlying controller-runtime client
+func (c *Client) Client() client.Client {
+	return c.cl
+}
+
+// GetRandomNodes selects n random unique nodes from the cluster
 func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, error) {
 	nodes, err := c.ListNodes(ctx)
 	if err != nil {
@@ -297,7 +311,27 @@ func (c *Client) GetRandomNodes(ctx context.Context, n int) ([]corev1.Node, erro
 }
 
 // ListNodes returns all nodes in the cluster with label storage.deckhouse.io/sds-replicated-volume-node=""
+// The result is cached with TTL of nodesCacheTTL
 func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
+	c.nodesMutex.RLock()
+	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
+		nodes := make([]corev1.Node, len(c.cachedNodes))
+		copy(nodes, c.cachedNodes)
+		c.nodesMutex.RUnlock()
+		return nodes, nil
+	}
+	c.nodesMutex.RUnlock()
+
+	c.nodesMutex.Lock()
+	defer c.nodesMutex.Unlock()
+
+	// Double-check after acquiring write lock
+	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
+		nodes := make([]corev1.Node, len(c.cachedNodes))
+		copy(nodes, c.cachedNodes)
+		return nodes, nil
+	}
+
 	nodeList := &corev1.NodeList{}
 	err := c.cl.List(ctx, nodeList, client.MatchingLabels{
 		"storage.deckhouse.io/sds-replicated-volume-node": "",
@@ -305,7 +339,13 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nodeList.Items, nil
+
+	// Cache the result with timestamp
+	c.cachedNodes = make([]corev1.Node, len(nodeList.Items))
+	copy(c.cachedNodes, nodeList.Items)
+	c.nodesCacheTime = time.Now()
+
+	return c.cachedNodes, nil
 }
 
 // CreateRV creates a new ReplicatedVolume
@@ -326,6 +366,20 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVo
 		return nil, err
 	}
 	return rv, nil
+}
+
+// IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
+func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
+	if rv.Status == nil {
+		return false
+	}
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady) &&
+		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
+}
+
+// PatchRV patches a ReplicatedVolume using merge patch strategy
+func (c *Client) PatchRV(ctx context.Context, originalRV *v1alpha3.ReplicatedVolume, updatedRV *v1alpha3.ReplicatedVolume) error {
+	return c.cl.Patch(ctx, updatedRV, client.MergeFrom(originalRV))
 }
 
 // ListRVRsByRVName lists all ReplicatedVolumeReplicas for a given RV

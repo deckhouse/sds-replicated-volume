@@ -20,9 +20,13 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
+	"os"
+	"os/signal"
 	"sync/atomic"
+	"syscall"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -31,15 +35,8 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
-const (
-	rvCreateTimeout      = 1 * time.Minute
-	rvDeleteTimeout      = 1 * time.Minute
-	subRunnerStopTimeout = 15 * time.Second // Safety timeout for waiting sub-runners to stop
-)
-
 var (
-	publisher1PeriodMinMax       = []int{30, 60}
-	publisher2PeriodMinMax       = []int{100, 200}
+	publisherPeriodMinMax        = []int{30, 60}
 	replicaDestroyerPeriodMinMax = []int{30, 300}
 	replicaCreatorPeriodMinMax   = []int{30, 300}
 
@@ -140,13 +137,15 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	if err != nil {
 		v.log.Error("failed waiting for RV to become ready", "error", err)
 		// Continue to cleanup
+		// TODO: run volume-checker before cleanup
+	} else {
+		// Start checker after Ready (to monitor for state changes)
+		v.log.Debug("RV is ready, starting checker")
+		v.startVolumeChecker(lifetimeCtx)
 	}
 	if v.totalWaitForRVReadyTime != nil {
 		v.totalWaitForRVReadyTime.Add(waitDuration.Nanoseconds())
 	}
-
-	// Start checker after Ready (to monitor for state changes)
-	v.startVolumeChecker(lifetimeCtx)
 
 	// Wait for lifetime to expire or context to be cancelled
 	<-lifetimeCtx.Done()
@@ -166,28 +165,32 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log.Info("started")
 	defer log.Info("finished")
 
-	// TODO - remove timeout to exit, but add timeout to show message what exit going wrong, e.g.
-	// show message after few mins what we can't make some part of unpublish or some else
-	// sub proceses for user can Ctrl+C for close withot full cleanup
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
+	defer cleanupCancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		sig := <-sigChan
+		log.Info("received signal, shutting down", "signal", sig)
+		cleanupCancel()
+	}()
 
 	//  Wait for ALL sub-runners to stop (including VolumeChecker)
-	// They use lifetimeCtx which is already Done, so they should exit quickly
-	// Each API call inside has apiCallTimeout, so this shouldn't take long
-	stopDeadline := time.Now().Add(subRunnerStopTimeout)
-	for v.runningSubRunners.Load() > 0 {
-		if time.Now().After(stopDeadline) {
-			log.Error("BUG: sub-runners did not stop in time", "remaining", v.runningSubRunners.Load())
-			break
+waitLoop:
+	for {
+		select {
+		case <-cleanupCtx.Done():
+			log.Info("cleanup interrupted, skipping sub-runners wait", "remaining", v.runningSubRunners.Load())
+			break waitLoop
+		default:
 		}
 		log.Debug("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	//  Now safe to delete RV - checker is already stopped, prevents watch conditions checks during cleanup
-	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
-	defer cleanupCancel()
-
-	deleteDuration, err := v.deleteRV(cleanupCtx)
+	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
 	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
 	}
@@ -260,7 +263,7 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.
 	return time.Since(startTime), nil
 }
 
-func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
+func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
 	startTime := time.Now()
 
 	rv := &v1alpha3.ReplicatedVolume{
@@ -274,7 +277,10 @@ func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
 		return time.Since(startTime), err
 	}
 
-	// TODO: Wait for deletion
+	err = v.WaitForRVDeleted(ctx, log)
+	if err != nil {
+		return time.Since(startTime), err
+	}
 
 	return time.Since(startTime), nil
 }
@@ -282,53 +288,73 @@ func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
 func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
 	startTime := time.Now()
 
-	// TODO: implement proper wait for ready
-	// err := v.client.WaitForRVReady(ctx, v.rvName, rvCreateTimeout)
-	// if err != nil {
-	// 	return time.Since(startTime), err
-	// }
-	for i := 0; i < 5; i++ {
-		v.log.Debug("waiting for RV to become ready", "attempt", i)
+	for {
+		v.log.Debug("waiting for RV to become ready")
+
+		select {
+		case <-ctx.Done():
+			return time.Since(startTime), ctx.Err()
+		default:
+		}
+
+		rv, err := v.client.GetRV(ctx, v.rvName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			return time.Since(startTime), err
+		}
+
+		if v.client.IsRVReady(rv) {
+			return time.Since(startTime), nil
+		}
+
 		time.Sleep(1 * time.Second)
 	}
+}
 
-	return time.Since(startTime), nil
+func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) error {
+	for {
+		log.Debug("waiting for RV to be deleted")
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		_, err := v.client.GetRV(ctx, v.rvName)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		time.Sleep(1 * time.Second)
+	}
 }
 
 func (v *VolumeMain) startSubRunners(ctx context.Context) {
-	// Create publisher configs
-	publisher1Cfg := config.VolumePublisherConfig{
+	// Start publisher
+	publisherCfg := config.VolumePublisherConfig{
 		Period: config.DurationMinMax{
-			Min: time.Duration(publisher1PeriodMinMax[0]) * time.Second,
-			Max: time.Duration(publisher1PeriodMinMax[1]) * time.Second,
+			Min: time.Duration(publisherPeriodMinMax[0]) * time.Second,
+			Max: time.Duration(publisherPeriodMinMax[1]) * time.Second,
 		},
 	}
-	publisher2Cfg := config.VolumePublisherConfig{
-		Period: config.DurationMinMax{
-			Min: time.Duration(publisher2PeriodMinMax[0]) * time.Second,
-			Max: time.Duration(publisher2PeriodMinMax[1]) * time.Second,
-		},
-	}
+	publisher := NewVolumePublisher(v.rvName, publisherCfg, v.client, publisherPeriodMinMax)
+	publisherCtx, cancel := context.WithCancel(ctx)
+	go func() {
+		v.runningSubRunners.Add(1)
+		defer func() {
+			cancel()
+			v.runningSubRunners.Add(-1)
+		}()
 
-	// Create runners
-	publishers := []*VolumePublisher{
-		NewVolumePublisher(v.rvName, publisher1Cfg, v.client, publisher1PeriodMinMax),
-		NewVolumePublisher(v.rvName, publisher2Cfg, v.client, publisher2PeriodMinMax),
-	}
-
-	// Start publishers
-	for _, pub := range publishers {
-		publisherCtx, cancel := context.WithCancel(ctx)
-		go func(p *VolumePublisher) {
-			v.runningSubRunners.Add(1)
-			defer func() {
-				cancel()
-				v.runningSubRunners.Add(-1)
-			}()
-
-			_ = p.Run(publisherCtx)
-		}(pub)
-	}
+		_ = publisher.Run(publisherCtx)
+	}()
 
 	// Start replica destroyer
 	if v.disableVolumeReplicaDestroyer {
