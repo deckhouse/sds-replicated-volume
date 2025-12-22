@@ -31,7 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
-	. "github.com/deckhouse/sds-common-lib/utils"
+	u "github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
@@ -89,12 +89,12 @@ func (s *Scanner) Run() error {
 		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
 			s.log.Debug("added resource update event", "resource", ev)
 			if err := s.batcher.Add(ev); err != nil {
-				return LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
+				return u.LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
 			}
 		}
 
 		if err != nil && s.ctx.Err() == nil {
-			return LogError(s.log, fmt.Errorf("run events2: %w", err))
+			return u.LogError(s.log, fmt.Errorf("run events2: %w", err))
 		}
 
 		if err != nil && s.ctx.Err() != nil {
@@ -178,7 +178,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 			statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 			if err != nil {
-				return LogError(log, fmt.Errorf("getting statusResult: %w", err))
+				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
@@ -195,7 +195,7 @@ func (s *Scanner) ConsumeBatches() error {
 				},
 			)
 			if err != nil {
-				return LogError(log, fmt.Errorf("listing rvr: %w", err))
+				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 			}
 
 			for _, item := range batch {
@@ -230,7 +230,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 				if err != nil {
-					return LogError(
+					return u.LogError(
 						log,
 						fmt.Errorf("updating replica status: %w", err),
 					)
@@ -256,6 +256,10 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 		rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
 	}
 	copyStatusFields(rvr.Status.DRBD.Status, resource)
+
+	_ = rvr.UpdateStatusConditionDataInitialized()
+	_ = rvr.UpdateStatusConditionInQuorum()
+	_ = rvr.UpdateStatusConditionInSync()
 
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
@@ -285,7 +289,7 @@ func copyStatusFields(
 		target.Devices = append(target.Devices, v1alpha3.DeviceStatus{
 			Volume:       d.Volume,
 			Minor:        d.Minor,
-			DiskState:    d.DiskState,
+			DiskState:    v1alpha3.ParseDiskState(d.DiskState),
 			Client:       d.Client,
 			Open:         d.Open,
 			Quorum:       d.Quorum,
@@ -305,7 +309,7 @@ func copyStatusFields(
 		conn := v1alpha3.ConnectionStatus{
 			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
-			ConnectionState: c.ConnectionState,
+			ConnectionState: v1alpha3.ParseConnectionState(c.ConnectionState),
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
@@ -336,8 +340,8 @@ func copyStatusFields(
 		for _, pd := range c.PeerDevices {
 			conn.PeerDevices = append(conn.PeerDevices, v1alpha3.PeerDeviceStatus{
 				Volume:                 pd.Volume,
-				ReplicationState:       pd.ReplicationState,
-				PeerDiskState:          pd.PeerDiskState,
+				ReplicationState:       v1alpha3.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:          v1alpha3.ParseDiskState(pd.PeerDiskState),
 				PeerClient:             pd.PeerClient,
 				ResyncSuspended:        pd.ResyncSuspended,
 				OutOfSync:              pd.OutOfSync,
