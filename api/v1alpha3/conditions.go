@@ -80,8 +80,6 @@ const (
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 
-	// [ConditionTypeDataInitialized] indicates whether replica data has been initialized
-	ConditionTypeDataInitialized = "DataInitialized"
 	// [ConditionTypePublished] indicates whether the replica has been published
 	ConditionTypePublished = "Published"
 )
@@ -93,28 +91,20 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-
-	// [ConditionTypeConfigured] indicates whether ReplicatedVolume is configured and ready
-	ConditionTypeConfigured = "Configured"
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeReady:                 {false},
-	ConditionTypeInitialSync:           {false},
-	ConditionTypeIsPrimary:             {false},
-	ConditionTypeDevicesReady:          {false},
-	ConditionTypeConfigurationAdjusted: {false},
-	ConditionTypeQuorum:                {false},
-	ConditionTypeDiskIOSuspended:       {false},
-	ConditionTypeAddressConfigured:     {false},
-	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeScheduled:             {false},
-	ConditionTypeInitialized:           {false},
-	ConditionTypeInQuorum:              {false},
-	ConditionTypeInSync:                {false},
-	ConditionTypeOnline:                {false},
-	ConditionTypeIOReady:               {false},
-	ConditionTypeDataInitialized:       {false},
+	// Conditions managed by rvr_status_conditions controller
+	ConditionTypeOnline:  {false},
+	ConditionTypeIOReady: {false},
+
+	// Conditions read by rvr_status_conditions controller
+	ConditionTypeScheduled:       {false},
+	ConditionTypeDataInitialized: {false},
+	ConditionTypeInQuorum:        {false},
+	ConditionTypeInSync:          {false},
+
+	// Other RVR conditions
 	ConditionTypeReady:                {false},
 	ConditionTypeInitialSync:          {false},
 	ConditionTypeIsPrimary:            {false},
@@ -123,13 +113,7 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeQuorum:               {false},
 	ConditionTypeDiskIOSuspended:      {false},
 	ConditionTypeAddressConfigured:    {false},
-	ConditionTypeScheduled:            {false},
 	ConditionTypeBackingVolumeCreated: {false},
-	ConditionTypeDataInitialized:      {false},
-	ConditionTypeInQuorum:             {false},
-	ConditionTypeInSync:               {false},
-	ConditionTypeOnline:               {false},
-	ConditionTypeIOReady:              {false},
 	ConditionTypePublished:            {false},
 }
 
