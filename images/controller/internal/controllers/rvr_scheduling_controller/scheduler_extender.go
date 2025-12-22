@@ -19,10 +19,12 @@ package rvr_scheduling_controller
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -62,8 +64,21 @@ func NewSchedulerHTTPClient() (*SchedulerExtenderClient, error) {
 		// No scheduler-extender URL configured — disable external capacity filtering.
 		return nil, errors.New("scheduler-extender URL is not configured")
 	}
+
+	// Parse URL to validate it
+	_, err := url.Parse(extURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scheduler-extender URL: %w", err)
+	}
+
+	// Create HTTP client that trusts any certificate
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	httpClient := &http.Client{Transport: tr}
+
 	return &SchedulerExtenderClient{
-		httpClient: http.DefaultClient,
+		httpClient: httpClient,
 		url:        extURL,
 	}, nil
 }
