@@ -29,6 +29,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 type DownHandler struct {
@@ -49,10 +50,16 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 	rvName := h.rvr.Spec.ReplicatedVolumeName
 	regularFilePath, tmpFilePath := FilePaths(rvName)
 
-	if err := drbdadm.ExecuteDown(ctx, h.rvr.Spec.ReplicatedVolumeName); err != nil {
-		h.log.Warn("failed to bring down DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName, "error", err)
+	// Try drbdadm first (uses config file)
+	if err := drbdadm.ExecuteDown(ctx, rvName); err != nil {
+		h.log.Warn("drbdadm down failed, trying drbdsetup down", "resource", rvName, "error", err)
+		// Fallback to drbdsetup (doesn't need config file)
+		if err := drbdsetup.ExecuteDown(ctx, rvName); err != nil {
+			return fmt.Errorf("failed to bring down DRBD resource %s: %w", rvName, err)
+		}
+		h.log.Info("successfully brought down DRBD resource via drbdsetup", "resource", rvName)
 	} else {
-		h.log.Info("successfully brought down DRBD resource", "resource", h.rvr.Spec.ReplicatedVolumeName)
+		h.log.Info("successfully brought down DRBD resource", "resource", rvName)
 	}
 
 	if err := FS.Remove(regularFilePath); err != nil {
