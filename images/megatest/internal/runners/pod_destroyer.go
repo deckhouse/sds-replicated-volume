@@ -100,12 +100,6 @@ func (p *PodDestroyer) doDestroy(ctx context.Context) error {
 	for i := 0; i < len(pods) && deleted < toDelete; i++ {
 		pod := &pods[i]
 
-		// Skip CSI controller pods
-		if strings.Contains(pod.Name, "csi") {
-			p.log.Debug("skipping CSI controller pod", "pod_name", pod.Name)
-			continue
-		}
-
 		p.log.Info("pod delete initiated",
 			"pod_name", pod.Name,
 			"namespace", pod.Namespace,
