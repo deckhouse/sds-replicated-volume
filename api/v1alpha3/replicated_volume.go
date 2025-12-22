@@ -141,7 +141,7 @@ type DRBDResourceConfig struct {
 	SharedSecret string `json:"sharedSecret,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest
+	// +kubebuilder:validation:Enum=SHA256;SHA1;dummyAlgorithmName_ForTestingPurposes-1
 	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
