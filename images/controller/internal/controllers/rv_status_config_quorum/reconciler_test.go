@@ -164,6 +164,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("ReplicatedVolume is ready", func() {
 			BeforeEach(func() {
+				rv.ObjectMeta.Finalizers = []string{v1alpha3.ControllerAppFinalizer}
 				rv.Status.Conditions = []metav1.Condition{
 					{
 						Type:   v1alpha3.ConditionTypeConfigured,
