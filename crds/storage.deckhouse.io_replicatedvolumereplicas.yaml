@@ -88,6 +88,8 @@ spec:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
               type:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.actualType fields.
                 enum:
                 - Diskful
                 - Access
@@ -100,6 +102,8 @@ spec:
           status:
             properties:
               actualType:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.actualType fields.
                 enum:
                 - Diskful
                 - Access

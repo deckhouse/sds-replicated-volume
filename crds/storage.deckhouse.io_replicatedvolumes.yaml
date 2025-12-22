@@ -179,7 +179,7 @@ spec:
                         enum:
                         - SHA256
                         - SHA1
-                        - dummyAlgorithmName_ForTestingPurposes-1
+                        - DummyForTest
                         type: string
                     type: object
                 type: object
