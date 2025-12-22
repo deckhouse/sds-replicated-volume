@@ -166,6 +166,10 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log.Info("started")
 	defer log.Info("finished")
 
+	// TODO - remove timeout to exit, but add timeout to show message what exit going wrong, e.g.
+	// show message after few mins what we can't make some part of unpublish or some else
+	// sub proceses for user can Ctrl+C for close withot full cleanup
+
 	//  Wait for ALL sub-runners to stop (including VolumeChecker)
 	// They use lifetimeCtx which is already Done, so they should exit quickly
 	// Each API call inside has apiCallTimeout, so this shouldn't take long

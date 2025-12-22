@@ -32,6 +32,10 @@ import (
 const (
 	// apiCallTimeout is the timeout for individual API calls to avoid hanging
 	apiCallTimeout = 10 * time.Second
+
+	// updateChBufferSize is the buffer size for RV update channel.
+	// Provides headroom for burst updates while checker processes events.
+	updateChBufferSize = 10
 )
 
 // CheckerStats holds statistics about condition transitions for a ReplicatedVolume.
@@ -83,7 +87,7 @@ func NewVolumeChecker(rvName string, client *kubeutils.Client, stats *CheckerSta
 			ioReadyStatus: metav1.ConditionTrue,
 			quorumStatus:  metav1.ConditionTrue,
 		},
-		updateCh: make(chan *v1alpha3.ReplicatedVolume, 10),
+		updateCh: make(chan *v1alpha3.ReplicatedVolume, updateChBufferSize),
 	}
 }
 
