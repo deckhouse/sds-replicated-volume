@@ -69,9 +69,7 @@ func (r *Reconciler) Reconcile(
 	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
-		rvr.GetFinalizers()
-		ok := v1alpha3.HasExternalFinalizers(rvr)
-		if ok {
+		if v1alpha3.HasExternalFinalizers(rvr) {
 			log.Info("non-agent finalizer found, ignore")
 			return reconcile.Result{}, nil
 		}
