@@ -110,7 +110,7 @@ func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 }
 
 func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
-	hasCrypto, err := kernelHasCrypto(h.rv.Status.DRBD.Config.SharedSecretAlg)
+	hasCrypto, err := kernelHasCrypto(string(h.rv.Status.DRBD.Config.SharedSecretAlg))
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
 				"shared secret alg is unsupported by the kernel: %s",
 				h.rv.Status.DRBD.Config.SharedSecretAlg,
 			),
-			unsupportedAlg: h.rv.Status.DRBD.Config.SharedSecretAlg,
+			unsupportedAlg: string(h.rv.Status.DRBD.Config.SharedSecretAlg),
 		}
 	}
 	return nil
@@ -271,7 +271,7 @@ func (h *UpAndAdjustHandler) generateResourceConfig() *v9.Resource {
 		Net: &v9.Net{
 			Protocol:          v9.ProtocolC,
 			SharedSecret:      h.rv.Status.DRBD.Config.SharedSecret,
-			CRAMHMACAlg:       h.rv.Status.DRBD.Config.SharedSecretAlg,
+			CRAMHMACAlg:       string(h.rv.Status.DRBD.Config.SharedSecretAlg),
 			RRConflict:        v9.RRConflictPolicyRetryConnect,
 			AllowTwoPrimaries: h.rv.Status.DRBD.Config.AllowTwoPrimaries,
 		},

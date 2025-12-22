@@ -134,11 +134,6 @@ type ReplicatedVolumeList struct {
 	Items           []ReplicatedVolume `json:"items"`
 }
 
-// // +k8s:deepcopy-gen=true
-// type DRBDResourceActual struct {
-
-// }
-
 // +k8s:deepcopy-gen=true
 type DRBDResourceConfig struct {
 	// +optional
@@ -146,8 +141,8 @@ type DRBDResourceConfig struct {
 	SharedSecret string `json:"sharedSecret,omitempty"`
 
 	// +optional
-	// +kubebuilder:validation:Enum=sha256;sha1
-	SharedSecretAlg string `json:"sharedSecretAlg,omitempty"`
+	// +kubebuilder:validation:Enum=SHA256;SHA1;DummyForTest
+	SharedSecretAlg SharedSecretAlg `json:"sharedSecretAlg,omitempty"`
 
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=8

@@ -122,7 +122,7 @@ func buildAlgorithmLogFields(
 	nextAlgorithm string,
 	maxFailedIndex int,
 	maxFailedRVR *v1alpha3.ReplicatedVolumeReplica,
-	algorithms []string,
+	algorithms []v1alpha3.SharedSecretAlg,
 	failedNodeNames []string,
 ) []any {
 	logFields := []any{
@@ -202,7 +202,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 			continue
 		}
 
-		index := slices.Index(algorithms, unsupportedAlg)
+		index := slices.Index(algorithms, v1alpha3.SharedSecretAlg(unsupportedAlg))
 		if index == -1 {
 			// Unknown algorithm - log warning but ignore for algorithm selection
 			// This is unlikely but possible if algorithm list changes (e.g., algorithm removed or renamed)
@@ -240,7 +240,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 	if nextIndex >= len(algorithms) {
 		// All algorithms exhausted - stop trying
 		// logFields: structured logging fields for debugging algorithm exhaustion
-		logFields := buildAlgorithmLogFields(rv, rv.Status.DRBD.Config.SharedSecretAlg, "", maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
+		logFields := buildAlgorithmLogFields(rv, string(rv.Status.DRBD.Config.SharedSecretAlg), "", maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
 		log.V(2).Info("All algorithms exhausted, cannot switch to next", logFields...)
 		return reconcile.Result{}, nil
 	}
@@ -250,7 +250,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 
 	// Log algorithm change details at V(2) for debugging (before patch)
 	// logFields: structured logging fields for debugging algorithm switch preparation
-	logFields := buildAlgorithmLogFields(rv, currentAlg, nextAlgorithm, maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
+	logFields := buildAlgorithmLogFields(rv, string(currentAlg), string(nextAlgorithm), maxFailedIndex, maxFailedRVR, algorithms, failedNodeNames)
 	log.V(2).Info("Preparing to switch algorithm", logFields...)
 
 	// Update RV with new algorithm and regenerate shared secret
