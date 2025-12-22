@@ -426,8 +426,8 @@ func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
 		return true
 	}
 
-	// controller works only when RV is Ready according to spec
-	if !meta.IsStatusConditionTrue(rv.Status.Conditions, "Ready") {
+	// controller works only when RV is IOReady according to spec
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
 		return true
 	}
 

@@ -102,12 +102,12 @@ var _ = Describe("Reconcile", func() {
 			})
 		})
 
-		When("Ready condition is False", func() {
+		When("IOReady condition is False", func() {
 			BeforeEach(func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -124,7 +124,7 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			It("skips when Ready condition is False without touching ReplicatedStorageClass", func(ctx SpecContext) {
+			It("skips when IOReady condition is False without touching ReplicatedStorageClass", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
 			})
 		})
@@ -164,7 +164,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -630,7 +630,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -683,7 +683,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -754,7 +754,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -782,7 +782,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
