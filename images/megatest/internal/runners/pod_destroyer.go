@@ -20,7 +20,6 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
-	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
