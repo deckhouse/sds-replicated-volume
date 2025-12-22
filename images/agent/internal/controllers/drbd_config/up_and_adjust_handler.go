@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -158,7 +159,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		return fmt.Errorf("renaming %s -> %s: %w", tmpFilePath, regularFilePath, fileSystemOperationError{err})
 	}
 
-	//
+	// Create metadata for diskful replicas
 	if h.rvr.Spec.Type == "Diskful" {
 		exists, err := drbdadm.ExecuteDumpMDMetadataExists(ctx, rvName)
 		if err != nil {
@@ -170,33 +171,9 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 				return fmt.Errorf("creating metadata: %w", configurationCommandError{err})
 			}
 		}
-
-		// initial sync?
-		noPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
-			len(h.rvr.Status.DRBD.Config.Peers) == 0
-
-		upToDate := h.rvr.Status != nil &&
-			h.rvr.Status.DRBD != nil &&
-			h.rvr.Status.DRBD.Status != nil &&
-			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
-			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
-
-		alreadyCompleted := h.rvr.Status != nil &&
-			h.rvr.Status.DRBD != nil &&
-			h.rvr.Status.DRBD.Actual.InitialSyncCompleted
-
-		if noPeers && !upToDate && !alreadyCompleted {
-			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
-				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, configurationCommandError{err})
-			}
-
-			if err := drbdadm.ExecuteSecondary(ctx, rvName); err != nil {
-				return fmt.Errorf("demoting resource '%s' after initil sync: %w", rvName, configurationCommandError{err})
-			}
-		}
 	}
 
-	// up & adjust
+	// up & adjust - must be done before initial sync
 	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
 	if err != nil {
 		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, configurationCommandError{err})
@@ -210,6 +187,33 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
 		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
+	}
+
+	// initial sync for diskful replicas without peers
+	if h.rvr.Spec.Type == "Diskful" {
+		noPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
+			len(h.rvr.Status.DRBD.Config.Peers) == 0
+
+		upToDate := h.rvr.Status != nil &&
+			h.rvr.Status.DRBD != nil &&
+			h.rvr.Status.DRBD.Status != nil &&
+			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
+			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
+
+		alreadyCompleted := h.rvr.Status != nil &&
+			h.rvr.Status.DRBD != nil &&
+			h.rvr.Status.DRBD.Actual != nil &&
+			h.rvr.Status.DRBD.Actual.InitialSyncCompleted
+
+		if noPeers && !upToDate && !alreadyCompleted {
+			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
+				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, configurationCommandError{err})
+			}
+
+			if err := drbdadm.ExecuteSecondary(ctx, rvName); err != nil {
+				return fmt.Errorf("demoting resource '%s' after initil sync: %w", rvName, configurationCommandError{err})
+			}
+		}
 	}
 
 	// Set actual fields
@@ -271,7 +275,7 @@ func (h *UpAndAdjustHandler) generateResourceConfig() *v9.Resource {
 		Net: &v9.Net{
 			Protocol:          v9.ProtocolC,
 			SharedSecret:      h.rv.Status.DRBD.Config.SharedSecret,
-			CRAMHMACAlg:       string(h.rv.Status.DRBD.Config.SharedSecretAlg),
+			CRAMHMACAlg:       strings.ToLower(string(h.rv.Status.DRBD.Config.SharedSecretAlg)),
 			RRConflict:        v9.RRConflictPolicyRetryConnect,
 			AllowTwoPrimaries: h.rv.Status.DRBD.Config.AllowTwoPrimaries,
 		},

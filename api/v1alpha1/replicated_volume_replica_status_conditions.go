@@ -132,6 +132,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 			// switch to false
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
+		} else {
+			// no change - keep old values
+			return nil
 		}
 	}
 
@@ -210,6 +213,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 				"Became unsynced after being synced for %v",
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
+		} else {
+			// no change - keep old values
+			return nil
 		}
 	}
 
