@@ -70,7 +70,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		rvr := &rvrList.Items[i]
 		if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.DeletionTimestamp == nil {
 			if err := r.cl.Delete(ctx, rvr); err != nil {
-				return reconcile.Result{}, fmt.Errorf("deleting rvr: %w", err)
+				if client.IgnoreNotFound(err) != nil {
+					return reconcile.Result{}, fmt.Errorf("deleting rvr: %w", err)
+				}
+				log.Debug("rvr already deleted", "rvrName", rvr.Name)
+				continue
 			}
 
 			log.Info("deleted rvr", "rvrName", rvr.Name)
@@ -82,5 +86,5 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 func linkedRVRsNeedToBeDeleted(rv *v1alpha1.ReplicatedVolume) bool {
-	return rv.DeletionTimestamp == nil
+	return rv.DeletionTimestamp != nil
 }

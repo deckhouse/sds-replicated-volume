@@ -49,7 +49,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		expectRemaining []types.NamespacedName
 	}{
 		{
-			name: "deletes linked rvrs for active rv",
+			name: "skips deletion when rv is active",
 			objects: []client.Object{
 				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
@@ -63,6 +63,33 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-active",
+						Type:                 "Diskful",
+					},
+				},
+			},
+			req:             reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-active"}},
+			expectRemaining: []types.NamespacedName{{Name: "rvr-linked"}},
+		},
+		{
+			name: "deletes linked rvrs when rv is being removed",
+			objects: []client.Object{
+				&v1alpha1.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rv-deleting",
+						DeletionTimestamp: func() *metav1.Time {
+							ts := metav1.NewTime(time.Now())
+							return &ts
+						}(),
+						Finalizers:      []string{"keep-me"},
+						ResourceVersion: "1",
+					},
+				},
+				&v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rvr-linked",
+					},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "rv-deleting",
 						Type:                 "Diskful",
 					},
 				},
@@ -85,44 +112,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 						Finalizers: []string{"keep-me"},
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-						ReplicatedVolumeName: "rv-active",
-						Type:                 "Diskful",
-					},
-				},
-			},
-			req:           reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-active"}},
-			expectDeleted: []types.NamespacedName{{Name: "rvr-linked"}},
-			expectRemaining: []types.NamespacedName{
-				{Name: "rvr-other"},
-				{Name: "rvr-already-deleting"},
-			},
-		},
-		{
-			name: "skips deletion when rv is being removed",
-			objects: []client.Object{
-				&v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "rv-deleting",
-						DeletionTimestamp: func() *metav1.Time {
-							ts := metav1.NewTime(time.Now())
-							return &ts
-						}(),
-						Finalizers:      []string{"keep-me"},
-						ResourceVersion: "1",
-					},
-				},
-				&v1alpha1.ReplicatedVolumeReplica{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "rvr-linked",
-					},
-					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-deleting",
 						Type:                 "Diskful",
 					},
 				},
 			},
-			req:             reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-deleting"}},
-			expectRemaining: []types.NamespacedName{{Name: "rvr-linked"}},
+			req:           reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-deleting"}},
+			expectDeleted: []types.NamespacedName{{Name: "rvr-linked"}},
+			expectRemaining: []types.NamespacedName{
+				{Name: "rvr-other"},
+				{Name: "rvr-already-deleting"},
+			},
 		},
 	}
 	for _, tt := range tests {
