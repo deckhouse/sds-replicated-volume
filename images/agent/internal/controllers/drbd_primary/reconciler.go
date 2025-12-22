@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
@@ -64,7 +64,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("Reconcile finished", "duration", time.Since(start).String())
 	}()
 
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	err := r.cl.Get(ctx, req.NamespacedName, rvr)
 	if err != nil {
 		log.Error(err, "getting ReplicatedVolumeReplica")
@@ -77,7 +77,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() && !v1alpha3.HasExternalFinalizers(rvr) {
+	if !rvr.DeletionTimestamp.IsZero() && !v1alpha1.HasExternalFinalizers(rvr) {
 		log.Info("ReplicatedVolumeReplica is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil
 	}
@@ -89,7 +89,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Check if ReplicatedVolume is Ready
-	// TODO: condition type v1alpha3.ConditionTypeReady is used here!
+	// TODO: condition type v1alpha1.ConditionTypeReady is used here!
 	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		log.Error(err, "checking ReplicatedVolume")
@@ -156,7 +156,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 func (r *Reconciler) updateErrorStatus(
 	ctx context.Context,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	cmdErr error,
 	cmdOutput string,
 	exitCode int,
@@ -165,13 +165,13 @@ func (r *Reconciler) updateErrorStatus(
 	patch := client.MergeFrom(rvr.DeepCopy())
 
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 	if rvr.Status.DRBD.Errors == nil {
-		rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+		rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 	}
 
 	// Set or clear error based on command result
@@ -182,7 +182,7 @@ func (r *Reconciler) updateErrorStatus(
 			output = output[:1024]
 		}
 
-		errorField := &v1alpha3.CmdError{
+		errorField := &v1alpha1.CmdError{
 			Output:   output,
 			ExitCode: exitCode,
 		}
@@ -208,7 +208,7 @@ func (r *Reconciler) updateErrorStatus(
 	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
-func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	// Check if there are any errors to clear
 	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
 		return nil
@@ -229,7 +229,7 @@ func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha3.ReplicatedVo
 // rvrIsReady checks if ReplicatedVolumeReplica is ready for primary/secondary operations.
 // It returns true if all required fields are present, false otherwise.
 // The second return value contains a reason string when the RVR is not ready.
-func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, string) {
+func (r *Reconciler) rvrIsReady(rvr *v1alpha1.ReplicatedVolumeReplica) (bool, string) {
 	// rvr.spec.nodeName will be set once and will not change again.
 	if rvr.Spec.NodeName == "" {
 		return false, "ReplicatedVolumeReplica does not have a nodeName"
@@ -255,13 +255,13 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, st
 // It returns true if the ReplicatedVolume exists and has Ready condition set to True,
 // false if the condition is not True, and an error if the ReplicatedVolume cannot be retrieved.
 func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv)
 	if err != nil {
 		return false, err
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv) {
+	if !v1alpha1.HasControllerFinalizer(rv) {
 		return false, nil
 	}
 
@@ -269,5 +269,5 @@ func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error)
 		return false, nil
 	}
 
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeReady), nil
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeReady), nil
 }

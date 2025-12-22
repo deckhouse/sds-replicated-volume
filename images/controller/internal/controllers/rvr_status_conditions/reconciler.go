@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // Reconciler computes Online and IOReady conditions for ReplicatedVolumeReplica
@@ -52,7 +52,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Get RVR
 	// Note: continue even if DeletionTimestamp is set - finalizer controllers need fresh conditions
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		// NotFound is expected, don't log as error
 		if !errors.IsNotFound(err) {
@@ -63,7 +63,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Ensure Status is not nil to avoid panic
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	// Check agent availability and determine reason if not available
@@ -79,8 +79,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// changed will be true even if only one of the conditions is changed.
 	rvrCopy := rvr.DeepCopy()
 	changed := false
-	changed = r.setCondition(rvr, v1alpha3.ConditionTypeOnline, onlineStatus, onlineReason, onlineMessage) || changed
-	changed = r.setCondition(rvr, v1alpha3.ConditionTypeIOReady, ioReadyStatus, ioReadyReason, ioReadyMessage) || changed
+	changed = r.setCondition(rvr, v1alpha1.ConditionTypeOnline, onlineStatus, onlineReason, onlineMessage) || changed
+	changed = r.setCondition(rvr, v1alpha1.ConditionTypeIOReady, ioReadyStatus, ioReadyReason, ioReadyMessage) || changed
 
 	if changed {
 		log.V(1).Info("Updating conditions", "online", onlineStatus, "onlineReason", onlineReason, "ioReady", ioReadyStatus, "ioReadyReason", ioReadyReason)
@@ -103,12 +103,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 // If shouldRetry is true, caller should return error to trigger requeue.
 func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string, log logr.Logger) (bool, string, bool) {
 	if nodeName == "" {
-		return false, v1alpha3.ReasonUnscheduled, false
+		return false, v1alpha1.ReasonUnscheduled, false
 	}
 
-	// AgentNamespace is taken from v1alpha3.ModuleNamespace
+	// AgentNamespace is taken from v1alpha1.ModuleNamespace
 	// Agent pods run in the same namespace as controller
-	agentNamespace := v1alpha3.ModuleNamespace
+	agentNamespace := v1alpha1.ModuleNamespace
 
 	// List agent pods on this node
 	podList := &corev1.PodList{}
@@ -118,7 +118,7 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 	); err != nil {
 		log.Error(err, "Listing agent pods, will retry")
 		// Hybrid: set status to Unknown AND return error to requeue
-		return false, v1alpha3.ReasonAgentStatusUnknown, true
+		return false, v1alpha1.ReasonAgentStatusUnknown, true
 	}
 
 	// Find agent pod on this node (skip terminating pods)
@@ -140,9 +140,9 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 	if agentPod == nil {
 		// Check if it's a node issue or missing pod
 		if r.isNodeNotReady(ctx, nodeName, log) {
-			return false, v1alpha3.ReasonNodeNotReady, false
+			return false, v1alpha1.ReasonNodeNotReady, false
 		}
-		return false, v1alpha3.ReasonAgentPodMissing, false
+		return false, v1alpha1.ReasonAgentPodMissing, false
 	}
 
 	// Check if agent pod is ready
@@ -156,9 +156,9 @@ func (r *Reconciler) checkAgentAvailability(ctx context.Context, nodeName string
 
 	// Pod exists but not ready - check if node issue
 	if r.isNodeNotReady(ctx, nodeName, log) {
-		return false, v1alpha3.ReasonNodeNotReady, false
+		return false, v1alpha1.ReasonNodeNotReady, false
 	}
-	return false, v1alpha3.ReasonAgentNotReady, false
+	return false, v1alpha1.ReasonAgentNotReady, false
 }
 
 // isNodeNotReady checks if the node is not ready
@@ -180,40 +180,40 @@ func (r *Reconciler) isNodeNotReady(ctx context.Context, nodeName string, log lo
 // calculateOnline computes the Online condition status, reason, and message.
 // Online = Scheduled AND Initialized AND InQuorum
 // Copies reason and message from source condition when False.
-func (r *Reconciler) calculateOnline(rvr *v1alpha3.ReplicatedVolumeReplica, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
+func (r *Reconciler) calculateOnline(rvr *v1alpha1.ReplicatedVolumeReplica, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
 	// If agent/node is not available, return False with appropriate reason
 	if !agentReady && unavailabilityReason != "" {
 		return metav1.ConditionFalse, unavailabilityReason, ""
 	}
 
 	// Check Scheduled condition
-	scheduledCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+	scheduledCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeScheduled)
 	if scheduledCond == nil || scheduledCond.Status != metav1.ConditionTrue {
-		reason, message := extractReasonAndMessage(scheduledCond, v1alpha3.ReasonUnscheduled, "Scheduled")
+		reason, message := extractReasonAndMessage(scheduledCond, v1alpha1.ReasonUnscheduled, "Scheduled")
 		return metav1.ConditionFalse, reason, message
 	}
 
 	// Check Initialized condition
-	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
+	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
 	if initializedCond == nil || initializedCond.Status != metav1.ConditionTrue {
-		reason, message := extractReasonAndMessage(initializedCond, v1alpha3.ReasonUninitialized, "Initialized")
+		reason, message := extractReasonAndMessage(initializedCond, v1alpha1.ReasonUninitialized, "Initialized")
 		return metav1.ConditionFalse, reason, message
 	}
 
 	// Check InQuorum condition
-	inQuorumCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInQuorum)
+	inQuorumCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInQuorum)
 	if inQuorumCond == nil || inQuorumCond.Status != metav1.ConditionTrue {
-		reason, message := extractReasonAndMessage(inQuorumCond, v1alpha3.ReasonQuorumLost, "InQuorum")
+		reason, message := extractReasonAndMessage(inQuorumCond, v1alpha1.ReasonQuorumLost, "InQuorum")
 		return metav1.ConditionFalse, reason, message
 	}
 
-	return metav1.ConditionTrue, v1alpha3.ReasonOnline, ""
+	return metav1.ConditionTrue, v1alpha1.ReasonOnline, ""
 }
 
 // calculateIOReady computes the IOReady condition status, reason, and message.
 // IOReady = Online AND InSync
 // Copies reason and message from source condition when False.
-func (r *Reconciler) calculateIOReady(rvr *v1alpha3.ReplicatedVolumeReplica, onlineStatus metav1.ConditionStatus, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
+func (r *Reconciler) calculateIOReady(rvr *v1alpha1.ReplicatedVolumeReplica, onlineStatus metav1.ConditionStatus, agentReady bool, unavailabilityReason string) (metav1.ConditionStatus, string, string) {
 	// If agent/node is not available, return False with appropriate reason
 	if !agentReady && unavailabilityReason != "" {
 		return metav1.ConditionFalse, unavailabilityReason, ""
@@ -221,21 +221,21 @@ func (r *Reconciler) calculateIOReady(rvr *v1alpha3.ReplicatedVolumeReplica, onl
 
 	// If not Online, IOReady is False with Offline reason
 	if onlineStatus != metav1.ConditionTrue {
-		return metav1.ConditionFalse, v1alpha3.ReasonOffline, ""
+		return metav1.ConditionFalse, v1alpha1.ReasonOffline, ""
 	}
 
 	// Check InSync condition
-	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInSync)
+	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInSync)
 	if inSyncCond == nil || inSyncCond.Status != metav1.ConditionTrue {
-		reason, message := extractReasonAndMessage(inSyncCond, v1alpha3.ReasonOutOfSync, "InSync")
+		reason, message := extractReasonAndMessage(inSyncCond, v1alpha1.ReasonOutOfSync, "InSync")
 		return metav1.ConditionFalse, reason, message
 	}
 
-	return metav1.ConditionTrue, v1alpha3.ReasonIOReady, ""
+	return metav1.ConditionTrue, v1alpha1.ReasonIOReady, ""
 }
 
 // setCondition sets a condition on the RVR and returns true if it was changed.
-func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, conditionType string, status metav1.ConditionStatus, reason, message string) bool {
+func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, conditionType string, status metav1.ConditionStatus, reason, message string) bool {
 	return meta.SetStatusCondition(&rvr.Status.Conditions, metav1.Condition{
 		Type:               conditionType,
 		Status:             status,

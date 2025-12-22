@@ -27,14 +27,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestAgentPodToRVRMapper(t *testing.T) {
 	// Setup scheme
 	s := scheme.Scheme
-	if err := v1alpha3.AddToScheme(s); err != nil {
-		t.Fatalf("failed to add v1alpha3 to scheme: %v", err)
+	if err := v1alpha1.AddToScheme(s); err != nil {
+		t.Fatalf("failed to add v1alpha1 to scheme: %v", err)
 	}
 
 	tests := []struct {
@@ -48,7 +48,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 		{
 			name:     "non-Pod object returns nil",
 			objects:  nil,
-			inputObj: &v1alpha3.ReplicatedVolumeReplica{},
+			inputObj: &v1alpha1.ReplicatedVolumeReplica{},
 			wantNil:  true,
 		},
 		{
@@ -70,7 +70,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "some-pod",
-					Namespace: v1alpha3.ModuleNamespace,
+					Namespace: v1alpha1.ModuleNamespace,
 					Labels:    map[string]string{"app": "other"},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -83,7 +83,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha3.ModuleNamespace,
+					Namespace: v1alpha1.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 			},
@@ -92,15 +92,15 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 		{
 			name: "no RVRs on node returns empty",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-other-node"},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
 				},
 			},
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha3.ModuleNamespace,
+					Namespace: v1alpha1.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -110,23 +110,23 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 		{
 			name: "returns requests for RVRs on same node",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-other"},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
 				},
 			},
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha3.ModuleNamespace,
+					Namespace: v1alpha1.ModuleNamespace,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},

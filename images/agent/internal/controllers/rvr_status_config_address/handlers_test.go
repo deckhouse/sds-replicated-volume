@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
@@ -46,14 +46,14 @@ var _ = Describe("Handlers", func() {
 	Describe("ReplicatedVolumeReplicaEnqueueHandler", func() {
 		var (
 			handler func(context.Context, client.Object) []reconcile.Request
-			rvr     *v1alpha3.ReplicatedVolumeReplica
+			rvr     *v1alpha1.ReplicatedVolumeReplica
 		)
 
 		BeforeEach(func() {
 			handler = nil
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rvr"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					NodeName: nodeName,
 				},
 			}
@@ -96,16 +96,16 @@ var _ = Describe("Handlers", func() {
 	Describe("ReplicatedVolumeReplicaUpdatePredicate", func() {
 		var (
 			pred   predicate.Funcs
-			oldRVR *v1alpha3.ReplicatedVolumeReplica
-			newRVR *v1alpha3.ReplicatedVolumeReplica
+			oldRVR *v1alpha1.ReplicatedVolumeReplica
+			newRVR *v1alpha1.ReplicatedVolumeReplica
 			e      event.UpdateEvent
 		)
 
 		BeforeEach(func() {
 			pred = predicate.Funcs{}
-			oldRVR = &v1alpha3.ReplicatedVolumeReplica{
+			oldRVR = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rvr"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					NodeName: nodeName,
 				},
 			}
@@ -256,7 +256,7 @@ var _ = Describe("Handlers", func() {
 				}
 			}),
 			Entry("object is not Node", func() client.Object {
-				return &v1alpha3.ReplicatedVolumeReplica{
+				return &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "test-rvr"},
 				}
 			}),

@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -52,13 +52,13 @@ func (r *Reconciler) Reconcile(
 	log.Info("Reconciling")
 
 	// Get the RV
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		log.Error(err, "Getting ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv) {
+	if !v1alpha1.HasControllerFinalizer(rv) {
 		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -75,7 +75,7 @@ func (r *Reconciler) Reconcile(
 // reconcileGenerateSharedSecret generates a new shared secret and selects the first algorithm
 func (r *Reconciler) reconcileGenerateSharedSecret(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
 	// Check if sharedSecret is already set (idempotent check on original)
@@ -94,7 +94,7 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 	// Generate new shared secret using UUID v4 (36 characters, fits DRBD limit of 64)
 	// UUID provides uniqueness and randomness required for peer authentication
 	sharedSecret := uuid.New().String()
-	algorithm := v1alpha3.SharedSecretAlgorithms()[0] // Start with first algorithm (sha256)
+	algorithm := v1alpha1.SharedSecretAlgorithms()[0] // Start with first algorithm (sha256)
 
 	log.Info("Generating new shared secret", "algorithm", algorithm)
 
@@ -117,12 +117,12 @@ func (r *Reconciler) reconcileGenerateSharedSecret(
 // buildAlgorithmLogFields builds structured logging fields for algorithm-related logs
 // logFields: structured logging fields for debugging algorithm operations
 func buildAlgorithmLogFields(
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	currentAlg string,
 	nextAlgorithm string,
 	maxFailedIndex int,
-	maxFailedRVR *v1alpha3.ReplicatedVolumeReplica,
-	algorithms []v1alpha3.SharedSecretAlg,
+	maxFailedRVR *v1alpha1.ReplicatedVolumeReplica,
+	algorithms []v1alpha1.SharedSecretAlg,
 	failedNodeNames []string,
 ) []any {
 	logFields := []any{
@@ -152,18 +152,18 @@ func buildAlgorithmLogFields(
 // reconcileSwitchAlgorithm checks RVRs for UnsupportedAlgorithm errors and switches to next algorithm
 func (r *Reconciler) reconcileSwitchAlgorithm(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
 	// Get all RVRs
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
 	// Collect all RVRs for this RV with errors
-	var rvrsWithErrors []*v1alpha3.ReplicatedVolumeReplica
+	var rvrsWithErrors []*v1alpha1.ReplicatedVolumeReplica
 	var failedNodeNames []string
 	for _, rvr := range rvrList.Items {
 		if rvr.Spec.ReplicatedVolumeName != rv.Name {
@@ -180,11 +180,11 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 		return reconcile.Result{}, nil
 	}
 
-	algorithms := v1alpha3.SharedSecretAlgorithms()
+	algorithms := v1alpha1.SharedSecretAlgorithms()
 
 	// Find maximum index among all failed algorithms and RVR with max algorithm
 	maxFailedIndex := -1
-	var maxFailedRVR *v1alpha3.ReplicatedVolumeReplica
+	var maxFailedRVR *v1alpha1.ReplicatedVolumeReplica
 	var rvrsWithoutAlg []string
 	// rvrsWithUnknownAlg: RVRs with unknown algorithms (not in SharedSecretAlgorithms list)
 	// This is unlikely but possible if the algorithm list changes (e.g., algorithm removed or renamed)
@@ -202,7 +202,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 			continue
 		}
 
-		index := slices.Index(algorithms, v1alpha3.SharedSecretAlg(unsupportedAlg))
+		index := slices.Index(algorithms, v1alpha1.SharedSecretAlg(unsupportedAlg))
 		if index == -1 {
 			// Unknown algorithm - log warning but ignore for algorithm selection
 			// This is unlikely but possible if algorithm list changes (e.g., algorithm removed or renamed)
@@ -282,7 +282,7 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 }
 
 // hasUnsupportedAlgorithmError checks if RVR has SharedSecretAlgSelectionError in drbd.errors
-func hasUnsupportedAlgorithmError(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+func hasUnsupportedAlgorithmError(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
 		return false
 	}
@@ -290,14 +290,14 @@ func hasUnsupportedAlgorithmError(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
 }
 
 // ensureRVStatusInitialized ensures that RV status structure is initialized
-func ensureRVStatusInitialized(rv *v1alpha3.ReplicatedVolume) {
+func ensureRVStatusInitialized(rv *v1alpha1.ReplicatedVolume) {
 	if rv.Status == nil {
-		rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
 	}
 	if rv.Status.DRBD == nil {
-		rv.Status.DRBD = &v1alpha3.DRBDResource{}
+		rv.Status.DRBD = &v1alpha1.DRBDResource{}
 	}
 	if rv.Status.DRBD.Config == nil {
-		rv.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		rv.Status.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
 	}
 }

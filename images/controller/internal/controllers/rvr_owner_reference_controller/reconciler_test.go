@@ -32,13 +32,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrownerreferencecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference_controller"
 )
 
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
-	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 	var (
 		clientBuilder *fake.ClientBuilder
@@ -68,19 +68,19 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolumeReplica exists", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
-		var rv *v1alpha3.ReplicatedVolume
+		var rvr *v1alpha1.ReplicatedVolumeReplica
+		var rv *v1alpha1.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv1",
 					UID:  "good-uid",
 				},
 			}
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
 				},
 			}
@@ -97,13 +97,13 @@ var _ = Describe("Reconciler", func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 			Expect(err).NotTo(HaveOccurred())
 
-			got := &v1alpha3.ReplicatedVolumeReplica{}
+			got := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 
 			Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
 				HaveField("Name", Equal(rv.Name)),
 				HaveField("Kind", Equal("ReplicatedVolume")),
-				HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+				HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha1")),
 				HaveField("Controller", Not(BeNil())),
 				HaveField("BlockOwnerDeletion", Not(BeNil())),
 			)))
@@ -114,15 +114,15 @@ var _ = Describe("Reconciler", func() {
 
 			When("has only controller finalizer", func() {
 				BeforeEach(func() {
-					rvr.Finalizers = []string{v1alpha3.ControllerAppFinalizer}
+					rvr.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
 					Expect(cl.Delete(ctx, rvr)).To(Succeed())
-					got := &v1alpha3.ReplicatedVolumeReplica{}
+					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
-					Expect(got.Finalizers).To(ContainElement(v1alpha3.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
 					Expect(got.OwnerReferences).To(BeEmpty())
 				})
 
@@ -130,22 +130,22 @@ var _ = Describe("Reconciler", func() {
 					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 					Expect(err).NotTo(HaveOccurred())
 
-					got := &v1alpha3.ReplicatedVolumeReplica{}
+					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
-					Expect(got.Finalizers).To(ContainElement(v1alpha3.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
 					Expect(got.OwnerReferences).To(BeEmpty())
 				})
 			})
 
 			When("has external finalizer in addition to controller finalizer", func() {
 				BeforeEach(func() {
-					rvr.Finalizers = []string{v1alpha3.ControllerAppFinalizer, externalFinalizer}
+					rvr.Finalizers = []string{v1alpha1.ControllerAppFinalizer, externalFinalizer}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
 					Expect(cl.Delete(ctx, rvr)).To(Succeed())
-					got := &v1alpha3.ReplicatedVolumeReplica{}
+					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
 					Expect(got.Finalizers).To(ContainElement(externalFinalizer))
@@ -155,14 +155,14 @@ var _ = Describe("Reconciler", func() {
 					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 					Expect(err).NotTo(HaveOccurred())
 
-					got := &v1alpha3.ReplicatedVolumeReplica{}
+					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.DeletionTimestamp).NotTo(BeNil())
 					Expect(got.Finalizers).To(ContainElement(externalFinalizer))
 					Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
 						HaveField("Name", Equal(rv.Name)),
 						HaveField("Kind", Equal("ReplicatedVolume")),
-						HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+						HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha1")),
 					)))
 				})
 			})
@@ -177,7 +177,7 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
+				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(BeEmpty())
 			})
@@ -192,7 +192,7 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
+				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(BeEmpty())
 			})
@@ -202,7 +202,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return errors.NewInternalError(fmt.Errorf("test error"))
 						}
 						return c.Get(ctx, key, obj, opts...)
@@ -244,13 +244,13 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
+				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(HaveLen(2))
 				Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
 					HaveField("Name", Equal(rv.Name)),
 					HaveField("Kind", Equal("ReplicatedVolume")),
-					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha1")),
 					HaveField("Controller", Not(BeNil())),
 					HaveField("BlockOwnerDeletion", Not(BeNil())),
 				)))
@@ -264,7 +264,7 @@ var _ = Describe("Reconciler", func() {
 					{
 						Name:               "rv1",
 						Kind:               "ReplicatedVolume",
-						APIVersion:         "storage.deckhouse.io/v1alpha3",
+						APIVersion:         "storage.deckhouse.io/v1alpha1",
 						Controller:         ptr.To(true),
 						BlockOwnerDeletion: ptr.To(true),
 						UID:                "good-uid",
@@ -282,7 +282,7 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
+				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(HaveLen(1))
 				Expect(got.OwnerReferences).To(ContainElement(HaveField("Name", Equal("rv1"))))
@@ -295,7 +295,7 @@ var _ = Describe("Reconciler", func() {
 					{
 						Name:               "rv1",
 						Kind:               "ReplicatedVolume",
-						APIVersion:         "storage.deckhouse.io/v1alpha3",
+						APIVersion:         "storage.deckhouse.io/v1alpha1",
 						Controller:         ptr.To(true),
 						BlockOwnerDeletion: ptr.To(true),
 						UID:                "bad-uid",
@@ -307,13 +307,13 @@ var _ = Describe("Reconciler", func() {
 				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
 				Expect(err).NotTo(HaveOccurred())
 
-				got := &v1alpha3.ReplicatedVolumeReplica{}
+				got := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(HaveLen(1))
 				Expect(got.OwnerReferences).To(ContainElement(SatisfyAll(
 					HaveField("Name", Equal(rv.Name)),
 					HaveField("Kind", Equal("ReplicatedVolume")),
-					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+					HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha1")),
 					HaveField("Controller", Not(BeNil())),
 					HaveField("BlockOwnerDeletion", Not(BeNil())),
 					HaveField("UID", Equal(types.UID("good-uid"))),

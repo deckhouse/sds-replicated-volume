@@ -34,7 +34,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
@@ -183,14 +183,14 @@ func (s *Scanner) ConsumeBatches() error {
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
 
-			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+			rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 
 			// we expect this query to hit cache with index
 			err = s.cl.List(
 				s.ctx,
 				rvrList,
 				client.MatchingFieldsSelector{
-					Selector: (&v1alpha3.ReplicatedVolumeReplica{}).
+					Selector: (&v1alpha1.ReplicatedVolumeReplica{}).
 						NodeNameSelector(s.hostname),
 				},
 			)
@@ -215,7 +215,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 				rvr, ok := uiter.Find(
 					uslices.Ptrs(rvrList.Items),
-					func(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+					func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 						// TODO
 						return rvr.Spec.ReplicatedVolumeName == resourceName
 					},
@@ -244,16 +244,16 @@ func (s *Scanner) ConsumeBatches() error {
 }
 
 func (s *Scanner) updateReplicaStatusIfNeeded(
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
 	statusPatch := client.MergeFrom(rvr.DeepCopy())
 
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 	if rvr.Status.DRBD.Status == nil {
-		rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+		rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 	}
 	copyStatusFields(rvr.Status.DRBD.Status, resource)
 
@@ -269,7 +269,7 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 }
 
 func copyStatusFields(
-	target *v1alpha3.DRBDStatus,
+	target *v1alpha1.DRBDStatus,
 	source *drbdsetup.Resource,
 ) {
 	target.Name = source.Name
@@ -284,12 +284,12 @@ func copyStatusFields(
 	target.WriteOrdering = source.WriteOrdering
 
 	// Devices
-	target.Devices = make([]v1alpha3.DeviceStatus, 0, len(source.Devices))
+	target.Devices = make([]v1alpha1.DeviceStatus, 0, len(source.Devices))
 	for _, d := range source.Devices {
-		target.Devices = append(target.Devices, v1alpha3.DeviceStatus{
+		target.Devices = append(target.Devices, v1alpha1.DeviceStatus{
 			Volume:       d.Volume,
 			Minor:        d.Minor,
-			DiskState:    v1alpha3.ParseDiskState(d.DiskState),
+			DiskState:    v1alpha1.ParseDiskState(d.DiskState),
 			Client:       d.Client,
 			Open:         d.Open,
 			Quorum:       d.Quorum,
@@ -304,12 +304,12 @@ func copyStatusFields(
 	}
 
 	// Connections
-	target.Connections = make([]v1alpha3.ConnectionStatus, 0, len(source.Connections))
+	target.Connections = make([]v1alpha1.ConnectionStatus, 0, len(source.Connections))
 	for _, c := range source.Connections {
-		conn := v1alpha3.ConnectionStatus{
+		conn := v1alpha1.ConnectionStatus{
 			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
-			ConnectionState: v1alpha3.ParseConnectionState(c.ConnectionState),
+			ConnectionState: v1alpha1.ParseConnectionState(c.ConnectionState),
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
@@ -318,15 +318,15 @@ func copyStatusFields(
 		}
 
 		// Paths
-		conn.Paths = make([]v1alpha3.PathStatus, 0, len(c.Paths))
+		conn.Paths = make([]v1alpha1.PathStatus, 0, len(c.Paths))
 		for _, p := range c.Paths {
-			conn.Paths = append(conn.Paths, v1alpha3.PathStatus{
-				ThisHost: v1alpha3.HostStatus{
+			conn.Paths = append(conn.Paths, v1alpha1.PathStatus{
+				ThisHost: v1alpha1.HostStatus{
 					Address: p.ThisHost.Address,
 					Port:    p.ThisHost.Port,
 					Family:  p.ThisHost.Family,
 				},
-				RemoteHost: v1alpha3.HostStatus{
+				RemoteHost: v1alpha1.HostStatus{
 					Address: p.RemoteHost.Address,
 					Port:    p.RemoteHost.Port,
 					Family:  p.RemoteHost.Family,
@@ -336,12 +336,12 @@ func copyStatusFields(
 		}
 
 		// Peer devices
-		conn.PeerDevices = make([]v1alpha3.PeerDeviceStatus, 0, len(c.PeerDevices))
+		conn.PeerDevices = make([]v1alpha1.PeerDeviceStatus, 0, len(c.PeerDevices))
 		for _, pd := range c.PeerDevices {
-			conn.PeerDevices = append(conn.PeerDevices, v1alpha3.PeerDeviceStatus{
+			conn.PeerDevices = append(conn.PeerDevices, v1alpha1.PeerDeviceStatus{
 				Volume:                 pd.Volume,
-				ReplicationState:       v1alpha3.ParseReplicationState(pd.ReplicationState),
-				PeerDiskState:          v1alpha3.ParseDiskState(pd.PeerDiskState),
+				ReplicationState:       v1alpha1.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:          v1alpha1.ParseDiskState(pd.PeerDiskState),
 				PeerClient:             pd.PeerClient,
 				ResyncSuspended:        pd.ResyncSuspended,
 				OutOfSync:              pd.OutOfSync,

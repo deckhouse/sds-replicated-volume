@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
 )
 
@@ -57,21 +57,21 @@ var _ = Describe("Reconciler", func() {
 	// Algorithm shortcuts for readability.
 	// NOTE: Tests assume at least 2 algorithms in SharedSecretAlgorithms().
 	// If list shrinks to 1, tests will panic (intentionally) as signal to review logic.
-	algs := v1alpha3.SharedSecretAlgorithms
+	algs := v1alpha1.SharedSecretAlgorithms
 	firstAlg := func() string { return string(algs()[0]) }
 	secondAlg := func() string { return string(algs()[1]) }
 	lastAlg := func() string { return string(algs()[len(algs())-1]) }
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed(), "should add v1alpha3 to scheme")
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		// Ensure test assumptions are met
 		Expect(len(algs())).To(BeNumerically(">=", 2),
 			"tests require at least 2 algorithms to test switching logic")
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
 		cl = nil
 		rec = nil
 	})
@@ -88,13 +88,13 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolume created", func() {
-		var rv *v1alpha3.ReplicatedVolume
+		var rv *v1alpha1.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
 			}
 		})
@@ -112,23 +112,23 @@ var _ = Describe("Reconciler", func() {
 			By("Verifying shared secret was generated")
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
 			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Not(BeEmpty())), "shared secret should be set")
-			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should use first algorithm ("+firstAlg()+")")
+			Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "should use first algorithm ("+firstAlg()+")")
 		})
 
 		When("RVR exists without errors", func() {
-			var rvr *v1alpha3.ReplicatedVolumeReplica
+			var rvr *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rvr = &v1alpha3.ReplicatedVolumeReplica{
+				rvr = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test-rvr-no-error",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-rv",
 						NodeName:             "node-1",
 					},
-					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha1.DRBD{},
 					},
 				}
 			})
@@ -146,17 +146,17 @@ var _ = Describe("Reconciler", func() {
 				By("Verifying shared secret was generated despite RVR without errors")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
 				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Not(BeEmpty())), "shared secret should be set even with RVR without errors")
-				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should use first algorithm ("+firstAlg()+")")
+				Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "should use first algorithm ("+firstAlg()+")")
 			})
 		})
 
 		When("shared secret already set", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-					DRBD: &v1alpha3.DRBDResource{
-						Config: &v1alpha3.DRBDResourceConfig{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+					DRBD: &v1alpha1.DRBDResource{
+						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: v1alpha3.SharedSecretAlg(firstAlg()),
+							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),
 						},
 					},
 				}
@@ -172,7 +172,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying nothing changed after first reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain unchanged ("+firstAlg()+")")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "algorithm should remain unchanged ("+firstAlg()+")")
 
 					By("Second reconcile: should still not change anything (idempotent)")
 					Expect(rec.Reconcile(ctx, reconcile.Request{
@@ -182,29 +182,29 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying nothing changed after second reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain "+firstAlg()+", not switch")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "algorithm should remain "+firstAlg()+", not switch")
 				})
 			})
 
 			When("UnsupportedAlgorithm error occurs", func() {
-				var rvr *v1alpha3.ReplicatedVolumeReplica
+				var rvr *v1alpha1.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
-					rvr = &v1alpha3.ReplicatedVolumeReplica{
+					rvr = &v1alpha1.ReplicatedVolumeReplica{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "test-rvr",
 						},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "test-rv",
 							NodeName:             "node-1",
 						},
-						Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-							DRBD: &v1alpha3.DRBD{
-								Errors: &v1alpha3.DRBDErrors{},
+						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							DRBD: &v1alpha1.DRBD{
+								Errors: &v1alpha1.DRBDErrors{},
 							},
 						},
 					}
-					rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+					rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 						UnsupportedAlg: firstAlg(),
 					}
 				})
@@ -221,7 +221,7 @@ var _ = Describe("Reconciler", func() {
 
 					By("Verifying algorithm was switched to " + secondAlg())
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "should switch to next algorithm ("+secondAlg()+")")
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(secondAlg()))), "should switch to next algorithm ("+secondAlg()+")")
 					// Secret is not regenerated if it already exists (idempotency check in controller)
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal("test-secret")), "shared secret should remain unchanged when switching algorithm")
 					firstSecret := rv.Status.DRBD.Config.SharedSecret
@@ -234,49 +234,49 @@ var _ = Describe("Reconciler", func() {
 
 					By("Verifying nothing changed on second reconcile")
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get ReplicatedVolume")
-					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "algorithm should remain "+secondAlg())
+					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(secondAlg()))), "algorithm should remain "+secondAlg())
 					Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecret", Equal(firstSecret)), "secret should remain unchanged")
 				})
 
 				When("multiple RVRs with different algorithms", func() {
-					var rvr2, rvrOtherRV *v1alpha3.ReplicatedVolumeReplica
+					var rvr2, rvrOtherRV *v1alpha1.ReplicatedVolumeReplica
 
 					BeforeEach(func() {
 						// RVR2: lastAlg - maximum index (all exhausted)
-						rvr2 = &v1alpha3.ReplicatedVolumeReplica{
+						rvr2 = &v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-2",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2",
 							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								DRBD: &v1alpha3.DRBD{
-									Errors: &v1alpha3.DRBDErrors{},
+							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha1.DRBD{
+									Errors: &v1alpha1.DRBDErrors{},
 								},
 							},
 						}
-						rvr2.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+						rvr2.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 							UnsupportedAlg: lastAlg(),
 						}
 
 						// RVR for another RV - should be ignored
-						rvrOtherRV = &v1alpha3.ReplicatedVolumeReplica{
+						rvrOtherRV = &v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-other",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "other-rv",
 								NodeName:             "node-3",
 							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								DRBD: &v1alpha3.DRBD{
-									Errors: &v1alpha3.DRBDErrors{},
+							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha1.DRBD{
+									Errors: &v1alpha1.DRBDErrors{},
 								},
 							},
 						}
-						rvrOtherRV.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+						rvrOtherRV.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 							UnsupportedAlg: firstAlg(),
 						}
 					})
@@ -294,69 +294,69 @@ var _ = Describe("Reconciler", func() {
 
 						By("Verifying algorithm was not changed (" + lastAlg() + " is last, all exhausted)")
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "should remain "+firstAlg()+" (all exhausted)")
+						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "should remain "+firstAlg()+" (all exhausted)")
 					})
 				})
 
 				When("RVRs with empty UnsupportedAlg", func() {
-					var rvrWithAlg, rvrWithoutAlg, rvrWithUnknownAlg *v1alpha3.ReplicatedVolumeReplica
+					var rvrWithAlg, rvrWithoutAlg, rvrWithUnknownAlg *v1alpha1.ReplicatedVolumeReplica
 
 					BeforeEach(func() {
 						// RVR with UnsupportedAlg
-						rvrWithAlg = &v1alpha3.ReplicatedVolumeReplica{
+						rvrWithAlg = &v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-with-alg",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2",
 							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								DRBD: &v1alpha3.DRBD{
-									Errors: &v1alpha3.DRBDErrors{},
+							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha1.DRBD{
+									Errors: &v1alpha1.DRBDErrors{},
 								},
 							},
 						}
-						rvrWithAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+						rvrWithAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 							UnsupportedAlg: firstAlg(),
 						}
 
 						// RVR with error but empty UnsupportedAlg
-						rvrWithoutAlg = &v1alpha3.ReplicatedVolumeReplica{
+						rvrWithoutAlg = &v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-no-alg",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-3",
 							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								DRBD: &v1alpha3.DRBD{
-									Errors: &v1alpha3.DRBDErrors{},
+							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha1.DRBD{
+									Errors: &v1alpha1.DRBDErrors{},
 								},
 							},
 						}
-						rvrWithoutAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+						rvrWithoutAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 							UnsupportedAlg: "", // Empty
 						}
 
 						// RVR with unknown algorithm (not in SharedSecretAlgorithms list)
 						// This simulates a scenario where algorithm list changes or RVR reports unexpected value
-						rvrWithUnknownAlg = &v1alpha3.ReplicatedVolumeReplica{
+						rvrWithUnknownAlg = &v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "test-rvr-unknown-alg",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-4",
 							},
-							Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-								DRBD: &v1alpha3.DRBD{
-									Errors: &v1alpha3.DRBDErrors{},
+							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								DRBD: &v1alpha1.DRBD{
+									Errors: &v1alpha1.DRBDErrors{},
 								},
 							},
 						}
-						rvrWithUnknownAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+						rvrWithUnknownAlg.Status.DRBD.Errors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 							UnsupportedAlg: "md5", // Unknown algorithm (not in SharedSecretAlgorithms)
 						}
 					})
@@ -375,7 +375,7 @@ var _ = Describe("Reconciler", func() {
 
 						By("Verifying algorithm switched to " + secondAlg() + " (next after " + firstAlg() + ", ignoring empty and unknown)")
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(secondAlg())), "should switch to "+secondAlg()+" using valid algorithm, ignoring empty and unknown")
+						Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(secondAlg()))), "should switch to "+secondAlg()+" using valid algorithm, ignoring empty and unknown")
 					})
 
 					When("all RVRs have empty UnsupportedAlg", func() {
@@ -395,7 +395,7 @@ var _ = Describe("Reconciler", func() {
 
 							By("Verifying algorithm was not changed (cannot determine which algorithm is unsupported)")
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed(), "should get updated ReplicatedVolume")
-							Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(firstAlg())), "algorithm should remain "+firstAlg()+" (cannot switch without knowing which algorithm is unsupported)")
+							Expect(rv).To(HaveField("Status.DRBD.Config.SharedSecretAlg", Equal(v1alpha1.SharedSecretAlg(firstAlg()))), "algorithm should remain "+firstAlg()+" (cannot switch without knowing which algorithm is unsupported)")
 						})
 					})
 				})
@@ -407,7 +407,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return internalServerError
 						}
 						return cl.Get(ctx, key, obj, opts...)
@@ -426,17 +426,17 @@ var _ = Describe("Reconciler", func() {
 			listError := errors.New("failed to list replicas")
 			BeforeEach(func() {
 				// Set sharedSecret so controller will check RVRs (reconcileSwitchAlgorithm)
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
-					DRBD: &v1alpha3.DRBDResource{
-						Config: &v1alpha3.DRBDResourceConfig{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+					DRBD: &v1alpha1.DRBDResource{
+						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
-							SharedSecretAlg: v1alpha3.SharedSecretAlg(firstAlg()),
+							SharedSecretAlg: v1alpha1.SharedSecretAlg(firstAlg()),
 						},
 					},
 				}
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					List: func(ctx context.Context, cl client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+						if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
 							return listError
 						}
 						return cl.List(ctx, list, opts...)
@@ -456,7 +456,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							if subResourceName == "status" {
 								return patchError
 							}

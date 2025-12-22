@@ -29,13 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 )
 
 func TestReconciler_Reconcile(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := v1alpha3.AddToScheme(scheme); err != nil {
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("adding scheme: %v", err)
 	}
 
@@ -51,31 +51,31 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name: "deletes linked rvrs for active rv",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:            "rv-active",
 						ResourceVersion: "1",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-linked",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-active",
 						Type:                 "Diskful",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-other",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-other",
 						Type:                 "Diskful",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-already-deleting",
 						DeletionTimestamp: func() *metav1.Time {
@@ -84,7 +84,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 						}(),
 						Finalizers: []string{"keep-me"},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-active",
 						Type:                 "Diskful",
 					},
@@ -100,7 +100,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name: "skips deletion when rv is being removed",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rv-deleting",
 						DeletionTimestamp: func() *metav1.Time {
@@ -111,11 +111,11 @@ func TestReconciler_Reconcile(t *testing.T) {
 						ResourceVersion: "1",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-linked",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-deleting",
 						Type:                 "Diskful",
 					},
@@ -148,7 +148,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			}
 
 			for _, nn := range tt.expectDeleted {
-				rvr := &v1alpha3.ReplicatedVolumeReplica{}
+				rvr := &v1alpha1.ReplicatedVolumeReplica{}
 				err := cl.Get(t.Context(), nn, rvr)
 				if err == nil {
 					t.Fatalf("expected rvr %s to be deleted, but it still exists", nn.Name)
@@ -159,7 +159,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			}
 
 			for _, nn := range tt.expectRemaining {
-				rvr := &v1alpha3.ReplicatedVolumeReplica{}
+				rvr := &v1alpha1.ReplicatedVolumeReplica{}
 				if err := cl.Get(t.Context(), nn, rvr); err != nil {
 					t.Fatalf("expected rvr %s to remain, get err: %v", nn.Name, err)
 				}

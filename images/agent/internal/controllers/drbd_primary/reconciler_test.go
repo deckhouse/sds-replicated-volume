@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdprimary "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_primary"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
@@ -56,12 +56,12 @@ var _ = Describe("Reconciler", func() {
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{})
 
 		cfg = &testConfig{nodeName: "test-node"}
 
@@ -86,7 +86,7 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+					if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 						return internalServerError
 					}
 					return cl.Get(ctx, key, obj, opts...)
@@ -102,35 +102,35 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolumeReplica created", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
-		var rv *v1alpha3.ReplicatedVolume
+		var rvr *v1alpha1.ReplicatedVolumeReplica
+		var rv *v1alpha1.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-storage-class",
 				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
+				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha3.ConditionTypeReady,
+							Type:   v1alpha1.ConditionTypeReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
 				},
 			}
 
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rvr",
 					UID:  "test-rvr-uid",
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
 					NodeName:             cfg.NodeName(),
 					Type:                 "Diskful",
@@ -174,29 +174,29 @@ var _ = Describe("Reconciler", func() {
 		DescribeTableSubtree("when rvr is not ready because",
 			Entry("no NodeName", func() { rvr.Spec.NodeName = "" }),
 			Entry("nil Status", func() { rvr.Status = nil }),
-			Entry("nil Status.DRBD", func() { rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD", func() { rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
 			Entry("nil Status.DRBD.Actual", func() {
-				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{
-						Config: &v1alpha3.DRBDConfig{Primary: boolPtr(true)},
-						Status: &v1alpha3.DRBDStatus{},
+				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha1.DRBD{
+						Config: &v1alpha1.DRBDConfig{Primary: boolPtr(true)},
+						Status: &v1alpha1.DRBDStatus{},
 						Actual: nil,
 					},
 				}
 			}),
-			Entry("nil Status.DRBD.Config", func() { rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: nil}} }),
+			Entry("nil Status.DRBD.Config", func() { rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 			Entry("nil Status.DRBD.Config.Primary", func() {
-				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{
-						Config: &v1alpha3.DRBDConfig{Primary: nil},
-						Status: &v1alpha3.DRBDStatus{},
-						Actual: &v1alpha3.DRBDActual{},
+				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha1.DRBD{
+						Config: &v1alpha1.DRBDConfig{Primary: nil},
+						Status: &v1alpha1.DRBDStatus{},
+						Actual: &v1alpha1.DRBDActual{},
 					},
 				}
 			}),
 			Entry("nil Status.DRBD.Status", func() {
-				rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Primary: boolPtr(true)}, Status: nil}}
+				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Primary: boolPtr(true)}, Status: nil}}
 			}),
 			func(setup func()) {
 				BeforeEach(func() {
@@ -211,19 +211,19 @@ var _ = Describe("Reconciler", func() {
 		When("RVR does not belong to this node", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = "other-node"
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -239,19 +239,19 @@ var _ = Describe("Reconciler", func() {
 		When("Initial sync not completed", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -267,19 +267,19 @@ var _ = Describe("Reconciler", func() {
 		When("ReplicatedVolume is not Ready", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -296,19 +296,19 @@ var _ = Describe("Reconciler", func() {
 		When("ReplicatedVolume does not exist", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -318,7 +318,7 @@ var _ = Describe("Reconciler", func() {
 				// Simulate RV NotFound error from API
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return apierrors.NewNotFound(schema.GroupResource{
 								Group:    "storage.deckhouse.io",
 								Resource: "replicatedvolumes",
@@ -338,19 +338,19 @@ var _ = Describe("Reconciler", func() {
 			internalServerError := errors.New("internal server error")
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -358,7 +358,7 @@ var _ = Describe("Reconciler", func() {
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return internalServerError
 						}
 						return cl.Get(ctx, key, obj, opts...)
@@ -374,19 +374,19 @@ var _ = Describe("Reconciler", func() {
 		When("RVR is ready and belongs to this node", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				if rvr.Status.DRBD == nil {
-					rvr.Status.DRBD = &v1alpha3.DRBD{}
+					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
 				if rvr.Status.DRBD.Config == nil {
-					rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+					rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 				}
 				if rvr.Status.DRBD.Status == nil {
-					rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+					rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 				}
 				if rvr.Status.DRBD.Actual == nil {
-					rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
 				rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -397,19 +397,19 @@ var _ = Describe("Reconciler", func() {
 			DescribeTableSubtree("when role already matches desired state",
 				Entry("Primary desired and current role is Primary", func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -418,19 +418,19 @@ var _ = Describe("Reconciler", func() {
 				}),
 				Entry("Secondary desired and current role is Secondary", func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(false)
@@ -445,19 +445,19 @@ var _ = Describe("Reconciler", func() {
 					It("should clear errors if they exist", func(ctx SpecContext) {
 						// Set some errors first
 						if rvr.Status == nil {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+							rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 						}
 						if rvr.Status.DRBD == nil {
-							rvr.Status.DRBD = &v1alpha3.DRBD{}
+							rvr.Status.DRBD = &v1alpha1.DRBD{}
 						}
 						if rvr.Status.DRBD.Errors == nil {
-							rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+							rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 						}
-						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha3.CmdError{
+						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
-						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha3.CmdError{
+						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
@@ -477,19 +477,19 @@ var _ = Describe("Reconciler", func() {
 			When("need to promote to primary", func() {
 				BeforeEach(func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -521,15 +521,15 @@ var _ = Describe("Reconciler", func() {
 				It("should clear LastSecondaryError when promoting", func(ctx SpecContext) {
 					// Set a secondary error first
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Errors == nil {
-						rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha3.CmdError{
+					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}
@@ -546,19 +546,19 @@ var _ = Describe("Reconciler", func() {
 			When("need to demote to secondary", func() {
 				BeforeEach(func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(false)
@@ -587,15 +587,15 @@ var _ = Describe("Reconciler", func() {
 				It("should clear LastPrimaryError when demoting", func(ctx SpecContext) {
 					// Set a primary error first
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Errors == nil {
-						rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha3.CmdError{
+					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}
@@ -613,19 +613,19 @@ var _ = Describe("Reconciler", func() {
 				patchError := errors.New("failed to patch status")
 				BeforeEach(func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -633,7 +633,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 						SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-							if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+							if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 								if subResourceName == "status" {
 									return patchError
 								}
@@ -652,19 +652,19 @@ var _ = Describe("Reconciler", func() {
 				var rvrName string
 				BeforeEach(func() {
 					if rvr.Status == nil {
-						rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 					}
 					if rvr.Status.DRBD == nil {
-						rvr.Status.DRBD = &v1alpha3.DRBD{}
+						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Config == nil {
-						rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+						rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 					}
 					if rvr.Status.DRBD.Status == nil {
-						rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+						rvr.Status.DRBD.Status = &v1alpha1.DRBDStatus{}
 					}
 					if rvr.Status.DRBD.Actual == nil {
-						rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
 					rvr.Status.DRBD.Config.Primary = boolPtr(true)
@@ -673,7 +673,7 @@ var _ = Describe("Reconciler", func() {
 					rvrName = rvr.Name
 					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 						SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-							if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+							if rvrObj, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 								if subResourceName == "status" && rvrObj.Name == rvrName {
 									return apierrors.NewNotFound(schema.GroupResource{Resource: "replicatedvolumereplicas"}, rvrObj.Name)
 								}

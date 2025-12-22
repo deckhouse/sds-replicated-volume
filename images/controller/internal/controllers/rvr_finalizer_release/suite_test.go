@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestRvrGCController(t *testing.T) {
@@ -47,11 +47,11 @@ func Requeue() gomegatypes.GomegaMatcher {
 // Get calls of ReplicatedVolumeReplica objects. All other Get calls are passed
 // through to the underlying client unchanged. List calls are not intercepted.
 func InterceptRVRGet(
-	intercept func(*v1alpha3.ReplicatedVolumeReplica) error,
+	intercept func(*v1alpha1.ReplicatedVolumeReplica) error,
 ) interceptor.Funcs {
 	return interceptor.Funcs{
 		Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-			rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
 			if !ok {
 				return cl.Get(ctx, key, obj, opts...)
 			}

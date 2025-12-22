@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -46,7 +46,7 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
 	}
@@ -71,10 +71,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 func (r *Reconciler) processFinalizers(
 	ctx context.Context,
 	log *slog.Logger,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 ) (hasChanged bool, err error) {
 	rvDeleted := rv.DeletionTimestamp == nil
-	rvHasFinalizer := slices.Contains(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+	rvHasFinalizer := slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
 
 	var hasRVRs bool
 	if rvDeleted {
@@ -86,7 +86,7 @@ func (r *Reconciler) processFinalizers(
 
 	if !rvDeleted {
 		if !rvHasFinalizer {
-			rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+			rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
 			log.Info("finalizer added to rv")
 			return true, nil
 		}
@@ -95,7 +95,7 @@ func (r *Reconciler) processFinalizers(
 
 	if hasRVRs {
 		if !rvHasFinalizer {
-			rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+			rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
 			log.Info("finalizer added to rv")
 			return true, nil
 		}
@@ -105,7 +105,7 @@ func (r *Reconciler) processFinalizers(
 	if rvHasFinalizer {
 		rv.Finalizers = slices.DeleteFunc(
 			rv.Finalizers,
-			func(f string) bool { return f == v1alpha3.ControllerAppFinalizer },
+			func(f string) bool { return f == v1alpha1.ControllerAppFinalizer },
 		)
 		log.Info("finalizer deleted from rv")
 		return true, nil
@@ -115,7 +115,7 @@ func (r *Reconciler) processFinalizers(
 }
 
 func (r *Reconciler) rvHasRVRs(ctx context.Context, log *slog.Logger, rvName string) (bool, error) {
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		return false, fmt.Errorf("listing rvrs: %w", err)
 	}

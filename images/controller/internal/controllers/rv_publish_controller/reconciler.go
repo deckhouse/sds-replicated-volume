@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
@@ -58,7 +57,7 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithName("Reconcile").WithValues("request", req)
 
 	// fetch target ReplicatedVolume; if it was deleted, stop reconciliation
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rv); err != nil {
 		log.Error(err, "unable to get ReplicatedVolume")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -105,9 +104,9 @@ func (r *Reconciler) Reconcile(
 // for the given ReplicatedVolume. It returns data needed for publish logic.
 func (r *Reconciler) loadPublishContext(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
-) (*v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, error) {
+) (*v1alpha1.ReplicatedStorageClass, []v1alpha1.ReplicatedVolumeReplica, error) {
 	// read ReplicatedStorageClass to understand volumeAccess and other policies
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
@@ -116,13 +115,13 @@ func (r *Reconciler) loadPublishContext(
 	}
 
 	// list all ReplicatedVolumeReplica objects and filter those that belong to this RV
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
 		return nil, nil, err
 	}
 
-	var replicasForRV []v1alpha3.ReplicatedVolumeReplica
+	var replicasForRV []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrList.Items {
 		// select replicas of this volume that are not marked for deletion
 		if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.DeletionTimestamp.IsZero() {
@@ -138,9 +137,9 @@ func (r *Reconciler) loadPublishContext(
 // PublishSucceeded=False and stops reconciliation.
 func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	rsc *v1alpha1.ReplicatedStorageClass,
-	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
+	replicasForRVList []v1alpha1.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) (bool, error) {
 	// this validation is relevant only when volumeAccess is Local
@@ -149,7 +148,7 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	}
 
 	// map replicas by NodeName for efficient lookup
-	NodeNameToRvrMap := make(map[string]*v1alpha3.ReplicatedVolumeReplica, len(replicasForRVList))
+	NodeNameToRvrMap := make(map[string]*v1alpha1.ReplicatedVolumeReplica, len(replicasForRVList))
 	for _, rvr := range replicasForRVList {
 		NodeNameToRvrMap[rvr.Spec.NodeName] = &rvr
 	}
@@ -161,7 +160,7 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 		if !ok || rvr.Spec.Type != "Diskful" {
 			patchedRV := rv.DeepCopy()
 			if patchedRV.Status == nil {
-				patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+				patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 			}
 			meta.SetStatusCondition(&patchedRV.Status.Conditions, metav1.Condition{
 				Type:    ConditionTypePublishSucceeded,
@@ -188,7 +187,7 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 // replicas is handled separately by waitForAllowTwoPrimariesApplied.
 func (r *Reconciler) syncAllowTwoPrimaries(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) error {
 	desiredAllowTwoPrimaries := len(rv.Spec.PublishOn) == 2
@@ -203,13 +202,13 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 	patchedRV := rv.DeepCopy()
 
 	if patchedRV.Status == nil {
-		patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 	}
 	if patchedRV.Status.DRBD == nil {
-		patchedRV.Status.DRBD = &v1alpha3.DRBDResource{}
+		patchedRV.Status.DRBD = &v1alpha1.DRBDResource{}
 	}
 	if patchedRV.Status.DRBD.Config == nil {
-		patchedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		patchedRV.Status.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
 	}
 	patchedRV.Status.DRBD.Config.AllowTwoPrimaries = desiredAllowTwoPrimaries
 
@@ -228,14 +227,14 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 
 func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (bool, error) {
 	if len(rv.Spec.PublishOn) != 2 {
 		return true, nil
 	}
 
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica while waiting for allowTwoPrimaries")
 		return false, err
@@ -262,8 +261,8 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 // from actual DRBD roles on replicas.
 func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
+	replicasForRV []v1alpha1.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
 	// desired primary set: replicas on nodes from rv.spec.publishOn should be primary
@@ -315,7 +314,7 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 
 	patchedRV := rv.DeepCopy()
 	if patchedRV.Status == nil {
-		patchedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 	}
 	patchedRV.Status.PublishedOn = publishedOn
 
@@ -337,7 +336,7 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 func (r *Reconciler) patchRVRTypeToAccess(
 	ctx context.Context,
 	log logr.Logger,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 ) error {
 	originalRVR := rvr.DeepCopy()
 
@@ -354,19 +353,19 @@ func (r *Reconciler) patchRVRTypeToAccess(
 func (r *Reconciler) patchRVRPrimary(
 	ctx context.Context,
 	log logr.Logger,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	shouldBePrimary bool,
 ) error {
 	originalRVR := rvr.DeepCopy()
 
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 	if rvr.Status.DRBD.Config == nil {
-		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 	}
 
 	currentPrimaryValue := false
@@ -391,13 +390,13 @@ func (r *Reconciler) patchRVRPrimary(
 func (r *Reconciler) patchRVRStatusConditions(
 	ctx context.Context,
 	log logr.Logger,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	shouldBePrimary bool,
 ) error {
 	originalRVR := rvr.DeepCopy()
 
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	_ = rvr.UpdateStatusConditionPublished(shouldBePrimary)
@@ -413,8 +412,8 @@ func (r *Reconciler) patchRVRStatusConditions(
 
 // shouldSkipRV returns true when, according to spec, rv-publish-controller
 // should not perform any actions for the given ReplicatedVolume.
-func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
-	if !v1alpha3.HasControllerFinalizer(rv) {
+func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
+	if !v1alpha1.HasControllerFinalizer(rv) {
 		return true
 	}
 

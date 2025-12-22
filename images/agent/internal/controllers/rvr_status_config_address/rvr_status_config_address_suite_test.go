@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestRvrStatusConfigAddress(t *testing.T) {
@@ -34,17 +34,17 @@ func TestRvrStatusConfigAddress(t *testing.T) {
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
-func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeID uint, address v1alpha3.Address) {
+func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alpha1.Address) {
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 
 	if rvr.Status.DRBD.Config == nil {
-		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 	}
 
 	rvr.Status.DRBD.Config.NodeId = &nodeID

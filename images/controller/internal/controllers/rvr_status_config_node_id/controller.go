@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -32,13 +32,13 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVRStatusConfigNodeIDControllerName).
-		For(&v1alpha3.ReplicatedVolume{}).
+		For(&v1alpha1.ReplicatedVolume{}).
 		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
+			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(
 				mgr.GetScheme(),
 				mgr.GetRESTMapper(),
-				&v1alpha3.ReplicatedVolume{},
+				&v1alpha1.ReplicatedVolume{},
 			),
 		).
 		Complete(rec)

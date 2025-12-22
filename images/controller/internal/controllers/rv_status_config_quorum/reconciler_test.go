@@ -30,14 +30,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 )
 
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	_ = v1alpha1.AddToScheme(scheme)
-	_ = v1alpha3.AddToScheme(scheme)
+	_ = v1alpha1.AddToScheme(scheme)
 
 	var clientBuilder *fake.ClientBuilder
 
@@ -50,8 +49,8 @@ var _ = Describe("Reconciler", func() {
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{})
 	})
 
 	JustBeforeEach(func() {
@@ -71,36 +70,36 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("with ReplicatedVolume and ReplicatedVolumeReplicas", func() {
-		var rv *v1alpha3.ReplicatedVolume
+		var rv *v1alpha1.ReplicatedVolume
 		var rsc *v1alpha1.ReplicatedStorageClass
-		var rvrList []*v1alpha3.ReplicatedVolumeReplica
+		var rvrList []*v1alpha1.ReplicatedVolumeReplica
 		BeforeEach(func() {
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
 				Spec: v1alpha1.ReplicatedStorageClassSpec{
-					Replication: v1alpha3.ReplicationConsistencyAndAvailability,
+					Replication: v1alpha1.ReplicationConsistencyAndAvailability,
 				},
 			}
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-rv"},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
 				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
+				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions:          []metav1.Condition{},
 					DiskfulReplicaCount: "3/3",
 				},
 			}
-			rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 0, 5)
+			rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, 5)
 			for i, rvrType := range []string{"Diskful", "Diskful", "Diskful", "Access", "Access"} {
-				rvrList = append(rvrList, &v1alpha3.ReplicatedVolumeReplica{
+				rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: fmt.Sprintf("rvr-%d", i+1),
 						OwnerReferences: []metav1.OwnerReference{
-							*metav1.NewControllerRef(rv, v1alpha3.SchemeGroupVersion.WithKind("ReplicatedVolume")),
+							*metav1.NewControllerRef(rv, v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolume")),
 						},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             fmt.Sprintf("node-%d", i+1),
 						Type:                 rvrType,
@@ -139,7 +138,7 @@ var _ = Describe("Reconciler", func() {
 			}),
 			Entry("because Conditions is nil", func() {
 				if rv.Status == nil {
-					rv.Status = &v1alpha3.ReplicatedVolumeStatus{}
+					rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
 				}
 				rv.Status.Conditions = nil
 			}),
@@ -149,7 +148,7 @@ var _ = Describe("Reconciler", func() {
 			Entry("because Configured is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha3.ConditionTypeConfigured,
+						Type:   v1alpha1.ConditionTypeConfigured,
 						Status: metav1.ConditionFalse,
 					},
 				}
@@ -164,16 +163,16 @@ var _ = Describe("Reconciler", func() {
 
 		When("ReplicatedVolume is ready", func() {
 			BeforeEach(func() {
-				rv.ObjectMeta.Finalizers = []string{v1alpha3.ControllerAppFinalizer}
+				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha3.ConditionTypeConfigured,
+						Type:   v1alpha1.ConditionTypeConfigured,
 						Status: metav1.ConditionTrue,
 					},
 				}
 				// Initialize Status.DRBD.Config to ensure patch works correctly
-				rv.Status.DRBD = &v1alpha3.DRBDResource{
-					Config: &v1alpha3.DRBDResourceConfig{},
+				rv.Status.DRBD = &v1alpha1.DRBDResource{
+					Config: &v1alpha1.DRBDResourceConfig{},
 				}
 			})
 
@@ -196,7 +195,7 @@ var _ = Describe("Reconciler", func() {
 
 				// Verify all RVRs got finalizers
 				for _, name := range []string{"rvr-1", "rvr-2", "rvr-3", "rvr-4"} {
-					rvr := &v1alpha3.ReplicatedVolumeReplica{}
+					rvr := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, types.NamespacedName{Name: name}, rvr)).To(Succeed())
 				}
 			})
@@ -229,23 +228,23 @@ var _ = Describe("Reconciler", func() {
 			DescribeTableSubtree("checking quorum calculation with ConsistencyAndAvailability",
 				func(diskfulCount, all int) {
 					BeforeEach(func() {
-						rsc.Spec.Replication = v1alpha3.ReplicationConsistencyAndAvailability
+						rsc.Spec.Replication = v1alpha1.ReplicationConsistencyAndAvailability
 						rv.Status.DiskfulReplicaCount = fmt.Sprintf("%d/%d", diskfulCount, diskfulCount)
 						By(fmt.Sprintf("creating %d RVRs with %d diskfull", all, diskfulCount))
-						rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 0, all)
+						rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, all)
 						for i := 0; i < all; i++ {
 							rvrType := "Diskful"
 							if i >= diskfulCount {
 								rvrType = "Access"
 							}
-							rvrList = append(rvrList, &v1alpha3.ReplicatedVolumeReplica{
+							rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: fmt.Sprintf("rvr-%d", i+1),
 									OwnerReferences: []metav1.OwnerReference{
-										*metav1.NewControllerRef(rv, v1alpha3.SchemeGroupVersion.WithKind("ReplicatedVolume")),
+										*metav1.NewControllerRef(rv, v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolume")),
 									},
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: "test-rv",
 									NodeName:             fmt.Sprintf("node-%d", i+1),
 									Type:                 rvrType,
@@ -261,7 +260,7 @@ var _ = Describe("Reconciler", func() {
 
 						Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, rv)).To(Succeed())
 
-						expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
+						expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationConsistencyAndAvailability)
 						Expect(rv).To(SatisfyAll(
 							HaveField("Status.DRBD.Config.Quorum", Equal(expectedQuorum)),
 							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(expectedQmr)),
@@ -269,7 +268,7 @@ var _ = Describe("Reconciler", func() {
 					})
 				},
 				func(diskfulCount, all int) string {
-					expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
+					expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationConsistencyAndAvailability)
 					return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=%d", diskfulCount, all, expectedQuorum, expectedQmr)
 				},
 				Entry(nil, 2, 2),
@@ -284,23 +283,23 @@ var _ = Describe("Reconciler", func() {
 			DescribeTableSubtree("checking quorum calculation with Availability (QMR should be 0)",
 				func(diskfulCount, all int) {
 					BeforeEach(func() {
-						rsc.Spec.Replication = v1alpha3.ReplicationAvailability
+						rsc.Spec.Replication = v1alpha1.ReplicationAvailability
 						rv.Status.DiskfulReplicaCount = fmt.Sprintf("%d/%d", diskfulCount, diskfulCount)
 						By(fmt.Sprintf("creating %d RVRs with %d diskfull", all, diskfulCount))
-						rvrList = make([]*v1alpha3.ReplicatedVolumeReplica, 0, all)
+						rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, all)
 						for i := 0; i < all; i++ {
 							rvrType := "Diskful"
 							if i >= diskfulCount {
 								rvrType = "Access"
 							}
-							rvrList = append(rvrList, &v1alpha3.ReplicatedVolumeReplica{
+							rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: fmt.Sprintf("rvr-%d", i+1),
 									OwnerReferences: []metav1.OwnerReference{
-										*metav1.NewControllerRef(rv, v1alpha3.SchemeGroupVersion.WithKind("ReplicatedVolume")),
+										*metav1.NewControllerRef(rv, v1alpha1.SchemeGroupVersion.WithKind("ReplicatedVolume")),
 									},
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: "test-rv",
 									NodeName:             fmt.Sprintf("node-%d", i+1),
 									Type:                 rvrType,
@@ -316,7 +315,7 @@ var _ = Describe("Reconciler", func() {
 
 						Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, rv)).To(Succeed())
 
-						expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationAvailability)
+						expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
 						Expect(rv).To(SatisfyAll(
 							HaveField("Status.DRBD.Config.Quorum", Equal(expectedQuorum)),
 							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(byte(0))),
@@ -324,7 +323,7 @@ var _ = Describe("Reconciler", func() {
 					})
 				},
 				func(diskfulCount, all int) string {
-					expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationAvailability)
+					expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
 					return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=0", diskfulCount, all, expectedQuorum)
 				},
 				Entry(nil, 2, 2),
@@ -414,7 +413,7 @@ var _ = Describe("Reconciler", func() {
 var _ = Describe("CalculateQuorum", func() {
 	DescribeTable("should calculate correct quorum and qmr values for ConsistencyAndAvailability",
 		func(diskfulCount, all int, expectedQuorum, expectedQmr byte) {
-			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationConsistencyAndAvailability)
+			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationConsistencyAndAvailability)
 			Expect(quorum).To(Equal(expectedQuorum))
 			Expect(qmr).To(Equal(expectedQmr))
 		},
@@ -467,7 +466,7 @@ var _ = Describe("CalculateQuorum", func() {
 
 	DescribeTable("should not set QMR for Availability replication",
 		func(diskfulCount, all int, expectedQuorum byte) {
-			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationAvailability)
+			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
 			Expect(quorum).To(Equal(expectedQuorum))
 			Expect(qmr).To(Equal(byte(0)), "QMR should be 0 for Availability replication")
 		},
@@ -485,7 +484,7 @@ var _ = Describe("CalculateQuorum", func() {
 
 	DescribeTable("should not set QMR for None replication",
 		func(diskfulCount, all int, expectedQuorum byte) {
-			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha3.ReplicationNone)
+			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationNone)
 			Expect(quorum).To(Equal(expectedQuorum))
 			Expect(qmr).To(Equal(byte(0)), "QMR should be 0 for None replication")
 		},

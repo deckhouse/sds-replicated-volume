@@ -23,7 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/types"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestRvrTieBreakerCount(t *testing.T) {
@@ -32,7 +32,7 @@ func TestRvrTieBreakerCount(t *testing.T) {
 }
 
 func HaveTieBreakerCount(matcher types.GomegaMatcher) types.GomegaMatcher {
-	return WithTransform(func(list []v1alpha3.ReplicatedVolumeReplica) int {
+	return WithTransform(func(list []v1alpha1.ReplicatedVolumeReplica) int {
 		tbCount := 0
 		for _, rvr := range list {
 			if rvr.Spec.Type == "TieBreaker" {

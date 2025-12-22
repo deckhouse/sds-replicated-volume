@@ -23,7 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -35,6 +35,6 @@ func BuildController(mgr manager.Manager) error {
 		log,
 		builder.ControllerManagedBy(mgr).
 			Named(ControllerName).
-			For(&v1alpha3.ReplicatedVolume{}).
+			For(&v1alpha1.ReplicatedVolume{}).
 			Complete(rec))
 }

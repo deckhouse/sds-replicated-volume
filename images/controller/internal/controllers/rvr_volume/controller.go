@@ -22,7 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -39,9 +39,9 @@ func BuildController(mgr manager.Manager) error {
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
 		For(
-			&v1alpha3.ReplicatedVolumeReplica{}).
+			&v1alpha1.ReplicatedVolumeReplica{}).
 		Watches(
 			&snc.LVMLogicalVolume{},
-			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha3.ReplicatedVolumeReplica{})).
+			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolumeReplica{})).
 		Complete(r)
 }

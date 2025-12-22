@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 const requeueAfterSec = 10
@@ -56,7 +55,7 @@ func (r *Reconciler) Reconcile(
 ) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("request", req)
 
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		log.Error(err, "Can't get ReplicatedVolumeReplica")
 		return reconcile.Result{}, client.IgnoreNotFound(err)
@@ -117,8 +116,8 @@ func (r *Reconciler) loadGCContext(
 	ctx context.Context,
 	rvName string,
 	log logr.Logger,
-) (*v1alpha3.ReplicatedVolume, *v1alpha1.ReplicatedStorageClass, []v1alpha3.ReplicatedVolumeReplica, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+) (*v1alpha1.ReplicatedVolume, *v1alpha1.ReplicatedStorageClass, []v1alpha1.ReplicatedVolumeReplica, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv); err != nil {
 		log.Error(err, "Can't get ReplicatedVolume")
 		return nil, nil, nil, err
@@ -130,13 +129,13 @@ func (r *Reconciler) loadGCContext(
 		return nil, nil, nil, err
 	}
 
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Can't list ReplicatedVolumeReplica")
 		return nil, nil, nil, err
 	}
 
-	var replicasForRV []v1alpha3.ReplicatedVolumeReplica
+	var replicasForRV []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrList.Items {
 		if rvr.Spec.ReplicatedVolumeName == rv.Name {
 			replicasForRV = append(replicasForRV, rvr)
@@ -147,8 +146,8 @@ func (r *Reconciler) loadGCContext(
 }
 
 func isThisReplicaCountEnoughForQuorum(
-	rv *v1alpha3.ReplicatedVolume,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	rv *v1alpha1.ReplicatedVolume,
+	replicasForRV []v1alpha1.ReplicatedVolumeReplica,
 	deletingRVRName string,
 ) bool {
 	quorum := 0
@@ -167,7 +166,7 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Status == nil {
 			continue
 		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeOnline) {
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeOnline) {
 			onlineReplicaCount++
 		}
 	}
@@ -176,7 +175,7 @@ func isThisReplicaCountEnoughForQuorum(
 }
 
 func isDeletingReplicaPublished(
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	deletingRVRNodeName string,
 ) bool {
 	if rv.Status == nil {
@@ -191,7 +190,7 @@ func isDeletingReplicaPublished(
 
 func hasEnoughDiskfulReplicasForReplication(
 	rsc *v1alpha1.ReplicatedStorageClass,
-	replicasForRV []v1alpha3.ReplicatedVolumeReplica,
+	replicasForRV []v1alpha1.ReplicatedVolumeReplica,
 	deletingRVRName string,
 ) bool {
 	var requiredDiskful int
@@ -215,14 +214,14 @@ func hasEnoughDiskfulReplicasForReplication(
 		if rvr.Status == nil {
 			continue
 		}
-		if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful {
+		if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			continue
 		}
-		if rvr.Status.ActualType != v1alpha3.ReplicaTypeDiskful {
+		if rvr.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha3.ConditionTypeIOReady) {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeIOReady) {
 			continue
 		}
 
@@ -234,10 +233,10 @@ func hasEnoughDiskfulReplicasForReplication(
 
 func (r *Reconciler) removeControllerFinalizer(
 	ctx context.Context,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
-	current := &v1alpha3.ReplicatedVolumeReplica{}
+	current := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, client.ObjectKeyFromObject(rvr), current); err != nil {
 		if apierrors.IsNotFound(err) {
 			return nil
@@ -251,7 +250,7 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	oldFinalizersLen := len(current.Finalizers)
-	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha3.ControllerAppFinalizer })
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha1.ControllerAppFinalizer })
 
 	if oldFinalizersLen == len(current.Finalizers) {
 		return nil
