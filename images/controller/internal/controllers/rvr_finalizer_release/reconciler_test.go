@@ -228,7 +228,7 @@ var _ = Describe("Reconcile", func() {
 					rvr3.Status.ActualType = "Access"
 				})
 
-				It("does not remove controller finalizer", func(ctx SpecContext) {
+				It("does not remove controller finalizer for Diskful replica", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, RequestFor(rvr))
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
@@ -236,6 +236,105 @@ var _ = Describe("Reconcile", func() {
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+				})
+			})
+
+			When("deleting a TieBreaker replica", func() {
+				var tiebreakerRvr *v1alpha1.ReplicatedVolumeReplica
+
+				BeforeEach(func() {
+					tiebreakerRvr = &v1alpha1.ReplicatedVolumeReplica{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rvr-tiebreaker",
+							Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
+						},
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             "node-tiebreaker",
+							Type:                 v1alpha1.ReplicaTypeTieBreaker,
+						},
+						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Conditions: []metav1.Condition{
+								{
+									Type:   v1alpha1.ConditionTypeOnline,
+									Status: metav1.ConditionFalse,
+								},
+							},
+						},
+					}
+					// Make replication condition unsatisfied - both extra replicas are Access, not Diskful
+					rvr2.Status.ActualType = "Access"
+					rvr3.Status.ActualType = "Access"
+				})
+
+				JustBeforeEach(func(ctx SpecContext) {
+					Expect(cl.Create(ctx, tiebreakerRvr)).To(Succeed())
+					Expect(cl.Update(ctx, rvr2)).To(Succeed())
+					Expect(cl.Update(ctx, rvr3)).To(Succeed())
+					// Mark TieBreaker for deletion
+					Expect(cl.Delete(ctx, tiebreakerRvr)).To(Succeed())
+				})
+
+				It("removes controller finalizer even when replication condition is not satisfied", func(ctx SpecContext) {
+					result, err := rec.Reconcile(ctx, RequestFor(tiebreakerRvr))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(reconcile.Result{}))
+
+					got := &v1alpha1.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(tiebreakerRvr), got)).To(Succeed())
+					Expect(got.Finalizers).To(HaveLen(1))
+					Expect(got.Finalizers).To(ContainElement("other-finalizer"))
+					Expect(got.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+				})
+			})
+
+			When("deleting an Access replica", func() {
+				var accessRvr *v1alpha1.ReplicatedVolumeReplica
+
+				BeforeEach(func() {
+					accessRvr = &v1alpha1.ReplicatedVolumeReplica{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rvr-access",
+							Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
+						},
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+							ReplicatedVolumeName: rv.Name,
+							NodeName:             "node-access",
+							Type:                 v1alpha1.ReplicaTypeAccess,
+						},
+						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							ActualType: v1alpha1.ReplicaTypeAccess,
+							Conditions: []metav1.Condition{
+								{
+									Type:   v1alpha1.ConditionTypeOnline,
+									Status: metav1.ConditionTrue,
+								},
+							},
+						},
+					}
+					// Make replication condition unsatisfied - both extra replicas are Access, not Diskful
+					rvr2.Status.ActualType = "Access"
+					rvr3.Status.ActualType = "Access"
+				})
+
+				JustBeforeEach(func(ctx SpecContext) {
+					Expect(cl.Create(ctx, accessRvr)).To(Succeed())
+					Expect(cl.Update(ctx, rvr2)).To(Succeed())
+					Expect(cl.Update(ctx, rvr3)).To(Succeed())
+					// Mark Access replica for deletion
+					Expect(cl.Delete(ctx, accessRvr)).To(Succeed())
+				})
+
+				It("removes controller finalizer even when replication condition is not satisfied", func(ctx SpecContext) {
+					result, err := rec.Reconcile(ctx, RequestFor(accessRvr))
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(reconcile.Result{}))
+
+					got := &v1alpha1.ReplicatedVolumeReplica{}
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(accessRvr), got)).To(Succeed())
+					Expect(got.Finalizers).To(HaveLen(1))
+					Expect(got.Finalizers).To(ContainElement("other-finalizer"))
+					Expect(got.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
 				})
 			})
 
