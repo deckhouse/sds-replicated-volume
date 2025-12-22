@@ -136,7 +136,7 @@ var _ = Describe("Reconcile", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             node.Name,
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					})
 				}
@@ -180,14 +180,14 @@ var _ = Describe("Reconcile", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}, {
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df2"},
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "node-2",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}}
 
@@ -226,7 +226,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-1",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -234,7 +234,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-2",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 					}
@@ -280,7 +280,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-a",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -288,7 +288,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-b",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -296,7 +296,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -304,7 +304,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 						{
@@ -312,7 +312,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 					}
@@ -344,7 +344,7 @@ var _ = Describe("Reconcile", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 				})
@@ -423,7 +423,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             nodeList[0].Name,
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -433,7 +433,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
 								NodeName:             "node-2",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -442,7 +442,7 @@ var _ = Describe("Reconcile", func() {
 							},
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
-								Type:                 "TieBreaker",
+								Type:                 v1alpha1.ReplicaTypeTieBreaker,
 							},
 						},
 						{
@@ -451,7 +451,7 @@ var _ = Describe("Reconcile", func() {
 							},
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
-								Type:                 "TieBreaker",
+								Type:                 v1alpha1.ReplicaTypeTieBreaker,
 							},
 						},
 					}
@@ -479,7 +479,7 @@ var _ = Describe("Reconcile", func() {
 					BeforeEach(func() {
 						builder.WithInterceptorFuncs(interceptor.Funcs{
 							Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-								if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
+								if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 									return errExpectedTestError
 								}
 								return c.Delete(ctx, obj, opts...)
@@ -552,7 +552,7 @@ var _ = Describe("Reconcile", func() {
 				Entry("Create RVR fails", func(b *fake.ClientBuilder) {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-							if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
+							if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 								return errExpectedTestError
 							}
 							return c.Create(ctx, obj, opts...)
@@ -657,7 +657,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "Diskful",
+									Type:                 v1alpha1.ReplicaTypeDiskful,
 								},
 							}
 							objects = append(objects, rvr)
@@ -672,7 +672,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "Access",
+									Type:                 v1alpha1.ReplicaTypeAccess,
 								},
 							}
 							objects = append(objects, rvr)
@@ -687,7 +687,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "TieBreaker",
+									Type:                 v1alpha1.ReplicaTypeTieBreaker,
 								},
 							}
 							objects = append(objects, rvr)

@@ -157,7 +157,7 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	// promotion is impossible: update PublishSucceeded on RV and stop reconcile.
 	for _, publishNodeName := range rv.Spec.PublishOn {
 		rvr, ok := NodeNameToRvrMap[publishNodeName]
-		if !ok || rvr.Spec.Type != "Diskful" {
+		if !ok || rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			patchedRV := rv.DeepCopy()
 			if patchedRV.Status == nil {
 				patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
@@ -284,7 +284,7 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 
 		_, shouldBePrimary := publishSet[rvr.Spec.NodeName]
 
-		if shouldBePrimary && rvr.Spec.Type == "TieBreaker" {
+		if shouldBePrimary && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 			if err := r.patchRVRTypeToAccess(ctx, log, rvr); err != nil {
 				rvrPatchErr = errors.Join(rvrPatchErr, err)
 				continue
@@ -340,7 +340,7 @@ func (r *Reconciler) patchRVRTypeToAccess(
 ) error {
 	originalRVR := rvr.DeepCopy()
 
-	rvr.Spec.Type = "Access"
+	rvr.Spec.Type = v1alpha1.ReplicaTypeAccess
 	if err := r.cl.Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		if !apierrors.IsNotFound(err) {
 			log.Error(err, "unable to patch ReplicatedVolumeReplica type to Access")

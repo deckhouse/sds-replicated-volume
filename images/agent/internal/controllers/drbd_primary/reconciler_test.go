@@ -133,7 +133,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
 					NodeName:             cfg.NodeName(),
-					Type:                 "Diskful",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 			Expect(controllerutil.SetControllerReference(rv, rvr, scheme)).To(Succeed())

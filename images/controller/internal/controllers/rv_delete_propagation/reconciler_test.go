@@ -63,7 +63,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-active",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 				&v1alpha1.ReplicatedVolumeReplica{
@@ -72,7 +72,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-other",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 				&v1alpha1.ReplicatedVolumeReplica{
@@ -86,7 +86,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-active",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 			},
@@ -117,7 +117,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-deleting",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 			},

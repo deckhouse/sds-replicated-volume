@@ -91,7 +91,13 @@ var _ = Describe("Reconciler", func() {
 				},
 			}
 			rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, 5)
-			for i, rvrType := range []string{"Diskful", "Diskful", "Diskful", "Access", "Access"} {
+			for i, rvrType := range []v1alpha1.ReplicaType{
+				v1alpha1.ReplicaTypeDiskful,
+				v1alpha1.ReplicaTypeDiskful,
+				v1alpha1.ReplicaTypeDiskful,
+				v1alpha1.ReplicaTypeAccess,
+				v1alpha1.ReplicaTypeAccess,
+			} {
 				rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: fmt.Sprintf("rvr-%d", i+1),
@@ -233,9 +239,9 @@ var _ = Describe("Reconciler", func() {
 						By(fmt.Sprintf("creating %d RVRs with %d diskfull", all, diskfulCount))
 						rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, all)
 						for i := 0; i < all; i++ {
-							rvrType := "Diskful"
+							rvrType := v1alpha1.ReplicaTypeDiskful
 							if i >= diskfulCount {
-								rvrType = "Access"
+								rvrType = v1alpha1.ReplicaTypeAccess
 							}
 							rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
@@ -288,9 +294,9 @@ var _ = Describe("Reconciler", func() {
 						By(fmt.Sprintf("creating %d RVRs with %d diskfull", all, diskfulCount))
 						rvrList = make([]*v1alpha1.ReplicatedVolumeReplica, 0, all)
 						for i := 0; i < all; i++ {
-							rvrType := "Diskful"
+							rvrType := v1alpha1.ReplicaTypeDiskful
 							if i >= diskfulCount {
-								rvrType = "Access"
+								rvrType = v1alpha1.ReplicaTypeAccess
 							}
 							rvrList = append(rvrList, &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{

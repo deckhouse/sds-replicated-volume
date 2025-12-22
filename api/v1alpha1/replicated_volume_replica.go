@@ -81,11 +81,11 @@ type ReplicatedVolumeReplicaSpec struct {
 
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	Type string `json:"type"`
+	Type ReplicaType `json:"type"`
 }
 
 func (s *ReplicatedVolumeReplicaSpec) IsDiskless() bool {
-	return s.Type != "Diskful"
+	return s.Type != ReplicaTypeDiskful
 }
 
 // +kubebuilder:object:generate=true
@@ -123,7 +123,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 
 	// +kubebuilder:validation:Enum=Diskful;Access;TieBreaker
-	ActualType string `json:"actualType,omitempty"`
+	ActualType ReplicaType `json:"actualType,omitempty"`
 
 	// +optional
 	// +kubebuilder:validation:MaxLength=256

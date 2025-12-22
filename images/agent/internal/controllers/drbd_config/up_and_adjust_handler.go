@@ -39,8 +39,8 @@ type UpAndAdjustHandler struct {
 	log      *slog.Logger
 	rvr      *v1alpha1.ReplicatedVolumeReplica
 	rv       *v1alpha1.ReplicatedVolume
-	lvg      *snc.LVMVolumeGroup   // will be nil for rvr.spec.type != "Diskful"
-	llv      *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful"
+	lvg      *snc.LVMVolumeGroup   // will be nil for non-diskful replicas
+	llv      *snc.LVMLogicalVolume // will be nil for non-diskful replicas
 	nodeName string
 }
 
@@ -159,7 +159,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	//
-	if h.rvr.Spec.Type == "Diskful" {
+	if h.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 		exists, err := drbdadm.ExecuteDumpMDMetadataExists(ctx, rvName)
 		if err != nil {
 			return fmt.Errorf("dumping metadata: %w", configurationCommandError{err})

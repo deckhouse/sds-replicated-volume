@@ -55,7 +55,7 @@ type ClusterSetup struct {
 
 // ExistingReplica represents an already scheduled replica
 type ExistingReplica struct {
-	Type     string // Diskful, Access, TieBreaker
+	Type     v1alpha1.ReplicaType // Diskful, Access, TieBreaker
 	NodeName string
 }
 
@@ -1130,14 +1130,14 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-2"},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 			}
@@ -1173,7 +1173,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 						NodeName:             "node-b",
 					},
 				},
@@ -1181,7 +1181,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-unscheduled"},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 			}

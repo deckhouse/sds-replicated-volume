@@ -60,18 +60,6 @@ const (
 // =============================================================================
 
 const (
-	// [ConditionTypeQuorumConfigured] indicates whether quorum configuration for RV is completed
-	ConditionTypeQuorumConfigured = "QuorumConfigured"
-
-	// [ConditionTypeDiskfulReplicaCountReached] indicates whether desired number of diskful replicas is reached
-	ConditionTypeDiskfulReplicaCountReached = "DiskfulReplicaCountReached"
-
-	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
-	ConditionTypeAllReplicasReady = "AllReplicasReady"
-
-	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
-	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-
 	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
 )
@@ -112,23 +100,8 @@ const (
 	// [ConditionTypeReady] indicates whether the replica is ready and operational
 	ConditionTypeReady = "Ready"
 
-	// [ConditionTypeInitialSync] indicates whether the initial synchronization has been completed
-	ConditionTypeInitialSync = "InitialSync"
-
-	// [ConditionTypeIsPrimary] indicates whether the replica is primary
-	ConditionTypeIsPrimary = "Primary"
-
-	// [ConditionTypeDevicesReady] indicates whether all the devices in UpToDate state
-	ConditionTypeDevicesReady = "DevicesReady"
-
 	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigured = "Configured"
-
-	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
-	ConditionTypeQuorum = "Quorum"
-
-	// [ConditionTypeDiskIOSuspended] indicates whether replica IO is suspended
-	ConditionTypeDiskIOSuspended = "DiskIOSuspended"
 
 	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
 	ConditionTypeAddressConfigured = "AddressConfigured"
@@ -139,40 +112,6 @@ const (
 	// [ConditionTypePublished] indicates whether the replica has been published
 	ConditionTypePublished = "Published"
 )
-
-var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	// Conditions managed by rvr_status_conditions controller
-	ConditionTypeOnline:  {false},
-	ConditionTypeIOReady: {false},
-
-	// Conditions read by rvr_status_conditions controller
-	ConditionTypeScheduled:       {false},
-	ConditionTypeDataInitialized: {false},
-	ConditionTypeInQuorum:        {false},
-	ConditionTypeInSync:          {false},
-
-	// Other RVR conditions
-	ConditionTypeReady:                {false},
-	ConditionTypeInitialSync:          {false},
-	ConditionTypeIsPrimary:            {false},
-	ConditionTypeDevicesReady:         {false},
-	ConditionTypeConfigured:           {false},
-	ConditionTypeQuorum:               {false},
-	ConditionTypeDiskIOSuspended:      {false},
-	ConditionTypeAddressConfigured:    {false},
-	ConditionTypeBackingVolumeCreated: {false},
-	ConditionTypePublished:            {false},
-}
-
-var ReplicatedVolumeConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeRVScheduled:            {false},
-	ConditionTypeRVBackingVolumeCreated: {false},
-	ConditionTypeRVConfigured:           {false},
-	ConditionTypeRVInitialized:          {false},
-	ConditionTypeRVQuorum:               {false},
-	ConditionTypeRVDataQuorum:           {false},
-	ConditionTypeRVIOReady:              {false},
-}
 
 // Replication values for [ReplicatedStorageClass] spec
 const (
@@ -262,86 +201,24 @@ const (
 // Condition reasons reserved for other controllers (not used yet)
 // =============================================================================
 
-// Condition reasons for [ConditionTypeReady] condition
-const (
-	ReasonWaitingForInitialSync = "WaitingForInitialSync"
-	ReasonDevicesAreNotReady    = "DevicesAreNotReady"
-	ReasonAdjustmentFailed      = "AdjustmentFailed"
-	ReasonNoQuorum              = "NoQuorum"
-	ReasonDiskIOSuspended       = "DiskIOSuspended"
-	ReasonReady                 = "Ready"
-)
-
 // Condition reasons for [ConditionTypeConfigured] condition
 const (
-	ReasonConfigurationFailed                           = "ConfigurationFailed"
-	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
-	ReasonMetadataCreationFailed                        = "MetadataCreationFailed"
-	ReasonStatusCheckFailed                             = "StatusCheckFailed"
-	ReasonResourceUpFailed                              = "ResourceUpFailed"
-	ReasonConfigurationAdjustFailed                     = "ConfigurationAdjustFailed"
-	ReasonConfigurationAdjustmentPausedUntilInitialSync = "ConfigurationAdjustmentPausedUntilInitialSync"
-	ReasonPromotionDemotionFailed                       = "PromotionDemotionFailed"
-	ReasonConfigurationAdjustmentSucceeded              = "ConfigurationAdjustmentSucceeded"
-)
-
-// Condition reasons for [ConditionTypeInitialSync] condition
-const (
-	ReasonInitialSyncRequiredButNotReady = "InitialSyncRequiredButNotReady"
-	ReasonSafeForInitialSync             = "SafeForInitialSync"
-	ReasonInitialDeviceReadinessReached  = "InitialDeviceReadinessReached"
-)
-
-// Condition reasons for [ConditionTypeDevicesReady] condition
-const (
-	ReasonDeviceIsNotReady = "DeviceIsNotReady"
-	ReasonDeviceIsReady    = "DeviceIsReady"
-)
-
-// Condition reasons for [ConditionTypeIsPrimary] condition
-const (
-	ReasonResourceRoleIsPrimary    = "ResourceRoleIsPrimary"
-	ReasonResourceRoleIsNotPrimary = "ResourceRoleIsNotPrimary"
-)
-
-// Condition reasons for [ConditionTypeQuorum] condition
-const (
-	ReasonNoQuorumStatus = "NoQuorumStatus"
-	ReasonQuorumStatus   = "QuorumStatus"
-)
-
-// Condition reasons for [ConditionTypeDiskIOSuspended] condition
-const (
-	ReasonDiskIONotSuspendedStatus     = "DiskIONotSuspendedStatus"
-	ReasonDiskIOSuspendedUnknownReason = "DiskIOSuspendedUnknownReason"
-	ReasonDiskIOSuspendedByUser        = "DiskIOSuspendedByUser"
-	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
-	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
-	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
+	ReasonConfigurationFailed              = "ConfigurationFailed"
+	ReasonConfigurationAdjustmentSucceeded = "ConfigurationAdjustmentSucceeded"
 )
 
 // Condition reasons for [ConditionTypeScheduled] condition
 const (
-	ReasonSchedulingReplicaScheduled         = "ReplicaScheduled"
-	ReasonSchedulingWaitingForAnotherReplica = "WaitingForAnotherReplica"
-	ReasonSchedulingPending                  = "SchedulingPending"
-	ReasonSchedulingFailed                   = "SchedulingFailed"
-	ReasonSchedulingTopologyConflict         = "TopologyConstraintsFailed"
-	ReasonSchedulingNoCandidateNodes         = "NoAvailableNodes"
-	ReasonSchedulingInsufficientStorage      = "InsufficientStorage"
-)
-
-// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
-const (
-	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
-	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
+	ReasonSchedulingReplicaScheduled = "ReplicaScheduled"
+	ReasonSchedulingPending          = "SchedulingPending"
+	ReasonSchedulingFailed           = "SchedulingFailed"
+	ReasonSchedulingTopologyConflict = "TopologyConstraintsFailed"
+	ReasonSchedulingNoCandidateNodes = "NoAvailableNodes"
 )
 
 // Condition reasons for [ConditionTypeAddressConfigured] condition
 const (
 	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
-	ReasonNodeIPNotFound                = "NodeIPNotFound"
-	ReasonPortSettingsNotFound          = "PortSettingsNotFound"
 	ReasonNoFreePortAvailable           = "NoFreePortAvailable"
 )
 
@@ -399,11 +276,6 @@ const (
 	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
 	ReasonPromoteFailed                  = "PromoteFailed"
 	ReasonDemoteFailed                   = "DemoteFailed"
-)
-
-// Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)
-const (
-	ReasonSynchronizing = "Synchronizing"
 )
 
 // Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)

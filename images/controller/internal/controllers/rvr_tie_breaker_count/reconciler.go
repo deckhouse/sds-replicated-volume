@@ -203,13 +203,13 @@ func aggregateReplicas(
 
 	for _, rvr := range replicasForRVList {
 		switch rvr.Spec.Type {
-		case "Diskful", "Access":
+		case v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeAccess:
 			if rvr.Spec.NodeName != "" {
 				if fd, ok := nodeNameToFdMap[rvr.Spec.NodeName]; ok {
 					FDToReplicaCountMap[fd]++
 				}
 			}
-		case "TieBreaker":
+		case v1alpha1.ReplicaTypeTieBreaker:
 			existingTieBreakersList = append(existingTieBreakersList, &rvr)
 		}
 	}
@@ -250,7 +250,7 @@ func (r *Reconciler) syncTieBreakers(
 				},
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
-					Type:                 "TieBreaker",
+					Type:                 v1alpha1.ReplicaTypeTieBreaker,
 				},
 			}
 

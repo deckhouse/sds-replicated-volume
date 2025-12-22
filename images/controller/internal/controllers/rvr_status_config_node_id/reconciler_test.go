@@ -115,7 +115,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "volume-1",
 					NodeName:             "node-1",
-					Type:                 "Diskful",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 			Expect(controllerutil.SetControllerReference(rv, rvr, scheme)).To(Succeed())
@@ -136,7 +136,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "volume-2",
 					NodeName:             "node-3",
-					Type:                 "Diskful",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 			Expect(controllerutil.SetControllerReference(otherRV, otherRVR, scheme)).To(Succeed())
@@ -211,7 +211,7 @@ var _ = Describe("Reconciler", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "volume-1",
 								NodeName:             fmt.Sprintf("node-%d", i+1),
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
@@ -230,7 +230,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-6",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 					Expect(controllerutil.SetControllerReference(rv, rvrList[rvrWithoutNodeIDIndex], scheme)).To(Succeed())
@@ -262,7 +262,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -278,7 +278,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-2",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -322,7 +322,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -338,7 +338,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-2",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -354,7 +354,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-3",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -370,7 +370,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-4",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 					Expect(controllerutil.SetControllerReference(rv, rvrWithoutNodeID1, scheme)).To(Succeed())
@@ -381,7 +381,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-5",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 					Expect(controllerutil.SetControllerReference(rv, rvrWithoutNodeID2, scheme)).To(Succeed())
@@ -424,7 +424,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -457,7 +457,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -473,7 +473,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-2",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 					Expect(controllerutil.SetControllerReference(rv, rvrWithoutNodeID, scheme)).To(Succeed())
@@ -521,7 +521,7 @@ var _ = Describe("Reconciler", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "volume-1",
 								NodeName:             fmt.Sprintf("node-%d", i+1),
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
@@ -539,7 +539,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             "node-invalid",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -597,7 +597,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             fmt.Sprintf("node-%d", i+1),
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
@@ -616,7 +616,7 @@ var _ = Describe("Reconciler", func() {
 						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: "volume-1",
 							NodeName:             fmt.Sprintf("node-needing-%d", i+1),
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 					Expect(controllerutil.SetControllerReference(rv, rvrNeedingNodeIDList[i], scheme)).To(Succeed())
