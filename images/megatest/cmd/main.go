@@ -35,9 +35,24 @@ func main() {
 	var opt Opt
 	opt.Parse()
 
+	// Convert log level string to slog.Level
+	var logLevel slog.Level
+	switch opt.LogLevel {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
+	}
+
 	// Setup logger with stdout output
 	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		Level:     slog.LevelDebug,
+		Level:     logLevel,
 		AddSource: false,
 	})
 	log := slog.New(logHandler)
