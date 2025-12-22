@@ -58,7 +58,7 @@ func (r *Reconciler) Reconcile(
 	log = log.With("rvrName", rvr.Name)
 
 	var llv *snc.LVMLogicalVolume
-	if rvr.Spec.Type == "Diskful" && rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
 		if llv, err = r.selectLLV(ctx, log, rvr.Status.LVMLogicalVolumeName); err != nil {
 			return reconcile.Result{}, err
 		}
@@ -207,7 +207,7 @@ func rvrFullyInitialized(log *slog.Logger, rv *v1alpha1.ReplicatedVolume, rvr *v
 		logNotInitializedField("status.drbd.config.peersInitialized")
 		return false
 	}
-	if rvr.Spec.Type == "Diskful" && rvr.Status.LVMLogicalVolumeName == "" {
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.LVMLogicalVolumeName == "" {
 		logNotInitializedField("status.lvmLogicalVolumeName")
 		return false
 	}

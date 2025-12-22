@@ -36,7 +36,7 @@ type DownHandler struct {
 	cl  client.Client
 	log *slog.Logger
 	rvr *v1alpha1.ReplicatedVolumeReplica
-	llv *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful" or for non-initialized RVR
+	llv *snc.LVMLogicalVolume // will be nil for non-diskful or non-initialized replicas
 }
 
 func (h *DownHandler) Handle(ctx context.Context) error {

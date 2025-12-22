@@ -78,7 +78,7 @@ type conditionTestCase struct {
 type testRVR struct {
 	name     string
 	nodeName string
-	rvrType  string // "Diskful", "Access", "TieBreaker"
+	rvrType  v1alpha1.ReplicaType
 
 	// Conditions on the RVR (using spec-compliant names)
 	scheduled            *testCondition

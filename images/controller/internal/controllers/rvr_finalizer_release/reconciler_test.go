@@ -78,7 +78,7 @@ var _ = Describe("Reconcile", func() {
 			},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 				ReplicatedVolumeName: "rv-1",
-				Type:                 "Diskful",
+				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
 		}
 
@@ -134,10 +134,10 @@ var _ = Describe("Reconcile", func() {
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
 					NodeName:             "node-1",
-					Type:                 "Diskful",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
-					ActualType: "Diskful",
+					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeOnline,
@@ -177,7 +177,7 @@ var _ = Describe("Reconcile", func() {
 
 			BeforeEach(func() {
 				baseStatus := &v1alpha1.ReplicatedVolumeReplicaStatus{
-					ActualType: "Diskful",
+					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeOnline,
@@ -198,7 +198,7 @@ var _ = Describe("Reconcile", func() {
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-2",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: baseStatus.DeepCopy(),
 				}
@@ -211,7 +211,7 @@ var _ = Describe("Reconcile", func() {
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-3",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 					Status: baseStatus.DeepCopy(),
 				}
@@ -224,8 +224,8 @@ var _ = Describe("Reconcile", func() {
 
 			When("replication condition is not satisfied", func() {
 				BeforeEach(func(SpecContext) {
-					rvr2.Status.ActualType = "Access"
-					rvr3.Status.ActualType = "Access"
+					rvr2.Status.ActualType = v1alpha1.ReplicaTypeAccess
+					rvr3.Status.ActualType = v1alpha1.ReplicaTypeAccess
 				})
 
 				It("does not remove controller finalizer", func(ctx SpecContext) {
@@ -241,8 +241,8 @@ var _ = Describe("Reconcile", func() {
 
 			When("deleting replica is published", func() {
 				JustBeforeEach(func(ctx SpecContext) {
-					rvr2.Status.ActualType = "Diskful"
-					rvr3.Status.ActualType = "Diskful"
+					rvr2.Status.ActualType = v1alpha1.ReplicaTypeDiskful
+					rvr3.Status.ActualType = v1alpha1.ReplicaTypeDiskful
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 
@@ -263,8 +263,8 @@ var _ = Describe("Reconcile", func() {
 
 			When("all conditions are satisfied", func() {
 				JustBeforeEach(func(ctx SpecContext) {
-					rvr2.Status.ActualType = "Diskful"
-					rvr3.Status.ActualType = "Diskful"
+					rvr2.Status.ActualType = v1alpha1.ReplicaTypeDiskful
+					rvr3.Status.ActualType = v1alpha1.ReplicaTypeDiskful
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 

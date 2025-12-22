@@ -507,9 +507,9 @@ var _ = Describe("Reconciler", func() {
 
 				Context("with diskless RVRs", func() {
 					BeforeEach(func() {
-						// Use only first 2 RVRs, set second one as diskless (Type != "Diskful")
+						// Use only first 2 RVRs, set second one as diskless (Type != ReplicaTypeDiskful)
 						rvrList = rvrList[:2]
-						rvrList[1].Spec.Type = "Access"
+						rvrList[1].Spec.Type = v1alpha1.ReplicaTypeAccess
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {

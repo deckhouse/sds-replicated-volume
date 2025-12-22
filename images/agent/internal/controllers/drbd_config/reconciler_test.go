@@ -75,8 +75,8 @@ const (
 	testLVGName             = "test-vg"
 	testLLVName             = "test-llv"
 	testDiskName            = "test-lv"
-	rvrTypeDiskful          = "Diskful"
-	rvrTypeAccess           = "Access"
+	rvrTypeDiskful          = v1alpha1.ReplicaTypeDiskful
+	rvrTypeAccess           = v1alpha1.ReplicaTypeAccess
 	testNodeIDLocal         = 0
 	testPeerNodeID          = 1
 	apiGroupStorage         = "storage.deckhouse.io"
@@ -393,7 +393,7 @@ func port(offset uint) uint {
 	return testPortBase + offset
 }
 
-func rvrSpecOnly(name string, rvrType string) *v1alpha1.ReplicatedVolumeReplica {
+func rvrSpecOnly(name string, rvrType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplica {
 	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name: name,
@@ -494,7 +494,7 @@ func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries b
 
 func readyRVR(
 	name string,
-	rvrType string,
+	rvrType v1alpha1.ReplicaType,
 	nodeID uint,
 	address v1alpha1.Address,
 	peers map[string]v1alpha1.Peer,

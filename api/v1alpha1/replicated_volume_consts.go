@@ -43,7 +43,7 @@ const (
 func SharedSecretAlgorithms() []SharedSecretAlg {
 	return []SharedSecretAlg{
 		// TODO: remove after testing
-		"DummyForTest",
+		SharedSecretAlgDummyForTest,
 		SharedSecretAlgSHA256,
 		SharedSecretAlgSHA1,
 	}

@@ -190,7 +190,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-1",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
@@ -200,7 +200,7 @@ var _ = Describe("Reconcile", func() {
 							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-2",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 					},
@@ -398,7 +398,7 @@ var _ = Describe("Reconcile", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-1",
-									Type:                 "TieBreaker",
+									Type:                 v1alpha1.ReplicaTypeTieBreaker,
 								},
 								Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 									DRBD: &v1alpha1.DRBD{
@@ -446,7 +446,7 @@ var _ = Describe("Reconcile", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-1",
-									Type:                 "Diskful",
+									Type:                 v1alpha1.ReplicaTypeDiskful,
 								},
 							},
 							{
@@ -456,7 +456,7 @@ var _ = Describe("Reconcile", func() {
 								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-2",
-									Type:                 "Access",
+									Type:                 v1alpha1.ReplicaTypeAccess,
 								},
 							},
 						},
@@ -507,7 +507,7 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// Сделаем одну реплику Access вместо Diskful
-					rvrList.Items[1].Spec.Type = "Access"
+					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeAccess
 				})
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
@@ -531,7 +531,7 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// Сделаем одну реплику TieBreaker вместо Diskful
-					rvrList.Items[1].Spec.Type = "TieBreaker"
+					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
 				})
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
@@ -655,7 +655,7 @@ var _ = Describe("Reconcile", func() {
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-1",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
 
@@ -707,7 +707,7 @@ var _ = Describe("Reconcile", func() {
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-1",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 

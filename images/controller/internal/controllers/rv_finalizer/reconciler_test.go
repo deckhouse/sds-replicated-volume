@@ -75,7 +75,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-with-rvr",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 			},
@@ -134,7 +134,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-deleting",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				},
 			},

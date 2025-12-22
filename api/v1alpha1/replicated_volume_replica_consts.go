@@ -21,14 +21,17 @@ import (
 	"strings"
 )
 
-// Replica type values for [ReplicatedVolumeReplica] spec.type field
+// ReplicaType enumerates possible values for ReplicatedVolumeReplica spec.type and status.actualType fields.
+type ReplicaType string
+
+// Replica type values for [ReplicatedVolumeReplica] spec.type field.
 const (
-	// ReplicaTypeDiskful represents a diskful replica that stores data on disk
-	ReplicaTypeDiskful = "Diskful"
-	// ReplicaTypeAccess represents a diskless replica for data access
-	ReplicaTypeAccess = "Access"
-	// ReplicaTypeTieBreaker represents a diskless replica for quorum
-	ReplicaTypeTieBreaker = "TieBreaker"
+	// ReplicaTypeDiskful represents a diskful replica that stores data on disk.
+	ReplicaTypeDiskful ReplicaType = "Diskful"
+	// ReplicaTypeAccess represents a diskless replica for data access.
+	ReplicaTypeAccess ReplicaType = "Access"
+	// ReplicaTypeTieBreaker represents a diskless replica for quorum.
+	ReplicaTypeTieBreaker ReplicaType = "TieBreaker"
 )
 
 // DRBD node ID constants for ReplicatedVolumeReplica

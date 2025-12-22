@@ -101,21 +101,21 @@ func (r *Reconciler) Reconcile(
 	// Phase 1: place Diskful replicas.
 	log.V(1).Info("starting Diskful phase", "unscheduledCount", len(sctx.UnscheduledDiskfulReplicas))
 	if err := r.scheduleDiskfulPhase(ctx, sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "Diskful", err, log)
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, string(v1alpha1.ReplicaTypeDiskful), err, log)
 	}
 	log.V(1).Info("Diskful phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
 	// Phase 2: place Access replicas.
 	log.V(1).Info("starting Access phase", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
 	if err := r.scheduleAccessPhase(sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "Access", err, log)
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, string(v1alpha1.ReplicaTypeAccess), err, log)
 	}
 	log.V(1).Info("Access phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
 	// Phase 3: place TieBreaker replicas.
 	log.V(1).Info("starting TieBreaker phase", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas))
 	if err := r.scheduleTieBreakerPhase(sctx); err != nil {
-		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, "TieBreaker", err, log)
+		return reconcile.Result{}, r.handlePhaseError(ctx, sctx, string(v1alpha1.ReplicaTypeTieBreaker), err, log)
 	}
 	log.V(1).Info("TieBreaker phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
@@ -487,7 +487,7 @@ func (r *Reconciler) scheduleDiskfulPhase(
 func (r *Reconciler) assignReplicasToNodes(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaTypeFilter string,
+	replicaTypeFilter v1alpha1.ReplicaType,
 	bestEffort bool,
 ) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
@@ -610,7 +610,7 @@ func (r *Reconciler) assignReplicasZonalTopology(
 func (r *Reconciler) assignReplicasTransZonalTopology(
 	sctx *SchedulingContext,
 	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaTypeFilter string,
+	replicaTypeFilter v1alpha1.ReplicaType,
 ) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
 		return nil, nil
@@ -773,7 +773,7 @@ func (r *Reconciler) scheduleTieBreakerPhase(
 	}
 
 	// Assign replicas: count ALL replica types for zone balancing, strict mode (must place all)
-	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledTieBreakerReplicas, "", false)
+	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledTieBreakerReplicas, v1alpha1.ReplicaType(""), false)
 	if err != nil {
 		return err
 	}
@@ -820,7 +820,7 @@ func getNodesWithRVReplicaSet(
 
 func getTypedReplicasLists(
 	replicasForRV []*v1alpha1.ReplicatedVolumeReplica,
-	replicaType string,
+	replicaType v1alpha1.ReplicaType,
 ) (scheduled, unscheduled []*v1alpha1.ReplicatedVolumeReplica) {
 	// Collect replicas of the given type, separating them by NodeName assignment.
 	for _, rvr := range replicasForRV {
@@ -1142,7 +1142,7 @@ func (r *Reconciler) applyCapacityFilterAndScoreCandidates(
 // If replicaType is empty, all replica types are counted.
 func countReplicasByZone(
 	replicas []*v1alpha1.ReplicatedVolumeReplica,
-	replicaType string,
+	replicaType v1alpha1.ReplicaType,
 	nodeNameToZone map[string]string,
 ) map[string]int {
 	zoneReplicaCount := make(map[string]int)

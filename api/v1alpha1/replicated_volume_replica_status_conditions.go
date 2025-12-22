@@ -282,7 +282,7 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 }
 
 func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrimary bool) error {
-	if rvr.Spec.Type != "Access" && rvr.Spec.Type != "Diskful" {
+	if rvr.Spec.Type != ReplicaTypeAccess && rvr.Spec.Type != ReplicaTypeDiskful {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{

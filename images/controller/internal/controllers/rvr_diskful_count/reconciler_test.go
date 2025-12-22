@@ -43,7 +43,7 @@ func createReplicatedVolumeReplica(name string, rv *v1alpha1.ReplicatedVolume, s
 }
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
@@ -473,7 +473,14 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
+						"rvr-non-diskful",
+						rv,
+						scheme,
+						v1alpha1.ReplicaTypeAccess,
+						true,
+						nil,
+					)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -502,7 +509,14 @@ var _ = Describe("Reconciler", func() {
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
 					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv, scheme, true, nil)
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
+						"rvr-non-diskful",
+						rv,
+						scheme,
+						v1alpha1.ReplicaTypeAccess,
+						true,
+						nil,
+					)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
