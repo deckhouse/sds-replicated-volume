@@ -66,7 +66,7 @@ const (
 	ConditionTypeDevicesReady = "DevicesReady"
 
 	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigured = "ConditionTypeConfigured"
+	ConditionTypeConfigured = "Configured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -108,13 +108,14 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeQuorum:               {false},
 	ConditionTypeDiskIOSuspended:      {false},
 	ConditionTypeAddressConfigured:    {false},
-	ConditionTypeBackingVolumeCreated: {false},
 	ConditionTypeScheduled:            {false},
+	ConditionTypeBackingVolumeCreated: {false},
 	ConditionTypeDataInitialized:      {false},
 	ConditionTypeInQuorum:             {false},
 	ConditionTypeInSync:               {false},
 	ConditionTypeOnline:               {false},
 	ConditionTypeIOReady:              {false},
+	ConditionTypePublished:            {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -206,6 +207,17 @@ const (
 	ReasonDiskIOSuspendedNoData        = "DiskIOSuspendedNoData"
 	ReasonDiskIOSuspendedFencing       = "DiskIOSuspendedFencing"
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
+)
+
+// Condition reasons for [ConditionTypeScheduled] condition
+const (
+	ReasonSchedulingReplicaScheduled         = "ReplicaScheduled"
+	ReasonSchedulingWaitingForAnotherReplica = "WaitingForAnotherReplica"
+	ReasonSchedulingPending                  = "SchedulingPending"
+	ReasonSchedulingFailed                   = "SchedulingFailed"
+	ReasonSchedulingTopologyConflict         = "TopologyConstraintsFailed"
+	ReasonSchedulingNoCandidateNodes         = "NoAvailableNodes"
+	ReasonSchedulingInsufficientStorage      = "InsufficientStorage"
 )
 
 // Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
