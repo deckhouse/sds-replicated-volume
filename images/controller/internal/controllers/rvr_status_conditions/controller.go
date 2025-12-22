@@ -28,7 +28,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 // BuildController creates and registers the rvr-status-conditions controller with the manager.
@@ -60,9 +59,9 @@ func AgentPodToRVRMapper(cl client.Client, log logr.Logger) handler.MapFunc {
 		}
 
 		// Only process agent pods
-		// AgentNamespace is taken from rv.ControllerConfigMapNamespace
+		// AgentNamespace is taken from v1alpha3.ModuleNamespace
 		// Agent pods run in the same namespace as controller
-		if pod.Namespace != rv.ControllerConfigMapNamespace {
+		if pod.Namespace != v1alpha3.ModuleNamespace {
 			return nil
 		}
 		if pod.Labels[AgentPodLabel] != AgentPodValue {

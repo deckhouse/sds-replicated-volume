@@ -30,7 +30,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const requeueAfterSec = 10
@@ -252,7 +251,7 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	oldFinalizersLen := len(current.Finalizers)
-	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == rvreconcile.ControllerFinalizerName })
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha3.ControllerAppFinalizer })
 
 	if oldFinalizersLen == len(current.Finalizers) {
 		return nil

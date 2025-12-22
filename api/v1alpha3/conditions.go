@@ -36,8 +36,9 @@ const (
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
 	ConditionTypeScheduled = "Scheduled"
 
-	// [ConditionTypeInitialized] indicates whether replica has been initialized (does not reset after True)
-	ConditionTypeInitialized = "Initialized"
+	// [ConditionTypeDataInitialized] indicates whether replica has been initialized.
+	// Does not reset after True, unless replica type has changed.
+	ConditionTypeDataInitialized = "DataInitialized"
 
 	// [ConditionTypeInQuorum] indicates whether replica is in quorum
 	ConditionTypeInQuorum = "InQuorum"
@@ -64,8 +65,8 @@ const (
 	// [ConditionTypeDevicesReady] indicates whether all the devices in UpToDate state
 	ConditionTypeDevicesReady = "DevicesReady"
 
-	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
+	ConditionTypeConfigured = "Configured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -81,6 +82,8 @@ const (
 
 	// [ConditionTypeDataInitialized] indicates whether replica data has been initialized
 	ConditionTypeDataInitialized = "DataInitialized"
+	// [ConditionTypePublished] indicates whether the replica has been published
+	ConditionTypePublished = "Published"
 )
 
 // RV condition types
@@ -112,6 +115,22 @@ var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration
 	ConditionTypeOnline:                {false},
 	ConditionTypeIOReady:               {false},
 	ConditionTypeDataInitialized:       {false},
+	ConditionTypeReady:                {false},
+	ConditionTypeInitialSync:          {false},
+	ConditionTypeIsPrimary:            {false},
+	ConditionTypeDevicesReady:         {false},
+	ConditionTypeConfigured:           {false},
+	ConditionTypeQuorum:               {false},
+	ConditionTypeDiskIOSuspended:      {false},
+	ConditionTypeAddressConfigured:    {false},
+	ConditionTypeScheduled:            {false},
+	ConditionTypeBackingVolumeCreated: {false},
+	ConditionTypeDataInitialized:      {false},
+	ConditionTypeInQuorum:             {false},
+	ConditionTypeInSync:               {false},
+	ConditionTypeOnline:               {false},
+	ConditionTypeIOReady:              {false},
+	ConditionTypePublished:            {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -157,7 +176,7 @@ const (
 	ReasonReady                 = "Ready"
 )
 
-// Condition reasons for [ConditionTypeConfigurationAdjusted] condition
+// Condition reasons for [ConditionTypeConfigured] condition
 const (
 	ReasonConfigurationFailed                           = "ConfigurationFailed"
 	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
@@ -205,6 +224,23 @@ const (
 	ReasonDiskIOSuspendedQuorum        = "DiskIOSuspendedQuorum"
 )
 
+// Condition reasons for [ConditionTypeScheduled] condition
+const (
+	ReasonSchedulingReplicaScheduled         = "ReplicaScheduled"
+	ReasonSchedulingWaitingForAnotherReplica = "WaitingForAnotherReplica"
+	ReasonSchedulingPending                  = "SchedulingPending"
+	ReasonSchedulingFailed                   = "SchedulingFailed"
+	ReasonSchedulingTopologyConflict         = "TopologyConstraintsFailed"
+	ReasonSchedulingNoCandidateNodes         = "NoAvailableNodes"
+	ReasonSchedulingInsufficientStorage      = "InsufficientStorage"
+)
+
+// Condition reasons for [ConditionTypeDiskfulReplicaCountReached] condition
+const (
+	ReasonFirstReplicaIsBeingCreated          = "FirstReplicaIsBeingCreated"
+	ReasonRequiredNumberOfReplicasIsAvailable = "RequiredNumberOfReplicasIsAvailable"
+)
+
 // Condition reasons for [ConditionTypeAddressConfigured] condition
 const (
 	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
@@ -222,7 +258,66 @@ const (
 	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
 )
 
+// Condition reasons for [ConditionTypeDataInitialized] condition
+const (
+	// status=Unknown
+	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
+	// status=False
+	ReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
+	ReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
+	// status=True
+	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
+)
+
+// Condition reasons for [ConditionTypeInQuorum] condition
+const (
+	ReasonInQuorumInQuorum   = "InQuorum"
+	ReasonInQuorumQuorumLost = "QuorumLost"
+)
+
+// Condition reasons for [ConditionTypeInSync] condition
+const (
+	// status=True
+	ReasonInSync   = "InSync"
+	ReasonDiskless = "Diskless"
+
+	// status=False
+	ReasonDiskLost                    = "DiskLost"
+	ReasonAttaching                   = "Attaching"
+	ReasonDetaching                   = "Detaching"
+	ReasonFailed                      = "Failed"
+	ReasonNegotiating                 = "Negotiating"
+	ReasonInconsistent                = "Inconsistent"
+	ReasonOutdated                    = "Outdated"
+	ReasonUnknownDiskState            = "UnknownDiskState"
+	ReasonInSyncReplicaNotInitialized = "ReplicaNotInitialized"
+)
+
+// Condition reasons for [ConditionTypeConfigured] condition
+const (
+	// status=True
+	ReasonConfigured = "Configured"
+	// status=False
+	ReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
+	ReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
+	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
+	ReasonPromoteFailed                  = "PromoteFailed"
+	ReasonDemoteFailed                   = "DemoteFailed"
+)
+
 // Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)
 const (
 	ReasonSynchronizing = "Synchronizing"
+)
+
+// Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)
+const (
+	// status=True
+	ReasonPublished = "Published"
+	// status=False
+	ReasonUnpublished             = "Unpublished"
+	ReasonPublishPending          = "PublishPending"
+	ReasonPublishingNotApplicable = "PublishingNotApplicable"
+	// status=Unknown
+	ReasonPublishingNotInitialized = "PublishingNotInitialized"
 )
