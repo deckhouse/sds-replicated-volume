@@ -19,8 +19,8 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
+      name: IOReady
       type: string
     - jsonPath: .spec.size
       name: Size
@@ -28,11 +28,11 @@ spec:
     - jsonPath: .status.actualSize
       name: ActualSize
       type: string
-    - jsonPath: .spec.replicas
-      name: Replicas
-      type: integer
-    - jsonPath: .spec.topology
-      name: Topology
+    - jsonPath: .status.diskfulReplicaCount
+      name: DiskfulReplicas
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
       type: string
     name: v1alpha1
     schema:
