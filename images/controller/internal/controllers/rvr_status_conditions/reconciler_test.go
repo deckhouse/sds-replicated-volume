@@ -450,7 +450,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "Initialized"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha3.ConditionTypeInitialized,
+			Type:   v1alpha3.ConditionTypeDataInitialized,
 			Status: status,
 			Reason: reason,
 		})
