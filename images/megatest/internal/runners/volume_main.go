@@ -179,7 +179,7 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 
 	//  Wait for ALL sub-runners to stop (including VolumeChecker)
 waitLoop:
-	for {
+	for v.runningSubRunners.Load() > 0 {
 		select {
 		case <-cleanupCtx.Done():
 			log.Info("cleanup interrupted, skipping sub-runners wait", "remaining", v.runningSubRunners.Load())
