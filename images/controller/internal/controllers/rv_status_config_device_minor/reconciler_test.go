@@ -86,7 +86,10 @@ var _ = Describe("Reconciler", func() {
 
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "volume-1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 			}
 		})
 
@@ -172,7 +175,9 @@ var _ = Describe("Reconciler", func() {
 				By("Creating volumes with duplicate deviceMinors")
 				// Group A: 2 volumes with deviceMinor=0 (duplicate)
 				rvA1 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-a1"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "volume-dup-a1",
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -182,7 +187,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				rvA2 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-a2"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "volume-dup-a2",
+						Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -193,7 +201,9 @@ var _ = Describe("Reconciler", func() {
 				}
 				// Group B: 3 volumes with deviceMinor=1 (duplicate)
 				rvB1 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-b1"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "volume-dup-b1",
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -203,7 +213,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				rvB2 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-b2"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "volume-dup-b2",
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -213,7 +225,10 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 				rvB3 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-b3"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "volume-dup-b3",
+						Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -224,7 +239,10 @@ var _ = Describe("Reconciler", func() {
 				}
 				// Group C: 1 volume with deviceMinor=2 (no duplicate)
 				rvC1 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-c1"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "volume-dup-c1",
+						Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					},
 					Status: &v1alpha3.ReplicatedVolumeStatus{
 						DRBD: &v1alpha3.DRBDResource{
 							Config: &v1alpha3.DRBDResourceConfig{
@@ -235,7 +253,10 @@ var _ = Describe("Reconciler", func() {
 				}
 				// Volume without deviceMinor
 				rvD1 := &v1alpha3.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{Name: "volume-dup-d1"},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:       "volume-dup-d1",
+						Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					},
 				}
 
 				for _, rv := range []*v1alpha3.ReplicatedVolume{rvA1, rvA2, rvB1, rvB2, rvB3, rvC1, rvD1} {
@@ -322,24 +343,6 @@ var _ = Describe("Reconciler", func() {
 				By("Removing A1 and B1, verifying partial resolution")
 				Expect(cl.Delete(ctx, rvA1)).To(Succeed(), "should delete A1")
 				Expect(cl.Delete(ctx, rvB1)).To(Succeed(), "should delete B1")
-
-				// Wait for volumes to be deleted from List
-				Eventually(func(g Gomega) {
-					rvList := &v1alpha3.ReplicatedVolumeList{}
-					g.Expect(cl.List(ctx, rvList)).To(Succeed())
-					var foundA1, foundB1 bool
-					for _, item := range rvList.Items {
-						if item.Name == rvA1.Name {
-							foundA1 = true
-						}
-						if item.Name == rvB1.Name {
-							foundB1 = true
-						}
-					}
-					g.Expect(foundA1).To(BeFalse(), "A1 should not be in List")
-					g.Expect(foundB1).To(BeFalse(), "B1 should not be in List")
-				}).Should(Succeed(), "A1 and B1 should be removed from List")
-
 				// Reconcile volumes to trigger error clearing
 				// Note: We need to reconcile all volumes to trigger duplicate detection for all volumes
 				Expect(rec.Reconcile(ctx, RequestFor(rvA2))).ToNot(Requeue(), "should trigger error clearing for A2")
@@ -367,19 +370,6 @@ var _ = Describe("Reconciler", func() {
 
 				By("Removing B2, verifying full resolution")
 				Expect(cl.Delete(ctx, rvB2)).To(Succeed(), "should delete B2")
-
-				// Wait for B2 to be deleted from List
-				Eventually(func(g Gomega) {
-					rvList := &v1alpha3.ReplicatedVolumeList{}
-					g.Expect(cl.List(ctx, rvList)).To(Succeed())
-					var foundB2 bool
-					for _, item := range rvList.Items {
-						if item.Name == rvB2.Name {
-							foundB2 = true
-						}
-					}
-					g.Expect(foundB2).To(BeFalse(), "B2 should not be in List")
-				}).Should(Succeed(), "B2 should be removed from List")
 
 				// Reconcile B3 to trigger error clearing
 				// Note: We need to reconcile volumes to trigger duplicate detection for all volumes
@@ -410,7 +400,8 @@ var _ = Describe("Reconciler", func() {
 					for i := 0; i < 5; i++ {
 						rvSeqList[i] = &v1alpha3.ReplicatedVolume{
 							ObjectMeta: metav1.ObjectMeta{
-								Name: fmt.Sprintf("volume-seq-%d", i+1),
+								Name:       fmt.Sprintf("volume-seq-%d", i+1),
+								Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 							},
 							Status: &v1alpha3.ReplicatedVolumeStatus{
 								DRBD: &v1alpha3.DRBDResource{
@@ -422,11 +413,17 @@ var _ = Describe("Reconciler", func() {
 						}
 					}
 					rv6 = &v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "volume-seq-6"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "volume-seq-6",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 					}
 
 					rvGap1 := &v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-1"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "volume-gap-1",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
@@ -436,7 +433,10 @@ var _ = Describe("Reconciler", func() {
 						},
 					}
 					rvGap2 := &v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-2"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "volume-gap-2",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
@@ -446,7 +446,10 @@ var _ = Describe("Reconciler", func() {
 						},
 					}
 					rvGap3 := &v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-3"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "volume-gap-3",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 						Status: &v1alpha3.ReplicatedVolumeStatus{
 							DRBD: &v1alpha3.DRBDResource{
 								Config: &v1alpha3.DRBDResourceConfig{
@@ -456,7 +459,10 @@ var _ = Describe("Reconciler", func() {
 						},
 					}
 					rvGap4 = &v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "volume-gap-4"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "volume-gap-4",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 					}
 					rvGapList = []*v1alpha3.ReplicatedVolume{rvGap1, rvGap2, rvGap3, rvGap4}
 				})
@@ -543,7 +549,10 @@ var _ = Describe("Reconciler", func() {
 			// to treat this as "minor is not assigned yet" and pick the next free value (1), instead of
 			// reusing 0 which is already taken by another volume.
 			rvNew = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "volume-config-no-minor"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "volume-config-no-minor",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 				Status: &v1alpha3.ReplicatedVolumeStatus{
 					DRBD: &v1alpha3.DRBDResource{
 						Config: &v1alpha3.DRBDResourceConfig{
@@ -584,7 +593,10 @@ var _ = Describe("Reconciler", func() {
 
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "volume-patch-1"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "volume-patch-1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 			}
 			testError = errors.New("failed to patch status")
 			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
@@ -615,7 +627,10 @@ var _ = Describe("Reconciler", func() {
 
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "volume-conflict-1"},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "volume-conflict-1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				},
 			}
 			patchAttempts = 0
 			conflictError = kerrors.NewConflict(

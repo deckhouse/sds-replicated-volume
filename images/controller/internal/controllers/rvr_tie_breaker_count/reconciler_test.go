@@ -77,7 +77,8 @@ var _ = Describe("Reconcile", func() {
 		BeforeEach(func() {
 			rv = v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "rv1",
+					Name:       "rv1",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",
@@ -204,7 +205,10 @@ var _ = Describe("Reconcile", func() {
 			When("Access replicas", func() {
 				BeforeEach(func() {
 					rv = v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rv1",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 						Spec: v1alpha3.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
 						},
@@ -254,7 +258,10 @@ var _ = Describe("Reconcile", func() {
 			When("more than one TieBreaker is required", func() {
 				BeforeEach(func() {
 					rv = v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rv1",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						},
 						Spec: v1alpha3.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
 						},
@@ -605,7 +612,8 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 
 					rv = &v1alpha3.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: "rv1",
+							Name:       "rv1",
+							Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 						},
 						Spec: v1alpha3.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",

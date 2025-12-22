@@ -93,7 +93,8 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			rv = &v1alpha3.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
+					Name:       "test-rv",
+					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
 				},
 			}
 		})
