@@ -14,15 +14,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha3
+package v1alpha1
 
 import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
@@ -41,7 +40,7 @@ type ReplicatedVolume struct {
 	Status *ReplicatedVolumeStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
@@ -55,7 +54,7 @@ type ReplicatedVolumeSpec struct {
 	PublishOn []string `json:"publishOn"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeStatus struct {
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -99,7 +98,7 @@ type ReplicatedVolumeStatus struct {
 	PublishedAndIOReadyCount string `json:"publishedAndIOReadyCount,omitempty"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeStatusErrors struct {
 	// +patchStrategy=merge
 	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
@@ -113,15 +112,14 @@ func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
 	s.Conditions = conditions
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDResource struct {
 	// +patchStrategy=merge
 	// +optional
 	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
 }
 
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 type ReplicatedVolumeList struct {
@@ -130,7 +128,7 @@ type ReplicatedVolumeList struct {
 	Items           []ReplicatedVolume `json:"items"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDResourceConfig struct {
 	// +optional
 	// +kubebuilder:validation:MinLength=1

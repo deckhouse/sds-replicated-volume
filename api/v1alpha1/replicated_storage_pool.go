@@ -19,6 +19,7 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // ReplicatedStoragePool is a Kubernetes Custom Resource that defines a configuration for Linstor Storage-pools.
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=rsp
 // +kubebuilder:metadata:labels=heritage=deckhouse
@@ -36,6 +37,7 @@ type ReplicatedStoragePool struct {
 }
 
 // Defines desired rules for Linstor's Storage-pools.
+// +kubebuilder:object:generate=true
 type ReplicatedStoragePoolSpec struct {
 	// Defines the volumes type. Might be:
 	// - LVM (for Thick)
@@ -61,6 +63,7 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 }
 
 // Displays current information about the state of the LINSTOR storage pool.
+// +kubebuilder:object:generate=true
 type ReplicatedStoragePoolStatus struct {
 	// The actual ReplicatedStoragePool resource's state. Might be:
 	// - Completed (if the controller received correct resource configuration and Linstor Storage-pools configuration is up-to-date)
@@ -73,6 +76,7 @@ type ReplicatedStoragePoolStatus struct {
 }
 
 // ReplicatedStoragePoolList contains a list of ReplicatedStoragePool
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 type ReplicatedStoragePoolList struct {
 	metav1.TypeMeta `json:",inline"`

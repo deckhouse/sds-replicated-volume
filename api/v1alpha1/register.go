@@ -46,6 +46,10 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedStorageClassList{},
 		&ReplicatedStoragePool{},
 		&ReplicatedStoragePoolList{},
+		&ReplicatedVolume{},
+		&ReplicatedVolumeList{},
+		&ReplicatedVolumeReplica{},
+		&ReplicatedVolumeReplicaList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

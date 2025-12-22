@@ -19,6 +19,7 @@ package v1alpha1
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 // ReplicatedStorageClass is a Kubernetes Custom Resource that defines a configuration for a Kubernetes Storage class.
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster,shortName=rsc
 // +kubebuilder:metadata:labels=heritage=deckhouse
@@ -34,6 +35,8 @@ type ReplicatedStorageClass struct {
 	Status            ReplicatedStorageClassStatus `json:"status,omitempty"`
 }
 
+// +kubebuilder:object:generate=true
+// +kubebuilder:object:root=true
 type ReplicatedStorageClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
@@ -47,6 +50,7 @@ type ReplicatedStorageClassList struct {
 // Defines a Kubernetes Storage class configuration.
 //
 // > Note that this field is in read-only mode.
+// +kubebuilder:object:generate=true
 type ReplicatedStorageClassSpec struct {
 	// Selected ReplicatedStoragePool resource's name.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
@@ -109,6 +113,7 @@ type ReplicatedStorageClassSpec struct {
 }
 
 // Displays current information about the Storage Class.
+// +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
 	// The Storage class current state. Might be:
 	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
