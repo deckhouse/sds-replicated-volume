@@ -148,7 +148,7 @@ func createMockServer(scores map[string]int, lvgToNode map[string]string) *httpt
 		var req struct {
 			LVGS []struct{ Name string } `json:"lvgs"`
 		}
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 		resp := map[string]any{"lvgs": []map[string]any{}}
 		for _, lvg := range req.LVGS {
 			nodeName, ok := lvgToNode[lvg.Name]
@@ -162,7 +162,7 @@ func createMockServer(scores map[string]int, lvgToNode map[string]string) *httpt
 			}
 			resp["lvgs"] = append(resp["lvgs"].([]map[string]any), map[string]any{"name": lvg.Name, "score": score})
 		}
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -577,7 +577,6 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		for _, tc := range zonalTestCases {
-			tc := tc // capture
 			It(tc.Name, func(ctx SpecContext) {
 				runTestCase(ctx, tc)
 			})
@@ -723,7 +722,6 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		for _, tc := range transZonalTestCases {
-			tc := tc // capture
 			It(tc.Name, func(ctx SpecContext) {
 				runTestCase(ctx, tc)
 			})
@@ -826,7 +824,6 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		for _, tc := range ignoredTestCases {
-			tc := tc // capture
 			It(tc.Name, func(ctx SpecContext) {
 				runTestCase(ctx, tc)
 			})
@@ -843,9 +840,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			lvgs, rsp := generateLVGs(nodes)
 
 			// Create mock server that returns EMPTY lvgs (simulates no space on any node)
-			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				resp := map[string]any{"lvgs": []map[string]any{}}
-				json.NewEncoder(w).Encode(resp)
+				_ = json.NewEncoder(w).Encode(resp)
 			}))
 			defer mockServer.Close()
 			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
@@ -1002,12 +999,12 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			var req struct {
 				LVGS []struct{ Name string } `json:"lvgs"`
 			}
-			json.NewDecoder(r.Body).Decode(&req)
+			_ = json.NewDecoder(r.Body).Decode(&req)
 			resp := map[string]any{"lvgs": []map[string]any{}}
 			for _, lvg := range req.LVGS {
 				resp["lvgs"] = append(resp["lvgs"].([]map[string]any), map[string]any{"name": lvg.Name, "score": 100})
 			}
-			json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(resp)
 		}))
 		os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
 		scheme = runtime.NewScheme()

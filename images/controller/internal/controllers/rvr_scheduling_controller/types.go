@@ -19,9 +19,10 @@ package rvr_scheduling_controller
 import (
 	"slices"
 
+	"github.com/go-logr/logr"
+
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/go-logr/logr"
 )
 
 type SchedulingContext struct {

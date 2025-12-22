@@ -96,7 +96,6 @@ func (r *Reconciler) Reconcile(
 			return reconcile.Result{}, err
 		}
 		return reconcile.Result{}, nil
-
 	}
 	log.V(1).Info("scheduling context prepared", "rsc", sctx.Rsc.Name, "topology", sctx.Rsc.Spec.Topology, "volumeAccess", sctx.Rsc.Spec.VolumeAccess)
 
@@ -699,6 +698,7 @@ func (r *Reconciler) assignReplicasTransZonalTopology(
 	return assignedReplicas, nil
 }
 
+//nolint:unparam // error is always nil by design - Access phase never fails
 func (r *Reconciler) scheduleAccessPhase(
 	sctx *SchedulingContext,
 ) error {
@@ -1009,14 +1009,15 @@ func (r *Reconciler) applyZonalTopologyFilter(
 	// Determine target zones based on phase
 	var targetZones []string
 
-	if len(zonesWithScheduledDiskfulReplicas) > 0 {
+	switch {
+	case len(zonesWithScheduledDiskfulReplicas) > 0:
 		// Use zone of scheduled Diskful replicas
 		targetZones = zonesWithScheduledDiskfulReplicas
-	} else if !isDiskfulPhase {
+	case !isDiskfulPhase:
 		// TieBreaker phase: no ScheduledDiskfulReplicas is an error
 		return fmt.Errorf("%w: cannot schedule TieBreaker for Zonal topology: no Diskful replicas scheduled",
 			errSchedulingNoCandidateNodes)
-	} else {
+	default:
 		// Diskful phase: fallback to publishOn zones
 		for _, nodeName := range sctx.PublishOnNodes {
 			zone, ok := sctx.NodeNameToZone[nodeName]
@@ -1197,15 +1198,16 @@ func (r *Reconciler) groupCandidateNodesByZone(
 func getAllowedZones(targetZones []string, rscZones []string, nodeNameToZone map[string]string) map[string]struct{} {
 	allowedZones := make(map[string]struct{})
 
-	if len(targetZones) > 0 {
+	switch {
+	case len(targetZones) > 0:
 		for _, zone := range targetZones {
 			allowedZones[zone] = struct{}{}
 		}
-	} else if len(rscZones) > 0 {
+	case len(rscZones) > 0:
 		for _, zone := range rscZones {
 			allowedZones[zone] = struct{}{}
 		}
-	} else {
+	default:
 		for _, zone := range nodeNameToZone {
 			if zone != "" {
 				allowedZones[zone] = struct{}{}

@@ -87,12 +87,8 @@ func (c *SchedulerExtenderClient) queryLVGScores(
 	}
 
 	reqBody := schedulerExtenderRequest{
-		LVGS: lvgs,
-		Volume: schedulerExtenderVolume{
-			Name: volumeInfo.Name,
-			Size: volumeInfo.Size,
-			Type: volumeInfo.Type,
-		},
+		LVGS:   lvgs,
+		Volume: schedulerExtenderVolume(volumeInfo),
 	}
 
 	data, err := json.Marshal(reqBody)
