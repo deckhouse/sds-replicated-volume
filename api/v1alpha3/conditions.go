@@ -71,6 +71,9 @@ const (
 
 	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
 	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
+
+	// [ConditionTypeConfigurationAdjusted] indicates whether the configuration adjustment for RVR is completed
+	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
 )
 
 // =============================================================================
@@ -137,15 +140,6 @@ const (
 	ConditionTypePublished = "Published"
 )
 
-// RV condition types
-const (
-	// [ConditionTypeAllReplicasReady] indicates whether all replicas are Ready
-	ConditionTypeAllReplicasReady = "AllReplicasReady"
-
-	// [ConditionTypeSharedSecretAlgorithmSelected] indicates whether shared secret algorithm is selected
-	ConditionTypeSharedSecretAlgorithmSelected = "SharedSecretAlgorithmSelected"
-)
-
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
 	// Conditions managed by rvr_status_conditions controller
 	ConditionTypeOnline:  {false},
@@ -209,6 +203,59 @@ const (
 	ReasonOffline   = "Offline"
 	ReasonOutOfSync = "OutOfSync"
 	// ReasonNodeNotReady and ReasonAgentNotReady are also used for IOReady
+)
+
+// =============================================================================
+// Condition reasons used by rv_status_conditions controller
+// =============================================================================
+
+// Condition reasons for [ConditionTypeRVScheduled] condition
+const (
+	ReasonSchedulingInProgress = "SchedulingInProgress"
+	ReasonAllReplicasScheduled = "AllReplicasScheduled"
+	ReasonReplicasNotScheduled = "ReplicasNotScheduled"
+)
+
+// Condition reasons for [ConditionTypeRVBackingVolumeCreated] condition
+const (
+	ReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
+	ReasonAllBackingVolumesReady   = "AllBackingVolumesReady"
+	ReasonBackingVolumesNotReady   = "BackingVolumesNotReady"
+)
+
+// Condition reasons for [ConditionTypeRVConfigured] condition
+const (
+	ReasonConfigurationInProgress = "ConfigurationInProgress"
+	ReasonAllReplicasConfigured   = "AllReplicasConfigured"
+	ReasonReplicasNotConfigured   = "ReplicasNotConfigured"
+)
+
+// Condition reasons for [ConditionTypeRVInitialized] condition
+const (
+	ReasonInitialized              = "Initialized"
+	ReasonInitializationInProgress = "InitializationInProgress"
+	ReasonWaitingForReplicas       = "WaitingForReplicas"
+)
+
+// Condition reasons for [ConditionTypeRVQuorum] condition
+const (
+	ReasonQuorumReached  = "QuorumReached"
+	ReasonQuorumDegraded = "QuorumDegraded"
+	// ReasonQuorumLost is also used (defined above)
+)
+
+// Condition reasons for [ConditionTypeRVDataQuorum] condition
+const (
+	ReasonDataQuorumReached  = "DataQuorumReached"
+	ReasonDataQuorumDegraded = "DataQuorumDegraded"
+	ReasonDataQuorumLost     = "DataQuorumLost"
+)
+
+// Condition reasons for [ConditionTypeRVIOReady] condition
+const (
+	ReasonRVIOReady                   = "IOReady"
+	ReasonNoIOReadyReplicas           = "NoIOReadyReplicas"
+	ReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas"
 )
 
 // =============================================================================
