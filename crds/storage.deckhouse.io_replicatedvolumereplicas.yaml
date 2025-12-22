@@ -483,12 +483,6 @@ spec:
         - metadata
         - spec
         type: object
-        x-kubernetes-validations:
-        - message: All ReplicatedVolume ownerReferences must be ControllerReferences
-            (controller == true) and their name must equal spec.replicatedVolumeName
-          rule: '!has(self.metadata.ownerReferences) || self.metadata.ownerReferences.filter(o,
-            o.kind == ''ReplicatedVolume'' && o.apiVersion.matches(''storage.deckhouse.io/v1alpha[0-9]+'')).all(o,
-            o.controller == true && o.name == self.spec.replicatedVolumeName)'
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName
