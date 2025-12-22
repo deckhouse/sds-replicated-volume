@@ -24,10 +24,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
-	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 	"github.com/google/uuid"
 	"k8s.io/apimachinery/pkg/api/resource"
+
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
+	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
 // Stats contains statistics about the test run

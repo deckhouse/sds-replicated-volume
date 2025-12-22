@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"log/slog"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -28,8 +29,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"log/slog"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
