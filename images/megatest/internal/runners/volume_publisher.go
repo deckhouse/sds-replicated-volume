@@ -213,13 +213,12 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.Repli
 		return fmt.Errorf("other node name equals selected node name: %s", nodeName)
 	}
 
-	// Step 1: Publish the selected node
-	if err := v.doPublish(ctx, rv, nodeName); err != nil {
-		log.Error("failed to doPublish selected node", "error", err)
+	// Step 1: Publish the selected node and wait for it
+	if err := v.publishCycle(ctx, rv, nodeName); err != nil {
 		return err
 	}
 
-	// Wait for both nodes to be published
+	// Verify both nodes are now published
 	for {
 		log.Debug("waiting for both nodes to be published", "selected_node", nodeName, "other_node", otherNodeName)
 
@@ -234,9 +233,7 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.Repli
 			return err
 		}
 
-		if rv.Status != nil &&
-			slices.Contains(rv.Status.PublishedOn, nodeName) &&
-			slices.Contains(rv.Status.PublishedOn, otherNodeName) {
+		if rv.Status != nil && len(rv.Status.PublishedOn) == 2 {
 			break
 		}
 
@@ -256,31 +253,8 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.Repli
 		return err
 	}
 
-	if err := v.doUnpublish(ctx, rv, otherNodeName); err != nil {
-		log.Error("failed to doUnpublish other node", "error", err, "other_node", otherNodeName)
+	if err := v.unpublishCycle(ctx, rv, otherNodeName); err != nil {
 		return err
-	}
-
-	// Wait for other node to be unpublished
-	for {
-		log.Debug("waiting for other node to be unpublished", "other_node", otherNodeName)
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		rv, err := v.client.GetRV(ctx, v.rvName)
-		if err != nil {
-			return err
-		}
-
-		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, otherNodeName) {
-			break
-		}
-
-		time.Sleep(1 * time.Second)
 	}
 
 	// Step 4: Random delay
@@ -296,32 +270,7 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.Repli
 		return err
 	}
 
-	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
-		log.Error("failed to doUnpublish selected node", "error", err)
-		return err
-	}
-
-	// Wait for selected node to be unpublished
-	for {
-		log.Debug("waiting for selected node to be unpublished")
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		rv, err := v.client.GetRV(ctx, v.rvName)
-		if err != nil {
-			return err
-		}
-
-		if rv.Status == nil || !slices.Contains(rv.Status.PublishedOn, nodeName) {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-	}
+	return v.unpublishCycle(ctx, rv, nodeName)
 }
 
 func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
