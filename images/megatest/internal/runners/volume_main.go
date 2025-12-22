@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"log/slog"
 	"math/rand"
 	"sync/atomic"
 	"time"
@@ -25,16 +26,15 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"log/slog"
-
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
 const (
-	rvCreateTimeout = 1 * time.Minute
-	rvDeleteTimeout = 1 * time.Minute
+	rvCreateTimeout      = 1 * time.Minute
+	rvDeleteTimeout      = 1 * time.Minute
+	subRunnerStopTimeout = 15 * time.Second // Safety timeout for waiting sub-runners to stop
 )
 
 var (
@@ -69,6 +69,9 @@ type VolumeMain struct {
 	totalCreateRVTime       *atomic.Int64 // nanoseconds
 	totalDeleteRVTime       *atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime *atomic.Int64 // nanoseconds
+
+	// Callback to register checker stats in MultiVolume
+	registerCheckerStats func(*CheckerStats)
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -80,6 +83,7 @@ func NewVolumeMain(
 	totalCreateRVTime *atomic.Int64,
 	totalDeleteRVTime *atomic.Int64,
 	totalWaitForRVReadyTime *atomic.Int64,
+	registerCheckerStats func(*CheckerStats),
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -95,6 +99,7 @@ func NewVolumeMain(
 		totalCreateRVTime:             totalCreateRVTime,
 		totalDeleteRVTime:             totalDeleteRVTime,
 		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
+		registerCheckerStats:          registerCheckerStats,
 	}
 }
 
@@ -161,6 +166,24 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	log.Info("started")
 	defer log.Info("finished")
 
+	// TODO - remove timeout to exit, but add timeout to show message what exit going wrong, e.g.
+	// show message after few mins what we can't make some part of unpublish or some else
+	// sub proceses for user can Ctrl+C for close withot full cleanup
+
+	//  Wait for ALL sub-runners to stop (including VolumeChecker)
+	// They use lifetimeCtx which is already Done, so they should exit quickly
+	// Each API call inside has apiCallTimeout, so this shouldn't take long
+	stopDeadline := time.Now().Add(subRunnerStopTimeout)
+	for v.runningSubRunners.Load() > 0 {
+		if time.Now().After(stopDeadline) {
+			log.Error("BUG: sub-runners did not stop in time", "remaining", v.runningSubRunners.Load())
+			break
+		}
+		log.Debug("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	//  Now safe to delete RV - checker is already stopped, prevents watch conditions checks during cleanup
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), rvDeleteTimeout)
 	defer cleanupCancel()
 
@@ -170,11 +193,6 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	}
 	if v.totalDeleteRVTime != nil {
 		v.totalDeleteRVTime.Add(deleteDuration.Nanoseconds())
-	}
-
-	for v.runningSubRunners.Load() > 0 {
-		log.Info("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
-		time.Sleep(1 * time.Second)
 	}
 }
 
@@ -264,10 +282,11 @@ func (v *VolumeMain) deleteRV(ctx context.Context) (time.Duration, error) {
 func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
 	startTime := time.Now()
 
-	//err := v.client.WaitForRVReady(ctx, v.rvName, rvCreateTimeout)
-	//if err != nil {
-	//	return time.Since(startTime), err
-	//}
+	// TODO: implement proper wait for ready
+	// err := v.client.WaitForRVReady(ctx, v.rvName, rvCreateTimeout)
+	// if err != nil {
+	// 	return time.Since(startTime), err
+	// }
 	for i := 0; i < 5; i++ {
 		v.log.Debug("waiting for RV to become ready", "attempt", i)
 		time.Sleep(1 * time.Second)
@@ -389,7 +408,13 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 }
 
 func (v *VolumeMain) startVolumeChecker(ctx context.Context) {
-	volumeChecker := NewVolumeChecker(v.rvName, v.client)
+	// Create stats for this checker and register in MultiVolume
+	stats := &CheckerStats{RVName: v.rvName}
+	if v.registerCheckerStats != nil {
+		v.registerCheckerStats(stats)
+	}
+
+	volumeChecker := NewVolumeChecker(v.rvName, v.client, stats)
 	checkerCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		v.runningSubRunners.Add(1)

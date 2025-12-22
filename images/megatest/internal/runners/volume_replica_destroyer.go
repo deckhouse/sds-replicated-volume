@@ -19,13 +19,15 @@ package runners
 import (
 	"context"
 	"log/slog"
+	"math/rand"
+	"time"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
-// VolumeReplicaDestroyer periodically deletes random replicas from a volume
-// It does NOT wait for deletion to succeed
+// VolumeReplicaDestroyer periodically deletes random replicas from a volume.
+// It does NOT wait for deletion to succeed.
 type VolumeReplicaDestroyer struct {
 	rvName string
 	cfg    config.VolumeReplicaDestroyerConfig
@@ -59,17 +61,43 @@ func (v *VolumeReplicaDestroyer) Run(ctx context.Context) error {
 			return nil
 		}
 
-		// Perform delete
-		if err := v.doDestroy(ctx); err != nil {
-			v.log.Error("destroy failed", "error", err)
-			// Continue even on failure
-		}
+		// Perform delete (errors are logged, not returned)
+		v.doDestroy(ctx)
 	}
 }
 
-func (v *VolumeReplicaDestroyer) doDestroy(ctx context.Context) error {
-	_ = ctx
-	v.log.Debug("destroying random replica ===============================")
+func (v *VolumeReplicaDestroyer) doDestroy(ctx context.Context) {
+	startTime := time.Now()
 
-	return nil
+	// Get list of RVRs for this RV
+	rvrs, err := v.client.ListRVRsByRVName(ctx, v.rvName)
+	if err != nil {
+		v.log.Error("failed to list RVRs", "error", err)
+		return
+	}
+
+	if len(rvrs) == 0 {
+		v.log.Debug("no RVRs found to destroy")
+		return
+	}
+
+	// Select random RVR
+	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
+	idx := rand.Intn(len(rvrs))
+	selectedRVR := &rvrs[idx]
+
+	// Delete RVR (do NOT wait for success)
+	if err := v.client.DeleteRVR(ctx, selectedRVR); err != nil {
+		v.log.Error("failed to delete RVR",
+			"rvr_name", selectedRVR.Name,
+			"error", err)
+		return
+	}
+
+	// Log success
+	v.log.Info("RVR deleted",
+		"rvr_name", selectedRVR.Name,
+		"rvr_type", selectedRVR.Spec.Type,
+		"rvr_node", selectedRVR.Spec.NodeName,
+		"duration", time.Since(startTime))
 }
