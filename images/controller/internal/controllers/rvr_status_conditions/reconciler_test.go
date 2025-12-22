@@ -153,18 +153,18 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 
 		// === Agent/Node not ready ===
 		{
-			name:              "Agent not ready, Node ready → Online=False (AgentNotReady), IOReady=False (AgentNotReady)",
+			name:              "Agent pod missing, Node ready → Online=False (AgentPodMissing), IOReady=False (AgentPodMissing)",
 			scheduled:         u.Ptr(true),
 			initialized:       u.Ptr(true),
 			inQuorum:          u.Ptr(true),
 			inSync:            u.Ptr(true),
-			agentReady:        false,
+			agentReady:        false, // no agent pod created
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha3.ReasonAgentNotReady,
+			wantOnlineReason:  v1alpha3.ReasonAgentPodMissing,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha3.ReasonAgentNotReady,
+			wantIOReadyReason: v1alpha3.ReasonAgentPodMissing,
 		},
 		{
 			name:              "Node not ready → Online=False (NodeNotReady), IOReady=False (NodeNotReady)",

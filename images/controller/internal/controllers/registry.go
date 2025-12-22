@@ -23,6 +23,7 @@ import (
 
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
+	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
@@ -54,6 +55,7 @@ func init() {
 	registry = append(registry, rvrfinalizerrelease.BuildController)
 	registry = append(registry, rvfinalizer.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
+	registry = append(registry, rvstatusconditions.BuildController)
 
 	// ...
 }

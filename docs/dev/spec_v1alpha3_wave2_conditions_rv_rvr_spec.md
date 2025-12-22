@@ -623,9 +623,9 @@ builder.ControllerManagedBy(mgr).
 | `BackingVolumeCreated` | ALL Diskful `RVR.BackingVolumeCreated=True` | `AllBackingVolumesReady`, `BackingVolumesNotReady`, `WaitingForBackingVolumes` |
 | `Configured` | ALL `RVR.Configured=True` | `AllReplicasConfigured`, `ReplicasNotConfigured`, `ConfigurationInProgress` |
 | `Initialized` | count(Initialized=True) >= threshold | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
-| `Quorum` | count(InQuorum=True) >= quorum | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
-| `DataQuorum` | count(Diskful InQuorum=True) >= QMR | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
-| `IOReady` | count(IOReady=True) >= threshold | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
+| `Quorum` | count(All InQuorum=True) >= quorum | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
+| `DataQuorum` | count(Diskful InSync=True) >= QMR | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
+| `IOReady` | count(Diskful IOReady=True) >= threshold | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 > **Примерный список reasons, добавьте/уберите если необходимо.**
 
