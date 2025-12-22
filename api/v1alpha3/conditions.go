@@ -36,8 +36,9 @@ const (
 	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
 	ConditionTypeScheduled = "Scheduled"
 
-	// [ConditionTypeInitialized] indicates whether replica has been initialized (does not reset after True)
-	ConditionTypeInitialized = "Initialized"
+	// [ConditionTypeDataInitialized] indicates whether replica has been initialized.
+	// Does not reset after True, unless replica type has changed.
+	ConditionTypeDataInitialized = "DataInitialized"
 
 	// [ConditionTypeInQuorum] indicates whether replica is in quorum
 	ConditionTypeInQuorum = "InQuorum"
@@ -64,8 +65,8 @@ const (
 	// [ConditionTypeDevicesReady] indicates whether all the devices in UpToDate state
 	ConditionTypeDevicesReady = "DevicesReady"
 
-	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
+	ConditionTypeConfigured = "ConditionTypeConfigured"
 
 	// [ConditionTypeQuorum] indicates whether replica has achieved quorum
 	ConditionTypeQuorum = "Quorum"
@@ -99,21 +100,21 @@ const (
 )
 
 var ReplicatedVolumeReplicaConditions = map[string]struct{ UseObservedGeneration bool }{
-	ConditionTypeReady:                 {false},
-	ConditionTypeInitialSync:           {false},
-	ConditionTypeIsPrimary:             {false},
-	ConditionTypeDevicesReady:          {false},
-	ConditionTypeConfigurationAdjusted: {false},
-	ConditionTypeQuorum:                {false},
-	ConditionTypeDiskIOSuspended:       {false},
-	ConditionTypeAddressConfigured:     {false},
-	ConditionTypeBackingVolumeCreated:  {false},
-	ConditionTypeScheduled:             {false},
-	ConditionTypeInitialized:           {false},
-	ConditionTypeInQuorum:              {false},
-	ConditionTypeInSync:                {false},
-	ConditionTypeOnline:                {false},
-	ConditionTypeIOReady:               {false},
+	ConditionTypeReady:                {false},
+	ConditionTypeInitialSync:          {false},
+	ConditionTypeIsPrimary:            {false},
+	ConditionTypeDevicesReady:         {false},
+	ConditionTypeConfigured:           {false},
+	ConditionTypeQuorum:               {false},
+	ConditionTypeDiskIOSuspended:      {false},
+	ConditionTypeAddressConfigured:    {false},
+	ConditionTypeBackingVolumeCreated: {false},
+	ConditionTypeScheduled:            {false},
+	ConditionTypeDataInitialized:      {false},
+	ConditionTypeInQuorum:             {false},
+	ConditionTypeInSync:               {false},
+	ConditionTypeOnline:               {false},
+	ConditionTypeIOReady:              {false},
 }
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -159,7 +160,7 @@ const (
 	ReasonReady                 = "Ready"
 )
 
-// Condition reasons for [ConditionTypeConfigurationAdjusted] condition
+// Condition reasons for [ConditionTypeConfigured] condition
 const (
 	ReasonConfigurationFailed                           = "ConfigurationFailed"
 	ReasonMetadataCheckFailed                           = "MetadataCheckFailed"
@@ -228,6 +229,53 @@ const (
 	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
 	ReasonBackingVolumeReady          = "BackingVolumeReady"
 	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
+)
+
+// Condition reasons for [ConditionTypeDataInitialized] condition
+const (
+	// status=Unknown
+	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
+	// status=False
+	ReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
+	ReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
+	// status=True
+	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
+)
+
+// Condition reasons for [ConditionTypeInQuorum] condition
+const (
+	ReasonInQuorumInQuorum   = "InQuorum"
+	ReasonInQuorumQuorumLost = "QuorumLost"
+)
+
+// Condition reasons for [ConditionTypeInSync] condition
+const (
+	// status=True
+	ReasonInSync   = "InSync"
+	ReasonDiskless = "Diskless"
+
+	// status=False
+	ReasonDiskLost                    = "DiskLost"
+	ReasonAttaching                   = "Attaching"
+	ReasonDetaching                   = "Detaching"
+	ReasonFailed                      = "Failed"
+	ReasonNegotiating                 = "Negotiating"
+	ReasonInconsistent                = "Inconsistent"
+	ReasonOutdated                    = "Outdated"
+	ReasonUnknownDiskState            = "UnknownDiskState"
+	ReasonInSyncReplicaNotInitialized = "ReplicaNotInitialized"
+)
+
+// Condition reasons for [ConditionTypeConfigured] condition
+const (
+	// status=True
+	ReasonConfigured = "Configured"
+	// status=False
+	ReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
+	ReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
+	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
+	ReasonPromoteFailed                  = "PromoteFailed"
+	ReasonDemoteFailed                   = "DemoteFailed"
 )
 
 // Condition reasons for [ConditionTypeIOReady] condition (reserved, not used yet)

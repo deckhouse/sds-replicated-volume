@@ -249,19 +249,19 @@ type DRBDStatus struct {
 
 // +k8s:deepcopy-gen=true
 type DeviceStatus struct {
-	Volume       int    `json:"volume"`
-	Minor        int    `json:"minor"`
-	DiskState    string `json:"diskState"`
-	Client       bool   `json:"client"`
-	Open         bool   `json:"open"`
-	Quorum       bool   `json:"quorum"`
-	Size         int    `json:"size"`
-	Read         int    `json:"read"`
-	Written      int    `json:"written"`
-	ALWrites     int    `json:"alWrites"`
-	BMWrites     int    `json:"bmWrites"`
-	UpperPending int    `json:"upperPending"`
-	LowerPending int    `json:"lowerPending"`
+	Volume       int       `json:"volume"`
+	Minor        int       `json:"minor"`
+	DiskState    DiskState `json:"diskState"`
+	Client       bool      `json:"client"`
+	Open         bool      `json:"open"`
+	Quorum       bool      `json:"quorum"`
+	Size         int       `json:"size"`
+	Read         int       `json:"read"`
+	Written      int       `json:"written"`
+	ALWrites     int       `json:"alWrites"`
+	BMWrites     int       `json:"bmWrites"`
+	UpperPending int       `json:"upperPending"`
+	LowerPending int       `json:"lowerPending"`
 }
 
 // +k8s:deepcopy-gen=true
@@ -269,7 +269,7 @@ type ConnectionStatus struct {
 	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int                `json:"peerNodeId"`
 	Name            string             `json:"name"`
-	ConnectionState string             `json:"connectionState"`
+	ConnectionState ConnectionState    `json:"connectionState"`
 	Congested       bool               `json:"congested"`
 	Peerrole        string             `json:"peerRole"`
 	TLS             bool               `json:"tls"`
@@ -295,15 +295,15 @@ type HostStatus struct {
 
 // +k8s:deepcopy-gen=true
 type PeerDeviceStatus struct {
-	Volume                 int    `json:"volume"`
-	ReplicationState       string `json:"replicationState"`
-	PeerDiskState          string `json:"peerDiskState"`
-	PeerClient             bool   `json:"peerClient"`
-	ResyncSuspended        string `json:"resyncSuspended"`
-	OutOfSync              int    `json:"outOfSync"`
-	Pending                int    `json:"pending"`
-	Unacked                int    `json:"unacked"`
-	HasSyncDetails         bool   `json:"hasSyncDetails"`
-	HasOnlineVerifyDetails bool   `json:"hasOnlineVerifyDetails"`
-	PercentInSync          string `json:"percentInSync"`
+	Volume                 int              `json:"volume"`
+	ReplicationState       ReplicationState `json:"replicationState"`
+	PeerDiskState          DiskState        `json:"peerDiskState"`
+	PeerClient             bool             `json:"peerClient"`
+	ResyncSuspended        string           `json:"resyncSuspended"`
+	OutOfSync              int              `json:"outOfSync"`
+	Pending                int              `json:"pending"`
+	Unacked                int              `json:"unacked"`
+	HasSyncDetails         bool             `json:"hasSyncDetails"`
+	HasOnlineVerifyDetails bool             `json:"hasOnlineVerifyDetails"`
+	PercentInSync          string           `json:"percentInSync"`
 }
