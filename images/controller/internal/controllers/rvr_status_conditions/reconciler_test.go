@@ -31,7 +31,6 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 // conditionTestCase defines a test case for reconciler condition logic
@@ -357,7 +356,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 		agentPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "agent-" + nodeName,
-				Namespace: rv.ControllerConfigMapNamespace,
+				Namespace: v1alpha3.ModuleNamespace,
 				Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 			},
 			Spec: corev1.PodSpec{NodeName: nodeName},
@@ -451,7 +450,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "Initialized"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha3.ConditionTypeInitialized,
+			Type:   v1alpha3.ConditionTypeDataInitialized,
 			Status: status,
 			Reason: reason,
 		})

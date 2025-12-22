@@ -31,10 +31,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
-	. "github.com/deckhouse/sds-common-lib/utils"
+	u "github.com/deckhouse/sds-common-lib/utils"
 	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
@@ -89,12 +89,12 @@ func (s *Scanner) Run() error {
 		for ev := range s.processEvents(drbdsetup.ExecuteEvents2(s.ctx, &err)) {
 			s.log.Debug("added resource update event", "resource", ev)
 			if err := s.batcher.Add(ev); err != nil {
-				return LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
+				return u.LogError(s.log, fmt.Errorf("adding event to batcher: %w", err))
 			}
 		}
 
 		if err != nil && s.ctx.Err() == nil {
-			return LogError(s.log, fmt.Errorf("run events2: %w", err))
+			return u.LogError(s.log, fmt.Errorf("run events2: %w", err))
 		}
 
 		if err != nil && s.ctx.Err() != nil {
@@ -178,24 +178,24 @@ func (s *Scanner) ConsumeBatches() error {
 
 			statusResult, err := drbdsetup.ExecuteStatus(s.ctx)
 			if err != nil {
-				return LogError(log, fmt.Errorf("getting statusResult: %w", err))
+				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
 
-			rvrList := &v1alpha2.ReplicatedVolumeReplicaList{}
+			rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
 
 			// we expect this query to hit cache with index
 			err = s.cl.List(
 				s.ctx,
 				rvrList,
 				client.MatchingFieldsSelector{
-					Selector: (&v1alpha2.ReplicatedVolumeReplica{}).
+					Selector: (&v1alpha3.ReplicatedVolumeReplica{}).
 						NodeNameSelector(s.hostname),
 				},
 			)
 			if err != nil {
-				return LogError(log, fmt.Errorf("listing rvr: %w", err))
+				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 			}
 
 			for _, item := range batch {
@@ -215,8 +215,9 @@ func (s *Scanner) ConsumeBatches() error {
 
 				rvr, ok := uiter.Find(
 					uslices.Ptrs(rvrList.Items),
-					func(rvr *v1alpha2.ReplicatedVolumeReplica) bool {
-						return rvr.Spec.ReplicatedVolumeName == resourceName && rvr.IsConfigured()
+					func(rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+						// TODO
+						return rvr.Spec.ReplicatedVolumeName == resourceName
 					},
 				)
 				if !ok {
@@ -229,7 +230,7 @@ func (s *Scanner) ConsumeBatches() error {
 
 				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
 				if err != nil {
-					return LogError(
+					return u.LogError(
 						log,
 						fmt.Errorf("updating replica status: %w", err),
 					)
@@ -243,15 +244,22 @@ func (s *Scanner) ConsumeBatches() error {
 }
 
 func (s *Scanner) updateReplicaStatusIfNeeded(
-	rvr *v1alpha2.ReplicatedVolumeReplica,
+	rvr *v1alpha3.ReplicatedVolumeReplica,
 	resource *drbdsetup.Resource,
 ) error {
 	statusPatch := client.MergeFrom(rvr.DeepCopy())
 
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha2.DRBDStatus{}
+		rvr.Status.DRBD = &v1alpha3.DRBD{}
 	}
-	copyStatusFields(rvr.Status.DRBD, resource)
+	if rvr.Status.DRBD.Status == nil {
+		rvr.Status.DRBD.Status = &v1alpha3.DRBDStatus{}
+	}
+	copyStatusFields(rvr.Status.DRBD.Status, resource)
+
+	_ = rvr.UpdateStatusConditionDataInitialized()
+	_ = rvr.UpdateStatusConditionInQuorum()
+	_ = rvr.UpdateStatusConditionInSync()
 
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
@@ -261,7 +269,7 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 }
 
 func copyStatusFields(
-	target *v1alpha2.DRBDStatus,
+	target *v1alpha3.DRBDStatus,
 	source *drbdsetup.Resource,
 ) {
 	target.Name = source.Name
@@ -276,12 +284,12 @@ func copyStatusFields(
 	target.WriteOrdering = source.WriteOrdering
 
 	// Devices
-	target.Devices = make([]v1alpha2.DeviceStatus, 0, len(source.Devices))
+	target.Devices = make([]v1alpha3.DeviceStatus, 0, len(source.Devices))
 	for _, d := range source.Devices {
-		target.Devices = append(target.Devices, v1alpha2.DeviceStatus{
+		target.Devices = append(target.Devices, v1alpha3.DeviceStatus{
 			Volume:       d.Volume,
 			Minor:        d.Minor,
-			DiskState:    d.DiskState,
+			DiskState:    v1alpha3.ParseDiskState(d.DiskState),
 			Client:       d.Client,
 			Open:         d.Open,
 			Quorum:       d.Quorum,
@@ -296,12 +304,12 @@ func copyStatusFields(
 	}
 
 	// Connections
-	target.Connections = make([]v1alpha2.ConnectionStatus, 0, len(source.Connections))
+	target.Connections = make([]v1alpha3.ConnectionStatus, 0, len(source.Connections))
 	for _, c := range source.Connections {
-		conn := v1alpha2.ConnectionStatus{
+		conn := v1alpha3.ConnectionStatus{
 			PeerNodeId:      c.PeerNodeID,
 			Name:            c.Name,
-			ConnectionState: c.ConnectionState,
+			ConnectionState: v1alpha3.ParseConnectionState(c.ConnectionState),
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
@@ -310,15 +318,15 @@ func copyStatusFields(
 		}
 
 		// Paths
-		conn.Paths = make([]v1alpha2.PathStatus, 0, len(c.Paths))
+		conn.Paths = make([]v1alpha3.PathStatus, 0, len(c.Paths))
 		for _, p := range c.Paths {
-			conn.Paths = append(conn.Paths, v1alpha2.PathStatus{
-				ThisHost: v1alpha2.HostStatus{
+			conn.Paths = append(conn.Paths, v1alpha3.PathStatus{
+				ThisHost: v1alpha3.HostStatus{
 					Address: p.ThisHost.Address,
 					Port:    p.ThisHost.Port,
 					Family:  p.ThisHost.Family,
 				},
-				RemoteHost: v1alpha2.HostStatus{
+				RemoteHost: v1alpha3.HostStatus{
 					Address: p.RemoteHost.Address,
 					Port:    p.RemoteHost.Port,
 					Family:  p.RemoteHost.Family,
@@ -328,12 +336,12 @@ func copyStatusFields(
 		}
 
 		// Peer devices
-		conn.PeerDevices = make([]v1alpha2.PeerDeviceStatus, 0, len(c.PeerDevices))
+		conn.PeerDevices = make([]v1alpha3.PeerDeviceStatus, 0, len(c.PeerDevices))
 		for _, pd := range c.PeerDevices {
-			conn.PeerDevices = append(conn.PeerDevices, v1alpha2.PeerDeviceStatus{
+			conn.PeerDevices = append(conn.PeerDevices, v1alpha3.PeerDeviceStatus{
 				Volume:                 pd.Volume,
-				ReplicationState:       pd.ReplicationState,
-				PeerDiskState:          pd.PeerDiskState,
+				ReplicationState:       v1alpha3.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:          v1alpha3.ParseDiskState(pd.PeerDiskState),
 				PeerClient:             pd.PeerClient,
 				ResyncSuspended:        pd.ResyncSuspended,
 				OutOfSync:              pd.OutOfSync,

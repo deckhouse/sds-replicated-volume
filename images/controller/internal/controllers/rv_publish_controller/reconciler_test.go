@@ -67,7 +67,7 @@ var _ = Describe("Reconcile", func() {
 
 	JustBeforeEach(func() {
 		cl = builder.Build()
-		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}))
 	})
 
 	It("returns nil when ReplicatedVolume not found", func(ctx SpecContext) {

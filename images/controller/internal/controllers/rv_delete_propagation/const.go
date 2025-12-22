@@ -14,27 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rv
+package rvdeletepropagation
 
-type Request interface {
-	_isRequest()
-}
-
-// single resource was created or spec has changed
-type ResourceReconcileRequest struct {
-	Name                   string
-	PropagatedFromOwnedRVR bool
-	PropagatedFromOwnedLLV bool
-}
-
-func (r ResourceReconcileRequest) _isRequest() {}
-
-// single resource was deleted and needs cleanup
-type ResourceDeleteRequest struct {
-	Name string
-}
-
-func (r ResourceDeleteRequest) _isRequest() {}
-
-var _ Request = ResourceReconcileRequest{}
-var _ Request = ResourceDeleteRequest{}
+var ControllerName = "rv_delete_propagation_controller"

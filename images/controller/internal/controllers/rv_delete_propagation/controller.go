@@ -14,6 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rv
+package rvdeletepropagation
 
-const ControllerFinalizerName = "sds-replicated-volume.deckhouse.io/controller"
+import (
+	"log/slog"
+
+	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+)
+
+func BuildController(mgr manager.Manager) error {
+	log := slog.Default().With("name", ControllerName)
+
+	rec := NewReconciler(mgr.GetClient(), log)
+
+	return u.LogError(
+		log,
+		builder.ControllerManagedBy(mgr).
+			Named(ControllerName).
+			For(&v1alpha3.ReplicatedVolume{}).
+			Complete(rec))
+}

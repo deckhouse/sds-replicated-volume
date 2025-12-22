@@ -32,7 +32,6 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const (
@@ -248,7 +247,7 @@ func (r *Reconciler) syncTieBreakers(
 			rvr := &v1alpha3.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: rv.Name + "-tiebreaker-",
-					Finalizers:   []string{rvreconcile.ControllerFinalizerName},
+					Finalizers:   []string{v1alpha3.ControllerAppFinalizer},
 				},
 				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
