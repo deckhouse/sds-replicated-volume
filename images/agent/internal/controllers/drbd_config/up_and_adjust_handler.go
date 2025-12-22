@@ -28,7 +28,7 @@ import (
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
@@ -37,8 +37,8 @@ import (
 type UpAndAdjustHandler struct {
 	cl       client.Client
 	log      *slog.Logger
-	rvr      *v1alpha3.ReplicatedVolumeReplica
-	rv       *v1alpha3.ReplicatedVolume
+	rvr      *v1alpha1.ReplicatedVolumeReplica
+	rv       *v1alpha1.ReplicatedVolume
 	lvg      *snc.LVMVolumeGroup   // will be nil for rvr.spec.type != "Diskful"
 	llv      *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful"
 	nodeName string
@@ -67,7 +67,7 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 	var drbdErr drbdAPIError
 	if errors.As(err, &drbdErr) {
 		if h.rvr.Status.DRBD.Errors == nil {
-			h.rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+			h.rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 		}
 
 		drbdErr.WriteDRBDError(h.rvr.Status.DRBD.Errors)
@@ -86,11 +86,11 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 
 func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.rvr.DeepCopy())
-	if !slices.Contains(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer)
 	}
-	if !slices.Contains(h.rvr.Finalizers, v1alpha3.ControllerAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.ControllerAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching rvr finalizers: %w", err)
@@ -100,8 +100,8 @@ func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 
 func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.llv.DeepCopy())
-	if !slices.Contains(h.llv.Finalizers, v1alpha3.AgentAppFinalizer) {
-		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha3.AgentAppFinalizer)
+	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentAppFinalizer) {
+		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha1.AgentAppFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
 		return fmt.Errorf("patching llv finalizers: %w", err)
@@ -131,10 +131,10 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	// prepare patch for status errors/actual fields
 	if h.rvr.Status == nil {
-		h.rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		h.rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if h.rvr.Status.DRBD == nil {
-		h.rvr.Status.DRBD = &v1alpha3.DRBD{}
+		h.rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 
 	// validate that shared secret alg is supported
@@ -214,11 +214,11 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	// Set actual fields
 	if h.rvr.Status.DRBD.Actual == nil {
-		h.rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+		h.rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 	}
 	h.rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 	if h.llv != nil {
-		h.rvr.Status.DRBD.Actual.Disk = v1alpha3.SprintDRBDDisk(
+		h.rvr.Status.DRBD.Actual.Disk = v1alpha1.SprintDRBDDisk(
 			h.lvg.Spec.ActualVGNameOnTheNode,
 			h.llv.Spec.ActualLVNameOnTheNode,
 		)
@@ -318,7 +318,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 	res *v9.Resource,
 	nodeName string,
 	nodeID uint,
-	peerOptions *v1alpha3.Peer, // nil for current node
+	peerOptions *v1alpha1.Peer, // nil for current node
 ) {
 	isCurrentNode := peerOptions == nil
 
@@ -340,7 +340,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 		if h.llv == nil {
 			vol.Disk = &v9.VolumeDiskNone{}
 		} else {
-			vol.Disk = u.Ptr(v9.VolumeDisk(v1alpha3.SprintDRBDDisk(
+			vol.Disk = u.Ptr(v9.VolumeDisk(v1alpha1.SprintDRBDDisk(
 				h.lvg.Spec.ActualVGNameOnTheNode,
 				h.llv.Spec.ActualLVNameOnTheNode,
 			)))
@@ -373,7 +373,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 	}
 }
 
-func apiAddressToV9HostAddress(hostname string, address v1alpha3.Address) v9.HostAddress {
+func apiAddressToV9HostAddress(hostname string, address v1alpha1.Address) v9.HostAddress {
 	return v9.HostAddress{
 		Name:            hostname,
 		AddressWithPort: fmt.Sprintf("%s:%d", address.IPv4, address.Port),

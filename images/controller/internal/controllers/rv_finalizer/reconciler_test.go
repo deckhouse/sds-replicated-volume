@@ -29,13 +29,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
 )
 
 func TestReconciler_Reconcile(t *testing.T) {
 	scheme := runtime.NewScheme()
-	if err := v1alpha3.AddToScheme(scheme); err != nil {
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
 		t.Fatalf("adding scheme: %v", err)
 	}
 
@@ -50,7 +50,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name: "adds finalizer to new rv without rvrs",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:            "rv-new",
 						ResourceVersion: "1",
@@ -58,51 +58,51 @@ func TestReconciler_Reconcile(t *testing.T) {
 				},
 			},
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-new"}},
-			wantFin: []string{v1alpha3.ControllerAppFinalizer},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		{
 			name: "adds finalizer when rvr exists",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:            "rv-with-rvr",
 						ResourceVersion: "1",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-linked",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-with-rvr",
 						Type:                 "Diskful",
 					},
 				},
 			},
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-with-rvr"}},
-			wantFin: []string{v1alpha3.ControllerAppFinalizer},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		{
 			name: "keeps finalizer when rv not deleting",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:            "rv-with-finalizer",
-						Finalizers:      []string{v1alpha3.ControllerAppFinalizer},
+						Finalizers:      []string{v1alpha1.ControllerAppFinalizer},
 						ResourceVersion: "1",
 					},
 				},
 			},
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-with-finalizer"}},
-			wantFin: []string{v1alpha3.ControllerAppFinalizer},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		{
 			name: "removes finalizer when deleting and no rvrs",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:       "rv-cleanup",
-						Finalizers: []string{"other-finalizer", v1alpha3.ControllerAppFinalizer},
+						Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
 						DeletionTimestamp: func() *metav1.Time {
 							ts := metav1.NewTime(time.Now())
 							return &ts
@@ -117,10 +117,10 @@ func TestReconciler_Reconcile(t *testing.T) {
 		{
 			name: "keeps finalizer while deleting",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:       "rv-deleting",
-						Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+						Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 						DeletionTimestamp: func() *metav1.Time {
 							ts := metav1.NewTime(time.Now())
 							return &ts
@@ -128,23 +128,23 @@ func TestReconciler_Reconcile(t *testing.T) {
 						ResourceVersion: "1",
 					},
 				},
-				&v1alpha3.ReplicatedVolumeReplica{
+				&v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-for-deleting",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-deleting",
 						Type:                 "Diskful",
 					},
 				},
 			},
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-deleting"}},
-			wantFin: []string{v1alpha3.ControllerAppFinalizer},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		{
 			name: "does not add finalizer while deleting without rvrs",
 			objects: []client.Object{
-				&v1alpha3.ReplicatedVolume{
+				&v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rv-newly-deleting",
 						DeletionTimestamp: func() *metav1.Time {
@@ -181,7 +181,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				t.Errorf("Reconcile() = %v, want %v", got, tt.want)
 			}
 
-			rv := &v1alpha3.ReplicatedVolume{}
+			rv := &v1alpha1.ReplicatedVolume{}
 			if err := cl.Get(t.Context(), tt.req.NamespacedName, rv); err != nil {
 				t.Fatalf("fetching rv: %v", err)
 			}

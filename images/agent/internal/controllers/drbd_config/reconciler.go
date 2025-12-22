@@ -28,7 +28,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -69,7 +69,7 @@ func (r *Reconciler) Reconcile(
 	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
-		if v1alpha3.HasExternalFinalizers(rvr) {
+		if v1alpha1.HasExternalFinalizers(rvr) {
 			log.Info("non-agent finalizer found, ignore")
 			return reconcile.Result{}, nil
 		}
@@ -109,23 +109,23 @@ func (r *Reconciler) selectRVR(
 	ctx context.Context,
 	req reconcile.Request,
 	log *slog.Logger,
-) (*v1alpha3.ReplicatedVolume, *v1alpha3.ReplicatedVolumeReplica, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+) (*v1alpha1.ReplicatedVolume, *v1alpha1.ReplicatedVolumeReplica, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv) {
+	if !v1alpha1.HasControllerFinalizer(rv) {
 		log.Info("no controller finalizer on rv, skipping")
 		return rv, nil, nil
 	}
 
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		return nil, nil, u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 	}
 
-	var rvr *v1alpha3.ReplicatedVolumeReplica
+	var rvr *v1alpha1.ReplicatedVolumeReplica
 	for rvrItem := range uslices.Ptrs(rvrList.Items) {
 		if rvrItem.Spec.NodeName == r.nodeName && rvrItem.Spec.ReplicatedVolumeName == req.Name {
 			if rvr != nil {
@@ -182,7 +182,7 @@ func NewReconciler(cl client.Client, log *slog.Logger, nodeName string) *Reconci
 	}
 }
 
-func rvrFullyInitialized(log *slog.Logger, rv *v1alpha3.ReplicatedVolume, rvr *v1alpha3.ReplicatedVolumeReplica) bool {
+func rvrFullyInitialized(log *slog.Logger, rv *v1alpha1.ReplicatedVolume, rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	var logNotInitializedField = func(field string) {
 		log.Info("rvr not initialized", "field", field)
 	}

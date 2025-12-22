@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -45,8 +45,8 @@ import (
 type reconcileTestCase struct {
 	name string
 	//
-	rv   *v1alpha3.ReplicatedVolume
-	rvr  *v1alpha3.ReplicatedVolumeReplica
+	rv   *v1alpha1.ReplicatedVolume
+	rvr  *v1alpha1.ReplicatedVolumeReplica
 	llv  *snc.LVMLogicalVolume
 	lvg  *snc.LVMVolumeGroup
 	objs []client.Object
@@ -187,7 +187,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  disklessExpectedCommands(testRVName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha3.AgentAppFinalizer, v1alpha3.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
 			},
@@ -215,7 +215,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  diskfulExpectedCommands(testRVName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha3.AgentAppFinalizer, v1alpha3.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
 				expectString(t, rvr.Status.DRBD.Actual.Disk, "/dev/"+testLVGName+"/"+testDiskName, "actual disk")
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 			},
@@ -306,8 +306,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				cl := fake.NewClientBuilder().
 					WithScheme(scheme).
 					WithStatusSubresource(
-						&v1alpha3.ReplicatedVolumeReplica{},
-						&v1alpha3.ReplicatedVolume{},
+						&v1alpha1.ReplicatedVolumeReplica{},
+						&v1alpha1.ReplicatedVolume{},
 					).
 					WithObjects(tc.toObjects()...).
 					Build()
@@ -353,24 +353,24 @@ func (tc *reconcileTestCase) toObjects() (res []client.Object) {
 	return res
 }
 
-func testRV() *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func testRV() *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 	}
 }
 
-func rvWithoutSecret() *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha3.ReplicatedVolumeStatus{
-			DRBD: &v1alpha3.DRBDResource{
-				Config: &v1alpha3.DRBDResourceConfig{},
+		Status: &v1alpha1.ReplicatedVolumeStatus{
+			DRBD: &v1alpha1.DRBDResource{
+				Config: &v1alpha1.DRBDResourceConfig{},
 			},
 		},
 	}
@@ -380,12 +380,12 @@ func port(offset uint) uint {
 	return testPortBase + offset
 }
 
-func rvrSpecOnly(name string, rvrType string) *v1alpha3.ReplicatedVolumeReplica {
-	return &v1alpha3.ReplicatedVolumeReplica{
+func rvrSpecOnly(name string, rvrType string) *v1alpha1.ReplicatedVolumeReplica {
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrType,
@@ -393,33 +393,33 @@ func rvrSpecOnly(name string, rvrType string) *v1alpha3.ReplicatedVolumeReplica 
 	}
 }
 
-func disklessRVR(name string, address v1alpha3.Address, peers ...map[string]v1alpha3.Peer) *v1alpha3.ReplicatedVolumeReplica {
+func disklessRVR(name string, address v1alpha1.Address, peers ...map[string]v1alpha1.Peer) *v1alpha1.ReplicatedVolumeReplica {
 	return readyRVR(name, rvrTypeAccess, testNodeIDLocal, address, firstMapOrNil(peers), "")
 }
 
 //nolint:unparam // accepts name for readability and potential future cases
-func diskfulRVR(name string, address v1alpha3.Address, llvName string, peers ...map[string]v1alpha3.Peer) *v1alpha3.ReplicatedVolumeReplica {
+func diskfulRVR(name string, address v1alpha1.Address, llvName string, peers ...map[string]v1alpha1.Peer) *v1alpha1.ReplicatedVolumeReplica {
 	return readyRVR(name, rvrTypeDiskful, testNodeIDLocal, address, firstMapOrNil(peers), llvName)
 }
 
-func firstMapOrNil(ms []map[string]v1alpha3.Peer) map[string]v1alpha3.Peer {
+func firstMapOrNil(ms []map[string]v1alpha1.Peer) map[string]v1alpha1.Peer {
 	if len(ms) == 0 {
 		return nil
 	}
 	return ms[0]
 }
 
-func rvrWithErrors(rvr *v1alpha3.ReplicatedVolumeReplica) *v1alpha3.ReplicatedVolumeReplica {
+func rvrWithErrors(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.ReplicatedVolumeReplica {
 	r := rvr.DeepCopy()
 	if r.Status == nil {
-		r.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		r.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if r.Status.DRBD == nil {
-		r.Status.DRBD = &v1alpha3.DRBD{}
+		r.Status.DRBD = &v1alpha1.DRBD{}
 	}
-	r.Status.DRBD.Errors = &v1alpha3.DRBDErrors{
-		FileSystemOperationError: &v1alpha3.MessageError{Message: "old-fs-error"},
-		ConfigurationCommandError: &v1alpha3.CmdError{
+	r.Status.DRBD.Errors = &v1alpha1.DRBDErrors{
+		FileSystemOperationError: &v1alpha1.MessageError{Message: "old-fs-error"},
+		ConfigurationCommandError: &v1alpha1.CmdError{
 			Command:  "old-cmd",
 			Output:   "old-output",
 			ExitCode: 1,
@@ -458,17 +458,17 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 }
 
 //nolint:unparam // keep secret configurable for future scenarios
-func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
-			Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha3.ReplicatedVolumeStatus{
-			DRBD: &v1alpha3.DRBDResource{
-				Config: &v1alpha3.DRBDResourceConfig{
+		Status: &v1alpha1.ReplicatedVolumeStatus{
+			DRBD: &v1alpha1.DRBDResource{
+				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
-					SharedSecretAlg:         v1alpha3.SharedSecretAlg(alg),
+					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),
 					AllowTwoPrimaries:       allowTwoPrimaries,
 					DeviceMinor:             &deviceMinor,
 					Quorum:                  1,
@@ -483,57 +483,57 @@ func readyRVR(
 	name string,
 	rvrType string,
 	nodeID uint,
-	address v1alpha3.Address,
-	peers map[string]v1alpha3.Peer,
+	address v1alpha1.Address,
+	peers map[string]v1alpha1.Peer,
 	lvmLogicalVolumeName string,
-) *v1alpha3.ReplicatedVolumeReplica {
-	return &v1alpha3.ReplicatedVolumeReplica{
+) *v1alpha1.ReplicatedVolumeReplica {
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrType,
 		},
-		Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: lvmLogicalVolumeName,
-			DRBD: &v1alpha3.DRBD{
-				Config: &v1alpha3.DRBDConfig{
+			DRBD: &v1alpha1.DRBD{
+				Config: &v1alpha1.DRBDConfig{
 					NodeId:           &nodeID,
 					Address:          &address,
 					Peers:            peers,
 					PeersInitialized: true,
 				},
-				Actual: &v1alpha3.DRBDActual{},
+				Actual: &v1alpha1.DRBDActual{},
 			},
 		},
 	}
 }
 
-func deletingRVR(name, llvName string) *v1alpha3.ReplicatedVolumeReplica {
+func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 	now := v1.NewTime(time.Now())
 
-	return &v1alpha3.ReplicatedVolumeReplica{
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name:              name,
-			Finalizers:        []string{v1alpha3.AgentAppFinalizer},
+			Finalizers:        []string{v1alpha1.AgentAppFinalizer},
 			DeletionTimestamp: &now,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrTypeDiskful,
 		},
-		Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: llvName,
-			DRBD: &v1alpha3.DRBD{
-				Config: &v1alpha3.DRBDConfig{
+			DRBD: &v1alpha1.DRBD{
+				Config: &v1alpha1.DRBDConfig{
 					NodeId:           ptrUint(0),
-					Address:          &v1alpha3.Address{IPv4: testNodeIPv4, Port: port(3)},
+					Address:          &v1alpha1.Address{IPv4: testNodeIPv4, Port: port(3)},
 					PeersInitialized: true,
 				},
-				Actual: &v1alpha3.DRBDActual{},
+				Actual: &v1alpha1.DRBDActual{},
 			},
 		},
 	}
@@ -544,7 +544,7 @@ func newLLV(name, lvgName, lvName string) *snc.LVMLogicalVolume {
 	return &snc.LVMLogicalVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       name,
-			Finalizers: []string{v1alpha3.AgentAppFinalizer},
+			Finalizers: []string{v1alpha1.AgentAppFinalizer},
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: lvName,
@@ -619,29 +619,29 @@ func ptrUint(v uint) *uint {
 	return &v
 }
 
-func addr(ip string, port uint) v1alpha3.Address {
-	return v1alpha3.Address{IPv4: ip, Port: port}
+func addr(ip string, port uint) v1alpha1.Address {
+	return v1alpha1.Address{IPv4: ip, Port: port}
 }
 
 type peerSpec struct {
 	name     string
 	nodeID   uint
-	address  v1alpha3.Address
+	address  v1alpha1.Address
 	diskless bool
 }
 
-func peerDisklessSpec(name string, nodeID uint, address v1alpha3.Address) peerSpec {
+func peerDisklessSpec(name string, nodeID uint, address v1alpha1.Address) peerSpec {
 	return peerSpec{name: name, nodeID: nodeID, address: address, diskless: true}
 }
 
-func peerDiskfulSpec(name string, nodeID uint, address v1alpha3.Address) peerSpec {
+func peerDiskfulSpec(name string, nodeID uint, address v1alpha1.Address) peerSpec {
 	return peerSpec{name: name, nodeID: nodeID, address: address, diskless: false}
 }
 
-func peersFrom(specs ...peerSpec) map[string]v1alpha3.Peer {
-	peers := make(map[string]v1alpha3.Peer, len(specs))
+func peersFrom(specs ...peerSpec) map[string]v1alpha1.Peer {
+	peers := make(map[string]v1alpha1.Peer, len(specs))
 	for _, spec := range specs {
-		peers[spec.name] = v1alpha3.Peer{
+		peers[spec.name] = v1alpha1.Peer{
 			NodeId:   spec.nodeID,
 			Address:  spec.address,
 			Diskless: spec.diskless,
@@ -661,18 +661,18 @@ func diskfulExpectedCommandsWithExistingMetadata(rvName string) []*fakedrbdadm.E
 	}
 }
 
-func fetchRVR(t *testing.T, cl client.Client, name string) *v1alpha3.ReplicatedVolumeReplica {
+func fetchRVR(t *testing.T, cl client.Client, name string) *v1alpha1.ReplicatedVolumeReplica {
 	t.Helper()
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := cl.Get(t.Context(), types.NamespacedName{Name: name}, rvr); err != nil {
 		t.Fatalf("getting rvr %s: %v", name, err)
 	}
 	return rvr
 }
 
-func tryGetRVR(t *testing.T, cl client.Client, name string) (*v1alpha3.ReplicatedVolumeReplica, error) {
+func tryGetRVR(t *testing.T, cl client.Client, name string) (*v1alpha1.ReplicatedVolumeReplica, error) {
 	t.Helper()
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	return rvr, cl.Get(t.Context(), types.NamespacedName{Name: name}, rvr)
 }
 
@@ -728,7 +728,7 @@ func expectString(t *testing.T, got string, expected string, name string) {
 	}
 }
 
-func expectNoDRBDErrors(t *testing.T, errs *v1alpha3.DRBDErrors) {
+func expectNoDRBDErrors(t *testing.T, errs *v1alpha1.DRBDErrors) {
 	t.Helper()
 	if errs == nil {
 		return

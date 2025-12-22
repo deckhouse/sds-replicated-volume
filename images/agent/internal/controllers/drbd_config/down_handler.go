@@ -26,20 +26,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
 type DownHandler struct {
 	cl  client.Client
 	log *slog.Logger
-	rvr *v1alpha3.ReplicatedVolumeReplica
+	rvr *v1alpha1.ReplicatedVolumeReplica
 	llv *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful" or for non-initialized RVR
 }
 
 func (h *DownHandler) Handle(ctx context.Context) error {
 	for _, f := range h.rvr.Finalizers {
-		if f != v1alpha3.AgentAppFinalizer {
+		if f != v1alpha1.AgentAppFinalizer {
 			h.log.Info("non-agent finalizer found, ignore", "rvrName", h.rvr.Name)
 			return nil
 		}

@@ -20,7 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const ControllerName = "rvr-finalizer-release-controller"
@@ -34,6 +34,6 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(ControllerName).
-		For(&v1alpha3.ReplicatedVolumeReplica{}).
+		For(&v1alpha1.ReplicatedVolumeReplica{}).
 		Complete(rec)
 }

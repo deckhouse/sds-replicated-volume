@@ -34,7 +34,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 const (
@@ -159,12 +158,12 @@ func (r *Reconciler) handlePhaseError(
 
 // schedulingErrorToReason converts a scheduling error to rvNotReadyReason.
 func schedulingErrorToReason(err error) *rvNotReadyReason {
-	reason := v1alpha3.ReasonSchedulingFailed
+	reason := v1alpha1.ReasonSchedulingFailed
 	switch {
 	case errors.Is(err, errSchedulingTopologyConflict):
-		reason = v1alpha3.ReasonSchedulingTopologyConflict
+		reason = v1alpha1.ReasonSchedulingTopologyConflict
 	case errors.Is(err, errSchedulingNoCandidateNodes):
-		reason = v1alpha3.ReasonSchedulingNoCandidateNodes
+		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
 	}
 	return &rvNotReadyReason{
 		reason:  reason,
@@ -204,7 +203,7 @@ func (r *Reconciler) patchScheduledReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha3.ReasonSchedulingReplicaScheduled,
+			v1alpha1.ReasonSchedulingReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
@@ -222,7 +221,7 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 	log logr.Logger,
 ) error {
 	// Collect all scheduled replicas that were NOT scheduled in this cycle
-	alreadyScheduledReplicas := make([]*v1alpha3.ReplicatedVolumeReplica, 0)
+	alreadyScheduledReplicas := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
 	alreadyScheduledReplicas = append(alreadyScheduledReplicas, sctx.ScheduledDiskfulReplicas...)
 
 	// Also check for scheduled Access and TieBreaker replicas from RvrList
@@ -242,7 +241,7 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 			continue
 		}
 		// Skip Diskful as they are already in ScheduledDiskfulReplicas
-		if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			continue
 		}
 		alreadyScheduledReplicas = append(alreadyScheduledReplicas, rvr)
@@ -252,9 +251,9 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 		// Check if condition is already correct
 		var cond *metav1.Condition
 		if rvr.Status != nil {
-			cond = meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			cond = meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeScheduled)
 		}
-		if cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == v1alpha3.ReasonSchedulingReplicaScheduled {
+		if cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == v1alpha1.ReasonSchedulingReplicaScheduled {
 			continue // Already correct
 		}
 
@@ -263,7 +262,7 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha3.ReasonSchedulingReplicaScheduled,
+			v1alpha1.ReasonSchedulingReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on existing RVR %s: %w", rvr.Name, err)
@@ -275,38 +274,38 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
 // Returns nil if ready, or a reason struct if not ready.
-func isRVReadyToSchedule(rv *v1alpha3.ReplicatedVolume) *rvNotReadyReason {
+func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) *rvNotReadyReason {
 	if rv.Status == nil {
 		return &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingPending,
+			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume status is not initialized",
 		}
 	}
 
 	if rv.Finalizers == nil {
 		return &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingPending,
+			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume has no finalizers",
 		}
 	}
 
-	if !slices.Contains(rv.Finalizers, v1alpha3.ControllerAppFinalizer) {
+	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer) {
 		return &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingPending,
+			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume is missing controller finalizer",
 		}
 	}
 
 	if rv.Spec.ReplicatedStorageClassName == "" {
 		return &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingPending,
+			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedStorageClassName is not specified in ReplicatedVolume spec",
 		}
 	}
 
 	if rv.Spec.Size.IsZero() {
 		return &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingPending,
+			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume size is zero in ReplicatedVolume spec",
 		}
 	}
@@ -320,7 +319,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	log logr.Logger,
 ) (*SchedulingContext, *rvNotReadyReason) {
 	// Fetch the target ReplicatedVolume for this reconcile request.
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		// If the volume no longer exists, exit reconciliation without error.
 		if apierrors.IsNotFound(err) {
@@ -329,7 +328,7 @@ func (r *Reconciler) prepareSchedulingContext(
 		}
 		log.Error(err, "unable to get ReplicatedVolume")
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedVolume: %v", err),
 		}
 	}
@@ -344,23 +343,23 @@ func (r *Reconciler) prepareSchedulingContext(
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
 		log.Error(err, "unable to get ReplicatedStorageClass")
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedStorageClass: %v", err),
 		}
 	}
 
 	// List all ReplicatedVolumeReplica resources in the cluster.
-	replicaList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, replicaList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to list ReplicatedVolumeReplica: %v", err),
 		}
 	}
 
 	// Keep only replicas that belong to this RV and are not being deleted.
-	var replicasForRV []*v1alpha3.ReplicatedVolumeReplica
+	var replicasForRV []*v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range replicaList.Items {
 		if rvr.Spec.ReplicatedVolumeName != rv.Name || !rvr.DeletionTimestamp.IsZero() {
 			continue
@@ -372,7 +371,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
 		log.Error(err, "unable to get ReplicatedStoragePool", "name", rsc.Spec.StoragePool)
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedStoragePool: %v", err),
 		}
 	}
@@ -380,7 +379,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsp, log)
 	if err != nil {
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get LVG to nodes mapping: %v", err),
 		}
 	}
@@ -399,15 +398,15 @@ func (r *Reconciler) prepareSchedulingContext(
 	nodeNameToZone, err := r.getNodeNameToZoneMap(ctx, log)
 	if err != nil {
 		return nil, &rvNotReadyReason{
-			reason:  v1alpha3.ReasonSchedulingFailed,
+			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get node to zone mapping: %v", err),
 		}
 	}
 
 	publishOnList := getPublishOnNodeList(rv)
-	scheduledDiskfulReplicas, unscheduledDiskfulReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeDiskful)
-	_, unscheduledAccessReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeAccess)
-	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(replicasForRV, v1alpha3.ReplicaTypeTieBreaker)
+	scheduledDiskfulReplicas, unscheduledDiskfulReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeDiskful)
+	_, unscheduledAccessReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeAccess)
+	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeTieBreaker)
 	publishNodesWithoutAnyReplica := getPublishNodesWithoutAnyReplica(publishOnList, nodesWithRVReplica)
 
 	schedulingCtx := &SchedulingContext{
@@ -467,7 +466,7 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	sctx.Log.V(1).Info("publishOn bonus applied")
 
 	// Assign replicas: for Diskful count only Diskful replicas for zone balancing, strict mode (must place all)
-	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha3.ReplicaTypeDiskful, false)
+	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha1.ReplicaTypeDiskful, false)
 	if err != nil {
 		return err
 	}
@@ -487,10 +486,10 @@ func (r *Reconciler) scheduleDiskfulPhase(
 // Note: This function returns the list of replicas that were assigned nodes in this call.
 func (r *Reconciler) assignReplicasToNodes(
 	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
 	replicaTypeFilter string,
 	bestEffort bool,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
+) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
 		sctx.Log.Info("no unscheduled replicas to assign", "rv", sctx.Rv.Name)
 		return nil, nil
@@ -513,9 +512,9 @@ func (r *Reconciler) assignReplicasToNodes(
 // Returns the list of replicas that were assigned nodes.
 func (r *Reconciler) assignReplicasIgnoredTopology(
 	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
 	bestEffort bool,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
+) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	sctx.Log.V(1).Info("assigning replicas with Ignored topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
 	// Collect all candidates from all zones
 	var allCandidates []NodeCandidate
@@ -525,7 +524,7 @@ func (r *Reconciler) assignReplicasIgnoredTopology(
 	sctx.Log.V(2).Info("collected candidates", "count", len(allCandidates))
 
 	// Assign nodes to replicas
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
+	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range unscheduledReplicas {
 		selectedNode, remaining := SelectAndRemoveBestNode(allCandidates)
 		if selectedNode == "" {
@@ -551,9 +550,9 @@ func (r *Reconciler) assignReplicasIgnoredTopology(
 // Returns the list of replicas that were assigned nodes.
 func (r *Reconciler) assignReplicasZonalTopology(
 	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
 	bestEffort bool,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
+) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	sctx.Log.V(1).Info("assigning replicas with Zonal topology", "replicasCount", len(unscheduledReplicas), "bestEffort", bestEffort)
 	// Find the best zone by combined metric: totalScore * len(candidates)
 	// This ensures zones with more nodes are preferred when scores are comparable
@@ -584,7 +583,7 @@ func (r *Reconciler) assignReplicasZonalTopology(
 	sctx.Log.V(1).Info("selected best zone", "zone", bestZone, "score", bestZoneScore)
 
 	// Assign nodes to replicas
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
+	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range unscheduledReplicas {
 		selectedNode, remaining := SelectAndRemoveBestNode(sctx.ZonesToNodeCandidatesMap[bestZone])
 		if selectedNode == "" {
@@ -610,9 +609,9 @@ func (r *Reconciler) assignReplicasZonalTopology(
 // Returns the list of replicas that were assigned nodes.
 func (r *Reconciler) assignReplicasTransZonalTopology(
 	sctx *SchedulingContext,
-	unscheduledReplicas []*v1alpha3.ReplicatedVolumeReplica,
+	unscheduledReplicas []*v1alpha1.ReplicatedVolumeReplica,
 	replicaTypeFilter string,
-) ([]*v1alpha3.ReplicatedVolumeReplica, error) {
+) ([]*v1alpha1.ReplicatedVolumeReplica, error) {
 	if len(unscheduledReplicas) == 0 {
 		return nil, nil
 	}
@@ -636,7 +635,7 @@ func (r *Reconciler) assignReplicasTransZonalTopology(
 	}
 
 	// For each unscheduled replica, pick the zone with fewest replicas, then best node
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
+	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
 	for i, rvr := range unscheduledReplicas {
 		sctx.Log.V(2).Info("scheduling replica", "index", i, "rvr", rvr.Name)
 
@@ -738,7 +737,7 @@ func (r *Reconciler) scheduleAccessPhase(
 	nodesToFill := min(len(candidateNodes), len(sctx.UnscheduledAccessReplicas))
 	sctx.Log.V(1).Info("Access phase: scheduling replicas", "nodesToFill", nodesToFill)
 
-	var assignedReplicas []*v1alpha3.ReplicatedVolumeReplica
+	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
 	for i := range nodesToFill {
 		nodeName := candidateNodes[i]
 		rvr := sctx.UnscheduledAccessReplicas[i]
@@ -800,12 +799,12 @@ func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []stri
 	return candidateNodes
 }
 
-func getPublishOnNodeList(rv *v1alpha3.ReplicatedVolume) []string {
+func getPublishOnNodeList(rv *v1alpha1.ReplicatedVolume) []string {
 	return slices.Clone(rv.Spec.PublishOn)
 }
 
 func getNodesWithRVReplicaSet(
-	replicasForRV []*v1alpha3.ReplicatedVolumeReplica,
+	replicasForRV []*v1alpha1.ReplicatedVolumeReplica,
 ) map[string]struct{} {
 	// Build a set of nodes that already host at least one replica of this RV.
 	nodesWithAnyReplica := make(map[string]struct{})
@@ -820,9 +819,9 @@ func getNodesWithRVReplicaSet(
 }
 
 func getTypedReplicasLists(
-	replicasForRV []*v1alpha3.ReplicatedVolumeReplica,
+	replicasForRV []*v1alpha1.ReplicatedVolumeReplica,
 	replicaType string,
-) (scheduled, unscheduled []*v1alpha3.ReplicatedVolumeReplica) {
+) (scheduled, unscheduled []*v1alpha1.ReplicatedVolumeReplica) {
 	// Collect replicas of the given type, separating them by NodeName assignment.
 	for _, rvr := range replicasForRV {
 		if rvr.Spec.Type != replicaType {
@@ -841,7 +840,7 @@ func getTypedReplicasLists(
 // setScheduledConditionOnRVR sets the Scheduled condition on a single RVR.
 func (r *Reconciler) setScheduledConditionOnRVR(
 	ctx context.Context,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	status metav1.ConditionStatus,
 	reason string,
 	message string,
@@ -849,13 +848,13 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 	patch := client.MergeFrom(rvr.DeepCopy())
 
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	changed := meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:               v1alpha3.ConditionTypeScheduled,
+			Type:               v1alpha1.ConditionTypeScheduled,
 			Status:             status,
 			Reason:             reason,
 			Message:            message,
@@ -879,12 +878,12 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 // belonging to the given RV when the RV is not ready for scheduling.
 func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	notReadyReason *rvNotReadyReason,
 	log logr.Logger,
 ) error {
 	// List all ReplicatedVolumeReplica resources in the cluster.
-	replicaList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, replicaList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
 		return err
@@ -1142,7 +1141,7 @@ func (r *Reconciler) applyCapacityFilterAndScoreCandidates(
 // If replicaType is not empty, only replicas of that type are counted.
 // If replicaType is empty, all replica types are counted.
 func countReplicasByZone(
-	replicas []*v1alpha3.ReplicatedVolumeReplica,
+	replicas []*v1alpha1.ReplicatedVolumeReplica,
 	replicaType string,
 	nodeNameToZone map[string]string,
 ) map[string]int {

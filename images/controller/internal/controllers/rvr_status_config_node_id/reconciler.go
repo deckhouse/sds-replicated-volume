@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -52,7 +52,7 @@ func (r *Reconciler) Reconcile(
 	log.Info("Reconciling")
 
 	// Get the ReplicatedVolume (parent resource)
-	var rv v1alpha3.ReplicatedVolume
+	var rv v1alpha1.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("ReplicatedVolume not found, probably deleted")
@@ -65,14 +65,14 @@ func (r *Reconciler) Reconcile(
 	// List all RVRs and filter by replicatedVolumeName
 	// Note: We list all RVRs and filter in memory instead of using owner reference index
 	// to avoid requiring a custom index field setup in the manager.
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "listing RVRs")
 		return reconcile.Result{}, err
 	}
 
 	// Filter by replicatedVolumeName (required field, always present)
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha1.ReplicatedVolumeReplica) bool {
 		return item.Spec.ReplicatedVolumeName != rv.Name
 	})
 
@@ -87,20 +87,20 @@ func (r *Reconciler) Reconcile(
 	// - RVRs without nodeID: add to rvrsNeedingNodeID list
 	// - RVRs with invalid nodeID: log and ignore. TODO: Revisit this in spec
 	usedNodeIDs := make(map[uint]struct{})
-	var rvrsNeedingNodeID []v1alpha3.ReplicatedVolumeReplica
+	var rvrsNeedingNodeID []v1alpha1.ReplicatedVolumeReplica
 
 	for _, item := range rvrList.Items {
 		// Check if Config exists and has valid nodeID
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
 			nodeID := *item.Status.DRBD.Config.NodeId
-			if v1alpha3.IsValidNodeID(nodeID) {
+			if v1alpha1.IsValidNodeID(nodeID) {
 				usedNodeIDs[nodeID] = struct{}{}
 				continue
 			}
 			// NOTE: Logging invalid nodeID is NOT in the spec.
 			// This was added to improve observability - administrators can see invalid nodeIDs in logs.
 			// To revert: remove this log line.
-			log.V(1).Info("ignoring nodeID outside valid range", "nodeID", nodeID, "validRange", v1alpha3.FormatValidNodeIDRange(), "rvr", item.Name, "volume", rv.Name)
+			log.V(1).Info("ignoring nodeID outside valid range", "nodeID", nodeID, "validRange", v1alpha1.FormatValidNodeIDRange(), "rvr", item.Name, "volume", rv.Name)
 			continue
 		}
 		// RVR needs nodeID assignment
@@ -114,8 +114,8 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// Find available nodeIDs (not in usedNodeIDs map)
-	availableNodeIDs := make([]uint, 0, int(v1alpha3.RVRMaxNodeID)+1)
-	for i := v1alpha3.RVRMinNodeID; i <= v1alpha3.RVRMaxNodeID; i++ {
+	availableNodeIDs := make([]uint, 0, int(v1alpha1.RVRMaxNodeID)+1)
+	for i := v1alpha1.RVRMinNodeID; i <= v1alpha1.RVRMaxNodeID; i++ {
 		if _, exists := usedNodeIDs[i]; !exists {
 			availableNodeIDs = append(availableNodeIDs, i)
 		}
@@ -130,7 +130,7 @@ func (r *Reconciler) Reconcile(
 			"needed", len(rvrsNeedingNodeID),
 			"available", len(availableNodeIDs),
 			"replicas", totalReplicas,
-			"max", int(v1alpha3.RVRMaxNodeID)+1,
+			"max", int(v1alpha1.RVRMaxNodeID)+1,
 			"volume", rv.Name,
 		)
 	}
@@ -153,7 +153,7 @@ func (r *Reconciler) Reconcile(
 				rv.Name,
 				len(rvrsNeedingNodeID)-i,
 				len(usedNodeIDs),
-				int(v1alpha3.RVRMaxNodeID)+1,
+				int(v1alpha1.RVRMaxNodeID)+1,
 			)
 			log.Error(err, "no more available nodeIDs, remaining RVRs will be assigned only after some replicas are removed")
 			return reconcile.Result{}, err
@@ -164,13 +164,13 @@ func (r *Reconciler) Reconcile(
 		from := client.MergeFrom(rvr)
 		changedRVR := rvr.DeepCopy()
 		if changedRVR.Status == nil {
-			changedRVR.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			changedRVR.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 		}
 		if changedRVR.Status.DRBD == nil {
-			changedRVR.Status.DRBD = &v1alpha3.DRBD{}
+			changedRVR.Status.DRBD = &v1alpha1.DRBD{}
 		}
 		if changedRVR.Status.DRBD.Config == nil {
-			changedRVR.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+			changedRVR.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 		}
 		changedRVR.Status.DRBD.Config.NodeId = &nodeID
 

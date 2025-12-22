@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestRvrVolume(t *testing.T) {
@@ -116,7 +116,7 @@ func NotHaveFinalizer(finalizerName string) gomegatypes.GomegaMatcher {
 
 // BeDiskful returns a matcher that checks if RVR is diskful
 func BeDiskful() gomegatypes.GomegaMatcher {
-	return HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful))
+	return HaveField("Spec.Type", Equal(v1alpha1.ReplicaTypeDiskful))
 }
 
 // BeNonDiskful returns a matcher that checks if RVR is not diskful
@@ -139,12 +139,12 @@ func NotHaveDeletionTimestamp() gomegatypes.GomegaMatcher {
 // HaveBackingVolumeCreatedCondition returns a matcher that checks if RVR has BackingVolumeCreated condition
 // with the specified status and reason.
 func HaveBackingVolumeCreatedCondition(status metav1.ConditionStatus, reason string) gomegatypes.GomegaMatcher {
-	return gcustom.MakeMatcher(func(rvr *v1alpha3.ReplicatedVolumeReplica) (bool, error) {
+	return gcustom.MakeMatcher(func(rvr *v1alpha1.ReplicatedVolumeReplica) (bool, error) {
 		if rvr.Status == nil || rvr.Status.Conditions == nil {
 			return false, nil
 		}
 		for _, cond := range rvr.Status.Conditions {
-			if cond.Type == v1alpha3.ConditionTypeBackingVolumeCreated {
+			if cond.Type == v1alpha1.ConditionTypeBackingVolumeCreated {
 				return cond.Status == status && cond.Reason == reason, nil
 			}
 		}
@@ -155,29 +155,29 @@ func HaveBackingVolumeCreatedCondition(status metav1.ConditionStatus, reason str
 // HaveBackingVolumeCreatedConditionReady is a convenience matcher that checks if
 // the BackingVolumeCreated condition is True with ReasonBackingVolumeReady.
 func HaveBackingVolumeCreatedConditionReady() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeReady)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeReady)
 }
 
 // HaveBackingVolumeCreatedConditionNotReady is a convenience matcher that checks if
 // the BackingVolumeCreated condition is False with ReasonBackingVolumeNotReady.
 func HaveBackingVolumeCreatedConditionNotReady() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeNotReady)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady)
 }
 
 // HaveBackingVolumeCreatedConditionNotApplicable is a convenience matcher that checks if
 // the BackingVolumeCreated condition is False with ReasonNotApplicable.
 func HaveBackingVolumeCreatedConditionNotApplicable() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha3.ReasonNotApplicable)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonNotApplicable)
 }
 
 // HaveBackingVolumeCreatedConditionCreationFailed is a convenience matcher that checks if
 // the BackingVolumeCreated condition is False with ReasonBackingVolumeCreationFailed.
 func HaveBackingVolumeCreatedConditionCreationFailed() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeCreationFailed)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeCreationFailed)
 }
 
 // HaveBackingVolumeCreatedConditionDeletionFailed is a convenience matcher that checks if
 // the BackingVolumeCreated condition is True with ReasonBackingVolumeDeletionFailed.
 func HaveBackingVolumeCreatedConditionDeletionFailed() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeDeletionFailed)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeDeletionFailed)
 }

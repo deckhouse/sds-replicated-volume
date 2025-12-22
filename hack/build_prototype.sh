@@ -19,17 +19,27 @@ set -e
 cd images/agent
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ./out ./cmd
 rm -f ./out
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
 echo "agent ok"
 cd - > /dev/null
 
 cd images/controller
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ./out ./cmd
 rm -f ./out
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
 echo "controller ok"
+cd - > /dev/null
+
+cd images/csi-driver
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ./out ./cmd
+rm -f ./out
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
+echo "csi-driver ok"
 cd - > /dev/null
 
 cd api
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w" -o ./out ./v1alpha1
 rm -f ./out
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go test ./...
 echo "api ok"
 cd - > /dev/null

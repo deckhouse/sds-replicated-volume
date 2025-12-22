@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func TestRvrStatusConfigPeers(t *testing.T) {
@@ -50,11 +50,11 @@ func HaveNoPeers() gomegatypes.GomegaMatcher {
 
 // HaveAllPeersSet is a matcher factory that returns a Gomega matcher for a single RVR
 // It checks that the RVR has all other RVRs from expectedResources as peers but his own
-func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
+func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) gomegatypes.GomegaMatcher {
 	if len(expectedPeerReplicas) < 2 {
 		return HaveNoPeers()
 	}
-	expectedPeers := make(map[string]v1alpha3.Peer, len(expectedPeerReplicas)-1)
+	expectedPeers := make(map[string]v1alpha1.Peer, len(expectedPeerReplicas)-1)
 	for _, rvr := range expectedPeerReplicas {
 		if rvr.Status == nil {
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
@@ -65,7 +65,7 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) go
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
 				WithMessage("expected rvr to have status.drbd.config, but it's nil")
 		}
-		expectedPeers[rvr.Spec.NodeName] = v1alpha3.Peer{
+		expectedPeers[rvr.Spec.NodeName] = v1alpha1.Peer{
 			NodeId:   *rvr.Status.DRBD.Config.NodeId,
 			Address:  *rvr.Status.DRBD.Config.Address,
 			Diskless: rvr.Spec.IsDiskless(),
@@ -73,9 +73,9 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) go
 	}
 	return SatisfyAll(
 		HaveField("Status.DRBD.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
-		WithTransform(func(rvr v1alpha3.ReplicatedVolumeReplica) map[string]v1alpha3.Peer {
+		WithTransform(func(rvr v1alpha1.ReplicatedVolumeReplica) map[string]v1alpha1.Peer {
 			ret := maps.Clone(rvr.Status.DRBD.Config.Peers)
-			ret[rvr.Spec.NodeName] = v1alpha3.Peer{
+			ret[rvr.Spec.NodeName] = v1alpha1.Peer{
 				NodeId:   *rvr.Status.DRBD.Config.NodeId,
 				Address:  *rvr.Status.DRBD.Config.Address,
 				Diskless: rvr.Spec.IsDiskless(),
@@ -86,17 +86,17 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha3.ReplicatedVolumeReplica) go
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
-func makeReady(rvr *v1alpha3.ReplicatedVolumeReplica, nodeID uint, address v1alpha3.Address) {
+func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alpha1.Address) {
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha3.DRBD{}
+		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 
 	if rvr.Status.DRBD.Config == nil {
-		rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+		rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 	}
 
 	rvr.Status.DRBD.Config.NodeId = &nodeID

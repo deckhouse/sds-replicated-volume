@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha3
+package v1alpha1
 
 import (
 	"fmt"
@@ -26,8 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rvr
@@ -66,7 +65,7 @@ func (rvr *ReplicatedVolumeReplica) SetReplicatedVolume(rv *ReplicatedVolume, sc
 	return controllerutil.SetControllerReference(rv, rvr, scheme)
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
@@ -89,7 +88,7 @@ func (s *ReplicatedVolumeReplicaSpec) IsDiskless() bool {
 	return s.Type != "Diskful"
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type Peer struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=7
@@ -103,7 +102,7 @@ type Peer struct {
 	Diskless bool `json:"diskless,omitempty"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type Address struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`
@@ -114,7 +113,7 @@ type Address struct {
 	Port uint `json:"port"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeReplicaStatus struct {
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -134,8 +133,7 @@ type ReplicatedVolumeReplicaStatus struct {
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
 }
 
-// +k8s:deepcopy-gen=true
-// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+// +kubebuilder:object:generate=true
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 type ReplicatedVolumeReplicaList struct {
@@ -144,7 +142,7 @@ type ReplicatedVolumeReplicaList struct {
 	Items           []ReplicatedVolumeReplica `json:"items"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDConfig struct {
 	// TODO: forbid changing properties more then once
 	// +kubebuilder:validation:Minimum=0
@@ -170,7 +168,7 @@ type DRBDConfig struct {
 	Primary *bool `json:"primary,omitempty"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBD struct {
 	// +patchStrategy=merge
 	Config *DRBDConfig `json:"config,omitempty" patchStrategy:"merge"`
@@ -182,7 +180,7 @@ type DRBD struct {
 	Errors *DRBDErrors `json:"errors,omitempty" patchStrategy:"merge"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDErrors struct {
 	// +patchStrategy=merge
 	FileSystemOperationError *MessageError `json:"fileSystemOperationError,omitempty" patchStrategy:"merge"`
@@ -196,7 +194,7 @@ type DRBDErrors struct {
 	LastSecondaryError *CmdError `json:"lastSecondaryError,omitempty" patchStrategy:"merge"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDActual struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^(/[a-zA-Z0-9/.+_-]+)?$`
@@ -229,7 +227,7 @@ func ParseDRBDDisk(disk string) (actualVGNameOnTheNode, actualLVNameOnTheNode st
 	return parts[2], parts[3], nil
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DRBDStatus struct {
 	Name string `json:"name"`
 	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
@@ -246,7 +244,7 @@ type DRBDStatus struct {
 	Connections      []ConnectionStatus `json:"connections"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type DeviceStatus struct {
 	Volume       int       `json:"volume"`
 	Minor        int       `json:"minor"`
@@ -263,7 +261,7 @@ type DeviceStatus struct {
 	LowerPending int       `json:"lowerPending"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type ConnectionStatus struct {
 	//nolint:revive // var-naming: PeerNodeId kept for API compatibility with JSON tag
 	PeerNodeId      int                `json:"peerNodeId"`
@@ -278,21 +276,21 @@ type ConnectionStatus struct {
 	PeerDevices     []PeerDeviceStatus `json:"peerDevices"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type PathStatus struct {
 	ThisHost    HostStatus `json:"thisHost"`
 	RemoteHost  HostStatus `json:"remoteHost"`
 	Established bool       `json:"established"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type HostStatus struct {
 	Address string `json:"address"`
 	Port    int    `json:"port"`
 	Family  string `json:"family"`
 }
 
-// +k8s:deepcopy-gen=true
+// +kubebuilder:object:generate=true
 type PeerDeviceStatus struct {
 	Volume                 int              `json:"volume"`
 	ReplicationState       ReplicationState `json:"replicationState"`

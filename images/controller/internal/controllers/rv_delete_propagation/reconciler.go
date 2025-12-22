@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -45,7 +45,7 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			r.log.Info("ReplicatedVolume not found, probably deleted", "req", req)
@@ -61,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing rvrs: %w", err)
 	}
@@ -81,6 +81,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func linkedRVRsNeedToBeDeleted(rv *v1alpha3.ReplicatedVolume) bool {
+func linkedRVRsNeedToBeDeleted(rv *v1alpha1.ReplicatedVolume) bool {
 	return rv.DeletionTimestamp == nil
 }

@@ -32,7 +32,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -197,9 +196,9 @@ func CreateReplicatedVolume(
 	kc client.Client,
 	log *logger.Logger,
 	traceID, name string,
-	rvSpec v1alpha3.ReplicatedVolumeSpec,
-) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{
+	rvSpec srv.ReplicatedVolumeSpec,
+) (*srv.ReplicatedVolume, error) {
+	rv := &srv.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:            name,
 			OwnerReferences: []metav1.OwnerReference{},
@@ -215,8 +214,8 @@ func CreateReplicatedVolume(
 }
 
 // GetReplicatedVolume gets a ReplicatedVolume resource
-func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+func GetReplicatedVolume(ctx context.Context, kc client.Client, name string) (*srv.ReplicatedVolume, error) {
+	rv := &srv.ReplicatedVolume{}
 	err := kc.Get(ctx, client.ObjectKey{Name: name}, rv)
 	return rv, err
 }
@@ -254,7 +253,7 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.Status != nil {
-			readyCond := meta.FindStatusCondition(rv.Status.Conditions, v1alpha3.ConditionTypeReady)
+			readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ConditionTypeReady)
 			if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
 				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready", traceID, name))
 				return attemptCounter, nil
@@ -294,7 +293,7 @@ func DeleteReplicatedVolume(ctx context.Context, kc client.Client, log *logger.L
 	return err
 }
 
-func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *v1alpha3.ReplicatedVolume, finalizer string) (bool, error) {
+func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log *logger.Logger, rv *srv.ReplicatedVolume, finalizer string) (bool, error) {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		removed := false
 		for i, val := range rv.Finalizers {
@@ -339,8 +338,8 @@ func removervdeletepropagationIfExist(ctx context.Context, kc client.Client, log
 }
 
 // GetReplicatedVolumeReplicaForNode gets ReplicatedVolumeReplica for a specific node
-func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*v1alpha3.ReplicatedVolumeReplica, error) {
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, volumeName, nodeName string) (*srv.ReplicatedVolumeReplica, error) {
+	rvrList := &srv.ReplicatedVolumeReplicaList{}
 	err := kc.List(
 		ctx,
 		rvrList,
@@ -361,7 +360,7 @@ func GetReplicatedVolumeReplicaForNode(ctx context.Context, kc client.Client, vo
 }
 
 // GetDRBDDevicePath gets DRBD device path from ReplicatedVolumeReplica status
-func GetDRBDDevicePath(rvr *v1alpha3.ReplicatedVolumeReplica) (string, error) {
+func GetDRBDDevicePath(rvr *srv.ReplicatedVolumeReplica) (string, error) {
 	if rvr.Status == nil || rvr.Status.DRBD == nil ||
 		rvr.Status.DRBD.Status == nil || len(rvr.Status.DRBD.Status.Devices) == 0 {
 		return "", fmt.Errorf("DRBD status not available or no devices found")
@@ -372,7 +371,7 @@ func GetDRBDDevicePath(rvr *v1alpha3.ReplicatedVolumeReplica) (string, error) {
 }
 
 // ExpandReplicatedVolume expands a ReplicatedVolume
-func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *v1alpha3.ReplicatedVolume, newSize resource.Quantity) error {
+func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.ReplicatedVolume, newSize resource.Quantity) error {
 	rv.Spec.Size = newSize
 	return kc.Update(ctx, rv)
 }
@@ -382,8 +381,8 @@ func BuildReplicatedVolumeSpec(
 	size resource.Quantity,
 	publishRequested []string,
 	rscName string,
-) v1alpha3.ReplicatedVolumeSpec {
-	return v1alpha3.ReplicatedVolumeSpec{
+) srv.ReplicatedVolumeSpec {
+	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
 		PublishOn:                  publishRequested,
 		ReplicatedStorageClassName: rscName,

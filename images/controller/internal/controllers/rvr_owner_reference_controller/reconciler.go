@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -48,12 +48,12 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *R
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() && !v1alpha3.HasExternalFinalizers(rvr) {
+	if !rvr.DeletionTimestamp.IsZero() && !v1alpha1.HasExternalFinalizers(rvr) {
 		return reconcile.Result{}, nil
 	}
 
@@ -61,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rvr.Spec.ReplicatedVolumeName}, rv); err != nil {
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
@@ -89,6 +89,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func ownerReferencesUnchanged(before, after *v1alpha3.ReplicatedVolumeReplica) bool {
+func ownerReferencesUnchanged(before, after *v1alpha1.ReplicatedVolumeReplica) bool {
 	return reflect.DeepEqual(before.OwnerReferences, after.OwnerReferences)
 }

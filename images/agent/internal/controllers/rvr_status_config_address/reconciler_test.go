@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigaddress "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/rvr_status_config_address"
 )
 
@@ -42,7 +42,7 @@ var _ = Describe("Reconciler", func() {
 	s := scheme.Scheme
 	Expect(metav1.AddMetaToScheme(s)).To(Succeed())
 	Expect(corev1.AddToScheme(s)).To(Succeed())
-	Expect(v1alpha3.AddToScheme(s)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(s)).To(Succeed())
 
 	var (
 		builder *fake.ClientBuilder
@@ -57,8 +57,8 @@ var _ = Describe("Reconciler", func() {
 		builder = fake.NewClientBuilder().
 			WithScheme(s).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{},
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{},
 				&corev1.Node{},
 			)
 
@@ -152,39 +152,39 @@ var _ = Describe("Reconciler", func() {
 
 	When("RVs and RVRs created", func() {
 		var (
-			rvList           []v1alpha3.ReplicatedVolume
-			rvrList          []v1alpha3.ReplicatedVolumeReplica
-			otherNodeRVRList []v1alpha3.ReplicatedVolumeReplica
+			rvList           []v1alpha1.ReplicatedVolume
+			rvrList          []v1alpha1.ReplicatedVolumeReplica
+			otherNodeRVRList []v1alpha1.ReplicatedVolumeReplica
 		)
 
 		BeforeEach(func() {
 			const count = 3
 
-			rvList = make([]v1alpha3.ReplicatedVolume, count)
-			rvrList = make([]v1alpha3.ReplicatedVolumeReplica, count)
-			otherNodeRVRList = make([]v1alpha3.ReplicatedVolumeReplica, count)
+			rvList = make([]v1alpha1.ReplicatedVolume, count)
+			rvrList = make([]v1alpha1.ReplicatedVolumeReplica, count)
+			otherNodeRVRList = make([]v1alpha1.ReplicatedVolumeReplica, count)
 
 			for i := range count {
-				rvList[i] = v1alpha3.ReplicatedVolume{
+				rvList[i] = v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("test-rv-%d", i+1)},
 				}
 
-				rvrList[i] = v1alpha3.ReplicatedVolumeReplica{
+				rvrList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-this-node", i+1)},
-					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
-						DRBD:       &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{}}},
+						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
 				}
 				rvrList[i].Spec.NodeName = node.Name
 				Expect(rvrList[i].SetReplicatedVolume(&rvList[i], s)).To(Succeed())
 
-				otherNodeRVRList[i] = v1alpha3.ReplicatedVolumeReplica{
+				otherNodeRVRList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-other-node", i+1)},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "other-node"},
-					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "other-node"},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
-						DRBD:       &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{}}},
+						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
 				}
 				Expect(otherNodeRVRList[i].SetReplicatedVolume(&rvList[i], s)).To(Succeed())
@@ -205,7 +205,7 @@ var _ = Describe("Reconciler", func() {
 
 		It("should filter out RVRs on other nodes and not configure addresses", func(ctx SpecContext) {
 			By("Saving previous versions")
-			prev := make([]v1alpha3.ReplicatedVolumeReplica, len(otherNodeRVRList))
+			prev := make([]v1alpha1.ReplicatedVolumeReplica, len(otherNodeRVRList))
 			for i := range otherNodeRVRList {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&otherNodeRVRList[i]), &prev[i])).To(Succeed())
 			}
@@ -222,7 +222,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("single RVR", func() {
 			var (
-				rvr *v1alpha3.ReplicatedVolumeReplica
+				rvr *v1alpha1.ReplicatedVolumeReplica
 			)
 			BeforeEach(func() {
 				rvrList = rvrList[:1]
@@ -242,9 +242,9 @@ var _ = Describe("Reconciler", func() {
 
 				By("verifying condition was set")
 				Expect(rvr).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
+					HaveField("Type", Equal(v1alpha1.ConditionTypeAddressConfigured)),
 					HaveField("Status", Equal(metav1.ConditionTrue)),
-					HaveField("Reason", Equal(v1alpha3.ReasonAddressConfigurationSucceeded)),
+					HaveField("Reason", Equal(v1alpha1.ReasonAddressConfigurationSucceeded)),
 				))))
 			})
 
@@ -268,8 +268,8 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR has different IP address", func() {
 				BeforeEach(func() {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{Config: &v1alpha3.DRBDConfig{Address: &v1alpha3.Address{
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{
 							IPv4: "192.168.1.99", // different IP
 							Port: 7500,
 						}}},
@@ -336,9 +336,9 @@ var _ = Describe("Reconciler", func() {
 				By("verifying second RVR has error condition")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), &rvrList[1])).To(Succeed())
 				Expect(rvrList[1].Status.Conditions).To(ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha3.ConditionTypeAddressConfigured)),
+					HaveField("Type", Equal(v1alpha1.ConditionTypeAddressConfigured)),
 					HaveField("Status", Equal(metav1.ConditionFalse)),
-					HaveField("Reason", Equal(v1alpha3.ReasonNoFreePortAvailable)),
+					HaveField("Reason", Equal(v1alpha1.ReasonNoFreePortAvailable)),
 				)))
 			})
 		})
@@ -348,7 +348,7 @@ var _ = Describe("Reconciler", func() {
 
 // HaveUniquePorts returns a matcher that checks if all RVRs have unique ports set.
 func HaveUniquePorts() gomegatypes.GomegaMatcher {
-	return gcustom.MakeMatcher(func(list []v1alpha3.ReplicatedVolumeReplica) (bool, error) {
+	return gcustom.MakeMatcher(func(list []v1alpha1.ReplicatedVolumeReplica) (bool, error) {
 		result := make(map[uint]struct{}, len(list))
 		for i := range list {
 			if list[i].Status == nil ||

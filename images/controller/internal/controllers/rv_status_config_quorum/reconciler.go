@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
@@ -62,7 +61,7 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithValues("request", req.NamespacedName).WithName("Reconcile")
 	log.V(1).Info("Reconciling")
 
-	var rv v1alpha3.ReplicatedVolume
+	var rv v1alpha1.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
 		if client.IgnoreNotFound(err) == nil {
 			log.V(1).Info("ReplicatedVolume not found, probably deleted")
@@ -72,7 +71,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha3.HasControllerFinalizer(&rv) {
+	if !v1alpha1.HasControllerFinalizer(&rv) {
 		log.V(1).Info("no controller finalizer on ReplicatedVolume, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -87,14 +86,14 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	var rvrList v1alpha3.ReplicatedVolumeReplicaList
+	var rvrList v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &rvrList); err != nil {
 		log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
 		return reconcile.Result{}, err
 	}
 
 	// Removing non owned
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		return !metav1.IsControlledBy(&rvr, &rv)
 	})
 
@@ -102,14 +101,14 @@ func (r *Reconciler) Reconcile(
 	// Keeping only without deletion timestamp
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
-		func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp != nil && !v1alpha3.HasExternalFinalizers(&rvr)
+		func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
+			return rvr.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(&rvr)
 		},
 	)
 
 	diskfulCount := 0
 	for _, rvr := range rvrList.Items {
-		if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			diskfulCount++
 		}
 	}
@@ -146,17 +145,17 @@ func (r *Reconciler) Reconcile(
 }
 
 func updateReplicatedVolumeIfNeeded(
-	rvStatus *v1alpha3.ReplicatedVolumeStatus,
+	rvStatus *v1alpha1.ReplicatedVolumeStatus,
 	diskfulCount,
 	all int,
 	replication string,
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
-		rvStatus.DRBD = &v1alpha3.DRBDResource{}
+		rvStatus.DRBD = &v1alpha1.DRBDResource{}
 	}
 	if rvStatus.DRBD.Config == nil {
-		rvStatus.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		rvStatus.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
 	}
 
 	changed = rvStatus.DRBD.Config.Quorum != quorum ||
@@ -176,7 +175,7 @@ func CalculateQuorum(diskfulCount, all int, replication string) (quorum, qmr byt
 		quorum = byte(max(2, all/2+1))
 
 		// QMR should only be set when ReplicatedStorageClass.spec.replication == ConsistencyAndAvailability
-		if replication == v1alpha3.ReplicationConsistencyAndAvailability {
+		if replication == v1alpha1.ReplicationConsistencyAndAvailability {
 			qmr = byte(max(2, diskfulCount/2+1))
 		}
 	}
@@ -208,12 +207,12 @@ func parseDiskfulReplicaCount(diskfulReplicaCount string) (current, desired int,
 	return current, desired, nil
 }
 
-func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus, log logr.Logger) bool {
+func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool {
 	current, desired, err := parseDiskfulReplicaCount(rvStatus.DiskfulReplicaCount)
 	if err != nil {
 		log.V(1).Info("failed to parse diskfulReplicaCount", "error", err)
 		return false
 	}
 
-	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeConfigured)
+	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ConditionTypeConfigured)
 }

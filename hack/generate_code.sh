@@ -20,23 +20,10 @@ cd api
 
 # crds
 go get sigs.k8s.io/controller-tools/cmd/controller-gen
-
 go run sigs.k8s.io/controller-tools/cmd/controller-gen \
-    crd paths=./v1alpha3 output:crd:dir=../crds
-
-# deep copy
-
-go get k8s.io/code-generator/cmd/deepcopy-gen
-
-go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
-    --output-file zz_generated.deepcopy.go \
-    --go-header-file ../hack/boilerplate.txt \
-    ./v1alpha1
-
-go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
-    --output-file zz_generated.deepcopy.go \
-    --go-header-file ../hack/boilerplate.txt \
-    ./v1alpha3
+    object:headerFile=../hack/boilerplate.txt \
+    crd paths=./v1alpha1 output:crd:dir=../crds \
+    paths=./v1alpha1
 
 # remove development dependencies
 go mod tidy

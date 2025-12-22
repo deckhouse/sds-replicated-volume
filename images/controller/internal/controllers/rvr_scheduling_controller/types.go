@@ -22,28 +22,27 @@ import (
 	"github.com/go-logr/logr"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type SchedulingContext struct {
 	Log                            logr.Logger
-	Rv                             *v1alpha3.ReplicatedVolume
+	Rv                             *v1alpha1.ReplicatedVolume
 	Rsc                            *v1alpha1.ReplicatedStorageClass
 	Rsp                            *v1alpha1.ReplicatedStoragePool
-	RvrList                        []*v1alpha3.ReplicatedVolumeReplica
+	RvrList                        []*v1alpha1.ReplicatedVolumeReplica
 	PublishOnNodes                 []string
 	NodesWithAnyReplica            map[string]struct{}
 	PublishOnNodesWithoutRvReplica []string
-	UnscheduledDiskfulReplicas     []*v1alpha3.ReplicatedVolumeReplica
-	ScheduledDiskfulReplicas       []*v1alpha3.ReplicatedVolumeReplica
-	UnscheduledAccessReplicas      []*v1alpha3.ReplicatedVolumeReplica
-	UnscheduledTieBreakerReplicas  []*v1alpha3.ReplicatedVolumeReplica
+	UnscheduledDiskfulReplicas     []*v1alpha1.ReplicatedVolumeReplica
+	ScheduledDiskfulReplicas       []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledAccessReplicas      []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledTieBreakerReplicas  []*v1alpha1.ReplicatedVolumeReplica
 	RspLvgToNodeInfoMap            map[string]LvgInfo // {lvgName: {NodeName, ThinPoolName}}
 	RspNodesWithoutReplica         []string
 	NodeNameToZone                 map[string]string          // {nodeName: zoneName}
 	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
 	// RVRs with nodes assigned in this reconcile
-	RVRsToSchedule []*v1alpha3.ReplicatedVolumeReplica
+	RVRsToSchedule []*v1alpha1.ReplicatedVolumeReplica
 }
 
 type NodeCandidate struct {
@@ -78,7 +77,7 @@ type LvgInfo struct {
 // It removes assigned replicas from the appropriate unscheduled list based on their type,
 // adds them to ScheduledDiskfulReplicas (for Diskful type),
 // adds the assigned nodes to NodesWithAnyReplica, and removes them from PublishOnNodesWithoutRvReplica.
-func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha3.ReplicatedVolumeReplica) {
+func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha1.ReplicatedVolumeReplica) {
 	if len(assignedReplicas) == 0 {
 		return
 	}
@@ -94,8 +93,8 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 
 	// Remove assigned replicas from appropriate unscheduled list based on type
 	switch replicaType {
-	case v1alpha3.ReplicaTypeDiskful:
-		var remainingUnscheduled []*v1alpha3.ReplicatedVolumeReplica
+	case v1alpha1.ReplicaTypeDiskful:
+		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
 		for _, rvr := range sctx.UnscheduledDiskfulReplicas {
 			if _, assigned := assignedSet[rvr.Name]; !assigned {
 				remainingUnscheduled = append(remainingUnscheduled, rvr)
@@ -105,8 +104,8 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 		// Add assigned Diskful replicas to ScheduledDiskfulReplicas
 		sctx.ScheduledDiskfulReplicas = append(sctx.ScheduledDiskfulReplicas, assignedReplicas...)
 
-	case v1alpha3.ReplicaTypeAccess:
-		var remainingUnscheduled []*v1alpha3.ReplicatedVolumeReplica
+	case v1alpha1.ReplicaTypeAccess:
+		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
 		for _, rvr := range sctx.UnscheduledAccessReplicas {
 			if _, assigned := assignedSet[rvr.Name]; !assigned {
 				remainingUnscheduled = append(remainingUnscheduled, rvr)
@@ -114,8 +113,8 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 		}
 		sctx.UnscheduledAccessReplicas = remainingUnscheduled
 
-	case v1alpha3.ReplicaTypeTieBreaker:
-		var remainingUnscheduled []*v1alpha3.ReplicatedVolumeReplica
+	case v1alpha1.ReplicaTypeTieBreaker:
+		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
 		for _, rvr := range sctx.UnscheduledTieBreakerReplicas {
 			if _, assigned := assignedSet[rvr.Name]; !assigned {
 				remainingUnscheduled = append(remainingUnscheduled, rvr)

@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -36,7 +36,7 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RVStatusConfigDeviceMinorControllerName).
-		For(&v1alpha3.ReplicatedVolume{}).
+		For(&v1alpha1.ReplicatedVolume{}).
 		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
 		Complete(rec)
 }

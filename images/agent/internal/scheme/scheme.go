@@ -25,7 +25,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 func New() (*runtime.Scheme, error) {
@@ -35,7 +34,6 @@ func New() (*runtime.Scheme, error) {
 		corev1.AddToScheme,
 		storagev1.AddToScheme,
 		v1alpha1.AddToScheme,
-		v1alpha3.AddToScheme,
 		snc.AddToScheme,
 	}
 

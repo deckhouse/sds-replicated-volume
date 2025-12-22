@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // EnqueueNodeByRVR returns a event handler that enqueues the node for reconciliation
@@ -35,9 +35,9 @@ import (
 func EnqueueNodeByRVRFunc(nodeName string, log logr.Logger) handler.MapFunc {
 	log = log.WithName("Watches").WithValues("type", "ReplicatedVolumeReplica")
 	return func(_ context.Context, obj client.Object) []reconcile.Request {
-		rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica)
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
 		if !ok {
-			log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha3.ReplicatedVolumeReplica")
+			log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha1.ReplicatedVolumeReplica")
 			return nil
 		}
 		// Only watch RVRs on the node
@@ -56,10 +56,10 @@ func SkipWhenRVRNodeNameNotUpdatedPred(log logr.Logger) predicate.Funcs {
 	log = log.WithName("Predicate").WithValues("type", "ReplicatedVolumeReplica")
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldRVR, ok1 := e.ObjectOld.(*v1alpha3.ReplicatedVolumeReplica)
-			newRVR, ok2 := e.ObjectNew.(*v1alpha3.ReplicatedVolumeReplica)
+			oldRVR, ok1 := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
+			newRVR, ok2 := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
 			if !ok1 || !ok2 {
-				log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha3.ReplicatedVolumeReplica")
+				log.Error(nil, "Can't cast ReplicatedVolumeReplica to *v1alpha1.ReplicatedVolumeReplica")
 				return false
 			}
 			// Enqueue if NodeName changed (shouldn't happen, but handle it)
