@@ -169,11 +169,12 @@ func printCheckerStats(stats []*runners.CheckerStats) {
 		fmt.Fprintf(os.Stdout, "%-40s %20d %20d\n", s.RVName, ioReady, quorum)
 
 		// Categorize RV state
-		if ioReady == 0 && quorum == 0 {
+		switch {
+		case ioReady == 0 && quorum == 0:
 			stableCount++ // No issues at all
-		} else if ioReady%2 == 1 || quorum%2 == 1 {
+		case ioReady%2 == 1 || quorum%2 == 1:
 			brokenCount++ // Odd = still in bad state
-		} else {
+		default:
 			recoveredCount++ // Even >0 = had issues but recovered
 		}
 	}

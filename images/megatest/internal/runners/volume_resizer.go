@@ -18,6 +18,7 @@ package runners
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
@@ -70,5 +71,5 @@ func (v *VolumeResizer) Run(ctx context.Context) error {
 func (v *VolumeResizer) doResize(ctx context.Context) error {
 	v.log.Debug("resizing volume -------------------------------------")
 	_ = ctx
-	return nil
+	return errors.New("resize not implemented")
 }
