@@ -347,9 +347,8 @@ func (rvr *ReplicatedVolumeReplica) validateStatusDRBDStatusNotNil() error {
 func reasonForStatusTrue(diskful bool) string {
 	if diskful {
 		return ReasonInSync
-	} else {
-		return ReasonDiskless
 	}
+	return ReasonDiskless
 }
 
 func reasonForStatusFalseFromDiskState(diskState DiskState) string {

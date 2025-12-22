@@ -377,7 +377,7 @@ func (r *Reconciler) patchRVRPrimary(
 		rvr.Status.DRBD.Config.Primary = &shouldBePrimary
 	}
 
-	rvr.UpdateStatusConditionPublished(shouldBePrimary)
+	_ = rvr.UpdateStatusConditionPublished(shouldBePrimary)
 
 	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -400,7 +400,7 @@ func (r *Reconciler) patchRVRStatusConditions(
 		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
 	}
 
-	rvr.UpdateStatusConditionPublished(shouldBePrimary)
+	_ = rvr.UpdateStatusConditionPublished(shouldBePrimary)
 
 	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		if !apierrors.IsNotFound(err) {
