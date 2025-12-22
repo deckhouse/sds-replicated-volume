@@ -82,7 +82,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+	if !v1alpha3.HasControllerFinalizer(&rv) {
 		log.V(1).Info("no controller finalizer on ReplicatedVolume, skipping")
 		return reconcile.Result{}, nil
 	}

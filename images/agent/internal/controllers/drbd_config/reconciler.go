@@ -117,7 +117,7 @@ func (r *Reconciler) selectRVR(
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+	if !v1alpha3.HasControllerFinalizer(rv) {
 		log.Info("no controller finalizer on rv, skipping")
 		return rv, nil, nil
 	}

@@ -61,7 +61,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !v1alpha3.HasControllerFinalizer(rv.ObjectMeta) {
+	if !v1alpha3.HasControllerFinalizer(rv) {
 		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
 		return reconcile.Result{}, nil
 	}
