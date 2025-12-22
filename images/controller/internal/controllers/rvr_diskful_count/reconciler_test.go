@@ -153,29 +153,64 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("ReplicatedVolume has deletionTimestamp", func() {
-			const finalizer = "test-finalizer"
-			BeforeEach(func() {
-				rv.Finalizers = []string{finalizer}
+			const externalFinalizer = "test-finalizer"
+
+			When("has only controller finalizer", func() {
+				BeforeEach(func() {
+					rv.Finalizers = []string{v1alpha3.ControllerAppFinalizer}
+				})
+
+				JustBeforeEach(func(ctx SpecContext) {
+					By("Deleting rv")
+					Expect(cl.Delete(ctx, rv)).To(Succeed())
+
+					By("Checking if it has DeletionTimestamp")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
+						Succeed(),
+						"rv should not be deleted because it has controller finalizer",
+					)
+
+					Expect(rv).To(SatisfyAll(
+						HaveField("Finalizers", ContainElement(v1alpha3.ControllerAppFinalizer)),
+						HaveField("DeletionTimestamp", Not(BeNil())),
+					))
+				})
+
+				It("should do nothing and return no error", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				})
 			})
 
-			JustBeforeEach(func(ctx SpecContext) {
-				By("Deleting rv")
-				Expect(cl.Delete(ctx, rv)).To(Succeed())
+			When("has external finalizer in addition to controller finalizer", func() {
+				BeforeEach(func() {
+					rv.Finalizers = []string{v1alpha3.ControllerAppFinalizer, externalFinalizer}
+					// ensure replication is defined so reconcile path can proceed
+					rsc.Spec.Replication = v1alpha3.ReplicationNone
+				})
 
-				By("Checking if it has DeletionTimestamp")
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
-					Succeed(),
-					"rv should not be deleted because it has finalizer",
-				)
+				JustBeforeEach(func(ctx SpecContext) {
+					By("Deleting rv")
+					Expect(cl.Delete(ctx, rv)).To(Succeed())
 
-				Expect(rv).To(SatisfyAll(
-					HaveField("Finalizers", ContainElement(finalizer)),
-					HaveField("DeletionTimestamp", Not(BeNil())),
-				))
-			})
+					By("Checking if it has DeletionTimestamp and external finalizer")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
+						Succeed(),
+						"rv should not be deleted because it has finalizers",
+					)
 
-			It("should do nothing and return no error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					Expect(rv).To(SatisfyAll(
+						HaveField("Finalizers", ContainElement(externalFinalizer)),
+						HaveField("DeletionTimestamp", Not(BeNil())),
+					))
+				})
+
+				It("still processes RV (creates replicas)", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					Expect(cl.List(ctx, rvrList)).To(Succeed())
+					Expect(rvrList.Items).ToNot(BeEmpty())
+				})
 			})
 		})
 

@@ -113,7 +113,7 @@ func (r *Reconciler) Reconcile(
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
 		func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp != nil
+			return rvr.DeletionTimestamp != nil && !v1alpha3.HasExternalFinalizers(&rvr)
 		},
 	)
 
