@@ -210,8 +210,12 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 
 func (m *MultiVolume) startPodDestroyers(ctx context.Context, agentCfg config.PodDestroyerConfig, controllerCfg config.PodDestroyerConfig) {
 	// Start agent destroyer
-	go NewPodDestroyer(agentCfg, m.client).Run(ctx)
+	go func() {
+		_ = NewPodDestroyer(agentCfg, m.client).Run(ctx)
+	}()
 
 	// Start controller destroyer
-	go NewPodDestroyer(controllerCfg, m.client).Run(ctx)
+	go func() {
+		_ = NewPodDestroyer(controllerCfg, m.client).Run(ctx)
+	}()
 }

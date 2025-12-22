@@ -57,13 +57,12 @@ func (p *PodDestroyer) Run(ctx context.Context) error {
 	for {
 		// Wait random duration before delete
 		if err := waitRandomWithContext(ctx, p.cfg.Period); err != nil {
-			return nil
+			return err
 		}
 
 		// Perform delete
 		if err := p.doDestroy(ctx); err != nil {
 			p.log.Error("destroy failed", "error", err)
-			// Continue even on failure
 		}
 	}
 }

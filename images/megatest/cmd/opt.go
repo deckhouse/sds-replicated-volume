@@ -34,7 +34,7 @@ type Opt struct {
 	StepPeriodMax   time.Duration
 	VolumePeriodMin time.Duration
 	VolumePeriodMax time.Duration
-	//LogLevel        string
+	// LogLevel        string
 
 	// Disable flags for goroutines
 	DisablePodDestroyer           bool
@@ -66,9 +66,9 @@ func (o *Opt) Parse() {
 				return errors.New("storage-classes flag is required")
 			}
 
-			//if !regexp.MustCompile(`^debug$|^info$|^warn$|^error$`).MatchString(o.LogLevel) {
-			//	return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
-			//}
+			// if !regexp.MustCompile(`^debug$|^info$|^warn$|^error$`).MatchString(o.LogLevel) {
+			// 	return errors.New("invalid 'log-level' (allowed values: debug, info, warn, error)")
+			// }
 
 			if o.VolumeStepMin < 1 {
 				return errors.New("volume-step-min must be at least 1")
@@ -118,7 +118,7 @@ func (o *Opt) Parse() {
 	rootCmd.Flags().DurationVarP(&o.StepPeriodMax, "step-period-max", "", 30*time.Second, "Maximum wait between ReplicatedVolume creation steps")
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMin, "volume-period-min", "", 60*time.Second, "Minimum ReplicatedVolume lifetime")
 	rootCmd.Flags().DurationVarP(&o.VolumePeriodMax, "volume-period-max", "", 300*time.Second, "Maximum ReplicatedVolume lifetime")
-	//rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
+	// rootCmd.Flags().StringVarP(&o.LogLevel, "log-level", "", "info", "Log level (allowed values: debug, info, warn, error)")
 
 	// Disable flags for goroutines
 	rootCmd.Flags().BoolVarP(&o.DisablePodDestroyer, "disable-pod-destroyer", "", false, "Disable pod-destroyer goroutines")
