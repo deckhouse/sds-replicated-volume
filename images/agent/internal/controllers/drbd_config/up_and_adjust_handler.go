@@ -73,6 +73,10 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 		drbdErr.WriteDRBDError(h.rvr.Status.DRBD.Errors)
 	}
 
+	if err := h.rvr.UpdateStatusConditionConfigured(); err != nil {
+		return err
+	}
+
 	if patchErr := h.cl.Status().Patch(ctx, h.rvr, statusPatch); patchErr != nil {
 		return fmt.Errorf("patching status: %w", errors.Join(patchErr, err))
 	}
@@ -192,18 +196,6 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		}
 	}
 
-	// Set actual fields
-	if h.rvr.Status.DRBD.Actual == nil {
-		h.rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
-	}
-	h.rvr.Status.DRBD.Actual.InitialSyncCompleted = true
-	if h.llv != nil {
-		h.rvr.Status.DRBD.Actual.Disk = v1alpha3.SprintDRBDDisk(
-			h.lvg.Spec.ActualVGNameOnTheNode,
-			h.llv.Spec.ActualLVNameOnTheNode,
-		)
-	}
-
 	// up & adjust
 	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
 	if err != nil {
@@ -219,6 +211,20 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
 		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
 	}
+
+	// Set actual fields
+	if h.rvr.Status.DRBD.Actual == nil {
+		h.rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+	}
+	h.rvr.Status.DRBD.Actual.InitialSyncCompleted = true
+	if h.llv != nil {
+		h.rvr.Status.DRBD.Actual.Disk = v1alpha3.SprintDRBDDisk(
+			h.lvg.Spec.ActualVGNameOnTheNode,
+			h.llv.Spec.ActualLVNameOnTheNode,
+		)
+	}
+
+	h.rvr.Status.ActualType = h.rvr.Spec.Type
 
 	return nil
 }

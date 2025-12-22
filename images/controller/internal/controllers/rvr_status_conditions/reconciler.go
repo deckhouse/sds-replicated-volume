@@ -179,7 +179,7 @@ func (r *Reconciler) calculateOnline(rvr *v1alpha3.ReplicatedVolumeReplica, agen
 	}
 
 	// Check Initialized condition
-	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeInitialized)
+	initializedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeDataInitialized)
 	if initializedCond == nil || initializedCond.Status != metav1.ConditionTrue {
 		reason, message := extractReasonAndMessage(initializedCond, v1alpha3.ReasonUninitialized, "Initialized")
 		return metav1.ConditionFalse, reason, message
