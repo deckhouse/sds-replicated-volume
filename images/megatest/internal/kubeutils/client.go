@@ -367,12 +367,13 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVo
 	return rv, nil
 }
 
-// IsRVReady checks if a ReplicatedVolume is in IOReady condition
+// IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
 func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
 	if rv.Status == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady) &&
+		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
 }
 
 // PatchRV patches a ReplicatedVolume using merge patch strategy
