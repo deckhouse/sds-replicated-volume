@@ -93,8 +93,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Check if ReplicatedVolume is Ready
-	// TODO: condition type v1alpha1.ConditionTypeReady is used here!
+	// Check if ReplicatedVolume is IOReady
 	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
 	if err != nil {
 		log.Error(err, "checking ReplicatedVolume")
@@ -256,8 +255,8 @@ func (r *Reconciler) rvrIsReady(rvr *v1alpha1.ReplicatedVolumeReplica) (bool, st
 	return true, ""
 }
 
-// rvIsReady checks if the ReplicatedVolume is Ready.
-// It returns true if the ReplicatedVolume exists and has Ready condition set to True,
+// rvIsReady checks if the ReplicatedVolume is IOReady.
+// It returns true if the ReplicatedVolume exists and has IOReady condition set to True,
 // false if the condition is not True, and an error if the ReplicatedVolume cannot be retrieved.
 func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error) {
 	rv := &v1alpha1.ReplicatedVolume{}
@@ -274,5 +273,5 @@ func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error)
 		return false, nil
 	}
 
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeReady), nil
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady), nil
 }

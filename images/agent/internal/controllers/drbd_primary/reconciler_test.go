@@ -115,14 +115,14 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-storage-class",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{
-						{
-							Type:   v1alpha1.ConditionTypeReady,
-							Status: metav1.ConditionTrue,
-						},
+			Status: &v1alpha1.ReplicatedVolumeStatus{
+				Conditions: []metav1.Condition{
+					{
+						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Status: metav1.ConditionTrue,
 					},
 				},
+			},
 			}
 
 			rvr = &v1alpha1.ReplicatedVolumeReplica{
@@ -264,7 +264,7 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("ReplicatedVolume is not Ready", func() {
+		When("ReplicatedVolume is not IOReady", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
 					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
