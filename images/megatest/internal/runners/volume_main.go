@@ -60,6 +60,7 @@ type VolumeMain struct {
 
 	// Tracking running volumes
 	runningSubRunners atomic.Int32
+	checkerStarted    atomic.Bool
 
 	// Statistics
 	createdRVCount          *atomic.Int64
@@ -188,6 +189,12 @@ waitLoop:
 		}
 		log.Debug("waiting for sub-runners to stop", "remaining", v.runningSubRunners.Load())
 		time.Sleep(500 * time.Millisecond)
+	}
+
+	// Start volume-checker if it wasn't started earlier to capture final RV state before deletion
+	if !v.checkerStarted.Load() {
+		log.Debug("checker was not started earlier, starting it now to capture final state")
+		v.startVolumeCheckerForFinalState(cleanupCtx, log)
 	}
 
 	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
@@ -434,6 +441,9 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 }
 
 func (v *VolumeMain) startVolumeChecker(ctx context.Context) {
+	// Mark checker as started
+	v.checkerStarted.Store(true)
+
 	// Create stats for this checker and register in MultiVolume
 	stats := &CheckerStats{RVName: v.rvName}
 	if v.registerCheckerStats != nil {
@@ -451,4 +461,31 @@ func (v *VolumeMain) startVolumeChecker(ctx context.Context) {
 
 		_ = volumeChecker.Run(checkerCtx)
 	}()
+}
+
+// startVolumeCheckerForFinalState starts a volume checker briefly to capture the final state
+// of the RV before deletion. This is used when the checker wasn't started earlier (e.g., if RV
+// never reached Ready state). The checker will capture the current state via checkInitialState
+// and then exit.
+func (v *VolumeMain) startVolumeCheckerForFinalState(ctx context.Context, log *slog.Logger) {
+	// Create stats for this checker and register in MultiVolume
+	stats := &CheckerStats{RVName: v.rvName}
+	if v.registerCheckerStats != nil {
+		v.registerCheckerStats(stats)
+	}
+
+	volumeChecker := NewVolumeChecker(v.rvName, v.client, stats)
+
+	// Create a context with timeout to allow checker to capture state and exit
+	// 5 seconds should be enough for checkInitialState to complete
+	checkerCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Run checker synchronously - it will capture initial state and exit when context is done
+	// This ensures we capture the final state before deletion
+	if err := volumeChecker.Run(checkerCtx); err != nil {
+		log.Debug("checker finished with error (expected)", "error", err)
+	} else {
+		log.Debug("checker finished successfully")
+	}
 }
