@@ -98,23 +98,27 @@ Enabling the `sds-node-configurator` module:
      version: 1
    EOF
    ```
-
-{{< alert level="warning" >}}
-It is recommended to specify the [dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter when enabling the module.
-
-Already added labels `storage.deckhouse.io/sds-replicated-volume-node: ""` are not removed automatically because the current version of the control-plane does not have an automatic data eviction mechanism.
-
-If you need to remove module resources from a node:
-
-1. Manually run the data eviction script `evict.sh` (located in the `linstor-server` container).
-2. After eviction, remove the label from the node:
-
-   ```shell
-   kubectl label node <node-name> storage.deckhouse.io/sds-replicated-volume-node-
-   ```
-
-{{< /alert >}}
-
+   
+   {{< alert level="warning" >}}
+   The [settings.dataNodes.nodeSelector](./configuration.html#parameters-datanodes-nodeselector) parameter is recommended to be specified when enabling the module.
+   
+   Already added labels `storage.deckhouse.io/sds-replicated-volume-*` are not removed automatically, as the current version of the control-plane does not have an automatic data eviction mechanism from cluster nodes.
+   
+   If you need to remove module resources from a node without removing the node itself from the cluster, you must:
+   
+   1. Manually run the [data eviction script](./faq.html#example-of-removing-resources-from-a-node-without-removing-the-node-itself) `/opt/deckhouse/sbin/evict.sh` with the `--delete-resources-only` parameter on any of the master nodes.
+   1. After data eviction, remove the labels from the node and remove the node from LINSTOR:
+      ```shell
+      export NODE_NAME=<node-name>
+      
+      kubectl get node $NODE_NAME -o jsonpath='{.metadata.labels}' | jq -r 'keys[] | select(startswith("storage.deckhouse.io/sds-replicated-volume-"))' | while read label; do
+        kubectl label node $NODE_NAME "$label"-
+      done
+      
+      kubectl -n d8-sds-replicated-volume exec -ti deploy/linstor-controller -- linstor node lost $NODE_NAME
+      ```
+   {{< /alert >}}
+   
 1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
