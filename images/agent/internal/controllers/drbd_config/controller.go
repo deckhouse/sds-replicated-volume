@@ -24,8 +24,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -40,19 +41,20 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetClient(),
 		log,
 		cfg.NodeName(),
+		scanner.DefaultScanner(),
 	)
 
 	return u.LogError(
 		log,
 		builder.ControllerManagedBy(mgr).
 			Named(ControllerName).
-			For(&v1alpha3.ReplicatedVolume{}).
+			For(&v1alpha1.ReplicatedVolume{}).
 			Watches(
-				&v1alpha3.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolumeReplica{},
 				handler.EnqueueRequestForOwner(
 					mgr.GetScheme(),
 					mgr.GetRESTMapper(),
-					&v1alpha3.ReplicatedVolume{},
+					&v1alpha1.ReplicatedVolume{},
 				),
 			).
 			Complete(rec))

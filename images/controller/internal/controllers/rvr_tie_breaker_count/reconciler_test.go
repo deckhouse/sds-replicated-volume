@@ -37,7 +37,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
 
@@ -47,7 +46,7 @@ var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
 	Expect(corev1.AddToScheme(scheme)).To(Succeed())
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 	var (
 		builder *fake.ClientBuilder
@@ -73,13 +72,14 @@ var _ = Describe("Reconcile", func() {
 	})
 
 	When("rv created", func() {
-		var rv v1alpha3.ReplicatedVolume
+		var rv v1alpha1.ReplicatedVolume
 		BeforeEach(func() {
-			rv = v1alpha3.ReplicatedVolume{
+			rv = v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "rv1",
+					Name:       "rv1",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",
 				},
 			}
@@ -101,7 +101,7 @@ var _ = Describe("Reconcile", func() {
 
 		When("RVRs created", func() {
 			var (
-				rvrList  v1alpha3.ReplicatedVolumeReplicaList
+				rvrList  v1alpha1.ReplicatedVolumeReplicaList
 				nodeList []corev1.Node
 				rsc      v1alpha1.ReplicatedStorageClass
 			)
@@ -119,7 +119,7 @@ var _ = Describe("Reconcile", func() {
 
 				// reset lists before populating them
 				nodeList = nil
-				rvrList = v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList = v1alpha1.ReplicatedVolumeReplicaList{}
 
 				for i := 1; i <= 2; i++ {
 					node := corev1.Node{
@@ -129,14 +129,14 @@ var _ = Describe("Reconcile", func() {
 					}
 					nodeList = append(nodeList, node)
 
-					rvrList.Items = append(rvrList.Items, v1alpha3.ReplicatedVolumeReplica{
+					rvrList.Items = append(rvrList.Items, v1alpha1.ReplicatedVolumeReplica{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: fmt.Sprintf("rvr-df%d", i),
 						},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             node.Name,
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					})
 				}
@@ -175,19 +175,19 @@ var _ = Describe("Reconcile", func() {
 			When("SetControllerReference fails", func() {
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
-					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{{
+					rvrList.Items = []v1alpha1.ReplicatedVolumeReplica{{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "node-1",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}, {
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df2"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "node-2",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}}
 
@@ -203,9 +203,12 @@ var _ = Describe("Reconcile", func() {
 
 			When("Access replicas", func() {
 				BeforeEach(func() {
-					rv = v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
-						Spec: v1alpha3.ReplicatedVolumeSpec{
+					rv = v1alpha1.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rv1",
+							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+						},
+						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
@@ -217,21 +220,21 @@ var _ = Describe("Reconcile", func() {
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
 					}
-					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+					rvrList.Items = []v1alpha1.ReplicatedVolumeReplica{
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-1",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-2",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 					}
@@ -242,7 +245,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
 
-					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
 				})
@@ -253,9 +256,12 @@ var _ = Describe("Reconcile", func() {
 			 */
 			When("more than one TieBreaker is required", func() {
 				BeforeEach(func() {
-					rv = v1alpha3.ReplicatedVolume{
-						ObjectMeta: metav1.ObjectMeta{Name: "rv1"},
-						Spec: v1alpha3.ReplicatedVolumeSpec{
+					rv = v1alpha1.ReplicatedVolume{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:       "rv1",
+							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+						},
+						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
@@ -268,45 +274,45 @@ var _ = Describe("Reconcile", func() {
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}},
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-c"}},
 					}
-					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+					rvrList.Items = []v1alpha1.ReplicatedVolumeReplica{
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-a1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-a",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-b1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-b",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-df-c1"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc-c2"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-acc-c3"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-c",
-								Type:                 "Access",
+								Type:                 v1alpha1.ReplicaTypeAccess,
 							},
 						},
 					}
@@ -317,7 +323,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
 
-					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(2)))
 				})
@@ -333,12 +339,12 @@ var _ = Describe("Reconcile", func() {
 						{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					}
 					rvrList.Items = rvrList.Items[:1]
-					rvrList.Items[0] = v1alpha3.ReplicatedVolumeReplica{
+					rvrList.Items[0] = v1alpha1.ReplicatedVolumeReplica{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-						Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 							ReplicatedVolumeName: rv.Name,
 							NodeName:             "",
-							Type:                 "Diskful",
+							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
 					}
 				})
@@ -409,43 +415,43 @@ var _ = Describe("Reconcile", func() {
 
 			When("extra TieBreakers", func() {
 				BeforeEach(func() {
-					rvrList.Items = []v1alpha3.ReplicatedVolumeReplica{
+					rvrList.Items = []v1alpha1.ReplicatedVolumeReplica{
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-df1",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             nodeList[0].Name,
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-df2",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
 								NodeName:             "node-2",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-tb1",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
-								Type:                 "TieBreaker",
+								Type:                 v1alpha1.ReplicaTypeTieBreaker,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-tb2",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "rv1",
-								Type:                 "TieBreaker",
+								Type:                 v1alpha1.ReplicaTypeTieBreaker,
 							},
 						},
 					}
@@ -473,7 +479,7 @@ var _ = Describe("Reconcile", func() {
 					BeforeEach(func() {
 						builder.WithInterceptorFuncs(interceptor.Funcs{
 							Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-								if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
+								if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 									return errExpectedTestError
 								}
 								return c.Delete(ctx, obj, opts...)
@@ -506,7 +512,7 @@ var _ = Describe("Reconcile", func() {
 				Entry("Get ReplicatedVolume fails", func(b *fake.ClientBuilder) {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-							if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+							if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 								return errExpectedTestError
 							}
 							return c.Get(ctx, key, obj, opts...)
@@ -536,7 +542,7 @@ var _ = Describe("Reconcile", func() {
 				Entry("List ReplicatedVolumeReplicaList fails", func(b *fake.ClientBuilder) {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+							if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
 								return errExpectedTestError
 							}
 							return c.List(ctx, list, opts...)
@@ -546,7 +552,7 @@ var _ = Describe("Reconcile", func() {
 				Entry("Create RVR fails", func(b *fake.ClientBuilder) {
 					b.WithInterceptorFuncs(interceptor.Funcs{
 						Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-							if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == "TieBreaker" {
+							if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 								return errExpectedTestError
 							}
 							return c.Create(ctx, obj, opts...)
@@ -589,13 +595,13 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				scheme := runtime.NewScheme()
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
 				Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-				Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+				Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				var (
 					builder *fake.ClientBuilder
 					cl      client.WithWatch
 					rec     *rvrtiebreakercount.Reconciler
-					rv      *v1alpha3.ReplicatedVolume
+					rv      *v1alpha1.ReplicatedVolume
 				)
 
 				BeforeEach(func() {
@@ -603,11 +609,12 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					cl = nil
 					rec = nil
 
-					rv = &v1alpha3.ReplicatedVolume{
+					rv = &v1alpha1.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
-							Name: "rv1",
+							Name:       "rv1",
+							Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 						},
-						Spec: v1alpha3.ReplicatedVolumeSpec{
+						Spec: v1alpha1.ReplicatedVolumeSpec{
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
@@ -643,14 +650,14 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 						}
 						index := 0
 						for j := 0; j < fdReplicaCounts.Diskful; j++ {
-							rvr := &v1alpha3.ReplicatedVolumeReplica{
+							rvr := &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: fmt.Sprintf("rvr-df-%s-%d", fdName, j+1),
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "Diskful",
+									Type:                 v1alpha1.ReplicaTypeDiskful,
 								},
 							}
 							objects = append(objects, rvr)
@@ -658,14 +665,14 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 						}
 
 						for j := 0; j < fdReplicaCounts.Access; j++ {
-							rvr := &v1alpha3.ReplicatedVolumeReplica{
+							rvr := &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: fmt.Sprintf("rvr-ac-%s-%d", fdName, j+1),
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "Access",
+									Type:                 v1alpha1.ReplicaTypeAccess,
 								},
 							}
 							objects = append(objects, rvr)
@@ -673,14 +680,14 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 						}
 
 						for j := 0; j < fdReplicaCounts.TieBreaker; j++ {
-							rvr := &v1alpha3.ReplicatedVolumeReplica{
+							rvr := &v1alpha1.ReplicatedVolumeReplica{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: fmt.Sprintf("rvr-tb-%s-%d", fdName, j+1),
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             nodeNameSlice[index],
-									Type:                 "TieBreaker",
+									Type:                 v1alpha1.ReplicaTypeTieBreaker,
 								},
 							}
 							objects = append(objects, rvr)
@@ -704,7 +711,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
 
-					rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+					rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 
 					fmt.Fprintf(GinkgoWriter, "  total replicas after reconcile: %d\n", len(rvrList.Items))

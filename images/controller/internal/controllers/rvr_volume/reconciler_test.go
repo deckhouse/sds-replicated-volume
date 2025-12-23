@@ -37,13 +37,12 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvrvolume "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_volume"
 )
 
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
-	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 	Expect(snc.AddToScheme(scheme)).To(Succeed())
 
@@ -62,8 +61,8 @@ var _ = Describe("Reconciler", func() {
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{})
 
 		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil
@@ -86,7 +85,7 @@ var _ = Describe("Reconciler", func() {
 		BeforeEach(func() {
 			clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 				Get: func(ctx context.Context, cl client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-					if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+					if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 						return internalServerError
 					}
 					return cl.Get(ctx, key, obj, opts...)
@@ -102,17 +101,17 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolumeReplica created", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var rvr *v1alpha1.ReplicatedVolumeReplica
 
 		BeforeEach(func() {
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rvr",
 					UID:  "test-uid",
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "test-rv",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 					NodeName:             "node-1",
 				},
 			}
@@ -123,7 +122,7 @@ var _ = Describe("Reconciler", func() {
 				rvr.Finalizers = []string{}
 				// Ensure status is set before creating RVR
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 			})
 
@@ -139,7 +138,7 @@ var _ = Describe("Reconciler", func() {
 			DescribeTableSubtree("when status does not have LLV name because",
 				Entry("nil Status", func() { rvr.Status = nil }),
 				Entry("empty LVMLogicalVolumeName", func() {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{LVMLogicalVolumeName: ""}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{LVMLogicalVolumeName: ""}
 				}),
 				func(setup func()) {
 					BeforeEach(func() {
@@ -156,7 +155,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("status has LVMLogicalVolumeName", func() {
 				BeforeEach(func() {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 						LVMLogicalVolumeName: "test-llv",
 					}
 				})
@@ -175,7 +174,7 @@ var _ = Describe("Reconciler", func() {
 						BeforeEach(func() {
 							clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 								SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-									if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
+									if rvrObj, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
 										if subResourceName == "status" {
 											return statusPatchError
 										}
@@ -310,8 +309,8 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR does not have DeletionTimestamp", func() {
 				DescribeTableSubtree("when RVR is not diskful because",
-					Entry("Type is Access", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeAccess }),
-					Entry("Type is TieBreaker", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeTieBreaker }),
+					Entry("Type is Access", func() { rvr.Spec.Type = v1alpha1.ReplicaTypeAccess }),
+					Entry("Type is TieBreaker", func() { rvr.Spec.Type = v1alpha1.ReplicaTypeTieBreaker }),
 					func(setup func()) {
 						BeforeEach(func() {
 							setup()
@@ -319,7 +318,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("ActualType matches Spec.Type", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 									ActualType: rvr.Spec.Type,
 								}
 							})
@@ -334,8 +333,8 @@ var _ = Describe("Reconciler", func() {
 
 						When("ActualType does not match Spec.Type", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-									ActualType:           v1alpha3.ReplicaTypeDiskful,
+								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+									ActualType:           v1alpha1.ReplicaTypeDiskful,
 									LVMLogicalVolumeName: "keep-llv",
 								}
 							})
@@ -361,12 +360,12 @@ var _ = Describe("Reconciler", func() {
 
 				When("RVR is Diskful", func() {
 					BeforeEach(func() {
-						rvr.Spec.Type = v1alpha3.ReplicaTypeDiskful
+						rvr.Spec.Type = v1alpha1.ReplicaTypeDiskful
 					})
 
 					DescribeTableSubtree("when RVR cannot create LLV because",
 						Entry("NodeName is empty", func() { rvr.Spec.NodeName = "" }),
-						Entry("Type is not Diskful", func() { rvr.Spec.Type = v1alpha3.ReplicaTypeAccess }),
+						Entry("Type is not Diskful", func() { rvr.Spec.Type = v1alpha1.ReplicaTypeAccess }),
 						func(setup func()) {
 							BeforeEach(func() {
 								setup()
@@ -380,7 +379,7 @@ var _ = Describe("Reconciler", func() {
 					When("RVR has NodeName and is Diskful", func() {
 						BeforeEach(func() {
 							rvr.Spec.NodeName = "node-1"
-							rvr.Spec.Type = v1alpha3.ReplicaTypeDiskful
+							rvr.Spec.Type = v1alpha1.ReplicaTypeDiskful
 						})
 
 						When("Status is nil", func() {
@@ -395,7 +394,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("Status.LVMLogicalVolumeName is empty", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: "",
 								}
 							})
@@ -407,7 +406,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("Status.LVMLogicalVolumeName is set", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: "existing-llv",
 								}
 							})
@@ -422,30 +421,30 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("reconcileLLVNormal scenarios", func() {
-			var rvr *v1alpha3.ReplicatedVolumeReplica
-			var rv *v1alpha3.ReplicatedVolume
+			var rvr *v1alpha1.ReplicatedVolumeReplica
+			var rv *v1alpha1.ReplicatedVolume
 			var rsc *v1alpha1.ReplicatedStorageClass
 			var rsp *v1alpha1.ReplicatedStoragePool
 			var lvg *snc.LVMVolumeGroup
 
 			BeforeEach(func() {
-				rvr = &v1alpha3.ReplicatedVolumeReplica{
+				rvr = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test-rvr",
 						UID:  "test-uid",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-rv",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 						NodeName:             "node-1",
 					},
 				}
 
-				rv = &v1alpha3.ReplicatedVolume{
+				rv = &v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test-rv",
 					},
-					Spec: v1alpha3.ReplicatedVolumeSpec{
+					Spec: v1alpha1.ReplicatedVolumeSpec{
 						Size:                       resource.MustParse("1Gi"),
 						ReplicatedStorageClassName: "test-rsc",
 					},
@@ -551,8 +550,8 @@ var _ = Describe("Reconciler", func() {
 
 					When("ActualType was Access before switching to Diskful", func() {
 						BeforeEach(func() {
-							rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-								ActualType: v1alpha3.ReplicaTypeAccess,
+							rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+								ActualType: v1alpha1.ReplicaTypeAccess,
 							}
 						})
 
@@ -771,7 +770,7 @@ var _ = Describe("Reconciler", func() {
 					JustBeforeEach(func(ctx SpecContext) {
 						// RVR is already created in parent JustBeforeEach
 						// Get the created RVR to set ownerReference correctly
-						createdRVR := &v1alpha3.ReplicatedVolumeReplica{}
+						createdRVR := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), createdRVR)).To(Succeed())
 						// Clear metadata and recreate ownerReference
 						llvCopy := llv.DeepCopy()
@@ -825,7 +824,7 @@ var _ = Describe("Reconciler", func() {
 								BeforeEach(func() {
 									clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 										SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-											if rvrObj, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
+											if rvrObj, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvrObj.Name == "test-rvr" {
 												if subResourceName == "status" {
 													return statusPatchError
 												}
@@ -846,7 +845,7 @@ var _ = Describe("Reconciler", func() {
 
 						When("RVR status already has LLV name", func() {
 							BeforeEach(func() {
-								rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+								rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 									LVMLogicalVolumeName: llv.Name,
 								}
 							})
@@ -906,20 +905,20 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("Spec.Type changes from Diskful to Access", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var rvr *v1alpha1.ReplicatedVolumeReplica
 		var llv *snc.LVMLogicalVolume
 
 		BeforeEach(func() {
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "type-switch-rvr",
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "type-switch-rv",
-					Type:                 v1alpha3.ReplicaTypeAccess,
+					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
-				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-					ActualType:           v1alpha3.ReplicaTypeAccess,
+				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					ActualType:           v1alpha1.ReplicaTypeAccess,
 					LVMLogicalVolumeName: "type-switch-llv",
 				},
 			}
@@ -969,7 +968,7 @@ var _ = Describe("Reconciler", func() {
 				// Second reconcile: see LLV gone and clear status
 				Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
-				fetchedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				fetchedRVR := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), fetchedRVR)).To(Succeed())
 				Expect(fetchedRVR.Status.LVMLogicalVolumeName).To(BeEmpty())
 			})
@@ -977,20 +976,20 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("Spec.Type is Access but ActualType is Diskful and LLV exists", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
+		var rvr *v1alpha1.ReplicatedVolumeReplica
 		var llv *snc.LVMLogicalVolume
 
 		BeforeEach(func() {
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "mismatch-rvr",
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "mismatch-rv",
-					Type:                 v1alpha3.ReplicaTypeAccess,
+					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
-				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-					ActualType:           v1alpha3.ReplicaTypeDiskful,
+				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					ActualType:           v1alpha1.ReplicaTypeDiskful,
 					LVMLogicalVolumeName: "keep-llv",
 				},
 			}
@@ -1025,33 +1024,33 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("integration test for full controller lifecycle", func() {
-		var rvr *v1alpha3.ReplicatedVolumeReplica
-		var rv *v1alpha3.ReplicatedVolume
+		var rvr *v1alpha1.ReplicatedVolumeReplica
+		var rv *v1alpha1.ReplicatedVolume
 		var rsc *v1alpha1.ReplicatedStorageClass
 		var rsp *v1alpha1.ReplicatedStoragePool
 		var lvg *snc.LVMVolumeGroup
 
 		BeforeEach(func() {
-			rvr = &v1alpha3.ReplicatedVolumeReplica{
+			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rvr",
 					UID:  "test-uid",
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "test-rv",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 					NodeName:             "node-1",
 				},
-				Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 					LVMLogicalVolumeName: "",
 				},
 			}
 
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-rv",
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
 					ReplicatedStorageClassName: "test-rsc",
 				},
@@ -1148,11 +1147,11 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Get(ctx, client.ObjectKey{Name: llvName}, llv)).To(Succeed())
 			Expect(llv.Status.Phase).To(Equal("Pending"))
 
-			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+			Eventually(func(g Gomega) *v1alpha1.ReplicatedVolumeReplica {
 				g.Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
 				// Verify RVR status was not updated with LLV name
-				notUpdatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				notUpdatedRVR := &v1alpha1.ReplicatedVolumeReplica{}
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), notUpdatedRVR)).To(Succeed())
 				return notUpdatedRVR
 			}).WithContext(ctx).Should(HaveNoLVMLogicalVolumeName())
@@ -1165,11 +1164,11 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Update(ctx, llv)).To(Succeed())
 
 			// Use Eventually to support future async client migration
-			Eventually(func(g Gomega) *v1alpha3.ReplicatedVolumeReplica {
+			Eventually(func(g Gomega) *v1alpha1.ReplicatedVolumeReplica {
 				g.Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
 				// Verify RVR status was updated with LLV name
-				updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+				updatedRVR := &v1alpha1.ReplicatedVolumeReplica{}
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 				return updatedRVR
 			}).WithContext(ctx).Should(And(
@@ -1178,12 +1177,12 @@ var _ = Describe("Reconciler", func() {
 			))
 
 			// Get updatedRVR for next steps
-			updatedRVR := &v1alpha3.ReplicatedVolumeReplica{}
+			updatedRVR := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 
 			// Step 4: Change RVR type to Access - LLV should remain
 			// updatedRVR already obtained above
-			updatedRVR.Spec.Type = v1alpha3.ReplicaTypeAccess
+			updatedRVR.Spec.Type = v1alpha1.ReplicaTypeAccess
 			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
@@ -1193,7 +1192,7 @@ var _ = Describe("Reconciler", func() {
 			// Step 5: Set actualType to Access - LLV should be deleted
 			// Get fresh RVR state
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
-			updatedRVR.Status.ActualType = v1alpha3.ReplicaTypeAccess
+			updatedRVR.Status.ActualType = v1alpha1.ReplicaTypeAccess
 			Expect(cl.Status().Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 
@@ -1210,7 +1209,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(updatedRVR).To(HaveBackingVolumeCreatedConditionNotApplicable())
 
 			// Step 7: Change type back to Diskful - should create LLV again
-			updatedRVR.Spec.Type = v1alpha3.ReplicaTypeDiskful
+			updatedRVR.Spec.Type = v1alpha1.ReplicaTypeDiskful
 			Expect(cl.Update(ctx, updatedRVR)).To(Succeed())
 			Expect(rec.Reconcile(ctx, RequestFor(rvr))).NotTo(Requeue())
 

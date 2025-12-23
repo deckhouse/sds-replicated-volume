@@ -1,0 +1,116 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://openvex.dev/docs/public/vex-linstor-server",
+  "author": "Deckhouse <contact@deckhouse.io>",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2023-6378"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/ch.qos.logback/logback-classic@1.3.8"
+        },
+        {
+          "@id": "pkg:maven/ch.qos.logback/logback-core@1.3.8"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает Logback Receiver, используемый для приёма логов по сети. LINSTOR Server не использует Logback Receiver и не принимает логи по сети от внешних источников"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-7254"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/com.google.protobuf/protobuf-java@3.23.3"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость вызывает StackOverflow при обработке глубоко вложенных protobuf-сообщений. LINSTOR использует protobuf для внутренней коммуникации с фиксированной схемой сообщений, которая не содержит глубокой вложенности и не обрабатывает произвольные пользовательские данные"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2021-42392"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/com.h2database/h2@1.4.197"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость затрагивает веб-консоль H2 Database. LINSTOR использует H2 только как встроенную базу данных для хранения конфигурации и не предоставляет доступ к H2 Console"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2022-23221"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/com.h2database/h2@1.4.197"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость позволяет загрузку классов через JNDI при подключении к H2 с определённым URL. LINSTOR использует H2 как встроенную базу данных с локальным подключением и не принимает внешние JDBC URL"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2025-55163"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/io.netty/netty-codec-http2@4.1.79.Final"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость MadeYouReset позволяет DDoS-атаку через HTTP/2. LINSTOR Server не использует HTTP/2 для внешних коммуникаций, а Netty используется только для внутреннего протокола репликации между узлами кластера"
+    },
+    {
+      "vulnerability": {
+        "name": "GHSA-xpw8-rcwv-8f8p"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/io.netty/netty-codec-http2@4.1.79.Final"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость HTTP/2 Rapid Reset Attack затрагивает HTTP/2 серверы. LINSTOR Server не использует HTTP/2 для внешних коммуникаций, Netty используется для внутреннего протокола репликации"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-1597"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/org.postgresql/postgresql@42.5.4"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость SQL-инъекции возникает только при использовании PreferQueryMode=SIMPLE. LINSTOR не использует этот режим при подключении к PostgreSQL и использует параметризованные запросы"
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2024-21634"
+      },
+      "products": [
+        {
+          "@id": "pkg:maven/software.amazon.ion/ion-java@1.0.2"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "Уязвимость StackOverflow при обработке глубоко вложенных Ion-структур. ion-java является транзитивной зависимостью AWS SDK и не используется напрямую для обработки пользовательских данных в LINSTOR"
+    }
+  ],
+  "timestamp": "2025-12-11T00:00:00Z"
+}

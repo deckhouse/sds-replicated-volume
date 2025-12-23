@@ -33,7 +33,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 // TODO: Update sds-node-configurator to export this contants and reuse here
@@ -69,7 +68,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("Reconcile finished", "duration", time.Since(start).String())
 	}()
 
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	err := r.cl.Get(ctx, req.NamespacedName, rvr)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -85,12 +84,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// rvr.spec.nodeName will be set once and will not change again.
-	if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.Spec.NodeName != "" {
+	if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Spec.NodeName != "" {
 		return reconcile.Result{}, wrapReconcileLLVNormal(ctx, r.cl, r.scheme, log, rvr)
 	}
 
 	// RVR is not diskful, so we need to delete the LLV if it exists and the actual type is the same as the spec type.
-	if rvr.Spec.Type != v1alpha3.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
+	if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
 		return reconcile.Result{}, wrapReconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
@@ -98,17 +97,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 }
 
 // wrapReconcileLLVDeletion wraps reconcileLLVDeletion and updates the BackingVolumeCreated condition.
-func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	if err := reconcileLLVDeletion(ctx, cl, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed: "+reconcileErr.Error()); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
 	}
 
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonNotApplicable, "Replica is not diskful"); err != nil {
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonNotApplicable, "Replica is not diskful"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
@@ -118,7 +117,7 @@ func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Lo
 // reconcileLLVDeletion handles deletion of LVMLogicalVolume associated with the RVR.
 // If LLV is not found, it clears the LVMLogicalVolumeName from RVR status.
 // If LLV exists, it deletes it and clears the LVMLogicalVolumeName from RVR status when LLV is actually deleted.
-func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	log = log.WithName("ReconcileLLVDeletion")
 
 	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
@@ -147,11 +146,11 @@ func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger
 }
 
 // wrapReconcileLLVNormal wraps reconcileLLVNormal and updates the BackingVolumeCreated condition.
-func wrapReconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func wrapReconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	if err := reconcileLLVNormal(ctx, cl, scheme, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeCreationFailed, "Backing volume creation failed: "+reconcileErr.Error()); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeCreationFailed, "Backing volume creation failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
@@ -162,7 +161,7 @@ func wrapReconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runti
 // reconcileLLVNormal reconciles LVMLogicalVolume for a normal (non-deleting) RVR
 // by finding it via ownerReference. If not found, creates a new LLV. If found and created,
 // updates RVR status with the LLV name.
-func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.Scheme, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	log = log.WithName("ReconcileLLVNormal")
 
 	llv, err := getLLVByRVR(ctx, cl, rvr)
@@ -177,7 +176,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 			return fmt.Errorf("creating LVMLogicalVolume: %w", err)
 		}
 
-		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
+		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 		}
 
@@ -187,7 +186,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 
 	log.Info("LVMLogicalVolume found, checking if it is ready", "llvName", llv.Name)
 	if !isLLVPhaseCreated(llv) {
-		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha3.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
+		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 		}
 		log.Info("LVMLogicalVolume is not ready, returning nil to wait for next reconcile event", "llvName", llv.Name)
@@ -199,7 +198,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 		return fmt.Errorf("updating LVMLogicalVolumeName in status: %w", err)
 	}
 
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha3.ReasonBackingVolumeReady, "Backing volume is ready"); err != nil {
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeReady, "Backing volume is ready"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
@@ -217,7 +216,7 @@ func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.L
 	return llv, nil
 }
 
-func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica) (*snc.LVMLogicalVolume, error) {
+func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha1.ReplicatedVolumeReplica) (*snc.LVMLogicalVolume, error) {
 	llvName := rvr.Name
 	if rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
 		llvName = rvr.Status.LVMLogicalVolumeName
@@ -228,13 +227,13 @@ func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha3.Replicated
 
 // ensureLVMLogicalVolumeNameInStatus sets or clears the LVMLogicalVolumeName field in RVR status if needed.
 // If llvName is empty string, the field is cleared. Otherwise, it is set to the provided value.
-func ensureLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr *v1alpha3.ReplicatedVolumeReplica, llvName string) error {
+func ensureLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr *v1alpha1.ReplicatedVolumeReplica, llvName string) error {
 	if rvr.Status != nil && rvr.Status.LVMLogicalVolumeName == llvName {
 		return nil
 	}
 	patch := client.MergeFrom(rvr.DeepCopy())
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	rvr.Status.LVMLogicalVolumeName = llvName
 	return cl.Status().Patch(ctx, rvr, patch)
@@ -243,7 +242,7 @@ func ensureLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, r
 // createLLV creates a LVMLogicalVolume with ownerReference pointing to RVR.
 // It retrieves the ReplicatedVolume and determines the appropriate LVMVolumeGroup and ThinPool
 // based on the RVR's node name, then creates the LLV with the correct configuration.
-func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
+func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, log logr.Logger) error {
 	log = log.WithValues("llvName", rvr.Name, "nodeName", rvr.Spec.NodeName)
 	log.Info("Creating LVMLogicalVolume")
 
@@ -308,8 +307,8 @@ func deleteLLV(ctx context.Context, cl client.Client, llv *snc.LVMLogicalVolume,
 
 // getReplicatedVolumeByName gets a ReplicatedVolume from the cluster by name.
 // Returns the ReplicatedVolume object and nil error if found, or nil and an error if not found or on failure.
-func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName string) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+func getReplicatedVolumeByName(ctx context.Context, cl client.Client, rvName string) (*v1alpha1.ReplicatedVolume, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := cl.Get(ctx, client.ObjectKey{Name: rvName}, rv); err != nil {
 		return nil, err
 	}
@@ -364,19 +363,19 @@ func updateBackingVolumeCreatedCondition(
 	ctx context.Context,
 	cl client.Client,
 	log logr.Logger,
-	rvr *v1alpha3.ReplicatedVolumeReplica,
+	rvr *v1alpha1.ReplicatedVolumeReplica,
 	conditionStatus metav1.ConditionStatus,
 	reason,
 	message string,
 ) error {
 	// Initialize status if needed
 	if rvr.Status == nil {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
 	// Check if condition is already set correctly
 	if rvr.Status.Conditions != nil {
-		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeBackingVolumeCreated)
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeBackingVolumeCreated)
 		if cond != nil &&
 			cond.Status == conditionStatus &&
 			cond.Reason == reason &&
@@ -395,7 +394,7 @@ func updateBackingVolumeCreatedCondition(
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:    v1alpha3.ConditionTypeBackingVolumeCreated,
+			Type:    v1alpha1.ConditionTypeBackingVolumeCreated,
 			Status:  conditionStatus,
 			Reason:  reason,
 			Message: message,

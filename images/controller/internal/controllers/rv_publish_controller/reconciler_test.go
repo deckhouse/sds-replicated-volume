@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvpublishcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_publish_controller"
 )
 
@@ -48,7 +47,7 @@ var errExpectedTestError = errors.New("test error")
 var _ = Describe("Reconcile", func() {
 	scheme := runtime.NewScheme()
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 	var (
 		builder *fake.ClientBuilder
@@ -59,15 +58,15 @@ var _ = Describe("Reconcile", func() {
 	BeforeEach(func() {
 		builder = fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolume{}).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
 		cl = nil
 		rec = nil
 	})
 
 	JustBeforeEach(func() {
 		cl = builder.Build()
-		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}))
 	})
 
 	It("returns nil when ReplicatedVolume not found", func(ctx SpecContext) {
@@ -75,14 +74,15 @@ var _ = Describe("Reconcile", func() {
 	})
 
 	When("rv created", func() {
-		var rv v1alpha3.ReplicatedVolume
+		var rv v1alpha1.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = v1alpha3.ReplicatedVolume{
+			rv = v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "rv1",
+					Name:       "rv1",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",
 				},
 			}
@@ -102,12 +102,12 @@ var _ = Describe("Reconcile", func() {
 			})
 		})
 
-		When("Ready condition is False", func() {
+		When("IOReady condition is False", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -124,7 +124,7 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			It("skips when Ready condition is False without touching ReplicatedStorageClass", func(ctx SpecContext) {
+			It("skips when IOReady condition is False without touching ReplicatedStorageClass", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: "non-existent"}})).To(Equal(reconcile.Result{}))
 			})
 		})
@@ -152,7 +152,7 @@ var _ = Describe("Reconcile", func() {
 		When("publish context loaded", func() {
 			var (
 				rsc          v1alpha1.ReplicatedStorageClass
-				rvrList      v1alpha3.ReplicatedVolumeReplicaList
+				rvrList      v1alpha1.ReplicatedVolumeReplicaList
 				publishOn    []string
 				volumeAccess string
 			)
@@ -161,10 +161,10 @@ var _ = Describe("Reconcile", func() {
 				volumeAccess = "Local"
 				publishOn = []string{"node-1", "node-2"}
 
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -181,26 +181,26 @@ var _ = Describe("Reconcile", func() {
 					},
 				}
 
-				rvrList = v1alpha3.ReplicatedVolumeReplicaList{
-					Items: []v1alpha3.ReplicatedVolumeReplica{
+				rvrList = v1alpha1.ReplicatedVolumeReplicaList{
+					Items: []v1alpha1.ReplicatedVolumeReplica{
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-df1",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-1",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 						{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "rvr-df2",
 							},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: rv.Name,
 								NodeName:             "node-2",
-								Type:                 "Diskful",
+								Type:                 v1alpha1.ReplicaTypeDiskful,
 							},
 						},
 					},
@@ -223,7 +223,7 @@ var _ = Describe("Reconcile", func() {
 				It("does not set PublishSucceeded condition for non-Local access", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(SatisfyAll(
 						HaveLen(1),
@@ -246,7 +246,7 @@ var _ = Describe("Reconcile", func() {
 				It("does not set PublishSucceeded=False and proceeds with reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
@@ -270,7 +270,7 @@ var _ = Describe("Reconcile", func() {
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
@@ -291,16 +291,16 @@ var _ = Describe("Reconcile", func() {
 					rv.Spec.PublishOn = []string{"node-1", "node-2"}
 
 					// replicas without actual.AllowTwoPrimaries
-					rvrList.Items[0].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{
-							Actual: &v1alpha3.DRBDActual{
+					rvrList.Items[0].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha1.DRBD{
+							Actual: &v1alpha1.DRBDActual{
 								AllowTwoPrimaries: false,
 							},
 						},
 					}
-					rvrList.Items[1].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-						DRBD: &v1alpha3.DRBD{
-							Actual: &v1alpha3.DRBDActual{
+					rvrList.Items[1].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						DRBD: &v1alpha1.DRBD{
+							Actual: &v1alpha1.DRBDActual{
 								AllowTwoPrimaries: false,
 							},
 						},
@@ -310,7 +310,7 @@ var _ = Describe("Reconcile", func() {
 				It("sets rv.status.drbd.config.allowTwoPrimaries=true and waits for replicas", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
@@ -330,12 +330,12 @@ var _ = Describe("Reconcile", func() {
 
 					// both replicas already have actual.AllowTwoPrimaries=true
 					for i := range rvrList.Items {
-						rvrList.Items[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-							DRBD: &v1alpha3.DRBD{
-								Actual: &v1alpha3.DRBDActual{
+						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+							DRBD: &v1alpha1.DRBD{
+								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
 								},
-								Status: &v1alpha3.DRBDStatus{
+								Status: &v1alpha1.DRBDStatus{
 									Role: "Secondary",
 								},
 							},
@@ -347,7 +347,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					// RVRs on publishOn nodes should be configured as Primary
-					gotRVRs := &v1alpha3.ReplicatedVolumeReplicaList{}
+					gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, gotRVRs)).To(Succeed())
 
 					for i := range gotRVRs.Items {
@@ -373,7 +373,7 @@ var _ = Describe("Reconcile", func() {
 					}
 
 					// rv.status.publishedOn should reflect RVRs with Role=Primary
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					gotRV := &rvList.Items[0]
@@ -389,23 +389,23 @@ var _ = Describe("Reconcile", func() {
 
 					rv.Spec.PublishOn = []string{"node-1"}
 
-					rvrList = v1alpha3.ReplicatedVolumeReplicaList{
-						Items: []v1alpha3.ReplicatedVolumeReplica{
+					rvrList = v1alpha1.ReplicatedVolumeReplicaList{
+						Items: []v1alpha1.ReplicatedVolumeReplica{
 							{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: "rvr-tb1",
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-1",
-									Type:                 "TieBreaker",
+									Type:                 v1alpha1.ReplicaTypeTieBreaker,
 								},
-								Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
-									DRBD: &v1alpha3.DRBD{
-										Actual: &v1alpha3.DRBDActual{
+								Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+									DRBD: &v1alpha1.DRBD{
+										Actual: &v1alpha1.DRBDActual{
 											AllowTwoPrimaries: false,
 										},
-										Status: &v1alpha3.DRBDStatus{
+										Status: &v1alpha1.DRBDStatus{
 											Role: "Secondary",
 										},
 									},
@@ -418,10 +418,10 @@ var _ = Describe("Reconcile", func() {
 				It("converts TieBreaker to Access and sets primary=true", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					gotRVR := &v1alpha3.ReplicatedVolumeReplica{}
+					gotRVR := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-tb1"}, gotRVR)).To(Succeed())
 
-					Expect(gotRVR.Spec.Type).To(Equal(v1alpha3.ReplicaTypeAccess))
+					Expect(gotRVR.Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 					Expect(gotRVR.Status).NotTo(BeNil())
 					Expect(gotRVR.Status.DRBD).NotTo(BeNil())
 					Expect(gotRVR.Status.DRBD.Config).NotTo(BeNil())
@@ -437,26 +437,26 @@ var _ = Describe("Reconcile", func() {
 
 					rv.Spec.PublishOn = []string{"node-1"}
 
-					rvrList = v1alpha3.ReplicatedVolumeReplicaList{
-						Items: []v1alpha3.ReplicatedVolumeReplica{
+					rvrList = v1alpha1.ReplicatedVolumeReplicaList{
+						Items: []v1alpha1.ReplicatedVolumeReplica{
 							{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: "rvr-node-1",
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-1",
-									Type:                 "Diskful",
+									Type:                 v1alpha1.ReplicaTypeDiskful,
 								},
 							},
 							{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: "rvr-node-2",
 								},
-								Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+								Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 									ReplicatedVolumeName: rv.Name,
 									NodeName:             "node-2",
-									Type:                 "Access",
+									Type:                 v1alpha1.ReplicaTypeAccess,
 								},
 							},
 						},
@@ -466,10 +466,10 @@ var _ = Describe("Reconcile", func() {
 				It("keeps replica on non-publishOn node non-primary", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					gotRVRs := &v1alpha3.ReplicatedVolumeReplicaList{}
+					gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, gotRVRs)).To(Succeed())
 
-					var rvrNode1, rvrNode2 *v1alpha3.ReplicatedVolumeReplica
+					var rvrNode1, rvrNode2 *v1alpha1.ReplicatedVolumeReplica
 					for i := range gotRVRs.Items {
 						r := &gotRVRs.Items[i]
 						switch r.Name {
@@ -507,13 +507,13 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// Сделаем одну реплику Access вместо Diskful
-					rvrList.Items[1].Spec.Type = "Access"
+					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeAccess
 				})
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
@@ -531,13 +531,13 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// Сделаем одну реплику TieBreaker вместо Diskful
-					rvrList.Items[1].Spec.Type = "TieBreaker"
+					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
 				})
 
 				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
@@ -557,16 +557,16 @@ var _ = Describe("Reconcile", func() {
 					rv.Spec.PublishOn = []string{"node-1"}
 
 					// смоделируем ситуацию, когда раньше allowTwoPrimaries уже был включён
-					rv.Status.DRBD = &v1alpha3.DRBDResource{
-						Config: &v1alpha3.DRBDResourceConfig{
+					rv.Status.DRBD = &v1alpha1.DRBDResource{
+						Config: &v1alpha1.DRBDResourceConfig{
 							AllowTwoPrimaries: true,
 						},
 					}
 
 					for i := range rvrList.Items {
-						rvrList.Items[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-							DRBD: &v1alpha3.DRBD{
-								Actual: &v1alpha3.DRBDActual{
+						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+							DRBD: &v1alpha1.DRBD{
+								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
 								},
 							},
@@ -577,7 +577,7 @@ var _ = Describe("Reconcile", func() {
 				It("sets allowTwoPrimaries=false when less than two nodes in publishOn", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					got := &v1alpha3.ReplicatedVolume{}
+					got := &v1alpha1.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rv), got)).To(Succeed())
 					Expect(got.Status).NotTo(BeNil())
 					Expect(got.Status.DRBD).NotTo(BeNil())
@@ -598,12 +598,12 @@ var _ = Describe("Reconcile", func() {
 						if rvrList.Items[i].Spec.NodeName == "node-1" {
 							role = "Primary"
 						}
-						rvrList.Items[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
-							DRBD: &v1alpha3.DRBD{
-								Actual: &v1alpha3.DRBDActual{
+						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+							DRBD: &v1alpha1.DRBD{
+								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
 								},
-								Status: &v1alpha3.DRBDStatus{
+								Status: &v1alpha1.DRBDStatus{
 									Role: role,
 								},
 							},
@@ -614,7 +614,7 @@ var _ = Describe("Reconcile", func() {
 				It("recomputes publishedOn from replicas with Primary role", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					rvList := &v1alpha3.ReplicatedVolumeList{}
+					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					gotRV := &rvList.Items[0]
@@ -627,10 +627,10 @@ var _ = Describe("Reconcile", func() {
 
 		When("setting PublishSucceeded condition fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -648,14 +648,14 @@ var _ = Describe("Reconcile", func() {
 				}
 
 				// Ноде нужен Diskful, но мы создадим Access — это вызовет попытку выставить PublishSucceeded=False
-				rvr := v1alpha3.ReplicatedVolumeReplica{
+				rvr := v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-access-1",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-1",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
 
@@ -663,7 +663,7 @@ var _ = Describe("Reconcile", func() {
 
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return errExpectedTestError
 						}
 						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
@@ -680,10 +680,10 @@ var _ = Describe("Reconcile", func() {
 
 		When("patching RVR primary status fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -700,14 +700,14 @@ var _ = Describe("Reconcile", func() {
 					},
 				}
 
-				rvr := v1alpha3.ReplicatedVolumeReplica{
+				rvr := v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-primary-1",
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
 						NodeName:             "node-1",
-						Type:                 "Diskful",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 
@@ -715,7 +715,7 @@ var _ = Describe("Reconcile", func() {
 
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 							return errExpectedTestError
 						}
 						return cl.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
@@ -734,7 +734,7 @@ var _ = Describe("Reconcile", func() {
 			BeforeEach(func() {
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolume); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolume); ok {
 							return errExpectedTestError
 						}
 						return c.Get(ctx, key, obj, opts...)
@@ -751,10 +751,10 @@ var _ = Describe("Reconcile", func() {
 
 		When("Get ReplicatedStorageClass fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -779,10 +779,10 @@ var _ = Describe("Reconcile", func() {
 
 		When("List ReplicatedVolumeReplica fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   "Ready",
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -802,7 +802,7 @@ var _ = Describe("Reconcile", func() {
 
 				builder.WithInterceptorFuncs(interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+						if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
 							return errExpectedTestError
 						}
 						return c.List(ctx, list, opts...)

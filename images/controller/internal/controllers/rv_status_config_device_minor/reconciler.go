@@ -26,7 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -53,14 +53,23 @@ func (r *Reconciler) Reconcile(
 	log.Info("Reconciling")
 
 	// Get the ReplicatedVolume
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Getting ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
+	}
+
+	if !v1alpha1.HasControllerFinalizer(rv) {
+		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
+		return reconcile.Result{}, nil
 	}
 
 	// List all RVs to collect used deviceMinors
-	rvList := &v1alpha3.ReplicatedVolumeList{}
+	rvList := &v1alpha1.ReplicatedVolumeList{}
 	if err := r.cl.List(ctx, rvList); err != nil {
 		log.Error(err, "listing RVs")
 		return reconcile.Result{}, err
@@ -71,7 +80,7 @@ func (r *Reconciler) Reconcile(
 	for _, item := range rvList.Items {
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.DeviceMinor != nil {
 			deviceMinor := *item.Status.DRBD.Config.DeviceMinor
-			if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
+			if deviceMinor >= v1alpha1.RVMinDeviceMinor && deviceMinor <= v1alpha1.RVMaxDeviceMinor {
 				deviceMinorToVolumes[deviceMinor] = append(deviceMinorToVolumes[deviceMinor], item.Name)
 			}
 		}
@@ -126,15 +135,15 @@ func (r *Reconciler) Reconcile(
 		from := client.MergeFrom(&item)
 		changedRV := item.DeepCopy()
 		if changedRV.Status == nil {
-			changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+			changedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 		}
 		if changedRV.Status.Errors == nil {
-			changedRV.Status.Errors = &v1alpha3.ReplicatedVolumeStatusErrors{}
+			changedRV.Status.Errors = &v1alpha1.ReplicatedVolumeStatusErrors{}
 		}
 
 		if hasDuplicate {
 			// Set error for duplicate
-			changedRV.Status.Errors.DuplicateDeviceMinor = &v1alpha3.MessageError{
+			changedRV.Status.Errors.DuplicateDeviceMinor = &v1alpha1.MessageError{
 				Message: duplicateMsg,
 			}
 		} else {
@@ -156,7 +165,7 @@ func (r *Reconciler) Reconcile(
 	// Note: DeviceMinor is *uint, so we check if Config exists, pointer is not nil, and value is in valid range
 	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.DeviceMinor != nil {
 		deviceMinor := *rv.Status.DRBD.Config.DeviceMinor
-		if deviceMinor >= v1alpha3.RVMinDeviceMinor && deviceMinor <= v1alpha3.RVMaxDeviceMinor {
+		if deviceMinor >= v1alpha1.RVMinDeviceMinor && deviceMinor <= v1alpha1.RVMaxDeviceMinor {
 			log.V(1).Info("deviceMinor already assigned and valid", "deviceMinor", deviceMinor)
 			return reconcile.Result{}, nil
 		}
@@ -165,7 +174,7 @@ func (r *Reconciler) Reconcile(
 	// Find first available deviceMinor (minimum free value)
 	var availableDeviceMinor uint
 	found := false
-	for i := v1alpha3.RVMinDeviceMinor; i <= v1alpha3.RVMaxDeviceMinor; i++ {
+	for i := v1alpha1.RVMinDeviceMinor; i <= v1alpha1.RVMaxDeviceMinor; i++ {
 		if _, exists := deviceMinorToVolumes[i]; !exists {
 			availableDeviceMinor = i
 			found = true
@@ -179,9 +188,9 @@ func (r *Reconciler) Reconcile(
 		err := fmt.Errorf(
 			"no available deviceMinor for volume %s (all %d deviceMinors are used)",
 			rv.Name,
-			int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1,
+			int(v1alpha1.RVMaxDeviceMinor-v1alpha1.RVMinDeviceMinor)+1,
 		)
-		log.Error(err, "no available deviceMinor for volume", "maxDeviceMinors", int(v1alpha3.RVMaxDeviceMinor-v1alpha3.RVMinDeviceMinor)+1)
+		log.Error(err, "no available deviceMinor for volume", "maxDeviceMinors", int(v1alpha1.RVMaxDeviceMinor-v1alpha1.RVMinDeviceMinor)+1)
 		return reconcile.Result{}, err
 	}
 
@@ -189,13 +198,13 @@ func (r *Reconciler) Reconcile(
 	from := client.MergeFrom(rv)
 	changedRV := rv.DeepCopy()
 	if changedRV.Status == nil {
-		changedRV.Status = &v1alpha3.ReplicatedVolumeStatus{}
+		changedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 	}
 	if changedRV.Status.DRBD == nil {
-		changedRV.Status.DRBD = &v1alpha3.DRBDResource{}
+		changedRV.Status.DRBD = &v1alpha1.DRBDResource{}
 	}
 	if changedRV.Status.DRBD.Config == nil {
-		changedRV.Status.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		changedRV.Status.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
 	}
 	changedRV.Status.DRBD.Config.DeviceMinor = &availableDeviceMinor
 

@@ -19,15 +19,15 @@ package drbdconfig
 import (
 	"strings"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
 type drbdAPIError interface {
 	error
-	WriteDRBDError(apiErrors *v1alpha3.DRBDErrors)
+	WriteDRBDError(apiErrors *v1alpha1.DRBDErrors)
 	// should be callable with zero receiver
-	ResetDRBDError(apiErrors *v1alpha3.DRBDErrors)
+	ResetDRBDError(apiErrors *v1alpha1.DRBDErrors)
 }
 
 // all errors
@@ -49,7 +49,7 @@ var allDRBDAPIErrors = []drbdAPIError{
 	sharedSecretAlgUnsupportedError{},
 }
 
-func resetAllDRBDAPIErrors(apiErrors *v1alpha3.DRBDErrors) {
+func resetAllDRBDAPIErrors(apiErrors *v1alpha1.DRBDErrors) {
 	for _, e := range allDRBDAPIErrors {
 		e.ResetDRBDError(apiErrors)
 	}
@@ -57,37 +57,37 @@ func resetAllDRBDAPIErrors(apiErrors *v1alpha3.DRBDErrors) {
 
 // [drbdAPIError.WriteDRBDError]
 
-func (c configurationCommandError) WriteDRBDError(apiErrors *v1alpha3.DRBDErrors) {
-	apiErrors.ConfigurationCommandError = &v1alpha3.CmdError{
+func (c configurationCommandError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.ConfigurationCommandError = &v1alpha1.CmdError{
 		Command:  trimLen(strings.Join(c.CommandWithArgs(), " "), maxErrLen),
 		Output:   trimLen(c.Output(), maxErrLen),
 		ExitCode: c.ExitCode(),
 	}
 }
 
-func (f fileSystemOperationError) WriteDRBDError(apiErrors *v1alpha3.DRBDErrors) {
-	apiErrors.FileSystemOperationError = &v1alpha3.MessageError{
+func (f fileSystemOperationError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.FileSystemOperationError = &v1alpha1.MessageError{
 		Message: trimLen(f.Error(), maxErrLen),
 	}
 }
 
-func (s sharedSecretAlgUnsupportedError) WriteDRBDError(apiErrors *v1alpha3.DRBDErrors) {
-	apiErrors.SharedSecretAlgSelectionError = &v1alpha3.SharedSecretUnsupportedAlgError{
+func (s sharedSecretAlgUnsupportedError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
+	apiErrors.SharedSecretAlgSelectionError = &v1alpha1.SharedSecretUnsupportedAlgError{
 		UnsupportedAlg: s.unsupportedAlg,
 	}
 }
 
 // [drbdAPIError.ResetDRBDError]
 
-func (configurationCommandError) ResetDRBDError(apiErrors *v1alpha3.DRBDErrors) {
+func (configurationCommandError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.ConfigurationCommandError = nil
 }
 
-func (fileSystemOperationError) ResetDRBDError(apiErrors *v1alpha3.DRBDErrors) {
+func (fileSystemOperationError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.FileSystemOperationError = nil
 }
 
-func (sharedSecretAlgUnsupportedError) ResetDRBDError(apiErrors *v1alpha3.DRBDErrors) {
+func (sharedSecretAlgUnsupportedError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.SharedSecretAlgSelectionError = nil
 }
 

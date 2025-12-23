@@ -28,7 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -85,14 +85,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	nodeInternalIP := node.Status.Addresses[nodeAddressIndex].Address
 
 	// List all RVRs on this node that need address configuration
-	var rvrList v1alpha3.ReplicatedVolumeReplicaList
+	var rvrList v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &rvrList); err != nil {
 		log.Error(err, "Can't list ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
 	// Keep only RVR on that node
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		return rvr.Spec.NodeName != node.Name
 	})
 
@@ -100,25 +100,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
 		if rvr.Status == nil {
-			rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+			rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 		}
 		if rvr.Status.Conditions == nil {
 			rvr.Status.Conditions = []metav1.Condition{}
 		}
 		if rvr.Status.DRBD == nil {
-			rvr.Status.DRBD = &v1alpha3.DRBD{}
+			rvr.Status.DRBD = &v1alpha1.DRBD{}
 		}
 		if rvr.Status.DRBD.Config == nil {
-			rvr.Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+			rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 		}
 		if rvr.Status.DRBD.Config.Address == nil {
-			rvr.Status.DRBD.Config.Address = &v1alpha3.Address{}
+			rvr.Status.DRBD.Config.Address = &v1alpha1.Address{}
 		}
 	}
 
 	// Build map of used ports from all RVRs removing the RVR with valid port and the not changed IPv4
 	usedPorts := make(map[uint]struct{})
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		if !IsPortValid(r.drbdCfg, rvr.Status.DRBD.Config.Address.Port) {
 			return false // keep invalid
 		}
@@ -155,7 +155,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 			if changed := r.setCondition(
 				&rvr,
 				metav1.ConditionFalse,
-				v1alpha3.ReasonNoFreePortAvailable,
+				v1alpha1.ReasonNoFreePortAvailable,
 				"No free port available",
 			); changed {
 				if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
@@ -167,7 +167,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 		}
 
 		// Set address and condition
-		address := &v1alpha3.Address{
+		address := &v1alpha1.Address{
 			IPv4: nodeInternalIP,
 			Port: portToAssign,
 		}
@@ -187,7 +187,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplica, address *v1alpha3.Address) bool {
+func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplica, address *v1alpha1.Address) bool {
 	// Check if address is already set correctly
 	addressChanged := *rvr.Status.DRBD.Config.Address != *address
 	rvr.Status.DRBD.Config.Address = address
@@ -196,17 +196,17 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha3.ReplicatedVolumeReplic
 	conditionChanged := r.setCondition(
 		rvr,
 		metav1.ConditionTrue,
-		v1alpha3.ReasonAddressConfigurationSucceeded,
+		v1alpha1.ReasonAddressConfigurationSucceeded,
 		"Address configured",
 	)
 
 	return addressChanged || conditionChanged
 }
 
-func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
+func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
 	// Check if condition is already set correctly
 	if rvr.Status != nil && rvr.Status.Conditions != nil {
-		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeAddressConfigured)
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAddressConfigured)
 		if cond != nil &&
 			cond.Status == status &&
 			cond.Reason == reason &&
@@ -220,7 +220,7 @@ func (r *Reconciler) setCondition(rvr *v1alpha3.ReplicatedVolumeReplica, status 
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:    v1alpha3.ConditionTypeAddressConfigured,
+			Type:    v1alpha1.ConditionTypeAddressConfigured,
 			Status:  status,
 			Reason:  reason,
 			Message: message,

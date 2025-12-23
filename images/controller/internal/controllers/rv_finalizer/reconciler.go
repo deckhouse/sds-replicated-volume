@@ -25,7 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -46,8 +46,12 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
 	}
 
@@ -55,43 +59,83 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	patch := client.MergeFrom(rv.DeepCopy())
 
-	if rvNeedsFinalizer(rv) {
-		rv.Finalizers = append(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
-
-		log.Info("finalizer added to rv")
-	} else if rvFinalizerMayNeedToBeRemoved(rv) {
-		rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
-		if err := r.cl.List(ctx, rvrList); err != nil {
-			return reconcile.Result{}, fmt.Errorf("listing rvrs: %w", err)
-		}
-
-		for i := range rvrList.Items {
-			if rvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name {
-				log.Debug(
-					"found rvr 'rvrName' linked to rv 'rvName', therefore skip removing finalizer from rv",
-					"rvrName", rvrList.Items[i].Name,
-				)
-				return reconcile.Result{}, nil
-			}
-		}
-
-		rv.Finalizers = slices.DeleteFunc(
-			rv.Finalizers,
-			func(f string) bool { return f == v1alpha3.ControllerAppFinalizer },
-		)
-
-		log.Info("finalizer deleted from rv")
+	hasChanged, err := r.processFinalizers(ctx, log, rv)
+	if err != nil {
+		return reconcile.Result{}, err
 	}
 
-	if err := r.cl.Patch(ctx, rv, patch); err != nil {
-		return reconcile.Result{}, fmt.Errorf("patching rv finalizers: %w", err)
+	if hasChanged {
+		if err := r.cl.Patch(ctx, rv, patch); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				log.Info("ReplicatedVolume was deleted during reconciliation, skipping patch")
+				return reconcile.Result{}, nil
+			}
+			return reconcile.Result{}, fmt.Errorf("patching rv finalizers: %w", err)
+		}
 	}
 	return reconcile.Result{}, nil
 }
 
-func rvNeedsFinalizer(rv *v1alpha3.ReplicatedVolume) bool {
-	return rv.DeletionTimestamp == nil && !slices.Contains(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+func (r *Reconciler) processFinalizers(
+	ctx context.Context,
+	log *slog.Logger,
+	rv *v1alpha1.ReplicatedVolume,
+) (hasChanged bool, err error) {
+	rvDeleted := rv.DeletionTimestamp != nil
+	rvHasFinalizer := slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+
+	var hasRVRs bool
+	if rvDeleted {
+		hasRVRs, err = r.rvHasRVRs(ctx, log, rv.Name)
+		if err != nil {
+			return false, err
+		}
+	} // it doesn't matter otherwise
+
+	if !rvDeleted {
+		if !rvHasFinalizer {
+			rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+			log.Info("finalizer added to rv")
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if hasRVRs {
+		if !rvHasFinalizer {
+			rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+			log.Info("finalizer added to rv")
+			return true, nil
+		}
+		return false, nil
+	}
+
+	if rvHasFinalizer {
+		rv.Finalizers = slices.DeleteFunc(
+			rv.Finalizers,
+			func(f string) bool { return f == v1alpha1.ControllerAppFinalizer },
+		)
+		log.Info("finalizer deleted from rv")
+		return true, nil
+	}
+
+	return false, nil
 }
-func rvFinalizerMayNeedToBeRemoved(rv *v1alpha3.ReplicatedVolume) bool {
-	return rv.DeletionTimestamp != nil && slices.Contains(rv.Finalizers, v1alpha3.ControllerAppFinalizer)
+
+func (r *Reconciler) rvHasRVRs(ctx context.Context, log *slog.Logger, rvName string) (bool, error) {
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err := r.cl.List(ctx, rvrList); err != nil {
+		return false, fmt.Errorf("listing rvrs: %w", err)
+	}
+
+	for i := range rvrList.Items {
+		if rvrList.Items[i].Spec.ReplicatedVolumeName == rvName {
+			log.Debug(
+				"found rvr 'rvrName' linked to rv 'rvName', therefore skip removing finalizer from rv",
+				"rvrName", rvrList.Items[i].Name,
+			)
+			return true, nil
+		}
+	}
+	return false, nil
 }

@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
 )
 
@@ -45,7 +44,7 @@ var _ = Describe("Reconciler", func() {
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed(), "should add v1alpha3 to scheme")
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
@@ -54,7 +53,7 @@ var _ = Describe("Reconciler", func() {
 			// - Update() ignores status field
 			// - Status().Update() updates only status
 			// This means tests must use Status().Update() to set status after Create().
-			WithStatusSubresource(&v1alpha3.ReplicatedVolume{}, &v1alpha3.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{})
 	})
 
 	JustBeforeEach(func() {
@@ -73,7 +72,7 @@ var _ = Describe("Reconciler", func() {
 
 		BeforeEach(func() {
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
-				InterceptGet(func(_ *v1alpha3.ReplicatedVolume) error {
+				InterceptGet(func(_ *v1alpha1.ReplicatedVolume) error {
 					return testError
 				}),
 			)
@@ -88,17 +87,18 @@ var _ = Describe("Reconciler", func() {
 
 	When("RV created", func() {
 		var (
-			rv  *v1alpha3.ReplicatedVolume
+			rv  *v1alpha1.ReplicatedVolume
 			rsc *v1alpha1.ReplicatedStorageClass
 		)
 
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 					PublishOn:                  []string{},
 				},
@@ -147,7 +147,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue for Local volumeAccess")
 
 				By("Verifying no Access RVR was created")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(BeEmpty(), "should not create Access RVR for Local volumeAccess")
 			})
@@ -163,36 +163,36 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after creating Access RVR")
 
 				By("Verifying Access RVR was created")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should create one Access RVR")
-				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeAccess), "should be Access type")
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess), "should be Access type")
 				Expect(rvrList.Items[0].Spec.NodeName).To(Equal("node-1"), "should be on node-1")
 				Expect(rvrList.Items[0].Spec.ReplicatedVolumeName).To(Equal("test-volume"), "should reference the RV")
 			})
 		})
 
 		When("publishOn has node with Diskful replica", func() {
-			var diskfulRVR *v1alpha3.ReplicatedVolumeReplica
+			var diskfulRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rv.Spec.PublishOn = []string{"node-1"}
-				diskfulRVR = &v1alpha3.ReplicatedVolumeReplica{
+				diskfulRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "diskful-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion: "storage.deckhouse.io/v1alpha3",
+								APIVersion: "storage.deckhouse.io/v1alpha1",
 								Kind:       "ReplicatedVolume",
 								Name:       "test-volume",
 								UID:        "test-uid",
 							},
 						},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-volume",
 						NodeName:             "node-1",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				}
 			})
@@ -206,34 +206,34 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying no additional RVR was created")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should only have the Diskful RVR")
-				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful), "should be Diskful type")
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful), "should be Diskful type")
 			})
 		})
 
 		When("publishOn has node with TieBreaker replica", func() {
-			var tieBreakerRVR *v1alpha3.ReplicatedVolumeReplica
+			var tieBreakerRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rv.Spec.PublishOn = []string{"node-1"}
-				tieBreakerRVR = &v1alpha3.ReplicatedVolumeReplica{
+				tieBreakerRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "tiebreaker-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion: "storage.deckhouse.io/v1alpha3",
+								APIVersion: "storage.deckhouse.io/v1alpha1",
 								Kind:       "ReplicatedVolume",
 								Name:       "test-volume",
 								UID:        "test-uid",
 							},
 						},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-volume",
 						NodeName:             "node-1",
-						Type:                 v1alpha3.ReplicaTypeTieBreaker,
+						Type:                 v1alpha1.ReplicaTypeTieBreaker,
 					},
 				}
 			})
@@ -247,34 +247,34 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying no additional RVR was created")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should only have the TieBreaker RVR")
-				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeTieBreaker), "should be TieBreaker type")
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeTieBreaker), "should be TieBreaker type")
 			})
 		})
 
 		When("Access RVR exists on node not in publishOn and not in publishedOn", func() {
-			var accessRVR *v1alpha3.ReplicatedVolumeReplica
+			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rv.Spec.PublishOn = []string{}
-				accessRVR = &v1alpha3.ReplicatedVolumeReplica{
+				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "access-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion: "storage.deckhouse.io/v1alpha3",
+								APIVersion: "storage.deckhouse.io/v1alpha1",
 								Kind:       "ReplicatedVolume",
 								Name:       "test-volume",
 								UID:        "test-uid",
 							},
 						},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-volume",
 						NodeName:             "node-1",
-						Type:                 v1alpha3.ReplicaTypeAccess,
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
 			})
@@ -288,36 +288,36 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVR was deleted")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(BeEmpty(), "should delete Access RVR")
 			})
 		})
 
 		When("Access RVR exists on node not in publishOn but in publishedOn", func() {
-			var accessRVR *v1alpha3.ReplicatedVolumeReplica
+			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rv.Spec.PublishOn = []string{}
-				rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					PublishedOn: []string{"node-1"},
 				}
-				accessRVR = &v1alpha3.ReplicatedVolumeReplica{
+				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "access-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
-								APIVersion: "storage.deckhouse.io/v1alpha3",
+								APIVersion: "storage.deckhouse.io/v1alpha1",
 								Kind:       "ReplicatedVolume",
 								Name:       "test-volume",
 								UID:        "test-uid",
 							},
 						},
 					},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "test-volume",
 						NodeName:             "node-1",
-						Type:                 v1alpha3.ReplicaTypeAccess,
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
 			})
@@ -333,10 +333,10 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVR was NOT deleted")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should keep Access RVR")
-				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeAccess), "should be Access type")
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess), "should be Access type")
 			})
 		})
 
@@ -350,13 +350,13 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVRs were created for both nodes")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(2), "should create two Access RVRs")
 
 				nodeNames := make(map[string]bool)
 				for _, rvr := range rvrList.Items {
-					Expect(rvr.Spec.Type).To(Equal(v1alpha3.ReplicaTypeAccess), "should be Access type")
+					Expect(rvr.Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess), "should be Access type")
 					nodeNames[rvr.Spec.NodeName] = true
 				}
 				Expect(nodeNames).To(HaveKey("node-1"))
@@ -374,7 +374,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue on first reconcile")
 
 				By("Verifying one Access RVR was created")
-				rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should create one Access RVR")
 
@@ -384,7 +384,7 @@ var _ = Describe("Reconciler", func() {
 				By("Verifying still only one Access RVR exists (no duplicates)")
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1), "should still have only one Access RVR (idempotent)")
-				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha3.ReplicaTypeAccess), "should be Access type")
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess), "should be Access type")
 				Expect(rvrList.Items[0].Spec.NodeName).To(Equal("node-1"), "should be on node-1")
 			})
 		})
@@ -392,19 +392,20 @@ var _ = Describe("Reconciler", func() {
 
 	When("Get RSC fails", func() {
 		var (
-			rv        *v1alpha3.ReplicatedVolume
+			rv        *v1alpha1.ReplicatedVolume
 			rsc       *v1alpha1.ReplicatedStorageClass
 			testError error
 		)
 
 		BeforeEach(func() {
 			testError = errors.New("RSC get error")
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 					PublishOn:                  []string{"node-1"},
 				},
@@ -437,19 +438,20 @@ var _ = Describe("Reconciler", func() {
 
 	When("List RVRs fails", func() {
 		var (
-			rv        *v1alpha3.ReplicatedVolume
+			rv        *v1alpha1.ReplicatedVolume
 			rsc       *v1alpha1.ReplicatedStorageClass
 			testError error
 		)
 
 		BeforeEach(func() {
 			testError = errors.New("List RVRs error")
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 					PublishOn:                  []string{"node-1"},
 				},
@@ -465,7 +467,7 @@ var _ = Describe("Reconciler", func() {
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+						if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
 							return testError
 						}
 						return c.List(ctx, list, opts...)
@@ -484,19 +486,20 @@ var _ = Describe("Reconciler", func() {
 
 	When("Create Access RVR fails", func() {
 		var (
-			rv        *v1alpha3.ReplicatedVolume
+			rv        *v1alpha1.ReplicatedVolume
 			rsc       *v1alpha1.ReplicatedStorageClass
 			testError error
 		)
 
 		BeforeEach(func() {
 			testError = errors.New("Create RVR error")
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 					PublishOn:                  []string{"node-1"},
 				},
@@ -512,7 +515,7 @@ var _ = Describe("Reconciler", func() {
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				interceptor.Funcs{
 					Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-						if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 							return testError
 						}
 						return c.Create(ctx, obj, opts...)
@@ -531,20 +534,21 @@ var _ = Describe("Reconciler", func() {
 
 	When("Delete Access RVR fails with non-NotFound error", func() {
 		var (
-			rv        *v1alpha3.ReplicatedVolume
+			rv        *v1alpha1.ReplicatedVolume
 			rsc       *v1alpha1.ReplicatedStorageClass
-			accessRVR *v1alpha3.ReplicatedVolumeReplica
+			accessRVR *v1alpha1.ReplicatedVolumeReplica
 			testError error
 		)
 
 		BeforeEach(func() {
 			testError = errors.New("Delete RVR error")
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-volume",
-					UID:  "test-uid",
+					Name:       "test-volume",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 					PublishOn:                  []string{}, // No publishOn - will trigger delete
 				},
@@ -557,28 +561,28 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 			}
-			accessRVR = &v1alpha3.ReplicatedVolumeReplica{
+			accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "access-rvr-to-delete",
 					OwnerReferences: []metav1.OwnerReference{
 						{
-							APIVersion: "storage.deckhouse.io/v1alpha3",
+							APIVersion: "storage.deckhouse.io/v1alpha1",
 							Kind:       "ReplicatedVolume",
 							Name:       "test-volume",
 							UID:        "test-uid",
 						},
 					},
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "test-volume",
 					NodeName:             "node-1",
-					Type:                 v1alpha3.ReplicaTypeAccess,
+					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
 			}
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				interceptor.Funcs{
 					Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
-						if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha3.ReplicaTypeAccess {
+						if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
 							return testError
 						}
 						return c.Delete(ctx, obj, opts...)

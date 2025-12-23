@@ -27,8 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 // BuildController creates and registers the rvr-status-conditions controller with the manager.
@@ -42,7 +41,7 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(RvrStatusConditionsControllerName).
-		For(&v1alpha3.ReplicatedVolumeReplica{}).
+		For(&v1alpha1.ReplicatedVolumeReplica{}).
 		Watches(
 			&corev1.Pod{},
 			handler.EnqueueRequestsFromMapFunc(AgentPodToRVRMapper(mgr.GetClient(), log.WithName("Mapper"))),
@@ -60,9 +59,9 @@ func AgentPodToRVRMapper(cl client.Client, log logr.Logger) handler.MapFunc {
 		}
 
 		// Only process agent pods
-		// AgentNamespace is taken from rv.ControllerConfigMapNamespace
+		// AgentNamespace is taken from v1alpha1.ModuleNamespace
 		// Agent pods run in the same namespace as controller
-		if pod.Namespace != rv.ControllerConfigMapNamespace {
+		if pod.Namespace != v1alpha1.ModuleNamespace {
 			return nil
 		}
 		if pod.Labels[AgentPodLabel] != AgentPodValue {
@@ -75,7 +74,7 @@ func AgentPodToRVRMapper(cl client.Client, log logr.Logger) handler.MapFunc {
 		}
 
 		// Find all RVRs on this node
-		var rvrList v1alpha3.ReplicatedVolumeReplicaList
+		var rvrList v1alpha1.ReplicatedVolumeReplicaList
 		if err := cl.List(ctx, &rvrList); err != nil {
 			log.Error(err, "Failed to list RVRs")
 			return nil

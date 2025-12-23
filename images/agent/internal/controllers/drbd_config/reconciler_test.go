@@ -35,7 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -45,8 +45,8 @@ import (
 type reconcileTestCase struct {
 	name string
 	//
-	rv   *v1alpha3.ReplicatedVolume
-	rvr  *v1alpha3.ReplicatedVolumeReplica
+	rv   *v1alpha1.ReplicatedVolume
+	rvr  *v1alpha1.ReplicatedVolumeReplica
 	llv  *snc.LVMLogicalVolume
 	lvg  *snc.LVMVolumeGroup
 	objs []client.Object
@@ -57,6 +57,7 @@ type reconcileTestCase struct {
 	expectedCommands     []*fakedrbdadm.ExpectedCmd
 	prepare              func(t *testing.T)
 	postCheck            func(t *testing.T, cl client.Client)
+	skipResourceRefresh  bool
 }
 
 const (
@@ -75,8 +76,8 @@ const (
 	testLVGName             = "test-vg"
 	testLLVName             = "test-llv"
 	testDiskName            = "test-lv"
-	rvrTypeDiskful          = "Diskful"
-	rvrTypeAccess           = "Access"
+	rvrTypeDiskful          = v1alpha1.ReplicaTypeDiskful
+	rvrTypeAccess           = v1alpha1.ReplicaTypeAccess
 	testNodeIDLocal         = 0
 	testPeerNodeID          = 1
 	apiGroupStorage         = "storage.deckhouse.io"
@@ -102,26 +103,43 @@ func setupDiscardLogger(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+type testResourceScanner struct {
+	resourceNames map[string]struct{}
+}
+
+func (t *testResourceScanner) ResourceShouldBeRefreshed(resourceName string) {
+	if t.resourceNames == nil {
+		t.resourceNames = map[string]struct{}{}
+	}
+	t.resourceNames[resourceName] = struct{}{}
+}
+
+var _ drbdconfig.ResourceScanner = &testResourceScanner{}
+
 func TestReconciler_Reconcile(t *testing.T) {
 	testCases := []*reconcileTestCase{
 		{
-			name: "empty cluster",
-			rv:   testRV(),
+			name:                "empty cluster",
+			rv:                  testRV(),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rvr not initialized",
-			rv:   testRV(),
-			rvr:  rvrSpecOnly("rvr-not-initialized", rvrTypeDiskful),
+			name:                "rvr not initialized",
+			rv:                  testRV(),
+			rvr:                 rvrSpecOnly("rvr-not-initialized", rvrTypeDiskful),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rvr missing status fields skips work",
-			rv:   testRV(),
-			rvr:  disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			name:                "rvr missing status fields skips work",
+			rv:                  testRV(),
+			rvr:                 disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rv missing shared secret skips work",
-			rv:   rvWithoutSecret(),
-			rvr:  disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			name:                "rv missing shared secret skips work",
+			rv:                  rvWithoutSecret(),
+			rvr:                 disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			skipResourceRefresh: true,
 		},
 		{
 			name: "duplicate rvr on node fails selection",
@@ -131,6 +149,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				disklessRVR("test-rvr-dup", addr(testNodeIPv4, port(1))),
 			},
 			expectedReconcileErr: errors.New("selecting rvr: more then one rvr exists"),
+			skipResourceRefresh:  true,
 		},
 		{
 			name:                 "diskful llv missing returns error",
@@ -139,6 +158,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
 			expectedReconcileErr: selectErr("llv", resourceLLV, testLLVName),
+			skipResourceRefresh:  true,
 		},
 		{
 			name:                 "diskful lvg missing returns error",
@@ -148,6 +168,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
 			expectedReconcileErr: selectErr("lvg", resourceLVG, testLVGName),
+			skipResourceRefresh:  true,
 		},
 		{
 			name: "deleting diskful rvr cleans up",
@@ -177,6 +198,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				regular, tmp := drbdconfig.FilePaths(testRVName)
 				expectFileAbsent(t, regular, tmp)
 			},
+			skipResourceRefresh: true,
 		},
 		{
 			name:              "diskless rvr adjusts config",
@@ -187,7 +209,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  disklessExpectedCommands(testRVName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha3.AgentAppFinalizer, v1alpha3.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
 			},
@@ -215,7 +237,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			expectedCommands:  diskfulExpectedCommands(testRVName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
-				expectFinalizers(t, rvr.Finalizers, v1alpha3.AgentAppFinalizer, v1alpha3.ControllerAppFinalizer)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
 				expectString(t, rvr.Status.DRBD.Actual.Disk, "/dev/"+testLVGName+"/"+testDiskName, "actual disk")
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
 			},
@@ -278,6 +300,19 @@ func TestReconciler_Reconcile(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:              "crypto algorithm matching is case insensitive (uppercase in config, lowercase in kernel)",
+			rv:                readyRVWithConfig(testRVSecret, "SHA256", 7, false),
+			rvr:               disklessRVR(testRVRName, addr(testNodeIPv4, port(201)), peersFrom(peerDisklessSpec(testPeerNodeName, testPeerNodeID, addr(testPeerIPv4, port(202))))),
+			needsResourcesDir: true,
+			cryptoAlgs:        []string{"sha256"}, // lowercase in kernel
+			expectedCommands:  disklessExpectedCommands(testRVName),
+			postCheck: func(t *testing.T, cl client.Client) {
+				rvr := fetchRVR(t, cl, testRVRName)
+				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
+				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
+			},
+		},
 	}
 
 	setupMemFS(t)
@@ -306,8 +341,8 @@ func TestReconciler_Reconcile(t *testing.T) {
 				cl := fake.NewClientBuilder().
 					WithScheme(scheme).
 					WithStatusSubresource(
-						&v1alpha3.ReplicatedVolumeReplica{},
-						&v1alpha3.ReplicatedVolume{},
+						&v1alpha1.ReplicatedVolumeReplica{},
+						&v1alpha1.ReplicatedVolume{},
 					).
 					WithObjects(tc.toObjects()...).
 					Build()
@@ -316,7 +351,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 				fakeExec.ExpectCommands(tc.expectedCommands...)
 				fakeExec.Setup(t)
 
-				rec := drbdconfig.NewReconciler(cl, nil, testNodeName)
+				resScanner := &testResourceScanner{}
+
+				rec := drbdconfig.NewReconciler(cl, nil, testNodeName, resScanner)
 
 				_, err := rec.Reconcile(
 					t.Context(),
@@ -332,6 +369,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 				if tc.postCheck != nil {
 					tc.postCheck(t, cl)
+				}
+
+				if !tc.skipResourceRefresh {
+					if _, invoked := resScanner.resourceNames[tc.rv.Name]; !invoked {
+						t.Errorf("expected to invoke resource scanner")
+					}
 				}
 			},
 		)
@@ -353,22 +396,24 @@ func (tc *reconcileTestCase) toObjects() (res []client.Object) {
 	return res
 }
 
-func testRV() *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func testRV() *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 	}
 }
 
-func rvWithoutSecret() *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha3.ReplicatedVolumeStatus{
-			DRBD: &v1alpha3.DRBDResource{
-				Config: &v1alpha3.DRBDResourceConfig{},
+		Status: &v1alpha1.ReplicatedVolumeStatus{
+			DRBD: &v1alpha1.DRBDResource{
+				Config: &v1alpha1.DRBDResourceConfig{},
 			},
 		},
 	}
@@ -378,12 +423,12 @@ func port(offset uint) uint {
 	return testPortBase + offset
 }
 
-func rvrSpecOnly(name string, rvrType string) *v1alpha3.ReplicatedVolumeReplica {
-	return &v1alpha3.ReplicatedVolumeReplica{
+func rvrSpecOnly(name string, rvrType v1alpha1.ReplicaType) *v1alpha1.ReplicatedVolumeReplica {
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrType,
@@ -391,33 +436,33 @@ func rvrSpecOnly(name string, rvrType string) *v1alpha3.ReplicatedVolumeReplica 
 	}
 }
 
-func disklessRVR(name string, address v1alpha3.Address, peers ...map[string]v1alpha3.Peer) *v1alpha3.ReplicatedVolumeReplica {
+func disklessRVR(name string, address v1alpha1.Address, peers ...map[string]v1alpha1.Peer) *v1alpha1.ReplicatedVolumeReplica {
 	return readyRVR(name, rvrTypeAccess, testNodeIDLocal, address, firstMapOrNil(peers), "")
 }
 
 //nolint:unparam // accepts name for readability and potential future cases
-func diskfulRVR(name string, address v1alpha3.Address, llvName string, peers ...map[string]v1alpha3.Peer) *v1alpha3.ReplicatedVolumeReplica {
+func diskfulRVR(name string, address v1alpha1.Address, llvName string, peers ...map[string]v1alpha1.Peer) *v1alpha1.ReplicatedVolumeReplica {
 	return readyRVR(name, rvrTypeDiskful, testNodeIDLocal, address, firstMapOrNil(peers), llvName)
 }
 
-func firstMapOrNil(ms []map[string]v1alpha3.Peer) map[string]v1alpha3.Peer {
+func firstMapOrNil(ms []map[string]v1alpha1.Peer) map[string]v1alpha1.Peer {
 	if len(ms) == 0 {
 		return nil
 	}
 	return ms[0]
 }
 
-func rvrWithErrors(rvr *v1alpha3.ReplicatedVolumeReplica) *v1alpha3.ReplicatedVolumeReplica {
+func rvrWithErrors(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.ReplicatedVolumeReplica {
 	r := rvr.DeepCopy()
 	if r.Status == nil {
-		r.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		r.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if r.Status.DRBD == nil {
-		r.Status.DRBD = &v1alpha3.DRBD{}
+		r.Status.DRBD = &v1alpha1.DRBD{}
 	}
-	r.Status.DRBD.Errors = &v1alpha3.DRBDErrors{
-		FileSystemOperationError: &v1alpha3.MessageError{Message: "old-fs-error"},
-		ConfigurationCommandError: &v1alpha3.CmdError{
+	r.Status.DRBD.Errors = &v1alpha1.DRBDErrors{
+		FileSystemOperationError: &v1alpha1.MessageError{Message: "old-fs-error"},
+		ConfigurationCommandError: &v1alpha1.CmdError{
 			Command:  "old-cmd",
 			Output:   "old-output",
 			ExitCode: 1,
@@ -456,16 +501,17 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 }
 
 //nolint:unparam // keep secret configurable for future scenarios
-func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
-			Name: testRVName,
+			Name:       testRVName,
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha3.ReplicatedVolumeStatus{
-			DRBD: &v1alpha3.DRBDResource{
-				Config: &v1alpha3.DRBDResourceConfig{
+		Status: &v1alpha1.ReplicatedVolumeStatus{
+			DRBD: &v1alpha1.DRBDResource{
+				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
-					SharedSecretAlg:         alg,
+					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),
 					AllowTwoPrimaries:       allowTwoPrimaries,
 					DeviceMinor:             &deviceMinor,
 					Quorum:                  1,
@@ -478,59 +524,59 @@ func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries b
 
 func readyRVR(
 	name string,
-	rvrType string,
+	rvrType v1alpha1.ReplicaType,
 	nodeID uint,
-	address v1alpha3.Address,
-	peers map[string]v1alpha3.Peer,
+	address v1alpha1.Address,
+	peers map[string]v1alpha1.Peer,
 	lvmLogicalVolumeName string,
-) *v1alpha3.ReplicatedVolumeReplica {
-	return &v1alpha3.ReplicatedVolumeReplica{
+) *v1alpha1.ReplicatedVolumeReplica {
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrType,
 		},
-		Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: lvmLogicalVolumeName,
-			DRBD: &v1alpha3.DRBD{
-				Config: &v1alpha3.DRBDConfig{
+			DRBD: &v1alpha1.DRBD{
+				Config: &v1alpha1.DRBDConfig{
 					NodeId:           &nodeID,
 					Address:          &address,
 					Peers:            peers,
 					PeersInitialized: true,
 				},
-				Actual: &v1alpha3.DRBDActual{},
+				Actual: &v1alpha1.DRBDActual{},
 			},
 		},
 	}
 }
 
-func deletingRVR(name, llvName string) *v1alpha3.ReplicatedVolumeReplica {
+func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 	now := v1.NewTime(time.Now())
 
-	return &v1alpha3.ReplicatedVolumeReplica{
+	return &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: v1.ObjectMeta{
 			Name:              name,
-			Finalizers:        []string{v1alpha3.AgentAppFinalizer},
+			Finalizers:        []string{v1alpha1.AgentAppFinalizer},
 			DeletionTimestamp: &now,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: testRVName,
 			NodeName:             testNodeName,
 			Type:                 rvrTypeDiskful,
 		},
-		Status: &v1alpha3.ReplicatedVolumeReplicaStatus{
+		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: llvName,
-			DRBD: &v1alpha3.DRBD{
-				Config: &v1alpha3.DRBDConfig{
+			DRBD: &v1alpha1.DRBD{
+				Config: &v1alpha1.DRBDConfig{
 					NodeId:           ptrUint(0),
-					Address:          &v1alpha3.Address{IPv4: testNodeIPv4, Port: port(3)},
+					Address:          &v1alpha1.Address{IPv4: testNodeIPv4, Port: port(3)},
 					PeersInitialized: true,
 				},
-				Actual: &v1alpha3.DRBDActual{},
+				Actual: &v1alpha1.DRBDActual{},
 			},
 		},
 	}
@@ -541,7 +587,7 @@ func newLLV(name, lvgName, lvName string) *snc.LVMLogicalVolume {
 	return &snc.LVMLogicalVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       name,
-			Finalizers: []string{v1alpha3.AgentAppFinalizer},
+			Finalizers: []string{v1alpha1.AgentAppFinalizer},
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
 			ActualLVNameOnTheNode: lvName,
@@ -605,10 +651,10 @@ func diskfulExpectedCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
 			ResultErr:    fakedrbdadm.ExitErr{Code: 1},
 		},
 		newExpectedCmd(drbdadm.Command, drbdadm.CreateMDArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(rvName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(rvName), "", nil),
 	}
 }
 
@@ -616,29 +662,29 @@ func ptrUint(v uint) *uint {
 	return &v
 }
 
-func addr(ip string, port uint) v1alpha3.Address {
-	return v1alpha3.Address{IPv4: ip, Port: port}
+func addr(ip string, port uint) v1alpha1.Address {
+	return v1alpha1.Address{IPv4: ip, Port: port}
 }
 
 type peerSpec struct {
 	name     string
 	nodeID   uint
-	address  v1alpha3.Address
+	address  v1alpha1.Address
 	diskless bool
 }
 
-func peerDisklessSpec(name string, nodeID uint, address v1alpha3.Address) peerSpec {
+func peerDisklessSpec(name string, nodeID uint, address v1alpha1.Address) peerSpec {
 	return peerSpec{name: name, nodeID: nodeID, address: address, diskless: true}
 }
 
-func peerDiskfulSpec(name string, nodeID uint, address v1alpha3.Address) peerSpec {
+func peerDiskfulSpec(name string, nodeID uint, address v1alpha1.Address) peerSpec {
 	return peerSpec{name: name, nodeID: nodeID, address: address, diskless: false}
 }
 
-func peersFrom(specs ...peerSpec) map[string]v1alpha3.Peer {
-	peers := make(map[string]v1alpha3.Peer, len(specs))
+func peersFrom(specs ...peerSpec) map[string]v1alpha1.Peer {
+	peers := make(map[string]v1alpha1.Peer, len(specs))
 	for _, spec := range specs {
-		peers[spec.name] = v1alpha3.Peer{
+		peers[spec.name] = v1alpha1.Peer{
 			NodeId:   spec.nodeID,
 			Address:  spec.address,
 			Diskless: spec.diskless,
@@ -658,18 +704,18 @@ func diskfulExpectedCommandsWithExistingMetadata(rvName string) []*fakedrbdadm.E
 	}
 }
 
-func fetchRVR(t *testing.T, cl client.Client, name string) *v1alpha3.ReplicatedVolumeReplica {
+func fetchRVR(t *testing.T, cl client.Client, name string) *v1alpha1.ReplicatedVolumeReplica {
 	t.Helper()
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := cl.Get(t.Context(), types.NamespacedName{Name: name}, rvr); err != nil {
 		t.Fatalf("getting rvr %s: %v", name, err)
 	}
 	return rvr
 }
 
-func tryGetRVR(t *testing.T, cl client.Client, name string) (*v1alpha3.ReplicatedVolumeReplica, error) {
+func tryGetRVR(t *testing.T, cl client.Client, name string) (*v1alpha1.ReplicatedVolumeReplica, error) {
 	t.Helper()
-	rvr := &v1alpha3.ReplicatedVolumeReplica{}
+	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	return rvr, cl.Get(t.Context(), types.NamespacedName{Name: name}, rvr)
 }
 
@@ -725,7 +771,7 @@ func expectString(t *testing.T, got string, expected string, name string) {
 	}
 }
 
-func expectNoDRBDErrors(t *testing.T, errs *v1alpha3.DRBDErrors) {
+func expectNoDRBDErrors(t *testing.T, errs *v1alpha1.DRBDErrors) {
 	t.Helper()
 	if errs == nil {
 		return

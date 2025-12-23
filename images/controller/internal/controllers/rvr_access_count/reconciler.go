@@ -29,7 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 )
 
 type Reconciler struct {
@@ -55,14 +54,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	log.Info("Reconciling")
 
 	// Get ReplicatedVolume
-	rv := &v1alpha3.ReplicatedVolume{}
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Getting ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
-	// Skip if RV is being deleted - this case will be handled by another controller
-	if rv.DeletionTimestamp != nil {
+	if !v1alpha1.HasControllerFinalizer(rv) {
+		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
+		return reconcile.Result{}, nil
+	}
+
+	// Skip if RV is being deleted (and no foreign finalizers) - this case will be handled by another controller
+	if rv.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(rv) {
 		log.Info("ReplicatedVolume is being deleted, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -87,14 +95,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Get all RVRs
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
 	// Filter RVRs by replicatedVolumeName
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha1.ReplicatedVolumeReplica) bool {
 		return item.Spec.ReplicatedVolumeName != rv.Name
 	})
 
@@ -104,7 +112,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// - Which nodes have  TieBreaker RVRs - there is no need to create Access RVRs for them, because TieBreaker can be converted to Access by another controller
 	// - Which nodes have Access RVRs - to track what exists for deletion logic
 	nodesWithDiskfulOrTieBreaker := make(map[string]struct{})
-	nodesWithAccess := make(map[string]*v1alpha3.ReplicatedVolumeReplica)
+	nodesWithAccess := make(map[string]*v1alpha1.ReplicatedVolumeReplica)
 
 	// ErrUnknownRVRType is logged when an unknown RVR type is encountered.
 	var ErrUnknownRVRType = errors.New("unknown RVR type")
@@ -119,10 +127,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 
 		switch rvr.Spec.Type {
-		case v1alpha3.ReplicaTypeDiskful, v1alpha3.ReplicaTypeTieBreaker:
+		case v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeTieBreaker:
 			// Both Diskful and TieBreaker mean node has "presence" in DRBD cluster.
 			nodesWithDiskfulOrTieBreaker[nodeName] = struct{}{}
-		case v1alpha3.ReplicaTypeAccess:
+		case v1alpha1.ReplicaTypeAccess:
 			nodesWithAccess[nodeName] = rvr
 		default:
 			log.Error(ErrUnknownRVRType, "Skipping", "rvr", rvr.Name, "type", rvr.Spec.Type)
@@ -164,7 +172,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Find Access RVRs to delete: exists but not in publishOn AND not in publishedOn
-	accessRVRsToDelete := make([]*v1alpha3.ReplicatedVolumeReplica, 0)
+	accessRVRsToDelete := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
 	for nodeName, rvr := range nodesWithAccess {
 		_, inPublishOn := publishOnSet[nodeName]
 		_, inPublishedOn := publishedOnSet[nodeName]
@@ -192,16 +200,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) createAccessRVR(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string, log logr.Logger) error {
-	rvr := &v1alpha3.ReplicatedVolumeReplica{
+func (r *Reconciler) createAccessRVR(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string, log logr.Logger) error {
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			// GenerateName: Kubernetes will append unique suffix, e.g. "pvc-xxx-" -> "pvc-xxx-abc12"
 			GenerateName: rv.Name + "-",
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			NodeName:             nodeName,
-			Type:                 v1alpha3.ReplicaTypeAccess,
+			Type:                 v1alpha1.ReplicaTypeAccess,
 		},
 	}
 
@@ -219,7 +227,7 @@ func (r *Reconciler) createAccessRVR(ctx context.Context, rv *v1alpha3.Replicate
 	return nil
 }
 
-func (r *Reconciler) deleteAccessRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica, log logr.Logger) error {
+func (r *Reconciler) deleteAccessRVR(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica, log logr.Logger) error {
 	if err := r.cl.Delete(ctx, rvr); err != nil {
 		log.Error(err, "Deleting Access RVR", "rvr", rvr.Name, "nodeName", rvr.Spec.NodeName)
 		return client.IgnoreNotFound(err)

@@ -31,8 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
-	rvreconcile "github.com/deckhouse/sds-replicated-volume/images/controller/internal/reconcile/rv"
 )
 
 const (
@@ -101,8 +99,8 @@ func (r *Reconciler) getReplicatedVolume(
 	ctx context.Context,
 	req reconcile.Request,
 	log logr.Logger,
-) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+) (*v1alpha1.ReplicatedVolume, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
 		log.Error(err, "Can't get ReplicatedVolume")
 		return nil, err
@@ -110,7 +108,12 @@ func (r *Reconciler) getReplicatedVolume(
 	return rv, nil
 }
 
-func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
+func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
+	if !v1alpha1.HasControllerFinalizer(rv) {
+		log.Info("No controller finalizer on ReplicatedVolume")
+		return true
+	}
+
 	if rv.Spec.ReplicatedStorageClassName == "" {
 		log.Info("Empty ReplicatedStorageClassName")
 		return true
@@ -120,15 +123,16 @@ func shouldSkipRV(rv *v1alpha3.ReplicatedVolume, log logr.Logger) bool {
 
 func (r *Reconciler) getReplicatedStorageClass(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (*v1alpha1.ReplicatedStorageClass, error) {
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		log.Error(err, "Can't get ReplicatedStorageClass")
 		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedStorageClass not found", "name", rv.Spec.ReplicatedStorageClassName)
 			return nil, nil
 		}
+		log.Error(err, "Can't get ReplicatedStorageClass")
 		return nil, err
 	}
 	return rsc, nil
@@ -167,16 +171,16 @@ func (r *Reconciler) GetNodeNameToFdMap(
 
 func (r *Reconciler) listReplicasForRV(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
-) ([]v1alpha3.ReplicatedVolumeReplica, error) {
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, rvrList); err != nil {
 		log.Error(err, "Can't List ReplicatedVolumeReplicaList")
 		return nil, err
 	}
 
-	replicasForRV := slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	replicasForRV := slices.DeleteFunc(rvrList.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		return rv.Name != rvr.Spec.ReplicatedVolumeName || !rvr.DeletionTimestamp.IsZero()
 	})
 
@@ -185,9 +189,9 @@ func (r *Reconciler) listReplicasForRV(
 
 func aggregateReplicas(
 	nodeNameToFdMap map[string]string,
-	replicasForRVList []v1alpha3.ReplicatedVolumeReplica,
+	replicasForRVList []v1alpha1.ReplicatedVolumeReplica,
 	rsc *v1alpha1.ReplicatedStorageClass,
-) (map[string]int, []*v1alpha3.ReplicatedVolumeReplica) {
+) (map[string]int, []*v1alpha1.ReplicatedVolumeReplica) {
 	FDToReplicaCountMap := make(map[string]int, len(nodeNameToFdMap))
 
 	for _, zone := range rsc.Spec.Zones {
@@ -196,17 +200,17 @@ func aggregateReplicas(
 		}
 	}
 
-	var existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica
+	var existingTieBreakersList []*v1alpha1.ReplicatedVolumeReplica
 
 	for _, rvr := range replicasForRVList {
 		switch rvr.Spec.Type {
-		case "Diskful", "Access":
+		case v1alpha1.ReplicaTypeDiskful, v1alpha1.ReplicaTypeAccess:
 			if rvr.Spec.NodeName != "" {
 				if fd, ok := nodeNameToFdMap[rvr.Spec.NodeName]; ok {
 					FDToReplicaCountMap[fd]++
 				}
 			}
-		case "TieBreaker":
+		case v1alpha1.ReplicaTypeTieBreaker:
 			existingTieBreakersList = append(existingTieBreakersList, &rvr)
 		}
 	}
@@ -216,9 +220,9 @@ func aggregateReplicas(
 
 func (r *Reconciler) syncTieBreakers(
 	ctx context.Context,
-	rv *v1alpha3.ReplicatedVolume,
+	rv *v1alpha1.ReplicatedVolume,
 	fdToReplicaCountMap map[string]int,
-	existingTieBreakersList []*v1alpha3.ReplicatedVolumeReplica,
+	existingTieBreakersList []*v1alpha1.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) (reconcile.Result, error) {
 	desiredTB, err := CalculateDesiredTieBreakerTotal(fdToReplicaCountMap)
@@ -240,14 +244,14 @@ func (r *Reconciler) syncTieBreakers(
 
 		toCreate := desiredTB - currentTB
 		for i := 0; i < toCreate; i++ {
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					GenerateName: rv.Name + "-tiebreaker-",
-					Finalizers:   []string{rvreconcile.ControllerFinalizerName},
+					Finalizers:   []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
-					Type:                 "TieBreaker",
+					Type:                 v1alpha1.ReplicaTypeTieBreaker,
 				},
 			}
 

@@ -145,6 +145,9 @@ Cм. существующую реализацию `drbdadm resize`.
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
 `sds-replicated-volume.storage.deckhouse.io/*` (нет чужих), новые реплики не создаются.
 
+### Добавление
+- начинать работу только если у RV  status.condition[type=IOReady].status=True
+
 ## `rv-publish-controller`
 
 ### Уточнение
@@ -229,7 +232,7 @@ Cм. существующую реализацию `drbdadm resize`.
   - `sds-replicated-volume.storage.deckhouse.io/controller` (далее - `F/controller`)
 
 При удалении RVR, agent не удаляет ресурс из DRBD, и не снимает финализаторы,
-пока стоит `F/controller`.
+пока есть хотя бы один финализатор, кроме `F/agent`.
 
 ### Цель 
 
@@ -242,9 +245,9 @@ Cм. существующую реализацию `drbdadm resize`.
 
 В случае, когда RV не удаляется (`rv.metadata.deletionTimestamp==nil`), требуется
 проверить дополнительные условия:
-- количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
+- количество rvr `rvr.status.conditions[type=Online].status == True`
 (исключая ту, которую собираются удалить) больше, либо равно `rv.status.drbd.config.quorum`
-- присутствует необходимое количество `rvr.status.actualType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
+- присутствует необходимое количество `rvr.spec.Type==Diskful && rvr.status.actualType==Diskful && rvr.status.conditions[type=IOReady].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
 соответствии с `rsc.spec.replication`
 
 ### Вывод

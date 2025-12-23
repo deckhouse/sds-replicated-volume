@@ -27,7 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -53,21 +53,30 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 	log := r.log.WithName("Reconcile").WithValues("req", req)
 	log.Info("Reconciling")
 
-	var rv v1alpha3.ReplicatedVolume
+	var rv v1alpha1.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Can't get ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
+	}
+
+	if !v1alpha1.HasControllerFinalizer(&rv) {
+		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
+		return reconcile.Result{}, nil
 	}
 
 	log.V(1).Info("Listing replicas")
-	var list v1alpha3.ReplicatedVolumeReplicaList
+	var list v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &list, &client.ListOptions{}); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplica")
 		return reconcile.Result{}, err
 	}
 
 	log.V(2).Info("Removing unrelated items")
-	list.Items = slices.DeleteFunc(list.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	list.Items = slices.DeleteFunc(list.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		if !metav1.IsControlledBy(&rvr, &rv) {
 			log.V(4).Info("Not controlled by this ReplicatedVolume")
 			return true
@@ -98,13 +107,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return false
 	})
 
-	peers := make(map[string]v1alpha3.Peer, len(list.Items))
+	peers := make(map[string]v1alpha1.Peer, len(list.Items))
 	for _, rvr := range list.Items {
 		if _, exist := peers[rvr.Spec.NodeName]; exist {
 			log.Error(ErrMultiplePeersOnSameNode, "Can't build peers map")
 			return reconcile.Result{}, ErrMultiplePeersOnSameNode
 		}
-		peers[rvr.Spec.NodeName] = v1alpha3.Peer{
+		peers[rvr.Spec.NodeName] = v1alpha1.Peer{
 			NodeId:   *rvr.Status.DRBD.Config.NodeId,
 			Address:  *rvr.Status.DRBD.Config.Address,
 			Diskless: rvr.Spec.IsDiskless(),

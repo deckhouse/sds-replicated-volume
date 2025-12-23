@@ -32,24 +32,23 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
 //
 //nolint:unparam // name and rv parameters are kept for flexibility in tests
-func createReplicatedVolumeReplica(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
-	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha3.ReplicaTypeDiskful, ready, deletionTimestamp)
+func createReplicatedVolumeReplica(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha1.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedVolume, scheme *runtime.Scheme, rvrType string, ready bool, deletionTimestamp *metav1.Time) *v1alpha3.ReplicatedVolumeReplica {
-	rvr := &v1alpha3.ReplicatedVolumeReplica{
+func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			Type:                 rvrType,
 		},
@@ -66,10 +65,10 @@ func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedV
 	}
 
 	if ready {
-		rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{
+		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha3.ConditionTypeReady,
+					Type:   v1alpha1.ConditionTypeDataInitialized,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -82,7 +81,7 @@ func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha3.ReplicatedV
 var _ = Describe("Reconciler", func() {
 	scheme := runtime.NewScheme()
 	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-	Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+	Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 	// Available in BeforeEach
 	var (
@@ -99,8 +98,8 @@ var _ = Describe("Reconciler", func() {
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{})
 
 		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil
@@ -119,19 +118,26 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("RV and RSC exists", func() {
-		var rv *v1alpha3.ReplicatedVolume
+		var rv *v1alpha1.ReplicatedVolume
 		var rsc *v1alpha1.ReplicatedStorageClass
-		var rvrList *v1alpha3.ReplicatedVolumeReplicaList
+		var rvrList *v1alpha1.ReplicatedVolumeReplicaList
 		BeforeEach(func() {
 			rsc = &v1alpha1.ReplicatedStorageClass{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"}}
-			rv = &v1alpha3.ReplicatedVolume{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-rv"},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
-					ReplicatedStorageClassName: rsc.Name},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
-					Conditions: []metav1.Condition{}}}
-			rvrList = &v1alpha3.ReplicatedVolumeReplicaList{}
+				ObjectMeta: metav1.ObjectMeta{Name: "test-rsc"},
+			}
+			rv = &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "test-rv",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: rsc.Name,
+				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{},
+				},
+			}
+			rvrList = &v1alpha1.ReplicatedVolumeReplicaList{}
 		})
 		JustBeforeEach(func(ctx SpecContext) {
 			if rsc != nil {
@@ -146,29 +152,64 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("ReplicatedVolume has deletionTimestamp", func() {
-			const finalizer = "test-finalizer"
-			BeforeEach(func() {
-				rv.Finalizers = []string{finalizer}
+			const externalFinalizer = "test-finalizer"
+
+			When("has only controller finalizer", func() {
+				BeforeEach(func() {
+					rv.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
+				})
+
+				JustBeforeEach(func(ctx SpecContext) {
+					By("Deleting rv")
+					Expect(cl.Delete(ctx, rv)).To(Succeed())
+
+					By("Checking if it has DeletionTimestamp")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
+						Succeed(),
+						"rv should not be deleted because it has controller finalizer",
+					)
+
+					Expect(rv).To(SatisfyAll(
+						HaveField("Finalizers", ContainElement(v1alpha1.ControllerAppFinalizer)),
+						HaveField("DeletionTimestamp", Not(BeNil())),
+					))
+				})
+
+				It("should do nothing and return no error", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+				})
 			})
 
-			JustBeforeEach(func(ctx SpecContext) {
-				By("Deleting rv")
-				Expect(cl.Delete(ctx, rv)).To(Succeed())
+			When("has external finalizer in addition to controller finalizer", func() {
+				BeforeEach(func() {
+					rv.Finalizers = []string{v1alpha1.ControllerAppFinalizer, externalFinalizer}
+					// ensure replication is defined so reconcile path can proceed
+					rsc.Spec.Replication = v1alpha1.ReplicationNone
+				})
 
-				By("Checking if it has DeletionTimestamp")
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
-					Succeed(),
-					"rv should not be deleted because it has finalizer",
-				)
+				JustBeforeEach(func(ctx SpecContext) {
+					By("Deleting rv")
+					Expect(cl.Delete(ctx, rv)).To(Succeed())
 
-				Expect(rv).To(SatisfyAll(
-					HaveField("Finalizers", ContainElement(finalizer)),
-					HaveField("DeletionTimestamp", Not(BeNil())),
-				))
-			})
+					By("Checking if it has DeletionTimestamp and external finalizer")
+					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(
+						Succeed(),
+						"rv should not be deleted because it has finalizers",
+					)
 
-			It("should do nothing and return no error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+					Expect(rv).To(SatisfyAll(
+						HaveField("Finalizers", ContainElement(externalFinalizer)),
+						HaveField("DeletionTimestamp", Not(BeNil())),
+					))
+				})
+
+				It("still processes RV (creates replicas)", func(ctx SpecContext) {
+					Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+					rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
+					Expect(cl.List(ctx, rvrList)).To(Succeed())
+					Expect(rvrList.Items).ToNot(BeEmpty())
+				})
 			})
 		})
 
@@ -187,7 +228,6 @@ var _ = Describe("Reconciler", func() {
 				It("should return an error", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(errorMatcher)
 				})
-
 			})
 
 		When("replication is None", func() {
@@ -204,23 +244,16 @@ var _ = Describe("Reconciler", func() {
 					HaveLen(1),
 					HaveEach(SatisfyAll(
 						HaveField("Spec.ReplicatedVolumeName", Equal(rv.Name)),
-						HaveField("Spec.Type", Equal(v1alpha3.ReplicaTypeDiskful)),
+						HaveField("Spec.Type", Equal(v1alpha1.ReplicaTypeDiskful)),
 						HaveField("OwnerReferences", ContainElement(SatisfyAll(
 							HaveField("Name", Equal(rv.Name)),
 							HaveField("Kind", Equal("ReplicatedVolume")),
-							HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha3")),
+							HaveField("APIVersion", Equal("storage.deckhouse.io/v1alpha1")),
 							HaveField("Controller", PointTo(BeTrue())),
 							HaveField("BlockOwnerDeletion", PointTo(BeTrue())),
 						))),
 					)),
 				))
-
-				// Verify condition was set
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
-				Expect(rv).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", v1alpha3.ConditionTypeDiskfulReplicaCountReached),
-					HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-				))))
 			})
 		})
 
@@ -242,8 +275,8 @@ var _ = Describe("Reconciler", func() {
 			})
 
 		When("all ReplicatedVolumeReplicas are being deleted", func() {
-			var rvr1 *v1alpha3.ReplicatedVolumeReplica
-			var nonDeletedBefore []v1alpha3.ReplicatedVolumeReplica
+			var rvr1 *v1alpha1.ReplicatedVolumeReplica
+			var nonDeletedBefore []v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
@@ -257,7 +290,7 @@ var _ = Describe("Reconciler", func() {
 
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				for _, rvr := range rvrList.Items {
-					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
+					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
 						nonDeletedBefore = append(nonDeletedBefore, rvr)
 					}
 				}
@@ -267,10 +300,10 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should create one new replica", func(ctx SpecContext) {
-				var nonDeletedReplicas []v1alpha3.ReplicatedVolumeReplica
+			It("should create one new replica", func() {
+				var nonDeletedReplicas []v1alpha1.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
-					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
+					if rvr.Spec.ReplicatedVolumeName == rv.Name && rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.DeletionTimestamp == nil {
 						nonDeletedReplicas = append(nonDeletedReplicas, rvr)
 					}
 				}
@@ -278,20 +311,11 @@ var _ = Describe("Reconciler", func() {
 				if len(nonDeletedBefore) == 0 {
 					Expect(nonDeletedReplicas).To(HaveLen(1))
 				}
-
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				if updatedRV.Status != nil {
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
-				}
 			})
 		})
 
 		When("there is one non-deleted ReplicatedVolumeReplica that is not ready", func() {
-			var rvr1 *v1alpha3.ReplicatedVolumeReplica
+			var rvr1 *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
@@ -310,7 +334,7 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("there are more non-deleted ReplicatedVolumeReplicas than needed", func() {
-			var rvr1, rvr2 *v1alpha3.ReplicatedVolumeReplica
+			var rvr1, rvr2 *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
@@ -332,7 +356,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("there are fewer non-deleted ReplicatedVolumeReplicas than needed", func() {
 			When("Availability replication", func() {
-				var rvr1 *v1alpha3.ReplicatedVolumeReplica
+				var rvr1 *v1alpha1.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
@@ -345,20 +369,13 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for Availability replication", func(ctx SpecContext) {
+				It("should create missing replicas for Availability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
 			When("ConsistencyAndAvailability replication", func() {
-				var rvr1 *v1alpha3.ReplicatedVolumeReplica
+				var rvr1 *v1alpha1.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
@@ -371,40 +388,33 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should create missing replicas for ConsistencyAndAvailability replication", func(ctx SpecContext) {
+				It("should create missing replicas for ConsistencyAndAvailability replication", func() {
 					Expect(rvrList.Items).To(HaveLen(3))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 
 		})
 
 		When("the required number of non-deleted ReplicatedVolumeReplicas is reached", func() {
-			var replicas []*v1alpha3.ReplicatedVolumeReplica
+			var replicas []*v1alpha1.ReplicatedVolumeReplica
 
 			DescribeTableSubtree("replication types",
 				Entry("None replication", func() {
 					rsc.Spec.Replication = "None"
-					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+					replicas = []*v1alpha1.ReplicatedVolumeReplica{
 						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
 					}
 				}),
 				Entry("Availability replication", func() {
 					rsc.Spec.Replication = "Availability"
-					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+					replicas = []*v1alpha1.ReplicatedVolumeReplica{
 						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
 						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
 					}
 				}),
 				Entry("ConsistencyAndAvailability replication", func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
-					replicas = []*v1alpha3.ReplicatedVolumeReplica{
+					replicas = []*v1alpha1.ReplicatedVolumeReplica{
 						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
 						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
 						createReplicatedVolumeReplica("rvr-3", rv, scheme, true, nil),
@@ -420,19 +430,16 @@ var _ = Describe("Reconciler", func() {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 					})
 
-					It("should set condition to True", func(ctx SpecContext) {
-						updatedRV := &v1alpha3.ReplicatedVolume{}
-						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-						Expect(updatedRV.Status.Conditions).To(HaveCondition(
-							v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-							HaveDiskfulReplicaCountReachedConditionAvailable(),
-						))
+					It("should not create additional replicas when required count is reached", func(ctx SpecContext) {
+						Expect(cl.List(ctx, rvrList)).To(Succeed())
+						// Verify that the number of replicas matches the expected count
+						Expect(rvrList.Items).To(HaveLen(len(replicas)))
 					})
 				})
 		})
 
 		When("there are both deleted and non-deleted ReplicatedVolumeReplicas", func() {
-			var rvr1, rvr2 *v1alpha3.ReplicatedVolumeReplica
+			var rvr1, rvr2 *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
@@ -449,31 +456,31 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 			})
 
-			It("should only count non-deleted replicas", func(ctx SpecContext) {
-				var relevantReplicas []v1alpha3.ReplicatedVolumeReplica
+			It("should only count non-deleted replicas", func() {
+				var relevantReplicas []v1alpha1.ReplicatedVolumeReplica
 				for _, rvr := range rvrList.Items {
 					if rvr.Spec.ReplicatedVolumeName == rv.Name {
 						relevantReplicas = append(relevantReplicas, rvr)
 					}
 				}
 				Expect(len(relevantReplicas)).To(BeNumerically(">=", 2))
-
-				updatedRV := &v1alpha3.ReplicatedVolume{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-				Expect(updatedRV.Status.Conditions).To(HaveCondition(
-					v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-					HaveDiskfulReplicaCountReachedConditionAvailable(),
-				))
 			})
 		})
 
 		When("there are non-Diskful ReplicatedVolumeReplicas", func() {
 			When("non-Diskful replica successfully reconciled", func() {
-				var rvrNonDiskful *v1alpha3.ReplicatedVolumeReplica
+				var rvrNonDiskful *v1alpha1.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
+						"rvr-non-diskful",
+						rv,
+						scheme,
+						v1alpha1.ReplicaTypeAccess,
+						true,
+						nil,
+					)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -482,34 +489,34 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should ignore non-Diskful replicas and only count Diskful ones", func(ctx SpecContext) {
+				It("should ignore non-Diskful replicas and only count Diskful ones", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
 
-					var diskfulReplicas []v1alpha3.ReplicatedVolumeReplica
+					var diskfulReplicas []v1alpha1.ReplicatedVolumeReplica
 					for _, rvr := range rvrList.Items {
-						if rvr.Spec.Type == v1alpha3.ReplicaTypeDiskful {
+						if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 							diskfulReplicas = append(diskfulReplicas, rvr)
 						}
 					}
 					Expect(diskfulReplicas).To(HaveLen(1))
 					Expect(diskfulReplicas[0].Spec.ReplicatedVolumeName).To(Equal(rv.Name))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionFirstReplicaBeingCreated(),
-					))
 				})
 			})
 
 			When("calculating required count", func() {
-				var rvrDiskful, rvrNonDiskful *v1alpha3.ReplicatedVolumeReplica
+				var rvrDiskful, rvrNonDiskful *v1alpha1.ReplicatedVolumeReplica
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
 					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv, scheme, true, nil)
-					rvrNonDiskful = createReplicatedVolumeReplicaWithType("rvr-non-diskful", rv, scheme, "Diskless", true, nil)
+					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
+						"rvr-non-diskful",
+						rv,
+						scheme,
+						v1alpha1.ReplicaTypeAccess,
+						true,
+						nil,
+					)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -519,15 +526,8 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 				})
 
-				It("should only count Diskful replicas when calculating required count", func(ctx SpecContext) {
+				It("should only count Diskful replicas when calculating required count", func() {
 					Expect(rvrList.Items).To(HaveLen(2))
-
-					updatedRV := &v1alpha3.ReplicatedVolume{}
-					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed())
-					Expect(updatedRV.Status.Conditions).To(HaveCondition(
-						v1alpha3.ConditionTypeDiskfulReplicaCountReached,
-						HaveDiskfulReplicaCountReachedConditionAvailable(),
-					))
 				})
 			})
 		})
@@ -546,10 +546,10 @@ var _ = Describe("Reconciler", func() {
 
 				rvr := &rvrList.Items[0]
 				Expect(rvr.Spec.ReplicatedVolumeName).To(Equal(rv.Name))
-				Expect(rvr.Spec.Type).To(Equal(v1alpha3.ReplicaTypeDiskful))
+				Expect(rvr.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 
 				if rvr.Status != nil && rvr.Status.Conditions != nil {
-					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha3.ConditionTypeReady)
+					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
 					if readyCond != nil {
 						Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 					}
@@ -563,20 +563,20 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveLen(1))
 
-				// Set Ready condition to True on the existing replica
-				rvr = &v1alpha3.ReplicatedVolumeReplica{}
+				// Set DataInitialized condition to True on the existing replica
+				rvr = &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, types.NamespacedName{Name: rvrList.Items[0].Name}, rvr)).To(Succeed())
 
 				patch := client.MergeFrom(rvr.DeepCopy())
 				if rvr.Status == nil {
-					rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 				}
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha3.ConditionTypeReady,
+						Type:   v1alpha1.ConditionTypeDataInitialized,
 						Status: metav1.ConditionTrue,
-						Reason: v1alpha3.ReasonReady,
+						Reason: "DataInitialized",
 					},
 				)
 				Expect(cl.Status().Patch(ctx, rvr, patch)).To(Succeed())

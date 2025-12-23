@@ -187,7 +187,7 @@ shell:
 
 ---
 image: {{ $.ImageName }}-k8s-await-election-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+fromImage: builder/golang-alpine
 final: false
 
 git:
@@ -198,9 +198,21 @@ git:
     stageDependencies:
       setup:
         - "**/*"
+
+  - add: /images/{{ $.ImageName }}/patches-k8s-await-election
+    to: /patches
+    stageDependencies:
+      setup:
+        - "**/*"
 shell:
   setup:
+    - apk add --no-cache git make
     - cd /usr/local/go/k8s-await-election
+    # apply git patches to upstream's code
+    - |
+      if ls /patches/*.patch 1> /dev/null 2>&1; then
+        git apply /patches/*.patch
+      fi
     - make
     - mv ./out/k8s-await-election-amd64 /k8s-await-election
 
@@ -377,3 +389,4 @@ docker:
     linstor-common: {{ $.Versions.LINSTOR_COMMON }}
     k8s-await-election: {{ $.Versions.LINSTOR_K8S_AWAIT_ELECTION }}
     piraeus-entry: {{ $.Versions.LINSTOR_SERVER_PIRAEUS }}
+---

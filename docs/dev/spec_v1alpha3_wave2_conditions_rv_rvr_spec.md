@@ -50,7 +50,7 @@
 | `Initialized` | Достаточно RVR Initialized | rv-status-conditions-controller | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
 | `Quorum` | Кворум достигнут | rv-status-conditions-controller | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
 | `DataQuorum` | Кворум данных Diskful | rv-status-conditions-controller | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
-| `IOReady` | Достаточно RVR IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
+| `IOReady` | Quorum=True+DataQuorum=True+PublishOn=IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 ### Удаляемые
 
@@ -96,14 +96,14 @@
   - `NotApplicable` — для `rvr.spec.type != Diskful` (diskless реплики)
 - Используется: **rvr-diskful-count-controller** — для определения готовности первой реплики.
 
-### `type=Initialized`
+### `type=DataInitialized`
 
 - Обновляется: на агенте (предположительно **drbd-config-controller**).
 - `status`:
-  - `True` — реплика прошла инициализацию (не снимается!)
+  - `True` — реплика `rvr.spec.type==Diskful` и прошла инициализацию (не снимается!)
     - DRBD ресурс создан и поднят
     - Начальная синхронизация завершена (если требовалась)
-  - `False` — инициализация не завершена
+  - `False` — инициализация не завершена, либо реплика `rvr.spec.type!=Diskful`
 - `reason`:
   - `Initialized` — реплика успешно инициализирована
   - `WaitingForInitialSync` — ожидание завершения начальной синхронизации
@@ -623,9 +623,9 @@ builder.ControllerManagedBy(mgr).
 | `BackingVolumeCreated` | ALL Diskful `RVR.BackingVolumeCreated=True` | `AllBackingVolumesReady`, `BackingVolumesNotReady`, `WaitingForBackingVolumes` |
 | `Configured` | ALL `RVR.Configured=True` | `AllReplicasConfigured`, `ReplicasNotConfigured`, `ConfigurationInProgress` |
 | `Initialized` | count(Initialized=True) >= threshold | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
-| `Quorum` | count(InQuorum=True) >= quorum | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
-| `DataQuorum` | count(Diskful InQuorum=True) >= QMR | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
-| `IOReady` | count(IOReady=True) >= threshold | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
+| `Quorum` | count(All InQuorum=True) >= quorum | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
+| `DataQuorum` | count(Diskful InSync=True) >= QMR | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
+| `IOReady` | count(Diskful IOReady=True) >= threshold | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 > **Примерный список reasons, добавьте/уберите если необходимо.**
 

@@ -20,8 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/google/uuid"
@@ -30,17 +28,12 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 
-	v1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2old"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/internal"
 	"github.com/deckhouse/sds-replicated-volume/images/csi-driver/pkg/utils"
 )
 
 const (
-	ReplicasKey     = "replicated.csi.storage.deckhouse.io/replicas"
-	TopologyKey     = "replicated.csi.storage.deckhouse.io/topology"
-	VolumeAccessKey = "replicated.csi.storage.deckhouse.io/volume-access"
-	ZonesKey        = "replicated.csi.storage.deckhouse.io/zones"
-	SharedSecretKey = "replicated.csi.storage.deckhouse.io/shared-secret"
+	ReplicatedStorageClassParamNameKey = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
 )
 
 func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
@@ -86,58 +79,6 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	rvSize := resource.NewQuantity(request.CapacityRange.GetRequiredBytes(), resource.BinarySI)
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolume size: %s", traceID, volumeID, rvSize.String()))
 
-	// Parse parameters for ReplicatedVolume
-	replicas := byte(3) // default
-	if replicasStr, ok := request.Parameters[ReplicasKey]; ok {
-		if parsed, err := strconv.ParseUint(replicasStr, 10, 8); err == nil {
-			replicas = byte(parsed)
-		} else {
-			d.log.Warning(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Invalid replicas parameter, using default: 3", traceID, volumeID))
-			replicas = 3
-		}
-	}
-
-	topology := "Zonal" // default
-	if topo, ok := request.Parameters[TopologyKey]; ok {
-		topology = topo
-	}
-
-	volumeAccess := "PreferablyLocal" // default
-	if va, ok := request.Parameters[VolumeAccessKey]; ok {
-		volumeAccess = va
-	}
-
-	// Generate unique shared secret for DRBD
-	sharedSecret := uuid.New().String()
-
-	var zones []string
-	if zonesStr, ok := request.Parameters[ZonesKey]; ok && zonesStr != "" {
-		// Parse zones from YAML list format (multi-line with "- " prefix)
-		// Format: "- zone1\n- zone2\n- zone3"
-		lines := strings.Split(zonesStr, "\n")
-		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			// Remove "- " prefix if present
-			if strings.HasPrefix(line, "- ") {
-				zone := strings.TrimSpace(line[2:])
-				if zone != "" {
-					zones = append(zones, zone)
-				}
-			} else {
-				// Fallback: support comma-separated format for backward compatibility
-				for _, zone := range strings.Split(line, ",") {
-					zone = strings.TrimSpace(zone)
-					if zone != "" {
-						zones = append(zones, zone)
-					}
-				}
-			}
-		}
-	}
-
 	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
 	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
 	// with key "kubernetes.io/hostname"
@@ -158,31 +99,11 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] publishRequested is empty (may be filled later via ControllerPublishVolume)", traceID, volumeID))
 	}
 
-	// Build LVGRef list from storagePoolInfo
-	var lvgRefs []v1alpha2.LVGRef
-	for _, lvg := range storagePoolInfo.LVMVolumeGroups {
-		lvgRef := v1alpha2.LVGRef{
-			Name: lvg.Name,
-		}
-		if LvmType == internal.LVMTypeThin {
-			if thinPoolName, ok := storagePoolInfo.LVGToThinPool[lvg.Name]; ok && thinPoolName != "" {
-				lvgRef.ThinPoolName = thinPoolName
-			}
-		}
-		lvgRefs = append(lvgRefs, lvgRef)
-	}
-
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
-		LvmType,
-		lvgRefs,
-		replicas,
-		topology,
-		volumeAccess,
-		sharedSecret,     // unique shared secret for DRBD
 		publishRequested, // publishRequested - contains preferred node for WaitForFirstConsumer
-		zones,
+		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
 
 	d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] ReplicatedVolumeSpec: %+v", traceID, volumeID, rvSpec))

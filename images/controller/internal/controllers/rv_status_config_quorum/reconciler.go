@@ -18,7 +18,10 @@ package rvrdiskfulcount
 
 import (
 	"context"
+	"fmt"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,26 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
-
-// CalculateQuorum calculates quorum and quorum minimum redundancy values
-// based on the number of diskful and total replicas.
-func CalculateQuorum(diskfulCount, all int) (quorum, qmr byte) {
-	if diskfulCount > 1 {
-		quorum = byte(max(2, all/2+1))
-
-		// TODO: Revisit this logic — QMR should not be set when ReplicatedStorageClass.spec.replication == Availability.
-		qmr = byte(max(2, diskfulCount/2+1))
-	}
-	return
-}
-
-func isRvReady(rvStatus *v1alpha3.ReplicatedVolumeStatus) bool {
-	return conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeDiskfulReplicaCountReached) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeAllReplicasReady) &&
-		conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeSharedSecretAlgorithmSelected)
-}
 
 type Reconciler struct {
 	cl  client.Client
@@ -76,30 +61,39 @@ func (r *Reconciler) Reconcile(
 	log := r.log.WithValues("request", req.NamespacedName).WithName("Reconcile")
 	log.V(1).Info("Reconciling")
 
-	var rv v1alpha3.ReplicatedVolume
+	var rv v1alpha1.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "unable to fetch ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
+	}
+
+	if !v1alpha1.HasControllerFinalizer(&rv) {
+		log.V(1).Info("no controller finalizer on ReplicatedVolume, skipping")
+		return reconcile.Result{}, nil
 	}
 
 	if rv.Status == nil {
 		log.V(1).Info("No status. Skipping")
 		return reconcile.Result{}, nil
 	}
-	if !isRvReady(rv.Status) {
+	if !isRvReady(rv.Status, log) {
 		log.V(1).Info("not ready for quorum calculations")
 		log.V(2).Info("status is", "status", rv.Status)
 		return reconcile.Result{}, nil
 	}
 
-	var rvrList v1alpha3.ReplicatedVolumeReplicaList
+	var rvrList v1alpha1.ReplicatedVolumeReplicaList
 	if err := r.cl.List(ctx, &rvrList); err != nil {
 		log.Error(err, "unable to fetch ReplicatedVolumeReplicaList")
 		return reconcile.Result{}, err
 	}
 
 	// Removing non owned
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
+	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
 		return !metav1.IsControlledBy(&rvr, &rv)
 	})
 
@@ -107,14 +101,14 @@ func (r *Reconciler) Reconcile(
 	// Keeping only without deletion timestamp
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
-		func(rvr v1alpha3.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp != nil
+		func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
+			return rvr.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(&rvr)
 		},
 	)
 
 	diskfulCount := 0
 	for _, rvr := range rvrList.Items {
-		if rvr.Spec.Type == "Diskful" { // TODO: Replace with api function
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			diskfulCount++
 		}
 	}
@@ -122,9 +116,22 @@ func (r *Reconciler) Reconcile(
 	log = log.WithValues("diskful", diskfulCount, "all", len(rvrList.Items))
 	log.V(1).Info("calculated replica counts")
 
+	// Get ReplicatedStorageClass to check replication type
+	rscName := rv.Spec.ReplicatedStorageClassName
+	if rscName == "" {
+		log.V(1).Info("ReplicatedStorageClassName is empty, skipping quorum update")
+		return reconcile.Result{}, nil
+	}
+
+	rsc := &v1alpha1.ReplicatedStorageClass{}
+	if err := r.cl.Get(ctx, client.ObjectKey{Name: rscName}, rsc); err != nil {
+		log.Error(err, "getting ReplicatedStorageClass", "name", rscName)
+		return reconcile.Result{}, err
+	}
+
 	// updating replicated volume
 	from := client.MergeFrom(rv.DeepCopy())
-	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items)) {
+	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items), rsc.Spec.Replication) {
 		log.V(1).Info("Updating quorum")
 		if err := r.cl.Status().Patch(ctx, &rv, from); err != nil {
 			log.Error(err, "patching ReplicatedVolume status")
@@ -138,16 +145,17 @@ func (r *Reconciler) Reconcile(
 }
 
 func updateReplicatedVolumeIfNeeded(
-	rvStatus *v1alpha3.ReplicatedVolumeStatus,
+	rvStatus *v1alpha1.ReplicatedVolumeStatus,
 	diskfulCount,
 	all int,
+	replication string,
 ) (changed bool) {
-	quorum, qmr := CalculateQuorum(diskfulCount, all)
+	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
-		rvStatus.DRBD = &v1alpha3.DRBDResource{}
+		rvStatus.DRBD = &v1alpha1.DRBDResource{}
 	}
 	if rvStatus.DRBD.Config == nil {
-		rvStatus.DRBD.Config = &v1alpha3.DRBDResourceConfig{}
+		rvStatus.DRBD.Config = &v1alpha1.DRBDResourceConfig{}
 	}
 
 	changed = rvStatus.DRBD.Config.Quorum != quorum ||
@@ -156,14 +164,55 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus.DRBD.Config.Quorum = quorum
 	rvStatus.DRBD.Config.QuorumMinimumRedundancy = qmr
 
-	if !conditions.IsTrue(rvStatus, v1alpha3.ConditionTypeQuorumConfigured) {
-		conditions.Set(rvStatus, metav1.Condition{
-			Type:    v1alpha3.ConditionTypeQuorumConfigured,
-			Status:  metav1.ConditionTrue,
-			Reason:  "QuorumConfigured", // TODO: change reason
-			Message: "Quorum configuration completed",
-		})
-		changed = true
-	}
 	return changed
+}
+
+// CalculateQuorum calculates quorum and quorum minimum redundancy values
+// based on the number of diskful and total replicas.
+// QMR is only set when replication == ConsistencyAndAvailability.
+func CalculateQuorum(diskfulCount, all int, replication string) (quorum, qmr byte) {
+	if diskfulCount > 1 {
+		quorum = byte(max(2, all/2+1))
+
+		// QMR should only be set when ReplicatedStorageClass.spec.replication == ConsistencyAndAvailability
+		if replication == v1alpha1.ReplicationConsistencyAndAvailability {
+			qmr = byte(max(2, diskfulCount/2+1))
+		}
+	}
+	return
+}
+
+// parseDiskfulReplicaCount parses the diskfulReplicaCount string in format "current/desired"
+// and returns current and desired counts. Returns (0, 0, error) if parsing fails.
+func parseDiskfulReplicaCount(diskfulReplicaCount string) (current, desired int, err error) {
+	if diskfulReplicaCount == "" {
+		return 0, 0, fmt.Errorf("diskfulReplicaCount is empty")
+	}
+
+	parts := strings.Split(diskfulReplicaCount, "/")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid diskfulReplicaCount format: expected 'current/desired', got '%s'", diskfulReplicaCount)
+	}
+
+	current, err = strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse current count: %w", err)
+	}
+
+	desired, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to parse desired count: %w", err)
+	}
+
+	return current, desired, nil
+}
+
+func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool {
+	current, desired, err := parseDiskfulReplicaCount(rvStatus.DiskfulReplicaCount)
+	if err != nil {
+		log.V(1).Info("failed to parse diskfulReplicaCount", "error", err)
+		return false
+	}
+
+	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ConditionTypeConfigured)
 }

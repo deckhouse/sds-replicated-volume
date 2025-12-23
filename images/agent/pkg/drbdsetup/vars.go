@@ -19,3 +19,6 @@ package drbdsetup
 var Command = "drbdsetup"
 var StatusArgs = []string{"status", "--json"}
 var Events2Args = []string{"events2", "--timestamps"}
+var DownArgs = func(resource string) []string {
+	return []string{"down", resource}
+}

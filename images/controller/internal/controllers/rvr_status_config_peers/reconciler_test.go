@@ -37,7 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil" // cspell:words controllerutil
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
 )
 
@@ -56,12 +56,12 @@ var _ = Describe("Reconciler", func() {
 
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
+		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 		clientBuilder = fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
-				&v1alpha3.ReplicatedVolumeReplica{},
-				&v1alpha3.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolumeReplica{},
+				&v1alpha1.ReplicatedVolume{})
 
 		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil
@@ -82,7 +82,7 @@ var _ = Describe("Reconciler", func() {
 	When("Get fails with non-NotFound error", func() {
 		internalServerError := errors.New("internal server error")
 		BeforeEach(func() {
-			clientBuilder = clientBuilder.WithInterceptorFuncs(InterceptGet(func(_ *v1alpha3.ReplicatedVolume) error {
+			clientBuilder = clientBuilder.WithInterceptorFuncs(InterceptGet(func(_ *v1alpha1.ReplicatedVolume) error {
 				return internalServerError
 			}))
 		})
@@ -95,26 +95,28 @@ var _ = Describe("Reconciler", func() {
 	})
 
 	When("ReplicatedVolume created", func() {
-		var rv, otherRv *v1alpha3.ReplicatedVolume
+		var rv, otherRv *v1alpha1.ReplicatedVolume
 
 		BeforeEach(func() {
-			rv = &v1alpha3.ReplicatedVolume{
+			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-rv",
-					UID:  "test-uid",
+					Name:       "test-rv",
+					UID:        "test-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
 					ReplicatedStorageClassName: "test-storage-class",
 				},
 			}
 
-			otherRv = &v1alpha3.ReplicatedVolume{
+			otherRv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "other-rv",
-					UID:  "other-uid",
+					Name:       "other-rv",
+					UID:        "other-uid",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
 					ReplicatedStorageClassName: "test-storage-class",
 				},
@@ -128,8 +130,8 @@ var _ = Describe("Reconciler", func() {
 
 		DescribeTableSubtree("when rv does not have config because",
 			Entry("nil Status", func() { rv.Status = nil }),
-			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha3.ReplicatedVolumeStatus{DRBD: &v1alpha3.DRBDResource{Config: nil}} }),
+			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()
@@ -141,12 +143,12 @@ var _ = Describe("Reconciler", func() {
 			})
 
 		When("first replica created", func() {
-			var firstReplica v1alpha3.ReplicatedVolumeReplica
+			var firstReplica v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				firstReplica = v1alpha3.ReplicatedVolumeReplica{
+				firstReplica = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-					Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 				}
 				Expect(controllerutil.SetControllerReference(rv, &firstReplica, scheme)).To(Succeed())
 			})
@@ -166,7 +168,7 @@ var _ = Describe("Reconciler", func() {
 				BeforeEach(func() {
 					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 						List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-							if _, ok := list.(*v1alpha3.ReplicatedVolumeReplicaList); ok {
+							if _, ok := list.(*v1alpha1.ReplicatedVolumeReplicaList); ok {
 								return listError
 							}
 							return client.List(ctx, list, opts...)
@@ -181,7 +183,7 @@ var _ = Describe("Reconciler", func() {
 
 			Context("if rvr-1 is ready", func() {
 				BeforeEach(func() {
-					makeReady(&firstReplica, 1, v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+					makeReady(&firstReplica, 1, v1alpha1.Address{IPv4: "192.168.1.1", Port: 7000})
 				})
 
 				It("should have no peers", func(ctx SpecContext) {
@@ -203,11 +205,11 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				When("second replica created", func() {
-					var secondRvr v1alpha3.ReplicatedVolumeReplica
+					var secondRvr v1alpha1.ReplicatedVolumeReplica
 					BeforeEach(func() {
-						secondRvr = v1alpha3.ReplicatedVolumeReplica{
+						secondRvr = v1alpha1.ReplicatedVolumeReplica{
 							ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-							Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+							Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2"},
 						}
@@ -232,7 +234,7 @@ var _ = Describe("Reconciler", func() {
 
 					Context("if rvr-2 ready", func() {
 						BeforeEach(func() {
-							makeReady(&secondRvr, 2, v1alpha3.Address{IPv4: "192.168.1.4", Port: 7001})
+							makeReady(&secondRvr, 2, v1alpha1.Address{IPv4: "192.168.1.4", Port: 7001})
 						})
 
 						It("should update peers when RVR transitions to ready state", func(ctx SpecContext) {
@@ -240,7 +242,7 @@ var _ = Describe("Reconciler", func() {
 
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&firstReplica), &firstReplica)).To(Succeed())
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(&secondRvr), &secondRvr)).To(Succeed())
-							list := []v1alpha3.ReplicatedVolumeReplica{firstReplica, secondRvr}
+							list := []v1alpha1.ReplicatedVolumeReplica{firstReplica, secondRvr}
 							Expect(list).To(HaveEach(HaveAllPeersSet(list)))
 						})
 
@@ -258,7 +260,7 @@ var _ = Describe("Reconciler", func() {
 							BeforeEach(func() {
 								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-										if _, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+										if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 											if subResourceName == "status" {
 												return patchError
 											}
@@ -277,7 +279,7 @@ var _ = Describe("Reconciler", func() {
 							BeforeEach(func() {
 								clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 									SubResourcePatch: func(ctx context.Context, cl client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
-										if rvr, ok := obj.(*v1alpha3.ReplicatedVolumeReplica); ok {
+										if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 											if subResourceName == "status" && rvr.Name == "rvr-1" {
 												return apierrors.NewNotFound(schema.GroupResource{Resource: "replicatedvolumereplicas"}, rvr.Name)
 											}
@@ -294,8 +296,8 @@ var _ = Describe("Reconciler", func() {
 
 						DescribeTableSubtree("if rvr-2 is not ready because",
 							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
-							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha3.DRBD{Config: nil}} }),
+							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeId", func() { secondRvr.Status.DRBD.Config.NodeId = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
@@ -328,27 +330,27 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		When("few replicas created", func() {
-			var rvrList []v1alpha3.ReplicatedVolumeReplica
+			var rvrList []v1alpha1.ReplicatedVolumeReplica
 
-			getAll := func(ctx context.Context, rvrList []v1alpha3.ReplicatedVolumeReplica) {
+			getAll := func(ctx context.Context, rvrList []v1alpha1.ReplicatedVolumeReplica) {
 				for i := range rvrList {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[i]), &rvrList[i])).To(Succeed())
 				}
 			}
 
 			BeforeEach(func() {
-				rvrList = []v1alpha3.ReplicatedVolumeReplica{
+				rvrList = []v1alpha1.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
-						Spec:       v1alpha3.ReplicatedVolumeReplicaSpec{NodeName: "node-3"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-3"},
 					},
 				}
 
@@ -368,7 +370,7 @@ var _ = Describe("Reconciler", func() {
 					if len(rvrList) == 0 {
 						Skip("empty rvrList")
 					}
-					makeReady(&rvrList[0], uint(1), v1alpha3.Address{IPv4: "192.168.1.1", Port: 7000})
+					makeReady(&rvrList[0], uint(1), v1alpha1.Address{IPv4: "192.168.1.1", Port: 7000})
 				})
 
 				It("should not have any peers", func(ctx SpecContext) {
@@ -384,7 +386,7 @@ var _ = Describe("Reconciler", func() {
 							makeReady(
 								&rvr,
 								uint(i),
-								v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
+								v1alpha1.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
 							)
 							Expect(cl.Status().Update(ctx, &rvr)).To(Succeed())
 						}
@@ -404,7 +406,7 @@ var _ = Describe("Reconciler", func() {
 						makeReady(
 							&rvrList[i],
 							uint(i),
-							v1alpha3.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
+							v1alpha1.Address{IPv4: fmt.Sprintf("192.168.1.%d", i+1), Port: 7000 + uint(i)},
 						)
 					}
 				})
@@ -436,7 +438,7 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						// Use all 3 RVRs, but set node-2 to node-1 for rvr-2
 						rvrList[1].Spec.NodeName = "node-1" // Same node as rvr-1
-						addresses := []v1alpha3.Address{
+						addresses := []v1alpha1.Address{
 							{IPv4: "192.168.1.1", Port: 7000},
 							{IPv4: "192.168.1.1", Port: 7001}, // Same IP, different port
 							{IPv4: "192.168.1.2", Port: 7000},
@@ -444,13 +446,13 @@ var _ = Describe("Reconciler", func() {
 						nodeIDs := []uint{1, 2, 3}
 						for i := range rvrList {
 							if rvrList[i].Status == nil {
-								rvrList[i].Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+								rvrList[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 							}
 							if rvrList[i].Status.DRBD == nil {
-								rvrList[i].Status.DRBD = &v1alpha3.DRBD{}
+								rvrList[i].Status.DRBD = &v1alpha1.DRBD{}
 							}
 							if rvrList[i].Status.DRBD.Config == nil {
-								rvrList[i].Status.DRBD.Config = &v1alpha3.DRBDConfig{}
+								rvrList[i].Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 							}
 							rvrList[i].Status.DRBD.Config.NodeId = &nodeIDs[i]
 							rvrList[i].Status.DRBD.Config.Address = &addresses[i]
@@ -505,16 +507,16 @@ var _ = Describe("Reconciler", func() {
 
 				Context("with diskless RVRs", func() {
 					BeforeEach(func() {
-						// Use only first 2 RVRs, set second one as diskless (Type != "Diskful")
+						// Use only first 2 RVRs, set second one as diskless (Type != ReplicaTypeDiskful)
 						rvrList = rvrList[:2]
-						rvrList[1].Spec.Type = "Access"
+						rvrList[1].Spec.Type = v1alpha1.ReplicaTypeAccess
 					})
 
 					It("should include diskless flag in peer information", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
 
 						// Verify rvr1 has rvr2 with diskless flag
-						updatedRVR1 := &v1alpha3.ReplicatedVolumeReplica{}
+						updatedRVR1 := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-1"}, updatedRVR1)).To(Succeed())
 						Expect(updatedRVR1.Status.DRBD.Config.Peers).To(HaveKeyWithValue("node-2", HaveField("Diskless", BeTrue())))
 					})

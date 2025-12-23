@@ -14,6 +14,8 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// +kubebuilder:object:generate=true
+// +groupName=storage.deckhouse.io
 package v1alpha1
 
 import (
@@ -44,11 +46,10 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedStorageClassList{},
 		&ReplicatedStoragePool{},
 		&ReplicatedStoragePoolList{},
-		&DRBDCluster{},
-		&DRBDClusterList{},
-		&DRBDResource{},
-		&DRBDResourceList{},
-		&DRBDNodeList{},
+		&ReplicatedVolume{},
+		&ReplicatedVolumeList{},
+		&ReplicatedVolumeReplica{},
+		&ReplicatedVolumeReplicaList{},
 	)
 	metav1.AddToGroupVersion(scheme, SchemeGroupVersion)
 	return nil

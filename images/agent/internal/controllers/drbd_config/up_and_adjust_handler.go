@@ -23,25 +23,31 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 )
 
+type ResourceScanner interface {
+	ResourceShouldBeRefreshed(resourceName string)
+}
+
 type UpAndAdjustHandler struct {
 	cl       client.Client
 	log      *slog.Logger
-	rvr      *v1alpha3.ReplicatedVolumeReplica
-	rv       *v1alpha3.ReplicatedVolume
-	lvg      *snc.LVMVolumeGroup   // will be nil for rvr.spec.type != "Diskful"
-	llv      *snc.LVMLogicalVolume // will be nil for rvr.spec.type != "Diskful"
+	rvr      *v1alpha1.ReplicatedVolumeReplica
+	rv       *v1alpha1.ReplicatedVolume
+	lvg      *snc.LVMVolumeGroup   // will be nil for non-diskful replicas
+	llv      *snc.LVMLogicalVolume // will be nil for non-diskful replicas
 	nodeName string
+	scanner  ResourceScanner
 }
 
 func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
@@ -67,26 +73,32 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 	var drbdErr drbdAPIError
 	if errors.As(err, &drbdErr) {
 		if h.rvr.Status.DRBD.Errors == nil {
-			h.rvr.Status.DRBD.Errors = &v1alpha3.DRBDErrors{}
+			h.rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 		}
 
 		drbdErr.WriteDRBDError(h.rvr.Status.DRBD.Errors)
+	}
+
+	if err := h.rvr.UpdateStatusConditionConfigured(); err != nil {
+		return err
 	}
 
 	if patchErr := h.cl.Status().Patch(ctx, h.rvr, statusPatch); patchErr != nil {
 		return fmt.Errorf("patching status: %w", errors.Join(patchErr, err))
 	}
 
+	h.scanner.ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
+
 	return err
 }
 
 func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.rvr.DeepCopy())
-	if !slices.Contains(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.AgentAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer)
 	}
-	if !slices.Contains(h.rvr.Finalizers, v1alpha3.ControllerAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha3.ControllerAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching rvr finalizers: %w", err)
@@ -96,8 +108,8 @@ func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 
 func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.llv.DeepCopy())
-	if !slices.Contains(h.llv.Finalizers, v1alpha3.AgentAppFinalizer) {
-		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha3.AgentAppFinalizer)
+	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentAppFinalizer) {
+		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha1.AgentAppFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
 		return fmt.Errorf("patching llv finalizers: %w", err)
@@ -106,7 +118,7 @@ func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 }
 
 func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
-	hasCrypto, err := kernelHasCrypto(h.rv.Status.DRBD.Config.SharedSecretAlg)
+	hasCrypto, err := kernelHasCrypto(string(h.rv.Status.DRBD.Config.SharedSecretAlg))
 	if err != nil {
 		return err
 	}
@@ -116,7 +128,7 @@ func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
 				"shared secret alg is unsupported by the kernel: %s",
 				h.rv.Status.DRBD.Config.SharedSecretAlg,
 			),
-			unsupportedAlg: h.rv.Status.DRBD.Config.SharedSecretAlg,
+			unsupportedAlg: string(h.rv.Status.DRBD.Config.SharedSecretAlg),
 		}
 	}
 	return nil
@@ -127,10 +139,10 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	// prepare patch for status errors/actual fields
 	if h.rvr.Status == nil {
-		h.rvr.Status = &v1alpha3.ReplicatedVolumeReplicaStatus{}
+		h.rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 	if h.rvr.Status.DRBD == nil {
-		h.rvr.Status.DRBD = &v1alpha3.DRBD{}
+		h.rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
 
 	// validate that shared secret alg is supported
@@ -155,7 +167,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	//
-	if h.rvr.Spec.Type == "Diskful" {
+	if h.rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 		exists, err := drbdadm.ExecuteDumpMDMetadataExists(ctx, rvName)
 		if err != nil {
 			return fmt.Errorf("dumping metadata: %w", configurationCommandError{err})
@@ -166,8 +178,26 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 				return fmt.Errorf("creating metadata: %w", configurationCommandError{err})
 			}
 		}
+	}
 
-		// initial sync?
+	// up & adjust - must be done before initial sync
+	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
+	if err != nil {
+		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, configurationCommandError{err})
+	}
+
+	if !isUp {
+		if err := drbdadm.ExecuteUp(ctx, rvName); err != nil {
+			return fmt.Errorf("upping the resource '%s': %w", rvName, configurationCommandError{err})
+		}
+	}
+
+	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
+		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
+	}
+
+	// initial sync for diskful replicas without peers
+	if h.rvr.Spec.Type == "Diskful" {
 		noPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
 			len(h.rvr.Status.DRBD.Config.Peers) == 0
 
@@ -179,6 +209,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 		alreadyCompleted := h.rvr.Status != nil &&
 			h.rvr.Status.DRBD != nil &&
+			h.rvr.Status.DRBD.Actual != nil &&
 			h.rvr.Status.DRBD.Actual.InitialSyncCompleted
 
 		if noPeers && !upToDate && !alreadyCompleted {
@@ -194,31 +225,18 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 
 	// Set actual fields
 	if h.rvr.Status.DRBD.Actual == nil {
-		h.rvr.Status.DRBD.Actual = &v1alpha3.DRBDActual{}
+		h.rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 	}
 	h.rvr.Status.DRBD.Actual.InitialSyncCompleted = true
+	h.rvr.Status.DRBD.Actual.AllowTwoPrimaries = h.rv.Status.DRBD.Config.AllowTwoPrimaries
 	if h.llv != nil {
-		h.rvr.Status.DRBD.Actual.Disk = v1alpha3.SprintDRBDDisk(
+		h.rvr.Status.DRBD.Actual.Disk = v1alpha1.SprintDRBDDisk(
 			h.lvg.Spec.ActualVGNameOnTheNode,
 			h.llv.Spec.ActualLVNameOnTheNode,
 		)
 	}
 
-	// up & adjust
-	isUp, err := drbdadm.ExecuteStatusIsUp(ctx, rvName)
-	if err != nil {
-		return fmt.Errorf("checking if resource '%s' is up: %w", rvName, configurationCommandError{err})
-	}
-
-	if !isUp {
-		if err := drbdadm.ExecuteUp(ctx, rvName); err != nil {
-			return fmt.Errorf("upping the resource '%s': %w", rvName, configurationCommandError{err})
-		}
-	}
-
-	if err := drbdadm.ExecuteAdjust(ctx, rvName); err != nil {
-		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
-	}
+	h.rvr.Status.ActualType = h.rvr.Spec.Type
 
 	return nil
 }
@@ -265,7 +283,7 @@ func (h *UpAndAdjustHandler) generateResourceConfig() *v9.Resource {
 		Net: &v9.Net{
 			Protocol:          v9.ProtocolC,
 			SharedSecret:      h.rv.Status.DRBD.Config.SharedSecret,
-			CRAMHMACAlg:       h.rv.Status.DRBD.Config.SharedSecretAlg,
+			CRAMHMACAlg:       strings.ToLower(string(h.rv.Status.DRBD.Config.SharedSecretAlg)),
 			RRConflict:        v9.RRConflictPolicyRetryConnect,
 			AllowTwoPrimaries: h.rv.Status.DRBD.Config.AllowTwoPrimaries,
 		},
@@ -312,7 +330,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 	res *v9.Resource,
 	nodeName string,
 	nodeID uint,
-	peerOptions *v1alpha3.Peer, // nil for current node
+	peerOptions *v1alpha1.Peer, // nil for current node
 ) {
 	isCurrentNode := peerOptions == nil
 
@@ -334,7 +352,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 		if h.llv == nil {
 			vol.Disk = &v9.VolumeDiskNone{}
 		} else {
-			vol.Disk = u.Ptr(v9.VolumeDisk(v1alpha3.SprintDRBDDisk(
+			vol.Disk = u.Ptr(v9.VolumeDisk(v1alpha1.SprintDRBDDisk(
 				h.lvg.Spec.ActualVGNameOnTheNode,
 				h.llv.Spec.ActualLVNameOnTheNode,
 			)))
@@ -367,7 +385,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 	}
 }
 
-func apiAddressToV9HostAddress(hostname string, address v1alpha3.Address) v9.HostAddress {
+func apiAddressToV9HostAddress(hostname string, address v1alpha1.Address) v9.HostAddress {
 	return v9.HostAddress{
 		Name:            hostname,
 		AddressWithPort: fmt.Sprintf("%s:%d", address.IPv4, address.Port),

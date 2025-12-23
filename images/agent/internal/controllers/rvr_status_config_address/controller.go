@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
@@ -42,7 +42,7 @@ func BuildController(mgr manager.Manager) error {
 		// We are not watching node updates because internalIP we are using is not expected to change
 		// For(&corev1.Node{}, builder.WithPredicates(NewNodePredicate(cfg.NodeName, log))).
 		Watches(
-			&v1alpha3.ReplicatedVolumeReplica{},
+			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestsFromMapFunc(EnqueueNodeByRVRFunc(cfg.NodeName(), log)),
 			builder.WithPredicates(SkipWhenRVRNodeNameNotUpdatedPred(log)),
 		).
