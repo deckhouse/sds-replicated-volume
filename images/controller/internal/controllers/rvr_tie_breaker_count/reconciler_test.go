@@ -84,7 +84,7 @@ var _ = Describe("Reconcile", func() {
 				},
 			}
 
-			setRVScheduledCondition(&rv, metav1.ConditionTrue)
+			setRVInitializedCondition(&rv, metav1.ConditionTrue)
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
@@ -156,7 +156,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("RV is not scheduled yet", func() {
 				BeforeEach(func() {
-					setRVScheduledCondition(&rv, metav1.ConditionFalse)
+					setRVInitializedCondition(&rv, metav1.ConditionFalse)
 				})
 
 				It("skips reconciliation until Scheduled=True", func(ctx SpecContext) {
@@ -229,7 +229,7 @@ var _ = Describe("Reconcile", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
-					setRVScheduledCondition(&rv, metav1.ConditionTrue)
+					setRVInitializedCondition(&rv, metav1.ConditionTrue)
 					rsc = v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
 						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
@@ -283,7 +283,7 @@ var _ = Describe("Reconcile", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
-					setRVScheduledCondition(&rv, metav1.ConditionTrue)
+					setRVInitializedCondition(&rv, metav1.ConditionTrue)
 					rsc = v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
 						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
@@ -380,7 +380,7 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.Topology = "TransZonal"
 					rsc.Spec.Zones = []string{"zone-0", "zone-1"}
 					for i := range nodeList {
-						nodeList[i].Labels = map[string]string{rvrtiebreakercount.NodeZoneLabel: fmt.Sprintf("zone-%d", i)}
+						nodeList[i].Labels = map[string]string{corev1.LabelTopologyZone: fmt.Sprintf("zone-%d", i)}
 					}
 				})
 				// Initial State:
@@ -600,7 +600,7 @@ func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
 	return fd
 }
 
-func setRVScheduledCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
+func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
 	rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 		Conditions: []metav1.Condition{{
 			Type:               v1alpha1.ConditionTypeRVInitialized,
@@ -648,7 +648,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
-					setRVScheduledCondition(rv, metav1.ConditionTrue)
+					setRVInitializedCondition(rv, metav1.ConditionTrue)
 
 					zones := maps.Keys(fdExtended)
 					rsc := &v1alpha1.ReplicatedStorageClass{
@@ -672,7 +672,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 							node := &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name:   nodeName,
-									Labels: map[string]string{rvrtiebreakercount.NodeZoneLabel: fdName},
+									Labels: map[string]string{corev1.LabelTopologyZone: fdName},
 								},
 							}
 							objects = append(objects, node)
