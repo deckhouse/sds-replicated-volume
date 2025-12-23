@@ -169,14 +169,19 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	// Cleanup can be interrupted by signal if the parent context was interrupted.
+	// This is done so that RV deletion can be skipped for subsequent debugging
+	if ctx.Err() != nil {
+		log.Info("cleanup interrupted by parent context")
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		sig := <-sigChan
-		log.Info("received signal, shutting down", "signal", sig)
-		cleanupCancel()
-	}()
+		go func() {
+			sig := <-sigChan
+			log.Info("received signal, shutting down", "signal", sig)
+			cleanupCancel()
+		}()
+	}
 
 	//  Wait for ALL sub-runners to stop (including VolumeChecker)
 waitLoop:

@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	// CleanupTimeout is the timeout for cleanup operations
-	CleanupTimeout = 2 * time.Minute
+	// CleanupTimeout is the timeout for cleanup operations.
+	// Increased to 3 minutes to handle rate limiter delays when deleting many RVs concurrently.
+	CleanupTimeout = 3 * time.Minute
 )
 
 // Runner represents a goroutine that can be started and stopped

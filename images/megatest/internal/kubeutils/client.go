@@ -99,6 +99,16 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 		}
 	}
 
+	// Increase rate limiter limits to handle high concurrency in megatest.
+	// Default QPS is 5 and Burst is 10, which may be insufficient when deleting many RVs concurrently.
+	// These values allow up to 50 requests per second with bursts up to 100.
+	if cfg.QPS == 0 {
+		cfg.QPS = 50
+	}
+	if cfg.Burst == 0 {
+		cfg.Burst = 100
+	}
+
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding corev1 to scheme: %w", err)
