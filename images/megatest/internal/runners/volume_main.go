@@ -30,7 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -246,11 +246,11 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.
 		publishOn = []string{}
 	}
 
-	rv := &v1alpha3.ReplicatedVolume{
+	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
 		},
-		Spec: v1alpha3.ReplicatedVolumeSpec{
+		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
 			PublishOn:                  publishOn,
@@ -273,7 +273,7 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.
 func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
 	startTime := time.Now()
 
-	rv := &v1alpha3.ReplicatedVolume{
+	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
 		},

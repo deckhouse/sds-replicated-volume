@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/megatest
 
-go 1.24.10
+go 1.24.11
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
@@ -8,9 +8,9 @@ require (
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/google/uuid v1.6.0
 	github.com/spf13/cobra v1.10.2
-	k8s.io/api v0.34.0
-	k8s.io/apimachinery v0.34.2
-	k8s.io/client-go v0.34.0
+	k8s.io/api v0.34.3
+	k8s.io/apimachinery v0.34.3
+	k8s.io/client-go v0.34.3
 	sigs.k8s.io/controller-runtime v0.22.0
 )
 
@@ -33,6 +33,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/onsi/ginkgo/v2 v2.23.4 // indirect
 	github.com/onsi/gomega v1.38.0 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

@@ -24,7 +24,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -139,7 +139,7 @@ func (v *VolumePublisher) cleanup(reason error) {
 	}
 }
 
-func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	log := v.log.With("node_name", nodeName, "func", "publishCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
@@ -172,7 +172,7 @@ func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha3.Replica
 	}
 }
 
-func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	log := v.log.With("node_name", nodeName, "func", "publishAndUnpublishCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
@@ -198,7 +198,7 @@ func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1al
 	return v.unpublishCycle(ctx, rv, nodeName)
 }
 
-func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	log := v.log.With("node_name", nodeName, "func", "migrationCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
@@ -273,7 +273,7 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha3.Repli
 	return v.unpublishCycle(ctx, rv, nodeName)
 }
 
-func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	// Check if node is already in PublishOn
 	if slices.Contains(rv.Spec.PublishOn, nodeName) {
 		v.log.Debug("node already in PublishOn", "node_name", nodeName)
@@ -291,7 +291,7 @@ func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha3.Replicated
 	return nil
 }
 
-func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	log := v.log.With("node_name", nodeName, "func", "unpublishCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
@@ -341,7 +341,7 @@ func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha3.Repli
 	}
 }
 
-func (v *VolumePublisher) doUnpublish(ctx context.Context, rv *v1alpha3.ReplicatedVolume, nodeName string) error {
+func (v *VolumePublisher) doUnpublish(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
 	originalRV := rv.DeepCopy()
 
 	if nodeName == "" {

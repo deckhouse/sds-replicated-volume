@@ -36,7 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -74,7 +74,7 @@ type Client struct {
 	// Dispatcher: routes RV events to registered checkers by name.
 	// Key: RV name, Value: channel to send updates.
 	rvCheckersMu sync.RWMutex
-	rvCheckers   map[string]chan *v1alpha3.ReplicatedVolume
+	rvCheckers   map[string]chan *v1alpha1.ReplicatedVolume
 }
 
 // NewClient creates a new Kubernetes client
@@ -103,8 +103,8 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 	if err := corev1.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("adding corev1 to scheme: %w", err)
 	}
-	if err := v1alpha3.AddToScheme(scheme); err != nil {
-		return nil, fmt.Errorf("adding v1alpha3 to scheme: %w", err)
+	if err := v1alpha1.AddToScheme(scheme); err != nil {
+		return nil, fmt.Errorf("adding v1alpha1 to scheme: %w", err)
 	}
 
 	cl, err := client.New(cfg, client.Options{Scheme: scheme})
@@ -117,7 +117,7 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 		cfg:          cfg,
 		scheme:       scheme,
 		informerStop: make(chan struct{}),
-		rvCheckers:   make(map[string]chan *v1alpha3.ReplicatedVolume),
+		rvCheckers:   make(map[string]chan *v1alpha1.ReplicatedVolume),
 	}
 
 	// Initialize RV informer
@@ -133,7 +133,7 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 func (c *Client) initRVInformer() error {
 	// Create REST client for RV
 	restCfg := rest.CopyConfig(c.cfg)
-	restCfg.GroupVersion = &v1alpha3.SchemeGroupVersion
+	restCfg.GroupVersion = &v1alpha1.SchemeGroupVersion
 	restCfg.APIPath = "/apis"
 	// Use WithoutConversion() to avoid "no kind X is registered for internal version" errors.
 	// CRDs don't have internal versions like core Kubernetes types, so we need to skip
@@ -148,7 +148,7 @@ func (c *Client) initRVInformer() error {
 	// Create ListWatch for ReplicatedVolumes
 	lw := &cache.ListWatch{
 		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
-			result := &v1alpha3.ReplicatedVolumeList{}
+			result := &v1alpha1.ReplicatedVolumeList{}
 			err := restClient.Get().
 				Resource("replicatedvolumes").
 				VersionedParams(&options, metav1.ParameterCodec).
@@ -168,7 +168,7 @@ func (c *Client) initRVInformer() error {
 	// Create shared informer
 	c.rvInformer = cache.NewSharedIndexInformer(
 		lw,
-		&v1alpha3.ReplicatedVolume{},
+		&v1alpha1.ReplicatedVolume{},
 		rvInformerResyncPeriod,
 		cache.Indexers{cache.NamespaceIndex: cache.MetaNamespaceIndexFunc},
 	)
@@ -206,7 +206,7 @@ func (c *Client) initRVInformer() error {
 // dispatchRVEvent routes an RV event to the registered checker (if any).
 // Called by informer handler for Add/Update events.
 func (c *Client) dispatchRVEvent(obj interface{}) {
-	rv, ok := obj.(*v1alpha3.ReplicatedVolume)
+	rv, ok := obj.(*v1alpha1.ReplicatedVolume)
 	if !ok {
 		return
 	}
@@ -239,7 +239,7 @@ func (c *Client) StopInformers() {
 // RegisterRVChecker registers a VolumeChecker to receive events for specific RV.
 // Returns channel where RV updates will be sent. Caller must call UnregisterRVChecker on shutdown.
 // Uses dispatcher pattern: one informer handler routes to many checkers via map lookup.
-func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha3.ReplicatedVolume) error {
+func (c *Client) RegisterRVChecker(rvName string, ch chan *v1alpha1.ReplicatedVolume) error {
 	c.rvInformerMu.RLock()
 	ready := c.informerReady
 	c.rvInformerMu.RUnlock()
@@ -265,7 +265,7 @@ func (c *Client) UnregisterRVChecker(rvName string) {
 
 // GetRVFromCache gets a ReplicatedVolume from the informer cache by name.
 // Used by VolumeChecker.checkInitialState() to get RV without API call.
-func (c *Client) GetRVFromCache(name string) (*v1alpha3.ReplicatedVolume, error) {
+func (c *Client) GetRVFromCache(name string) (*v1alpha1.ReplicatedVolume, error) {
 	c.rvInformerMu.RLock()
 	defer c.rvInformerMu.RUnlock()
 
@@ -281,7 +281,7 @@ func (c *Client) GetRVFromCache(name string) (*v1alpha3.ReplicatedVolume, error)
 		return nil, fmt.Errorf("RV %s not found in cache", name)
 	}
 
-	rv, ok := obj.(*v1alpha3.ReplicatedVolume)
+	rv, ok := obj.(*v1alpha1.ReplicatedVolume)
 	if !ok {
 		return nil, fmt.Errorf("unexpected object type in cache: %T", obj)
 	}
@@ -352,18 +352,18 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 }
 
 // CreateRV creates a new ReplicatedVolume
-func (c *Client) CreateRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
+func (c *Client) CreateRV(ctx context.Context, rv *v1alpha1.ReplicatedVolume) error {
 	return c.cl.Create(ctx, rv)
 }
 
 // DeleteRV deletes a ReplicatedVolume
-func (c *Client) DeleteRV(ctx context.Context, rv *v1alpha3.ReplicatedVolume) error {
+func (c *Client) DeleteRV(ctx context.Context, rv *v1alpha1.ReplicatedVolume) error {
 	return c.cl.Delete(ctx, rv)
 }
 
 // GetRV gets a ReplicatedVolume by name (from API server, not cache)
-func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVolume, error) {
-	rv := &v1alpha3.ReplicatedVolume{}
+func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVolume, error) {
+	rv := &v1alpha1.ReplicatedVolume{}
 	err := c.cl.Get(ctx, client.ObjectKey{Name: name}, rv)
 	if err != nil {
 		return nil, err
@@ -372,30 +372,30 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha3.ReplicatedVo
 }
 
 // IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
-func (c *Client) IsRVReady(rv *v1alpha3.ReplicatedVolume) bool {
+func (c *Client) IsRVReady(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv.Status == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady) &&
-		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) &&
+		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
 }
 
 // PatchRV patches a ReplicatedVolume using merge patch strategy
-func (c *Client) PatchRV(ctx context.Context, originalRV *v1alpha3.ReplicatedVolume, updatedRV *v1alpha3.ReplicatedVolume) error {
+func (c *Client) PatchRV(ctx context.Context, originalRV *v1alpha1.ReplicatedVolume, updatedRV *v1alpha1.ReplicatedVolume) error {
 	return c.cl.Patch(ctx, updatedRV, client.MergeFrom(originalRV))
 }
 
 // ListRVRsByRVName lists all ReplicatedVolumeReplicas for a given RV
 // Filters by spec.replicatedVolumeName field
-func (c *Client) ListRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha3.ReplicatedVolumeReplica, error) {
-	rvrList := &v1alpha3.ReplicatedVolumeReplicaList{}
+func (c *Client) ListRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	err := c.cl.List(ctx, rvrList)
 	if err != nil {
 		return nil, err
 	}
 
 	// Filter by replicatedVolumeName
-	var result []v1alpha3.ReplicatedVolumeReplica
+	var result []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrList.Items {
 		if rvr.Spec.ReplicatedVolumeName == rvName {
 			result = append(result, rvr)
@@ -405,12 +405,12 @@ func (c *Client) ListRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha
 }
 
 // DeleteRVR deletes a ReplicatedVolumeReplica
-func (c *Client) DeleteRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func (c *Client) DeleteRVR(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	return c.cl.Delete(ctx, rvr)
 }
 
 // CreateRVR creates a ReplicatedVolumeReplica
-func (c *Client) CreateRVR(ctx context.Context, rvr *v1alpha3.ReplicatedVolumeReplica) error {
+func (c *Client) CreateRVR(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	return c.cl.Create(ctx, rvr)
 }
 

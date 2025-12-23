@@ -25,7 +25,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
@@ -72,7 +72,7 @@ type VolumeChecker struct {
 	state  conditionState
 
 	// Channel for receiving RV updates (dispatcher sends here)
-	updateCh chan *v1alpha3.ReplicatedVolume
+	updateCh chan *v1alpha1.ReplicatedVolume
 }
 
 // NewVolumeChecker creates a new VolumeChecker for the given RV
@@ -87,7 +87,7 @@ func NewVolumeChecker(rvName string, client *kubeutils.Client, stats *CheckerSta
 			ioReadyStatus: metav1.ConditionTrue,
 			quorumStatus:  metav1.ConditionTrue,
 		},
-		updateCh: make(chan *v1alpha3.ReplicatedVolume, updateChBufferSize),
+		updateCh: make(chan *v1alpha1.ReplicatedVolume, updateChBufferSize),
 	}
 }
 
@@ -159,9 +159,9 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 }
 
 // processRVUpdate checks for condition changes and logs them
-func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha3.ReplicatedVolume) {
-	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
-	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
+func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
+	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
 
 	// Check IOReady transition.
 	// v.state stores previous status (default: True = expected healthy state).
@@ -172,14 +172,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha3.Replic
 		v.state.ioReadyStatus = newIOReadyStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha3.ConditionTypeIOReady,
+			"condition", v1alpha1.ConditionTypeRVIOReady,
 			"transition", string(oldStatus)+"->"+string(newIOReadyStatus))
 
 		// On False: log failed RVRs for debugging
 		if newIOReadyStatus == metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha3.ConditionTypeIOReady)
-			v.logConditionDetails(ctx, v1alpha3.ConditionTypeIOReady, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVIOReady, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 
@@ -190,14 +190,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha3.Replic
 		v.state.quorumStatus = newQuorumStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha3.ConditionTypeQuorum,
+			"condition", v1alpha1.ConditionTypeRVQuorum,
 			"transition", string(oldStatus)+"->"+string(newQuorumStatus))
 
 		// Log RVRs only if IOReady didn't just log them (avoid duplicate output)
 		if newQuorumStatus == metav1.ConditionFalse && v.state.ioReadyStatus != metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha3.ConditionTypeQuorum)
-			v.logConditionDetails(ctx, v1alpha3.ConditionTypeQuorum, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
+			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVQuorum, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 }
@@ -230,7 +230,7 @@ func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reaso
 	}
 
 	// Find failed RVRs (those with at least one False condition)
-	var failedRVRs []v1alpha3.ReplicatedVolumeReplica
+	var failedRVRs []v1alpha1.ReplicatedVolumeReplica
 	for _, rvr := range rvrs {
 		if hasAnyFalseCondition(rvr.Status) {
 			failedRVRs = append(failedRVRs, rvr)
@@ -261,7 +261,7 @@ func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reaso
 }
 
 // hasAnyFalseCondition checks if RVR has at least one condition with False status
-func hasAnyFalseCondition(status *v1alpha3.ReplicatedVolumeReplicaStatus) bool {
+func hasAnyFalseCondition(status *v1alpha1.ReplicatedVolumeReplicaStatus) bool {
 	if status == nil {
 		return false
 	}
@@ -284,14 +284,14 @@ func hasAnyFalseCondition(status *v1alpha3.ReplicatedVolumeReplicaStatus) bool {
 //	RVR: test-rv-1-abc (node: worker-1, type: Diskful)
 //	  - Ready: False | StoragePoolUnavailable | Pool xyz not found
 //	  - Synchronized: True | InSync
-func buildRVRConditionsTable(rvr *v1alpha3.ReplicatedVolumeReplica) string {
+func buildRVRConditionsTable(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	var sb strings.Builder
 	sb.WriteString("    RVR: ")
 	sb.WriteString(rvr.Name)
 	sb.WriteString(" (node: ")
 	sb.WriteString(rvr.Spec.NodeName)
 	sb.WriteString(", type: ")
-	sb.WriteString(rvr.Spec.Type)
+	sb.WriteString(string(rvr.Spec.Type))
 	sb.WriteString(")\n")
 
 	if rvr.Status == nil {

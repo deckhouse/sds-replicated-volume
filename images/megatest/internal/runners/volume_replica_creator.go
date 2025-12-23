@@ -25,7 +25,7 @@ import (
 	"github.com/google/uuid"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
@@ -34,9 +34,9 @@ import (
 // Uncomment ReplicaTypeDiskful when diskful destroyer is implemented.
 func availableReplicaTypes() []string {
 	return []string{
-		v1alpha3.ReplicaTypeAccess,
-		v1alpha3.ReplicaTypeTieBreaker,
-		// v1alpha3.ReplicaTypeDiskful, // TODO: uncomment when diskful destroyer is ready
+		string(v1alpha1.ReplicaTypeAccess),
+		string(v1alpha1.ReplicaTypeTieBreaker),
+		// string(v1alpha1.ReplicaTypeDiskful), // TODO: uncomment when diskful destroyer is ready
 	}
 }
 
@@ -107,13 +107,13 @@ func (v *VolumeReplicaCreator) doCreate(ctx context.Context) {
 	// Note: We don't set OwnerReference here.
 	// The rvr_owner_reference_controller handles this automatically
 	// based on spec.replicatedVolumeName.
-	rvr := &v1alpha3.ReplicatedVolumeReplica{
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: rvrName,
 		},
-		Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: v.rvName,
-			Type:                 replicaType,
+			Type:                 v1alpha1.ReplicaType(replicaType),
 			// NodeName is not set - controller will schedule it
 		},
 	}
