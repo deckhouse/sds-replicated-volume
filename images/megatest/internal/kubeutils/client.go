@@ -135,7 +135,10 @@ func (c *Client) initRVInformer() error {
 	restCfg := rest.CopyConfig(c.cfg)
 	restCfg.GroupVersion = &v1alpha3.SchemeGroupVersion
 	restCfg.APIPath = "/apis"
-	restCfg.NegotiatedSerializer = serializer.NewCodecFactory(c.scheme)
+	// Use WithoutConversion() to avoid "no kind X is registered for internal version" errors.
+	// CRDs don't have internal versions like core Kubernetes types, so we need to skip
+	// version conversion when decoding watch events.
+	restCfg.NegotiatedSerializer = serializer.NewCodecFactory(c.scheme).WithoutConversion()
 
 	restClient, err := rest.RESTClientFor(restCfg)
 	if err != nil {

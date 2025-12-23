@@ -144,7 +144,7 @@ func main() {
 	// Print checker statistics
 	printCheckerStats(checkerStats)
 
-	fmt.Fprintf(os.Stdout, "Test duration: %s\n", duration.String())
+	fmt.Fprintf(os.Stdout, "\nTest duration: %s\n", duration.String())
 
 	os.Stdout.Sync()
 }
