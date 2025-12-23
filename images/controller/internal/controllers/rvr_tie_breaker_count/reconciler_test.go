@@ -83,6 +83,8 @@ var _ = Describe("Reconcile", func() {
 					ReplicatedStorageClassName: "rsc1",
 				},
 			}
+
+			setRVScheduledCondition(&rv, metav1.ConditionTrue)
 		})
 
 		JustBeforeEach(func(ctx SpecContext) {
@@ -152,6 +154,21 @@ var _ = Describe("Reconcile", func() {
 				}
 			})
 
+			When("RV is not scheduled yet", func() {
+				BeforeEach(func() {
+					setRVScheduledCondition(&rv, metav1.ConditionFalse)
+				})
+
+				It("skips reconciliation until Scheduled=True", func(ctx SpecContext) {
+					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
+					Expect(err).NotTo(HaveOccurred())
+					Expect(result).To(Equal(reconcile.Result{}))
+
+					Expect(cl.List(ctx, &rvrList)).To(Succeed())
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(0)))
+				})
+			})
+
 			// Initial State:
 			//   FD "node-1": [Diskful]
 			//   FD "node-2": [Diskful]
@@ -212,6 +229,7 @@ var _ = Describe("Reconcile", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
+					setRVScheduledCondition(&rv, metav1.ConditionTrue)
 					rsc = v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
 						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
@@ -265,6 +283,7 @@ var _ = Describe("Reconcile", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
+					setRVScheduledCondition(&rv, metav1.ConditionTrue)
 					rsc = v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{Name: "rsc1"},
 						Spec:       v1alpha1.ReplicatedStorageClassSpec{Replication: "Availability"},
@@ -581,6 +600,17 @@ func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
 	return fd
 }
 
+func setRVScheduledCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
+	rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+		Conditions: []metav1.Condition{{
+			Type:               v1alpha1.ConditionTypeRVInitialized,
+			Status:             status,
+			LastTransitionTime: metav1.Now(),
+			Reason:             "test",
+		}},
+	}
+}
+
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTableSubtree("returns correct TieBreaker count for fdCount < 4",
 		func(_ string, fdExtended map[string]FDReplicaCounts, expected int) {
@@ -618,6 +648,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 							ReplicatedStorageClassName: "rsc1",
 						},
 					}
+					setRVScheduledCondition(rv, metav1.ConditionTrue)
 
 					zones := maps.Keys(fdExtended)
 					rsc := &v1alpha1.ReplicatedStorageClass{
