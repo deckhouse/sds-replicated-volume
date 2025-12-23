@@ -16,6 +16,8 @@ limitations under the License.
 
 package v1alpha1
 
+// TODO split RV/RVR conditions :ConditionTypeRVInitialized
+
 // =============================================================================
 // Condition types managed by rvr_status_conditions controller
 // =============================================================================
