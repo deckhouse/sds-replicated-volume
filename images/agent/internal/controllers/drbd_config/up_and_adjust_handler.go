@@ -35,6 +35,10 @@ import (
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 )
 
+type ResourceScanner interface {
+	ResourceShouldBeRefreshed(resourceName string)
+}
+
 type UpAndAdjustHandler struct {
 	cl       client.Client
 	log      *slog.Logger
@@ -43,6 +47,7 @@ type UpAndAdjustHandler struct {
 	lvg      *snc.LVMVolumeGroup   // will be nil for non-diskful replicas
 	llv      *snc.LVMLogicalVolume // will be nil for non-diskful replicas
 	nodeName string
+	scanner  ResourceScanner
 }
 
 func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
@@ -81,6 +86,8 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 	if patchErr := h.cl.Status().Patch(ctx, h.rvr, statusPatch); patchErr != nil {
 		return fmt.Errorf("patching status: %w", errors.Join(patchErr, err))
 	}
+
+	h.scanner.ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
 
 	return err
 }

@@ -21,7 +21,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
@@ -53,10 +52,6 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
-}
-
-func (rvr *ReplicatedVolumeReplica) NodeNameSelector(nodeName string) fields.Selector {
-	return fields.OneTermEqualSelector("spec.nodeName", nodeName)
 }
 
 // SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.

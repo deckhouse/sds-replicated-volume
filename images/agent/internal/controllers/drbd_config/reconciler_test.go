@@ -57,6 +57,7 @@ type reconcileTestCase struct {
 	expectedCommands     []*fakedrbdadm.ExpectedCmd
 	prepare              func(t *testing.T)
 	postCheck            func(t *testing.T, cl client.Client)
+	skipResourceRefresh  bool
 }
 
 const (
@@ -102,26 +103,43 @@ func setupDiscardLogger(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+type testResourceScanner struct {
+	resourceNames map[string]struct{}
+}
+
+func (t *testResourceScanner) ResourceShouldBeRefreshed(resourceName string) {
+	if t.resourceNames == nil {
+		t.resourceNames = map[string]struct{}{}
+	}
+	t.resourceNames[resourceName] = struct{}{}
+}
+
+var _ drbdconfig.ResourceScanner = &testResourceScanner{}
+
 func TestReconciler_Reconcile(t *testing.T) {
 	testCases := []*reconcileTestCase{
 		{
-			name: "empty cluster",
-			rv:   testRV(),
+			name:                "empty cluster",
+			rv:                  testRV(),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rvr not initialized",
-			rv:   testRV(),
-			rvr:  rvrSpecOnly("rvr-not-initialized", rvrTypeDiskful),
+			name:                "rvr not initialized",
+			rv:                  testRV(),
+			rvr:                 rvrSpecOnly("rvr-not-initialized", rvrTypeDiskful),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rvr missing status fields skips work",
-			rv:   testRV(),
-			rvr:  disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			name:                "rvr missing status fields skips work",
+			rv:                  testRV(),
+			rvr:                 disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			skipResourceRefresh: true,
 		},
 		{
-			name: "rv missing shared secret skips work",
-			rv:   rvWithoutSecret(),
-			rvr:  disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			name:                "rv missing shared secret skips work",
+			rv:                  rvWithoutSecret(),
+			rvr:                 disklessRVR(testRVRName, addr(testNodeIPv4, port(0))),
+			skipResourceRefresh: true,
 		},
 		{
 			name: "duplicate rvr on node fails selection",
@@ -131,6 +149,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				disklessRVR("test-rvr-dup", addr(testNodeIPv4, port(1))),
 			},
 			expectedReconcileErr: errors.New("selecting rvr: more then one rvr exists"),
+			skipResourceRefresh:  true,
 		},
 		{
 			name:                 "diskful llv missing returns error",
@@ -139,6 +158,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
 			expectedReconcileErr: selectErr("llv", resourceLLV, testLLVName),
+			skipResourceRefresh:  true,
 		},
 		{
 			name:                 "diskful lvg missing returns error",
@@ -148,6 +168,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
 			expectedReconcileErr: selectErr("lvg", resourceLVG, testLVGName),
+			skipResourceRefresh:  true,
 		},
 		{
 			name: "deleting diskful rvr cleans up",
@@ -177,6 +198,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				regular, tmp := drbdconfig.FilePaths(testRVName)
 				expectFileAbsent(t, regular, tmp)
 			},
+			skipResourceRefresh: true,
 		},
 		{
 			name:              "diskless rvr adjusts config",
@@ -329,7 +351,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 				fakeExec.ExpectCommands(tc.expectedCommands...)
 				fakeExec.Setup(t)
 
-				rec := drbdconfig.NewReconciler(cl, nil, testNodeName)
+				resScanner := &testResourceScanner{}
+
+				rec := drbdconfig.NewReconciler(cl, nil, testNodeName, resScanner)
 
 				_, err := rec.Reconcile(
 					t.Context(),
@@ -345,6 +369,12 @@ func TestReconciler_Reconcile(t *testing.T) {
 
 				if tc.postCheck != nil {
 					tc.postCheck(t, cl)
+				}
+
+				if !tc.skipResourceRefresh {
+					if _, invoked := resScanner.resourceNames[tc.rv.Name]; !invoked {
+						t.Errorf("expected to invoke resource scanner")
+					}
 				}
 			},
 		)

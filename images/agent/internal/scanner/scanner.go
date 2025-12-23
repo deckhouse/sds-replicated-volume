@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package scanner
 
 //lint:file-ignore ST1001 utils is the only exception
 
@@ -24,6 +24,7 @@ import (
 	"iter"
 	"log/slog"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -37,6 +38,16 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
+
+var defaultScanner atomic.Pointer[Scanner]
+
+func DefaultScanner() *Scanner {
+	return defaultScanner.Load()
+}
+
+func SetDefaultScanner(s *Scanner) {
+	defaultScanner.Store(s)
+}
 
 type Scanner struct {
 	log      *slog.Logger
@@ -80,6 +91,10 @@ func (s *Scanner) retryUntilCancel(fn func() error) error {
 		},
 		fn,
 	)
+}
+
+func (s *Scanner) ResourceShouldBeRefreshed(resourceName string) {
+	_ = s.batcher.Add(updatedResourceName(resourceName))
 }
 
 func (s *Scanner) Run() error {
@@ -183,17 +198,9 @@ func (s *Scanner) ConsumeBatches() error {
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
 
+			// TODO: add index
 			rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-
-			// we expect this query to hit cache with index
-			err = s.cl.List(
-				s.ctx,
-				rvrList,
-				client.MatchingFieldsSelector{
-					Selector: (&v1alpha1.ReplicatedVolumeReplica{}).
-						NodeNameSelector(s.hostname),
-				},
-			)
+			err = s.cl.List(s.ctx, rvrList)
 			if err != nil {
 				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
 			}
@@ -216,8 +223,8 @@ func (s *Scanner) ConsumeBatches() error {
 				rvr, ok := uiter.Find(
 					uslices.Ptrs(rvrList.Items),
 					func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-						// TODO
-						return rvr.Spec.ReplicatedVolumeName == resourceName
+						return rvr.Spec.ReplicatedVolumeName == resourceName &&
+							rvr.Spec.NodeName == s.hostname
 					},
 				)
 				if !ok {
