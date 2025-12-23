@@ -48,6 +48,10 @@ func NewReconciler(cl client.Client, log *slog.Logger) *Reconciler {
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			r.log.Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		return reconcile.Result{}, fmt.Errorf("getting rv: %w", err)
 	}
 
@@ -62,6 +66,10 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if hasChanged {
 		if err := r.cl.Patch(ctx, rv, patch); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				log.Info("ReplicatedVolume was deleted during reconciliation, skipping patch")
+				return reconcile.Result{}, nil
+			}
 			return reconcile.Result{}, fmt.Errorf("patching rv finalizers: %w", err)
 		}
 	}
@@ -73,7 +81,7 @@ func (r *Reconciler) processFinalizers(
 	log *slog.Logger,
 	rv *v1alpha1.ReplicatedVolume,
 ) (hasChanged bool, err error) {
-	rvDeleted := rv.DeletionTimestamp == nil
+	rvDeleted := rv.DeletionTimestamp != nil
 	rvHasFinalizer := slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
 
 	var hasRVRs bool

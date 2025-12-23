@@ -294,7 +294,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.ConditionTypeReady,
+					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
 				}},
 			},
@@ -867,7 +867,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeReady,
+						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -944,7 +944,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeReady,
+						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1043,7 +1043,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.ConditionTypeReady,
+					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
 				}},
 			},

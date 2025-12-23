@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"fmt"
+	"reflect"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -132,6 +133,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 			// switch to false
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
+		} else {
+			// no change - keep old values
+			return nil
 		}
 	}
 
@@ -210,6 +214,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 				"Became unsynced after being synced for %v",
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
+		} else {
+			// no change - keep old values
+			return nil
 		}
 	}
 
@@ -374,6 +381,11 @@ func reasonForStatusFalseFromDiskState(diskState DiskState) string {
 
 func validateArgNotNil(arg any, argName string) error {
 	if arg == nil {
+		return fmt.Errorf("expected '%s' to be non-nil", argName)
+	}
+	// Check for typed nil pointers (e.g., (*SomeStruct)(nil) passed as any)
+	v := reflect.ValueOf(arg)
+	if v.Kind() == reflect.Ptr && v.IsNil() {
 		return fmt.Errorf("expected '%s' to be non-nil", argName)
 	}
 	return nil

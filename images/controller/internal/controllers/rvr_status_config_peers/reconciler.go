@@ -55,8 +55,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 	var rv v1alpha1.ReplicatedVolume
 	if err := r.cl.Get(ctx, req.NamespacedName, &rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Can't get ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
 	if !v1alpha1.HasControllerFinalizer(&rv) {

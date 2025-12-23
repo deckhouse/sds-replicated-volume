@@ -42,7 +42,7 @@ func kernelHasCrypto(name string) (bool, error) {
 		if strings.HasPrefix(line, "name") {
 			// line is like: "name         : aes"
 			fields := strings.SplitN(line, ":", 2)
-			if len(fields) == 2 && strings.TrimSpace(fields[1]) == name {
+			if len(fields) == 2 && strings.EqualFold(strings.TrimSpace(fields[1]), name) {
 				found = true
 			}
 		}

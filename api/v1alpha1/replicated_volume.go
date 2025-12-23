@@ -26,11 +26,11 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
-// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="IOReady",type=string,JSONPath=".status.conditions[?(@.type=='IOReady')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"
-// +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=".spec.replicas"
-// +kubebuilder:printcolumn:name="Topology",type=string,JSONPath=".spec.topology"
+// +kubebuilder:printcolumn:name="DiskfulReplicas",type=string,JSONPath=".status.diskfulReplicaCount"
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=".status.phase"
 type ReplicatedVolume struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata"`

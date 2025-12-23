@@ -57,8 +57,12 @@ func (r *Reconciler) Reconcile(
 
 	rvr := &v1alpha1.ReplicatedVolumeReplica{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("ReplicatedVolumeReplica not found, probably already deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "Can't get ReplicatedVolumeReplica")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
 	if rvr.DeletionTimestamp.IsZero() {

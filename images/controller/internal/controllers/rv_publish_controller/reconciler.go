@@ -59,8 +59,12 @@ func (r *Reconciler) Reconcile(
 	// fetch target ReplicatedVolume; if it was deleted, stop reconciliation
 	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: req.Name}, rv); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.V(1).Info("ReplicatedVolume not found, probably deleted")
+			return reconcile.Result{}, nil
+		}
 		log.Error(err, "unable to get ReplicatedVolume")
-		return reconcile.Result{}, client.IgnoreNotFound(err)
+		return reconcile.Result{}, err
 	}
 
 	// check basic preconditions from spec before doing any work
@@ -245,6 +249,12 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 			continue
 		}
 
+		// Skip replicas without a node (unscheduled replicas or TieBreaker without node assignment)
+		// as they are not configured by the agent and won't have actual.allowTwoPrimaries set
+		if rvr.Spec.NodeName == "" {
+			continue
+		}
+
 		if rvr.Status == nil ||
 			rvr.Status.DRBD == nil ||
 			rvr.Status.DRBD.Actual == nil ||
@@ -422,8 +432,8 @@ func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
 		return true
 	}
 
-	// controller works only when RV is Ready according to spec
-	if !meta.IsStatusConditionTrue(rv.Status.Conditions, "Ready") {
+	// controller works only when RV is IOReady according to spec
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
 		return true
 	}
 

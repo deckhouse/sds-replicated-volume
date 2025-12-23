@@ -118,7 +118,7 @@ var _ = Describe("Reconciler", func() {
 				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeReady,
+							Type:   v1alpha1.ConditionTypeRVIOReady,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -264,7 +264,7 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("ReplicatedVolume is not Ready", func() {
+		When("ReplicatedVolume is not IOReady", func() {
 			BeforeEach(func() {
 				if rvr.Status == nil {
 					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}

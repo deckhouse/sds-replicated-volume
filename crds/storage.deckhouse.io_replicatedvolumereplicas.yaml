@@ -25,29 +25,29 @@ spec:
     - jsonPath: .spec.nodeName
       name: Node
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Primary')].status
-      name: Primary
+    - jsonPath: .spec.type
+      name: Type
       type: string
-    - jsonPath: .spec.volumes[0].disk==null
-      name: Diskless
+    - jsonPath: .status.conditions[?(@.type=='Published')].status
+      name: Published
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.conditions[?(@.type=='Online')].status
+      name: Online
       type: string
-    - jsonPath: .status.conditions[?(@.type=='ConfigurationAdjusted')].status
-      name: ConfigurationAdjusted
+    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
+      name: IOReady
       type: string
-    - jsonPath: .status.conditions[?(@.type=='InitialSync')].status
-      name: InitialSync
+    - jsonPath: .status.conditions[?(@.type=='Configured')].status
+      name: Configured
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Quorum')].status
-      name: Quorum
+    - jsonPath: .status.conditions[?(@.type=='DataInitialized')].status
+      name: DataInitialized
       type: string
-    - jsonPath: .status.conditions[?(@.type=='DevicesReady')].status
-      name: DevicesReady
+    - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
+      name: InQuorum
       type: string
-    - jsonPath: .status.conditions[?(@.type=='DiskIOSuspended')].status
-      name: DiskIOSuspended
+    - jsonPath: .status.conditions[?(@.type=='InSync')].status
+      name: InSync
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -88,6 +88,8 @@ spec:
                 - message: replicatedVolumeName is immutable
                   rule: self == oldSelf
               type:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.actualType fields.
                 enum:
                 - Diskful
                 - Access
@@ -100,6 +102,8 @@ spec:
           status:
             properties:
               actualType:
+                description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                  spec.type and status.actualType fields.
                 enum:
                 - Diskful
                 - Access

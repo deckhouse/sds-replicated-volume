@@ -16,9 +16,23 @@ limitations under the License.
 
 package drbdsetup
 
-var Command = "drbdsetup"
-var StatusArgs = []string{"status", "--json"}
-var Events2Args = []string{"events2", "--timestamps"}
-var DownArgs = func(resource string) []string {
-	return []string{"down", resource}
+import (
+	"context"
+	"fmt"
+	"os/exec"
+)
+
+func ExecuteDown(ctx context.Context, resource string) error {
+	args := DownArgs(resource)
+	cmd := exec.CommandContext(ctx, Command, args...)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf(
+			"running command %s %v: %w; output: %q",
+			Command, args, err, string(out),
+		)
+	}
+
+	return nil
 }

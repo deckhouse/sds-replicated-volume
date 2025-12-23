@@ -253,12 +253,12 @@ func WaitForReplicatedVolumeReady(
 		}
 
 		if rv.Status != nil {
-			readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ConditionTypeReady)
+			readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ConditionTypeRVIOReady)
 			if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
-				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is ready", traceID, name))
+				log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
 				return attemptCounter, nil
 			}
-			log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not ready yet. Waiting...", traceID, name, attemptCounter))
+			log.Trace(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] Attempt %d, ReplicatedVolume not IOReady yet. Waiting...", traceID, name, attemptCounter))
 		}
 	}
 }
