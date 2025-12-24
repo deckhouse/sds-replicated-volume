@@ -580,15 +580,18 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
 
 				var (
-					builder *fake.ClientBuilder
-					cl      client.WithWatch
-					rec     *rvrtiebreakercount.Reconciler
-					rv      *v1alpha1.ReplicatedVolume
+					builder  *fake.ClientBuilder
+					cl       client.WithWatch
+					rec      *rvrtiebreakercount.Reconciler
+					rv       *v1alpha1.ReplicatedVolume
+					cfg      EntryConfig
+					rscZones []string
+					nodeList []corev1.Node
 				)
 
 				BeforeEach(func() {
 					// Apply defaults for config
-					cfg := EntryConfig{Topology: "TransZonal"}
+					cfg = EntryConfig{Topology: "TransZonal"}
 					if cfgPtr != nil {
 						if cfgPtr.Topology != "" {
 							cfg.Topology = cfgPtr.Topology
@@ -598,6 +601,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 
 					cl = nil
 					rec = nil
+					nodeList = nil
 
 					rv = &v1alpha1.ReplicatedVolume{
 						ObjectMeta: metav1.ObjectMeta{
@@ -611,7 +615,6 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					setRVInitializedCondition(rv, metav1.ConditionTrue)
 
 					// Determine zones for RSC
-					var rscZones []string
 					if cfg.Zones != nil {
 						rscZones = *cfg.Zones
 					} else {
@@ -637,13 +640,14 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 						var nodeNameSlice []string
 						for i := range 10 {
 							nodeName := fmt.Sprintf("node-%s-%d", fdName, i)
-							node := &corev1.Node{
+							node := corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name:   nodeName,
 									Labels: map[string]string{corev1.LabelTopologyZone: fdName},
 								},
 							}
-							objects = append(objects, node)
+							nodeList = append(nodeList, node)
+							objects = append(objects, &node)
 							nodeNameSlice = append(nodeNameSlice, nodeName)
 
 						}
@@ -716,6 +720,11 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					fmt.Fprintf(GinkgoWriter, "  total replicas after reconcile: %d\n", len(rvrList.Items))
 
 					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(expected)))
+
+					// Check FD distribution balance (only for TransZonal topology)
+					if cfg.Topology == "TransZonal" {
+						Expect(rvrList.Items).To(HaveBalancedFDDistribution(rscZones, nodeList))
+					}
 				})
 			})
 		},
@@ -805,5 +814,26 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, "TB-outside-zones-4",
 			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "excluded": {TieBreaker: 2}}, 0,
 			&EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
+
+		// ===== Diskful replica in zone outside RSC zones =====
+		// Diskful in zone "c" which is NOT in RSC zones ["a", "b"]
+		// Total replicas = 3 (odd), so no TB needed
+		// BUG: if controller ignores replicas outside zones, it will see only 2 Diskful
+		// and create 1 TB, resulting in 4 total replicas (even) - violates spec!
+		Entry(nil, "Diskful-outside-zones-1",
+			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0,
+			&EntryConfig{Zones: u.Ptr([]string{"a", "b"})}),
+
+		// ===== TB in wrong zone - should be redistributed =====
+		// Initial: a has 1df+2ac+2tb=5 replicas, b has 1df, c has 1df
+		// Controller sees currentTB=2, desiredTB=2 -> "No need to change"
+		// BUG: TB should be in zones b and c, not in a!
+		// Distribution after reconcile should be balanced (diff <= 1)
+		Entry(nil, "TB-wrong-distribution",
+			map[string]FDReplicaCounts{
+				"a": {Diskful: 1, Access: 2, TieBreaker: 2},
+				"b": {Diskful: 1},
+				"c": {Diskful: 1},
+			}, 2, &EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
 	)
 })

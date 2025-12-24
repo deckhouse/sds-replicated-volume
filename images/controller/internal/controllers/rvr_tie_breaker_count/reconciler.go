@@ -346,7 +346,7 @@ func (r *Reconciler) syncTieBreakers(
 				logError(log.WithValues("tbToDelete", tbToDelete.Name), fmt.Errorf("deleting tb rvr: %w", err))
 		}
 
-		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, desiredTB-currentTB), "tbToDelete", tbToDelete.Name)
+		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, currentTB-desiredTB), "tbToDelete", tbToDelete.Name)
 	}
 
 	return reconcile.Result{}, nil
