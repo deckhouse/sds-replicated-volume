@@ -152,6 +152,24 @@ properties:
           ca:
             type: string
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
+      pvcRwxAllowedUsernames:
+        type: array
+        default: []
+        items:
+          type: string
+        description: |
+          Allowed admission usernames that can create RWX PVCs using StorageClasses
+          with provisioner `replicated.csi.storage.deckhouse.io`.
+          By default `system:serviceaccount:d8-virtualization:virtualization-controller` and
+          `system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller` are allowed.
+      pvcRwxAllowedGroups:
+        type: array
+        default: []
+        items:
+          type: string
+        description: |
+          Allowed admission groups that can create RWX PVCs using StorageClasses
+          with provisioner `replicated.csi.storage.deckhouse.io`.
       customSchedulerExtenderCert:
          type: object
          default: {}

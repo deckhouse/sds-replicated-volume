@@ -70,3 +70,27 @@ webhooks:
     admissionReviewVersions: ["v1", "v1beta1"]
     sideEffects: None
     timeoutSeconds: 5
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: "d8-sds-replicated-volume-pvc-validation"
+  {{- include "helm_lib_module_labels" (list .) | nindent 2 }}
+webhooks:
+  - name: "d8-sds-replicated-volume-pvc-validation.storage.deckhouse.io"
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["persistentvolumeclaims"]
+        scope: "Namespaced"
+    clientConfig:
+      service:
+        namespace: "d8-{{ .Chart.Name }}"
+        name: "webhooks"
+        path: "/pvc-validate"
+      caBundle: |
+        {{ .Values.sdsReplicatedVolume.internal.customWebhookCert.ca | b64enc }}
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 5

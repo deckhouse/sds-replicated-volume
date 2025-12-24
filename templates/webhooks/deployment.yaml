@@ -73,6 +73,11 @@ spec:
           - -tls-key-file=/etc/webhook/certs/tls.key
         image: {{ include "helm_lib_module_image" (list . "webhooks") }}
         imagePullPolicy: IfNotPresent
+        env:
+          - name: PVC_RWX_ALLOWED_USERNAMES
+            value: {{ join "," .Values.sdsReplicatedVolume.internal.pvcRwxAllowedUsernames | quote }}
+          - name: PVC_RWX_ALLOWED_GROUPS
+            value: {{ join "," .Values.sdsReplicatedVolume.internal.pvcRwxAllowedGroups | quote }}
         volumeMounts:
           - name: webhook-certs
             mountPath: /etc/webhook/certs
