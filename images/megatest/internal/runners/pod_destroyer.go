@@ -37,6 +37,8 @@ type PodDestroyer struct {
 func NewPodDestroyer(
 	cfg config.PodDestroyerConfig,
 	client *kubeutils.Client,
+	podCountMinMax []int,
+	periodMinMax []int,
 ) *PodDestroyer {
 	return &PodDestroyer{
 		cfg:    cfg,
@@ -45,6 +47,8 @@ func NewPodDestroyer(
 			"runner", "pod-destroyer",
 			"namespace", cfg.Namespace,
 			"label_selector", cfg.LabelSelector,
+			"pod_count_min_max", podCountMinMax,
+			"period_min_max", periodMinMax,
 		),
 	}
 }

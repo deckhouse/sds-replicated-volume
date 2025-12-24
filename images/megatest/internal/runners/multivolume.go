@@ -32,6 +32,20 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
+var (
+	// PodDestroyer Agent configuration
+	podDestroyerAgentNamespace      = "d8-sds-replicated-volume"
+	podDestroyerAgentLabelSelector  = "app=sds-replicated-volume-controller-agent"
+	podDestroyerAgentPodCountMinMax = []int{1, 2}
+	podDestroyerAgentPeriodMinMax   = []int{30, 60}
+
+	// PodDestroyer Controller configuration
+	podDestroyerControllerNamespace      = "d8-sds-replicated-volume"
+	podDestroyerControllerLabelSelector  = "app=sds-replicated-volume-controller"
+	podDestroyerControllerPodCountMinMax = []int{1, 3}
+	podDestroyerControllerPeriodMinMax   = []int{30, 60}
+)
+
 // Stats contains statistics about the test run
 type Stats struct {
 	CreatedRVCount          int64
@@ -42,12 +56,10 @@ type Stats struct {
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
 type MultiVolume struct {
-	cfg                          config.MultiVolumeConfig
-	podDestroyerAgentConfig      config.PodDestroyerConfig
-	podDestroyerControllerConfig config.PodDestroyerConfig
-	client                       *kubeutils.Client
-	log                          *slog.Logger
-	forceCleanupChan             <-chan struct{}
+	cfg              config.MultiVolumeConfig
+	client           *kubeutils.Client
+	log              *slog.Logger
+	forceCleanupChan <-chan struct{}
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
@@ -66,18 +78,14 @@ type MultiVolume struct {
 // NewMultiVolume creates a new MultiVolume orchestrator
 func NewMultiVolume(
 	cfg config.MultiVolumeConfig,
-	podDestroyerAgentConfig config.PodDestroyerConfig,
-	podDestroyerControllerConfig config.PodDestroyerConfig,
 	client *kubeutils.Client,
 	forceCleanupChan <-chan struct{},
 ) *MultiVolume {
 	return &MultiVolume{
-		cfg:                          cfg,
-		podDestroyerAgentConfig:      podDestroyerAgentConfig,
-		podDestroyerControllerConfig: podDestroyerControllerConfig,
-		client:                       client,
-		log:                          slog.Default().With("runner", "multivolume"),
-		forceCleanupChan:             forceCleanupChan,
+		cfg:              cfg,
+		client:           client,
+		log:              slog.Default().With("runner", "multivolume"),
+		forceCleanupChan: forceCleanupChan,
 	}
 }
 
@@ -103,7 +111,7 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 	if m.cfg.DisablePodDestroyer {
 		m.log.Debug("pod-destroyer runners are disabled")
 	} else {
-		m.startPodDestroyers(ctx, m.podDestroyerAgentConfig, m.podDestroyerControllerConfig)
+		m.startPodDestroyers(ctx)
 	}
 
 	// Main volume creation loop
@@ -211,14 +219,30 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 	}()
 }
 
-func (m *MultiVolume) startPodDestroyers(ctx context.Context, agentCfg config.PodDestroyerConfig, controllerCfg config.PodDestroyerConfig) {
+func (m *MultiVolume) startPodDestroyers(ctx context.Context) {
+	// Create agent pod-destroyer config
+	agentCfg := config.PodDestroyerConfig{
+		Namespace:     podDestroyerAgentNamespace,
+		LabelSelector: podDestroyerAgentLabelSelector,
+		PodCount:      config.StepMinMax{Min: podDestroyerAgentPodCountMinMax[0], Max: podDestroyerAgentPodCountMinMax[1]},
+		Period:        config.DurationMinMax{Min: time.Duration(podDestroyerAgentPeriodMinMax[0]) * time.Second, Max: time.Duration(podDestroyerAgentPeriodMinMax[1]) * time.Second},
+	}
+
 	// Start agent destroyer
 	go func() {
-		_ = NewPodDestroyer(agentCfg, m.client).Run(ctx)
+		_ = NewPodDestroyer(agentCfg, m.client, podDestroyerAgentPodCountMinMax, podDestroyerAgentPeriodMinMax).Run(ctx)
 	}()
+
+	// Create controller pod-destroyer config
+	controllerCfg := config.PodDestroyerConfig{
+		Namespace:     podDestroyerControllerNamespace,
+		LabelSelector: podDestroyerControllerLabelSelector,
+		PodCount:      config.StepMinMax{Min: podDestroyerControllerPodCountMinMax[0], Max: podDestroyerControllerPodCountMinMax[1]},
+		Period:        config.DurationMinMax{Min: time.Duration(podDestroyerControllerPeriodMinMax[0]) * time.Second, Max: time.Duration(podDestroyerControllerPeriodMinMax[1]) * time.Second},
+	}
 
 	// Start controller destroyer
 	go func() {
-		_ = NewPodDestroyer(controllerCfg, m.client).Run(ctx)
+		_ = NewPodDestroyer(controllerCfg, m.client, podDestroyerControllerPodCountMinMax, podDestroyerControllerPeriodMinMax).Run(ctx)
 	}()
 }
