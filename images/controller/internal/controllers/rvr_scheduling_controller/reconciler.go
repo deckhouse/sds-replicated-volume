@@ -229,41 +229,17 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 ) error {
 	// Collect all scheduled replicas that were NOT scheduled in this cycle
 	alreadyScheduledReplicas := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
-	alreadyScheduledReplicas = append(alreadyScheduledReplicas, sctx.ScheduledDiskfulReplicas...)
+	// alreadyScheduledReplicas = append(alreadyScheduledReplicas, sctx.ScheduledDiskfulReplicas...)
 
 	// Also check for scheduled Access and TieBreaker replicas from RvrList
 	for _, rvr := range sctx.RvrList {
 		if rvr.Spec.NodeName == "" {
 			continue // Skip unscheduled
 		}
-		// Skip if it was scheduled in this cycle
-		alreadyScheduled := true
-		for _, newlyScheduled := range sctx.RVRsToSchedule {
-			if rvr.Name == newlyScheduled.Name {
-				alreadyScheduled = false
-				break
-			}
-		}
-		if !alreadyScheduled {
-			continue
-		}
-		// Skip Diskful as they are already in ScheduledDiskfulReplicas
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			continue
-		}
 		alreadyScheduledReplicas = append(alreadyScheduledReplicas, rvr)
 	}
 
 	for _, rvr := range alreadyScheduledReplicas {
-		// Check if condition is already correct
-		var cond *metav1.Condition
-		if rvr.Status != nil {
-			cond = meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeScheduled)
-		}
-		if cond != nil && cond.Status == metav1.ConditionTrue && cond.Reason == v1alpha1.ReasonSchedulingReplicaScheduled {
-			continue // Already correct
-		}
-
 		log.V(2).Info("fixing Scheduled condition on existing replica", "rvr", rvr.Name)
 		if err := r.setScheduledConditionOnRVR(
 			ctx,
