@@ -98,6 +98,12 @@ func (r *Reconciler) Reconcile(
 	}
 	log.V(1).Info("scheduling context prepared", "rsc", sctx.Rsc.Name, "topology", sctx.Rsc.Spec.Topology, "volumeAccess", sctx.Rsc.Spec.VolumeAccess)
 
+	// Ensure all previously scheduled replicas have correct Scheduled condition
+	// This is done early so that even if phases fail, existing replicas have correct conditions
+	if err := r.ensureScheduledConditionOnExistingReplicas(ctx, sctx, log); err != nil {
+		return reconcile.Result{}, err
+	}
+
 	// Phase 1: place Diskful replicas.
 	log.V(1).Info("starting Diskful phase", "unscheduledCount", len(sctx.UnscheduledDiskfulReplicas))
 	if err := r.scheduleDiskfulPhase(ctx, sctx); err != nil {
@@ -121,11 +127,6 @@ func (r *Reconciler) Reconcile(
 
 	log.V(1).Info("patching scheduled replicas", "countTotal", len(sctx.RVRsToSchedule))
 	if err := r.patchScheduledReplicas(ctx, sctx, log); err != nil {
-		return reconcile.Result{}, err
-	}
-
-	// Ensure all previously scheduled replicas have correct Scheduled condition
-	if err := r.ensureScheduledConditionOnExistingReplicas(ctx, sctx, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
@@ -516,7 +517,7 @@ func (r *Reconciler) tryScheduleDiskfulReplicas(
 // For Zonal topology: selects the best zone first (by total score), then best nodes from that zone.
 // For TransZonal topology: distributes replicas across zones, picking zones with fewer scheduled replicas first.
 // replicaTypeFilter: for TransZonal, which replica types to count for zone balancing (empty = all types).
-// bestEffort: if true, don't return error when not enough nodes (used for TieBreaker).
+// bestEffort: if true, don't return error when not enough nodes.
 // Note: This function returns the list of replicas that were assigned nodes in this call.
 func (r *Reconciler) assignReplicasToNodes(
 	sctx *SchedulingContext,

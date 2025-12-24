@@ -82,54 +82,27 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 		return
 	}
 
-	// Build a set of assigned replica names for fast lookup
-	assignedSet := make(map[string]struct{}, len(assignedReplicas))
-	for _, rvr := range assignedReplicas {
-		assignedSet[rvr.Name] = struct{}{}
-	}
-
-	// Determine replica type from first replica (all in batch should be same type)
-	replicaType := assignedReplicas[0].Spec.Type
-
-	// Remove assigned replicas from appropriate unscheduled list based on type
-	switch replicaType {
-	case v1alpha1.ReplicaTypeDiskful:
-		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
-		for _, rvr := range sctx.UnscheduledDiskfulReplicas {
-			if _, assigned := assignedSet[rvr.Name]; !assigned {
-				remainingUnscheduled = append(remainingUnscheduled, rvr)
-			}
-		}
-		sctx.UnscheduledDiskfulReplicas = remainingUnscheduled
-		// Add assigned Diskful replicas to ScheduledDiskfulReplicas
-		sctx.ScheduledDiskfulReplicas = append(sctx.ScheduledDiskfulReplicas, assignedReplicas...)
-
-	case v1alpha1.ReplicaTypeAccess:
-		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
-		for _, rvr := range sctx.UnscheduledAccessReplicas {
-			if _, assigned := assignedSet[rvr.Name]; !assigned {
-				remainingUnscheduled = append(remainingUnscheduled, rvr)
-			}
-		}
-		sctx.UnscheduledAccessReplicas = remainingUnscheduled
-
-	case v1alpha1.ReplicaTypeTieBreaker:
-		var remainingUnscheduled []*v1alpha1.ReplicatedVolumeReplica
-		for _, rvr := range sctx.UnscheduledTieBreakerReplicas {
-			if _, assigned := assignedSet[rvr.Name]; !assigned {
-				remainingUnscheduled = append(remainingUnscheduled, rvr)
-			}
-		}
-		sctx.UnscheduledTieBreakerReplicas = remainingUnscheduled
-	}
-
-	// Build a set of assigned nodes and add to NodesWithAnyReplica
+	// Build sets for fast lookup in a single pass
+	assignedNames := make(map[string]struct{}, len(assignedReplicas))
 	assignedNodes := make(map[string]struct{}, len(assignedReplicas))
+	var diskfulReplicas []*v1alpha1.ReplicatedVolumeReplica
+
 	for _, rvr := range assignedReplicas {
-		nodeName := rvr.Spec.NodeName
-		assignedNodes[nodeName] = struct{}{}
-		sctx.NodesWithAnyReplica[nodeName] = struct{}{}
+		assignedNames[rvr.Name] = struct{}{}
+		assignedNodes[rvr.Spec.NodeName] = struct{}{}
+		sctx.NodesWithAnyReplica[rvr.Spec.NodeName] = struct{}{}
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			diskfulReplicas = append(diskfulReplicas, rvr)
+		}
 	}
+
+	// Filter unscheduled lists
+	sctx.UnscheduledDiskfulReplicas = removeAssigned(sctx.UnscheduledDiskfulReplicas, assignedNames)
+	sctx.UnscheduledAccessReplicas = removeAssigned(sctx.UnscheduledAccessReplicas, assignedNames)
+	sctx.UnscheduledTieBreakerReplicas = removeAssigned(sctx.UnscheduledTieBreakerReplicas, assignedNames)
+
+	// Add diskful replicas to ScheduledDiskfulReplicas
+	sctx.ScheduledDiskfulReplicas = append(sctx.ScheduledDiskfulReplicas, diskfulReplicas...)
 
 	// Remove assigned nodes from PublishOnNodesWithoutRvReplica
 	var remainingPublishNodes []string
@@ -142,6 +115,17 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 
 	// Add assigned replicas to RVRsToSchedule
 	sctx.RVRsToSchedule = append(sctx.RVRsToSchedule, assignedReplicas...)
+}
+
+// removeAssigned removes replicas that are in the assigned set and returns the rest.
+func removeAssigned(replicas []*v1alpha1.ReplicatedVolumeReplica, assigned map[string]struct{}) []*v1alpha1.ReplicatedVolumeReplica {
+	var result []*v1alpha1.ReplicatedVolumeReplica
+	for _, rvr := range replicas {
+		if _, ok := assigned[rvr.Name]; !ok {
+			result = append(result, rvr)
+		}
+	}
+	return result
 }
 
 const publishOnScoreBonus = 1000
