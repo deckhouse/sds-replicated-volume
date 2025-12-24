@@ -62,6 +62,21 @@ type Opt struct {
 
 func (o *Opt) Parse() {
 	var rootCmd = &cobra.Command{
+		Use:   "megatest",
+		Short: "A tool for testing ReplicatedVolume operations in Kubernetes",
+		Long: `megatest is a testing tool that creates and manages multiple ReplicatedVolumes concurrently
+to test the stability and performance of the SDS Replicated Volume system.
+
+Graceful Shutdown:
+  To stop megatest, press Ctrl+C (SIGINT). This will:
+  1. Stop creating new ReplicatedVolumes
+  2. Begin cleanup process that will delete all created ReplicatedVolumes and related resources
+  3. After cleanup completes, display test statistics
+
+Interrupting Cleanup:
+  If you need to interrupt the cleanup process, press Ctrl+C a second time.
+  This will force immediate termination, leaving all objects created by megatest
+  in the cluster. These objects will need to be manually deleted later.`,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			if len(o.StorageClasses) == 0 {
 				return errors.New("storage-classes flag is required")
@@ -105,6 +120,17 @@ func (o *Opt) Parse() {
 
 	// Exit after displaying the help information
 	rootCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+		// Print Short description if available
+		if cmd.Short != "" {
+			cmd.Println(cmd.Short)
+			cmd.Println()
+		}
+		// Print Long description if available
+		if cmd.Long != "" {
+			cmd.Println(cmd.Long)
+			cmd.Println()
+		}
+		// Print usage and flags
 		cmd.Print(cmd.UsageString())
 		os.Exit(0)
 	})
