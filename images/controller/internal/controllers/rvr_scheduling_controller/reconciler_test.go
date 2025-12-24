@@ -25,6 +25,9 @@ import (
 	"os"
 	"slices"
 
+	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -38,10 +41,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 )
 
 // ClusterSetup defines a cluster configuration for tests
@@ -77,8 +76,8 @@ type ExpectedResult struct {
 	UnscheduledDiskfulCount *int   // expected number of unscheduled Diskful (nil = 0)
 	UnscheduledReason       string // expected condition reason for unscheduled Diskful replicas
 	// Partial scheduling support for TieBreaker
-	ScheduledTieBreakerCount   *int   // expected number of scheduled TieBreaker (nil = all must be scheduled)
-	UnscheduledTieBreakerCount *int   // expected number of unscheduled TieBreaker (nil = 0)
+	ScheduledTieBreakerCount    *int   // expected number of scheduled TieBreaker (nil = all must be scheduled)
+	UnscheduledTieBreakerCount  *int   // expected number of unscheduled TieBreaker (nil = 0)
 	UnscheduledTieBreakerReason string // expected condition reason for unscheduled TieBreaker replicas
 }
 
@@ -398,16 +397,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 			if updated.Spec.NodeName != "" {
 				scheduledDiskful = append(scheduledDiskful, updated.Spec.NodeName)
-			// Find zone for this node
-			for _, node := range nodes {
-				if node.Name == updated.Spec.NodeName {
-					zone := node.Labels["topology.kubernetes.io/zone"]
-					if !slices.Contains(diskfulZones, zone) {
-						diskfulZones = append(diskfulZones, zone)
+				// Find zone for this node
+				for _, node := range nodes {
+					if node.Name == updated.Spec.NodeName {
+						zone := node.Labels["topology.kubernetes.io/zone"]
+						if !slices.Contains(diskfulZones, zone) {
+							diskfulZones = append(diskfulZones, zone)
+						}
+						break
 					}
-					break
 				}
-			}
 			} else {
 				unscheduledDiskful = append(unscheduledDiskful, updated.Name)
 				// Check condition on unscheduled replica
