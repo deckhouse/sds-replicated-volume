@@ -160,6 +160,12 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 
 // processRVUpdate checks for condition changes and logs them
 func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
+	// Handle nil Status (can happen during deletion or if RV was just created)
+	if rv == nil || rv.Status == nil {
+		v.log.Debug("RV or Status is nil, skipping condition check")
+		return
+	}
+
 	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
 	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
 
