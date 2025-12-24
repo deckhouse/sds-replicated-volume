@@ -220,7 +220,6 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 ) error {
 	// Collect all scheduled replicas that were NOT scheduled in this cycle
 	alreadyScheduledReplicas := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
-	// alreadyScheduledReplicas = append(alreadyScheduledReplicas, sctx.ScheduledDiskfulReplicas...)
 
 	// Also check for scheduled Access and TieBreaker replicas from RvrList
 	for _, rvr := range sctx.RvrList {
