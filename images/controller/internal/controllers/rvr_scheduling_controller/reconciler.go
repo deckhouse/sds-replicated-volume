@@ -83,7 +83,6 @@ func (r *Reconciler) Reconcile(
 	log.V(1).Info("starting reconciliation cycle")
 
 	// Load ReplicatedVolume, its ReplicatedStorageClass and all relevant replicas.
-	// The helper may also return an early reconcile.Result (e.g. when RV is not ready yet).
 	sctx, err := r.prepareSchedulingContext(ctx, req, log)
 	if err != nil {
 		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, "prepare", err, log)
