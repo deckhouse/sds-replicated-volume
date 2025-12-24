@@ -83,7 +83,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	fds, tbs, nonFDtbs, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
+	fds, tbs, nonFDtbs, nonFDbaseCount, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -99,7 +99,7 @@ func (r *Reconciler) Reconcile(
 		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, len(nonFDtbs)), "tbToDelete", tbToDelete.Name)
 	}
 
-	return r.syncTieBreakers(ctx, log, rv, fds, tbs)
+	return r.syncTieBreakers(ctx, log, rv, fds, tbs, nonFDbaseCount)
 }
 
 func (r *Reconciler) getReplicatedVolume(
@@ -160,11 +160,11 @@ func (r *Reconciler) loadFailureDomains(
 	log logr.Logger,
 	rvName string,
 	rsc *v1alpha1.ReplicatedStorageClass,
-) (fds map[string]*failureDomain, tbs []tb, nonFDtbs []tb, err error) {
+) (fds map[string]*failureDomain, tbs []tb, nonFDtbs []tb, nonFDbaseCount int, err error) {
 	// initialize empty failure domains
 	nodeList := &corev1.NodeList{}
 	if err := r.cl.List(ctx, nodeList); err != nil {
-		return nil, nil, nil, logError(r.log, fmt.Errorf("listing nodes: %w", err))
+		return nil, nil, nil, 0, logError(r.log, fmt.Errorf("listing nodes: %w", err))
 	}
 
 	if rsc.Spec.Topology == "TransZonal" {
@@ -178,7 +178,7 @@ func (r *Reconciler) loadFailureDomains(
 			zone, ok := node.Labels[corev1.LabelTopologyZone]
 			if !ok {
 				log.WithValues("node", node.Name).Error(ErrNoZoneLabel, "No zone label")
-				return nil, nil, nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
+				return nil, nil, nil, 0, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
 
 			if fd, ok := fds[zone]; ok {
@@ -197,7 +197,7 @@ func (r *Reconciler) loadFailureDomains(
 	// init failure domains with RVRs
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err = r.cl.List(ctx, rvrList); err != nil {
-		return nil, nil, nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
+		return nil, nil, nil, 0, logError(log, fmt.Errorf("listing rvrs: %w", err))
 	}
 
 	for rvr := range uslices.Ptrs(rvrList.Items) {
@@ -230,17 +230,22 @@ func (r *Reconciler) loadFailureDomains(
 				nonFDtbs = append(nonFDtbs, rvr)
 			}
 		} else {
+			added := false
 			for _, fd := range fds {
 				if fd.addBaseReplica(rvr) {
 					// rvr always maps to single fd
+					added = true
 					break
 				}
 			}
-			// ignore non-fb base replicas
+			if !added {
+				// count base replicas outside allowed FDs for odd total calculation
+				nonFDbaseCount++
+			}
 		}
 	}
 
-	return fds, tbs, nonFDtbs, nil
+	return fds, tbs, nonFDtbs, nonFDbaseCount, nil
 }
 
 func (r *Reconciler) syncTieBreakers(
@@ -249,6 +254,7 @@ func (r *Reconciler) syncTieBreakers(
 	rv *v1alpha1.ReplicatedVolume,
 	fds map[string]*failureDomain,
 	tbs []tb,
+	nonFDbaseCount int,
 ) (reconcile.Result, error) {
 
 	var maxBaseReplicaCount, totalBaseReplicaCount int
@@ -260,6 +266,31 @@ func (r *Reconciler) syncTieBreakers(
 
 	currentTB := len(tbs)
 
+	// Delete TBs from zones with max base count (if there are zones with fewer base replicas)
+	// These TBs are in "wrong" zones and should be redistributed
+	hasZonesWithFewerBase := false
+	for _, fd := range fds {
+		if fd.baseReplicaCount() < maxBaseReplicaCount {
+			hasZonesWithFewerBase = true
+			break
+		}
+	}
+
+	if hasZonesWithFewerBase {
+		for _, fd := range fds {
+			for fd.baseReplicaCount() == maxBaseReplicaCount && fd.tbReplicaCount() > 0 {
+				// TB in "overloaded" zone - delete it
+				tbToDelete := fd.popTBReplica()
+				if err := r.cl.Delete(ctx, tbToDelete); client.IgnoreNotFound(err) != nil {
+					return reconcile.Result{},
+						logError(log.WithValues("tbToDelete", tbToDelete.Name), fmt.Errorf("deleting misplaced tb rvr: %w", err))
+				}
+				log.Info("deleted misplaced TB from zone with max base count", "tbToDelete", tbToDelete.Name)
+				currentTB--
+			}
+		}
+	}
+
 	var desiredTB int
 	for _, fd := range fds {
 		baseReplicaCountDiffFromMax := maxBaseReplicaCount - fd.baseReplicaCount()
@@ -268,7 +299,8 @@ func (r *Reconciler) syncTieBreakers(
 		}
 	}
 
-	desiredTotalReplicaCount := totalBaseReplicaCount + desiredTB
+	// Include base replicas outside allowed FDs in total count for odd calculation
+	desiredTotalReplicaCount := totalBaseReplicaCount + nonFDbaseCount + desiredTB
 	if desiredTotalReplicaCount > 0 && desiredTotalReplicaCount%2 == 0 {
 		// add one more in order to keep total number of replicas odd
 		desiredTB++
