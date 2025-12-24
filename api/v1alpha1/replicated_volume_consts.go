@@ -27,6 +27,23 @@ const (
 	RVMaxDeviceMinor = uint(1048575)
 )
 
+// DRBD quorum configuration constants for ReplicatedVolume
+const (
+	// QuorumMinValue is the minimum quorum value when diskfulCount > 1.
+	// Quorum formula: max(QuorumMinValue, allReplicas/2+1)
+	QuorumMinValue = 2
+
+	// QuorumMinimumRedundancyDefault is the default minimum number of UpToDate
+	// replicas required for quorum. Used for None and Availability replication modes.
+	// This ensures at least one UpToDate replica is required for quorum.
+	QuorumMinimumRedundancyDefault = 1
+
+	// QuorumMinimumRedundancyMinForConsistency is the minimum QMR value
+	// for ConsistencyAndAvailability replication mode when calculating majority-based QMR.
+	// QMR formula for C&A: max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1)
+	QuorumMinimumRedundancyMinForConsistency = 2
+)
+
 type SharedSecretAlg string
 
 // Shared secret hashing algorithms
