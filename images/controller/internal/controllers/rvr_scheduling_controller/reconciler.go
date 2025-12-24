@@ -359,25 +359,9 @@ func (r *Reconciler) prepareSchedulingContext(
 	}
 
 	// Collect replicas for this RV:
-	// - Track nodes from ALL replicas (including deleting) for occupancy check
-	// - Only include non-deleting replicas in scheduling lists
-	var replicasForRV []*v1alpha1.ReplicatedVolumeReplica
-	nodesWithRVReplica := make(map[string]struct{})
-	for i := range replicaList.Items {
-		rvr := &replicaList.Items[i]
-		if rvr.Spec.ReplicatedVolumeName != rv.Name {
-			continue
-		}
-		// Track nodes from ALL replicas (including deleting ones) for occupancy
-		// This prevents scheduling new replicas on nodes where replicas are being deleted
-		if rvr.Spec.NodeName != "" {
-			nodesWithRVReplica[rvr.Spec.NodeName] = struct{}{}
-		}
-		// Only include non-deleting replicas in scheduling lists
-		if rvr.DeletionTimestamp.IsZero() {
-			replicasForRV = append(replicasForRV, rvr)
-		}
-	}
+	// - replicasForRV: non-deleting replicas
+	// - nodesWithRVReplica: all occupied nodes (including nodes with deleting replicas)
+	replicasForRV, nodesWithRVReplica := collectReplicasAndOccupiedNodes(replicaList.Items, rv.Name)
 
 	rsp := &v1alpha1.ReplicatedStoragePool{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
@@ -395,8 +379,6 @@ func (r *Reconciler) prepareSchedulingContext(
 			message: fmt.Sprintf("unable to get LVG to nodes mapping: %v", err),
 		}
 	}
-
-	// nodesWithRVReplica is already built above (includes nodes from deleting replicas)
 
 	// Build list of RSP nodes WITHOUT replicas - exclude nodes that already have replicas.
 	rspNodesWithoutReplica := []string{}
@@ -446,93 +428,83 @@ func (r *Reconciler) scheduleDiskfulPhase(
 	sctx *SchedulingContext,
 ) error {
 	if len(sctx.UnscheduledDiskfulReplicas) == 0 {
-		// Nothing to do if all Diskful replicas are already scheduled.
 		sctx.Log.V(1).Info("no unscheduled Diskful replicas. Skipping Diskful phase.")
 		return nil
 	}
 
-	// Track the failure reason for unscheduled replicas
-	var failureReason *rvNotReadyReason
-
 	candidateNodes := sctx.RspNodesWithoutReplica
 	sctx.Log.V(1).Info("Diskful phase: initial candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
 
-	// Apply topology constraints (Ignored/Zonal/TransZonal) to the nodes without replicas.
-	err := r.applyTopologyFilter(candidateNodes, true, sctx) // isDiskfulPhase=true
-	if err != nil {
-		// Topology constraints for Diskful phase are violated.
-		// Set condition on all unscheduled replicas and continue (best-effort).
-		sctx.Log.V(1).Info("topology filter failed", "error", err)
-		failureReason = &rvNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingTopologyConflict,
-			message: fmt.Sprintf("topology constraints violated: %v", err),
-		}
-		// Fall through to set conditions on unscheduled replicas
-	}
-
-	// Only proceed with scheduling if we have candidates
-	if failureReason == nil {
-		if len(sctx.ZonesToNodeCandidatesMap) == 0 {
-			sctx.Log.V(1).Info("no candidate nodes found after topology filtering")
-			failureReason = &rvNotReadyReason{
-				reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
-				message: "no candidate nodes found after topology filtering",
-			}
-		}
-	}
-
-	if failureReason == nil {
-		sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-
-		// Apply capacity filtering using scheduler extender
-		err = r.applyCapacityFilterAndScoreCandidates(ctx, sctx)
-		if err != nil {
-			sctx.Log.V(1).Info("capacity filter failed", "error", err)
-			failureReason = schedulingErrorToReason(err)
-		}
-	}
-
-	var assignedReplicas []*v1alpha1.ReplicatedVolumeReplica
-
-	if failureReason == nil {
-		sctx.Log.V(1).Info("capacity filter applied and candidates scored", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
-
-		sctx.ApplyPublishOnBonus()
-		sctx.Log.V(1).Info("publishOn bonus applied")
-
-		// Assign replicas: for Diskful count only Diskful replicas for zone balancing, best-effort mode
-		assignedReplicas, err = r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha1.ReplicaTypeDiskful, true)
-		if err != nil {
-			// Unexpected error during assignment (not "not enough nodes")
-			return err
-		}
-		sctx.Log.V(1).Info("Diskful replicas assigned", "count", len(assignedReplicas))
-
-		sctx.UpdateAfterScheduling(assignedReplicas)
-
-		// If not all replicas were scheduled, set failure reason for remaining
-		if len(sctx.UnscheduledDiskfulReplicas) > 0 {
-			failureReason = &rvNotReadyReason{
-				reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
-				message: "not enough candidate nodes to schedule all Diskful replicas",
-			}
-		}
-	}
+	// Try to schedule replicas, collect failure reason if any step fails
+	failureReason := r.tryScheduleDiskfulReplicas(ctx, sctx, candidateNodes)
 
 	// Set Scheduled=False condition on remaining unscheduled Diskful replicas
 	if len(sctx.UnscheduledDiskfulReplicas) > 0 && failureReason != nil {
 		sctx.Log.V(1).Info("setting Scheduled=False on unscheduled Diskful replicas",
 			"count", len(sctx.UnscheduledDiskfulReplicas),
 			"reason", failureReason.reason)
-		if err := r.setScheduledConditionOnRVRs(
+		return r.setScheduledConditionOnRVRs(
 			ctx,
 			sctx.UnscheduledDiskfulReplicas,
 			metav1.ConditionFalse,
 			failureReason.reason,
 			failureReason.message,
 			sctx.Log,
-		); err != nil {
-			return err
+		)
+	}
+
+	return nil
+}
+
+// tryScheduleDiskfulReplicas attempts to schedule Diskful replicas and returns failure reason if not all could be scheduled.
+func (r *Reconciler) tryScheduleDiskfulReplicas(
+	ctx context.Context,
+	sctx *SchedulingContext,
+	candidateNodes []string,
+) *rvNotReadyReason {
+	// Apply topology constraints
+	if err := r.applyTopologyFilter(candidateNodes, true, sctx); err != nil {
+		sctx.Log.V(1).Info("topology filter failed", "error", err)
+		return &rvNotReadyReason{
+			reason:  v1alpha1.ReasonSchedulingTopologyConflict,
+			message: fmt.Sprintf("topology constraints violated: %v", err),
+		}
+	}
+
+	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
+		sctx.Log.V(1).Info("no candidate nodes found after topology filtering")
+		return &rvNotReadyReason{
+			reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
+			message: "no candidate nodes found after topology filtering",
+		}
+	}
+	sctx.Log.V(1).Info("topology filter applied", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
+
+	// Apply capacity filtering
+	if err := r.applyCapacityFilterAndScoreCandidates(ctx, sctx); err != nil {
+		sctx.Log.V(1).Info("capacity filter failed", "error", err)
+		return schedulingErrorToReason(err)
+	}
+	sctx.Log.V(1).Info("capacity filter applied and candidates scored", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
+
+	sctx.ApplyPublishOnBonus()
+	sctx.Log.V(1).Info("publishOn bonus applied")
+
+	// Assign replicas in best-effort mode
+	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha1.ReplicaTypeDiskful, true)
+	if err != nil {
+		sctx.Log.Error(err, "unexpected error during replica assignment")
+		return schedulingErrorToReason(err)
+	}
+	sctx.Log.V(1).Info("Diskful replicas assigned", "count", len(assignedReplicas))
+
+	sctx.UpdateAfterScheduling(assignedReplicas)
+
+	// Return failure reason if not all replicas were scheduled
+	if len(sctx.UnscheduledDiskfulReplicas) > 0 {
+		return &rvNotReadyReason{
+			reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
+			message: "not enough candidate nodes to schedule all Diskful replicas",
 		}
 	}
 
@@ -873,19 +845,31 @@ func getPublishOnNodeList(rv *v1alpha1.ReplicatedVolume) []string {
 	return slices.Clone(rv.Spec.PublishOn)
 }
 
-func getNodesWithRVReplicaSet(
-	replicasForRV []*v1alpha1.ReplicatedVolumeReplica,
-) map[string]struct{} {
-	// Build a set of nodes that already host at least one replica of this RV.
-	nodesWithAnyReplica := make(map[string]struct{})
+// collectReplicasAndOccupiedNodes filters replicas for a given RV and returns:
+// - activeReplicas: non-deleting replicas (both scheduled and unscheduled)
+// - occupiedNodes: all nodes with replicas (including deleting ones) to prevent scheduling collisions
+func collectReplicasAndOccupiedNodes(
+	allReplicas []v1alpha1.ReplicatedVolumeReplica,
+	rvName string,
+) (activeReplicas []*v1alpha1.ReplicatedVolumeReplica, occupiedNodes map[string]struct{}) {
+	occupiedNodes = make(map[string]struct{})
 
-	for _, rvr := range replicasForRV {
+	for i := range allReplicas {
+		rvr := &allReplicas[i]
+		if rvr.Spec.ReplicatedVolumeName != rvName {
+			continue
+		}
+		// Track nodes from ALL replicas (including deleting ones) for occupancy
+		// This prevents scheduling new replicas on nodes where replicas are being deleted
 		if rvr.Spec.NodeName != "" {
-			nodesWithAnyReplica[rvr.Spec.NodeName] = struct{}{}
+			occupiedNodes[rvr.Spec.NodeName] = struct{}{}
+		}
+		// Only include non-deleting replicas (active replicas)
+		if rvr.DeletionTimestamp.IsZero() {
+			activeReplicas = append(activeReplicas, rvr)
 		}
 	}
-
-	return nodesWithAnyReplica
+	return activeReplicas, occupiedNodes
 }
 
 func getTypedReplicasLists(
