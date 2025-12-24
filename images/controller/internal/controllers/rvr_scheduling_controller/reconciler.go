@@ -134,7 +134,7 @@ func (r *Reconciler) Reconcile(
 	return reconcile.Result{}, nil
 }
 
-// rvrNotReadyReason describes why an RV is not ready for scheduling.
+// rvrNotReadyReason describes why an RVR is not ready for scheduling.
 type rvrNotReadyReason struct {
 	reason  string
 	message string
