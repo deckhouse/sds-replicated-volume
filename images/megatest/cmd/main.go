@@ -140,9 +140,11 @@ func main() {
 		avgWaitTime = stats.TotalWaitForRVReadyTime / time.Duration(stats.CreatedRVCount)
 	}
 
-	fmt.Fprintf(os.Stdout, "Total create RV time: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
+	if logLevel >= slog.LevelDebug {
+		fmt.Fprintf(os.Stdout, "Total time to create RV via API: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
+	}
+	fmt.Fprintf(os.Stdout, "Total create RV time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
 	fmt.Fprintf(os.Stdout, "Total delete RV time: %s (avg: %s)\n", stats.TotalDeleteRVTime.String(), avgDeleteTime.String())
-	fmt.Fprintf(os.Stdout, "Total wait for RV ready time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
 
 	// Print checker statistics
 	printCheckerStats(checkerStats)
