@@ -72,10 +72,14 @@ type ExpectedResult struct {
 	TieBreakerZones []string // zones where TieBreaker replicas should be (nil = any)
 	DiskfulNodes    []string // specific nodes for Diskful (nil = check zones only)
 	TieBreakerNodes []string // specific nodes for TieBreaker (nil = check zones only)
-	// Partial scheduling support
+	// Partial scheduling support for Diskful
 	ScheduledDiskfulCount   *int   // expected number of scheduled Diskful (nil = all must be scheduled)
 	UnscheduledDiskfulCount *int   // expected number of unscheduled Diskful (nil = 0)
-	UnscheduledReason       string // expected condition reason for unscheduled replicas
+	UnscheduledReason       string // expected condition reason for unscheduled Diskful replicas
+	// Partial scheduling support for TieBreaker
+	ScheduledTieBreakerCount   *int   // expected number of scheduled TieBreaker (nil = all must be scheduled)
+	UnscheduledTieBreakerCount *int   // expected number of unscheduled TieBreaker (nil = 0)
+	UnscheduledTieBreakerReason string // expected condition reason for unscheduled TieBreaker replicas
 }
 
 // IntegrationTestCase defines a full integration test case
@@ -394,16 +398,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 			if updated.Spec.NodeName != "" {
 				scheduledDiskful = append(scheduledDiskful, updated.Spec.NodeName)
-				// Find zone for this node
-				for _, node := range nodes {
-					if node.Name == updated.Spec.NodeName {
-						zone := node.Labels["topology.kubernetes.io/zone"]
-						if !slices.Contains(diskfulZones, zone) {
-							diskfulZones = append(diskfulZones, zone)
-						}
-						break
+			// Find zone for this node
+			for _, node := range nodes {
+				if node.Name == updated.Spec.NodeName {
+					zone := node.Labels["topology.kubernetes.io/zone"]
+					if !slices.Contains(diskfulZones, zone) {
+						diskfulZones = append(diskfulZones, zone)
 					}
+					break
 				}
+			}
 			} else {
 				unscheduledDiskful = append(unscheduledDiskful, updated.Name)
 				// Check condition on unscheduled replica
@@ -439,23 +443,45 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		// Verify TieBreaker replicas
 		var scheduledTieBreaker []string
+		var unscheduledTieBreaker []string
 		var tieBreakerZones []string
 		for i := 0; i < tc.ToSchedule.TieBreaker; i++ {
 			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-tiebreaker-%d", i+1)}, updated)).To(Succeed())
-			Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "TieBreaker replica %d not scheduled", i+1)
-			scheduledTieBreaker = append(scheduledTieBreaker, updated.Spec.NodeName)
+			if updated.Spec.NodeName != "" {
+				scheduledTieBreaker = append(scheduledTieBreaker, updated.Spec.NodeName)
 
-			// Find zone for this node
-			for _, node := range nodes {
-				if node.Name == updated.Spec.NodeName {
-					zone := node.Labels["topology.kubernetes.io/zone"]
-					if !slices.Contains(tieBreakerZones, zone) {
-						tieBreakerZones = append(tieBreakerZones, zone)
+				// Find zone for this node
+				for _, node := range nodes {
+					if node.Name == updated.Spec.NodeName {
+						zone := node.Labels["topology.kubernetes.io/zone"]
+						if !slices.Contains(tieBreakerZones, zone) {
+							tieBreakerZones = append(tieBreakerZones, zone)
+						}
+						break
 					}
-					break
+				}
+			} else {
+				unscheduledTieBreaker = append(unscheduledTieBreaker, updated.Name)
+				// Check condition on unscheduled TieBreaker replica
+				if tc.Expected.UnscheduledTieBreakerReason != "" {
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil(), "Unscheduled TieBreaker replica %s should have Scheduled condition", updated.Name)
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse), "Unscheduled TieBreaker replica %s should have Scheduled=False", updated.Name)
+					Expect(cond.Reason).To(Equal(tc.Expected.UnscheduledTieBreakerReason), "Unscheduled TieBreaker replica %s has wrong reason", updated.Name)
 				}
 			}
+		}
+
+		// Check scheduled/unscheduled TieBreaker counts if specified
+		if tc.Expected.ScheduledTieBreakerCount != nil {
+			Expect(len(scheduledTieBreaker)).To(Equal(*tc.Expected.ScheduledTieBreakerCount), "Scheduled TieBreaker count mismatch")
+		} else if tc.Expected.UnscheduledTieBreakerCount == nil {
+			// Default: all must be scheduled
+			Expect(len(unscheduledTieBreaker)).To(Equal(0), "All TieBreaker replicas should be scheduled, but %d were not: %v", len(unscheduledTieBreaker), unscheduledTieBreaker)
+		}
+		if tc.Expected.UnscheduledTieBreakerCount != nil {
+			Expect(len(unscheduledTieBreaker)).To(Equal(*tc.Expected.UnscheduledTieBreakerCount), "Unscheduled TieBreaker count mismatch")
 		}
 
 		// Check TieBreaker zones
@@ -575,16 +601,24 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
-				Name:       "10. medium-2z: TB only without Diskful - error",
+				Name:       "10. medium-2z: TB only without Diskful - no candidate nodes",
 				Cluster:    "medium-2z",
 				Topology:   "Zonal",
 				PublishOn:  nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no Diskful replicas"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:      "11. medium-2z-4n: existing D+TB in zone-a - new D in zone-a",
@@ -718,7 +752,11 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:       "10. large-3z: TB only, no existing - TB in any zone",
@@ -818,7 +856,11 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:      "6. small-1z-4n: existing D+TB - new D on best remaining",
