@@ -61,12 +61,6 @@ func main() {
 	start := time.Now()
 	log.Info("megatest started")
 
-	// to ensure statistics are always printed
-	exitCode := 0
-	defer func() {
-		os.Exit(exitCode)
-	}()
-
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -94,8 +88,7 @@ func main() {
 	kubeClient, err := kubeutils.NewClientWithKubeconfig(opt.Kubeconfig)
 	if err != nil {
 		log.Error("failed to create Kubernetes client", "error", err)
-		exitCode = 1
-		return
+		os.Exit(1)
 	}
 	// Stopping Informers whom uses by VolumeChecker
 	defer kubeClient.StopInformers()
@@ -157,6 +150,8 @@ func main() {
 	fmt.Fprintf(os.Stdout, "\nTest duration: %s\n", duration.String())
 
 	os.Stdout.Sync()
+
+	os.Exit(0)
 }
 
 // printCheckerStats prints a summary table of all checker statistics

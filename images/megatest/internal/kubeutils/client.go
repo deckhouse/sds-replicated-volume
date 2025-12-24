@@ -198,9 +198,32 @@ func (c *Client) initRVInformer() error {
 	// Start informer in background
 	go c.rvInformer.Run(c.informerStop)
 
-	// Wait for cache sync
-	if !cache.WaitForCacheSync(c.informerStop, c.rvInformer.HasSynced) {
-		return fmt.Errorf("timeout waiting for RV informer cache sync")
+	// Wait for cache sync with timeout to detect connectivity issues early
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+
+	syncDone := make(chan struct{})
+	var syncErr error
+	go func() {
+		// This is a blocking call that waits for the cache to be synced or the context is cancelled
+		if !cache.WaitForCacheSync(c.informerStop, c.rvInformer.HasSynced) {
+			syncErr = fmt.Errorf("cache sync failed")
+		}
+		close(syncDone)
+	}()
+
+	select {
+	case <-syncDone:
+		if syncErr != nil {
+			return syncErr
+		}
+		// Cache synced successfully
+	case <-syncCtx.Done():
+		// Timeout - cluster might be unreachable or API server is slow
+		return fmt.Errorf("timeout waiting for RV informer cache sync: cluster may be unreachable")
+	case <-c.informerStop:
+		// Informer was stopped (shouldn't happen during init)
+		return fmt.Errorf("informer stopped unexpectedly during initialization")
 	}
 
 	c.rvInformerMu.Lock()
