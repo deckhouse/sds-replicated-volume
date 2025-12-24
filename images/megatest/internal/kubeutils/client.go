@@ -33,6 +33,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/flowcontrol"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -99,15 +100,11 @@ func NewClientWithKubeconfig(kubeconfigPath string) (*Client, error) {
 		}
 	}
 
-	// Increase rate limiter limits to handle high concurrency in megatest.
-	// Default QPS is 5 and Burst is 10, which may be insufficient when deleting many RVs concurrently.
-	// These values allow up to 50 requests per second with bursts up to 100.
-	if cfg.QPS == 0 {
-		cfg.QPS = 50
-	}
-	if cfg.Burst == 0 {
-		cfg.Burst = 100
-	}
+	// Disable rate limiter for megatest to avoid "rate: Wait(n=1) would exceed context deadline" errors.
+	// megatest is a test tool that creates/deletes many resources concurrently.
+	// In test environments, disabling client-side rate limiting is acceptable.
+	// Note: API server may still throttle requests, but client won't block waiting.
+	cfg.RateLimiter = flowcontrol.NewFakeAlwaysRateLimiter()
 
 	scheme := runtime.NewScheme()
 	if err := corev1.AddToScheme(scheme); err != nil {
