@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -36,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdprimary "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_primary"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
