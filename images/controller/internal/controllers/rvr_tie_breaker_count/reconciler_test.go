@@ -62,7 +62,7 @@ var _ = Describe("Reconcile", func() {
 
 	JustBeforeEach(func() {
 		cl = builder.Build()
-		rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+		rec, _ = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 	})
 
 	It("returns nil when ReplicatedVolume not found", func(ctx SpecContext) {
@@ -187,35 +187,6 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.List(ctx, &rvrList)).To(Succeed())
 				Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
 
-			})
-
-			When("SetControllerReference fails", func() {
-				BeforeEach(func() {
-					rsc.Spec.Replication = "Availability"
-					rvrList.Items = []v1alpha1.ReplicatedVolumeReplica{{
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df1"},
-						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: rv.Name,
-							NodeName:             "node-1",
-							Type:                 v1alpha1.ReplicaTypeDiskful,
-						},
-					}, {
-						ObjectMeta: metav1.ObjectMeta{Name: "rvr-df2"},
-						Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-							ReplicatedVolumeName: rv.Name,
-							NodeName:             "node-2",
-							Type:                 v1alpha1.ReplicaTypeDiskful,
-						},
-					}}
-
-					old := scheme
-					DeferCleanup(func() { scheme = old })
-					scheme = nil
-				})
-				It("returns error when SetControllerReference fails", func(ctx SpecContext) {
-					_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
-					Expect(err).To(HaveOccurred())
-				})
 			})
 
 			When("Access replicas", func() {
@@ -413,22 +384,10 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				//   Note: this initial state is not reachable in a real cluster (it violates documented replication rules: "Data is stored in two copies on different nodes"),
-				// but the test verifies that if such a state is ever observed, the controller remains a no-op and does not create a useless TieBreaker.
-				// Initial State:
-				//   FD "node-1": [Diskful, Diskful]
-				//   TB: []
-				//   Replication: Availability
-				// Violates (cluster-level requirement):
-				//   - "one FD failure should not break quorum" cannot be achieved for this layout, because all replicas are in a single FD
-				// Desired state (nothing should be changed):
-				//   FD "node-1": [Diskful, Diskful]
-				//   TB total: 0
-				//   replicas total: 2
-				It("3. does not create TieBreaker when all Diskful are in the same FD", func(ctx SpecContext) {
+				It("3. create TieBreaker when all Diskful are in the same FD", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 					Expect(cl.List(ctx, &rvrList)).To(Succeed())
-					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(0)))
+					Expect(rvrList.Items).To(HaveTieBreakerCount(Equal(1)))
 				})
 			})
 
@@ -591,15 +550,6 @@ type FDReplicaCounts struct {
 	TieBreaker int
 }
 
-func shrinkFDExtended(fdExtended map[string]FDReplicaCounts) map[string]int {
-	fd := make(map[string]int, len(fdExtended))
-	for zone, counts := range fdExtended {
-		// Sum Diskful and Access replicas (TieBreaker is not counted as base replica)
-		fd[zone] = counts.Diskful + counts.Access
-	}
-	return fd
-}
-
 func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
 	rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 		Conditions: []metav1.Condition{{
@@ -614,13 +564,6 @@ func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.Cond
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTableSubtree("returns correct TieBreaker count for fdCount < 4",
 		func(_ string, fdExtended map[string]FDReplicaCounts, expected int) {
-			It("function CalculateDesiredTieBreakerTotal works", func() {
-				fd := shrinkFDExtended(fdExtended)
-				got, err := rvrtiebreakercount.CalculateDesiredTieBreakerTotal(fd)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(got).To(Equal(expected))
-			})
-
 			When("reconciler creates expected TieBreaker replicas", func() {
 				scheme := runtime.NewScheme()
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
@@ -730,7 +673,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 
 				JustBeforeEach(func() {
 					cl = builder.Build()
-					rec = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
+					rec, _ = rvrtiebreakercount.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
 				})
 
 				It("Reconcile works", func(ctx SpecContext) {
@@ -789,5 +732,9 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
 		Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
 		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4),
+		// with deletion of existing TBs
+		Entry(nil, "22", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 1}}, 0),
+		Entry(nil, "23", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 0),
+		Entry(nil, "24", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 1),
 	)
 })

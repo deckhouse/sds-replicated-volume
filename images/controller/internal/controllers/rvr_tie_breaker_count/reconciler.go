@@ -20,9 +20,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	interrors "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -31,8 +32,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -41,47 +40,22 @@ type Reconciler struct {
 	scheme *runtime.Scheme
 }
 
-func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) *Reconciler {
-
+func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*Reconciler, error) {
+	if err := interrors.ValidateArgNotNil(cl, "cl"); err != nil {
+		return nil, err
+	}
+	if err := interrors.ValidateArgNotNil(scheme, "scheme"); err != nil {
+		return nil, err
+	}
 	return &Reconciler{
 		cl:     cl,
 		log:    log,
 		scheme: scheme,
-	}
+	}, nil
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
 var ErrNoZoneLabel = errors.New("can't find zone label")
-
-type baseReplica *v1alpha1.ReplicatedVolumeReplica
-
-type tb *v1alpha1.ReplicatedVolumeReplica
-
-type failureDomain struct {
-	nodeNames    []string // for Any/Zonal topology it is always single node
-	baseReplicas []baseReplica
-	tbs          []tb
-}
-
-func (fd *failureDomain) baseReplicaCount() int {
-	return len(fd.baseReplicas)
-}
-func (fd *failureDomain) tbReplicaCount() int {
-	return len(fd.tbs)
-}
-
-func (fd *failureDomain) addReplica(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
-		fd.tbs = append(fd.tbs, tb(rvr))
-	} else {
-		if rvr.Spec.NodeName == "" || !slices.Contains(fd.nodeNames, rvr.Spec.NodeName) {
-			return false
-		}
-
-		fd.baseReplicas = append(fd.baseReplicas, baseReplica(rvr))
-	}
-	return true
-}
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -109,12 +83,12 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	fds, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
+	fds, tbs, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	return r.syncTieBreakers(ctx, log, rv, fds)
+	return r.syncTieBreakers(ctx, log, rv, fds, tbs)
 }
 
 func (r *Reconciler) getReplicatedVolume(
@@ -141,8 +115,8 @@ func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
 		return true
 	}
 
-	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVScheduled) {
-		log.Info("ReplicatedVolume is not scheduled yet")
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized) {
+		log.Info("ReplicatedVolume is not initialized yet")
 		return true
 	}
 
@@ -175,11 +149,11 @@ func (r *Reconciler) loadFailureDomains(
 	log logr.Logger,
 	rvName string,
 	rsc *v1alpha1.ReplicatedStorageClass,
-) (fds map[string]*failureDomain, err error) {
+) (fds map[string]*failureDomain, tbs []tb, err error) {
 	// initialize empty failure domains
 	nodeList := &corev1.NodeList{}
 	if err := r.cl.List(ctx, nodeList); err != nil {
-		return nil, logError(r.log, fmt.Errorf("listing nodes: %w", err))
+		return nil, nil, logError(r.log, fmt.Errorf("listing nodes: %w", err))
 	}
 
 	if rsc.Spec.Topology == "TransZonal" {
@@ -193,7 +167,7 @@ func (r *Reconciler) loadFailureDomains(
 			zone, ok := node.Labels[corev1.LabelTopologyZone]
 			if !ok {
 				log.WithValues("node", node.Name).Error(ErrNoZoneLabel, "No zone label")
-				return nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
+				return nil, nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
 
 			if fd, ok := fds[zone]; ok {
@@ -212,22 +186,27 @@ func (r *Reconciler) loadFailureDomains(
 	// init failure domains with RVRs
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err = r.cl.List(ctx, rvrList); err != nil {
-		return nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
+		return nil, nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
 	}
 
 	for rvr := range uslices.Ptrs(rvrList.Items) {
 		if rvr.Spec.ReplicatedVolumeName != rvName {
 			continue
 		}
-		for _, fd := range fds {
-			if fd.addReplica(rvr) {
-				// rvr maps to single fd
-				break
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+			tbs = append(tbs, tb(rvr))
+		}
+		if rvr.Spec.NodeName != "" {
+			for _, fd := range fds {
+				if fd.addReplica(rvr) {
+					// rvr maps to single fd
+					break
+				}
 			}
 		}
 	}
 
-	return fds, nil
+	return fds, tbs, nil
 }
 
 func (r *Reconciler) syncTieBreakers(
@@ -235,16 +214,17 @@ func (r *Reconciler) syncTieBreakers(
 	log logr.Logger,
 	rv *v1alpha1.ReplicatedVolume,
 	fds map[string]*failureDomain,
+	tbs []tb,
 ) (reconcile.Result, error) {
 
 	var maxBaseReplicaCount, totalBaseReplicaCount int
-	var currentTB int
 	for _, fd := range fds {
 		fdBaseReplicaCount := fd.baseReplicaCount()
 		maxBaseReplicaCount = max(maxBaseReplicaCount, fdBaseReplicaCount)
 		totalBaseReplicaCount += fdBaseReplicaCount
-		currentTB += fd.tbReplicaCount()
 	}
+
+	currentTB := len(tbs)
 
 	var desiredTB int
 	for _, fd := range fds {
@@ -253,7 +233,10 @@ func (r *Reconciler) syncTieBreakers(
 			desiredTB += baseReplicaCountDiffFromMax - 1
 		}
 	}
-	if (totalBaseReplicaCount+desiredTB)%2 == 0 {
+
+	desiredTotalReplicaCount := totalBaseReplicaCount + desiredTB
+	if desiredTotalReplicaCount > 0 && desiredTotalReplicaCount%2 == 0 {
+		// add one more in order to keep total number of replicas odd
 		desiredTB++
 	}
 
@@ -263,7 +246,7 @@ func (r *Reconciler) syncTieBreakers(
 	}
 
 	for i := range desiredTB - currentTB {
-		// to create
+		// creating
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
 				GenerateName: rv.Name + "-",
@@ -286,114 +269,53 @@ func (r *Reconciler) syncTieBreakers(
 		log.Info(fmt.Sprintf("created rvr %d/%d", i+1, desiredTB-currentTB), "newRVR", rvr.Name)
 	}
 
-	if currentTB-desiredTB > 0 {
-		// delete 1 TB per reconcile, starting from tbs ... TODO
-	}
-
 	for i := range currentTB - desiredTB {
-		rvr := tbs[i]
-		if err := r.cl.Delete(ctx, rvr); client.IgnoreNotFound(err) != nil {
-			return reconcile.Result{}, err
+		// deleting starting from scheduled TBs
+		var tbToDelete *v1alpha1.ReplicatedVolumeReplica
+		for _, fd := range fds {
+			if fd.tbReplicaCount() == 0 {
+				continue
+			}
+
+			wantFDTotalReplicaCount := fd.baseReplicaCount() + fd.tbReplicaCount()
+
+			// can we remove one tb from this fd?
+			wantFDTotalReplicaCount--
+
+			baseReplicaCountDiffFromMax := maxBaseReplicaCount - wantFDTotalReplicaCount
+			if baseReplicaCountDiffFromMax < 2 {
+				// found tb, which is not necessary for this fd
+				tbToDelete = fd.popTB()
+
+				break
+			}
 		}
-		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, desiredTB-currentTB), "deletedRVR", rvr.Name)
+
+		if tbToDelete == nil {
+			for _, tb := range tbs {
+				// take the first non-scheduled
+				if tb.Spec.NodeName == "" {
+					tbToDelete = tb
+					break
+				}
+			}
+		}
+
+		if tbToDelete == nil {
+			// this should not happen, but let's be safe
+			log.V(1).Info("failed to select TB to delete")
+			return reconcile.Result{}, nil
+		}
+
+		if err := r.cl.Delete(ctx, tbToDelete); client.IgnoreNotFound(err) != nil {
+			return reconcile.Result{},
+				logError(log.WithValues("tbToDelete", tbToDelete.Name), fmt.Errorf("deleting tb rvr: %w", err))
+		}
+
+		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, desiredTB-currentTB), "tbToDelete", tbToDelete.Name)
 	}
 
 	return reconcile.Result{}, nil
-}
-
-func CalculateDesiredTieBreakerTotal(fdReplicaCount map[string]int) (int, error) {
-	fdCount := len(fdReplicaCount)
-
-	if fdCount <= 1 {
-		return 0, nil
-	}
-
-	totalBaseReplicas := 0
-	for _, v := range fdReplicaCount {
-		totalBaseReplicas += v
-	}
-	if totalBaseReplicas == 0 {
-		return 0, nil
-	}
-
-	// TODO: tbCount <= totalBaseReplicas is not the best approach, need to rework later
-	for tbCount := 0; tbCount <= totalBaseReplicas; tbCount++ {
-		if IsThisTieBreakerCountEnough(fdReplicaCount, fdCount, totalBaseReplicas, tbCount) {
-			return tbCount, nil
-		}
-	}
-
-	return 0, nil
-}
-
-func IsThisTieBreakerCountEnough(
-	fdReplicaCount map[string]int,
-	fdCount int,
-	totalBaseReplicas int,
-	tieBreakerCount int,
-) bool {
-	totalReplicas := totalBaseReplicas + tieBreakerCount
-	if totalReplicas%2 == 0 {
-		return false
-	}
-
-	/*
-		example:
-		totalReplicas 7
-		fdCount 3
-	*/
-
-	replicasPerFDMin := totalReplicas / fdCount // 7/3 = 2 (+ 1 remains (modulo))
-	if replicasPerFDMin == 0 {
-		replicasPerFDMin = 1
-	}
-	maxFDsWithExtraReplica := totalReplicas % fdCount // 1 (modulo)
-
-	/*
-		This method takes the actual state of the replica distribution and attempts to convert it to the desired state
-
-		Desired state of replica distribution, calculated from totalReplicas (example):
-		fd 1: [replica] [replica]
-		fd 2: [replica] [replica]
-		fd 3: [replica] [replica]   *[extra replica]*
-
-		maxFDsWithExtraReplica == 1 means that 1 of these fds take an extra replica
-
-		Actual state (example):
-		FDReplicaCount {
-			"1" : 3
-			"2" : 2
-			"3" : 1
-		}
-
-		Desired state can be achieved:
-		FDReplicaCount {
-			"1" : 3 (+0) = 2
-			"2" : 2 (+0) = 2
-			"3" : 1 (+1) = 3
-		}
-	*/
-
-	fdsAlreadyAboveMin := 0 // how many FDs have min+1 replica
-	for _, replicasAlreadyInFD := range fdReplicaCount {
-		delta := replicasAlreadyInFD - replicasPerFDMin
-
-		if delta > 1 {
-			return false
-		}
-
-		if delta == 1 {
-			fdsAlreadyAboveMin++
-		}
-	}
-
-	// we expext fdsWithMaxReplicaPossible (which ew calculated just now) to be
-	// not more then we predicted earlier (maxFDsWithExtraReplica)
-	if fdsAlreadyAboveMin > maxFDsWithExtraReplica {
-		return false
-	}
-
-	return true
 }
 
 func logError(log logr.Logger, err error) error {

@@ -29,7 +29,10 @@ func BuildController(mgr manager.Manager) error {
 
 	log := mgr.GetLogger().WithName(controllerName)
 
-	var rec = NewReconciler(mgr.GetClient(), log, mgr.GetScheme())
+	rec, err := NewReconciler(mgr.GetClient(), log, mgr.GetScheme())
+	if err != nil {
+		return err
+	}
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
