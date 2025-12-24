@@ -23,7 +23,6 @@ import (
 	"slices"
 
 	"github.com/go-logr/logr"
-	"github.com/google/uuid"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -77,11 +76,7 @@ func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	req reconcile.Request,
 ) (reconcile.Result, error) {
-	// Generate unique trace ID for this reconciliation cycle
-	traceID := uuid.New().String()[:8] // Use first 8 chars for brevity
-
 	log := r.log.WithName("RVRScheduler").WithValues(
-		"traceID", traceID,
 		"rv", req.Name,
 	)
 	log.V(1).Info("starting reconciliation cycle")
