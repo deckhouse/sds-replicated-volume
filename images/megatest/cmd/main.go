@@ -61,9 +61,19 @@ func main() {
 	start := time.Now()
 	log.Info("megatest started")
 
+	// Create Kubernetes client first, before setting up signal handling
+	// This allows us to exit early if cluster is unreachable
+	kubeClient, err := kubeutils.NewClientWithKubeconfig(opt.Kubeconfig)
+	if err != nil {
+		log.Error("failed to create Kubernetes client", "error", err)
+		os.Exit(1)
+	}
+
 	// Setup signal handling
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	// Stopping Informers whom uses by VolumeChecker
+	defer kubeClient.StopInformers()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
@@ -83,15 +93,6 @@ func main() {
 		log.Info("received second signal, forcing cleanup cancellation for all", "signal", sig)
 		close(forceCleanupChan) // Broadcast: all readers will get notification simultaneously
 	}()
-
-	// Create Kubernetes client
-	kubeClient, err := kubeutils.NewClientWithKubeconfig(opt.Kubeconfig)
-	if err != nil {
-		log.Error("failed to create Kubernetes client", "error", err)
-		os.Exit(1)
-	}
-	// Stopping Informers whom uses by VolumeChecker
-	defer kubeClient.StopInformers()
 
 	// Create multivolume config
 	cfg := config.MultiVolumeConfig{
@@ -153,7 +154,7 @@ func main() {
 
 	os.Stdout.Sync()
 
-	os.Exit(0)
+	// Function returns normally, defer statements will execute
 }
 
 // printCheckerStats prints a summary table of all checker statistics
