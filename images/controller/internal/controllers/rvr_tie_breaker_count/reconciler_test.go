@@ -154,12 +154,12 @@ var _ = Describe("Reconcile", func() {
 				}
 			})
 
-			When("RV is not scheduled yet", func() {
+			When("RV is not initialized yet", func() {
 				BeforeEach(func() {
 					setRVInitializedCondition(&rv, metav1.ConditionFalse)
 				})
 
-				It("skips reconciliation until Scheduled=True", func(ctx SpecContext) {
+				It("skips reconciliation until Initialized=True", func(ctx SpecContext) {
 					result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 					Expect(err).NotTo(HaveOccurred())
 					Expect(result).To(Equal(reconcile.Result{}))
