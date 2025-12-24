@@ -36,9 +36,9 @@ limitations under the License.
 // The controller only executes role changes when ALL of the following conditions are met:
 //   - rv.status.conditions[type=Ready].status=True
 //   - rvr.status.drbd.initialSyncCompleted=true
-//   - Either:
-//     * Promotion needed: rvr.status.drbd.config.primary==true AND rvr.status.drbd.status.role!=Primary
-//     * Demotion needed: rvr.status.drbd.config.primary==false AND rvr.status.drbd.status.role==Primary
+//     Either:
+//   - Promotion needed: rvr.status.drbd.config.primary==true AND rvr.status.drbd.status.role!=Primary
+//   - Demotion needed: rvr.status.drbd.config.primary==false AND rvr.status.drbd.status.role==Primary
 //
 // # Reconciliation Flow
 //

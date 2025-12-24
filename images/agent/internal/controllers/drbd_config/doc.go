@@ -61,8 +61,8 @@ limitations under the License.
 //     - Check for metadata existence with `drbdadm dump-md`
 //     - Create metadata if missing with `drbdadm create-md`
 //     - Perform initial sync if needed (first replica with no peers):
-//       * Execute `drbdadm primary --force`
-//       * Execute `drbdadm secondary`
+//     * Execute `drbdadm primary --force`
+//     * Execute `drbdadm secondary`
 //     - Set rvr.status.drbd.actual.initialSyncCompleted=true
 //  5. For non-Diskful replicas:
 //     - Set rvr.status.drbd.actual.initialSyncCompleted=true immediately
