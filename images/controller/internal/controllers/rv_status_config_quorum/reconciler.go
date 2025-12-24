@@ -169,16 +169,32 @@ func updateReplicatedVolumeIfNeeded(
 
 // CalculateQuorum calculates quorum and quorum minimum redundancy values
 // based on the number of diskful and total replicas.
-// QMR is only set when replication == ConsistencyAndAvailability.
+// QMR is set to:
+// - QuorumMinimumRedundancyDefault (1) for None and Availability modes
+// - max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1) for ConsistencyAndAvailability mode
 func CalculateQuorum(diskfulCount, all int, replication string) (quorum, qmr byte) {
 	if diskfulCount > 1 {
-		quorum = byte(max(2, all/2+1))
-
-		// QMR should only be set when ReplicatedStorageClass.spec.replication == ConsistencyAndAvailability
-		if replication == v1alpha1.ReplicationConsistencyAndAvailability {
-			qmr = byte(max(2, diskfulCount/2+1))
-		}
+		quorum = byte(max(v1alpha1.QuorumMinValue, all/2+1))
 	}
+
+	switch replication {
+	case v1alpha1.ReplicationNone:
+		qmr = v1alpha1.QuorumMinimumRedundancyDefault
+	case v1alpha1.ReplicationAvailability:
+		qmr = v1alpha1.QuorumMinimumRedundancyDefault
+	case v1alpha1.ReplicationConsistencyAndAvailability:
+		// Stricter QMR for consistency: majority of diskful replicas
+		if diskfulCount > 1 {
+			qmr = byte(max(v1alpha1.QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1))
+		} else {
+			qmr = v1alpha1.QuorumMinimumRedundancyDefault
+		}
+	default:
+		// NOTE: Unknown replication type - this should not happen in production.
+		// Using default QMR as fallback.
+		qmr = v1alpha1.QuorumMinimumRedundancyDefault
+	}
+
 	return
 }
 
