@@ -134,8 +134,8 @@ func (r *Reconciler) Reconcile(
 	return reconcile.Result{}, nil
 }
 
-// rvNotReadyReason describes why an RV is not ready for scheduling.
-type rvNotReadyReason struct {
+// rvrNotReadyReason describes why an RV is not ready for scheduling.
+type rvrNotReadyReason struct {
 	reason  string
 	message string
 }
@@ -158,7 +158,7 @@ func (r *Reconciler) handlePhaseError(
 }
 
 // schedulingErrorToReason converts a scheduling error to rvNotReadyReason.
-func schedulingErrorToReason(err error) *rvNotReadyReason {
+func schedulingErrorToReason(err error) *rvrNotReadyReason {
 	reason := v1alpha1.ReasonSchedulingFailed
 	switch {
 	case errors.Is(err, errSchedulingTopologyConflict):
@@ -166,7 +166,7 @@ func schedulingErrorToReason(err error) *rvNotReadyReason {
 	case errors.Is(err, errSchedulingNoCandidateNodes):
 		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
 	}
-	return &rvNotReadyReason{
+	return &rvrNotReadyReason{
 		reason:  reason,
 		message: err.Error(),
 	}
@@ -275,37 +275,37 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
 // Returns nil if ready, or a reason struct if not ready.
-func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) *rvNotReadyReason {
+func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) *rvrNotReadyReason {
 	if rv.Status == nil {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume status is not initialized",
 		}
 	}
 
 	if rv.Finalizers == nil {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume has no finalizers",
 		}
 	}
 
 	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer) {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume is missing controller finalizer",
 		}
 	}
 
 	if rv.Spec.ReplicatedStorageClassName == "" {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedStorageClassName is not specified in ReplicatedVolume spec",
 		}
 	}
 
 	if rv.Spec.Size.IsZero() {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingPending,
 			message: "ReplicatedVolume size is zero in ReplicatedVolume spec",
 		}
@@ -318,7 +318,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	ctx context.Context,
 	req reconcile.Request,
 	log logr.Logger,
-) (*SchedulingContext, *rvNotReadyReason) {
+) (*SchedulingContext, *rvrNotReadyReason) {
 	// Fetch the target ReplicatedVolume for this reconcile request.
 	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
@@ -328,7 +328,7 @@ func (r *Reconciler) prepareSchedulingContext(
 			return nil, nil
 		}
 		log.Error(err, "unable to get ReplicatedVolume")
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedVolume: %v", err),
 		}
@@ -343,7 +343,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
 		log.Error(err, "unable to get ReplicatedStorageClass")
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedStorageClass: %v", err),
 		}
@@ -353,7 +353,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, replicaList); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to list ReplicatedVolumeReplica: %v", err),
 		}
@@ -367,7 +367,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	rsp := &v1alpha1.ReplicatedStoragePool{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
 		log.Error(err, "unable to get ReplicatedStoragePool", "name", rsc.Spec.StoragePool)
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get ReplicatedStoragePool: %v", err),
 		}
@@ -375,7 +375,7 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsp, log)
 	if err != nil {
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get LVG to nodes mapping: %v", err),
 		}
@@ -391,7 +391,7 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	nodeNameToZone, err := r.getNodeNameToZoneMap(ctx, log)
 	if err != nil {
-		return nil, &rvNotReadyReason{
+		return nil, &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingFailed,
 			message: fmt.Sprintf("unable to get node to zone mapping: %v", err),
 		}
@@ -462,11 +462,11 @@ func (r *Reconciler) tryScheduleDiskfulReplicas(
 	ctx context.Context,
 	sctx *SchedulingContext,
 	candidateNodes []string,
-) *rvNotReadyReason {
+) *rvrNotReadyReason {
 	// Apply topology constraints
 	if err := r.applyTopologyFilter(candidateNodes, true, sctx); err != nil {
 		sctx.Log.V(1).Info("topology filter failed", "error", err)
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingTopologyConflict,
 			message: fmt.Sprintf("topology constraints violated: %v", err),
 		}
@@ -474,7 +474,7 @@ func (r *Reconciler) tryScheduleDiskfulReplicas(
 
 	if len(sctx.ZonesToNodeCandidatesMap) == 0 {
 		sctx.Log.V(1).Info("no candidate nodes found after topology filtering")
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
 			message: "no candidate nodes found after topology filtering",
 		}
@@ -503,7 +503,7 @@ func (r *Reconciler) tryScheduleDiskfulReplicas(
 
 	// Return failure reason if not all replicas were scheduled
 	if len(sctx.UnscheduledDiskfulReplicas) > 0 {
-		return &rvNotReadyReason{
+		return &rvrNotReadyReason{
 			reason:  v1alpha1.ReasonSchedulingNoCandidateNodes,
 			message: "not enough candidate nodes to schedule all Diskful replicas",
 		}
@@ -952,7 +952,7 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
-	notReadyReason *rvNotReadyReason,
+	notReadyReason *rvrNotReadyReason,
 	log logr.Logger,
 ) error {
 	// List all ReplicatedVolumeReplica resources in the cluster.
