@@ -45,6 +45,7 @@ const (
 var (
 	errSchedulingTopologyConflict = errors.New("scheduling topology conflict")
 	errSchedulingNoCandidateNodes = errors.New("scheduling no candidate nodes")
+	errSchedulingPending          = errors.New("scheduling pending")
 )
 
 type Reconciler struct {
@@ -83,9 +84,13 @@ func (r *Reconciler) Reconcile(
 
 	// Load ReplicatedVolume, its ReplicatedStorageClass and all relevant replicas.
 	// The helper may also return an early reconcile.Result (e.g. when RV is not ready yet).
-	sctx, failReason := r.prepareSchedulingContext(ctx, req, log)
-	if failReason != nil {
-		return reconcile.Result{}, r.handleNotReady(ctx, req.Name, failReason, log)
+	sctx, err := r.prepareSchedulingContext(ctx, req, log)
+	if err != nil {
+		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, "prepare", err, log)
+	}
+	if sctx == nil {
+		// ReplicatedVolume not found, skip reconciliation
+		return reconcile.Result{}, nil
 	}
 	log.V(1).Info("scheduling context prepared", "rsc", sctx.Rsc.Name, "topology", sctx.Rsc.Spec.Topology, "volumeAccess", sctx.Rsc.Spec.VolumeAccess)
 
@@ -112,7 +117,7 @@ func (r *Reconciler) Reconcile(
 	// Phase 3: place TieBreaker replicas.
 	log.V(1).Info("starting TieBreaker phase", "unscheduledCount", len(sctx.UnscheduledTieBreakerReplicas))
 	if err := r.scheduleTieBreakerPhase(ctx, sctx); err != nil {
-		return reconcile.Result{}, err
+		return reconcile.Result{}, r.handlePhaseError(ctx, req.Name, string(v1alpha1.ReplicaTypeTieBreaker), err, log)
 	}
 	log.V(1).Info("TieBreaker phase completed", "scheduledCountTotal", len(sctx.RVRsToSchedule))
 
@@ -148,22 +153,7 @@ func (r *Reconciler) handlePhaseError(
 	return err
 }
 
-// handleNotReady handles cases when RV is not ready for scheduling.
-// It sets failed condition on RVRs and returns nil (no requeue, wait for next watch event).
-func (r *Reconciler) handleNotReady(
-	ctx context.Context,
-	rvName string,
-	reason *rvrNotReadyReason,
-	log logr.Logger,
-) error {
-	log.V(1).Info("RV not ready for scheduling", "reason", reason.reason, "message", reason.message)
-	if err := r.setFailedScheduledConditionOnNonScheduledRVRs(ctx, rvName, reason, log); err != nil {
-		return err
-	}
-	return nil
-}
-
-// schedulingErrorToReason converts a scheduling error to rvNotReadyReason.
+// schedulingErrorToReason converts a scheduling error to rvrNotReadyReason.
 func schedulingErrorToReason(err error) *rvrNotReadyReason {
 	reason := v1alpha1.ReasonSchedulingFailed
 	switch {
@@ -171,6 +161,8 @@ func schedulingErrorToReason(err error) *rvrNotReadyReason {
 		reason = v1alpha1.ReasonSchedulingTopologyConflict
 	case errors.Is(err, errSchedulingNoCandidateNodes):
 		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
+	case errors.Is(err, errSchedulingPending):
+		reason = v1alpha1.ReasonSchedulingPending
 	}
 	return &rvrNotReadyReason{
 		reason:  reason,
@@ -256,41 +248,26 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 }
 
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
-// Returns nil if ready, or a reason struct if not ready.
-func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) *rvrNotReadyReason {
+// Returns nil if ready, or an error wrapped with errSchedulingPending if not ready.
+func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
 	if rv.Status == nil {
-		return &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingPending,
-			message: "ReplicatedVolume status is not initialized",
-		}
+		return fmt.Errorf("%w: ReplicatedVolume status is not initialized", errSchedulingPending)
 	}
 
 	if rv.Finalizers == nil {
-		return &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingPending,
-			message: "ReplicatedVolume has no finalizers",
-		}
+		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
 	}
 
 	if !slices.Contains(rv.Finalizers, v1alpha1.ControllerAppFinalizer) {
-		return &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingPending,
-			message: "ReplicatedVolume is missing controller finalizer",
-		}
+		return fmt.Errorf("%w: ReplicatedVolume is missing controller finalizer", errSchedulingPending)
 	}
 
 	if rv.Spec.ReplicatedStorageClassName == "" {
-		return &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingPending,
-			message: "ReplicatedStorageClassName is not specified in ReplicatedVolume spec",
-		}
+		return fmt.Errorf("%w: ReplicatedStorageClassName is not specified in ReplicatedVolume spec", errSchedulingPending)
 	}
 
 	if rv.Spec.Size.IsZero() {
-		return &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingPending,
-			message: "ReplicatedVolume size is zero in ReplicatedVolume spec",
-		}
+		return fmt.Errorf("%w: ReplicatedVolume size is zero in ReplicatedVolume spec", errSchedulingPending)
 	}
 
 	return nil
@@ -300,7 +277,7 @@ func (r *Reconciler) prepareSchedulingContext(
 	ctx context.Context,
 	req reconcile.Request,
 	log logr.Logger,
-) (*SchedulingContext, *rvrNotReadyReason) {
+) (*SchedulingContext, error) {
 	// Fetch the target ReplicatedVolume for this reconcile request.
 	rv := &v1alpha1.ReplicatedVolume{}
 	if err := r.cl.Get(ctx, req.NamespacedName, rv); err != nil {
@@ -309,36 +286,23 @@ func (r *Reconciler) prepareSchedulingContext(
 			log.V(1).Info("ReplicatedVolume not found, skipping reconciliation")
 			return nil, nil
 		}
-		log.Error(err, "unable to get ReplicatedVolume")
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to get ReplicatedVolume: %v", err),
-		}
+		return nil, fmt.Errorf("unable to get ReplicatedVolume: %w", err)
 	}
 
-	notReadyReason := isRVReadyToSchedule(rv)
-	if notReadyReason != nil {
-		return nil, notReadyReason
+	if err := isRVReadyToSchedule(rv); err != nil {
+		return nil, err
 	}
 
 	// Load the referenced ReplicatedStorageClass.
 	rsc := &v1alpha1.ReplicatedStorageClass{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rv.Spec.ReplicatedStorageClassName}, rsc); err != nil {
-		log.Error(err, "unable to get ReplicatedStorageClass")
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to get ReplicatedStorageClass: %v", err),
-		}
+		return nil, fmt.Errorf("unable to get ReplicatedStorageClass: %w", err)
 	}
 
 	// List all ReplicatedVolumeReplica resources in the cluster.
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err := r.cl.List(ctx, replicaList); err != nil {
-		log.Error(err, "unable to list ReplicatedVolumeReplica")
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to list ReplicatedVolumeReplica: %v", err),
-		}
+		return nil, fmt.Errorf("unable to list ReplicatedVolumeReplica: %w", err)
 	}
 
 	// Collect replicas for this RV:
@@ -348,19 +312,12 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	rsp := &v1alpha1.ReplicatedStoragePool{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
-		log.Error(err, "unable to get ReplicatedStoragePool", "name", rsc.Spec.StoragePool)
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to get ReplicatedStoragePool: %v", err),
-		}
+		return nil, fmt.Errorf("unable to get ReplicatedStoragePool %s: %w", rsc.Spec.StoragePool, err)
 	}
 
 	rspLvgToNodeInfoMap, err := r.getLVGToNodesByStoragePool(ctx, rsp, log)
 	if err != nil {
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to get LVG to nodes mapping: %v", err),
-		}
+		return nil, fmt.Errorf("unable to get LVG to nodes mapping: %w", err)
 	}
 
 	// Build list of RSP nodes WITHOUT replicas - exclude nodes that already have replicas.
@@ -373,10 +330,7 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	nodeNameToZone, err := r.getNodeNameToZoneMap(ctx, log)
 	if err != nil {
-		return nil, &rvrNotReadyReason{
-			reason:  v1alpha1.ReasonSchedulingFailed,
-			message: fmt.Sprintf("unable to get node to zone mapping: %v", err),
-		}
+		return nil, fmt.Errorf("unable to get node to zone mapping: %w", err)
 	}
 
 	publishOnList := getPublishOnNodeList(rv)
