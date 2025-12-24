@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -35,10 +36,6 @@ import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 )
-
-func uintPtr(v uint) *uint {
-	return &v
-}
 
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
@@ -181,7 +178,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor),
 							},
 						},
 					},
@@ -194,7 +191,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor),
 							},
 						},
 					},
@@ -207,7 +204,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor + 1),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -219,7 +216,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor + 1),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -232,7 +229,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor + 1),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
 							},
 						},
 					},
@@ -246,7 +243,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor + 2),
+								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 2),
 							},
 						},
 					},
@@ -406,7 +403,7 @@ var _ = Describe("Reconciler", func() {
 							Status: &v1alpha1.ReplicatedVolumeStatus{
 								DRBD: &v1alpha1.DRBDResource{
 									Config: &v1alpha1.DRBDResourceConfig{
-										DeviceMinor: uintPtr(uint(i)),
+										DeviceMinor: u.Ptr(uint(i)),
 									},
 								},
 							},
@@ -427,7 +424,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha1.ReplicatedVolumeStatus{
 							DRBD: &v1alpha1.DRBDResource{
 								Config: &v1alpha1.DRBDResourceConfig{
-									DeviceMinor: uintPtr(6),
+									DeviceMinor: u.Ptr(uint(6)),
 								},
 							},
 						},
@@ -440,7 +437,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha1.ReplicatedVolumeStatus{
 							DRBD: &v1alpha1.DRBDResource{
 								Config: &v1alpha1.DRBDResourceConfig{
-									DeviceMinor: uintPtr(8),
+									DeviceMinor: u.Ptr(uint(8)),
 								},
 							},
 						},
@@ -453,7 +450,7 @@ var _ = Describe("Reconciler", func() {
 						Status: &v1alpha1.ReplicatedVolumeStatus{
 							DRBD: &v1alpha1.DRBDResource{
 								Config: &v1alpha1.DRBDResourceConfig{
-									DeviceMinor: uintPtr(9),
+									DeviceMinor: u.Ptr(uint(9)),
 								},
 							},
 						},
@@ -504,7 +501,7 @@ var _ = Describe("Reconciler", func() {
 					Status: &v1alpha1.ReplicatedVolumeStatus{
 						DRBD: &v1alpha1.DRBDResource{
 							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: uintPtr(42),
+								DeviceMinor: u.Ptr(uint(42)),
 							},
 						},
 					},
@@ -538,7 +535,7 @@ var _ = Describe("Reconciler", func() {
 				Status: &v1alpha1.ReplicatedVolumeStatus{
 					DRBD: &v1alpha1.DRBDResource{
 						Config: &v1alpha1.DRBDResourceConfig{
-							DeviceMinor: uintPtr(v1alpha1.RVMinDeviceMinor), // 0
+							DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor), // 0
 						},
 					},
 				},
