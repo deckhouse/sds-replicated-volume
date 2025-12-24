@@ -47,6 +47,7 @@ type MultiVolume struct {
 	podDestroyerControllerConfig config.PodDestroyerConfig
 	client                       *kubeutils.Client
 	log                          *slog.Logger
+	forceCleanupChan             <-chan struct{}
 
 	// Tracking running volumes
 	runningVolumes atomic.Int32
@@ -68,6 +69,7 @@ func NewMultiVolume(
 	podDestroyerAgentConfig config.PodDestroyerConfig,
 	podDestroyerControllerConfig config.PodDestroyerConfig,
 	client *kubeutils.Client,
+	forceCleanupChan <-chan struct{},
 ) *MultiVolume {
 	return &MultiVolume{
 		cfg:                          cfg,
@@ -75,6 +77,7 @@ func NewMultiVolume(
 		podDestroyerControllerConfig: podDestroyerControllerConfig,
 		client:                       client,
 		log:                          slog.Default().With("runner", "multivolume"),
+		forceCleanupChan:             forceCleanupChan,
 	}
 }
 
@@ -192,7 +195,7 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 	volumeMain := NewVolumeMain(
 		rvName, cfg, m.client,
 		&m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime,
-		m.AddCheckerStats,
+		m.AddCheckerStats, m.forceCleanupChan,
 	)
 
 	volumeCtx, cancel := context.WithCancel(ctx)

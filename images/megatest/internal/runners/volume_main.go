@@ -20,10 +20,7 @@ import (
 	"context"
 	"log/slog"
 	"math/rand"
-	"os"
-	"os/signal"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -70,6 +67,10 @@ type VolumeMain struct {
 
 	// Callback to register checker stats in MultiVolume
 	registerCheckerStats func(*CheckerStats)
+
+	// Channel to receive broadcast notification when second Ctrl+C is pressed
+	// When closed, all cleanup handlers will receive notification simultaneously
+	forceCleanupChan <-chan struct{}
 }
 
 // NewVolumeMain creates a new VolumeMain
@@ -82,6 +83,7 @@ func NewVolumeMain(
 	totalDeleteRVTime *atomic.Int64,
 	totalWaitForRVReadyTime *atomic.Int64,
 	registerCheckerStats func(*CheckerStats),
+	forceCleanupChan <-chan struct{},
 ) *VolumeMain {
 	return &VolumeMain{
 		rvName:                        rvName,
@@ -98,6 +100,7 @@ func NewVolumeMain(
 		totalDeleteRVTime:             totalDeleteRVTime,
 		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
 		registerCheckerStats:          registerCheckerStats,
+		forceCleanupChan:              forceCleanupChan,
 	}
 }
 
@@ -152,12 +155,12 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	<-lifetimeCtx.Done()
 
 	// Cleanup sequence
-	v.cleanup(ctx, lifetimeCtx)
+	v.cleanup(ctx, lifetimeCtx, v.forceCleanupChan)
 
 	return nil
 }
 
-func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
+func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context, forceCleanupChan <-chan struct{}) {
 	reason := ctx.Err()
 	if reason == nil {
 		reason = lifetimeCtx.Err()
@@ -169,17 +172,20 @@ func (v *VolumeMain) cleanup(ctx context.Context, lifetimeCtx context.Context) {
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
 
-	// Cleanup can be interrupted by signal if the parent context was interrupted.
-	// This is done so that RV deletion can be skipped for subsequent debugging
-	if ctx.Err() != nil {
-		log.Info("cleanup interrupted by parent context")
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
+	// If context was cancelled, listen for second signal to force cleanup cancellation.
+	// First signal already cancelled the main context (stopped volume creation).
+	// Second signal will close forceCleanupChan, and all cleanup handlers will receive
+	// notification simultaneously (broadcast mechanism via channel closure).
+	if ctx.Err() != nil && forceCleanupChan != nil {
+		log.Info("cleanup can be interrupted by second signal")
 		go func() {
-			sig := <-sigChan
-			log.Info("received signal, shutting down", "signal", sig)
-			cleanupCancel()
+			select {
+			case <-forceCleanupChan: // All handlers receive this simultaneously when channel is closed
+				log.Info("received second signal, forcing cleanup cancellation")
+				cleanupCancel()
+			case <-cleanupCtx.Done():
+				// Cleanup already completed or was cancelled
+			}
 		}()
 	}
 
@@ -356,7 +362,7 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 			Max: time.Duration(publisherPeriodMinMax[1]) * time.Second,
 		},
 	}
-	publisher := NewVolumePublisher(v.rvName, publisherCfg, v.client, publisherPeriodMinMax)
+	publisher := NewVolumePublisher(v.rvName, publisherCfg, v.client, publisherPeriodMinMax, v.forceCleanupChan)
 	publisherCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		v.runningSubRunners.Add(1)

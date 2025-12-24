@@ -36,19 +36,21 @@ const (
 
 // VolumePublisher periodically publishes and unpublishes a volume to random nodes
 type VolumePublisher struct {
-	rvName string
-	cfg    config.VolumePublisherConfig
-	client *kubeutils.Client
-	log    *slog.Logger
+	rvName           string
+	cfg              config.VolumePublisherConfig
+	client           *kubeutils.Client
+	log              *slog.Logger
+	forceCleanupChan <-chan struct{}
 }
 
 // NewVolumePublisher creates a new VolumePublisher
-func NewVolumePublisher(rvName string, cfg config.VolumePublisherConfig, client *kubeutils.Client, periodrMinMax []int) *VolumePublisher {
+func NewVolumePublisher(rvName string, cfg config.VolumePublisherConfig, client *kubeutils.Client, periodrMinMax []int, forceCleanupChan <-chan struct{}) *VolumePublisher {
 	return &VolumePublisher{
-		rvName: rvName,
-		cfg:    cfg,
-		client: client,
-		log:    slog.Default().With("runner", "volume-publisher", "rv_name", rvName, "period_min_max", periodrMinMax),
+		rvName:           rvName,
+		cfg:              cfg,
+		client:           client,
+		log:              slog.Default().With("runner", "volume-publisher", "rv_name", rvName, "period_min_max", periodrMinMax),
+		forceCleanupChan: forceCleanupChan,
 	}
 }
 
@@ -59,7 +61,7 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 
 	for {
 		if err := waitRandomWithContext(ctx, v.cfg.Period); err != nil {
-			v.cleanup(err)
+			v.cleanup(ctx, err)
 			return nil
 		}
 
@@ -120,13 +122,30 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 	}
 }
 
-func (v *VolumePublisher) cleanup(reason error) {
+func (v *VolumePublisher) cleanup(ctx context.Context, reason error) {
 	log := v.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
 	defer log.Info("finished")
 
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 	defer cleanupCancel()
+
+	// If context was cancelled, listen for second signal to force cleanup cancellation.
+	// First signal already cancelled the main context (stopped volume operations).
+	// Second signal will close forceCleanupChan, and all cleanup handlers will receive
+	// notification simultaneously (broadcast mechanism via channel closure).
+	if ctx.Err() != nil && v.forceCleanupChan != nil {
+		log.Info("cleanup can be interrupted by second signal")
+		go func() {
+			select {
+			case <-v.forceCleanupChan: // All handlers receive this simultaneously when channel is closed
+				log.Info("received second signal, forcing cleanup cancellation")
+				cleanupCancel()
+			case <-cleanupCtx.Done():
+				// Cleanup already completed or was cancelled
+			}
+		}()
+	}
 
 	rv, err := v.client.GetRV(cleanupCtx, v.rvName)
 	if err != nil {

@@ -74,10 +74,20 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Channel to broadcast second signal to all cleanup handlers
+	// When closed, all readers will receive notification simultaneously (broadcast mechanism)
+	forceCleanupChan := make(chan struct{})
+
+	// Handle signals: first signal stops volume creation, second signal forces cleanup cancellation
 	go func() {
 		sig := <-sigChan
-		log.Info("received signal, shutting down", "signal", sig)
+		log.Info("received first signal, stopping RV creation and cleanup", "signal", sig)
 		cancel()
+
+		// Wait for second signal to broadcast to all cleanup handlers
+		sig = <-sigChan
+		log.Info("received second signal, forcing cleanup cancellation for all", "signal", sig)
+		close(forceCleanupChan) // Broadcast: all readers will get notification simultaneously
 	}()
 
 	// Create Kubernetes client
@@ -118,7 +128,7 @@ func main() {
 		Period:        config.DurationMinMax{Min: opt.PodDestroyerControllerPeriodMin, Max: opt.PodDestroyerControllerPeriodMax},
 	}
 
-	multiVolume := runners.NewMultiVolume(cfg, podDestroyerAgentConfig, podDestroyerControllerConfig, kubeClient)
+	multiVolume := runners.NewMultiVolume(cfg, podDestroyerAgentConfig, podDestroyerControllerConfig, kubeClient, forceCleanupChan)
 	_ = multiVolume.Run(ctx)
 
 	// Print statistics
