@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -550,6 +551,14 @@ type FDReplicaCounts struct {
 	TieBreaker int
 }
 
+// EntryConfig allows overriding default test configuration per entry
+type EntryConfig struct {
+	// Topology overrides RSC topology. Defaults to "TransZonal" if empty.
+	Topology string
+	// Zones overrides RSC zones. If nil, uses all FD keys. If empty slice, uses no zones.
+	Zones *[]string
+}
+
 func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
 	rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 		Conditions: []metav1.Condition{{
@@ -563,7 +572,7 @@ func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.Cond
 
 var _ = Describe("DesiredTieBreakerTotal", func() {
 	DescribeTableSubtree("returns correct TieBreaker count for fdCount < 4",
-		func(_ string, fdExtended map[string]FDReplicaCounts, expected int) {
+		func(_ string, fdExtended map[string]FDReplicaCounts, expected int, cfgPtr *EntryConfig) {
 			When("reconciler creates expected TieBreaker replicas", func() {
 				scheme := runtime.NewScheme()
 				Expect(corev1.AddToScheme(scheme)).To(Succeed())
@@ -578,6 +587,14 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				)
 
 				BeforeEach(func() {
+					// Apply defaults for config
+					cfg := EntryConfig{Topology: "TransZonal"}
+					if cfgPtr != nil {
+						if cfgPtr.Topology != "" {
+							cfg.Topology = cfgPtr.Topology
+						}
+						cfg.Zones = cfgPtr.Zones
+					}
 
 					cl = nil
 					rec = nil
@@ -593,15 +610,23 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 					}
 					setRVInitializedCondition(rv, metav1.ConditionTrue)
 
-					zones := maps.Keys(fdExtended)
+					// Determine zones for RSC
+					var rscZones []string
+					if cfg.Zones != nil {
+						rscZones = *cfg.Zones
+					} else {
+						// Default: use all FD keys as zones
+						rscZones = slices.Collect(maps.Keys(fdExtended))
+					}
+
 					rsc := &v1alpha1.ReplicatedStorageClass{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: "rsc1",
 						},
 						Spec: v1alpha1.ReplicatedStorageClassSpec{
 							Replication: "Availability",
-							Topology:    "TransZonal",
-							Zones:       slices.Collect(zones),
+							Topology:    cfg.Topology,
+							Zones:       rscZones,
 						},
 					}
 
@@ -694,7 +719,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				})
 			})
 		},
-		func(name string, fd map[string]FDReplicaCounts, expected int) string {
+		func(name string, fd map[string]FDReplicaCounts, expected int, cfgPtr *EntryConfig) string {
 			// Sort zone names for predictable output
 			zones := slices.Collect(maps.Keys(fd))
 			slices.Sort(zones)
@@ -706,35 +731,79 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				total := counts.Diskful + counts.Access
 				s = append(s, fmt.Sprintf("%d", total))
 			}
-			return fmt.Sprintf("case %s: %d FDs, %s -> %d", name, len(fd), strings.Join(s, "+"), expected)
-		},
-		Entry(nil, "1", map[string]FDReplicaCounts{}, 0),
-		Entry(nil, "2", map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0),
-		Entry(nil, "3", map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0),
-		Entry(nil, "4", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1),
-		Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2),
-		Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1),
-		Entry(nil, "7", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {}}, 3),
-		Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2),
-		Entry(nil, "8.1", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0),
-		Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3),
-		Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0),
 
-		Entry(nil, "11", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1),
-		Entry(nil, "12", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1),
-		Entry(nil, "13", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0),
-		Entry(nil, "14", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2),
-		Entry(nil, "15", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4),
+			// Add topology info if non-default
+			topologyInfo := ""
+			if cfgPtr != nil && cfgPtr.Topology != "" && cfgPtr.Topology != "TransZonal" {
+				topologyInfo = fmt.Sprintf(" [%s]", cfgPtr.Topology)
+			}
+			if cfgPtr != nil && cfgPtr.Zones != nil {
+				topologyInfo += fmt.Sprintf(" zones=%v", *cfgPtr.Zones)
+			}
+
+			return fmt.Sprintf("case %s: %d FDs, %s -> %d%s", name, len(fd), strings.Join(s, "+"), expected, topologyInfo)
+		},
+		Entry(nil, "1", map[string]FDReplicaCounts{}, 0, nil),
+		Entry(nil, "2", map[string]FDReplicaCounts{"a": {Diskful: 1}}, 0, nil),
+		Entry(nil, "3", map[string]FDReplicaCounts{"a": {Diskful: 0}, "b": {Diskful: 0}}, 0, nil),
+		Entry(nil, "4", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}}, 1, nil),
+		Entry(nil, "5", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {}}, 2, nil),
+		Entry(nil, "6", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {}}, 1, nil),
+		Entry(nil, "7", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {}}, 3, nil),
+		Entry(nil, "8", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}, "c": {}}, 2, nil),
+		Entry(nil, "8.1", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 3}}, 0, nil),
+		Entry(nil, "9", map[string]FDReplicaCounts{"a": {Diskful: 3}, "b": {Diskful: 3}, "c": {}}, 3, nil),
+		Entry(nil, "10", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}}, 0, nil),
+
+		Entry(nil, "11", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 2}}, 1, nil),
+		Entry(nil, "12", map[string]FDReplicaCounts{"a": {Diskful: 2}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 1, nil),
+		Entry(nil, "13", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {Diskful: 2}}, 0, nil),
+		Entry(nil, "14", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 3}}, 2, nil),
+		Entry(nil, "15", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 3}, "c": {Diskful: 5}}, 4, nil),
 		// Test cases with mixed replica types
-		Entry(nil, "16", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0),
-		Entry(nil, "17", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1),
-		Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1),
-		Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1),
-		Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0),
-		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4),
+		Entry(nil, "16", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}}, 0, nil),
+		Entry(nil, "17", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Access: 1}}, 1, nil),
+		Entry(nil, "18", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}}, 1, nil),
+		Entry(nil, "19", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1}, "b": {Diskful: 1, Access: 2}}, 1, nil),
+		Entry(nil, "20", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1, Access: 1}, "c": {Diskful: 1}}, 0, nil),
+		Entry(nil, "21", map[string]FDReplicaCounts{"a": {Diskful: 2, Access: 1, TieBreaker: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {}}, 4, nil),
 		// with deletion of existing TBs
-		Entry(nil, "22", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 1}}, 0),
-		Entry(nil, "23", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 0),
-		Entry(nil, "24", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 1),
+		Entry(nil, "22", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 1}}, 0, nil),
+		Entry(nil, "23", map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 0, nil),
+		Entry(nil, "24", map[string]FDReplicaCounts{"a": {Diskful: 1, Access: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 2}}, 1, nil),
+
+		// ===== Tests with Zonal topology (FD = node, not zone) =====
+		Entry(nil, "Z1", map[string]FDReplicaCounts{"node-a": {Diskful: 1}, "node-b": {Diskful: 1}}, 1,
+			&EntryConfig{Topology: "Zonal"}),
+		Entry(nil, "Z2", map[string]FDReplicaCounts{"node-a": {Diskful: 1}, "node-b": {Diskful: 1}, "node-c": {Diskful: 1}}, 0,
+			&EntryConfig{Topology: "Zonal"}),
+		Entry(nil, "Z3", map[string]FDReplicaCounts{"node-a": {Diskful: 2}, "node-b": {Diskful: 1}}, 0,
+			&EntryConfig{Topology: "Zonal"}),
+		Entry(nil, "Z4", map[string]FDReplicaCounts{"node-a": {Diskful: 1}, "node-b": {Diskful: 1}, "node-c": {TieBreaker: 1}}, 1,
+			&EntryConfig{Topology: "Zonal"}),
+
+		// ===== Tests with Any topology (FD = node) =====
+		Entry(nil, "A1", map[string]FDReplicaCounts{"node-a": {Diskful: 1}, "node-b": {Diskful: 1}}, 1,
+			&EntryConfig{Topology: "Any"}),
+		Entry(nil, "A2", map[string]FDReplicaCounts{"node-a": {Diskful: 1}, "node-b": {Diskful: 1}, "node-c": {Diskful: 1}}, 0,
+			&EntryConfig{Topology: "Any"}),
+
+		// ===== BUG REPRODUCTION: TB on node outside allowed zones should be deleted =====
+		// 3 Diskful in allowed zones (odd total), 1 TB in zone "c" (not allowed) -> TB should be deleted
+		Entry(nil, "TB-outside-zones-1",
+			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 2}, "c": {TieBreaker: 1}}, 0,
+			&EntryConfig{Zones: u.Ptr([]string{"a", "b"})}),
+		// TB in zone "d" (not allowed), 3 Diskful across allowed zones a,b,c -> no TB needed, delete the one in d
+		Entry(nil, "TB-outside-zones-2",
+			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 1}}, 0,
+			&EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
+		// 3 Diskful in allowed zones (odd), 2 TBs outside allowed zones -> all TBs should be deleted
+		Entry(nil, "TB-outside-zones-3",
+			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "d": {TieBreaker: 1}, "e": {TieBreaker: 1}}, 0,
+			&EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
+		// TB in excluded zone when no TB is needed at all
+		Entry(nil, "TB-outside-zones-4",
+			map[string]FDReplicaCounts{"a": {Diskful: 1}, "b": {Diskful: 1}, "c": {Diskful: 1}, "excluded": {TieBreaker: 2}}, 0,
+			&EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
 	)
 })

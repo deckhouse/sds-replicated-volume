@@ -24,20 +24,26 @@ func (fd *failureDomain) tbReplicaCount() int {
 	return len(fd.tbs)
 }
 
-func (fd *failureDomain) addReplica(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+func (fd *failureDomain) addTBReplica(rvr tb) bool {
+	if !slices.Contains(fd.nodeNames, rvr.Spec.NodeName) {
+		return false
+	}
+	fd.tbs = append(fd.tbs, rvr)
+
+	return true
+}
+
+func (fd *failureDomain) addBaseReplica(rvr baseReplica) bool {
 	if !slices.Contains(fd.nodeNames, rvr.Spec.NodeName) {
 		return false
 	}
 
-	if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
-		fd.tbs = append(fd.tbs, tb(rvr))
-	} else {
-		fd.baseReplicas = append(fd.baseReplicas, baseReplica(rvr))
-	}
+	fd.baseReplicas = append(fd.baseReplicas, rvr)
+
 	return true
 }
 
-func (fd *failureDomain) popTB() *v1alpha1.ReplicatedVolumeReplica {
+func (fd *failureDomain) popTBReplica() *v1alpha1.ReplicatedVolumeReplica {
 	if len(fd.tbs) == 0 {
 		return nil
 	}

@@ -83,9 +83,20 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	fds, tbs, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
+	fds, tbs, nonFDtbs, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
 	if err != nil {
 		return reconcile.Result{}, err
+	}
+
+	// delete TBs, which are scheduled to FDs, which are outside our FDs
+	for i, tbToDelete := range nonFDtbs {
+		rvr := (*v1alpha1.ReplicatedVolumeReplica)(tbToDelete)
+		if err := r.cl.Delete(ctx, rvr); client.IgnoreNotFound(err) != nil {
+			return reconcile.Result{},
+				logError(log.WithValues("tbToDelete", tbToDelete.Name), fmt.Errorf("deleting nonFDtbs rvr: %w", err))
+		}
+
+		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, len(nonFDtbs)), "tbToDelete", tbToDelete.Name)
 	}
 
 	return r.syncTieBreakers(ctx, log, rv, fds, tbs)
@@ -149,11 +160,11 @@ func (r *Reconciler) loadFailureDomains(
 	log logr.Logger,
 	rvName string,
 	rsc *v1alpha1.ReplicatedStorageClass,
-) (fds map[string]*failureDomain, tbs []tb, err error) {
+) (fds map[string]*failureDomain, tbs []tb, nonFDtbs []tb, err error) {
 	// initialize empty failure domains
 	nodeList := &corev1.NodeList{}
 	if err := r.cl.List(ctx, nodeList); err != nil {
-		return nil, nil, logError(r.log, fmt.Errorf("listing nodes: %w", err))
+		return nil, nil, nil, logError(r.log, fmt.Errorf("listing nodes: %w", err))
 	}
 
 	if rsc.Spec.Topology == "TransZonal" {
@@ -167,7 +178,7 @@ func (r *Reconciler) loadFailureDomains(
 			zone, ok := node.Labels[corev1.LabelTopologyZone]
 			if !ok {
 				log.WithValues("node", node.Name).Error(ErrNoZoneLabel, "No zone label")
-				return nil, nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
+				return nil, nil, nil, fmt.Errorf("%w: node is %s", ErrNoZoneLabel, node.Name)
 			}
 
 			if fd, ok := fds[zone]; ok {
@@ -186,27 +197,50 @@ func (r *Reconciler) loadFailureDomains(
 	// init failure domains with RVRs
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 	if err = r.cl.List(ctx, rvrList); err != nil {
-		return nil, nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
+		return nil, nil, nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
 	}
 
 	for rvr := range uslices.Ptrs(rvrList.Items) {
 		if rvr.Spec.ReplicatedVolumeName != rvName {
 			continue
 		}
-		if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
-			tbs = append(tbs, tb(rvr))
+
+		// ignore non-scheduled base replicas
+		if rvr.Spec.NodeName == "" && rvr.Spec.Type != v1alpha1.ReplicaTypeTieBreaker {
+			continue
 		}
-		if rvr.Spec.NodeName != "" {
+
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
+			var fdTB bool
+			if rvr.Spec.NodeName != "" {
+				for _, fd := range fds {
+					if fd.addTBReplica(rvr) {
+						// rvr always maps to single fd
+						fdTB = true
+						break
+					}
+				}
+			} else {
+				fdTB = true
+			}
+
+			if fdTB {
+				tbs = append(tbs, rvr)
+			} else {
+				nonFDtbs = append(nonFDtbs, rvr)
+			}
+		} else {
 			for _, fd := range fds {
-				if fd.addReplica(rvr) {
-					// rvr maps to single fd
+				if fd.addBaseReplica(rvr) {
+					// rvr always maps to single fd
 					break
 				}
 			}
+			// ignore non-fb base replicas
 		}
 	}
 
-	return fds, tbs, nil
+	return fds, tbs, nonFDtbs, nil
 }
 
 func (r *Reconciler) syncTieBreakers(
@@ -285,7 +319,7 @@ func (r *Reconciler) syncTieBreakers(
 			baseReplicaCountDiffFromMax := maxBaseReplicaCount - wantFDTotalReplicaCount
 			if baseReplicaCountDiffFromMax < 2 {
 				// found tb, which is not necessary for this fd
-				tbToDelete = fd.popTB()
+				tbToDelete = fd.popTBReplica()
 
 				break
 			}
