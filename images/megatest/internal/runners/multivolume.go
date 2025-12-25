@@ -36,7 +36,7 @@ var (
 	// PodDestroyer Agent configuration
 	podDestroyerAgentNamespace      = "d8-sds-replicated-volume"
 	podDestroyerAgentLabelSelector  = "app=agent"
-	podDestroyerAgentPodCountMinMax = []int{1, 2}
+	podDestroyerAgentPodCountMinMax = []int{1, 5}
 	podDestroyerAgentPeriodMinMax   = []int{30, 60}
 
 	// PodDestroyer Controller configuration
