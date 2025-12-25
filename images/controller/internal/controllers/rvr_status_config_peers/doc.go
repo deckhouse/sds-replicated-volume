@@ -49,9 +49,9 @@ limitations under the License.
 //     a. Collect ready peers (meeting Ready Replica criteria)
 //     b. Exclude the current replica from its own peer list
 //     c. Build peer entries with:
-//        - nodeId: rvr.status.drbd.config.nodeId
-//        - address: rvr.status.drbd.config.address
-//        - Any other relevant peer information
+//     - nodeId: rvr.status.drbd.config.nodeId
+//     - address: rvr.status.drbd.config.address
+//     - Any other relevant peer information
 //  6. Update rvr.status.drbd.config.peers with the peer list
 //  7. Set rvr.status.drbd.config.peersInitialized = true
 //     (even if peer list is empty - first replica case)

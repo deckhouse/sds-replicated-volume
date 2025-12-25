@@ -42,7 +42,7 @@ limitations under the License.
 // Delete LLV when:
 //   - rvr.spec.type!=Diskful (type changed to Access or TieBreaker)
 //   - rvr.status.actualType==rvr.spec.type (actual type matches desired)
-//     * This ensures DRBD has released the volume before deletion
+//   - This ensures DRBD has released the volume before deletion
 //
 // # Reconciliation Flow
 //
@@ -52,24 +52,26 @@ limitations under the License.
 //  3. Check rvr.spec.type:
 //
 // For Diskful replicas (rvr.spec.type==Diskful AND deletionTimestamp==nil):
-//     a. Check if LLV already exists (by owner reference or name)
-//     b. If LLV doesn't exist:
-//        - Create new LLV resource
-//        - Set spec.size from RV
-//        - Set spec.lvmVolumeGroupName from storage pool
-//        - Set metadata.ownerReferences pointing to RVR
-//     c. If LLV exists and is ready:
-//        - Update rvr.status.lvmLogicalVolumeName to LLV name
+//
+//	a. Check if LLV already exists (by owner reference or name)
+//	b. If LLV doesn't exist:
+//	   - Create new LLV resource
+//	   - Set spec.size from RV
+//	   - Set spec.lvmVolumeGroupName from storage pool
+//	   - Set metadata.ownerReferences pointing to RVR
+//	c. If LLV exists and is ready:
+//	   - Update rvr.status.lvmLogicalVolumeName to LLV name
 //
 // For non-Diskful replicas (rvr.spec.type!=Diskful):
-//     a. Check if rvr.status.actualType==rvr.spec.type (type transition complete)
-//     b. If types match and LLV exists:
-//        - Delete the LLV
-//     c. After LLV deletion:
-//        - Clear rvr.status.lvmLogicalVolumeName
 //
-//  4. If rvr.metadata.deletionTimestamp is set:
-//     - LLV will be deleted via owner reference cascade (handled by Kubernetes)
+//	   a. Check if rvr.status.actualType==rvr.spec.type (type transition complete)
+//	   b. If types match and LLV exists:
+//	      - Delete the LLV
+//	   c. After LLV deletion:
+//	      - Clear rvr.status.lvmLogicalVolumeName
+//
+//	4. If rvr.metadata.deletionTimestamp is set:
+//	   - LLV will be deleted via owner reference cascade (handled by Kubernetes)
 //
 // # Status Updates
 //

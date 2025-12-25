@@ -22,9 +22,6 @@ import (
 	"fmt"
 	"slices"
 
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
-	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	interrors "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -33,6 +30,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
+	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
+	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	interrors "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
 
 type Reconciler struct {
@@ -262,7 +263,6 @@ func (r *Reconciler) syncTieBreakers(
 	fds map[string]*failureDomain,
 	tbs []tb,
 ) (reconcile.Result, error) {
-
 	var maxBaseReplicaCount, totalBaseReplicaCount int
 	for _, fd := range fds {
 		fdBaseReplicaCount := fd.baseReplicaCount()

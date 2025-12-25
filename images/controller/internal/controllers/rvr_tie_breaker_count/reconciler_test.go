@@ -24,7 +24,6 @@ import (
 	"slices"
 	"strings"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -37,6 +36,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
 )
@@ -845,7 +845,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 		Entry(nil, "TB-wrong-distribution2",
 			map[string]FDReplicaCounts{
 				"a": {Diskful: 4, Access: 2},     //6
-				"b": {Diskful: 1, TieBreaker: 8}, //1+4
+				"b": {Diskful: 1, TieBreaker: 8}, // 1+4
 				"c": {Diskful: 1},                // 1+4
 			}, 9, &EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
 	)

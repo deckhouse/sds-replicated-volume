@@ -52,10 +52,10 @@ limitations under the License.
 //  3. For each node in rv.spec.publishOn:
 //     a. Check if a replica already exists on that node
 //     b. If no replica exists and rsc.spec.volumeAccess != Local:
-//        - Create new RVR with spec.type=Access
+//     - Create new RVR with spec.type=Access
 //  4. For each Access replica:
 //     a. If node not in rv.spec.publishOn AND not in rv.status.publishedOn:
-//        - Delete the Access replica
+//     - Delete the Access replica
 //
 // # Status Updates
 //
