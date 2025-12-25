@@ -28,6 +28,7 @@ import (
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
+	rvstatusreplicas "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_replicas"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
@@ -58,6 +59,7 @@ func init() {
 	registry = append(registry, rvfinalizer.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
 	registry = append(registry, rvstatusconditions.BuildController)
+	registry = append(registry, rvstatusreplicas.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)
 	registry = append(registry, rvpublishcontroller.BuildController)
 

@@ -67,6 +67,10 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
 
+	// +patchStrategy=merge
+	// +optional
+	Replicas []RVReplicaInfo `json:"replicas,omitempty" patchStrategy:"merge"`
+
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional

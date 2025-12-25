@@ -204,6 +204,22 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+              replicas:
+                items:
+                  properties:
+                    deletionTimestamp:
+                      format: date-time
+                      type: string
+                    name:
+                      type: string
+                    nodeName:
+                      type: string
+                    type:
+                      description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                        spec.type and status.actualType fields.
+                      type: string
+                  type: object
+                type: array
             type: object
         required:
         - metadata
