@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount_test
+package rvstatusconfigquorum_test
 
 import (
 	"fmt"
@@ -212,7 +212,7 @@ var _ = Describe("Reconciler", func() {
 					rv.Status.DiskfulReplicaCount = "1/1"
 				})
 
-				It("should not set quorum when diskfulCount <= 1", func(ctx SpecContext) {
+				It("should not set quorum when diskfulCount <= 1 but QMR=1", func(ctx SpecContext) {
 					// rvrList[0] is already created in JustBeforeEach
 
 					Expect(rec.Reconcile(ctx, reconcile.Request{
@@ -222,11 +222,11 @@ var _ = Describe("Reconciler", func() {
 						},
 					})).NotTo(Requeue())
 
-					// Verify quorum is 0 (not set)
+					// Verify quorum is 0 (not set) but QMR is 1
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), rv)).To(Succeed())
 					Expect(rv).To(SatisfyAll(
 						HaveField("Status.DRBD.Config.Quorum", Equal(byte(0))),
-						HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(byte(0))),
+						HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(byte(1))),
 					))
 				})
 			})
@@ -286,7 +286,7 @@ var _ = Describe("Reconciler", func() {
 				Entry(nil, 7, 7),
 			)
 
-			DescribeTableSubtree("checking quorum calculation with Availability (QMR should be 0)",
+			DescribeTableSubtree("checking quorum calculation with Availability (QMR should be 1)",
 				func(diskfulCount, all int) {
 					BeforeEach(func() {
 						rsc.Spec.Replication = v1alpha1.ReplicationAvailability
@@ -314,23 +314,23 @@ var _ = Describe("Reconciler", func() {
 						}
 					})
 
-					It("should calculate correct quorum but QMR should be 0", func(ctx SpecContext) {
+					It("should calculate correct quorum and QMR should be 1", func(ctx SpecContext) {
 						Expect(rec.Reconcile(ctx, reconcile.Request{
 							NamespacedName: types.NamespacedName{Name: "test-rv"},
 						})).NotTo(Requeue())
 
 						Expect(cl.Get(ctx, types.NamespacedName{Name: "test-rv"}, rv)).To(Succeed())
 
-						expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
+						expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
 						Expect(rv).To(SatisfyAll(
 							HaveField("Status.DRBD.Config.Quorum", Equal(expectedQuorum)),
-							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(byte(0))),
+							HaveField("Status.DRBD.Config.QuorumMinimumRedundancy", Equal(expectedQmr)),
 						))
 					})
 				},
 				func(diskfulCount, all int) string {
-					expectedQuorum, _ := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
-					return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=0", diskfulCount, all, expectedQuorum)
+					expectedQuorum, expectedQmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
+					return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=%d", diskfulCount, all, expectedQuorum, expectedQmr)
 				},
 				Entry(nil, 2, 2),
 				Entry(nil, 2, 3),
@@ -426,11 +426,11 @@ var _ = Describe("CalculateQuorum", func() {
 		func(diskfulCount, all int, expectedQuorum, expectedQmr byte) string {
 			return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=%d", diskfulCount, all, expectedQuorum, expectedQmr)
 		},
-		// Edge cases: diskfulCount <= 1
-		Entry(nil, 0, 1, byte(0), byte(0)),
-		Entry(nil, 1, 1, byte(0), byte(0)),
-		Entry(nil, 1, 2, byte(0), byte(0)),
-		Entry(nil, 1, 3, byte(0), byte(0)),
+		// Edge cases: diskfulCount <= 1 (QMR=1 as minimum)
+		Entry(nil, 0, 1, byte(0), byte(1)),
+		Entry(nil, 1, 1, byte(0), byte(1)),
+		Entry(nil, 1, 2, byte(0), byte(1)),
+		Entry(nil, 1, 3, byte(0), byte(1)),
 		// Small numbers
 		Entry(nil, 2, 2, byte(2), byte(2)),
 		Entry(nil, 2, 3, byte(2), byte(2)),
@@ -470,14 +470,14 @@ var _ = Describe("CalculateQuorum", func() {
 		Entry(nil, 10, 10, byte(6), byte(6)),
 	)
 
-	DescribeTable("should not set QMR for Availability replication",
+	DescribeTable("should set QMR=1 for Availability replication",
 		func(diskfulCount, all int, expectedQuorum byte) {
 			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationAvailability)
 			Expect(quorum).To(Equal(expectedQuorum))
-			Expect(qmr).To(Equal(byte(0)), "QMR should be 0 for Availability replication")
+			Expect(qmr).To(Equal(byte(1)), "QMR should be 1 for Availability replication")
 		},
 		func(diskfulCount, all int, expectedQuorum byte) string {
-			return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=0", diskfulCount, all, expectedQuorum)
+			return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=1", diskfulCount, all, expectedQuorum)
 		},
 		Entry(nil, 2, 2, byte(2)),
 		Entry(nil, 2, 3, byte(2)),
@@ -488,14 +488,14 @@ var _ = Describe("CalculateQuorum", func() {
 		Entry(nil, 4, 5, byte(3)),
 	)
 
-	DescribeTable("should not set QMR for None replication",
+	DescribeTable("should set QMR=1 for None replication",
 		func(diskfulCount, all int, expectedQuorum byte) {
 			quorum, qmr := rvquorumcontroller.CalculateQuorum(diskfulCount, all, v1alpha1.ReplicationNone)
 			Expect(quorum).To(Equal(expectedQuorum))
-			Expect(qmr).To(Equal(byte(0)), "QMR should be 0 for None replication")
+			Expect(qmr).To(Equal(byte(1)), "QMR should be 1 for None replication")
 		},
 		func(diskfulCount, all int, expectedQuorum byte) string {
-			return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=0", diskfulCount, all, expectedQuorum)
+			return fmt.Sprintf("diskfulCount=%d, all=%d -> quorum=%d, qmr=1", diskfulCount, all, expectedQuorum)
 		},
 		Entry(nil, 1, 1, byte(0)),
 		Entry(nil, 1, 2, byte(0)),

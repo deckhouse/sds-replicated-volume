@@ -16,7 +16,7 @@ limitations under the License.
 
 // cspell:words Diskless Logr Subresource apimachinery gomega gvks metav onsi
 
-package rvr_status_config_peers_test
+package rvrstatusconfigpeers_test
 
 import (
 	"context"
@@ -38,7 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
+	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -51,7 +51,7 @@ var _ = Describe("Reconciler", func() {
 	// Available in JustBeforeEach
 	var (
 		cl  client.WithWatch
-		rec *rvr_status_config_peers.Reconciler
+		rec *rvrstatusconfigpeers.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -70,7 +70,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvr_status_config_peers.NewReconciler(cl, GinkgoLogr)
+		rec = rvrstatusconfigpeers.NewReconciler(cl, GinkgoLogr)
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
@@ -460,7 +460,7 @@ var _ = Describe("Reconciler", func() {
 					})
 
 					It("should fail", func(ctx SpecContext) {
-						Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(rvr_status_config_peers.ErrMultiplePeersOnSameNode))
+						Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(rvrstatusconfigpeers.ErrMultiplePeersOnSameNode))
 					})
 				})
 

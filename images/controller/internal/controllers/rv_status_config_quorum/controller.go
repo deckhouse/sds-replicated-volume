@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrdiskfulcount // TODO change package if need
+package rvstatusconfigquorum
 
 import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
