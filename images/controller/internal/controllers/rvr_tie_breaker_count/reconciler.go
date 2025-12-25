@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
@@ -56,6 +57,7 @@ func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme) (*
 
 var _ reconcile.Reconciler = &Reconciler{}
 var ErrNoZoneLabel = errors.New("can't find zone label")
+var ErrBaseReplicaNodeIsNotInReplicatedStorageClassZones = errors.New("node is not in rsc.spec.zones")
 
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
@@ -211,32 +213,42 @@ func (r *Reconciler) loadFailureDomains(
 		}
 
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
-			var fdTB bool
+			var fdFound bool
 			if rvr.Spec.NodeName != "" {
 				for _, fd := range fds {
 					if fd.addTBReplica(rvr) {
 						// rvr always maps to single fd
-						fdTB = true
+						fdFound = true
 						break
 					}
 				}
 			} else {
-				fdTB = true
+				fdFound = true
 			}
 
-			if fdTB {
+			if fdFound {
 				tbs = append(tbs, rvr)
 			} else {
 				nonFDtbs = append(nonFDtbs, rvr)
 			}
 		} else {
+			var fdFound bool
 			for _, fd := range fds {
 				if fd.addBaseReplica(rvr) {
 					// rvr always maps to single fd
+					fdFound = true
 					break
 				}
 			}
-			// ignore non-fb base replicas
+			if !fdFound {
+				return nil, nil, nil, logError(
+					log,
+					fmt.Errorf(
+						"cannot map base replica '%s' (node '%s') to failure domain: %w",
+						rvr.Name, rvr.Spec.NodeName, ErrBaseReplicaNodeIsNotInReplicatedStorageClassZones,
+					),
+				)
+			}
 		}
 	}
 
@@ -257,6 +269,38 @@ func (r *Reconciler) syncTieBreakers(
 		maxBaseReplicaCount = max(maxBaseReplicaCount, fdBaseReplicaCount)
 		totalBaseReplicaCount += fdBaseReplicaCount
 	}
+
+	// delete useless TBs:
+	// useless TB is scheduled to FD where number of other replicas is not less then
+	// maximum number of replicas per FD in cluster by 2
+	baseReplicaCountForTBusefulness := maxBaseReplicaCount - 2
+	for _, fd := range fds {
+		if len(fd.tbs) == 0 {
+			continue
+		}
+
+		fdBaseReplicaCount := fd.baseReplicaCount()
+
+		usefulTBNum := max(0, baseReplicaCountForTBusefulness-fdBaseReplicaCount)
+
+		uselessTBNum := max(0, len(fd.tbs)-usefulTBNum)
+
+		for i := range uselessTBNum {
+			uselessTB := fd.popTBReplica()
+			tbs = slices.DeleteFunc(tbs, func(rvr tb) bool { return rvr.Name == uselessTB.Name })
+
+			if err := r.cl.Delete(ctx, uselessTB); client.IgnoreNotFound(err) != nil {
+				return reconcile.Result{},
+					logError(log.WithValues("uselessTB", uselessTB.Name), fmt.Errorf("deleting useless tb rvr: %w", err))
+			}
+
+			log.Info(
+				fmt.Sprintf("deleted useless tb rvr %d/%d", i+1, uselessTBNum),
+				"uselessTB", uselessTB.Name,
+			)
+		}
+	}
+	//
 
 	currentTB := len(tbs)
 
