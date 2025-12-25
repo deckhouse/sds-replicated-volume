@@ -35,13 +35,13 @@ import (
 var (
 	// PodDestroyer Agent configuration
 	podDestroyerAgentNamespace      = "d8-sds-replicated-volume"
-	podDestroyerAgentLabelSelector  = "app=sds-replicated-volume-controller-agent"
+	podDestroyerAgentLabelSelector  = "app=agent"
 	podDestroyerAgentPodCountMinMax = []int{1, 2}
 	podDestroyerAgentPeriodMinMax   = []int{30, 60}
 
 	// PodDestroyer Controller configuration
 	podDestroyerControllerNamespace      = "d8-sds-replicated-volume"
-	podDestroyerControllerLabelSelector  = "app=sds-replicated-volume-controller"
+	podDestroyerControllerLabelSelector  = "app=controller"
 	podDestroyerControllerPodCountMinMax = []int{1, 3}
 	podDestroyerControllerPeriodMinMax   = []int{30, 60}
 )
