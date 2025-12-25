@@ -835,5 +835,12 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 				"b": {Diskful: 1},
 				"c": {Diskful: 1},
 			}, 2, &EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
+
+		Entry(nil, "TB-wrong-distribution",
+			map[string]FDReplicaCounts{
+				"a": {Diskful: 4, Access: 2},     //6
+				"b": {Diskful: 1, TieBreaker: 8}, //1+4
+				"c": {Diskful: 1},                // 1+4
+			}, 9, &EntryConfig{Zones: u.Ptr([]string{"a", "b", "c"})}),
 	)
 })
