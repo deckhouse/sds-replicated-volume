@@ -152,9 +152,9 @@ func (c *Client) initRVInformer() error {
 		return fmt.Errorf("creating REST client: %w", err)
 	}
 
-	// Create ListWatch for ReplicatedVolumes
+	// Create ListWatch for ReplicatedVolumes using REST client methods directly
 	lw := &cache.ListWatch{
-		ListFunc: func(options metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
 			result := &v1alpha1.ReplicatedVolumeList{}
 			err := restClient.Get().
 				Resource("replicatedvolumes").
@@ -163,7 +163,7 @@ func (c *Client) initRVInformer() error {
 				Into(result)
 			return result, err
 		},
-		WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watch.Interface, error) {
 			options.Watch = true
 			return restClient.Get().
 				Resource("replicatedvolumes").
