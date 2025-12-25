@@ -125,15 +125,17 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 		}
 	} else {
-		if inQuorum && oldCond.Status != v1.ConditionTrue {
+		switch {
+		case inQuorum && oldCond.Status != v1.ConditionTrue:
 			// switch to true
 			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInQuorumInQuorum
 			newCond.Message = fmt.Sprintf("Quorum achieved after being lost for %v", time.Since(oldCond.LastTransitionTime.Time))
-		} else if !inQuorum && oldCond.Status != v1.ConditionFalse {
+
+		case !inQuorum && oldCond.Status != v1.ConditionFalse:
 			// switch to false
 			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
 			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
-		} else {
+		default:
 			// no change - keep old values
 			return nil
 		}
@@ -199,7 +201,8 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonForStatusFalseFromDiskState(device.DiskState)
 		}
 	} else {
-		if inSync && oldCond.Status != v1.ConditionTrue {
+		switch {
+		case inSync && oldCond.Status != v1.ConditionTrue:
 			// switch to true
 			newCond.Status, newCond.Reason = v1.ConditionTrue, reasonForStatusTrue(diskful)
 			newCond.Message = fmt.Sprintf(
@@ -207,14 +210,14 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 				oldCond.Reason,
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
-		} else if !inSync && oldCond.Status != v1.ConditionFalse {
+		case !inSync && oldCond.Status != v1.ConditionFalse:
 			// switch to false
 			newCond.Status, newCond.Reason = v1.ConditionFalse, reasonForStatusFalseFromDiskState(device.DiskState)
 			newCond.Message = fmt.Sprintf(
 				"Became unsynced after being synced for %v",
 				time.Since(oldCond.LastTransitionTime.Time),
 			)
-		} else {
+		default:
 			// no change - keep old values
 			return nil
 		}

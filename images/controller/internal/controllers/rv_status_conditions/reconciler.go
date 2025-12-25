@@ -278,7 +278,15 @@ func (r *Reconciler) getInitializedThreshold(rsc *v1alpha1.ReplicatedStorageClas
 // Reads RVR.DataInitialized condition (set by drbd-config-controller on agent)
 // Threshold: None=1, Availability=2, ConsistencyAndAvailability=3
 // Reasons: Initialized, InitializationInProgress, WaitingForReplicas
+// NOTE: Once True, this condition is never reset to False (per spec).
+// This protects against accidental primary --force on new replicas when RV was already initialized.
 func (r *Reconciler) calculateInitialized(rv *v1alpha1.ReplicatedVolume, rvrs []v1alpha1.ReplicatedVolumeReplica, rsc *v1alpha1.ReplicatedStorageClass) {
+	// Once True, never reset to False - this is intentional per spec
+	alreadyTrue := meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized)
+	if alreadyTrue {
+		return
+	}
+
 	threshold := r.getInitializedThreshold(rsc)
 	initializedCount := countRVRCondition(rvrs, v1alpha1.ConditionTypeDataInitialized)
 
