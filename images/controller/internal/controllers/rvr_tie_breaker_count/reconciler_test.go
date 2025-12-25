@@ -715,6 +715,8 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 
 					if cfgPtr != nil && cfgPtr.ExpectedReconcileError != nil {
 						Expect(err).To(MatchError(cfgPtr.ExpectedReconcileError))
+						Expect(result).To(Equal(reconcile.Result{}))
+						return
 					}
 
 					Expect(err).NotTo(HaveOccurred())
