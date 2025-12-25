@@ -196,10 +196,10 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
 	}
 
-	// initial sync for diskful replicas without peers
+	// initial sync for diskful replicas without diskful peers
 	if h.rvr.Spec.Type == "Diskful" {
-		noPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
-			len(h.rvr.Status.DRBD.Config.Peers) == 0
+		noDiskfulPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
+			!hasDiskfulPeer(h.rvr.Status.DRBD.Config.Peers)
 
 		upToDate := h.rvr.Status != nil &&
 			h.rvr.Status.DRBD != nil &&
@@ -212,7 +212,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 			h.rvr.Status.DRBD.Actual != nil &&
 			h.rvr.Status.DRBD.Actual.InitialSyncCompleted
 
-		if noPeers && !upToDate && !alreadyCompleted {
+		if noDiskfulPeers && !upToDate && !alreadyCompleted {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
 				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, configurationCommandError{err})
 			}
@@ -383,6 +383,15 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 
 		res.Connections = append(res.Connections, con)
 	}
+}
+
+func hasDiskfulPeer(peers map[string]v1alpha1.Peer) bool {
+	for _, peer := range peers {
+		if !peer.Diskless {
+			return true
+		}
+	}
+	return false
 }
 
 func apiAddressToV9HostAddress(hostname string, address v1alpha1.Address) v9.HostAddress {

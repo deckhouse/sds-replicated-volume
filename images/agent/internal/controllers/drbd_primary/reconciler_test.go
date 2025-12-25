@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdprimary "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_primary"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
@@ -178,7 +179,7 @@ var _ = Describe("Reconciler", func() {
 			Entry("nil Status.DRBD.Actual", func() {
 				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha1.DRBD{
-						Config: &v1alpha1.DRBDConfig{Primary: boolPtr(true)},
+						Config: &v1alpha1.DRBDConfig{Primary: u.Ptr(true)},
 						Status: &v1alpha1.DRBDStatus{},
 						Actual: nil,
 					},
@@ -196,7 +197,7 @@ var _ = Describe("Reconciler", func() {
 			}),
 			Entry("nil Status.DRBD.Status", func() {
 				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
-					DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Primary: boolPtr(true)}, Status: nil}}
+					DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Primary: u.Ptr(true)}, Status: nil}}
 			}),
 			func(setup func()) {
 				BeforeEach(func() {
@@ -226,7 +227,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = "other-node"
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 			})
@@ -254,7 +255,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = false
 			})
@@ -282,7 +283,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				rv.Status.Conditions[0].Status = metav1.ConditionFalse
@@ -311,7 +312,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 
@@ -353,7 +354,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
@@ -389,7 +390,7 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 				}
 				rvr.Spec.NodeName = cfg.NodeName()
-				rvr.Status.DRBD.Config.Primary = boolPtr(true)
+				rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 				rvr.Status.DRBD.Status.Role = "Secondary"
 				rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 			})
@@ -412,7 +413,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(true)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 					rvr.Status.DRBD.Status.Role = "Primary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				}),
@@ -433,7 +434,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(false)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(false)
 					rvr.Status.DRBD.Status.Role = "Secondary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				}),
@@ -492,7 +493,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(true)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 					rvr.Status.DRBD.Status.Role = "Secondary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				})
@@ -561,7 +562,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(false)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(false)
 					rvr.Status.DRBD.Status.Role = "Primary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				})
@@ -628,7 +629,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(true)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 					rvr.Status.DRBD.Status.Role = "Secondary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 					clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
@@ -667,7 +668,7 @@ var _ = Describe("Reconciler", func() {
 						rvr.Status.DRBD.Actual = &v1alpha1.DRBDActual{}
 					}
 					rvr.Spec.NodeName = cfg.NodeName()
-					rvr.Status.DRBD.Config.Primary = boolPtr(true)
+					rvr.Status.DRBD.Config.Primary = u.Ptr(true)
 					rvr.Status.DRBD.Status.Role = "Secondary"
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 					rvrName = rvr.Name
@@ -717,7 +718,3 @@ func (c *testConfig) MetricsBindAddress() string {
 }
 
 var _ env.Config = &testConfig{}
-
-func boolPtr(b bool) *bool {
-	return &b
-}
