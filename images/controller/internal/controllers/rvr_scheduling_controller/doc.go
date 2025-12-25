@@ -40,9 +40,9 @@ limitations under the License.
 //
 // Eligible nodes are determined by intersection of:
 //   - Nodes in zones specified by rsc.spec.zones (or all zones if not specified)
-//     * Exception: For Access replicas, all nodes are eligible regardless of zones
+//   - Exception: For Access replicas, all nodes are eligible regardless of zones
 //   - Nodes with LVG from rsp.spec.lvmVolumeGroups (only for Diskful replicas)
-//     * Access and TieBreaker replicas can be scheduled on any node
+//   - Access and TieBreaker replicas can be scheduled on any node
 //
 // # Scheduling Phases
 //
@@ -51,14 +51,14 @@ limitations under the License.
 // Phase 1: Diskful Replicas
 //   - Exclude nodes already hosting any replica of this RV
 //   - Apply topology constraints:
-//     * Zonal: All replicas in one zone
-//       - If Diskful replicas exist, use their zone
-//       - Else if rv.spec.publishOn specified, choose best zone from those nodes
-//       - Else choose best zone from allowed zones
-//     * TransZonal: Distribute replicas evenly across zones
-//       - Place each replica in zone with fewest Diskful replicas
-//       - Fail if even distribution is impossible
-//     * Ignored: No zone constraints
+//   - Zonal: All replicas in one zone
+//   - If Diskful replicas exist, use their zone
+//   - Else if rv.spec.publishOn specified, choose best zone from those nodes
+//   - Else choose best zone from allowed zones
+//   - TransZonal: Distribute replicas evenly across zones
+//   - Place each replica in zone with fewest Diskful replicas
+//   - Fail if even distribution is impossible
+//   - Ignored: No zone constraints
 //   - Check storage capacity via scheduler-extender API
 //   - Prefer nodes in rv.spec.publishOn (increase priority)
 //
@@ -73,14 +73,14 @@ limitations under the License.
 // Phase 3: TieBreaker Replicas
 //   - Exclude nodes already hosting any replica of this RV
 //   - Apply topology constraints:
-//     * Zonal: Place in same zone as Diskful replicas
-//       - Fail if no Diskful replicas exist
-//       - Fail if insufficient free nodes in zone
-//     * TransZonal: Place in zone with fewest replicas (any type)
-//       - If multiple zones tied, choose any
-//       - Fail if no free nodes in least-populated zones (cannot guarantee balance)
-//     * Ignored: No zone constraints
-//       - Fail if insufficient free nodes
+//   - Zonal: Place in same zone as Diskful replicas
+//   - Fail if no Diskful replicas exist
+//   - Fail if insufficient free nodes in zone
+//   - TransZonal: Place in zone with fewest replicas (any type)
+//   - If multiple zones tied, choose any
+//   - Fail if no free nodes in least-populated zones (cannot guarantee balance)
+//   - Ignored: No zone constraints
+//   - Fail if insufficient free nodes
 //
 // # Reconciliation Flow
 //
@@ -102,7 +102,7 @@ limitations under the License.
 //  7. Update rvr.status.conditions[type=Scheduled]:
 //     - status=True, reason=ReplicaScheduled when successful
 //     - status=False with appropriate reason when scheduling fails:
-//       * InsufficientNodes, NoEligibleNodes, TopologyConstraintViolation, etc.
+//     * InsufficientNodes, NoEligibleNodes, TopologyConstraintViolation, etc.
 //     - For unscheduled replicas: reason=WaitingForAnotherReplica
 //
 // # Status Updates
