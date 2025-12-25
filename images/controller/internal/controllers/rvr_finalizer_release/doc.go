@@ -50,18 +50,18 @@ limitations under the License.
 // Always required:
 //   - Replica is not published: node not in rv.status.publishedOn
 //   - For RV deletion (rv.metadata.deletionTimestamp set):
-//     * All replicas must be unpublished (len(rv.status.publishedOn)==0)
+//   - All replicas must be unpublished (len(rv.status.publishedOn)==0)
 //
 // When RV is NOT being deleted (rv.metadata.deletionTimestamp==nil):
 //   - Remaining online replicas >= quorum:
-//     * Count rvr.status.conditions[type=Online].status==True
-//     * Exclude the replica being deleted
-//     * Count must be >= rv.status.drbd.config.quorum
+//   - Count rvr.status.conditions[type=Online].status==True
+//   - Exclude the replica being deleted
+//   - Count must be >= rv.status.drbd.config.quorum
 //   - Sufficient Diskful replicas remain:
-//     * Count rvr.spec.Type==Diskful AND rvr.status.actualType==Diskful
-//     * Count rvr.status.conditions[type=IOReady].status==True
-//     * Exclude replicas being deleted (rvr.metadata.deletionTimestamp!=nil)
-//     * Count must meet rsc.spec.replication requirements
+//   - Count rvr.spec.Type==Diskful AND rvr.status.actualType==Diskful
+//   - Count rvr.status.conditions[type=IOReady].status==True
+//   - Exclude replicas being deleted (rvr.metadata.deletionTimestamp!=nil)
+//   - Count must meet rsc.spec.replication requirements
 //
 // # Reconciliation Flow
 //

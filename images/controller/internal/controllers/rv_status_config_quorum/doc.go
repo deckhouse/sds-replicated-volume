@@ -62,7 +62,7 @@ limitations under the License.
 //  5. Update rv.status.drbd.config.quorum and rv.status.drbd.config.quorumMinimumRedundancy
 //  6. Handle replica deletion:
 //     - When rvr.metadata.deletionTimestamp is set, only remove finalizer after
-//       quorum has been safely reduced
+//     quorum has been safely reduced
 //  7. Update rv.status.conditions[type=QuorumConfigured]:
 //     - status=True when quorum is properly configured
 //     - status=False if configuration failed
