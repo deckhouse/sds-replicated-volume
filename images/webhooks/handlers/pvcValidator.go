@@ -44,6 +44,7 @@ const (
 var pvcRwxDefaultAllowedUsernames = []string{
 	"system:serviceaccount:d8-virtualization:cdi-sa",
 	"system:serviceaccount:d8-virtualization:virtualization-controller",
+	"system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller",
 }
 
 // kubeClientFactory allows injecting a custom client factory for testing
