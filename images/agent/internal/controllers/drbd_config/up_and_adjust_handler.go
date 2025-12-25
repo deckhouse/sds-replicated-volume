@@ -25,6 +25,7 @@ import (
 	"slices"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
@@ -196,7 +197,12 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		return fmt.Errorf("adjusting the resource '%s': %w", rvName, configurationCommandError{err})
 	}
 
-	// initial sync for diskful replicas without diskful peers
+	// Initial sync for diskful replicas without diskful peers.
+	// We only do primary --force if:
+	// - There are no diskful peers (all peers are diskless or no peers at all)
+	// - Disk is not already UpToDate
+	// - RV was never initialized (rv.conditions.Initialized=False)
+	// The rv.Initialized check protects against split-brain when peers info is not yet populated.
 	if h.rvr.Spec.Type == "Diskful" {
 		noDiskfulPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
 			!hasDiskfulPeer(h.rvr.Status.DRBD.Config.Peers)
@@ -207,12 +213,10 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
 			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
 
-		alreadyCompleted := h.rvr.Status != nil &&
-			h.rvr.Status.DRBD != nil &&
-			h.rvr.Status.DRBD.Actual != nil &&
-			h.rvr.Status.DRBD.Actual.InitialSyncCompleted
+		rvAlreadyInitialized := h.rv.Status != nil &&
+			meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized)
 
-		if noDiskfulPeers && !upToDate && !alreadyCompleted {
+		if noDiskfulPeers && !upToDate && !rvAlreadyInitialized {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
 				return fmt.Errorf("promoting resource '%s' for initial sync: %w", rvName, configurationCommandError{err})
 			}
