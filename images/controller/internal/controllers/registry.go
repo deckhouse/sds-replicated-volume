@@ -31,7 +31,7 @@ import (
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
-	rvrownerreferencecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference_controller"
+	rvrownerreference "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_conditions"
 	rvrstatusconfignodeid "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_node_id"
@@ -52,7 +52,7 @@ func init() {
 	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
-	registry = append(registry, rvrownerreferencecontroller.BuildController)
+	registry = append(registry, rvrownerreference.BuildController)
 	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrfinalizerrelease.BuildController)
 	registry = append(registry, rvfinalizer.BuildController)

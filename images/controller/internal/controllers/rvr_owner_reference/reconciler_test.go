@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrownerreferencecontroller_test
+package rvrownerreference_test
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvrownerreferencecontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference_controller"
+	rvrownerreference "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -46,7 +46,7 @@ var _ = Describe("Reconciler", func() {
 
 	var (
 		cl  client.Client
-		rec *rvrownerreferencecontroller.Reconciler
+		rec *rvrownerreference.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -59,7 +59,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvrownerreferencecontroller.NewReconciler(cl, GinkgoLogr, scheme)
+		rec = rvrownerreference.NewReconciler(cl, GinkgoLogr, scheme)
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
