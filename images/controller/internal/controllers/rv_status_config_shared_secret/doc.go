@@ -58,13 +58,13 @@ limitations under the License.
 //     a. Extract the failed algorithm from error.unsupportedAlg
 //     b. Select the next algorithm from the supported list
 //     c. If next algorithm exists:
-//        - Generate new shared secret
-//        - Update rv.status.drbd.config.sharedSecretAlg
-//        - Update rv.status.drbd.config.sharedSecret
+//     - Generate new shared secret
+//     - Update rv.status.drbd.config.sharedSecretAlg
+//     - Update rv.status.drbd.config.sharedSecret
 //     d. If no more algorithms available:
-//        - Set rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False
-//        - Set reason=UnableToSelectSharedSecretAlgorithm
-//        - Include details in message (node, algorithm)
+//     - Set rv.status.conditions[type=SharedSecretAlgorithmSelected].status=False
+//     - Set reason=UnableToSelectSharedSecretAlgorithm
+//     - Include details in message (node, algorithm)
 //
 // # Status Updates
 //
