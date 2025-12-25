@@ -349,7 +349,9 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	c.nodesMutex.RLock()
 	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
 		nodes := make([]corev1.Node, len(c.cachedNodes))
-		copy(nodes, c.cachedNodes)
+		for i := range c.cachedNodes {
+			nodes[i] = *c.cachedNodes[i].DeepCopy()
+		}
 		c.nodesMutex.RUnlock()
 		return nodes, nil
 	}
@@ -361,7 +363,9 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 	// Double-check after acquiring write lock
 	if c.cachedNodes != nil && time.Since(c.nodesCacheTime) < nodesCacheTTL {
 		nodes := make([]corev1.Node, len(c.cachedNodes))
-		copy(nodes, c.cachedNodes)
+		for i := range c.cachedNodes {
+			nodes[i] = *c.cachedNodes[i].DeepCopy()
+		}
 		return nodes, nil
 	}
 
@@ -375,10 +379,17 @@ func (c *Client) ListNodes(ctx context.Context) ([]corev1.Node, error) {
 
 	// Cache the result with timestamp
 	c.cachedNodes = make([]corev1.Node, len(nodeList.Items))
-	copy(c.cachedNodes, nodeList.Items)
+	for i := range nodeList.Items {
+		c.cachedNodes[i] = *nodeList.Items[i].DeepCopy()
+	}
 	c.nodesCacheTime = time.Now()
 
-	return c.cachedNodes, nil
+	// Return a deep copy to prevent external modifications
+	nodes := make([]corev1.Node, len(c.cachedNodes))
+	for i := range c.cachedNodes {
+		nodes[i] = *c.cachedNodes[i].DeepCopy()
+	}
+	return nodes, nil
 }
 
 // CreateRV creates a new ReplicatedVolume
