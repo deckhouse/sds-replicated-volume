@@ -52,18 +52,18 @@ limitations under the License.
 //  3. Process each node in rv.spec.publishOn:
 //     a. Find or identify replica on that node
 //     b. For Local volume access:
-//        - Verify replica is Diskful type
-//        - Set condition PublishSucceeded=False if not (UnableToProvideLocalVolumeAccess)
+//     - Verify replica is Diskful type
+//     - Set condition PublishSucceeded=False if not (UnableToProvideLocalVolumeAccess)
 //     c. For TieBreaker replicas:
-//        - Convert spec.type to Access before promoting
+//     - Convert spec.type to Access before promoting
 //     d. Set rvr.status.drbd.config.primary=true
 //  4. Handle allowTwoPrimaries configuration:
 //     - If len(rv.spec.publishOn)==2:
-//       * Set rv.status.drbd.config.allowTwoPrimaries=true
-//       * Wait for all replicas to report rvr.status.drbd.actual.allowTwoPrimaries=true
-//       * Then proceed with promotions
+//     * Set rv.status.drbd.config.allowTwoPrimaries=true
+//     * Wait for all replicas to report rvr.status.drbd.actual.allowTwoPrimaries=true
+//     * Then proceed with promotions
 //     - If len(rv.spec.publishOn)<2:
-//       * Set rv.status.drbd.config.allowTwoPrimaries=false
+//     * Set rv.status.drbd.config.allowTwoPrimaries=false
 //  5. Demote replicas no longer in publishOn:
 //     - Set rvr.status.drbd.config.primary=false
 //  6. Update rv.status.publishedOn:

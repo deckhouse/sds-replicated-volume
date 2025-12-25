@@ -58,7 +58,7 @@ limitations under the License.
 //     c. Build a set of used node IDs (0-7)
 //     d. Find smallest available ID
 //     e. If all IDs are used (>8 replicas):
-//        - Log error and retry (DRBD limitation)
+//     - Log error and retry (DRBD limitation)
 //     f. Update rvr.status.drbd.config.nodeId
 //
 // # Status Updates

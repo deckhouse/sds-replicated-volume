@@ -57,9 +57,9 @@ limitations under the License.
 //  5. Count existing Diskful replicas (excluding those being deleted)
 //  6. If current count < target count:
 //     a. For the first replica (count == 0):
-//        - Create one replica and wait for it to be Ready
+//     - Create one replica and wait for it to be Ready
 //     b. For subsequent replicas (count >= 1):
-//        - Create remaining replicas (can be created in parallel)
+//     - Create remaining replicas (can be created in parallel)
 //  7. For each new replica:
 //     - Set spec.type=Diskful
 //     - Set spec.replicatedVolumeName to RV name
