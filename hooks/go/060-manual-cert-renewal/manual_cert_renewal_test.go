@@ -17,7 +17,6 @@ limitations under the License.
 package manualcertrenewal
 
 import (
-	"context"
 	"os"
 	"testing"
 
@@ -29,7 +28,7 @@ func TestManualCertRenewal(t *testing.T) {
 	devMode = true
 	os.Setenv("LOG_LEVEL", "INFO")
 
-	err := manualCertRenewal(context.Background(), &pkg.HookInput{
+	err := manualCertRenewal(t.Context(), &pkg.HookInput{
 		Logger: log.Default(),
 	})
 
