@@ -1,0 +1,203 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.20.0
+  labels:
+    backup.deckhouse.io/cluster-config: "true"
+    heritage: deckhouse
+    module: sds-replicated-volume
+  name: replicatedstorageclasses.storage.deckhouse.io
+spec:
+  group: storage.deckhouse.io
+  names:
+    kind: ReplicatedStorageClass
+    listKind: ReplicatedStorageClassList
+    plural: replicatedstorageclasses
+    shortNames:
+    - rsc
+    singular: replicatedstorageclass
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.reason
+      name: Reason
+      priority: 1
+      type: string
+    - description: The age of this resource
+      jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ReplicatedStorageClass is a Kubernetes Custom Resource that defines
+          a configuration for a Kubernetes Storage class.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              Defines a Kubernetes Storage class configuration.
+
+              > Note that this field is in read-only mode.
+            properties:
+              reclaimPolicy:
+                description: |-
+                  The storage class's reclaim policy. Might be:
+                  - Delete (If the Persistent Volume Claim is deleted, deletes the Persistent Volume and its associated storage as well)
+                  - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
+                enum:
+                - Delete
+                - Retain
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              replication:
+                default: ConsistencyAndAvailability
+                description: |-
+                  The Storage class's replication mode. Might be:
+                  - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
+                  - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
+                  - ConsistencyAndAvailability — In this mode the volume remains readable and writable when one replica node fails. Data is stored in three copies on different nodes (`placementCount = 3`, `AutoEvictMinReplicaCount = 3`). This mode provides protection against data loss when two nodes containing volume replicas fail and guarantees data consistency. However, if two replicas are lost, the volume switches to suspend-io mode.
+
+                  > Note that default Replication mode is 'ConsistencyAndAvailability'.
+                enum:
+                - None
+                - Availability
+                - ConsistencyAndAvailability
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              storagePool:
+                description: Selected ReplicatedStoragePool resource's name.
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              topology:
+                description: |-
+                  The topology settings for the volumes in the created Storage class. Might be:
+                  - TransZonal - replicas of the volumes will be created in different zones (one replica per zone).
+                  To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
+                  - Zonal - all replicas of the volumes are created in the same zone that the scheduler selected to place the pod using this volume.
+                  - Ignored - the topology information will not be used to place replicas of the volumes.
+                  The replicas can be placed on any available nodes, with the restriction: no more than one replica of a given volume on one node.
+
+                  > Note that the 'Ignored' value can be used only if there are no zones in the cluster (there are no nodes with the topology.kubernetes.io/zone label).
+
+                  > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
+                enum:
+                - TransZonal
+                - Zonal
+                - Ignored
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              volumeAccess:
+                default: PreferablyLocal
+                description: |-
+                  The Storage class's access mode. Might be:
+                  - Local (in this mode the Storage class's 'allowRemoteVolumeAccess' param equals 'false'
+                  and Volume Binding mode equals 'WaitForFirstConsumer')
+                  - EventuallyLocal (in this mode the Storage class's 'allowRemoteVolumeAccess' param
+                  equals '- fromSame:\n  - topology.kubernetes.io/zone', 'auto-diskful' param equals '30' minutes,
+                  'auto-diskful-allow-cleanup' param equals 'true',
+                  and Volume Binding mode equals 'WaitForFirstConsumer')
+                  - PreferablyLocal (in this mode the Storage class's 'allowRemoteVolumeAccess' param
+                  equals '- fromSame:\n  - topology.kubernetes.io/zone',
+                  and Volume Binding mode equals 'WaitForFirstConsumer')
+                  - Any (in this mode the Storage class's 'allowRemoteVolumeAccess' param
+                  equals '- fromSame:\n  - topology.kubernetes.io/zone',
+                  and Volume Binding mode equals 'Immediate')
+
+                  > Note that the default Volume Access mode is 'PreferablyLocal'.
+                enum:
+                - Local
+                - EventuallyLocal
+                - PreferablyLocal
+                - Any
+                type: string
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+              zones:
+                description: |-
+                  Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
+                  the Storage class's name on the nodes which be actual used by the Storage class.
+
+                  > Note that for Replication mode 'Availability' and 'ConsistencyAndAvailability' you have to select
+                  exactly 1 or 3 zones.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-validations:
+                - message: Value is immutable.
+                  rule: self == oldSelf
+            required:
+            - reclaimPolicy
+            - storagePool
+            - topology
+            type: object
+            x-kubernetes-validations:
+            - message: When replication is not set or is set to Availability or ConsistencyAndAvailability
+                (default value), zones must be either not specified, or must contain
+                exactly three zones.
+              rule: (has(self.replication) && self.replication == "None") || ((!has(self.replication)
+                || self.replication == "Availability" || self.replication == "ConsistencyAndAvailability")
+                && (!has(self.zones) || size(self.zones) == 0 || size(self.zones)
+                == 1 || size(self.zones) == 3))
+            - message: zones field cannot be deleted or added
+              rule: (has(self.zones) && has(oldSelf.zones)) || (!has(self.zones) &&
+                !has(oldSelf.zones))
+            - message: replication filed cannot be deleted or added
+              rule: (has(self.replication) && has(oldSelf.replication)) || (!has(self.replication)
+                && !has(oldSelf.replication))
+            - message: volumeAccess filed cannot be deleted or added
+              rule: (has(self.volumeAccess) && has(oldSelf.volumeAccess)) || (!has(self.volumeAccess)
+                && !has(oldSelf.volumeAccess))
+          status:
+            description: Displays current information about the Storage Class.
+            properties:
+              phase:
+                description: |-
+                  The Storage class current state. Might be:
+                  - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
+                  - Create (if everything went fine)
+                enum:
+                - Failed
+                - Created
+                type: string
+              reason:
+                description: Additional information about the current state of the
+                  Storage Class.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

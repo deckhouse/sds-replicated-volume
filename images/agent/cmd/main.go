@@ -32,6 +32,7 @@ import (
 	"github.com/deckhouse/sds-common-lib/slogh"
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 )
 
 func main() {
@@ -83,14 +84,15 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 	})
 
 	// DRBD SCANNER
-	scanner := NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
+	s := scanner.NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
+	scanner.SetDefaultScanner(s)
 
 	eg.Go(func() error {
-		return scanner.Run()
+		return s.Run()
 	})
 
 	eg.Go(func() error {
-		return scanner.ConsumeBatches()
+		return s.ConsumeBatches()
 	})
 
 	return eg.Wait()

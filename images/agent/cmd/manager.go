@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
@@ -71,10 +71,10 @@ func newManager(
 
 	err = mgr.GetFieldIndexer().IndexField(
 		ctx,
-		&v1alpha3.ReplicatedVolumeReplica{},
+		&v1alpha1.ReplicatedVolumeReplica{},
 		"spec.nodeName",
 		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha3.ReplicatedVolumeReplica)
+			replica := rawObj.(*v1alpha1.ReplicatedVolumeReplica)
 			if replica.Spec.NodeName == "" {
 				return nil
 			}

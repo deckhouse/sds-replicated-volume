@@ -5,7 +5,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-    http://www.apache.org/licenses/LICENSE-2.0
+	http://www.apache.org/licenses/LICENSE-2.0
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvr_scheduling_controller_test
+package rvrschedulingcontroller_test
 
 import (
 	"context"
@@ -41,7 +41,6 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	v1alpha3 "github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 )
 
@@ -56,7 +55,7 @@ type ClusterSetup struct {
 
 // ExistingReplica represents an already scheduled replica
 type ExistingReplica struct {
-	Type     string // Diskful, Access, TieBreaker
+	Type     v1alpha1.ReplicaType // Diskful, Access, TieBreaker
 	NodeName string
 }
 
@@ -73,6 +72,14 @@ type ExpectedResult struct {
 	TieBreakerZones []string // zones where TieBreaker replicas should be (nil = any)
 	DiskfulNodes    []string // specific nodes for Diskful (nil = check zones only)
 	TieBreakerNodes []string // specific nodes for TieBreaker (nil = check zones only)
+	// Partial scheduling support for Diskful
+	ScheduledDiskfulCount   *int   // expected number of scheduled Diskful (nil = all must be scheduled)
+	UnscheduledDiskfulCount *int   // expected number of unscheduled Diskful (nil = 0)
+	UnscheduledReason       string // expected condition reason for unscheduled Diskful replicas
+	// Partial scheduling support for TieBreaker
+	ScheduledTieBreakerCount    *int   // expected number of scheduled TieBreaker (nil = all must be scheduled)
+	UnscheduledTieBreakerCount  *int   // expected number of unscheduled TieBreaker (nil = 0)
+	UnscheduledTieBreakerReason string // expected condition reason for unscheduled TieBreaker replicas
 }
 
 // IntegrationTestCase defines a full integration test case
@@ -84,6 +91,11 @@ type IntegrationTestCase struct {
 	Existing   []ExistingReplica
 	ToSchedule ReplicasToSchedule
 	Expected   ExpectedResult
+}
+
+// intPtr returns a pointer to an int value
+func intPtr(i int) *int {
+	return &i
 }
 
 // generateNodes creates nodes for a cluster setup
@@ -245,7 +257,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		utilruntime.Must(corev1.AddToScheme(scheme))
 		utilruntime.Must(snc.AddToScheme(scheme))
 		utilruntime.Must(v1alpha1.AddToScheme(scheme))
-		utilruntime.Must(v1alpha3.AddToScheme(scheme))
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	})
 
 	// Helper to run a test case
@@ -283,33 +295,33 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		// Create RV
-		rv := &v1alpha3.ReplicatedVolume{
+		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-test",
-				Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
+			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-test",
 				PublishOn:                  tc.PublishOn,
 			},
-			Status: &v1alpha3.ReplicatedVolumeStatus{
+			Status: &v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha3.ConditionTypeReady,
+					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
 				}},
 			},
 		}
 
 		// Create RVRs
-		var rvrList []*v1alpha3.ReplicatedVolumeReplica
+		var rvrList []*v1alpha1.ReplicatedVolumeReplica
 		rvrIndex := 1
 
 		// Existing replicas (already scheduled)
 		for _, existing := range tc.Existing {
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-existing-%d", rvrIndex)},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "rv-test",
 					Type:                 existing.Type,
 					NodeName:             existing.NodeName,
@@ -321,11 +333,11 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		// Diskful replicas to schedule
 		for i := 0; i < tc.ToSchedule.Diskful; i++ {
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-diskful-%d", i+1)},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "rv-test",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 			rvrList = append(rvrList, rvr)
@@ -333,11 +345,11 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		// TieBreaker replicas to schedule
 		for i := 0; i < tc.ToSchedule.TieBreaker; i++ {
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-tiebreaker-%d", i+1)},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "rv-test",
-					Type:                 v1alpha3.ReplicaTypeTieBreaker,
+					Type:                 v1alpha1.ReplicaTypeTieBreaker,
 				},
 			}
 			rvrList = append(rvrList, rvr)
@@ -359,7 +371,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		cl := fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithRuntimeObjects(objects...).
-			WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			Build()
 		rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 		Expect(err).ToNot(HaveOccurred())
@@ -378,23 +390,45 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		// Verify Diskful replicas
 		var scheduledDiskful []string
+		var unscheduledDiskful []string
 		var diskfulZones []string
 		for i := 0; i < tc.ToSchedule.Diskful; i++ {
-			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-diskful-%d", i+1)}, updated)).To(Succeed())
-			Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "Diskful replica %d not scheduled", i+1)
-			scheduledDiskful = append(scheduledDiskful, updated.Spec.NodeName)
 
-			// Find zone for this node
-			for _, node := range nodes {
-				if node.Name == updated.Spec.NodeName {
-					zone := node.Labels["topology.kubernetes.io/zone"]
-					if !slices.Contains(diskfulZones, zone) {
-						diskfulZones = append(diskfulZones, zone)
+			if updated.Spec.NodeName != "" {
+				scheduledDiskful = append(scheduledDiskful, updated.Spec.NodeName)
+				// Find zone for this node
+				for _, node := range nodes {
+					if node.Name == updated.Spec.NodeName {
+						zone := node.Labels["topology.kubernetes.io/zone"]
+						if !slices.Contains(diskfulZones, zone) {
+							diskfulZones = append(diskfulZones, zone)
+						}
+						break
 					}
-					break
+				}
+			} else {
+				unscheduledDiskful = append(unscheduledDiskful, updated.Name)
+				// Check condition on unscheduled replica
+				if tc.Expected.UnscheduledReason != "" {
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil(), "Unscheduled replica %s should have Scheduled condition", updated.Name)
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse), "Unscheduled replica %s should have Scheduled=False", updated.Name)
+					Expect(cond.Reason).To(Equal(tc.Expected.UnscheduledReason), "Unscheduled replica %s has wrong reason", updated.Name)
 				}
 			}
+		}
+
+		// Check scheduled/unscheduled counts if specified
+		if tc.Expected.ScheduledDiskfulCount != nil {
+			Expect(len(scheduledDiskful)).To(Equal(*tc.Expected.ScheduledDiskfulCount), "Scheduled Diskful count mismatch")
+		} else if tc.Expected.UnscheduledDiskfulCount == nil {
+			// Default: all must be scheduled
+			Expect(len(unscheduledDiskful)).To(Equal(0), "All Diskful replicas should be scheduled, but %d were not: %v", len(unscheduledDiskful), unscheduledDiskful)
+		}
+		if tc.Expected.UnscheduledDiskfulCount != nil {
+			Expect(len(unscheduledDiskful)).To(Equal(*tc.Expected.UnscheduledDiskfulCount), "Unscheduled Diskful count mismatch")
 		}
 
 		// Check Diskful zones
@@ -409,23 +443,45 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 		// Verify TieBreaker replicas
 		var scheduledTieBreaker []string
+		var unscheduledTieBreaker []string
 		var tieBreakerZones []string
 		for i := 0; i < tc.ToSchedule.TieBreaker; i++ {
-			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: fmt.Sprintf("rvr-tiebreaker-%d", i+1)}, updated)).To(Succeed())
-			Expect(updated.Spec.NodeName).ToNot(BeEmpty(), "TieBreaker replica %d not scheduled", i+1)
-			scheduledTieBreaker = append(scheduledTieBreaker, updated.Spec.NodeName)
+			if updated.Spec.NodeName != "" {
+				scheduledTieBreaker = append(scheduledTieBreaker, updated.Spec.NodeName)
 
-			// Find zone for this node
-			for _, node := range nodes {
-				if node.Name == updated.Spec.NodeName {
-					zone := node.Labels["topology.kubernetes.io/zone"]
-					if !slices.Contains(tieBreakerZones, zone) {
-						tieBreakerZones = append(tieBreakerZones, zone)
+				// Find zone for this node
+				for _, node := range nodes {
+					if node.Name == updated.Spec.NodeName {
+						zone := node.Labels["topology.kubernetes.io/zone"]
+						if !slices.Contains(tieBreakerZones, zone) {
+							tieBreakerZones = append(tieBreakerZones, zone)
+						}
+						break
 					}
-					break
+				}
+			} else {
+				unscheduledTieBreaker = append(unscheduledTieBreaker, updated.Name)
+				// Check condition on unscheduled TieBreaker replica
+				if tc.Expected.UnscheduledTieBreakerReason != "" {
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil(), "Unscheduled TieBreaker replica %s should have Scheduled condition", updated.Name)
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse), "Unscheduled TieBreaker replica %s should have Scheduled=False", updated.Name)
+					Expect(cond.Reason).To(Equal(tc.Expected.UnscheduledTieBreakerReason), "Unscheduled TieBreaker replica %s has wrong reason", updated.Name)
 				}
 			}
+		}
+
+		// Check scheduled/unscheduled TieBreaker counts if specified
+		if tc.Expected.ScheduledTieBreakerCount != nil {
+			Expect(len(scheduledTieBreaker)).To(Equal(*tc.Expected.ScheduledTieBreakerCount), "Scheduled TieBreaker count mismatch")
+		} else if tc.Expected.UnscheduledTieBreakerCount == nil {
+			// Default: all must be scheduled
+			Expect(len(unscheduledTieBreaker)).To(Equal(0), "All TieBreaker replicas should be scheduled, but %d were not: %v", len(unscheduledTieBreaker), unscheduledTieBreaker)
+		}
+		if tc.Expected.UnscheduledTieBreakerCount != nil {
+			Expect(len(unscheduledTieBreaker)).To(Equal(*tc.Expected.UnscheduledTieBreakerCount), "Unscheduled TieBreaker count mismatch")
 		}
 
 		// Check TieBreaker zones
@@ -495,7 +551,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Cluster:    "medium-2z-4n",
 				Topology:   "Zonal",
 				PublishOn:  nil,
-				Existing:   []ExistingReplica{{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"}},
+				Existing:   []ExistingReplica{{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"}},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}, TieBreakerZones: []string{"zone-a"}},
 			},
@@ -505,11 +561,17 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Zonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
-				Expected:   ExpectedResult{Error: "multiple zones"},
+				// With best-effort scheduling, topology conflict doesn't return error,
+				// but sets Scheduled=False on unscheduled replicas
+				Expected: ExpectedResult{
+					ScheduledDiskfulCount:   intPtr(0),
+					UnscheduledDiskfulCount: intPtr(1),
+					UnscheduledReason:       v1alpha1.ReasonSchedulingTopologyConflict,
+				},
 			},
 			{
 				Name:       "7. large-3z: no publishOn - pick best zone by score",
@@ -535,20 +597,28 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Zonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
-				Name:       "10. medium-2z: TB only without Diskful - error",
+				Name:       "10. medium-2z: TB only without Diskful - no candidate nodes",
 				Cluster:    "medium-2z",
 				Topology:   "Zonal",
 				PublishOn:  nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no Diskful replicas"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:      "11. medium-2z-4n: existing D+TB in zone-a - new D in zone-a",
@@ -556,8 +626,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Zonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
@@ -568,8 +638,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Zonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-a"}},
@@ -613,8 +683,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
@@ -625,8 +695,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-c"}},
@@ -636,7 +706,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Cluster:    "medium-2z",
 				Topology:   "TransZonal",
 				PublishOn:  nil,
-				Existing:   []ExistingReplica{{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"}},
+				Existing:   []ExistingReplica{{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"}},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-b"}},
 			},
@@ -646,8 +716,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{}, // will place in any zone with free node
@@ -676,13 +746,17 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:       "10. large-3z: TB only, no existing - TB in any zone",
@@ -699,9 +773,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
@@ -712,9 +786,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "TransZonal",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected:   ExpectedResult{TieBreakerZones: []string{"zone-c"}}, // zone-c has 0 replicas
@@ -778,11 +852,15 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Ignored",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
-				Expected:   ExpectedResult{Error: "no candidate nodes"},
+				Expected: ExpectedResult{
+					ScheduledTieBreakerCount:    intPtr(0),
+					UnscheduledTieBreakerCount:  intPtr(1),
+					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+				},
 			},
 			{
 				Name:      "6. small-1z-4n: existing D+TB - new D on best remaining",
@@ -790,8 +868,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Ignored",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{}, // any of remaining nodes
@@ -802,8 +880,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Ignored",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected:   ExpectedResult{}, // any of remaining nodes
@@ -814,9 +892,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Topology:  "Ignored",
 				PublishOn: nil,
 				Existing: []ExistingReplica{
-					{Type: v1alpha3.ReplicaTypeDiskful, NodeName: "node-a1"},
-					{Type: v1alpha3.ReplicaTypeAccess, NodeName: "node-a2"},
-					{Type: v1alpha3.ReplicaTypeTieBreaker, NodeName: "node-b1"},
+					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
+					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
+					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-b1"},
 				},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
 				Expected:   ExpectedResult{}, // best remaining nodes by score
@@ -832,7 +910,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 
 	// ==================== EXTENDER FILTERING ====================
 	Context("Extender Filtering", func() {
-		It("returns error when extender filters out all nodes (no space)", func(ctx SpecContext) {
+		It("sets Scheduled=False when extender filters out all nodes (no space)", func(ctx SpecContext) {
 			cluster := clusterConfigs["medium-2z"]
 
 			// Generate cluster resources
@@ -857,27 +935,27 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					Zones:        cluster.RSCZones,
 				},
 			}
-			rv := &v1alpha3.ReplicatedVolume{
+			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
+				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
+						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
 					}},
 				},
 			}
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "rv-test",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 
@@ -892,14 +970,23 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			cl := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
 
+			// With best-effort scheduling, no error is returned
 			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("no nodes with sufficient storage space"))
+			Expect(err).ToNot(HaveOccurred())
+
+			// Check that replica has Scheduled=False condition
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(BeEmpty(), "Replica should not be scheduled when no space")
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+			Expect(cond).ToNot(BeNil())
+			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			Expect(cond.Reason).To(Equal(v1alpha1.ReasonSchedulingNoCandidateNodes))
 		})
 
 		It("filters nodes where extender doesn't return LVG", func(ctx SpecContext) {
@@ -934,27 +1021,27 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					Zones:        cluster.RSCZones,
 				},
 			}
-			rv := &v1alpha3.ReplicatedVolume{
+			rv := &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv-test",
-					Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 				},
-				Spec: v1alpha3.ReplicatedVolumeSpec{
+				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha3.ReplicatedVolumeStatus{
+				Status: &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha3.ConditionTypeReady,
+						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
 					}},
 				},
 			}
-			rvr := &v1alpha3.ReplicatedVolumeReplica{
+			rvr := &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
-				Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: "rv-test",
-					Type:                 v1alpha3.ReplicaTypeDiskful,
+					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
 			}
 
@@ -969,7 +1056,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			cl := fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -977,7 +1064,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
 
-			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
 			// Must be on zone-a node since zone-b was filtered out
 			Expect(updated.Spec.NodeName).To(Or(Equal("node-a1"), Equal("node-a2")))
@@ -1011,7 +1098,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		utilruntime.Must(corev1.AddToScheme(scheme))
 		utilruntime.Must(snc.AddToScheme(scheme))
 		utilruntime.Must(v1alpha1.AddToScheme(scheme))
-		utilruntime.Must(v1alpha3.AddToScheme(scheme))
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
 	})
 
 	AfterEach(func() {
@@ -1020,31 +1107,31 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 	})
 
 	var (
-		rv                    *v1alpha3.ReplicatedVolume
+		rv                    *v1alpha1.ReplicatedVolume
 		rsc                   *v1alpha1.ReplicatedStorageClass
 		rsp                   *v1alpha1.ReplicatedStoragePool
 		lvgA                  *snc.LVMVolumeGroup
 		lvgB                  *snc.LVMVolumeGroup
 		nodeA                 *corev1.Node
 		nodeB                 *corev1.Node
-		rvrList               []*v1alpha3.ReplicatedVolumeReplica
+		rvrList               []*v1alpha1.ReplicatedVolumeReplica
 		withStatusSubresource bool
 	)
 
 	BeforeEach(func() {
-		rv = &v1alpha3.ReplicatedVolume{
+		rv = &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-access",
-				Finalizers: []string{v1alpha3.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 			},
-			Spec: v1alpha3.ReplicatedVolumeSpec{
+			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-access",
 				PublishOn:                  []string{"node-a", "node-b"},
 			},
-			Status: &v1alpha3.ReplicatedVolumeStatus{
+			Status: &v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha3.ConditionTypeReady,
+					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
 				}},
 			},
@@ -1108,7 +1195,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		}
 		builder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
 		if withStatusSubresource {
-			builder = builder.WithStatusSubresource(&v1alpha3.ReplicatedVolumeReplica{})
+			builder = builder.WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
 		}
 		cl = builder.Build()
 		var err error
@@ -1118,27 +1205,27 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 
 	When("one publishOn node has diskful replica", func() {
 		BeforeEach(func() {
-			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 						NodeName:             "node-a",
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-1"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-2"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 			}
@@ -1148,9 +1235,9 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
 
-			updated1 := &v1alpha3.ReplicatedVolumeReplica{}
+			updated1 := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-1"}, updated1)).To(Succeed())
-			updated2 := &v1alpha3.ReplicatedVolumeReplica{}
+			updated2 := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-2"}, updated2)).To(Succeed())
 
 			nodeNames := []string{updated1.Spec.NodeName, updated2.Spec.NodeName}
@@ -1161,28 +1248,28 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 
 	When("all publishOn nodes already have replicas", func() {
 		BeforeEach(func() {
-			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-a"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 						NodeName:             "node-a",
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-b"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 						NodeName:             "node-b",
 					},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-access-unscheduled"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 "Access",
+						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				},
 			}
@@ -1192,7 +1279,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
 
-			updated := &v1alpha3.ReplicatedVolumeReplica{}
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-access-unscheduled"}, updated)).To(Succeed())
 			Expect(updated.Spec.NodeName).To(Equal(""))
 		})
@@ -1201,23 +1288,23 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 	When("checking Scheduled condition", func() {
 		BeforeEach(func() {
 			rv.Spec.PublishOn = []string{"node-a", "node-b"}
-			rvrList = []*v1alpha3.ReplicatedVolumeReplica{
+			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 						NodeName:             "node-a",
 					},
-					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-to-schedule"},
-					Spec: v1alpha3.ReplicatedVolumeReplicaSpec{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: "rv-access",
-						Type:                 v1alpha3.ReplicaTypeDiskful,
+						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha3.ReplicatedVolumeReplicaStatus{},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{},
 				},
 			}
 		})
@@ -1227,21 +1314,439 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			// Check already-scheduled replica gets condition fixed
-			updatedScheduled := &v1alpha3.ReplicatedVolumeReplica{}
+			updatedScheduled := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-scheduled"}, updatedScheduled)).To(Succeed())
-			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha1.ConditionTypeScheduled)
 			Expect(condScheduled).ToNot(BeNil())
 			Expect(condScheduled.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
+			Expect(condScheduled.Reason).To(Equal(v1alpha1.ReasonSchedulingReplicaScheduled))
 
 			// Check newly-scheduled replica gets NodeName and Scheduled condition
-			updatedNewlyScheduled := &v1alpha3.ReplicatedVolumeReplica{}
+			updatedNewlyScheduled := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-to-schedule"}, updatedNewlyScheduled)).To(Succeed())
 			Expect(updatedNewlyScheduled.Spec.NodeName).To(Equal("node-b"))
-			condNewlyScheduled := meta.FindStatusCondition(updatedNewlyScheduled.Status.Conditions, v1alpha3.ConditionTypeScheduled)
+			condNewlyScheduled := meta.FindStatusCondition(updatedNewlyScheduled.Status.Conditions, v1alpha1.ConditionTypeScheduled)
 			Expect(condNewlyScheduled).ToNot(BeNil())
 			Expect(condNewlyScheduled.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condNewlyScheduled.Reason).To(Equal(v1alpha3.ReasonSchedulingReplicaScheduled))
+			Expect(condNewlyScheduled.Reason).To(Equal(v1alpha1.ReasonSchedulingReplicaScheduled))
+		})
+	})
+})
+
+// ==================== PARTIAL SCHEDULING AND EDGE CASES TESTS ====================
+var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
+	var (
+		scheme *runtime.Scheme
+	)
+
+	BeforeEach(func() {
+		scheme = runtime.NewScheme()
+		utilruntime.Must(corev1.AddToScheme(scheme))
+		utilruntime.Must(snc.AddToScheme(scheme))
+		utilruntime.Must(v1alpha1.AddToScheme(scheme))
+	})
+
+	Context("Partial Diskful Scheduling", func() {
+		It("schedules as many Diskful replicas as possible and sets Scheduled=False on remaining", func(ctx SpecContext) {
+			// Setup: 3 Diskful replicas to schedule, only 2 candidate nodes
+			cluster := clusterConfigs["small-1z"]
+			nodes, scores := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			// Build lvg -> node mapping for mock server
+			lvgToNode := make(map[string]string)
+			for _, lvg := range lvgs {
+				if len(lvg.Status.Nodes) > 0 {
+					lvgToNode[lvg.Name] = lvg.Status.Nodes[0].Name
+				}
+			}
+
+			mockServer := createMockServer(scores, lvgToNode)
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "Ignored",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create 3 Diskful replicas but only 2 nodes available
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr3 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-3"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr1, rvr2, rvr3}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Reconcile should succeed (no error) even though not all replicas can be scheduled
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Count scheduled replicas and check conditions
+			var scheduledCount int
+			var unscheduledCount int
+			for _, rvrName := range []string{"rvr-diskful-1", "rvr-diskful-2", "rvr-diskful-3"} {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, updated)).To(Succeed())
+
+				if updated.Spec.NodeName != "" {
+					scheduledCount++
+					// Check Scheduled=True for scheduled replicas
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil())
+					Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				} else {
+					unscheduledCount++
+					// Check Scheduled=False for unscheduled replicas with appropriate reason
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil())
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReasonSchedulingNoCandidateNodes))
+				}
+			}
+
+			// Expect 2 scheduled (we have 2 nodes) and 1 unscheduled
+			Expect(scheduledCount).To(Equal(2))
+			Expect(unscheduledCount).To(Equal(1))
+		})
+	})
+
+	Context("Deleting Replica Node Occupancy", func() {
+		It("does not schedule new replica on node with deleting replica", func(ctx SpecContext) {
+			// Setup: existing replica being deleted on node-a, new replica to schedule
+			cluster := clusterConfigs["small-1z"]
+			nodes, scores := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			lvgToNode := make(map[string]string)
+			for _, lvg := range lvgs {
+				if len(lvg.Status.Nodes) > 0 {
+					lvgToNode[lvg.Name] = lvg.Status.Nodes[0].Name
+				}
+			}
+
+			mockServer := createMockServer(scores, lvgToNode)
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "Ignored",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create a deleting replica on node-a1 (best score node)
+			deletingTime := metav1.Now()
+			deletingRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rvr-deleting",
+					DeletionTimestamp: &deletingTime,
+					Finalizers:        []string{"test-finalizer"}, // Finalizer to prevent actual deletion
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					NodeName:             "node-a1", // Best score node
+				},
+			}
+
+			// New replica to schedule
+			newRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-new"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, deletingRvr, newRvr}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// New replica should be scheduled on node-a2 (not node-a1 which has deleting replica)
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-new"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(Equal("node-a2"))
+			Expect(updated.Spec.NodeName).ToNot(Equal("node-a1")) // Should NOT be on node with deleting replica
+		})
+	})
+
+	Context("RVR with DeletionTimestamp", func() {
+		It("does not schedule RVR that is being deleted", func(ctx SpecContext) {
+			cluster := clusterConfigs["small-1z"]
+			nodes, scores := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			lvgToNode := make(map[string]string)
+			for _, lvg := range lvgs {
+				if len(lvg.Status.Nodes) > 0 {
+					lvgToNode[lvg.Name] = lvg.Status.Nodes[0].Name
+				}
+			}
+
+			mockServer := createMockServer(scores, lvgToNode)
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "Ignored",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// RVR with DeletionTimestamp and no NodeName - should NOT be scheduled
+			deletingTime := metav1.Now()
+			deletingRvr := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:              "rvr-deleting-unscheduled",
+					DeletionTimestamp: &deletingTime,
+					Finalizers:        []string{"test-finalizer"},
+				},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+					// No NodeName - not scheduled
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, deletingRvr}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Deleting RVR should NOT be scheduled
+			updated := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-deleting-unscheduled"}, updated)).To(Succeed())
+			Expect(updated.Spec.NodeName).To(BeEmpty()) // Should remain unscheduled
+		})
+	})
+
+	Context("Constraint Violation Conditions", func() {
+		It("sets Scheduled=False with appropriate reason when topology constraints fail", func(ctx SpecContext) {
+			// Setup: TransZonal topology, existing replicas in 2 zones, need to place more but distribution can't be satisfied
+			cluster := clusterConfigs["medium-2z"]
+			nodes, scores := generateNodes(cluster)
+			lvgs, rsp := generateLVGs(nodes)
+
+			// Only include zone-a nodes in lvgToNode (simulating zone-b has no capacity)
+			lvgToNode := make(map[string]string)
+			for _, lvg := range lvgs {
+				if len(lvg.Status.Nodes) > 0 {
+					nodeName := lvg.Status.Nodes[0].Name
+					if nodeName == "node-a1" || nodeName == "node-a2" {
+						lvgToNode[lvg.Name] = nodeName
+					}
+				}
+			}
+
+			mockServer := createMockServer(scores, lvgToNode)
+			defer mockServer.Close()
+			os.Setenv("SCHEDULER_EXTENDER_URL", mockServer.URL)
+			defer os.Unsetenv("SCHEDULER_EXTENDER_URL")
+
+			rsc := &v1alpha1.ReplicatedStorageClass{
+				ObjectMeta: metav1.ObjectMeta{Name: "rsc-test"},
+				Spec: v1alpha1.ReplicatedStorageClassSpec{
+					StoragePool:  "pool-1",
+					VolumeAccess: "Any",
+					Topology:     "TransZonal",
+					Zones:        cluster.RSCZones,
+				},
+			}
+			rv := &v1alpha1.ReplicatedVolume{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:       "rv-test",
+					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					Size:                       resource.MustParse("10Gi"),
+					ReplicatedStorageClassName: "rsc-test",
+				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{
+					Conditions: []metav1.Condition{{
+						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Status: metav1.ConditionTrue,
+					}},
+				},
+			}
+
+			// Create Diskful replicas to schedule - TransZonal will fail to place evenly
+			rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-1"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+			rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{Name: "rvr-diskful-2"},
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "rv-test",
+					Type:                 v1alpha1.ReplicaTypeDiskful,
+				},
+			}
+
+			objects := []runtime.Object{rv, rsc, rsp, rvr1, rvr2}
+			for _, node := range nodes {
+				objects = append(objects, node)
+			}
+			for _, lvg := range lvgs {
+				objects = append(objects, lvg)
+			}
+
+			cl := fake.NewClientBuilder().
+				WithScheme(scheme).
+				WithRuntimeObjects(objects...).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				Build()
+			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
+			Expect(err).ToNot(HaveOccurred())
+
+			// Reconcile - should succeed but some replicas may not be scheduled
+			_, err = rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
+			Expect(err).ToNot(HaveOccurred())
+
+			// Check that unscheduled replicas have Scheduled=False condition
+			for _, rvrName := range []string{"rvr-diskful-1", "rvr-diskful-2"} {
+				updated := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKey{Name: rvrName}, updated)).To(Succeed())
+
+				if updated.Spec.NodeName == "" {
+					// Unscheduled replica should have Scheduled=False
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					Expect(cond).ToNot(BeNil())
+					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+					// Reason should indicate why scheduling failed
+					Expect(cond.Reason).To(Or(
+						Equal(v1alpha1.ReasonSchedulingNoCandidateNodes),
+						Equal(v1alpha1.ReasonSchedulingTopologyConflict),
+					))
+				}
+			}
 		})
 	})
 })

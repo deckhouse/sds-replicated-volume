@@ -29,7 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha3"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
@@ -62,7 +62,7 @@ var _ = Describe("AddPublishRequested", func() {
 			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
 			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
@@ -81,7 +81,7 @@ var _ = Describe("AddPublishRequested", func() {
 			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName2)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName1))
 			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
@@ -100,7 +100,7 @@ var _ = Describe("AddPublishRequested", func() {
 			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
 			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
@@ -121,7 +121,7 @@ var _ = Describe("AddPublishRequested", func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("maximum of 2 nodes already present"))
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(2))
 		})
@@ -163,7 +163,7 @@ var _ = Describe("RemovePublishRequested", func() {
 			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName))
 			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
@@ -182,7 +182,7 @@ var _ = Describe("RemovePublishRequested", func() {
 			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName1)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName1))
 			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
@@ -201,7 +201,7 @@ var _ = Describe("RemovePublishRequested", func() {
 			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
-			updatedRV := &v1alpha3.ReplicatedVolume{}
+			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
 		})
@@ -237,7 +237,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -253,7 +253,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -262,7 +262,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			go func() {
 				defer GinkgoRecover()
 				time.Sleep(100 * time.Millisecond)
-				updatedRV := &v1alpha3.ReplicatedVolume{}
+				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 				updatedRV.Status.PublishedOn = []string{nodeName}
 				// Use Update instead of Status().Update for fake client
@@ -295,7 +295,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -329,7 +329,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -345,7 +345,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -354,7 +354,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			go func() {
 				defer GinkgoRecover()
 				time.Sleep(100 * time.Millisecond)
-				updatedRV := &v1alpha3.ReplicatedVolume{}
+				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
 				updatedRV.Status.PublishedOn = []string{}
 				// Use Update instead of Status().Update for fake client
@@ -400,7 +400,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha3.ReplicatedVolumeStatus{
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 				PublishedOn: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
@@ -420,23 +420,23 @@ var _ = Describe("WaitForPublishRemoved", func() {
 func newFakeClient() client.Client {
 	s := scheme.Scheme
 	_ = metav1.AddMetaToScheme(s)
-	_ = v1alpha3.AddToScheme(s)
+	_ = v1alpha1.AddToScheme(s)
 
 	builder := fake.NewClientBuilder().WithScheme(s)
 	return builder.Build()
 }
 
-func createTestReplicatedVolume(name string, publishOn []string) *v1alpha3.ReplicatedVolume {
-	return &v1alpha3.ReplicatedVolume{
+func createTestReplicatedVolume(name string, publishOn []string) *v1alpha1.ReplicatedVolume {
+	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
-		Spec: v1alpha3.ReplicatedVolumeSpec{
+		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       resource.MustParse("1Gi"),
 			PublishOn:                  publishOn,
 			ReplicatedStorageClassName: "rsc",
 		},
-		Status: &v1alpha3.ReplicatedVolumeStatus{
+		Status: &v1alpha1.ReplicatedVolumeStatus{
 			PublishedOn: []string{},
 		},
 	}
