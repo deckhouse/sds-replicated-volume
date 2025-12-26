@@ -154,7 +154,7 @@ properties:
             x-examples: ["YjY0ZW5jX3N0cmluZwo="]
       pvcRwxAllowedUsernames:
         type: array
-        default: ["system:serviceaccount:d8-virtualization:cdi-sa", "system:serviceaccount:d8-virtualization:virtualization-controller", "system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller"]
+        default: ["system:serviceaccount:d8-virtualization:d8-cdi-sa", "system:serviceaccount:d8-virtualization:cdi-sa", "system:serviceaccount:d8-virtualization:virtualization-controller", "system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller"]
         items:
           type: string
         description: |
