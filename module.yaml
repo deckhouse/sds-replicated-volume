@@ -5,7 +5,7 @@ descriptions:
   en: "SDS Replicated Volume module"
 requirements:
   bootstrapped: true
-  deckhouse: ">= 1.67"
+  deckhouse: ">= 1.70"
   modules:
     sds-node-configurator: ">= 0.0.0"
     snapshot-controller: ">= 0.0.0"  
