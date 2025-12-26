@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	goruntime "runtime"
 	"strconv"
 	"strings"
@@ -29,12 +30,13 @@ import (
 )
 
 const (
-	EnvLogLevel    = "LOG_LEVEL"
-	EnvTimeout     = "TIMEOUT_SEC"
-	EnvSleep       = "SLEEP_SEC"
-	EnvFilePath    = "FILE_PATH"
-	EnvFileContent = "FILE_CONTENT"
-	EnvWaitingMsg  = "WAITING_MSG"
+	EnvLogLevel      = "LOG_LEVEL"
+	EnvTimeout       = "TIMEOUT_SEC"
+	EnvSleep         = "SLEEP_SEC"
+	EnvFilePath      = "FILE_PATH"
+	EnvMinVersion    = "MIN_VERSION"
+	EnvWaitingMsg    = "WAITING_MSG"
+	VersionKeyPrefix = "version:"
 )
 
 var (
@@ -50,10 +52,100 @@ func getEnv(envName string, defaultValue string) string {
 	return envVal
 }
 
-func mainExecution(log *logger.Logger, filePath string, fileContent string, waitingMsg string, sleepSec int64) int {
+// parseVersion extracts major, minor, patch from a version string like "9.2.5"
+func parseVersion(versionStr string) (major, minor, patch int, err error) {
+	// Remove any leading/trailing whitespace
+	versionStr = strings.TrimSpace(versionStr)
+
+	// Match version pattern like "9.2.5" or "9.2"
+	re := regexp.MustCompile(`^(\d+)\.(\d+)(?:\.(\d+))?`)
+	matches := re.FindStringSubmatch(versionStr)
+	if matches == nil {
+		return 0, 0, 0, fmt.Errorf("invalid version format: %s", versionStr)
+	}
+
+	major, err = strconv.Atoi(matches[1])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid major version: %s", matches[1])
+	}
+
+	minor, err = strconv.Atoi(matches[2])
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("invalid minor version: %s", matches[2])
+	}
+
+	if matches[3] != "" {
+		patch, err = strconv.Atoi(matches[3])
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("invalid patch version: %s", matches[3])
+		}
+	}
+
+	return major, minor, patch, nil
+}
+
+// compareVersions returns:
+//
+//	1 if v1 > v2
+//	0 if v1 == v2
+//	-1 if v1 < v2
+func compareVersions(major1, minor1, patch1, major2, minor2, patch2 int) int {
+	if major1 > major2 {
+		return 1
+	}
+	if major1 < major2 {
+		return -1
+	}
+	// major1 == major2
+	if minor1 > minor2 {
+		return 1
+	}
+	if minor1 < minor2 {
+		return -1
+	}
+	// minor1 == minor2
+	if patch1 > patch2 {
+		return 1
+	}
+	if patch1 < patch2 {
+		return -1
+	}
+	return 0
+}
+
+// extractVersionFromLine extracts version string from a line like "version: 9.2.5 (api:2/proto:86-121)"
+func extractVersionFromLine(line string) (string, bool) {
+	if !strings.Contains(line, VersionKeyPrefix) {
+		return "", false
+	}
+
+	// Extract version after "version:"
+	idx := strings.Index(line, VersionKeyPrefix)
+	if idx == -1 {
+		return "", false
+	}
+
+	remainder := strings.TrimSpace(line[idx+len(VersionKeyPrefix):])
+	// Version ends at space or end of string
+	fields := strings.Fields(remainder)
+	if len(fields) == 0 {
+		return "", false
+	}
+
+	return fields[0], true
+}
+
+func mainExecution(log *logger.Logger, filePath string, minVersion string, waitingMsg string, sleepSec int64) int {
 	log.Info(fmt.Sprintf("Go Version:%s ", goruntime.Version()))
 	log.Info(fmt.Sprintf("OS/Arch:Go OS/Arch:%s/%s ", goruntime.GOOS, goruntime.GOARCH))
-	log.Info(fmt.Sprintf("Start to watch file '%s' for string '%s'", filePath, fileContent))
+	log.Info(fmt.Sprintf("Start to watch file '%s' for version >= '%s'", filePath, minVersion))
+
+	// Parse the minimum required version
+	minMajor, minMinor, minPatch, err := parseVersion(minVersion)
+	if err != nil {
+		log.Error(err, fmt.Sprintf("unable to parse minimum version '%s'", minVersion))
+		return 2
+	}
 
 	for {
 		// Open the file for reading
@@ -64,31 +156,49 @@ func mainExecution(log *logger.Logger, filePath string, fileContent string, wait
 			time.Sleep(time.Duration(sleepSec) * time.Second)
 			continue
 		}
-		defer file.Close()
 
 		// Create a scanner to read the file line by line
 		scanner := bufio.NewScanner(file)
 		found := false
+		var currentVersion string
 
 		// Iterate over each line
 		for scanner.Scan() {
 			line := scanner.Text()
-			// Check if the line contains the desired string
-			if strings.Contains(line, fileContent) {
+			// Check if the line contains version info
+			versionStr, ok := extractVersionFromLine(line)
+			if !ok {
+				continue
+			}
+
+			currentVersion = versionStr
+			curMajor, curMinor, curPatch, err := parseVersion(versionStr)
+			if err != nil {
+				log.Warning(fmt.Sprintf("Unable to parse version from line '%s': %v", line, err))
+				continue
+			}
+
+			// Check if current version >= minimum version
+			if compareVersions(curMajor, curMinor, curPatch, minMajor, minMinor, minPatch) >= 0 {
 				found = true
 				break
 			}
+
+			log.Debug(fmt.Sprintf("Found version %s, but need >= %s", versionStr, minVersion))
 		}
 
 		// Check for any scanning error
-		if err := scanner.Err(); err != nil {
-			log.Error(err, fmt.Sprintf("reading file %s", filePath))
+		if scanErr := scanner.Err(); scanErr != nil {
+			log.Error(scanErr, fmt.Sprintf("reading file %s", filePath))
+			file.Close()
 			return 3
 		}
 
-		// If string found, exit the loop
+		file.Close()
+
+		// If appropriate version found, exit the loop
 		if found {
-			log.Debug(fmt.Sprintf("Found string '%s' in file '%s'", fileContent, filePath))
+			log.Info(fmt.Sprintf("Found version %s >= %s in file '%s'", currentVersion, minVersion, filePath))
 			break
 		}
 
@@ -123,9 +233,9 @@ func main() {
 	}
 
 	filePath := getEnv(EnvFilePath, "/proc/drbd")
-	fileContent := getEnv(EnvFileContent, "version: 9.2")
-	waitingMsg := getEnv(EnvWaitingMsg, "Waiting for DRBD version 9.2.x on host")
+	minVersion := getEnv(EnvMinVersion, "9.2.0")
+	waitingMsg := getEnv(EnvWaitingMsg, "Waiting for DRBD version >= 9.2.0 on host")
 
-	returnValue := mainExecution(log, filePath, fileContent, waitingMsg, sleepSec)
+	returnValue := mainExecution(log, filePath, minVersion, waitingMsg, sleepSec)
 	os.Exit(returnValue)
 }
