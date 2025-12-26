@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   labels:
     module: sds-replicated-volume
   name: replicatedvolumes.storage.deckhouse.io
@@ -203,6 +203,22 @@ spec:
                 items:
                   type: string
                 maxItems: 2
+                type: array
+              replicas:
+                items:
+                  properties:
+                    deletionTimestamp:
+                      format: date-time
+                      type: string
+                    name:
+                      type: string
+                    nodeName:
+                      type: string
+                    type:
+                      description: ReplicaType enumerates possible values for ReplicatedVolumeReplica
+                        spec.type and status.actualType fields.
+                      type: string
+                  type: object
                 type: array
             type: object
         required:
