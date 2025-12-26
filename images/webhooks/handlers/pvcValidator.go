@@ -42,11 +42,10 @@ const (
 )
 
 var pvcRwxDefaultAllowedUsernames = []string{
-	"system:kube-scheduler",
-	"system:serviceaccount:kube-system:persistent-volume-binder",
-	"system:serviceaccount:kube-system:pvc-protection-controller",
+	"system:serviceaccount:d8-virtualization:d8-cdi-sa",
 	"system:serviceaccount:d8-virtualization:cdi-sa",
 	"system:serviceaccount:d8-virtualization:virtualization-controller",
+	"system:serviceaccount:d8-virtualization:kubevirt-internal-virtualization-controller",
 }
 
 // kubeClientFactory allows injecting a custom client factory for testing
@@ -84,7 +83,7 @@ func PVCValidate(ctx context.Context, arReview *model.AdmissionReview, obj metav
 
 	allowedUsernames := splitCommaEnv(pvcRwxAllowedUsernamesEnv)
 	allowedGroups := splitCommaEnv(pvcRwxAllowedGroupsEnv)
-	if len(allowedUsernames) == 0 && len(allowedGroups) == 0 {
+	if len(allowedUsernames) == 0 {
 		allowedUsernames = pvcRwxDefaultAllowedUsernames
 	}
 

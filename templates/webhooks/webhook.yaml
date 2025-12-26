@@ -81,7 +81,7 @@ webhooks:
     rules:
       - apiGroups: [""]
         apiVersions: ["v1"]
-        operations: ["CREATE", "UPDATE"]
+        operations: ["CREATE"]
         resources: ["persistentvolumeclaims"]
         scope: "Namespaced"
     clientConfig:
