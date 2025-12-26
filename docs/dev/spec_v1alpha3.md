@@ -563,7 +563,6 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   -  отличие в количестве реплик между FD не больше чем на 1
   -  общее количество реплик - нечётное
 
-
 ### Вывод
   - Новая rvr с `rvr.spec.type==TieBreaker`
   - `rvr.metadata.deletionTimestamp==true`
