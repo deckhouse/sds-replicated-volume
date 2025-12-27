@@ -14,24 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package rvpublishcontroller implements the rv-publish-controller, which manages
+// Package rvattachcontroller implements the rv-attach-controller, which manages
 // the promotion and demotion of DRBD replicas to Primary role based on volume
 // access requirements.
 //
 // # Controller Responsibilities
 //
 // The controller ensures replicas are promoted/demoted correctly by:
-//   - Monitoring rv.spec.publishOn for nodes requiring volume access
+//   - Monitoring rv.spec.attachTo for nodes requiring volume access
 //   - Setting rvr.status.drbd.config.primary to control replica promotion
 //   - Managing allowTwoPrimaries configuration for live migration scenarios
-//   - Updating rv.status.publishedOn to reflect actual Primary replicas
+//   - Updating rv.status.attachedTo to reflect actual Primary replicas
 //   - Converting TieBreaker replicas to Access replicas when promotion is needed
 //   - Validating that Local volume access requirements can be satisfied
 //
 // # Watched Resources
 //
 // The controller watches:
-//   - ReplicatedVolume: To monitor publishOn requirements
+//   - ReplicatedVolume: To monitor attachTo requirements
 //   - ReplicatedVolumeReplica: To track replica states and roles
 //   - ReplicatedStorageClass: To check volumeAccess policy
 //
@@ -49,24 +49,24 @@ limitations under the License.
 //  1. Verify ReplicatedVolume is ready
 //  2. Handle deletion case:
 //     - If RV has deletionTimestamp and only module finalizers, demote all replicas
-//  3. Process each node in rv.spec.publishOn:
+//  3. Process each node in rv.spec.attachTo:
 //     a. Find or identify replica on that node
 //     b. For Local volume access:
 //     - Verify replica is Diskful type
-//     - Set condition PublishSucceeded=False if not (UnableToProvideLocalVolumeAccess)
+//     - Set condition AttachSucceeded=False if not (UnableToProvideLocalVolumeAccess)
 //     c. For TieBreaker replicas:
 //     - Convert spec.type to Access before promoting
 //     d. Set rvr.status.drbd.config.primary=true
 //  4. Handle allowTwoPrimaries configuration:
-//     - If len(rv.spec.publishOn)==2:
+//     - If len(rv.spec.attachTo)==2:
 //     * Set rv.status.drbd.config.allowTwoPrimaries=true
 //     * Wait for all replicas to report rvr.status.drbd.actual.allowTwoPrimaries=true
 //     * Then proceed with promotions
-//     - If len(rv.spec.publishOn)<2:
+//     - If len(rv.spec.attachTo)<2:
 //     * Set rv.status.drbd.config.allowTwoPrimaries=false
-//  5. Demote replicas no longer in publishOn:
+//  5. Demote replicas no longer in attachTo:
 //     - Set rvr.status.drbd.config.primary=false
-//  6. Update rv.status.publishedOn:
+//  6. Update rv.status.attachedTo:
 //     - List nodes where rvr.status.drbd.status.role==Primary
 //
 // # Status Updates
@@ -74,14 +74,14 @@ limitations under the License.
 // The controller maintains:
 //   - rvr.status.drbd.config.primary - Desired Primary role for each replica
 //   - rv.status.drbd.config.allowTwoPrimaries - Allow multiple Primary replicas (for migration)
-//   - rv.status.publishedOn - Nodes where replicas are actually Primary
-//   - rv.status.conditions[type=PublishSucceeded] - Publication success/failure status
+//   - rv.status.attachedTo - Nodes where replicas are actually Primary
+//   - rv.status.conditions[type=AttachSucceeded] - Attach success/failure status
 //
 // # Special Notes
 //
 // Local Volume Access:
 //   - When rsc.spec.volumeAccess==Local, only Diskful replicas can be promoted
-//   - If no Diskful replica exists on the requested node, publication fails
+//   - If no Diskful replica exists on the requested node, attach fails
 //
 // Two Primaries Support:
 //   - Required for live migration of VMs between nodes
@@ -91,4 +91,4 @@ limitations under the License.
 // TieBreaker Conversion:
 //   - TieBreaker replicas cannot be Primary
 //   - Automatically converted to Access type when promotion is required
-package rvpublishcontroller
+package rvattachcontroller

@@ -111,8 +111,8 @@ const (
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 
-	// [ConditionTypePublished] indicates whether the replica has been published
-	ConditionTypePublished = "Published"
+	// [ConditionTypeAttached] indicates whether the replica has been attached
+	ConditionTypeAttached = "Attached"
 )
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -280,14 +280,14 @@ const (
 	ReasonDemoteFailed                   = "DemoteFailed"
 )
 
-// Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)
+// Condition reasons for [ConditionTypeAttached] condition (reserved, not used yet)
 const (
 	// status=True
-	ReasonPublished = "Published"
+	ReasonAttached = "Attached"
 	// status=False
-	ReasonUnpublished             = "Unpublished"
-	ReasonPublishPending          = "PublishPending"
-	ReasonPublishingNotApplicable = "PublishingNotApplicable"
+	ReasonDetached               = "Detached"
+	ReasonAttachPending          = "AttachPending"
+	ReasonAttachingNotApplicable = "AttachingNotApplicable"
 	// status=Unknown
-	ReasonPublishingNotInitialized = "PublishingNotInitialized"
+	ReasonAttachingNotInitialized = "AttachingNotInitialized"
 )

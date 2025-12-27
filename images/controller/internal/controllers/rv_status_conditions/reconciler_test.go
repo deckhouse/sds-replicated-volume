@@ -70,9 +70,9 @@ type conditionTestCase struct {
 	wantIOReady              *expectedCondition
 
 	// Expected counters
-	wantDiskfulReplicaCount      string
-	wantDiskfulReplicasInSync    string
-	wantPublishedAndIOReadyCount string
+	wantDiskfulReplicaCount     string
+	wantDiskfulReplicasInSync   string
+	wantAttachedAndIOReadyCount string
 }
 
 type testRVR struct {
@@ -528,9 +528,9 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 			t.Errorf("DiskfulReplicasInSync: got %q, want %q", updatedRV.Status.DiskfulReplicasInSync, tc.wantDiskfulReplicasInSync)
 		}
 	}
-	if tc.wantPublishedAndIOReadyCount != "" {
-		if updatedRV.Status.PublishedAndIOReadyCount != tc.wantPublishedAndIOReadyCount {
-			t.Errorf("PublishedAndIOReadyCount: got %q, want %q", updatedRV.Status.PublishedAndIOReadyCount, tc.wantPublishedAndIOReadyCount)
+	if tc.wantAttachedAndIOReadyCount != "" {
+		if updatedRV.Status.AttachedAndIOReadyCount != tc.wantAttachedAndIOReadyCount {
+			t.Errorf("AttachedAndIOReadyCount: got %q, want %q", updatedRV.Status.AttachedAndIOReadyCount, tc.wantAttachedAndIOReadyCount)
 		}
 	}
 }
