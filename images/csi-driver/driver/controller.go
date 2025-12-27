@@ -82,27 +82,27 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
 	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
 	// with key "kubernetes.io/hostname"
-	publishRequested := make([]string, 0)
+	attachTo := make([]string, 0)
 	if request.AccessibilityRequirements != nil && len(request.AccessibilityRequirements.Preferred) > 0 {
 		for _, preferred := range request.AccessibilityRequirements.Preferred {
 			// Get node name from kubernetes.io/hostname (standard Kubernetes topology key)
 			if nodeName, ok := preferred.Segments["kubernetes.io/hostname"]; ok && nodeName != "" {
 				d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Found preferred node from AccessibilityRequirements: %s", traceID, volumeID, nodeName))
-				publishRequested = append(publishRequested, nodeName)
+				attachTo = append(attachTo, nodeName)
 				break // Use first preferred node
 			}
 		}
 	}
 
-	// Log if publishRequested is empty (may be required for WaitForFirstConsumer)
-	if len(publishRequested) == 0 {
-		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] publishRequested is empty (may be filled later via ControllerPublishVolume)", traceID, volumeID))
+	// Log if spec.attachTo is empty (may be required for WaitForFirstConsumer)
+	if len(attachTo) == 0 {
+		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] spec.attachTo is empty (may be filled later via ControllerPublishVolume)", traceID, volumeID))
 	}
 
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
-		publishRequested, // publishRequested - contains preferred node for WaitForFirstConsumer
+		attachTo, // attachTo - contains preferred node for WaitForFirstConsumer (will be set to rv.spec.attachTo)
 		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
 
@@ -191,25 +191,25 @@ func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.Contr
 	volumeID := request.VolumeId
 	nodeID := request.NodeId
 
-	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Adding node to publishRequested", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Adding node to spec.attachTo", traceID, volumeID, nodeID))
 
-	// Add node to publishRequested
-	err := utils.AddPublishRequested(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	// Add node to spec.attachTo
+	err := utils.AddAttachTo(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to add node to publishRequested", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to add node to publishRequested: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to add node to spec.attachTo", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to add node to spec.attachTo: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to appear in publishProvided", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to appear in status.attachedTo", traceID, volumeID, nodeID))
 
-	// Wait for node to appear in publishProvided
-	err = utils.WaitForPublishProvided(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	// Wait for node to appear in status.attachedTo
+	err = utils.WaitForAttachedToProvided(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for publishProvided", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to wait for publishProvided: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.attachedTo", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to wait for status.attachedTo: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume published successfully", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume attached successfully", traceID, volumeID, nodeID))
 	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s] ========== END ControllerPublishVolume ============", traceID))
 
 	return &csi.ControllerPublishVolumeResponse{
@@ -234,25 +234,25 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.Con
 	volumeID := request.VolumeId
 	nodeID := request.NodeId
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Removing node from publishRequested", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Removing node from spec.attachTo", traceID, volumeID, nodeID))
 
-	// Remove node from publishRequested
-	err := utils.RemovePublishRequested(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	// Remove node from spec.attachTo
+	err := utils.RemoveAttachTo(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to remove node from publishRequested", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to remove node from publishRequested: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to remove node from spec.attachTo", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to remove node from spec.attachTo: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from publishProvided", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from status.attachedTo", traceID, volumeID, nodeID))
 
-	// Wait for node to disappear from publishProvided
-	err = utils.WaitForPublishRemoved(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	// Wait for node to disappear from status.attachedTo
+	err = utils.WaitForAttachedToRemoved(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for publishRemoved", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to wait for publishRemoved: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.attachedTo removal", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to wait for status.attachedTo removal: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume unpublished successfully", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume detached successfully", traceID, volumeID, nodeID))
 	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s] ========== END ControllerUnpublishVolume ============", traceID))
 
 	return &csi.ControllerUnpublishVolumeResponse{}, nil

@@ -140,12 +140,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// CREATE logic:
 	// We need Access RVR on a node if:
-	// 1. Node is in publishOn (pod wants to run there)
+	// 1. Node is in attachTo (pod wants to run there)
 	// 2. Node has NO Diskful (can't access data locally)
 	// 3. Node has NO TieBreaker (other controller will convert it to access)
 	// 4. Node has NO Access RVR yet (avoid duplicates)
 	nodesNeedingAccess := make([]string, 0)
-	for _, nodeName := range rv.Spec.PublishOn {
+	for _, nodeName := range rv.Spec.AttachTo {
 		_, hasDiskfulOrTieBreaker := nodesWithDiskfulOrTieBreaker[nodeName]
 		_, hasAccess := nodesWithAccess[nodeName]
 
@@ -156,29 +156,29 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// DELETE logic:
 	// We should delete Access RVR if node is NOT needed anymore.
-	// Node is "needed" if it's in publishOn OR publishedOn:
-	// - publishOn = where pod WANTS to run (user intent via CSI)
-	// - publishedOn = where pod IS running (current reality)
+	// Node is "needed" if it's in attachTo OR attachedTo:
+	// - attachTo = where pod WANTS to run (user intent via CSI)
+	// - attachedTo = where pod IS running (current reality)
 	// We keep Access if either is true to avoid disrupting running pods.
-	publishOnSet := make(map[string]struct{})
-	for _, nodeName := range rv.Spec.PublishOn {
-		publishOnSet[nodeName] = struct{}{}
+	attachToSet := make(map[string]struct{})
+	for _, nodeName := range rv.Spec.AttachTo {
+		attachToSet[nodeName] = struct{}{}
 	}
 
-	publishedOnSet := make(map[string]struct{})
+	attachedToSet := make(map[string]struct{})
 	if rv.Status != nil {
-		for _, nodeName := range rv.Status.PublishedOn {
-			publishedOnSet[nodeName] = struct{}{}
+		for _, nodeName := range rv.Status.AttachedTo {
+			attachedToSet[nodeName] = struct{}{}
 		}
 	}
 
-	// Find Access RVRs to delete: exists but not in publishOn AND not in publishedOn
+	// Find Access RVRs to delete: exists but not in attachTo AND not in attachedTo
 	accessRVRsToDelete := make([]*v1alpha1.ReplicatedVolumeReplica, 0)
 	for nodeName, rvr := range nodesWithAccess {
-		_, inPublishOn := publishOnSet[nodeName]
-		_, inPublishedOn := publishedOnSet[nodeName]
+		_, inAttachTo := attachToSet[nodeName]
+		_, inAttachedTo := attachedToSet[nodeName]
 
-		if !inPublishOn && !inPublishedOn && rvr.DeletionTimestamp.IsZero() {
+		if !inAttachTo && !inAttachedTo && rvr.DeletionTimestamp.IsZero() {
 			accessRVRsToDelete = append(accessRVRsToDelete, rvr)
 		}
 	}

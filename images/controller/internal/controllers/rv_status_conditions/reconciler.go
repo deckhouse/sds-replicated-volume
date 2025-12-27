@@ -469,13 +469,13 @@ func (r *Reconciler) calculateIOReady(rv *v1alpha1.ReplicatedVolume, rvrs []v1al
 func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv *v1alpha1.ReplicatedVolume, rvrs []v1alpha1.ReplicatedVolumeReplica) {
 	var diskfulTotal, diskfulCurrent int
 	var diskfulInSync int
-	var publishedAndIOReady int
+	var attachedAndIOReady int
 
-	// Build set of published nodes for O(1) lookup
-	publishedSet := make(map[string]struct{})
+	// Build set of attached nodes for O(1) lookup
+	attachedSet := make(map[string]struct{})
 	if rv.Status != nil {
-		for _, node := range rv.Status.PublishedOn {
-			publishedSet[node] = struct{}{}
+		for _, node := range rv.Status.AttachedTo {
+			attachedSet[node] = struct{}{}
 		}
 	}
 
@@ -493,16 +493,16 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 			}
 		}
 
-		if _, published := publishedSet[rvr.Spec.NodeName]; published {
+		if _, attached := attachedSet[rvr.Spec.NodeName]; attached {
 			// Use IOReady condition per spec
 			ioReadyCond := getRVRCondition(&rvr, v1alpha1.ConditionTypeIOReady)
 			if ioReadyCond != nil && ioReadyCond.Status == metav1.ConditionTrue {
-				publishedAndIOReady++
+				attachedAndIOReady++
 			}
 		}
 	}
 
 	patchedRV.Status.DiskfulReplicaCount = strconv.Itoa(diskfulCurrent) + "/" + strconv.Itoa(diskfulTotal)
 	patchedRV.Status.DiskfulReplicasInSync = strconv.Itoa(diskfulInSync) + "/" + strconv.Itoa(diskfulTotal)
-	patchedRV.Status.PublishedAndIOReadyCount = strconv.Itoa(publishedAndIOReady) + "/" + strconv.Itoa(len(rv.Spec.PublishOn))
+	patchedRV.Status.AttachedAndIOReadyCount = strconv.Itoa(attachedAndIOReady) + "/" + strconv.Itoa(len(rv.Spec.AttachTo))
 }

@@ -24,14 +24,14 @@ limitations under the License.
 //   - Assigning unique nodes to each replica of a ReplicatedVolume
 //   - Respecting topology constraints (Zonal, TransZonal, Ignored)
 //   - Checking storage capacity via scheduler-extender API
-//   - Preferring nodes in rv.spec.publishOn when possible
+//   - Preferring nodes in rv.spec.attachTo when possible
 //   - Handling different scheduling requirements for Diskful, Access, and TieBreaker replicas
 //
 // # Watched Resources
 //
 // The controller watches:
 //   - ReplicatedVolumeReplica: To detect replicas needing node assignment
-//   - ReplicatedVolume: To get placement hints (publishOn)
+//   - ReplicatedVolume: To get placement hints (attachTo)
 //   - ReplicatedStorageClass: To get topology and zone constraints
 //   - ReplicatedStoragePool: To determine available nodes with storage
 //   - Node: To get zone information
@@ -53,22 +53,22 @@ limitations under the License.
 //   - Apply topology constraints:
 //   - Zonal: All replicas in one zone
 //   - If Diskful replicas exist, use their zone
-//   - Else if rv.spec.publishOn specified, choose best zone from those nodes
+//   - Else if rv.spec.attachTo specified, choose best zone from those nodes
 //   - Else choose best zone from allowed zones
 //   - TransZonal: Distribute replicas evenly across zones
 //   - Place each replica in zone with fewest Diskful replicas
 //   - Fail if even distribution is impossible
 //   - Ignored: No zone constraints
 //   - Check storage capacity via scheduler-extender API
-//   - Prefer nodes in rv.spec.publishOn (increase priority)
+//   - Prefer nodes in rv.spec.attachTo (increase priority)
 //
 // Phase 2: Access Replicas
-//   - Only when rv.spec.publishOn is set AND rsc.spec.volumeAccess != Local
+//   - Only when rv.spec.attachTo is set AND rsc.spec.volumeAccess != Local
 //   - Exclude nodes already hosting any replica of this RV
-//   - Target nodes in rv.spec.publishOn without replicas
+//   - Target nodes in rv.spec.attachTo without replicas
 //   - No topology or storage capacity constraints
-//   - OK if some publishOn nodes cannot get replicas (already have other replica types)
-//   - OK if some Access replicas cannot be scheduled (all publishOn nodes have replicas)
+//   - OK if some attachTo nodes cannot get replicas (already have other replica types)
+//   - OK if some Access replicas cannot be scheduled (all attachTo nodes have replicas)
 //
 // Phase 3: TieBreaker Replicas
 //   - Exclude nodes already hosting any replica of this RV
@@ -94,7 +94,7 @@ limitations under the License.
 //     c. Call scheduler-extender to verify storage capacity
 //     d. Assign rvr.spec.nodeName
 //  5. Schedule Access replicas (if applicable):
-//     a. Identify nodes in publishOn without replicas
+//     a. Identify nodes in attachTo without replicas
 //     b. Assign rvr.spec.nodeName
 //  6. Schedule TieBreaker replicas:
 //     a. Apply topology rules

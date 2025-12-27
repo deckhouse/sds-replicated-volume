@@ -27,7 +27,7 @@
 | `Configured` | Конфигурация применена | drbd-config-controller (agent) | `Configured`, `ConfigurationPending`, `ConfigurationFailed`, ...errors... |
 | `Online` | Scheduled + Initialized + InQuorum | rvr-status-conditions-controller | `Online`, `Unscheduled`, `Uninitialized`, `QuorumLost`, `NodeNotReady`, `AgentNotReady` |
 | `IOReady` | Online + InSync (safe) | rvr-status-conditions-controller | `IOReady`, `Offline`, `OutOfSync`, `Synchronizing`, `NodeNotReady`, `AgentNotReady` |
-| `Published` | Реплика Primary | rv-publish-controller | `Published`, `Unpublished`, `PublishPending` |
+| `Attached` | Реплика Primary | rv-attach-controller | `Attached`, `Detached`, `AttachPending` |
 | `AddressConfigured` | Адрес DRBD настроен | rvr-status-config-address-controller (agent) | `AddressConfigured`, `WaitingForAddress` |
 
 ### Удаляемые
@@ -50,7 +50,7 @@
 | `Initialized` | Достаточно RVR Initialized | rv-status-conditions-controller | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
 | `Quorum` | Кворум достигнут | rv-status-conditions-controller | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
 | `DataQuorum` | Кворум данных Diskful | rv-status-conditions-controller | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
-| `IOReady` | Quorum=True+DataQuorum=True+PublishOn=IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
+| `IOReady` | Quorum=True+DataQuorum=True+AttachTo=IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 ### Удаляемые
 
@@ -222,20 +222,20 @@
   - `AgentNotReady` — agent pod не работает, статус неизвестен
 - `message`: детали ошибки из `rvr.status.drbd.errors.*`
 - Примечание: может "мигать" при изменении параметров — это нормально.
-- Примечание: НЕ включает publish и resize — они отделены.
+- Примечание: НЕ включает attach и resize — они отделены.
 
-### `type=Published`
+### `type=Attached`
 
-- Обновляется: **rv-publish-controller**.
+- Обновляется: **rv-attach-controller**.
 - Ранее: `Primary`.
 - `status`:
   - `True` — реплика опубликована (primary)
     - `rvr.status.drbd.status.role=Primary`
   - `False` — реплика не опубликована
 - `reason`:
-  - `Published` — реплика является Primary
-  - `Unpublished` — реплика является Secondary
-  - `PublishPending` — ожидание перехода в Primary
+  - `Attached` — реплика является Primary
+  - `Detached` — реплика является Secondary
+  - `AttachPending` — ожидание перехода в Primary
 - Применимость: только для `Access` и `Diskful` реплик.
 - Примечание: `TieBreaker` не может быть Primary напрямую — требуется сначала изменить тип на `Access`.
 - Примечание: НЕ учитывает состояние I/O — только факт публикации.
@@ -306,7 +306,7 @@
   - `InsufficientIOReadyReplicas` — недостаточно IOReady реплик
   - `NoIOReadyReplicas` — нет ни одной IOReady реплики
 - TODO: уточнить точную формулу threshold для IOReady (предположительно >= 1 реплика).
-- Используется: **rv-publish-controller**, **drbd-resize-controller**, **drbd-primary-controller**.
+- Используется: **rv-attach-controller**, **drbd-resize-controller**, **drbd-primary-controller**.
 
 ### `type=Scheduled`
 
@@ -426,7 +426,7 @@
   - Обновляется: **rv-status-conditions-controller**.
   - Описание: количество синхронизированных Diskful реплик / всего Diskful реплик.
 
-- `publishedAndIOReadyCount`
+- `attachedAndIOReadyCount`
   - Тип: string.
   - Формат: `current/requested` (например, `1/1`).
   - Обновляется: **rv-status-conditions-controller**.
@@ -635,14 +635,14 @@ builder.ControllerManagedBy(mgr).
 |---------|--------|----------|
 | `diskfulReplicaCount` | `current/desired` | Diskful реплик |
 | `diskfulReplicasInSync` | `current/total` | InSync Diskful реплик |
-| `publishedAndIOReadyCount` | `current/requested` | Published + IOReady |
+| `attachedAndIOReadyCount` | `current/requested` | Attached + IOReady |
 
 ### Вывод
 
 - `rv.status.conditions[type=*]`
 - `rv.status.diskfulReplicaCount`
 - `rv.status.diskfulReplicasInSync`
-- `rv.status.publishedAndIOReadyCount`
+- `rv.status.attachedAndIOReadyCount`
 
 ---
 

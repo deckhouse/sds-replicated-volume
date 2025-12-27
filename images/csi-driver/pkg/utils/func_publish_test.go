@@ -35,10 +35,10 @@ import (
 
 func TestPublishUtils(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Publish Utils Suite")
+	RunSpecs(t, "Attach Utils Suite")
 }
 
-var _ = Describe("AddPublishRequested", func() {
+var _ = Describe("AddAttachTo", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -51,7 +51,7 @@ var _ = Describe("AddPublishRequested", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when adding node to empty publishRequested", func() {
+	Context("when adding node to empty spec.attachTo", func() {
 		It("should successfully add the node", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
@@ -59,13 +59,13 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := AddAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
+			Expect(updatedRV.Spec.AttachTo).To(ContainElement(nodeName))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(1))
 		})
 	})
 
@@ -78,14 +78,14 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName2)
+			err := AddAttachTo(ctx, cl, &log, traceID, volumeName, nodeName2)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(2))
+			Expect(updatedRV.Spec.AttachTo).To(ContainElement(nodeName1))
+			Expect(updatedRV.Spec.AttachTo).To(ContainElement(nodeName2))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(2))
 		})
 	})
 
@@ -97,13 +97,13 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := AddAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(1))
+			Expect(updatedRV.Spec.AttachTo).To(ContainElement(nodeName))
 		})
 	})
 
@@ -117,13 +117,13 @@ var _ = Describe("AddPublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName3)
+			err := AddAttachTo(ctx, cl, &log, traceID, volumeName, nodeName3)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("maximum of 2 nodes already present"))
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(2))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(2))
 		})
 	})
 
@@ -132,14 +132,14 @@ var _ = Describe("AddPublishRequested", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := AddAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("get ReplicatedVolume"))
 		})
 	})
 })
 
-var _ = Describe("RemovePublishRequested", func() {
+var _ = Describe("RemoveAttachTo", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -160,13 +160,13 @@ var _ = Describe("RemovePublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := RemoveAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
+			Expect(updatedRV.Spec.AttachTo).NotTo(ContainElement(nodeName))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(0))
 		})
 	})
 
@@ -179,14 +179,14 @@ var _ = Describe("RemovePublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName1)
+			err := RemoveAttachTo(ctx, cl, &log, traceID, volumeName, nodeName1)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
+			Expect(updatedRV.Spec.AttachTo).NotTo(ContainElement(nodeName1))
+			Expect(updatedRV.Spec.AttachTo).To(ContainElement(nodeName2))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(1))
 		})
 	})
 
@@ -198,12 +198,12 @@ var _ = Describe("RemovePublishRequested", func() {
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := RemoveAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 
 			updatedRV := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
+			Expect(len(updatedRV.Spec.AttachTo)).To(Equal(0))
 		})
 	})
 
@@ -212,13 +212,13 @@ var _ = Describe("RemovePublishRequested", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := RemoveAttachTo(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 })
 
-var _ = Describe("WaitForPublishProvided", func() {
+var _ = Describe("WaitForAttachedToProvided", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -231,30 +231,30 @@ var _ = Describe("WaitForPublishProvided", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when node already in publishProvided", func() {
+	Context("when node already in status.attachedTo", func() {
 		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
+				AttachedTo: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("when node appears in publishProvided", func() {
+	Context("when node appears in status.attachedTo", func() {
 		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
+				AttachedTo: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
@@ -264,7 +264,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 				time.Sleep(100 * time.Millisecond)
 				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.PublishedOn = []string{nodeName}
+				updatedRV.Status.AttachedTo = []string{nodeName}
 				// Use Update instead of Status().Update for fake client
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
 			}()
@@ -273,7 +273,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -283,7 +283,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedVolume"))
 		})
@@ -296,21 +296,21 @@ var _ = Describe("WaitForPublishProvided", func() {
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
+				AttachedTo: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})
 	})
 })
 
-var _ = Describe("WaitForPublishRemoved", func() {
+var _ = Describe("WaitForAttachedToRemoved", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -323,30 +323,30 @@ var _ = Describe("WaitForPublishRemoved", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when node already not in publishProvided", func() {
+	Context("when node already not in status.attachedTo", func() {
 		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
+				AttachedTo: []string{},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("when node is removed from publishProvided", func() {
+	Context("when node is removed from status.attachedTo", func() {
 		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
+				AttachedTo: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
@@ -356,7 +356,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 				time.Sleep(100 * time.Millisecond)
 				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.PublishedOn = []string{}
+				updatedRV.Status.AttachedTo = []string{}
 				// Use Update instead of Status().Update for fake client
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
 			}()
@@ -365,7 +365,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -375,7 +375,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -389,7 +389,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			rv.Status = nil
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -401,14 +401,14 @@ var _ = Describe("WaitForPublishRemoved", func() {
 
 			rv := createTestReplicatedVolume(volumeName, []string{})
 			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
+				AttachedTo: []string{nodeName},
 			}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})
@@ -426,18 +426,18 @@ func newFakeClient() client.Client {
 	return builder.Build()
 }
 
-func createTestReplicatedVolume(name string, publishOn []string) *v1alpha1.ReplicatedVolume {
+func createTestReplicatedVolume(name string, attachTo []string) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       resource.MustParse("1Gi"),
-			PublishOn:                  publishOn,
+			AttachTo:                   attachTo,
 			ReplicatedStorageClassName: "rsc",
 		},
 		Status: &v1alpha1.ReplicatedVolumeStatus{
-			PublishedOn: []string{},
+			AttachedTo: []string{},
 		},
 	}
 }

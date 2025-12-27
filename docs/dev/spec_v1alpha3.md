@@ -37,11 +37,11 @@
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-1)
   - [`rvr-access-count-controller`](#rvr-access-count-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-2)
-  - [`rv-publish-controller`](#rv-publish-controller)
+  - [`rv-attach-controller`](#rv-attach-controller)
     - [Статус: \[OK | priority: 5 | complexity: 4\]](#статус-ok--priority-5--complexity-4-2)
   - [`rvr-volume-controller`](#rvr-volume-controller)
     - [Статус: \[OK | priority: 5 | complexity: 3\]](#статус-ok--priority-5--complexity-3-3)
-  - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
+  - [`rvr-quorum-and-attach-constrained-release-controller`](#rvr-quorum-and-attach-constrained-release-controller)
     - [Статус: \[OK | priority: 5 | complexity: 2\]](#статус-ok--priority-5--complexity-2-3)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
     - [Статус: \[OK | priority: 5 | complexity: 1\]](#статус-ok--priority-5--complexity-1)
@@ -142,11 +142,11 @@ TB в любой ситуации поддерживает нечетное, и 
   - Обязательное поле.
   - Используется:
     - **rvr-diskful-count-controller** — определяет целевое число реплик по `ReplicatedStorageClass`.
-    - **rv-publish-controller** — проверяет `rsc.spec.volumeAccess==Local` для возможности локального доступа.
-- `publishOn[]`
+    - **rv-attach-controller** — проверяет `rsc.spec.volumeAccess==Local` для возможности локального доступа.
+- `attachTo[]`
   - До 2 узлов (MaxItems=2).
   - Используется:
-    - **rv-publish-controller** — промоут/демоут реплик.
+    - **rv-attach-controller** — промоут/демоут реплик.
     - **rvr-access-count-controller** — поддержание количества `Access`-реплик.
 
 ## `status`
@@ -160,7 +160,7 @@ TB в любой ситуации поддерживает нечетное, и 
     - Обновляется: **rv-status-config-shared-secret-controller**.
     - При исчерпании вариантов: `status=False`, `reason=UnableToSelectSharedSecretAlgorithm`, `message=<node, alg>`.
   - `type=PublishSucceeded`
-    - Обновляется: **rv-publish-controller**.
+    - Обновляется: **rv-attach-controller**.
     - При невозможности локального доступа: `status=False`, `reason=UnableToProvideLocalVolumeAccess`, `message=<пояснение>`.
   - `type=DiskfulReplicaCountReached`
     - Обновляется: **rvr-diskful-count-controller**.
@@ -176,11 +176,11 @@ TB в любой ситуации поддерживает нечетное, и 
   - `quorumMinimumRedundancy`
     - Обновляет: **rv-status-config-quorum-controller**.
   - `allowTwoPrimaries`
-    - Обновляет: **rv-publish-controller** (включает при 2 узлах в `spec.publishOn`, выключает иначе).
+    - Обновляет: **rv-attach-controller** (включает при 2 узлах в `spec.attachTo`, выключает иначе).
   - `deviceMinor`
     - Обновляет: **rv-status-config-device-minor-controller** (уникален среди всех RV).
-- `publishedOn[]`
-  - Обновляется: **rv-publish-controller**.
+- `attachedTo[]`
+  - Обновляется: **rv-attach-controller**.
   - Значение: список узлов, где `rvr.status.drbd.status.role==Primary`.
 - `actualSize`
   - Присутствует в API; источник обновления не описан в спецификации.
@@ -231,10 +231,10 @@ TB в любой ситуации поддерживает нечетное, и 
   - `disk`
     - Обеспечивает: **rvr-volume-controller** при `spec.type==Diskful`; формат `/dev/<VG>/<LV>`.
   - `primary`
-    - Обновляет: **rv-publish-controller** (промоут/демоут).
+    - Обновляет: **rv-attach-controller** (промоут/демоут).
 - `drbd.actual`
   - `allowTwoPrimaries`
-    - Используется: **rv-publish-controller** (ожидание применения настройки на каждой RVR).
+    - Используется: **rv-attach-controller** (ожидание применения настройки на каждой RVR).
   - `disk`
     - Поле присутствует в API; не используется в спецификации явно.
 - `drbd.status`
@@ -449,7 +449,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
   - учитываем topology:
     - `Zonal` - все реплики должны быть в рамках одной зоны
       - если уже есть Diskful реплики - используем их зону
-      - иначе если указан `rv.spec.publishOn` - выбраем лучшую из зон publishOn узлов (даже если в `rv.spec.publishOn` будут указаны узлы, зоны которых не указаны в `rsc.spec.zones`)
+      - иначе если указан `rv.spec.attachTo` - выбраем лучшую из зон attachTo узлов (даже если в `rv.spec.attachTo` будут указаны узлы, зоны которых не указаны в `rsc.spec.zones`)
       - иначе выбираем лучшую разрешённую зону (из `rsc.spec.zones` или все зоны кластера)
     - `TransZonal` - реплики распределяются равномерно по зонам
       - каждую реплику размещаем в зону с наименьшим количеством Diskful реплик
@@ -457,15 +457,15 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
     - `Ignored` - зоны не учитываются, реплики размещаются по произвольным нодам
   - учитываем место
     - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
-  - пытаемся учесть `rv.spec.publishOn` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
+  - пытаемся учесть `rv.spec.attachTo` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
 - Размещение `Access`
   - фаза работает только если:
-    - `rv.spec.publishOn` задан и не на всех нодах из `rv.spec.publishOn` есть реплики
+    - `rv.spec.attachTo` задан и не на всех нодах из `rv.spec.attachTo` есть реплики
     - `rsc.spec.volumeAccess!=Local`
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
   - не учитываем topology, место на диске
-  - допустимо иметь ноды в `rv.spec.publishOn`, на которые не хватило реплик
-  - допустимо иметь реплики, которые никуда не запланировались (потому что на всех `rv.spec.publishOn` и так есть
+  - допустимо иметь ноды в `rv.spec.attachTo`, на которые не хватило реплик
+  - допустимо иметь реплики, которые никуда не запланировались (потому что на всех `rv.spec.attachTo` и так есть
   реплики какого-то типа)
 - Размещение `TieBreaker`
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
@@ -574,21 +574,21 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Цель 
 Поддерживать количество `rvr.spec.type==Access` реплик (для всех режимов
 `rsc.spec.volumeAccess`, кроме `Local`) таким, чтобы их хватало для размещения на тех узлах, где это требуется:
- - список запрашиваемых для доступа узлов обновляется в `rv.spec.publishOn`
+ - список запрашиваемых для доступа узлов обновляется в `rv.spec.attachTo`
  - `Access` реплики требуются для доступа к данным на тех узлах, где нет других реплик
-Когда узел больше не в `rv.spec.publishOn`, а также не в `rv.status.publishedOn`,
+Когда узел больше не в `rv.spec.attachTo`, а также не в `rv.status.attachedTo`,
 `Access` реплика на нём должна быть удалена.
 
 ### Вывод
   - создает, обновляет, удаляет `rvr`
 
-## `rv-publish-controller`
+## `rv-attach-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 4]
 
 ### Цель 
 
-Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в запросе на публикацию `rv.spec.publishOn` и приводить в соответствие реплики на этой ноде, проставляя им `rvr.status.drbd.config.primary`. 
+Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в запросе на публикацию `rv.spec.attachTo` и приводить в соответствие реплики на этой ноде, проставляя им `rvr.status.drbd.config.primary`. 
 
 В случае, если `rsc.spec.volumeAccess==Local`, но реплика не `rvr.spec.type==Diskful`,
 либо её нет вообще, промоут невозможен, и требуется обновить rv и прекратить реконсайл:
@@ -599,14 +599,14 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Не все реплики могут быть primary. Для `rvr.spec.type=TieBreaker` требуется поменять тип на
 `rvr.spec.type=Accees` (в одном патче вместе с `rvr.status.drbd.config.primary`).
 
-В `rv.spec.publishOn` может быть указано 2 узла. Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
+В `rv.spec.attachTo` может быть указано 2 узла. Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
  - поменяв `rv.status.drbd.config.allowTwoPrimaries=true`
  - дождаться фактического применения настройки на каждой rvr `rvr.status.drbd.actual.allowTwoPrimaries`
  - и только потом обновлять `rvr.status.drbd.config.primary`
 
-В случае, когда в `rv.spec.publishOn` менее двух нод, нужно убедиться, что настройка `rv.status.drbd.config.allowTwoPrimaries=false`.
+В случае, когда в `rv.spec.attachTo` менее двух нод, нужно убедиться, что настройка `rv.status.drbd.config.allowTwoPrimaries=false`.
 
-Также требуется поддерживать свойство `rv.status.publishedOn`, указывая там список нод, на которых
+Также требуется поддерживать свойство `rv.status.attachedTo`, указывая там список нод, на которых
 фактически произошёл переход реплики в состояние Primary. Это состояние публикуется в `rvr.status.drbd.status.role` (значение `Primary`).
 
 Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
@@ -614,7 +614,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Вывод 
   - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
-  - `rv.status.publishedOn`
+  - `rv.status.attachedTo`
   - `rv.status.conditions[type=PublishSucceeded]`
 
 ## `rvr-volume-controller`
@@ -636,7 +636,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   - Обновление для уже существующих: `llv.metadata.ownerReference` - вынесли в отдельный контроллер [`llv-owner-reference-controller`](#llv-owner-reference-controller)
   - `rvr.status.lvmLogicalVolumeName` (задание и сброс)
 
-## `rvr-quorum-and-publish-constrained-release-controller`
+## `rvr-quorum-and-attach-constrained-release-controller`
 
 ### Статус: [OK | priority: 5 | complexity: 2]
 
@@ -651,14 +651,14 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Цель 
 
-Цель `rvr-quorum-and-publish-constrained-release-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
+Цель `rvr-quorum-and-attach-constrained-release-controller` - снимать финализатор `F/controller` с удаляемых rvr, когда 
 кластер к этому готов. Условия готовности:
 
 - количество rvr `rvr.status.conditions[type=Ready].status == rvr.status.conditions[type=FullyConnected].status == True`
 (исключая ту, которую собираются удалить) больше, либо равно `rv.status.drbd.config.quorum`
 - присутствует необходимое количество `rvr.status.actualType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
 соответствии с `rsc.spec.replication`
-- удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.publishedOn`
+- удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.attachedTo`
 
 
 ### Вывод

@@ -52,7 +52,7 @@ type ReplicatedVolumeSpec struct {
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
-	PublishOn []string `json:"publishOn"`
+	AttachTo []string `json:"attachTo"`
 }
 
 // +kubebuilder:object:generate=true
@@ -71,7 +71,7 @@ type ReplicatedVolumeStatus struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional
-	PublishedOn []string `json:"publishedOn,omitempty"`
+	AttachedTo []string `json:"attachedTo,omitempty"`
 
 	// +optional
 	ActualSize *resource.Quantity `json:"actualSize,omitempty"`
@@ -93,10 +93,10 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DiskfulReplicasInSync string `json:"diskfulReplicasInSync,omitempty"`
 
-	// PublishedAndIOReadyCount represents the number of published replicas that are IOReady in format "ready/published"
-	// Example: "1/2" means 1 replica is IOReady out of 2 published
+	// AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
+	// Example: "1/2" means 1 replica is IOReady out of 2 attached
 	// +optional
-	PublishedAndIOReadyCount string `json:"publishedAndIOReadyCount,omitempty"`
+	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvpublishcontroller
+package rvattachcontroller
 
 import (
 	"context"
@@ -46,7 +46,7 @@ func NewReconciler(cl client.Client, log logr.Logger) *Reconciler {
 var _ reconcile.Reconciler = &Reconciler{}
 
 const (
-	ConditionTypePublishSucceeded          = "PublishSucceeded"
+	ConditionTypeAttachSucceeded           = "AttachSucceeded"
 	ReasonUnableToProvideLocalVolumeAccess = "UnableToProvideLocalVolumeAccess"
 )
 
@@ -73,12 +73,12 @@ func (r *Reconciler) Reconcile(
 	}
 
 	// load ReplicatedStorageClass and all replicas of this RV
-	rsc, replicasForRV, err := r.loadPublishContext(ctx, rv, log)
+	rsc, replicasForRV, err := r.loadAttachContext(ctx, rv, log)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	// validate local access constraints for volumeAccess=Local; may set PublishSucceeded=False and stop
+	// validate local access constraints for volumeAccess=Local; may set AttachSucceeded=False and stop
 	finish, err := r.checkIfLocalAccessHasEnoughDiskfulReplicas(ctx, rv, rsc, replicasForRV, log)
 	if err != nil {
 		return reconcile.Result{}, err
@@ -96,17 +96,17 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	// sync primary roles on replicas and rv.status.publishedOn
-	if err := r.syncReplicaPrimariesAndPublishedOn(ctx, rv, replicasForRV, log); err != nil {
+	// sync primary roles on replicas and rv.status.attachedTo
+	if err := r.syncReplicaPrimariesAndAttachedTo(ctx, rv, replicasForRV, log); err != nil {
 		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
 }
 
-// loadPublishContext fetches ReplicatedStorageClass and all non-deleted replicas
-// for the given ReplicatedVolume. It returns data needed for publish logic.
-func (r *Reconciler) loadPublishContext(
+// loadAttachContext fetches ReplicatedStorageClass and all non-deleted replicas
+// for the given ReplicatedVolume. It returns data needed for attach logic.
+func (r *Reconciler) loadAttachContext(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
@@ -137,8 +137,8 @@ func (r *Reconciler) loadPublishContext(
 }
 
 // checkIfLocalAccessHasEnoughDiskfulReplicas enforces the rule that for volumeAccess=Local there must be
-// a Diskful replica on each node from rv.spec.publishOn. On violation it sets
-// PublishSucceeded=False and stops reconciliation.
+// a Diskful replica on each node from rv.spec.attachTo. On violation it sets
+// AttachSucceeded=False and stops reconciliation.
 func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
@@ -158,23 +158,23 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 	}
 
 	// In case rsc.spec.volumeAccess==Local, but replica is not Diskful or doesn't exist,
-	// promotion is impossible: update PublishSucceeded on RV and stop reconcile.
-	for _, publishNodeName := range rv.Spec.PublishOn {
-		rvr, ok := NodeNameToRvrMap[publishNodeName]
+	// promotion is impossible: update AttachSucceeded on RV and stop reconcile.
+	for _, attachNodeName := range rv.Spec.AttachTo {
+		rvr, ok := NodeNameToRvrMap[attachNodeName]
 		if !ok || rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful {
 			patchedRV := rv.DeepCopy()
 			if patchedRV.Status == nil {
 				patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 			}
 			meta.SetStatusCondition(&patchedRV.Status.Conditions, metav1.Condition{
-				Type:    ConditionTypePublishSucceeded,
+				Type:    ConditionTypeAttachSucceeded,
 				Status:  metav1.ConditionFalse,
 				Reason:  ReasonUnableToProvideLocalVolumeAccess,
-				Message: fmt.Sprintf("Local access required but no Diskful replica found on node %s", publishNodeName),
+				Message: fmt.Sprintf("Local access required but no Diskful replica found on node %s", attachNodeName),
 			})
 
 			if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
-				log.Error(err, "unable to update ReplicatedVolume PublishSucceeded=False")
+				log.Error(err, "unable to update ReplicatedVolume AttachSucceeded=False")
 				return true, err
 			}
 
@@ -187,14 +187,14 @@ func (r *Reconciler) checkIfLocalAccessHasEnoughDiskfulReplicas(
 }
 
 // syncAllowTwoPrimaries updates rv.status.drbd.config.allowTwoPrimaries according to
-// the number of nodes in rv.spec.publishOn. Waiting for actual application on
+// the number of nodes in rv.spec.attachTo. Waiting for actual application on
 // replicas is handled separately by waitForAllowTwoPrimariesApplied.
 func (r *Reconciler) syncAllowTwoPrimaries(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) error {
-	desiredAllowTwoPrimaries := len(rv.Spec.PublishOn) == 2
+	desiredAllowTwoPrimaries := len(rv.Spec.AttachTo) == 2
 
 	if rv.Status != nil &&
 		rv.Status.DRBD != nil &&
@@ -222,7 +222,7 @@ func (r *Reconciler) syncAllowTwoPrimaries(
 			return err
 		}
 
-		// RV was deleted concurrently; nothing left to publish for
+		// RV was deleted concurrently; nothing left to attach for
 		return nil
 	}
 
@@ -234,7 +234,7 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (bool, error) {
-	if len(rv.Spec.PublishOn) != 2 {
+	if len(rv.Spec.AttachTo) != 2 {
 		return true, nil
 	}
 
@@ -266,19 +266,19 @@ func (r *Reconciler) waitForAllowTwoPrimariesApplied(
 	return true, nil
 }
 
-// syncReplicaPrimariesAndPublishedOn updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)
-// for all replicas according to rv.spec.publishOn and recomputes rv.status.publishedOn
+// syncReplicaPrimariesAndAttachedTo updates rvr.status.drbd.config.primary (and spec.type for TieBreaker)
+// for all replicas according to rv.spec.attachTo and recomputes rv.status.attachedTo
 // from actual DRBD roles on replicas.
-func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
+func (r *Reconciler) syncReplicaPrimariesAndAttachedTo(
 	ctx context.Context,
 	rv *v1alpha1.ReplicatedVolume,
 	replicasForRV []v1alpha1.ReplicatedVolumeReplica,
 	log logr.Logger,
 ) error {
-	// desired primary set: replicas on nodes from rv.spec.publishOn should be primary
-	publishSet := make(map[string]struct{}, len(rv.Spec.PublishOn))
-	for _, nodeName := range rv.Spec.PublishOn {
-		publishSet[nodeName] = struct{}{}
+	// desired primary set: replicas on nodes from rv.spec.attachTo should be primary
+	attachSet := make(map[string]struct{}, len(rv.Spec.AttachTo))
+	for _, nodeName := range rv.Spec.AttachTo {
+		attachSet[nodeName] = struct{}{}
 	}
 
 	var rvrPatchErr error
@@ -292,7 +292,7 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 			continue
 		}
 
-		_, shouldBePrimary := publishSet[rvr.Spec.NodeName]
+		_, shouldBePrimary := attachSet[rvr.Spec.NodeName]
 
 		if shouldBePrimary && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 			if err := r.patchRVRTypeToAccess(ctx, log, rvr); err != nil {
@@ -307,8 +307,8 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		}
 	}
 
-	// recompute rv.status.publishedOn from actual DRBD roles on replicas
-	publishedOn := make([]string, 0, len(replicasForRV))
+	// recompute rv.status.attachedTo from actual DRBD roles on replicas
+	attachedTo := make([]string, 0, len(replicasForRV))
 	for _, rvr := range replicasForRV {
 		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
 			continue
@@ -319,21 +319,21 @@ func (r *Reconciler) syncReplicaPrimariesAndPublishedOn(
 		if rvr.Spec.NodeName == "" {
 			continue
 		}
-		publishedOn = append(publishedOn, rvr.Spec.NodeName)
+		attachedTo = append(attachedTo, rvr.Spec.NodeName)
 	}
 
 	patchedRV := rv.DeepCopy()
 	if patchedRV.Status == nil {
 		patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
 	}
-	patchedRV.Status.PublishedOn = publishedOn
+	patchedRV.Status.AttachedTo = attachedTo
 
 	if err := r.cl.Status().Patch(ctx, patchedRV, client.MergeFrom(rv)); err != nil {
 		if !apierrors.IsNotFound(err) {
-			log.Error(err, "unable to patch ReplicatedVolume publishedOn")
+			log.Error(err, "unable to patch ReplicatedVolume attachedTo")
 			return errors.Join(rvrPatchErr, err)
 		}
-		// RV was deleted concurrently; nothing left to publish for
+		// RV was deleted concurrently; nothing left to attach for
 	}
 
 	if rvrPatchErr != nil {
@@ -386,7 +386,7 @@ func (r *Reconciler) patchRVRPrimary(
 		rvr.Status.DRBD.Config.Primary = &shouldBePrimary
 	}
 
-	_ = rvr.UpdateStatusConditionPublished(shouldBePrimary)
+	_ = rvr.UpdateStatusConditionAttached(shouldBePrimary)
 
 	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -409,7 +409,7 @@ func (r *Reconciler) patchRVRStatusConditions(
 		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
 
-	_ = rvr.UpdateStatusConditionPublished(shouldBePrimary)
+	_ = rvr.UpdateStatusConditionAttached(shouldBePrimary)
 
 	if err := r.cl.Status().Patch(ctx, rvr, client.MergeFrom(originalRVR)); err != nil {
 		if !apierrors.IsNotFound(err) {
@@ -420,7 +420,7 @@ func (r *Reconciler) patchRVRStatusConditions(
 	return nil
 }
 
-// shouldSkipRV returns true when, according to spec, rv-publish-controller
+// shouldSkipRV returns true when, according to spec, rv-attach-controller
 // should not perform any actions for the given ReplicatedVolume.
 func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
 	if !v1alpha1.HasControllerFinalizer(rv) {

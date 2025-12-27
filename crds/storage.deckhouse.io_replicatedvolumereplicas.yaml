@@ -28,8 +28,8 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Published')].status
-      name: Published
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
       type: string
     - jsonPath: .status.conditions[?(@.type=='Online')].status
       name: Online

@@ -57,7 +57,7 @@ spec:
             type: object
           spec:
             properties:
-              publishOn:
+              attachTo:
                 items:
                   type: string
                 maxItems: 2
@@ -72,7 +72,7 @@ spec:
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             required:
-            - publishOn
+            - attachTo
             - replicatedStorageClassName
             - size
             type: object
@@ -194,12 +194,12 @@ spec:
                 type: object
               phase:
                 type: string
-              publishedAndIOReadyCount:
+              attachedAndIOReadyCount:
                 description: |-
-                  PublishedAndIOReadyCount represents the number of published replicas that are IOReady in format "ready/published"
-                  Example: "1/2" means 1 replica is IOReady out of 2 published
+                  AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
+                  Example: "1/2" means 1 replica is IOReady out of 2 attached
                 type: string
-              publishedOn:
+              attachedTo:
                 items:
                   type: string
                 maxItems: 2
