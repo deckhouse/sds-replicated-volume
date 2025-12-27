@@ -379,41 +379,41 @@ func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.Repli
 // BuildReplicatedVolumeSpec builds ReplicatedVolumeSpec from parameters
 func BuildReplicatedVolumeSpec(
 	size resource.Quantity,
-	publishRequested []string,
+	attachTo []string,
 	rscName string,
 ) srv.ReplicatedVolumeSpec {
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
-		PublishOn:                  publishRequested,
+		AttachTo:                   attachTo,
 		ReplicatedStorageClassName: rscName,
 	}
 }
 
-// AddPublishRequested adds a node name to publishRequested array if not already present
-func AddPublishRequested(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
+// AddAttachTo adds a node name to rv.spec.attachTo if not already present
+func AddAttachTo(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
 		if err != nil {
 			return fmt.Errorf("get ReplicatedVolume %s: %w", volumeName, err)
 		}
 
-		// Check if node is already in publishRequested
-		for _, existingNode := range rv.Spec.PublishOn {
+		// Check if node is already in spec.attachTo
+		for _, existingNode := range rv.Spec.AttachTo {
 			if existingNode == nodeName {
-				log.Info(fmt.Sprintf("[AddPublishRequested][traceID:%s][volumeID:%s][node:%s] Node already in publishRequested", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Node already in spec.attachTo", traceID, volumeName, nodeName))
 				return nil
 			}
 		}
 
 		// Check if we can add more nodes (max 2)
-		if len(rv.Spec.PublishOn) >= 2 {
-			return fmt.Errorf("cannot add node %s to publishRequested: maximum of 2 nodes already present", nodeName)
+		if len(rv.Spec.AttachTo) >= 2 {
+			return fmt.Errorf("cannot add node %s to spec.attachTo: maximum of 2 nodes already present", nodeName)
 		}
 
-		// Add node to publishRequested
-		rv.Spec.PublishOn = append(rv.Spec.PublishOn, nodeName)
+		// Add node to spec.attachTo
+		rv.Spec.AttachTo = append(rv.Spec.AttachTo, nodeName)
 
-		log.Info(fmt.Sprintf("[AddPublishRequested][traceID:%s][volumeID:%s][node:%s] Adding node to publishRequested", traceID, volumeName, nodeName))
+		log.Info(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Adding node to spec.attachTo", traceID, volumeName, nodeName))
 		err = kc.Update(ctx, rv)
 		if err == nil {
 			return nil
@@ -424,7 +424,7 @@ func AddPublishRequested(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 
 		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[AddPublishRequested][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
+			log.Trace(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -434,37 +434,37 @@ func AddPublishRequested(ctx context.Context, kc client.Client, log *logger.Logg
 		}
 	}
 
-	return fmt.Errorf("failed to add node %s to publishRequested after %d attempts", nodeName, KubernetesAPIRequestLimit)
+	return fmt.Errorf("failed to add node %s to spec.attachTo after %d attempts", nodeName, KubernetesAPIRequestLimit)
 }
 
-// RemovePublishRequested removes a node name from publishRequested array
-func RemovePublishRequested(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
+// RemoveAttachTo removes a node name from rv.spec.attachTo
+func RemoveAttachTo(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
 	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
 		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
 		if err != nil {
 			if kerrors.IsNotFound(err) {
-				log.Info(fmt.Sprintf("[RemovePublishRequested][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, assuming already removed", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, assuming already removed", traceID, volumeName, nodeName))
 				return nil
 			}
 			return fmt.Errorf("get ReplicatedVolume %s: %w", volumeName, err)
 		}
 
-		// Check if node is in publishRequested
+		// Check if node is in spec.attachTo
 		found := false
-		for i, existingNode := range rv.Spec.PublishOn {
+		for i, existingNode := range rv.Spec.AttachTo {
 			if existingNode == nodeName {
-				rv.Spec.PublishOn = slices.Delete(rv.Spec.PublishOn, i, i+1)
+				rv.Spec.AttachTo = slices.Delete(rv.Spec.AttachTo, i, i+1)
 				found = true
 				break
 			}
 		}
 
 		if !found {
-			log.Info(fmt.Sprintf("[RemovePublishRequested][traceID:%s][volumeID:%s][node:%s] Node not in publishRequested, nothing to remove", traceID, volumeName, nodeName))
+			log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Node not in spec.attachTo, nothing to remove", traceID, volumeName, nodeName))
 			return nil
 		}
 
-		log.Info(fmt.Sprintf("[RemovePublishRequested][traceID:%s][volumeID:%s][node:%s] Removing node from publishRequested", traceID, volumeName, nodeName))
+		log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Removing node from spec.attachTo", traceID, volumeName, nodeName))
 		err = kc.Update(ctx, rv)
 		if err == nil {
 			return nil
@@ -475,7 +475,7 @@ func RemovePublishRequested(ctx context.Context, kc client.Client, log *logger.L
 		}
 
 		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[RemovePublishRequested][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
+			log.Trace(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -485,23 +485,23 @@ func RemovePublishRequested(ctx context.Context, kc client.Client, log *logger.L
 		}
 	}
 
-	return fmt.Errorf("failed to remove node %s from publishRequested after %d attempts", nodeName, KubernetesAPIRequestLimit)
+	return fmt.Errorf("failed to remove node %s from spec.attachTo after %d attempts", nodeName, KubernetesAPIRequestLimit)
 }
 
-// WaitForPublishProvided waits for a node name to appear in publishProvided status
-func WaitForPublishProvided(
+// WaitForAttachedToProvided waits for a node name to appear in rv.status.attachedTo
+func WaitForAttachedToProvided(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Waiting for node to appear in publishProvided", traceID, volumeName, nodeName))
+	log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Waiting for node to appear in status.attachedTo", traceID, volumeName, nodeName))
 	for {
 		attemptCounter++
 		select {
 		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
+			log.Warning(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
 			return ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
@@ -517,38 +517,38 @@ func WaitForPublishProvided(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishedOn))
+				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.attachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.AttachedTo))
 			}
 
-			// Check if node is in publishProvided
-			for _, publishedNode := range rv.Status.PublishedOn {
-				if publishedNode == nodeName {
-					log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Node is now in publishProvided", traceID, volumeName, nodeName))
+			// Check if node is in status.attachedTo
+			for _, attachedNode := range rv.Status.AttachedTo {
+				if attachedNode == nodeName {
+					log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.attachedTo", traceID, volumeName, nodeName))
 					return nil
 				}
 			}
 		} else if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
+			log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
 		}
 
-		log.Trace(fmt.Sprintf("[WaitForPublishProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in publishProvided yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
+		log.Trace(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in status.attachedTo yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }
 
-// WaitForPublishRemoved waits for a node name to disappear from publishProvided status
-func WaitForPublishRemoved(
+// WaitForAttachedToRemoved waits for a node name to disappear from rv.status.attachedTo
+func WaitForAttachedToRemoved(
 	ctx context.Context,
 	kc client.Client,
 	log *logger.Logger,
 	traceID, volumeName, nodeName string,
 ) error {
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Waiting for node to disappear from publishProvided", traceID, volumeName, nodeName))
+	log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Waiting for node to disappear from status.attachedTo", traceID, volumeName, nodeName))
 	for {
 		attemptCounter++
 		select {
 		case <-ctx.Done():
-			log.Warning(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
+			log.Warning(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
 			return ctx.Err()
 		default:
 			time.Sleep(500 * time.Millisecond)
@@ -558,7 +558,7 @@ func WaitForPublishRemoved(
 		if err != nil {
 			if kerrors.IsNotFound(err) {
 				// Volume deleted, consider it as removed
-				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, considering node as removed", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, considering node as removed", traceID, volumeName, nodeName))
 				return nil
 			}
 			return err
@@ -566,30 +566,30 @@ func WaitForPublishRemoved(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, publishProvided: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.PublishedOn))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.attachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.AttachedTo))
 			}
 
-			// Check if node is NOT in publishProvided
+			// Check if node is NOT in status.attachedTo
 			found := false
-			for _, publishedNode := range rv.Status.PublishedOn {
-				if publishedNode == nodeName {
+			for _, attachedNode := range rv.Status.AttachedTo {
+				if attachedNode == nodeName {
 					found = true
 					break
 				}
 			}
 
 			if !found {
-				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in publishProvided", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.attachedTo", traceID, volumeName, nodeName))
 				return nil
 			}
 		} else {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil, considering node as removed", traceID, volumeName, nodeName, attemptCounter))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil, considering node as removed", traceID, volumeName, nodeName, attemptCounter))
 			}
 			// If status is nil, consider node as removed
 			return nil
 		}
 
-		log.Trace(fmt.Sprintf("[WaitForPublishRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in publishProvided. Waiting...", traceID, volumeName, nodeName, attemptCounter))
+		log.Trace(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in status.attachedTo. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }

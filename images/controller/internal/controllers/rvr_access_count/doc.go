@@ -20,14 +20,14 @@ limitations under the License.
 // # Controller Responsibilities
 //
 // The controller manages Access replicas by:
-//   - Creating Access replicas for nodes in rv.spec.publishOn without other replica types
+//   - Creating Access replicas for nodes in rv.spec.attachTo without other replica types
 //   - Deleting Access replicas when they are no longer needed
 //   - Ensuring enough replicas exist for requested access points
 //
 // # Watched Resources
 //
 // The controller watches:
-//   - ReplicatedVolume: To monitor publishOn requirements
+//   - ReplicatedVolume: To monitor attachTo requirements
 //   - ReplicatedVolumeReplica: To track existing replicas
 //   - ReplicatedStorageClass: To check volumeAccess policy
 //
@@ -35,12 +35,12 @@ limitations under the License.
 //
 // Access replicas are needed when:
 //   - rsc.spec.volumeAccess != Local (Remote or Any access modes)
-//   - A node is in rv.spec.publishOn
+//   - A node is in rv.spec.attachTo
 //   - No Diskful or TieBreaker replica exists on that node
 //
 // Access replicas should be removed when:
-//   - The node is no longer in rv.spec.publishOn
-//   - The node is not in rv.status.publishedOn (not actively using the volume)
+//   - The node is no longer in rv.spec.attachTo
+//   - The node is not in rv.status.attachedTo (not actively using the volume)
 //
 // # Reconciliation Flow
 //
@@ -49,12 +49,12 @@ limitations under the License.
 //     - rv.status.condition[type=IOReady].status must be True
 //  2. If RV is being deleted (only module finalizers remain):
 //     - Skip creation of new Access replicas
-//  3. For each node in rv.spec.publishOn:
+//  3. For each node in rv.spec.attachTo:
 //     a. Check if a replica already exists on that node
 //     b. If no replica exists and rsc.spec.volumeAccess != Local:
 //     - Create new RVR with spec.type=Access
 //  4. For each Access replica:
-//     a. If node not in rv.spec.publishOn AND not in rv.status.publishedOn:
+//     a. If node not in rv.spec.attachTo AND not in rv.status.attachedTo:
 //     - Delete the Access replica
 //
 // # Status Updates
@@ -69,7 +69,7 @@ limitations under the License.
 //   - Only Diskful replicas can provide Local access
 //
 // TieBreaker Conversion:
-//   - TieBreaker replicas can be converted to Access replicas by rv-publish-controller
+//   - TieBreaker replicas can be converted to Access replicas by rv-attach-controller
 //     when promotion to Primary is required
 //
 // The controller only processes resources when the RV has the controller finalizer

@@ -285,14 +285,14 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	return nil
 }
 
-func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrimary bool) error {
+func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimary bool) error {
 	if rvr.Spec.Type != ReplicaTypeAccess && rvr.Spec.Type != ReplicaTypeDiskful {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:   ConditionTypePublished,
+				Type:   ConditionTypeAttached,
 				Status: v1.ConditionFalse,
-				Reason: ReasonPublishingNotApplicable,
+				Reason: ReasonAttachingNotApplicable,
 			},
 		)
 		return nil
@@ -305,9 +305,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrima
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:   ConditionTypePublished,
+				Type:   ConditionTypeAttached,
 				Status: v1.ConditionUnknown,
-				Reason: ReasonPublishingNotInitialized,
+				Reason: ReasonAttachingNotInitialized,
 			},
 		)
 		return nil
@@ -315,17 +315,17 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrima
 
 	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
 
-	cond := v1.Condition{Type: ConditionTypePublished}
+	cond := v1.Condition{Type: ConditionTypeAttached}
 
 	if isPrimary {
 		cond.Status = v1.ConditionTrue
-		cond.Reason = ReasonPublished
+		cond.Reason = ReasonAttached
 	} else {
 		cond.Status = v1.ConditionFalse
 		if shouldBePrimary {
-			cond.Reason = ReasonPublishPending
+			cond.Reason = ReasonAttachPending
 		} else {
-			cond.Reason = ReasonUnpublished
+			cond.Reason = ReasonDetached
 		}
 	}
 

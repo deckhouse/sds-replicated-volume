@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvpublishcontroller_test
+package rvattachcontroller_test
 
 import (
 	"context"
@@ -34,12 +34,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvpublishcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_publish_controller"
+	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 )
 
-func TestRvPublishReconciler(t *testing.T) {
+func TestRvAttachReconciler(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "rv-publish-controller Reconciler Suite")
+	RunSpecs(t, "rv-attach-controller Reconciler Suite")
 }
 
 var errExpectedTestError = errors.New("test error")
@@ -52,7 +52,7 @@ var _ = Describe("Reconcile", func() {
 	var (
 		builder *fake.ClientBuilder
 		cl      client.WithWatch
-		rec     *rvpublishcontroller.Reconciler
+		rec     *rvattachcontroller.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -66,7 +66,7 @@ var _ = Describe("Reconcile", func() {
 
 	JustBeforeEach(func() {
 		cl = builder.Build()
-		rec = rvpublishcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}))
+		rec = rvattachcontroller.NewReconciler(cl, logr.New(log.NullLogSink{}))
 	})
 
 	It("returns nil when ReplicatedVolume not found", func(ctx SpecContext) {
@@ -153,13 +153,13 @@ var _ = Describe("Reconcile", func() {
 			var (
 				rsc          v1alpha1.ReplicatedStorageClass
 				rvrList      v1alpha1.ReplicatedVolumeReplicaList
-				publishOn    []string
+				attachTo     []string
 				volumeAccess string
 			)
 
 			BeforeEach(func() {
 				volumeAccess = "Local"
-				publishOn = []string{"node-1", "node-2"}
+				attachTo = []string{"node-1", "node-2"}
 
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
@@ -169,7 +169,7 @@ var _ = Describe("Reconcile", func() {
 						},
 					},
 				}
-				rv.Spec.PublishOn = publishOn
+				rv.Spec.AttachTo = attachTo
 
 				rsc = v1alpha1.ReplicatedStorageClass{
 					ObjectMeta: metav1.ObjectMeta{
@@ -220,7 +220,7 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
-				It("does not set PublishSucceeded condition for non-Local access", func(ctx SpecContext) {
+				It("does not set AttachSucceeded condition for non-Local access", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -230,20 +230,20 @@ var _ = Describe("Reconcile", func() {
 						HaveEach(HaveField(
 							"Status.Conditions",
 							Not(ContainElement(
-								HaveField("Type", Equal(rvpublishcontroller.ConditionTypePublishSucceeded)),
+								HaveField("Type", Equal(rvattachcontroller.ConditionTypeAttachSucceeded)),
 							)),
 						)),
 					))
 				})
 			})
 
-			When("Local access and Diskful replicas exist on all publishOn nodes", func() {
+			When("Local access and Diskful replicas exist on all attachTo nodes", func() {
 				BeforeEach(func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
-				It("does not set PublishSucceeded=False and proceeds with reconciliation", func(ctx SpecContext) {
+				It("does not set AttachSucceeded=False and proceeds with reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -253,12 +253,12 @@ var _ = Describe("Reconcile", func() {
 
 					// no failure condition should be present
 					for _, cond := range got.Status.Conditions {
-						Expect(cond.Type).NotTo(Equal(rvpublishcontroller.ConditionTypePublishSucceeded))
+						Expect(cond.Type).NotTo(Equal(rvattachcontroller.ConditionTypeAttachSucceeded))
 					}
 				})
 			})
 
-			When("Local access but Diskful replica is missing on one of publishOn nodes", func() {
+			When("Local access but Diskful replica is missing on one of attachTo nodes", func() {
 				BeforeEach(func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
@@ -267,7 +267,7 @@ var _ = Describe("Reconcile", func() {
 					rvrList.Items = rvrList.Items[:1]
 				})
 
-				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
+				It("sets AttachSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -275,10 +275,10 @@ var _ = Describe("Reconcile", func() {
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
 
-					cond := meta.FindStatusCondition(got.Status.Conditions, rvpublishcontroller.ConditionTypePublishSucceeded)
+					cond := meta.FindStatusCondition(got.Status.Conditions, rvattachcontroller.ConditionTypeAttachSucceeded)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(rvpublishcontroller.ReasonUnableToProvideLocalVolumeAccess))
+					Expect(cond.Reason).To(Equal(rvattachcontroller.ReasonUnableToProvideLocalVolumeAccess))
 				})
 			})
 
@@ -288,7 +288,7 @@ var _ = Describe("Reconcile", func() {
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// request two primaries
-					rv.Spec.PublishOn = []string{"node-1", "node-2"}
+					rv.Spec.AttachTo = []string{"node-1", "node-2"}
 
 					// replicas without actual.AllowTwoPrimaries
 					rvrList.Items[0].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
@@ -326,7 +326,7 @@ var _ = Describe("Reconcile", func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
 
-					rv.Spec.PublishOn = []string{"node-1", "node-2"}
+					rv.Spec.AttachTo = []string{"node-1", "node-2"}
 
 					// both replicas already have actual.AllowTwoPrimaries=true
 					for i := range rvrList.Items {
@@ -343,10 +343,10 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				It("updates primary roles and publishedOn", func(ctx SpecContext) {
+				It("updates primary roles and attachedTo", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
-					// RVRs on publishOn nodes should be configured as Primary
+					// RVRs on attachTo nodes should be configured as Primary
 					gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
 					Expect(cl.List(ctx, gotRVRs)).To(Succeed())
 
@@ -372,13 +372,13 @@ var _ = Describe("Reconcile", func() {
 						}
 					}
 
-					// rv.status.publishedOn should reflect RVRs with Role=Primary
+					// rv.status.attachedTo should reflect RVRs with Role=Primary
 					rvList := &v1alpha1.ReplicatedVolumeList{}
 					Expect(cl.List(ctx, rvList)).To(Succeed())
 					Expect(rvList.Items).To(HaveLen(1))
 					gotRV := &rvList.Items[0]
 					// we don't assert exact content here, just that field is present and length <= 2
-					Expect(len(gotRV.Status.PublishedOn)).To(BeNumerically("<=", 2))
+					Expect(len(gotRV.Status.AttachedTo)).To(BeNumerically("<=", 2))
 				})
 			})
 
@@ -387,7 +387,7 @@ var _ = Describe("Reconcile", func() {
 					volumeAccess = "Remote"
 					rsc.Spec.VolumeAccess = volumeAccess
 
-					rv.Spec.PublishOn = []string{"node-1"}
+					rv.Spec.AttachTo = []string{"node-1"}
 
 					rvrList = v1alpha1.ReplicatedVolumeReplicaList{
 						Items: []v1alpha1.ReplicatedVolumeReplica{
@@ -430,12 +430,12 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("replica on node outside publishOn does not become primary", func() {
+			When("replica on node outside attachTo does not become primary", func() {
 				BeforeEach(func() {
 					volumeAccess = "Remote"
 					rsc.Spec.VolumeAccess = volumeAccess
 
-					rv.Spec.PublishOn = []string{"node-1"}
+					rv.Spec.AttachTo = []string{"node-1"}
 
 					rvrList = v1alpha1.ReplicatedVolumeReplicaList{
 						Items: []v1alpha1.ReplicatedVolumeReplica{
@@ -463,7 +463,7 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				It("keeps replica on non-publishOn node non-primary", func(ctx SpecContext) {
+				It("keeps replica on non-attachTo node non-primary", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
@@ -501,7 +501,7 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("Local access but replica on publishOn node is Access", func() {
+			When("Local access but replica on attachTo node is Access", func() {
 				BeforeEach(func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
@@ -510,7 +510,7 @@ var _ = Describe("Reconcile", func() {
 					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeAccess
 				})
 
-				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
+				It("sets AttachSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -518,14 +518,14 @@ var _ = Describe("Reconcile", func() {
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
 
-					cond := meta.FindStatusCondition(got.Status.Conditions, rvpublishcontroller.ConditionTypePublishSucceeded)
+					cond := meta.FindStatusCondition(got.Status.Conditions, rvattachcontroller.ConditionTypeAttachSucceeded)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(rvpublishcontroller.ReasonUnableToProvideLocalVolumeAccess))
+					Expect(cond.Reason).To(Equal(rvattachcontroller.ReasonUnableToProvideLocalVolumeAccess))
 				})
 			})
 
-			When("Local access but replica on publishOn node is TieBreaker", func() {
+			When("Local access but replica on attachTo node is TieBreaker", func() {
 				BeforeEach(func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
@@ -534,7 +534,7 @@ var _ = Describe("Reconcile", func() {
 					rvrList.Items[1].Spec.Type = v1alpha1.ReplicaTypeTieBreaker
 				})
 
-				It("sets PublishSucceeded=False and stops reconciliation", func(ctx SpecContext) {
+				It("sets AttachSucceeded=False and stops reconciliation", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -542,19 +542,19 @@ var _ = Describe("Reconcile", func() {
 					Expect(rvList.Items).To(HaveLen(1))
 					got := &rvList.Items[0]
 
-					cond := meta.FindStatusCondition(got.Status.Conditions, rvpublishcontroller.ConditionTypePublishSucceeded)
+					cond := meta.FindStatusCondition(got.Status.Conditions, rvattachcontroller.ConditionTypeAttachSucceeded)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(rvpublishcontroller.ReasonUnableToProvideLocalVolumeAccess))
+					Expect(cond.Reason).To(Equal(rvattachcontroller.ReasonUnableToProvideLocalVolumeAccess))
 				})
 			})
 
-			When("publishOn shrinks to a single node", func() {
+			When("attachTo shrinks to a single node", func() {
 				BeforeEach(func() {
 					volumeAccess = "Local"
 					rsc.Spec.VolumeAccess = volumeAccess
 
-					rv.Spec.PublishOn = []string{"node-1"}
+					rv.Spec.AttachTo = []string{"node-1"}
 
 					// смоделируем ситуацию, когда раньше allowTwoPrimaries уже был включён
 					rv.Status.DRBD = &v1alpha1.DRBDResource{
@@ -574,7 +574,7 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				It("sets allowTwoPrimaries=false when less than two nodes in publishOn", func(ctx SpecContext) {
+				It("sets allowTwoPrimaries=false when less than two nodes in attachTo", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					got := &v1alpha1.ReplicatedVolume{}
@@ -591,7 +591,7 @@ var _ = Describe("Reconcile", func() {
 					volumeAccess = "Remote"
 					rsc.Spec.VolumeAccess = volumeAccess
 
-					rv.Spec.PublishOn = []string{"node-1", "node-2"}
+					rv.Spec.AttachTo = []string{"node-1", "node-2"}
 
 					for i := range rvrList.Items {
 						role := "Secondary"
@@ -611,7 +611,7 @@ var _ = Describe("Reconcile", func() {
 					}
 				})
 
-				It("recomputes publishedOn from replicas with Primary role", func(ctx SpecContext) {
+				It("recomputes attachedTo from replicas with Primary role", func(ctx SpecContext) {
 					Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 
 					rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -619,13 +619,13 @@ var _ = Describe("Reconcile", func() {
 					Expect(rvList.Items).To(HaveLen(1))
 					gotRV := &rvList.Items[0]
 
-					Expect(gotRV.Status.PublishedOn).To(ConsistOf("node-1"))
+					Expect(gotRV.Status.AttachedTo).To(ConsistOf("node-1"))
 				})
 			})
 
 		})
 
-		When("setting PublishSucceeded condition fails", func() {
+		When("setting AttachSucceeded condition fails", func() {
 			BeforeEach(func() {
 				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
@@ -635,7 +635,7 @@ var _ = Describe("Reconcile", func() {
 						},
 					},
 				}
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Spec.AttachTo = []string{"node-1"}
 
 				rsc := v1alpha1.ReplicatedStorageClass{
 					ObjectMeta: metav1.ObjectMeta{
@@ -647,7 +647,7 @@ var _ = Describe("Reconcile", func() {
 					},
 				}
 
-				// Ноде нужен Diskful, но мы создадим Access — это вызовет попытку выставить PublishSucceeded=False
+				// Ноде нужен Diskful, но мы создадим Access — это вызовет попытку выставить AttachSucceeded=False
 				rvr := v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "rvr-access-1",
@@ -671,7 +671,7 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			It("propagates error from PublishSucceeded status patch", func(ctx SpecContext) {
+			It("propagates error from AttachSucceeded status patch", func(ctx SpecContext) {
 				result, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})
 				Expect(err).To(MatchError(errExpectedTestError))
 				Expect(result).To(Equal(reconcile.Result{}))
@@ -688,7 +688,7 @@ var _ = Describe("Reconcile", func() {
 						},
 					},
 				}
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Spec.AttachTo = []string{"node-1"}
 
 				rsc := v1alpha1.ReplicatedStorageClass{
 					ObjectMeta: metav1.ObjectMeta{

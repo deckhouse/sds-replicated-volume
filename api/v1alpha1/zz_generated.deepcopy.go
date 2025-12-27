@@ -742,8 +742,8 @@ func (in *ReplicatedVolumeReplicaStatus) DeepCopy() *ReplicatedVolumeReplicaStat
 func (in *ReplicatedVolumeSpec) DeepCopyInto(out *ReplicatedVolumeSpec) {
 	*out = *in
 	out.Size = in.Size.DeepCopy()
-	if in.PublishOn != nil {
-		in, out := &in.PublishOn, &out.PublishOn
+	if in.AttachTo != nil {
+		in, out := &in.AttachTo, &out.AttachTo
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
@@ -774,8 +774,8 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 		*out = new(DRBDResource)
 		(*in).DeepCopyInto(*out)
 	}
-	if in.PublishedOn != nil {
-		in, out := &in.PublishedOn, &out.PublishedOn
+	if in.AttachedTo != nil {
+		in, out := &in.AttachedTo, &out.AttachedTo
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
