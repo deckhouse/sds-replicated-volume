@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync"
 )
 
 const MaxDeviceMinor DeviceMinor = 1_048_575 // 2^20-1
@@ -56,6 +57,7 @@ func (dm DeviceMinor) Decrement() (DeviceMinor, bool) {
 }
 
 type DeviceMinorCache struct {
+	mu       sync.RWMutex
 	byRVName map[string]DeviceMinor // values are unique
 	max      DeviceMinor            // maximum value in byRVName
 	released []DeviceMinor          // "holes" in values in byRVName, sorted
@@ -68,19 +70,31 @@ func NewDeviceMinorCache() *DeviceMinorCache {
 }
 
 func (c *DeviceMinorCache) Len() int {
-	return len(c.byRVName)
+	c.mu.RLock()
+	res := len(c.byRVName)
+	c.mu.RUnlock()
+	return res
 }
 
 func (c *DeviceMinorCache) ReleasedLen() int {
-	return len(c.released)
+	c.mu.RLock()
+	res := len(c.released)
+	c.mu.RUnlock()
+	return res
 }
 
 func (c *DeviceMinorCache) Max() DeviceMinor {
-	return c.max
+	c.mu.RLock()
+	res := c.max
+	c.mu.RUnlock()
+	return res
 }
 
 func (c *DeviceMinorCache) Released() []DeviceMinor {
-	return slices.Clone(c.released)
+	c.mu.RLock()
+	res := slices.Clone(c.released)
+	c.mu.RUnlock()
+	return res
 }
 
 func (c *DeviceMinorCache) Initialize(byRVName map[string]DeviceMinor) error {
@@ -113,6 +127,9 @@ func (c *DeviceMinorCache) Initialize(byRVName map[string]DeviceMinor) error {
 		return dupErr
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// Clear state
 	c.byRVName = make(map[string]DeviceMinor, len(dms))
 	c.released = nil
@@ -139,6 +156,9 @@ func (c *DeviceMinorCache) Initialize(byRVName map[string]DeviceMinor) error {
 }
 
 func (c *DeviceMinorCache) GetOrCreate(rvName string) (DeviceMinor, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	// initialize first item
 	if len(c.byRVName) == 0 {
 		c.addRVDM(rvName, c.max)
@@ -166,7 +186,9 @@ func (c *DeviceMinorCache) GetOrCreate(rvName string) (DeviceMinor, error) {
 }
 
 func (c *DeviceMinorCache) Release(rvName string) {
+	c.mu.Lock()
 	c.removeRVDM(rvName)
+	c.mu.Unlock()
 }
 
 func (c *DeviceMinorCache) addRVDM(rvName string, dm DeviceMinor) {
