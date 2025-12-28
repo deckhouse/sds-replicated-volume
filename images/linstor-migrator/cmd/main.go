@@ -27,7 +27,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/deckhouse/sds-common-lib/slogh"
 	kubeutils "github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/pkg/kubeutils"
@@ -39,10 +38,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
-	"k8s.io/apimachinery/pkg/api/resource"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
@@ -243,434 +238,437 @@ func migratePV(
 		return err
 	}
 
-	// TODO:
-	rv, err := createOrGetRV(ctx, kClient, log, pv.Name, size, linstorDB, repStorPool, repStorClass)
-	if err != nil {
-		return err
-	}
+	_ = myLvmVolumeGroups
+	_ = repStorClass
 
-	linstorResources, ok := linstorDB.Resources[pv.Name]
-	if !ok {
-		return fmt.Errorf("linstor Resources not found")
-	}
-	for _, linstorResource := range linstorResources {
-		// 0-Diskful|388-TieBreaker|260-Diskless
-		if linstorResource.Spec.ResourceFlags == 0 {
-			err := createOrGetLLV(ctx, kClient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
-			if err != nil {
-				return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
-			}
-		}
+	//// TODO:
+	//rv, err := createOrGetRV(ctx, kClient, log, pv.Name, size, linstorDB, repStorPool, repStorClass)
+	//if err != nil {
+	//	return err
+	//}
 
-		err := createOrGetRVR(ctx, kClient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
-		if err != nil {
-			return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
-		}
-	}
+	//linstorResources, ok := linstorDB.Resources[pv.Name]
+	//if !ok {
+	//	return fmt.Errorf("linstor Resources not found")
+	//}
+	//for _, linstorResource := range linstorResources {
+	//	// 0-Diskful|388-TieBreaker|260-Diskless
+	//	if linstorResource.Spec.ResourceFlags == 0 {
+	//		err := createOrGetLLV(ctx, kClient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
+	//		if err != nil {
+	//			return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
+	//		}
+	//	}
+
+	//	err := createOrGetRVR(ctx, kClient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
+	//	if err != nil {
+	//		return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
+	//	}
+	//}
 
 	log.Info("End migrating Replicated PersistentVolume")
 	return nil
 }
 
-func createOrGetRV(
-	ctx context.Context,
-	kClient kubecl.Client,
-	log *slog.Logger,
-	pvName string,
-	size int,
-	linstorDB *linstorDB,
-	repStorPool srvv1alpha1.ReplicatedStoragePool,
-	repStorClass srvv1alpha1.ReplicatedStorageClass,
-) (*corev1.ConfigMap, error) {
-	// TODO: replace ConfigMap -> ReplicatedVolume
-	rvName := pvName
-
-	log = log.With("rv_name", rvName)
-	log.Info("Creating RV")
-
-	replicaCount, err := getReplicaCount(pvName, linstorDB)
-	if err != nil {
-		return nil, err
-	}
-
-	sharedSecret, err := getSharedSecret(pvName, linstorDB)
-	if err != nil {
-		return nil, err
-	}
-
-	var typeLVM string
-	if repStorPool.Spec.Type == "LVMThin" {
-		typeLVM = typeLVMThin
-	} else {
-		typeLVM = typeLVMThick
-	}
-
-	lvmVolumeGroups := make([]srvv1alpha1.LVGRef, 0, len(repStorPool.Spec.LVMVolumeGroups))
-	for _, lvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
-		lvmVolumeGroups = append(lvmVolumeGroups, srvv1alpha1.LVGRef{
-			Name:         lvmVolumeGroup.Name,
-			ThinPoolName: lvmVolumeGroup.ThinPoolName,
-		})
-	}
-
-	rvNew1 := &srvv1alpha1.ReplicatedVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: rvName,
-			// TODO: add csi finalizer
-			// TODO: remove this finalizer
-			Finalizers: []string{controllerFinalizerName},
-		},
-		Spec: srvv1alpha1.ReplicatedVolumeSpec{
-			Size:         *resource.NewQuantity(int64(size), resource.BinarySI),
-			Replicas:     replicaCount,
-			SharedSecret: sharedSecret,
-			LVM: srvv1alpha1.LVMSpec{
-				Type:            typeLVM,
-				LVMVolumeGroups: lvmVolumeGroups,
-			},
-			Topology: repStorClass.Spec.Topology,
-			Zones:    repStorClass.Spec.Zones,
-			// patch in createOrGetRVR function
-			//PublishRequested: ,
-		},
-	}
-	log.Debug(fmt.Sprintf("rvNew1: %+v", rvNew1))
-
-	rvExists := &corev1.ConfigMap{}
-	err = kClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: rvName}, rvExists)
-	if err == nil {
-		log.Info("RV already exists")
-		return rvExists, nil
-	}
-	if !apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("failed to get ReplicatedVolume: %w", err)
-	}
-
-	rvNew := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      rvName,
-			Namespace: "default",
-		},
-		Data: map[string]string{
-			"key": "value",
-		},
-	}
-
-	err = kClient.Create(ctx, rvNew)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create ReplicatedVolume: %w", err)
-	}
-
-	// TODO: wait ready RV
-
-	log.Info("RV created")
-
-	return rvNew, nil
-}
-
-func createOrGetLLV(
-	ctx context.Context,
-	kClient kubecl.Client,
-	log *slog.Logger,
-	pvName string,
-	rv *corev1.ConfigMap,
-	size int,
-	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
-	linstorResource srvlinstor.Resources,
-) error {
-	generateLlvName := fmt.Sprintf("%s%s", pvName, "-")
-
-	log = log.With("node_name", linstorResource.Spec.NodeName, "generate_llv_name", generateLlvName)
-	log.Info("Creating LLV")
-
-	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(linstorResource.Spec.NodeName, myLvmVolumeGroups)
-	if err != nil {
-		return err
-	}
-
-	llvs := &sncv1alpha1.LVMLogicalVolumeList{}
-	if err := kClient.List(ctx, llvs); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to get LVMLogicalVolumeList: %w", err)
-		}
-	}
-	for _, llv := range llvs.Items {
-		if llv.GenerateName == generateLlvName && llv.Spec.LVMVolumeGroupName == lvmVolumeGroupName {
-			if llv.Status.Phase == llmPhaseCreated {
-				log.Info("LLV already exists")
-				return nil
-			} else {
-				return fmt.Errorf("LLV already exists but not in phase %s (current phase: %s)", llmPhaseCreated, llv.Status.Phase)
-			}
-		}
-	}
-
-	var typeLVM string
-	if thinPoolName != "" {
-		typeLVM = typeLVMThin
-	} else {
-		typeLVM = typeLVMThick
-	}
-
-	llvNew := &sncv1alpha1.LVMLogicalVolume{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: generateLlvName,
-			// TODO: remove this finalizer
-			Finalizers: []string{controllerFinalizerName},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         corev1.SchemeGroupVersion.String(),
-					Kind:               "ConfigMap",
-					Name:               rv.Name,
-					UID:                rv.UID,
-					Controller:         ptrTo(true),
-					BlockOwnerDeletion: ptrTo(true),
-				},
-			},
-		},
-		Spec: sncv1alpha1.LVMLogicalVolumeSpec{
-			ActualLVNameOnTheNode: fmt.Sprintf("%s%s", pvName, linstorLVMSuffix),
-			LVMVolumeGroupName:    lvmVolumeGroupName,
-			Type:                  typeLVM,
-			Size:                  fmt.Sprintf("%d", size),
-		},
-	}
-	if thinPoolName != "" {
-		llvNew.Spec.Thin = &sncv1alpha1.LVMLogicalVolumeThinSpec{
-			PoolName: thinPoolName,
-		}
-	}
-
-	err = kClient.Create(ctx, llvNew)
-	if err != nil {
-		return fmt.Errorf("failed to create LLV: %w", err)
-	}
-
-	log = log.With("llv_name", llvNew.Name)
-
-	// Wait for LLV to reach Created phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
-	startTime := time.Now()
-	for {
-		llvExists := &sncv1alpha1.LVMLogicalVolume{}
-		err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvNew.Name}, llvExists)
-		if err != nil {
-			return fmt.Errorf("failed to get LLV: %w", err)
-		}
-		if llvExists.Status != nil && llvExists.Status.Phase == llmPhaseCreated {
-			break
-		}
-		time.Sleep(1 * time.Second)
-		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
-			return fmt.Errorf("LLV created but not in phase %s (current phase: %s)", llmPhaseCreated, llvExists.Status.Phase)
-		}
-
-		log.Debug("waiting to reach Created phase...")
-	}
-	log.Info(fmt.Sprintf("LLV created and in phase %s", llmPhaseCreated))
-
-	return nil
-}
-
-func createOrGetRVR(
-	ctx context.Context,
-	kClient kubecl.Client,
-	log *slog.Logger,
-	pvName string,
-	rv *corev1.ConfigMap,
-	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
-	linstorResource srvlinstor.Resources,
-	linstorDB *linstorDB,
-) error {
-	nodeName := strings.ToLower(linstorResource.Spec.NodeName)
-	generateRvrName := fmt.Sprintf("%s-", pvName)
-
-	diskless := false
-	if linstorResource.Spec.ResourceFlags != 0 {
-		diskless = true
-	}
-
-	log = log.With("node_name", nodeName, "generate_rvr_name", generateRvrName, "diskless", fmt.Sprintf("%t", diskless))
-	log.Info("Creating RVR")
-
-	rvrs := &srvv1alpha1.ReplicatedVolumeReplicaList{}
-	if err := kClient.List(ctx, rvrs); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return fmt.Errorf("failed to get ReplicatedVolumeReplicaList: %w", err)
-		}
-	}
-	for _, rvr := range rvrs.Items {
-		if rvr.Spec.NodeName == nodeName && rvr.Spec.ReplicatedVolumeName == pvName {
-			if rvr.Status == nil {
-				return fmt.Errorf("RVR already exists; status is not set")
-			}
-			if rvr.Status.Conditions == nil {
-				return fmt.Errorf("RVR already exists; conditions are not set")
-			}
-			cond := meta.FindStatusCondition(rvr.Status.Conditions, srvv1alpha1.ConditionTypeReady)
-			if cond != nil && cond.Status == metav1.ConditionTrue {
-				log.Info("RVR already exists")
-				return nil
-			} else {
-				return fmt.Errorf("RVR already exists; condition %s is not true (current status: %q)", srvv1alpha1.ConditionTypeReady, func() string {
-					if cond == nil {
-						return "<nil>"
-					}
-					return string(cond.Status)
-				}())
-			}
-		}
-	}
-
-	nodeId, err := getNodeId(pvName, nodeName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug("node id", "node_id", nodeId)
-
-	nodeIPv4, err := getNodeIPv4(nodeName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("node ipv4: %s", nodeIPv4))
-
-	drbdPort, err := getDRBDPort(pvName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("drbd port: %d", drbdPort))
-
-	sharedSecret, err := getSharedSecret(pvName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("shared secret: %s", sharedSecret))
-
-	peers, err := getPeers(pvName, nodeName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("peers: %v", peers))
-
-	drbdMinor, err := getDRBDMinor(pvName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("drbd minor: %d", drbdMinor))
-
-	primary, err := getPrimary(ctx, kClient, pvName, nodeName)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("primary: %t", primary))
-
-	//if primary {
-	//	err := setPublishRequested(ctx, kClient, rv, nodeName)
-	//	if err != nil {
-	//		return err
-	//	}
-	//	log.Debug(fmt.Sprintf("patched PublishRequested in RV (node_name: %s)", nodeName))
-	//}
-
-	replicaCount, err := getReplicaCount(pvName, linstorDB)
-	if err != nil {
-		return err
-	}
-	log.Debug(fmt.Sprintf("replica count: %d", replicaCount))
-	quorum := replicaCount/2 + 1
-	quorumMinimumRedundancy := byte(0)
-	if replicaCount > 2 {
-		quorumMinimumRedundancy = quorum
-	}
-	log.Debug(fmt.Sprintf("quorum: %d", quorum))
-	log.Debug(fmt.Sprintf("quorum minimum redundancy: %d", quorumMinimumRedundancy))
-
-	rvrNew := &srvv1alpha1.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: generateRvrName,
-			// TODO: remove this finalizer
-			Finalizers: []string{controllerFinalizerName},
-			OwnerReferences: []metav1.OwnerReference{
-				{
-					APIVersion:         corev1.SchemeGroupVersion.String(),
-					Kind:               "ConfigMap",
-					Name:               rv.Name,
-					UID:                rv.UID,
-					Controller:         ptrTo(true),
-					BlockOwnerDeletion: ptrTo(true),
-				},
-			},
-		},
-		Spec: srvv1alpha1.ReplicatedVolumeReplicaSpec{
-			NodeName:             nodeName,
-			ReplicatedVolumeName: pvName,
-			NodeId:               uint(nodeId),
-			NodeAddress: srvv1alpha1.Address{
-				IPv4: nodeIPv4,
-				Port: uint(drbdPort),
-			},
-			Peers:                   peers,
-			SharedSecret:            sharedSecret,
-			Primary:                 primary,
-			Quorum:                  quorum,
-			QuorumMinimumRedundancy: quorumMinimumRedundancy,
-			AllowTwoPrimaries:       false,
-			Volumes: []srvv1alpha1.Volume{
-				{
-					Device: uint(drbdMinor),
-					Number: 0,
-				},
-			},
-		},
-	}
-	if !diskless {
-		lvmVolumeGroupName, _, err := getLVMVolumeGroupNameAndThinPoolName(nodeName, myLvmVolumeGroups)
-		if err != nil {
-			return err
-		}
-
-		lvmVolumeGroup := &sncv1alpha1.LVMVolumeGroup{}
-		if err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: lvmVolumeGroupName}, lvmVolumeGroup); err != nil {
-			return fmt.Errorf("failed to get LVMVolumeGroup: %w", err)
-		}
-
-		lvName := fmt.Sprintf("%s%s", pvName, linstorLVMSuffix)
-
-		rvrNew.Spec.Volumes[0].Disk = fmt.Sprintf("/dev/%s/%s", lvmVolumeGroup.Spec.ActualVGNameOnTheNode, lvName)
-		log.Debug(fmt.Sprintf("disk: %s", rvrNew.Spec.Volumes[0].Disk))
-	}
-
-	err = kClient.Create(ctx, rvrNew)
-	if err != nil {
-		return fmt.Errorf("failed to create RVR: %w", err)
-	}
-
-	log = log.With("rvr_name", rvrNew.Name)
-
-	// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
-	//startTime := time.Now()
-	//for {
-	//	rvrExists := &srvv1alpha1.ReplicatedVolumeReplica{}
-	//	err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
-	//	if err != nil {
-	//		return fmt.Errorf("failed to get RVR: %w", err)
-	//	}
-	//	if rvrExists.Status != nil && rvrExists.Status.Conditions != nil {
-	//		cond := meta.FindStatusCondition(rvrExists.Status.Conditions, srvv1alpha1.ConditionTypeReady)
-	//		if cond != nil && cond.Status == metav1.ConditionTrue {
-	//			break
-	//		}
-	//	}
-	//	time.Sleep(1 * time.Second)
-	//	if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
-	//		return fmt.Errorf("RVR created but not in Ready state")
-	//	}
-
-	//	log.Debug("waiting to reach Ready state...")
-	//}
-	log.Info("RVR created and in Ready state")
-
-	return nil
-}
+//func createOrGetRV(
+//	ctx context.Context,
+//	kClient kubecl.Client,
+//	log *slog.Logger,
+//	pvName string,
+//	size int,
+//	linstorDB *linstorDB,
+//	repStorPool srvv1alpha1.ReplicatedStoragePool,
+//	repStorClass srvv1alpha1.ReplicatedStorageClass,
+//) (*corev1.ConfigMap, error) {
+//	// TODO: replace ConfigMap -> ReplicatedVolume
+//	rvName := pvName
+//
+//	log = log.With("rv_name", rvName)
+//	log.Info("Creating RV")
+//
+//	replicaCount, err := getReplicaCount(pvName, linstorDB)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	sharedSecret, err := getSharedSecret(pvName, linstorDB)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	var typeLVM string
+//	if repStorPool.Spec.Type == "LVMThin" {
+//		typeLVM = typeLVMThin
+//	} else {
+//		typeLVM = typeLVMThick
+//	}
+//
+//	lvmVolumeGroups := make([]srvv1alpha1.LVGRef, 0, len(repStorPool.Spec.LVMVolumeGroups))
+//	for _, lvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
+//		lvmVolumeGroups = append(lvmVolumeGroups, srvv1alpha1.LVGRef{
+//			Name:         lvmVolumeGroup.Name,
+//			ThinPoolName: lvmVolumeGroup.ThinPoolName,
+//		})
+//	}
+//
+//	rvNew1 := &srvv1alpha1.ReplicatedVolume{
+//		ObjectMeta: metav1.ObjectMeta{
+//			Name: rvName,
+//			// TODO: add csi finalizer
+//			// TODO: remove this finalizer
+//			Finalizers: []string{controllerFinalizerName},
+//		},
+//		Spec: srvv1alpha1.ReplicatedVolumeSpec{
+//			Size:         *resource.NewQuantity(int64(size), resource.BinarySI),
+//			Replicas:     replicaCount,
+//			SharedSecret: sharedSecret,
+//			LVM: srvv1alpha1.LVMSpec{
+//				Type:            typeLVM,
+//				LVMVolumeGroups: lvmVolumeGroups,
+//			},
+//			Topology: repStorClass.Spec.Topology,
+//			Zones:    repStorClass.Spec.Zones,
+//			// patch in createOrGetRVR function
+//			//PublishRequested: ,
+//		},
+//	}
+//	log.Debug(fmt.Sprintf("rvNew1: %+v", rvNew1))
+//
+//	rvExists := &corev1.ConfigMap{}
+//	err = kClient.Get(ctx, types.NamespacedName{Namespace: "default", Name: rvName}, rvExists)
+//	if err == nil {
+//		log.Info("RV already exists")
+//		return rvExists, nil
+//	}
+//	if !apierrors.IsNotFound(err) {
+//		return nil, fmt.Errorf("failed to get ReplicatedVolume: %w", err)
+//	}
+//
+//	rvNew := &corev1.ConfigMap{
+//		ObjectMeta: metav1.ObjectMeta{
+//			Name:      rvName,
+//			Namespace: "default",
+//		},
+//		Data: map[string]string{
+//			"key": "value",
+//		},
+//	}
+//
+//	err = kClient.Create(ctx, rvNew)
+//	if err != nil {
+//		return nil, fmt.Errorf("failed to create ReplicatedVolume: %w", err)
+//	}
+//
+//	// TODO: wait ready RV
+//
+//	log.Info("RV created")
+//
+//	return rvNew, nil
+//}
+//
+//func createOrGetLLV(
+//	ctx context.Context,
+//	kClient kubecl.Client,
+//	log *slog.Logger,
+//	pvName string,
+//	rv *corev1.ConfigMap,
+//	size int,
+//	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
+//	linstorResource srvlinstor.Resources,
+//) error {
+//	generateLlvName := fmt.Sprintf("%s%s", pvName, "-")
+//
+//	log = log.With("node_name", linstorResource.Spec.NodeName, "generate_llv_name", generateLlvName)
+//	log.Info("Creating LLV")
+//
+//	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(linstorResource.Spec.NodeName, myLvmVolumeGroups)
+//	if err != nil {
+//		return err
+//	}
+//
+//	llvs := &sncv1alpha1.LVMLogicalVolumeList{}
+//	if err := kClient.List(ctx, llvs); err != nil {
+//		if !apierrors.IsNotFound(err) {
+//			return fmt.Errorf("failed to get LVMLogicalVolumeList: %w", err)
+//		}
+//	}
+//	for _, llv := range llvs.Items {
+//		if llv.GenerateName == generateLlvName && llv.Spec.LVMVolumeGroupName == lvmVolumeGroupName {
+//			if llv.Status.Phase == llmPhaseCreated {
+//				log.Info("LLV already exists")
+//				return nil
+//			} else {
+//				return fmt.Errorf("LLV already exists but not in phase %s (current phase: %s)", llmPhaseCreated, llv.Status.Phase)
+//			}
+//		}
+//	}
+//
+//	var typeLVM string
+//	if thinPoolName != "" {
+//		typeLVM = typeLVMThin
+//	} else {
+//		typeLVM = typeLVMThick
+//	}
+//
+//	llvNew := &sncv1alpha1.LVMLogicalVolume{
+//		ObjectMeta: metav1.ObjectMeta{
+//			GenerateName: generateLlvName,
+//			// TODO: remove this finalizer
+//			Finalizers: []string{controllerFinalizerName},
+//			OwnerReferences: []metav1.OwnerReference{
+//				{
+//					APIVersion:         corev1.SchemeGroupVersion.String(),
+//					Kind:               "ConfigMap",
+//					Name:               rv.Name,
+//					UID:                rv.UID,
+//					Controller:         ptrTo(true),
+//					BlockOwnerDeletion: ptrTo(true),
+//				},
+//			},
+//		},
+//		Spec: sncv1alpha1.LVMLogicalVolumeSpec{
+//			ActualLVNameOnTheNode: fmt.Sprintf("%s%s", pvName, linstorLVMSuffix),
+//			LVMVolumeGroupName:    lvmVolumeGroupName,
+//			Type:                  typeLVM,
+//			Size:                  fmt.Sprintf("%d", size),
+//		},
+//	}
+//	if thinPoolName != "" {
+//		llvNew.Spec.Thin = &sncv1alpha1.LVMLogicalVolumeThinSpec{
+//			PoolName: thinPoolName,
+//		}
+//	}
+//
+//	err = kClient.Create(ctx, llvNew)
+//	if err != nil {
+//		return fmt.Errorf("failed to create LLV: %w", err)
+//	}
+//
+//	log = log.With("llv_name", llvNew.Name)
+//
+//	// Wait for LLV to reach Created phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
+//	startTime := time.Now()
+//	for {
+//		llvExists := &sncv1alpha1.LVMLogicalVolume{}
+//		err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: llvNew.Name}, llvExists)
+//		if err != nil {
+//			return fmt.Errorf("failed to get LLV: %w", err)
+//		}
+//		if llvExists.Status != nil && llvExists.Status.Phase == llmPhaseCreated {
+//			break
+//		}
+//		time.Sleep(1 * time.Second)
+//		if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
+//			return fmt.Errorf("LLV created but not in phase %s (current phase: %s)", llmPhaseCreated, llvExists.Status.Phase)
+//		}
+//
+//		log.Debug("waiting to reach Created phase...")
+//	}
+//	log.Info(fmt.Sprintf("LLV created and in phase %s", llmPhaseCreated))
+//
+//	return nil
+//}
+//
+//func createOrGetRVR(
+//	ctx context.Context,
+//	kClient kubecl.Client,
+//	log *slog.Logger,
+//	pvName string,
+//	rv *corev1.ConfigMap,
+//	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
+//	linstorResource srvlinstor.Resources,
+//	linstorDB *linstorDB,
+//) error {
+//	nodeName := strings.ToLower(linstorResource.Spec.NodeName)
+//	generateRvrName := fmt.Sprintf("%s-", pvName)
+//
+//	diskless := false
+//	if linstorResource.Spec.ResourceFlags != 0 {
+//		diskless = true
+//	}
+//
+//	log = log.With("node_name", nodeName, "generate_rvr_name", generateRvrName, "diskless", fmt.Sprintf("%t", diskless))
+//	log.Info("Creating RVR")
+//
+//	rvrs := &srvv1alpha1.ReplicatedVolumeReplicaList{}
+//	if err := kClient.List(ctx, rvrs); err != nil {
+//		if !apierrors.IsNotFound(err) {
+//			return fmt.Errorf("failed to get ReplicatedVolumeReplicaList: %w", err)
+//		}
+//	}
+//	for _, rvr := range rvrs.Items {
+//		if rvr.Spec.NodeName == nodeName && rvr.Spec.ReplicatedVolumeName == pvName {
+//			if rvr.Status == nil {
+//				return fmt.Errorf("RVR already exists; status is not set")
+//			}
+//			if rvr.Status.Conditions == nil {
+//				return fmt.Errorf("RVR already exists; conditions are not set")
+//			}
+//			cond := meta.FindStatusCondition(rvr.Status.Conditions, srvv1alpha1.ConditionTypeReady)
+//			if cond != nil && cond.Status == metav1.ConditionTrue {
+//				log.Info("RVR already exists")
+//				return nil
+//			} else {
+//				return fmt.Errorf("RVR already exists; condition %s is not true (current status: %q)", srvv1alpha1.ConditionTypeReady, func() string {
+//					if cond == nil {
+//						return "<nil>"
+//					}
+//					return string(cond.Status)
+//				}())
+//			}
+//		}
+//	}
+//
+//	nodeId, err := getNodeId(pvName, nodeName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug("node id", "node_id", nodeId)
+//
+//	nodeIPv4, err := getNodeIPv4(nodeName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("node ipv4: %s", nodeIPv4))
+//
+//	drbdPort, err := getDRBDPort(pvName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("drbd port: %d", drbdPort))
+//
+//	sharedSecret, err := getSharedSecret(pvName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("shared secret: %s", sharedSecret))
+//
+//	peers, err := getPeers(pvName, nodeName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("peers: %v", peers))
+//
+//	drbdMinor, err := getDRBDMinor(pvName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("drbd minor: %d", drbdMinor))
+//
+//	primary, err := getPrimary(ctx, kClient, pvName, nodeName)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("primary: %t", primary))
+//
+//	//if primary {
+//	//	err := setPublishRequested(ctx, kClient, rv, nodeName)
+//	//	if err != nil {
+//	//		return err
+//	//	}
+//	//	log.Debug(fmt.Sprintf("patched PublishRequested in RV (node_name: %s)", nodeName))
+//	//}
+//
+//	replicaCount, err := getReplicaCount(pvName, linstorDB)
+//	if err != nil {
+//		return err
+//	}
+//	log.Debug(fmt.Sprintf("replica count: %d", replicaCount))
+//	quorum := replicaCount/2 + 1
+//	quorumMinimumRedundancy := byte(0)
+//	if replicaCount > 2 {
+//		quorumMinimumRedundancy = quorum
+//	}
+//	log.Debug(fmt.Sprintf("quorum: %d", quorum))
+//	log.Debug(fmt.Sprintf("quorum minimum redundancy: %d", quorumMinimumRedundancy))
+//
+//	rvrNew := &srvv1alpha1.ReplicatedVolumeReplica{
+//		ObjectMeta: metav1.ObjectMeta{
+//			GenerateName: generateRvrName,
+//			// TODO: remove this finalizer
+//			Finalizers: []string{controllerFinalizerName},
+//			OwnerReferences: []metav1.OwnerReference{
+//				{
+//					APIVersion:         corev1.SchemeGroupVersion.String(),
+//					Kind:               "ConfigMap",
+//					Name:               rv.Name,
+//					UID:                rv.UID,
+//					Controller:         ptrTo(true),
+//					BlockOwnerDeletion: ptrTo(true),
+//				},
+//			},
+//		},
+//		Spec: srvv1alpha1.ReplicatedVolumeReplicaSpec{
+//			NodeName:             nodeName,
+//			ReplicatedVolumeName: pvName,
+//			NodeId:               uint(nodeId),
+//			NodeAddress: srvv1alpha1.Address{
+//				IPv4: nodeIPv4,
+//				Port: uint(drbdPort),
+//			},
+//			Peers:                   peers,
+//			SharedSecret:            sharedSecret,
+//			Primary:                 primary,
+//			Quorum:                  quorum,
+//			QuorumMinimumRedundancy: quorumMinimumRedundancy,
+//			AllowTwoPrimaries:       false,
+//			Volumes: []srvv1alpha1.Volume{
+//				{
+//					Device: uint(drbdMinor),
+//					Number: 0,
+//				},
+//			},
+//		},
+//	}
+//	if !diskless {
+//		lvmVolumeGroupName, _, err := getLVMVolumeGroupNameAndThinPoolName(nodeName, myLvmVolumeGroups)
+//		if err != nil {
+//			return err
+//		}
+//
+//		lvmVolumeGroup := &sncv1alpha1.LVMVolumeGroup{}
+//		if err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: lvmVolumeGroupName}, lvmVolumeGroup); err != nil {
+//			return fmt.Errorf("failed to get LVMVolumeGroup: %w", err)
+//		}
+//
+//		lvName := fmt.Sprintf("%s%s", pvName, linstorLVMSuffix)
+//
+//		rvrNew.Spec.Volumes[0].Disk = fmt.Sprintf("/dev/%s/%s", lvmVolumeGroup.Spec.ActualVGNameOnTheNode, lvName)
+//		log.Debug(fmt.Sprintf("disk: %s", rvrNew.Spec.Volumes[0].Disk))
+//	}
+//
+//	err = kClient.Create(ctx, rvrNew)
+//	if err != nil {
+//		return fmt.Errorf("failed to create RVR: %w", err)
+//	}
+//
+//	log = log.With("rvr_name", rvrNew.Name)
+//
+//	// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
+//	//startTime := time.Now()
+//	//for {
+//	//	rvrExists := &srvv1alpha1.ReplicatedVolumeReplica{}
+//	//	err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
+//	//	if err != nil {
+//	//		return fmt.Errorf("failed to get RVR: %w", err)
+//	//	}
+//	//	if rvrExists.Status != nil && rvrExists.Status.Conditions != nil {
+//	//		cond := meta.FindStatusCondition(rvrExists.Status.Conditions, srvv1alpha1.ConditionTypeReady)
+//	//		if cond != nil && cond.Status == metav1.ConditionTrue {
+//	//			break
+//	//		}
+//	//	}
+//	//	time.Sleep(1 * time.Second)
+//	//	if time.Since(startTime) > maximumWaitingTimeInMinutes*time.Minute {
+//	//		return fmt.Errorf("RVR created but not in Ready state")
+//	//	}
+//
+//	//	log.Debug("waiting to reach Ready state...")
+//	//}
+//	log.Info("RVR created and in Ready state")
+//
+//	return nil
+//}
 
 func getMyLvmVolumeGroups(
 	ctx context.Context,
