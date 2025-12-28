@@ -492,9 +492,9 @@ func (r *Reconciler) reconcileRVAStatus(
 	// Attached always wins (even if RVA/RV are deleting): reflect the actual state.
 	if slices.Contains(actuallyAttachedTo, rva.Spec.NodeName) {
 		if !rva.DeletionTimestamp.IsZero() {
-			desiredPhase = "Detaching"
+			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching
 		} else {
-			desiredPhase = "Attached"
+			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttached
 		}
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionTrue,
@@ -506,7 +506,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// RV might be missing (not yet created / already deleted). In this case we can't attach and keep RVA Pending.
 	if rv == nil {
-		desiredPhase = "Pending"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolume,
@@ -517,7 +517,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// StorageClass might be missing (not yet created / already deleted). In this case we can't attach and keep RVA Pending.
 	if sc == nil {
-		desiredPhase = "Pending"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolume,
@@ -530,7 +530,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	// If this is not satisfied, keep RVA in Pending (do not move to Attaching).
 	if sc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal {
 		if replicaOnNode == nil || replicaOnNode.Status == nil || replicaOnNode.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
-			desiredPhase = "Pending"
+			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 			desiredReadyCondition = metav1.Condition{
 				Status:  metav1.ConditionFalse,
 				Reason:  v1alpha1.RVAReasonLocalityNotSatisfied,
@@ -542,7 +542,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// If RV status is not initialized or not IOReady, we can't progress attachment; keep informative Pending.
 	if rv.Status == nil || !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
-		desiredPhase = "Pending"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolumeIOReady,
@@ -553,7 +553,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// Not active (not in desiredAttachTo): must wait until one of the active nodes detaches.
 	if !slices.Contains(desiredAttachTo, rva.Spec.NodeName) {
-		desiredPhase = "Pending"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonWaitingForActiveAttachmentsToDetach,
@@ -564,7 +564,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// Active but not yet attached.
 	if replicaOnNode == nil {
-		desiredPhase = "Attaching"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonWaitingForReplica,
@@ -576,7 +576,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	// TieBreaker replica cannot be promoted directly; it must be converted first.
 	if replicaOnNode.Spec.Type == v1alpha1.ReplicaTypeTieBreaker ||
 		(replicaOnNode.Status != nil && replicaOnNode.Status.ActualType == v1alpha1.ReplicaTypeTieBreaker) {
-		desiredPhase = "Attaching"
+		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 		desiredReadyCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
 			Reason:  v1alpha1.RVAReasonConvertingTieBreakerToAccess,
@@ -585,7 +585,7 @@ func (r *Reconciler) reconcileRVAStatus(
 		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
 	}
 
-	desiredPhase = "Attaching"
+	desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 	desiredReadyCondition = metav1.Condition{
 		Status:  metav1.ConditionFalse,
 		Reason:  v1alpha1.RVAReasonSettingPrimary,

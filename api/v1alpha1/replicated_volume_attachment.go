@@ -18,6 +18,15 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+// ReplicatedVolumeAttachment status.phase possible values.
+// Keep these in sync with `ReplicatedVolumeAttachmentStatus.Phase` validation enum.
+const (
+	ReplicatedVolumeAttachmentPhasePending   = "Pending"
+	ReplicatedVolumeAttachmentPhaseAttaching = "Attaching"
+	ReplicatedVolumeAttachmentPhaseAttached  = "Attached"
+	ReplicatedVolumeAttachmentPhaseDetaching = "Detaching"
+)
+
 // ReplicatedVolumeAttachment is a Kubernetes Custom Resource that represents an attachment intent/state
 // of a ReplicatedVolume to a specific node.
 // +kubebuilder:object:generate=true
