@@ -19,6 +19,7 @@ package rvstatusconfigdeviceminor_test
 import (
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	. "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
@@ -93,8 +94,8 @@ func TestDeviceMinorCache(t *testing.T) {
 		// -
 		initialize(map[string]DeviceMinor{"a": 0, "e": 4}, "").
 		expect(2, 4, holes(1, 2, 3)).
-		// -
-		initialize(map[string]DeviceMinor{"a": 99, "e": 99}, "rvs 'a' and 'e' have same device minor 99").
+		// - (error message order depends on map iteration, so check for key parts)
+		initializeErrContains(map[string]DeviceMinor{"a": 99, "e": 99}, "a", "e", "have same device minor 99").
 		expect(2, 4, holes(1, 2, 3)).
 		// [a, b, _, _, e]
 		getOrCreate("b", 1, "").
@@ -192,6 +193,18 @@ func (tc testDeviceMinorCache) initialize(
 	return tc
 }
 
+func (tc testDeviceMinorCache) initializeErrContains(
+	byRVName map[string]DeviceMinor,
+	substrings ...string,
+) testDeviceMinorCache {
+	tc.Helper()
+	err := tc.Initialize(byRVName)
+	if !errContainsAll(err, substrings...) {
+		tc.Fatalf("expected Initialize error to contain %v, got %v", substrings, err)
+	}
+	return tc
+}
+
 func (tc testDeviceMinorCache) expect(
 	expectedLen int,
 	expectedMax DeviceMinor,
@@ -240,6 +253,19 @@ func (tc testDeviceMinorCache) expectEmpty() testDeviceMinorCache {
 
 func errIsExpected(err error, expectedErr string) bool {
 	return ((err == nil) == (expectedErr == "")) && (err == nil || err.Error() == expectedErr)
+}
+
+func errContainsAll(err error, substrings ...string) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	for _, s := range substrings {
+		if !strings.Contains(errStr, s) {
+			return false
+		}
+	}
+	return true
 }
 
 // only for test cases to look better
