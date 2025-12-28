@@ -1,6 +1,6 @@
 module github.com/deckhouse/sds-replicated-volume/images/linstor-migrator
 
-go 1.24.7
+go 1.24.11
 
 replace github.com/deckhouse/sds-replicated-volume/api => ../../api
 
@@ -9,10 +9,10 @@ require (
 	github.com/deckhouse/sds-node-configurator/api v0.0.0-20250917090813-2f0c8b6a607f
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.9.1
-	k8s.io/api v0.34.0
-	k8s.io/apimachinery v0.34.1
-	k8s.io/client-go v0.34.0
-	sigs.k8s.io/controller-runtime v0.22.1
+	k8s.io/api v0.34.1
+	k8s.io/apimachinery v0.34.3
+	k8s.io/client-go v0.34.1
+	sigs.k8s.io/controller-runtime v0.22.4
 )
 
 require (
@@ -44,7 +44,7 @@ require (
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/term v0.35.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	golang.org/x/time v0.9.0 // indirect
+	golang.org/x/time v0.10.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

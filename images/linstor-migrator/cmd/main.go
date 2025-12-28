@@ -37,7 +37,6 @@ import (
 	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
 	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 
-	srvv1alpha2 "github.com/deckhouse/sds-replicated-volume/api/v1alpha2"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -306,26 +305,26 @@ func createOrGetRV(
 		typeLVM = typeLVMThick
 	}
 
-	lvmVolumeGroups := make([]srvv1alpha2.LVGRef, 0, len(repStorPool.Spec.LVMVolumeGroups))
+	lvmVolumeGroups := make([]srvv1alpha1.LVGRef, 0, len(repStorPool.Spec.LVMVolumeGroups))
 	for _, lvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
-		lvmVolumeGroups = append(lvmVolumeGroups, srvv1alpha2.LVGRef{
+		lvmVolumeGroups = append(lvmVolumeGroups, srvv1alpha1.LVGRef{
 			Name:         lvmVolumeGroup.Name,
 			ThinPoolName: lvmVolumeGroup.ThinPoolName,
 		})
 	}
 
-	rvNew1 := &srvv1alpha2.ReplicatedVolume{
+	rvNew1 := &srvv1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: rvName,
 			// TODO: add csi finalizer
 			// TODO: remove this finalizer
 			Finalizers: []string{controllerFinalizerName},
 		},
-		Spec: srvv1alpha2.ReplicatedVolumeSpec{
+		Spec: srvv1alpha1.ReplicatedVolumeSpec{
 			Size:         *resource.NewQuantity(int64(size), resource.BinarySI),
 			Replicas:     replicaCount,
 			SharedSecret: sharedSecret,
-			LVM: srvv1alpha2.LVMSpec{
+			LVM: srvv1alpha1.LVMSpec{
 				Type:            typeLVM,
 				LVMVolumeGroups: lvmVolumeGroups,
 			},
@@ -493,7 +492,7 @@ func createOrGetRVR(
 	log = log.With("node_name", nodeName, "generate_rvr_name", generateRvrName, "diskless", fmt.Sprintf("%t", diskless))
 	log.Info("Creating RVR")
 
-	rvrs := &srvv1alpha2.ReplicatedVolumeReplicaList{}
+	rvrs := &srvv1alpha1.ReplicatedVolumeReplicaList{}
 	if err := kClient.List(ctx, rvrs); err != nil {
 		if !apierrors.IsNotFound(err) {
 			return fmt.Errorf("failed to get ReplicatedVolumeReplicaList: %w", err)
@@ -507,12 +506,12 @@ func createOrGetRVR(
 			if rvr.Status.Conditions == nil {
 				return fmt.Errorf("RVR already exists; conditions are not set")
 			}
-			cond := meta.FindStatusCondition(rvr.Status.Conditions, srvv1alpha2.ConditionTypeReady)
+			cond := meta.FindStatusCondition(rvr.Status.Conditions, srvv1alpha1.ConditionTypeReady)
 			if cond != nil && cond.Status == metav1.ConditionTrue {
 				log.Info("RVR already exists")
 				return nil
 			} else {
-				return fmt.Errorf("RVR already exists; condition %s is not true (current status: %q)", srvv1alpha2.ConditionTypeReady, func() string {
+				return fmt.Errorf("RVR already exists; condition %s is not true (current status: %q)", srvv1alpha1.ConditionTypeReady, func() string {
 					if cond == nil {
 						return "<nil>"
 					}
@@ -585,7 +584,7 @@ func createOrGetRVR(
 	log.Debug(fmt.Sprintf("quorum: %d", quorum))
 	log.Debug(fmt.Sprintf("quorum minimum redundancy: %d", quorumMinimumRedundancy))
 
-	rvrNew := &srvv1alpha2.ReplicatedVolumeReplica{
+	rvrNew := &srvv1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: generateRvrName,
 			// TODO: remove this finalizer
@@ -601,11 +600,11 @@ func createOrGetRVR(
 				},
 			},
 		},
-		Spec: srvv1alpha2.ReplicatedVolumeReplicaSpec{
+		Spec: srvv1alpha1.ReplicatedVolumeReplicaSpec{
 			NodeName:             nodeName,
 			ReplicatedVolumeName: pvName,
 			NodeId:               uint(nodeId),
-			NodeAddress: srvv1alpha2.Address{
+			NodeAddress: srvv1alpha1.Address{
 				IPv4: nodeIPv4,
 				Port: uint(drbdPort),
 			},
@@ -615,7 +614,7 @@ func createOrGetRVR(
 			Quorum:                  quorum,
 			QuorumMinimumRedundancy: quorumMinimumRedundancy,
 			AllowTwoPrimaries:       false,
-			Volumes: []srvv1alpha2.Volume{
+			Volumes: []srvv1alpha1.Volume{
 				{
 					Device: uint(drbdMinor),
 					Number: 0,
@@ -650,13 +649,13 @@ func createOrGetRVR(
 	// Wait for RVR to reach Ready phase, polling every 1s, up to maximumWaitingTimeInMinutes minutes
 	//startTime := time.Now()
 	//for {
-	//	rvrExists := &srvv1alpha2.ReplicatedVolumeReplica{}
+	//	rvrExists := &srvv1alpha1.ReplicatedVolumeReplica{}
 	//	err := kClient.Get(ctx, types.NamespacedName{Namespace: "", Name: rvrNew.Name}, rvrExists)
 	//	if err != nil {
 	//		return fmt.Errorf("failed to get RVR: %w", err)
 	//	}
 	//	if rvrExists.Status != nil && rvrExists.Status.Conditions != nil {
-	//		cond := meta.FindStatusCondition(rvrExists.Status.Conditions, srvv1alpha2.ConditionTypeReady)
+	//		cond := meta.FindStatusCondition(rvrExists.Status.Conditions, srvv1alpha1.ConditionTypeReady)
 	//		if cond != nil && cond.Status == metav1.ConditionTrue {
 	//			break
 	//		}
@@ -744,7 +743,6 @@ func newScheme() (*runtime.Scheme, error) {
 	var schemeFuncs = []func(s *runtime.Scheme) error{
 		corev1.AddToScheme,
 		srvv1alpha1.AddToScheme,
-		srvv1alpha2.AddToScheme,
 		srvlinstor.AddToScheme,
 		sncv1alpha1.AddToScheme,
 		storagev1.AddToScheme,
@@ -888,8 +886,8 @@ func getSharedSecret(pvName string, linstorDB *linstorDB) (string, error) {
 	return layerDrbdResourceDefinition.Spec.Secret, nil
 }
 
-func getPeers(pvName string, currentNodeName string, linstorDB *linstorDB) (map[string]srvv1alpha2.Peer, error) {
-	peers := make(map[string]srvv1alpha2.Peer)
+func getPeers(pvName string, currentNodeName string, linstorDB *linstorDB) (map[string]srvv1alpha1.Peer, error) {
+	peers := make(map[string]srvv1alpha1.Peer)
 	for _, linstorResource := range linstorDB.Resources[pvName] {
 		if strings.EqualFold(linstorResource.Spec.NodeName, currentNodeName) {
 			// Skip current node
@@ -916,9 +914,9 @@ func getPeers(pvName string, currentNodeName string, linstorDB *linstorDB) (map[
 			diskless = true
 		}
 
-		peers[strings.ToLower(linstorResource.Spec.NodeName)] = srvv1alpha2.Peer{
+		peers[strings.ToLower(linstorResource.Spec.NodeName)] = srvv1alpha1.Peer{
 			NodeId: uint(nodeId),
-			Address: srvv1alpha2.Address{
+			Address: srvv1alpha1.Address{
 				IPv4: nodeIPv4,
 				Port: uint(drbdPort),
 			},
