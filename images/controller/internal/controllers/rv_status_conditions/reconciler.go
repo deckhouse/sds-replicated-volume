@@ -474,7 +474,7 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 	// Build set of attached nodes for O(1) lookup
 	attachedSet := make(map[string]struct{})
 	if rv.Status != nil {
-		for _, node := range rv.Status.AttachedTo {
+		for _, node := range rv.Status.ActuallyAttachedTo {
 			attachedSet[node] = struct{}{}
 		}
 	}
@@ -504,5 +504,9 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 
 	patchedRV.Status.DiskfulReplicaCount = strconv.Itoa(diskfulCurrent) + "/" + strconv.Itoa(diskfulTotal)
 	patchedRV.Status.DiskfulReplicasInSync = strconv.Itoa(diskfulInSync) + "/" + strconv.Itoa(diskfulTotal)
-	patchedRV.Status.AttachedAndIOReadyCount = strconv.Itoa(attachedAndIOReady) + "/" + strconv.Itoa(len(rv.Spec.AttachTo))
+	desiredAttachCount := 0
+	if rv.Status != nil {
+		desiredAttachCount = len(rv.Status.DesiredAttachTo)
+	}
+	patchedRV.Status.AttachedAndIOReadyCount = strconv.Itoa(attachedAndIOReady) + "/" + strconv.Itoa(desiredAttachCount)
 }

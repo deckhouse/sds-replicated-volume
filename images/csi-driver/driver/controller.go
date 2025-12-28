@@ -82,27 +82,12 @@ func (d *Driver) CreateVolume(ctx context.Context, request *csi.CreateVolumeRequ
 	// Extract preferred node from AccessibilityRequirements for WaitForFirstConsumer
 	// Kubernetes provides the selected node in AccessibilityRequirements.Preferred[].Segments
 	// with key "kubernetes.io/hostname"
-	attachTo := make([]string, 0)
-	if request.AccessibilityRequirements != nil && len(request.AccessibilityRequirements.Preferred) > 0 {
-		for _, preferred := range request.AccessibilityRequirements.Preferred {
-			// Get node name from kubernetes.io/hostname (standard Kubernetes topology key)
-			if nodeName, ok := preferred.Segments["kubernetes.io/hostname"]; ok && nodeName != "" {
-				d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] Found preferred node from AccessibilityRequirements: %s", traceID, volumeID, nodeName))
-				attachTo = append(attachTo, nodeName)
-				break // Use first preferred node
-			}
-		}
-	}
-
-	// Log if spec.attachTo is empty (may be required for WaitForFirstConsumer)
-	if len(attachTo) == 0 {
-		d.log.Info(fmt.Sprintf("[CreateVolume][traceID:%s][volumeID:%s] spec.attachTo is empty (may be filled later via ControllerPublishVolume)", traceID, volumeID))
-	}
+	// NOTE: We no longer use rv.spec.attachTo. Attachment intent is expressed via ReplicatedVolumeAttachment (RVA)
+	// created in ControllerPublishVolume.
 
 	// Build ReplicatedVolumeSpec
 	rvSpec := utils.BuildReplicatedVolumeSpec(
 		*rvSize,
-		attachTo, // attachTo - contains preferred node for WaitForFirstConsumer (will be set to rv.spec.attachTo)
 		request.Parameters[ReplicatedStorageClassParamNameKey],
 	)
 
@@ -191,22 +176,41 @@ func (d *Driver) ControllerPublishVolume(ctx context.Context, request *csi.Contr
 	volumeID := request.VolumeId
 	nodeID := request.NodeId
 
-	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Adding node to spec.attachTo", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Creating ReplicatedVolumeAttachment and waiting for Ready=true", traceID, volumeID, nodeID))
 
-	// Add node to spec.attachTo
-	err := utils.AddAttachTo(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	_, err := utils.EnsureRVA(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to add node to spec.attachTo", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to add node to spec.attachTo: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to create ReplicatedVolumeAttachment", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to create ReplicatedVolumeAttachment: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to appear in status.attachedTo", traceID, volumeID, nodeID))
-
-	// Wait for node to appear in status.attachedTo
-	err = utils.WaitForAttachedToProvided(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	err = utils.WaitForRVAReady(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.attachedTo", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to wait for status.attachedTo: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed waiting for RVA Ready=true", traceID, volumeID, nodeID))
+		// Preserve RVA reason/message for better user diagnostics.
+		var waitErr *utils.RVAWaitError
+		if errors.As(err, &waitErr) {
+			// Permanent failures: waiting won't help (e.g. locality constraints).
+			if waitErr.Permanent {
+				return nil, status.Errorf(codes.FailedPrecondition, "ReplicatedVolumeAttachment not ready: %v", waitErr)
+			}
+			// Context-aware mapping (external-attacher controls ctx deadline).
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, status.Errorf(codes.DeadlineExceeded, "Timed out waiting for ReplicatedVolumeAttachment to become Ready=true: %v", waitErr)
+			}
+			if errors.Is(err, context.Canceled) {
+				return nil, status.Errorf(codes.Canceled, "Canceled waiting for ReplicatedVolumeAttachment to become Ready=true: %v", waitErr)
+			}
+			return nil, status.Errorf(codes.Internal, "Failed waiting for ReplicatedVolumeAttachment Ready=true: %v", waitErr)
+		}
+		// Fallback for unexpected errors.
+		if errors.Is(err, context.DeadlineExceeded) {
+			return nil, status.Errorf(codes.DeadlineExceeded, "Timed out waiting for ReplicatedVolumeAttachment to become Ready=true: %v", err)
+		}
+		if errors.Is(err, context.Canceled) {
+			return nil, status.Errorf(codes.Canceled, "Canceled waiting for ReplicatedVolumeAttachment to become Ready=true: %v", err)
+		}
+		return nil, status.Errorf(codes.Internal, "Failed waiting for ReplicatedVolumeAttachment Ready=true: %v", err)
 	}
 
 	d.log.Info(fmt.Sprintf("[ControllerPublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume attached successfully", traceID, volumeID, nodeID))
@@ -234,22 +238,21 @@ func (d *Driver) ControllerUnpublishVolume(ctx context.Context, request *csi.Con
 	volumeID := request.VolumeId
 	nodeID := request.NodeId
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Removing node from spec.attachTo", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Deleting ReplicatedVolumeAttachment", traceID, volumeID, nodeID))
 
-	// Remove node from spec.attachTo
-	err := utils.RemoveAttachTo(ctx, d.cl, d.log, traceID, volumeID, nodeID)
+	err := utils.DeleteRVA(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to remove node from spec.attachTo", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to remove node from spec.attachTo: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to delete ReplicatedVolumeAttachment", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to delete ReplicatedVolumeAttachment: %v", err)
 	}
 
-	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from status.attachedTo", traceID, volumeID, nodeID))
+	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Waiting for node to disappear from status.actuallyAttachedTo", traceID, volumeID, nodeID))
 
-	// Wait for node to disappear from status.attachedTo
+	// Wait for node to disappear from status.actuallyAttachedTo
 	err = utils.WaitForAttachedToRemoved(ctx, d.cl, d.log, traceID, volumeID, nodeID)
 	if err != nil {
-		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.attachedTo removal", traceID, volumeID, nodeID))
-		return nil, status.Errorf(codes.Internal, "Failed to wait for status.attachedTo removal: %v", err)
+		d.log.Error(err, fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Failed to wait for status.actuallyAttachedTo removal", traceID, volumeID, nodeID))
+		return nil, status.Errorf(codes.Internal, "Failed to wait for status.actuallyAttachedTo removal: %v", err)
 	}
 
 	d.log.Info(fmt.Sprintf("[ControllerUnpublishVolume][traceID:%s][volumeID:%s][nodeID:%s] Volume detached successfully", traceID, volumeID, nodeID))

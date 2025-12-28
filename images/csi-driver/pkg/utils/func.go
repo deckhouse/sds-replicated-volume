@@ -18,9 +18,12 @@ package utils
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -379,116 +382,267 @@ func ExpandReplicatedVolume(ctx context.Context, kc client.Client, rv *srv.Repli
 // BuildReplicatedVolumeSpec builds ReplicatedVolumeSpec from parameters
 func BuildReplicatedVolumeSpec(
 	size resource.Quantity,
-	attachTo []string,
 	rscName string,
 ) srv.ReplicatedVolumeSpec {
 	return srv.ReplicatedVolumeSpec{
 		Size:                       size,
-		AttachTo:                   attachTo,
 		ReplicatedStorageClassName: rscName,
 	}
 }
 
-// AddAttachTo adds a node name to rv.spec.attachTo if not already present
-func AddAttachTo(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
-	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
-		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
-		if err != nil {
-			return fmt.Errorf("get ReplicatedVolume %s: %w", volumeName, err)
-		}
+func BuildRVAName(volumeName, nodeName string) string {
+	base := "rva-" + volumeName + "-" + nodeName
+	if len(base) <= 253 {
+		return base
+	}
 
-		// Check if node is already in spec.attachTo
-		for _, existingNode := range rv.Spec.AttachTo {
-			if existingNode == nodeName {
-				log.Info(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Node already in spec.attachTo", traceID, volumeName, nodeName))
-				return nil
+	sum := sha1.Sum([]byte(base))
+	hash := hex.EncodeToString(sum[:])[:8]
+
+	// "rva-" + vol + "-" + node + "-" + hash
+	const prefixLen = 4 // len("rva-")
+	const sepCount = 2  // "-" between parts + "-" before hash
+	const hashLen = 8
+	maxPartsLen := 253 - prefixLen - sepCount - hashLen
+	if maxPartsLen < 2 {
+		// Should never happen, but keep a valid, bounded name.
+		return "rva-" + hash
+	}
+
+	volMax := maxPartsLen / 2
+	nodeMax := maxPartsLen - volMax
+
+	volPart := truncateString(volumeName, volMax)
+	nodePart := truncateString(nodeName, nodeMax)
+	return "rva-" + volPart + "-" + nodePart + "-" + hash
+}
+
+func truncateString(s string, maxLen int) string {
+	if maxLen <= 0 {
+		return ""
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	// Make the truncation stable and avoid trailing '-' (purely cosmetic, but improves readability).
+	out := s[:maxLen]
+	out = strings.TrimSuffix(out, "-")
+	out = strings.TrimSuffix(out, ".")
+	return out
+}
+
+func EnsureRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) (string, error) {
+	rvaName := BuildRVAName(volumeName, nodeName)
+
+	existing := &srv.ReplicatedVolumeAttachment{}
+	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, existing); err == nil {
+		// Validate it matches the intended binding.
+		if existing.Spec.ReplicatedVolumeName != volumeName || existing.Spec.NodeName != nodeName {
+			return "", fmt.Errorf("ReplicatedVolumeAttachment %s already exists but has different spec (volume=%s,node=%s)",
+				rvaName, existing.Spec.ReplicatedVolumeName, existing.Spec.NodeName,
+			)
+		}
+		return rvaName, nil
+	} else if client.IgnoreNotFound(err) != nil {
+		return "", fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+
+	rva := &srv.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rvaName,
+		},
+		Spec: srv.ReplicatedVolumeAttachmentSpec{
+			ReplicatedVolumeName: volumeName,
+			NodeName:             nodeName,
+		},
+	}
+
+	log.Info(fmt.Sprintf("[EnsureRVA][traceID:%s][volumeID:%s][node:%s] Creating ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
+	if err := kc.Create(ctx, rva); err != nil {
+		if kerrors.IsAlreadyExists(err) {
+			return rvaName, nil
+		}
+		return "", fmt.Errorf("create ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+	return rvaName, nil
+}
+
+func DeleteRVA(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
+	rvaName := BuildRVAName(volumeName, nodeName)
+	rva := &srv.ReplicatedVolumeAttachment{}
+	if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] ReplicatedVolumeAttachment %s not found, skipping", traceID, volumeName, nodeName, rvaName))
+			return nil
+		}
+		return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
+	}
+
+	log.Info(fmt.Sprintf("[DeleteRVA][traceID:%s][volumeID:%s][node:%s] Deleting ReplicatedVolumeAttachment %s", traceID, volumeName, nodeName, rvaName))
+	if err := kc.Delete(ctx, rva); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return nil
+}
+
+// RVAWaitError represents a failure to observe RVA Ready=True.
+// It may wrap a context cancellation/deadline error, while still preserving the last seen RVA Ready condition.
+type RVAWaitError struct {
+	VolumeName string
+	NodeName   string
+	RVAName    string
+
+	// LastReadyCondition is the last observed Ready condition (may be nil if status/condition was never observed).
+	LastReadyCondition *metav1.Condition
+
+	// Permanent indicates that waiting won't help (e.g. locality constraint violation).
+	Permanent bool
+
+	// Cause is the underlying error (e.g. context.DeadlineExceeded). May be nil for non-context failures.
+	Cause error
+}
+
+func (e *RVAWaitError) Unwrap() error { return e.Cause }
+
+func (e *RVAWaitError) Error() string {
+	base := fmt.Sprintf("RVA %s for volume=%s node=%s not ready", e.RVAName, e.VolumeName, e.NodeName)
+	if e.LastReadyCondition != nil {
+		base = fmt.Sprintf("%s: Ready=%s reason=%s message=%q", base, e.LastReadyCondition.Status, e.LastReadyCondition.Reason, e.LastReadyCondition.Message)
+	}
+	if e.Permanent {
+		base = base + " (permanent)"
+	}
+	if e.Cause != nil {
+		base = fmt.Sprintf("%s: %v", base, e.Cause)
+	}
+	return base
+}
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func WaitForRVAReady(
+	ctx context.Context,
+	kc client.Client,
+	log *logger.Logger,
+	traceID, volumeName, nodeName string,
+) error {
+	rvaName := BuildRVAName(volumeName, nodeName)
+	var attemptCounter int
+	var lastReadyCond *metav1.Condition
+	log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to become Ready=True", traceID, volumeName, nodeName, rvaName))
+	for {
+		attemptCounter++
+		if err := ctx.Err(); err != nil {
+			log.Warning(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
+			return &RVAWaitError{
+				VolumeName:         volumeName,
+				NodeName:           nodeName,
+				RVAName:            rvaName,
+				LastReadyCondition: lastReadyCond,
+				Cause:              err,
 			}
 		}
 
-		// Check if we can add more nodes (max 2)
-		if len(rv.Spec.AttachTo) >= 2 {
-			return fmt.Errorf("cannot add node %s to spec.attachTo: maximum of 2 nodes already present", nodeName)
+		rva := &srv.ReplicatedVolumeAttachment{}
+		if err := kc.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+			if client.IgnoreNotFound(err) == nil {
+				if attemptCounter%10 == 0 {
+					log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA not found yet", traceID, volumeName, nodeName, attemptCounter))
+				}
+				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+					return &RVAWaitError{
+						VolumeName:         volumeName,
+						NodeName:           nodeName,
+						RVAName:            rvaName,
+						LastReadyCondition: lastReadyCond,
+						Cause:              err,
+					}
+				}
+				continue
+			}
+			return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
 
-		// Add node to spec.attachTo
-		rv.Spec.AttachTo = append(rv.Spec.AttachTo, nodeName)
+		if rva.Status == nil {
+			if attemptCounter%10 == 0 {
+				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA status is nil", traceID, volumeName, nodeName, attemptCounter))
+			}
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return &RVAWaitError{
+					VolumeName:         volumeName,
+					NodeName:           nodeName,
+					RVAName:            rvaName,
+					LastReadyCondition: lastReadyCond,
+					Cause:              err,
+				}
+			}
+			continue
+		}
 
-		log.Info(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Adding node to spec.attachTo", traceID, volumeName, nodeName))
-		err = kc.Update(ctx, rv)
-		if err == nil {
+		cond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeReady)
+		if cond == nil {
+			if attemptCounter%10 == 0 {
+				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA Ready condition missing", traceID, volumeName, nodeName, attemptCounter))
+			}
+			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				return &RVAWaitError{
+					VolumeName:         volumeName,
+					NodeName:           nodeName,
+					RVAName:            rvaName,
+					LastReadyCondition: lastReadyCond,
+					Cause:              err,
+				}
+			}
+			continue
+		}
+
+		// Keep a stable copy of the last observed condition for error reporting.
+		condCopy := *cond
+		lastReadyCond = &condCopy
+
+		if attemptCounter%10 == 0 {
+			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, Ready=%s reason=%s message=%q", traceID, volumeName, nodeName, attemptCounter, cond.Status, cond.Reason, cond.Message))
+		}
+
+		if cond.Status == metav1.ConditionTrue {
+			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] RVA Ready=True", traceID, volumeName, nodeName))
 			return nil
 		}
 
-		if !kerrors.IsConflict(err) {
-			return fmt.Errorf("error updating ReplicatedVolume %s: %w", volumeName, err)
+		// Early exit for conditions that will not become Ready without changing the request or topology.
+		// Waiting here only burns time and hides the real cause from CSI callers.
+		if cond.Status == metav1.ConditionFalse && (cond.Reason == srv.RVAReasonLocalityNotSatisfied || cond.Reason == srv.RVAReasonUnableToProvideLocalVolumeAccess) {
+			return &RVAWaitError{
+				VolumeName:         volumeName,
+				NodeName:           nodeName,
+				RVAName:            rvaName,
+				LastReadyCondition: lastReadyCond,
+				Permanent:          true,
+			}
 		}
 
-		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[AddAttachTo][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				time.Sleep(KubernetesAPIRequestTimeout * time.Second)
+		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			return &RVAWaitError{
+				VolumeName:         volumeName,
+				NodeName:           nodeName,
+				RVAName:            rvaName,
+				LastReadyCondition: lastReadyCond,
+				Cause:              err,
 			}
 		}
 	}
-
-	return fmt.Errorf("failed to add node %s to spec.attachTo after %d attempts", nodeName, KubernetesAPIRequestLimit)
 }
 
-// RemoveAttachTo removes a node name from rv.spec.attachTo
-func RemoveAttachTo(ctx context.Context, kc client.Client, log *logger.Logger, traceID, volumeName, nodeName string) error {
-	for attempt := 0; attempt < KubernetesAPIRequestLimit; attempt++ {
-		rv, err := GetReplicatedVolume(ctx, kc, volumeName)
-		if err != nil {
-			if kerrors.IsNotFound(err) {
-				log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] ReplicatedVolume not found, assuming already removed", traceID, volumeName, nodeName))
-				return nil
-			}
-			return fmt.Errorf("get ReplicatedVolume %s: %w", volumeName, err)
-		}
-
-		// Check if node is in spec.attachTo
-		found := false
-		for i, existingNode := range rv.Spec.AttachTo {
-			if existingNode == nodeName {
-				rv.Spec.AttachTo = slices.Delete(rv.Spec.AttachTo, i, i+1)
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Node not in spec.attachTo, nothing to remove", traceID, volumeName, nodeName))
-			return nil
-		}
-
-		log.Info(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Removing node from spec.attachTo", traceID, volumeName, nodeName))
-		err = kc.Update(ctx, rv)
-		if err == nil {
-			return nil
-		}
-
-		if !kerrors.IsConflict(err) {
-			return fmt.Errorf("error updating ReplicatedVolume %s: %w", volumeName, err)
-		}
-
-		if attempt < KubernetesAPIRequestLimit-1 {
-			log.Trace(fmt.Sprintf("[RemoveAttachTo][traceID:%s][volumeID:%s][node:%s] Conflict while updating, retrying...", traceID, volumeName, nodeName))
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
-				time.Sleep(KubernetesAPIRequestTimeout * time.Second)
-			}
-		}
-	}
-
-	return fmt.Errorf("failed to remove node %s from spec.attachTo after %d attempts", nodeName, KubernetesAPIRequestLimit)
-}
-
-// WaitForAttachedToProvided waits for a node name to appear in rv.status.attachedTo
+// WaitForAttachedToProvided waits for a node name to appear in rv.status.actuallyAttachedTo
 func WaitForAttachedToProvided(
 	ctx context.Context,
 	kc client.Client,
@@ -496,7 +650,7 @@ func WaitForAttachedToProvided(
 	traceID, volumeName, nodeName string,
 ) error {
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Waiting for node to appear in status.attachedTo", traceID, volumeName, nodeName))
+	log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Waiting for node to appear in status.actuallyAttachedTo", traceID, volumeName, nodeName))
 	for {
 		attemptCounter++
 		select {
@@ -517,13 +671,13 @@ func WaitForAttachedToProvided(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.attachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.AttachedTo))
+				log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
 			}
 
-			// Check if node is in status.attachedTo
-			for _, attachedNode := range rv.Status.AttachedTo {
+			// Check if node is in status.actuallyAttachedTo
+			for _, attachedNode := range rv.Status.ActuallyAttachedTo {
 				if attachedNode == nodeName {
-					log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.attachedTo", traceID, volumeName, nodeName))
+					log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Node is now in status.actuallyAttachedTo", traceID, volumeName, nodeName))
 					return nil
 				}
 			}
@@ -531,11 +685,11 @@ func WaitForAttachedToProvided(
 			log.Info(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status is nil", traceID, volumeName, nodeName, attemptCounter))
 		}
 
-		log.Trace(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in status.attachedTo yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
+		log.Trace(fmt.Sprintf("[WaitForAttachedToProvided][traceID:%s][volumeID:%s][node:%s] Attempt %d, node not in status.actuallyAttachedTo yet. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }
 
-// WaitForAttachedToRemoved waits for a node name to disappear from rv.status.attachedTo
+// WaitForAttachedToRemoved waits for a node name to disappear from rv.status.actuallyAttachedTo
 func WaitForAttachedToRemoved(
 	ctx context.Context,
 	kc client.Client,
@@ -543,7 +697,7 @@ func WaitForAttachedToRemoved(
 	traceID, volumeName, nodeName string,
 ) error {
 	var attemptCounter int
-	log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Waiting for node to disappear from status.attachedTo", traceID, volumeName, nodeName))
+	log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Waiting for node to disappear from status.actuallyAttachedTo", traceID, volumeName, nodeName))
 	for {
 		attemptCounter++
 		select {
@@ -566,12 +720,12 @@ func WaitForAttachedToRemoved(
 
 		if rv.Status != nil {
 			if attemptCounter%10 == 0 {
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.attachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.AttachedTo))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt: %d, status.actuallyAttachedTo: %v", traceID, volumeName, nodeName, attemptCounter, rv.Status.ActuallyAttachedTo))
 			}
 
-			// Check if node is NOT in status.attachedTo
+			// Check if node is NOT in status.actuallyAttachedTo
 			found := false
-			for _, attachedNode := range rv.Status.AttachedTo {
+			for _, attachedNode := range rv.Status.ActuallyAttachedTo {
 				if attachedNode == nodeName {
 					found = true
 					break
@@ -579,7 +733,7 @@ func WaitForAttachedToRemoved(
 			}
 
 			if !found {
-				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.attachedTo", traceID, volumeName, nodeName))
+				log.Info(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Node is no longer in status.actuallyAttachedTo", traceID, volumeName, nodeName))
 				return nil
 			}
 		} else {
@@ -590,6 +744,6 @@ func WaitForAttachedToRemoved(
 			return nil
 		}
 
-		log.Trace(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in status.attachedTo. Waiting...", traceID, volumeName, nodeName, attemptCounter))
+		log.Trace(fmt.Sprintf("[WaitForAttachedToRemoved][traceID:%s][volumeID:%s][node:%s] Attempt %d, node still in status.actuallyAttachedTo. Waiting...", traceID, volumeName, nodeName, attemptCounter))
 	}
 }

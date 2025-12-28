@@ -24,7 +24,7 @@ limitations under the License.
 //   - Assigning unique nodes to each replica of a ReplicatedVolume
 //   - Respecting topology constraints (Zonal, TransZonal, Ignored)
 //   - Checking storage capacity via scheduler-extender API
-//   - Preferring nodes in rv.spec.attachTo when possible
+//   - Preferring nodes in rv.status.desiredAttachTo when possible
 //   - Handling different scheduling requirements for Diskful, Access, and TieBreaker replicas
 //
 // # Watched Resources
@@ -53,19 +53,19 @@ limitations under the License.
 //   - Apply topology constraints:
 //   - Zonal: All replicas in one zone
 //   - If Diskful replicas exist, use their zone
-//   - Else if rv.spec.attachTo specified, choose best zone from those nodes
+//   - Else if rv.status.desiredAttachTo specified, choose best zone from those nodes
 //   - Else choose best zone from allowed zones
 //   - TransZonal: Distribute replicas evenly across zones
 //   - Place each replica in zone with fewest Diskful replicas
 //   - Fail if even distribution is impossible
 //   - Ignored: No zone constraints
 //   - Check storage capacity via scheduler-extender API
-//   - Prefer nodes in rv.spec.attachTo (increase priority)
+//   - Prefer nodes in rv.status.desiredAttachTo (increase priority)
 //
 // Phase 2: Access Replicas
-//   - Only when rv.spec.attachTo is set AND rsc.spec.volumeAccess != Local
+//   - Only when rv.status.desiredAttachTo is set AND rsc.spec.volumeAccess != Local
 //   - Exclude nodes already hosting any replica of this RV
-//   - Target nodes in rv.spec.attachTo without replicas
+//   - Target nodes in rv.status.desiredAttachTo without replicas
 //   - No topology or storage capacity constraints
 //   - OK if some attachTo nodes cannot get replicas (already have other replica types)
 //   - OK if some Access replicas cannot be scheduled (all attachTo nodes have replicas)

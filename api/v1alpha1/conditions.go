@@ -102,6 +102,10 @@ const (
 	// [ConditionTypeReady] indicates whether the replica is ready and operational
 	ConditionTypeReady = "Ready"
 
+	// [RVRConditionTypeReady] is an alias for [ConditionTypeReady].
+	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
+	RVRConditionTypeReady = ConditionTypeReady
+
 	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigured = "Configured"
 
@@ -113,6 +117,32 @@ const (
 
 	// [ConditionTypeAttached] indicates whether the replica has been attached
 	ConditionTypeAttached = "Attached"
+
+	// [RVRConditionTypeAttached] is an alias for [ConditionTypeAttached].
+	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
+	RVRConditionTypeAttached = ConditionTypeAttached
+)
+
+// =============================================================================
+// Condition types and reasons for RVA (ReplicatedVolumeAttachment) controllers
+// =============================================================================
+
+const (
+	// [RVAConditionTypeReady] indicates whether the attachment is ready (volume is attached to the requested node).
+	RVAConditionTypeReady = "Ready"
+)
+
+const (
+	// RVA condition reasons reported via [RVAConditionTypeReady].
+	RVAReasonWaitingForActiveAttachmentsToDetach = "WaitingForActiveAttachmentsToDetach"
+	RVAReasonWaitingForReplicatedVolume          = "WaitingForReplicatedVolume"
+	RVAReasonWaitingForReplicatedVolumeIOReady   = "WaitingForReplicatedVolumeIOReady"
+	RVAReasonWaitingForReplica                   = "WaitingForReplica"
+	RVAReasonConvertingTieBreakerToAccess        = "ConvertingTieBreakerToAccess"
+	RVAReasonUnableToProvideLocalVolumeAccess    = "UnableToProvideLocalVolumeAccess"
+	RVAReasonLocalityNotSatisfied                = "LocalityNotSatisfied"
+	RVAReasonSettingPrimary                      = "SettingPrimary"
+	RVAReasonAttached                            = "Attached"
 )
 
 // Replication values for [ReplicatedStorageClass] spec

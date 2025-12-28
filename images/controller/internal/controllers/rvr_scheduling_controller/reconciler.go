@@ -675,7 +675,7 @@ func (r *Reconciler) scheduleAccessPhase(
 	sctx *SchedulingContext,
 ) error {
 	// Spec «Access»: phase works only when:
-	// - rv.spec.attachTo is set AND not all attachTo nodes have replicas
+	// - rv.status.desiredAttachTo is set AND not all desiredAttachTo nodes have replicas
 	// - rsc.spec.volumeAccess != Local
 	if len(sctx.AttachToNodes) == 0 {
 		sctx.Log.V(1).Info("skipping Access phase: no attachTo nodes")
@@ -704,8 +704,8 @@ func (r *Reconciler) scheduleAccessPhase(
 	}
 	sctx.Log.V(1).Info("Access phase: candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
 
-	// We are not required to place all Access replicas or to cover all attachTo nodes.
-	// Spec «Access»: it is allowed to have nodes in rv.spec.attachTo without enough replicas
+	// We are not required to place all Access replicas or to cover all desiredAttachTo nodes.
+	// Spec «Access»: it is allowed to have nodes in rv.status.desiredAttachTo without enough replicas
 	// Spec «Access»: it is allowed to have replicas that could not be scheduled
 	nodesToFill := min(len(candidateNodes), len(sctx.UnscheduledAccessReplicas))
 	sctx.Log.V(1).Info("Access phase: scheduling replicas", "nodesToFill", nodesToFill)
@@ -805,7 +805,10 @@ func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []stri
 }
 
 func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
-	return slices.Clone(rv.Spec.AttachTo)
+	if rv == nil || rv.Status == nil {
+		return nil
+	}
+	return slices.Clone(rv.Status.DesiredAttachTo)
 }
 
 // collectReplicasAndOccupiedNodes filters replicas for a given RV and returns:

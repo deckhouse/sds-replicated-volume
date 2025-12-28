@@ -17,9 +17,13 @@ limitations under the License.
 package rvattachcontroller
 
 import (
+	"context"
+
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -37,6 +41,16 @@ func BuildController(mgr manager.Manager) error {
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolume{}),
+		).
+		Watches(
+			&v1alpha1.ReplicatedVolumeAttachment{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+				if !ok || rva.Spec.ReplicatedVolumeName == "" {
+					return nil
+				}
+				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: rva.Spec.ReplicatedVolumeName}}}
+			}),
 		).
 		Complete(rec)
 }

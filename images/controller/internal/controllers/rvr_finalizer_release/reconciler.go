@@ -189,7 +189,7 @@ func isDeletingReplicaAttached(
 		return false
 	}
 
-	return slices.Contains(rv.Status.AttachedTo, deletingRVRNodeName)
+	return slices.Contains(rv.Status.ActuallyAttachedTo, deletingRVRNodeName)
 }
 
 func hasEnoughDiskfulReplicasForReplication(

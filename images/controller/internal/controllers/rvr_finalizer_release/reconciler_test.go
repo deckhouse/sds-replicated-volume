@@ -246,7 +246,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 
-					rv.Status.AttachedTo = []string{rvr.Spec.NodeName}
+					rv.Status.ActuallyAttachedTo = []string{rvr.Spec.NodeName}
 					Expect(cl.Update(ctx, rv)).To(Succeed())
 				})
 
@@ -268,7 +268,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 
-					rv.Status.AttachedTo = []string{}
+					rv.Status.ActuallyAttachedTo = []string{}
 					Expect(cl.Update(ctx, rv)).To(Succeed())
 
 					currentRsc := &v1alpha1.ReplicatedStorageClass{}

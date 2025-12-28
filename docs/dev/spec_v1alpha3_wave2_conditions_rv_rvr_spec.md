@@ -50,7 +50,7 @@
 | `Initialized` | Достаточно RVR Initialized | rv-status-conditions-controller | `Initialized`, `WaitingForReplicas`, `InitializationInProgress` |
 | `Quorum` | Кворум достигнут | rv-status-conditions-controller | `QuorumReached`, `QuorumLost`, `QuorumDegraded` |
 | `DataQuorum` | Кворум данных Diskful | rv-status-conditions-controller | `DataQuorumReached`, `DataQuorumLost`, `DataQuorumDegraded` |
-| `IOReady` | Quorum=True+DataQuorum=True+AttachTo=IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
+| `IOReady` | Quorum=True+DataQuorum=True+DesiredAttachTo=IOReady | rv-status-conditions-controller | `IOReady`, `InsufficientIOReadyReplicas`, `NoIOReadyReplicas` |
 
 ### Удаляемые
 

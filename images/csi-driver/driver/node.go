@@ -391,7 +391,10 @@ func (d *Driver) NodeGetVolumeStats(_ context.Context, req *csi.NodeGetVolumeSta
 		return nil, status.Errorf(codes.Internal, "failed to statfs %s: %v", req.VolumePath, err)
 	}
 
-	blockSize := fsStat.Bsize
+	// NOTE: syscall.Statfs_t field types are OS-dependent.
+	// On linux Bsize is already int64 (so the conversion is redundant and triggers unconvert),
+	// but on darwin it's not, and we need int64 for computations below.
+	blockSize := int64(fsStat.Bsize) //nolint:unconvert
 	available := int64(fsStat.Bavail) * blockSize
 	total := int64(fsStat.Blocks) * blockSize
 	used := (int64(fsStat.Blocks) - int64(fsStat.Bfree)) * blockSize

@@ -303,9 +303,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-test",
-				AttachTo:                   tc.AttachTo,
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: tc.AttachTo,
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
@@ -1127,9 +1127,9 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-access",
-				AttachTo:                   []string{"node-a", "node-b"},
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: []string{"node-a", "node-b"},
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
@@ -1287,7 +1287,10 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 
 	When("checking Scheduled condition", func() {
 		BeforeEach(func() {
-			rv.Spec.AttachTo = []string{"node-a", "node-b"}
+			if rv.Status == nil {
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
+			}
+			rv.Status.DesiredAttachTo = []string{"node-a", "node-b"}
 			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},

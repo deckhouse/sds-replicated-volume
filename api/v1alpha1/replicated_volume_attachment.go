@@ -83,5 +83,3 @@ type ReplicatedVolumeAttachmentList struct {
 	metav1.ListMeta `json:"metadata"`
 	Items           []ReplicatedVolumeAttachment `json:"items"`
 }
-
-

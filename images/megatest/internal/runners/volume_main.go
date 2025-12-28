@@ -251,12 +251,6 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.Duration, error) {
 	startTime := time.Now()
 
-	// Ensure AttachTo is never nil (use empty slice instead)
-	attachOn := attachNodes
-	if attachOn == nil {
-		attachOn = []string{}
-	}
-
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -264,13 +258,25 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
-			AttachTo:                   attachOn,
 		},
 	}
 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
 		return time.Since(startTime), err
+	}
+
+	// Create initial attachment intents via RVA (if requested).
+	for _, nodeName := range attachNodes {
+		if nodeName == "" {
+			continue
+		}
+		if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
+			return time.Since(startTime), err
+		}
+		if err := v.client.WaitForRVAReady(ctx, v.rvName, nodeName); err != nil {
+			return time.Since(startTime), err
+		}
 	}
 
 	// Increment statistics counter on successful creation

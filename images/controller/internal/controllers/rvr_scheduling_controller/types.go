@@ -130,7 +130,7 @@ func removeAssigned(replicas []*v1alpha1.ReplicatedVolumeReplica, assigned map[s
 
 const attachToScoreBonus = 1000
 
-// ApplyAttachToBonus increases score for nodes in rv.spec.attachTo.
+// ApplyAttachToBonus increases score for nodes in rv.status.desiredAttachTo.
 // This ensures attachTo nodes are preferred when scheduling Diskful replicas.
 func (sctx *SchedulingContext) ApplyAttachToBonus() {
 	if len(sctx.AttachToNodes) == 0 {

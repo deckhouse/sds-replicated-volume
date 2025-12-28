@@ -20,7 +20,7 @@ limitations under the License.
 // # Controller Responsibilities
 //
 // The controller manages Access replicas by:
-//   - Creating Access replicas for nodes in rv.spec.attachTo without other replica types
+//   - Creating Access replicas for nodes in rv.status.desiredAttachTo without other replica types
 //   - Deleting Access replicas when they are no longer needed
 //   - Ensuring enough replicas exist for requested access points
 //
@@ -35,12 +35,12 @@ limitations under the License.
 //
 // Access replicas are needed when:
 //   - rsc.spec.volumeAccess != Local (Remote or Any access modes)
-//   - A node is in rv.spec.attachTo
+//   - A node is in rv.status.desiredAttachTo
 //   - No Diskful or TieBreaker replica exists on that node
 //
 // Access replicas should be removed when:
-//   - The node is no longer in rv.spec.attachTo
-//   - The node is not in rv.status.attachedTo (not actively using the volume)
+//   - The node is no longer in rv.status.desiredAttachTo
+//   - The node is not in rv.status.actuallyAttachedTo (not actively using the volume)
 //
 // # Reconciliation Flow
 //
@@ -49,12 +49,12 @@ limitations under the License.
 //     - rv.status.condition[type=IOReady].status must be True
 //  2. If RV is being deleted (only module finalizers remain):
 //     - Skip creation of new Access replicas
-//  3. For each node in rv.spec.attachTo:
+//  3. For each node in rv.status.desiredAttachTo:
 //     a. Check if a replica already exists on that node
 //     b. If no replica exists and rsc.spec.volumeAccess != Local:
 //     - Create new RVR with spec.type=Access
 //  4. For each Access replica:
-//     a. If node not in rv.spec.attachTo AND not in rv.status.attachedTo:
+//     a. If node not in rv.status.desiredAttachTo AND not in rv.status.actuallyAttachedTo:
 //     - Delete the Access replica
 //
 // # Status Updates

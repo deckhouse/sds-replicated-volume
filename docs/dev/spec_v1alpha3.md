@@ -143,11 +143,9 @@ TB в любой ситуации поддерживает нечетное, и 
   - Используется:
     - **rvr-diskful-count-controller** — определяет целевое число реплик по `ReplicatedStorageClass`.
     - **rv-attach-controller** — проверяет `rsc.spec.volumeAccess==Local` для возможности локального доступа.
-- `attachTo[]`
-  - До 2 узлов (MaxItems=2).
-  - Используется:
-    - **rv-attach-controller** — промоут/демоут реплик.
-    - **rvr-access-count-controller** — поддержание количества `Access`-реплик.
+> Примечание: запрос на публикацию (attach intent) задаётся не через `rv.spec`, а через ресурсы
+> [`ReplicatedVolumeAttachment`](#контракт-данных-replicatedvolumeattachment-rva). Итоговый набор целевых нод
+> публикуется в `rv.status.desiredAttachTo`.
 
 ## `status`
 - `conditions[]`
@@ -176,17 +174,48 @@ TB в любой ситуации поддерживает нечетное, и 
   - `quorumMinimumRedundancy`
     - Обновляет: **rv-status-config-quorum-controller**.
   - `allowTwoPrimaries`
-    - Обновляет: **rv-attach-controller** (включает при 2 узлах в `spec.attachTo`, выключает иначе).
+    - Обновляет: **rv-attach-controller** (включает при 2 узлах в `status.desiredAttachTo`, выключает иначе).
   - `deviceMinor`
     - Обновляет: **rv-status-config-device-minor-controller** (уникален среди всех RV).
-- `attachedTo[]`
+- `actuallyAttachedTo[]`
   - Обновляется: **rv-attach-controller**.
   - Значение: список узлов, где `rvr.status.drbd.status.role==Primary`.
+- `desiredAttachTo[]`
+  - Обновляется: **rv-attach-controller**.
+  - Значение: список узлов, где том **должен** быть опубликован (макс. 2).
+  - Источник: вычисляется из активных `ReplicatedVolumeAttachment` (RVA), с учётом ограничений локальности
+    (`rsc.spec.volumeAccess==Local`).
 - `actualSize`
   - Присутствует в API; источник обновления не описан в спецификации.
 - `phase`
   - Возможные значения: `Terminating`, `Synchronizing`, `Ready`.
   - Обновляется: **rv-status-controller**.
+
+# Контракт данных: `ReplicatedVolumeAttachment` (RVA)
+RVA — это ресурс «намерения публикации» тома на конкретной ноде.
+
+## `spec`
+- `replicatedVolumeName`
+  - Обязательное; неизменяемое.
+  - Значение: имя `ReplicatedVolume`, который требуется опубликовать.
+- `nodeName`
+  - Обязательное; неизменяемое.
+  - Значение: имя узла, на который требуется опубликовать том.
+
+## `status`
+- `phase` (Enum: `Pending`, `Attaching`, `Attached`, `Detaching`)
+- `conditions[]`
+  - `type=Ready`
+    - `status=True`, `reason=Attached` — том опубликован на `spec.nodeName`.
+    - `status=False` — ожидание/ошибка публикации. Основные `reason`:
+      - `WaitingForActiveAttachmentsToDetach`
+      - `WaitingForReplicatedVolume`
+      - `WaitingForReplicatedVolumeIOReady`
+      - `WaitingForReplica`
+      - `ConvertingTieBreakerToAccess`
+      - `UnableToProvideLocalVolumeAccess`
+      - `LocalityNotSatisfied`
+      - `SettingPrimary`
 
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
@@ -449,7 +478,7 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
   - учитываем topology:
     - `Zonal` - все реплики должны быть в рамках одной зоны
       - если уже есть Diskful реплики - используем их зону
-      - иначе если указан `rv.spec.attachTo` - выбраем лучшую из зон attachTo узлов (даже если в `rv.spec.attachTo` будут указаны узлы, зоны которых не указаны в `rsc.spec.zones`)
+      - иначе если указан `rv.status.desiredAttachTo` - выбраем лучшую из зон desiredAttachTo узлов (даже если в `rv.status.desiredAttachTo` будут указаны узлы, зоны которых не указаны в `rsc.spec.zones`)
       - иначе выбираем лучшую разрешённую зону (из `rsc.spec.zones` или все зоны кластера)
     - `TransZonal` - реплики распределяются равномерно по зонам
       - каждую реплику размещаем в зону с наименьшим количеством Diskful реплик
@@ -457,15 +486,15 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
     - `Ignored` - зоны не учитываются, реплики размещаются по произвольным нодам
   - учитываем место
     - делаем вызов в scheduler-extender (см. https://github.com/deckhouse/sds-node-configurator/pull/183)
-  - пытаемся учесть `rv.spec.attachTo` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
+  - пытаемся учесть `rv.status.desiredAttachTo` - назначить `Diskful` реплики на эти ноды, если это возможно (увеличиваем приоритет таких нод)
 - Размещение `Access`
   - фаза работает только если:
-    - `rv.spec.attachTo` задан и не на всех нодах из `rv.spec.attachTo` есть реплики
+    - `rv.status.desiredAttachTo` задан и не на всех нодах из `rv.status.desiredAttachTo` есть реплики
     - `rsc.spec.volumeAccess!=Local`
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
   - не учитываем topology, место на диске
-  - допустимо иметь ноды в `rv.spec.attachTo`, на которые не хватило реплик
-  - допустимо иметь реплики, которые никуда не запланировались (потому что на всех `rv.spec.attachTo` и так есть
+  - допустимо иметь ноды в `rv.status.desiredAttachTo`, на которые не хватило реплик
+  - допустимо иметь реплики, которые никуда не запланировались (потому что на всех `rv.status.desiredAttachTo` и так есть
   реплики какого-то типа)
 - Размещение `TieBreaker`
   - исключаем из планирования узлы, на которых уже есть реплики этой RV (любого типа)
@@ -574,9 +603,9 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Цель 
 Поддерживать количество `rvr.spec.type==Access` реплик (для всех режимов
 `rsc.spec.volumeAccess`, кроме `Local`) таким, чтобы их хватало для размещения на тех узлах, где это требуется:
- - список запрашиваемых для доступа узлов обновляется в `rv.spec.attachTo`
+ - список запрашиваемых для доступа узлов — `rv.status.desiredAttachTo` (вычисляется из RVA)
  - `Access` реплики требуются для доступа к данным на тех узлах, где нет других реплик
-Когда узел больше не в `rv.spec.attachTo`, а также не в `rv.status.attachedTo`,
+Когда узел больше не в `rv.status.desiredAttachTo`, а также не в `rv.status.actuallyAttachedTo`,
 `Access` реплика на нём должна быть удалена.
 
 ### Вывод
@@ -588,7 +617,11 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 ### Цель 
 
-Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в запросе на публикацию `rv.spec.attachTo` и приводить в соответствие реплики на этой ноде, проставляя им `rvr.status.drbd.config.primary`. 
+Обеспечить переход в primary (промоут) и обратно реплик. Для этого нужно следить за списком нод в
+`rv.status.desiredAttachTo` (вычисляется из RVA) и приводить в соответствие реплики на этих нодах,
+проставляя им `rvr.status.drbd.config.primary`. 
+Источник запроса на публикацию — активные ресурсы `ReplicatedVolumeAttachment` (RVA). Контроллер вычисляет
+целевой набор нод как `rv.status.desiredAttachTo` и уже по нему промоут/демоут реплик.
 
 В случае, если `rsc.spec.volumeAccess==Local`, но реплика не `rvr.spec.type==Diskful`,
 либо её нет вообще, промоут невозможен, и требуется обновить rv и прекратить реконсайл:
@@ -599,14 +632,14 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 Не все реплики могут быть primary. Для `rvr.spec.type=TieBreaker` требуется поменять тип на
 `rvr.spec.type=Accees` (в одном патче вместе с `rvr.status.drbd.config.primary`).
 
-В `rv.spec.attachTo` может быть указано 2 узла. Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
+В `rv.status.desiredAttachTo` может быть указано 2 узла (что соответствует двум активным RVA). Однако, в кластере по умолчанию стоит запрет на 2 primary ноды. В таком случае, нужно временно выключить запрет:
  - поменяв `rv.status.drbd.config.allowTwoPrimaries=true`
  - дождаться фактического применения настройки на каждой rvr `rvr.status.drbd.actual.allowTwoPrimaries`
  - и только потом обновлять `rvr.status.drbd.config.primary`
 
-В случае, когда в `rv.spec.attachTo` менее двух нод, нужно убедиться, что настройка `rv.status.drbd.config.allowTwoPrimaries=false`.
+В случае, когда в `rv.status.desiredAttachTo` менее двух нод, нужно убедиться, что настройка `rv.status.drbd.config.allowTwoPrimaries=false`.
 
-Также требуется поддерживать свойство `rv.status.attachedTo`, указывая там список нод, на которых
+Также требуется поддерживать свойство `rv.status.actuallyAttachedTo`, указывая там список нод, на которых
 фактически произошёл переход реплики в состояние Primary. Это состояние публикуется в `rvr.status.drbd.status.role` (значение `Primary`).
 
 Контроллер работает только когда RV имеет `status.condition[type=Ready].status=True`
@@ -614,7 +647,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Вывод 
   - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
-  - `rv.status.attachedTo`
+  - `rv.status.actuallyAttachedTo`
   - `rv.status.conditions[type=PublishSucceeded]`
 
 ## `rvr-volume-controller`
@@ -658,7 +691,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 (исключая ту, которую собираются удалить) больше, либо равно `rv.status.drbd.config.quorum`
 - присутствует необходимое количество `rvr.status.actualType==Diskful && rvr.status.conditions[type=Ready].status==True && rvr.metadata.deletionTimestamp==nil` реплик, в
 соответствии с `rsc.spec.replication`
-- удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.attachedTo`
+- удаляемая реплика не является фактически опубликованной, т.е. её нода не в `rv.status.actuallyAttachedTo`
 
 
 ### Вывод

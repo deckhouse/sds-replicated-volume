@@ -49,10 +49,6 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
-
-	// +kubebuilder:validation:MaxItems=2
-	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
-	AttachTo []string `json:"attachTo"`
 }
 
 // +kubebuilder:object:generate=true
@@ -71,7 +67,14 @@ type ReplicatedVolumeStatus struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional
-	AttachedTo []string `json:"attachedTo,omitempty"`
+	ActuallyAttachedTo []string `json:"actuallyAttachedTo,omitempty"`
+
+	// DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
+	// It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
+	// +kubebuilder:validation:MaxItems=2
+	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	// +optional
+	DesiredAttachTo []string `json:"desiredAttachTo,omitempty"`
 
 	// +optional
 	ActualSize *resource.Quantity `json:"actualSize,omitempty"`

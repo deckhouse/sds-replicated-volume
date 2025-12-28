@@ -57,11 +57,6 @@ spec:
             type: object
           spec:
             properties:
-              attachTo:
-                items:
-                  type: string
-                maxItems: 2
-                type: array
               replicatedStorageClassName:
                 minLength: 1
                 type: string
@@ -72,7 +67,6 @@ spec:
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
             required:
-            - attachTo
             - replicatedStorageClassName
             - size
             type: object
@@ -84,16 +78,16 @@ spec:
                 - type: string
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
+              actuallyAttachedTo:
+                items:
+                  type: string
+                maxItems: 2
+                type: array
               attachedAndIOReadyCount:
                 description: |-
                   AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
                   Example: "1/2" means 1 replica is IOReady out of 2 attached
                 type: string
-              attachedTo:
-                items:
-                  type: string
-                maxItems: 2
-                type: array
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -153,6 +147,14 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              desiredAttachTo:
+                description: |-
+                  DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
+                  It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
+                items:
+                  type: string
+                maxItems: 2
+                type: array
               diskfulReplicaCount:
                 description: |-
                   DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"

@@ -240,8 +240,8 @@ Cм. существующую реализацию `drbdadm resize`.
 кластер к этому готов.
 
 Условие готовности (даже если `rv.metadata.deletionTimestamp!=nil`):
-- удаляемые реплики не опубликованы (`rv.status.attachedTo`), при этом при удалении RV, удаляемыми
-считаются все реплики (`len(rv.status.attachedTo)==0`)
+- удаляемые реплики не опубликованы (`rv.status.actuallyAttachedTo`), при этом при удалении RV, удаляемыми
+считаются все реплики (`len(rv.status.actuallyAttachedTo)==0`)
 
 В случае, когда RV не удаляется (`rv.metadata.deletionTimestamp==nil`), требуется
 проверить дополнительные условия:

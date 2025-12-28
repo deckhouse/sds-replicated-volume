@@ -144,8 +144,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// 2. Node has NO Diskful (can't access data locally)
 	// 3. Node has NO TieBreaker (other controller will convert it to access)
 	// 4. Node has NO Access RVR yet (avoid duplicates)
+	desiredAttachTo := []string(nil)
+	if rv.Status != nil {
+		desiredAttachTo = rv.Status.DesiredAttachTo
+	}
 	nodesNeedingAccess := make([]string, 0)
-	for _, nodeName := range rv.Spec.AttachTo {
+	for _, nodeName := range desiredAttachTo {
 		_, hasDiskfulOrTieBreaker := nodesWithDiskfulOrTieBreaker[nodeName]
 		_, hasAccess := nodesWithAccess[nodeName]
 
@@ -161,13 +165,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// - attachedTo = where pod IS running (current reality)
 	// We keep Access if either is true to avoid disrupting running pods.
 	attachToSet := make(map[string]struct{})
-	for _, nodeName := range rv.Spec.AttachTo {
+	for _, nodeName := range desiredAttachTo {
 		attachToSet[nodeName] = struct{}{}
 	}
 
 	attachedToSet := make(map[string]struct{})
 	if rv.Status != nil {
-		for _, nodeName := range rv.Status.AttachedTo {
+		for _, nodeName := range rv.Status.ActuallyAttachedTo {
 			attachedToSet[nodeName] = struct{}{}
 		}
 	}

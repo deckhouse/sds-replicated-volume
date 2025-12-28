@@ -285,32 +285,21 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	return nil
 }
 
-func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimary bool) error {
+func (rvr *ReplicatedVolumeReplica) ComputeStatusConditionAttached(shouldBePrimary bool) (v1.Condition, error) {
 	if rvr.Spec.Type != ReplicaTypeAccess && rvr.Spec.Type != ReplicaTypeDiskful {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:   ConditionTypeAttached,
-				Status: v1.ConditionFalse,
-				Reason: ReasonAttachingNotApplicable,
-			},
-		)
-		return nil
+		return v1.Condition{
+			Type:   ConditionTypeAttached,
+			Status: v1.ConditionFalse,
+			Reason: ReasonAttachingNotApplicable,
+		}, nil
 	}
-	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
-		if rvr.Status == nil {
-			rvr.Status = &ReplicatedVolumeReplicaStatus{}
-		}
 
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:   ConditionTypeAttached,
-				Status: v1.ConditionUnknown,
-				Reason: ReasonAttachingNotInitialized,
-			},
-		)
-		return nil
+	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+		return v1.Condition{
+			Type:   ConditionTypeAttached,
+			Status: v1.ConditionUnknown,
+			Reason: ReasonAttachingNotInitialized,
+		}, nil
 	}
 
 	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
@@ -329,6 +318,17 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimar
 		}
 	}
 
+	return cond, nil
+}
+
+func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimary bool) error {
+	cond, err := rvr.ComputeStatusConditionAttached(shouldBePrimary)
+	if err != nil {
+		return err
+	}
+	if rvr.Status == nil {
+		rvr.Status = &ReplicatedVolumeReplicaStatus{}
+	}
 	meta.SetStatusCondition(&rvr.Status.Conditions, cond)
 
 	return nil

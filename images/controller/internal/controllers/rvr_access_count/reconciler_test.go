@@ -100,8 +100,8 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					AttachTo:                   []string{},
 				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -116,6 +116,7 @@ var _ = Describe("Reconciler", func() {
 		JustBeforeEach(func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rsc)).To(Succeed(), "should create RSC")
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create RV")
+			Expect(cl.Status().Update(ctx, rv)).To(Succeed(), "should update RV status")
 		})
 
 		When("RV is being deleted", func() {
@@ -141,8 +142,8 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should skip without creating Access RVR", func(ctx SpecContext) {
-				rv.Spec.AttachTo = []string{"node-1"}
-				Expect(cl.Update(ctx, rv)).To(Succeed())
+				rv.Status.DesiredAttachTo = []string{"node-1"}
+				Expect(cl.Status().Update(ctx, rv)).To(Succeed())
 
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue for Local volumeAccess")
 
@@ -155,7 +156,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("attachTo has node without replicas", func() {
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 			})
 
 			It("should create Access RVR", func(ctx SpecContext) {
@@ -176,7 +177,7 @@ var _ = Describe("Reconciler", func() {
 			var diskfulRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 				diskfulRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -217,7 +218,7 @@ var _ = Describe("Reconciler", func() {
 			var tieBreakerRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 				tieBreakerRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -258,7 +259,7 @@ var _ = Describe("Reconciler", func() {
 			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{}
+				rv.Status.DesiredAttachTo = []string{}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -298,10 +299,8 @@ var _ = Describe("Reconciler", func() {
 			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{}
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-					AttachedTo: []string{"node-1"},
-				}
+				rv.Status.DesiredAttachTo = []string{}
+				rv.Status.ActuallyAttachedTo = []string{"node-1"}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -342,7 +341,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("multiple nodes in attachTo", func() {
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{"node-1", "node-2"}
+				rv.Status.DesiredAttachTo = []string{"node-1", "node-2"}
 			})
 
 			It("should create Access RVR for each node without replicas", func(ctx SpecContext) {
@@ -366,7 +365,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("reconcile is called twice (idempotency)", func() {
 			BeforeEach(func() {
-				rv.Spec.AttachTo = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 			})
 
 			It("should not create duplicate Access RVRs", func(ctx SpecContext) {
@@ -407,7 +406,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					AttachTo:                   []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -453,7 +451,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					AttachTo:                   []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -501,7 +498,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					AttachTo:                   []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -527,6 +523,10 @@ var _ = Describe("Reconciler", func() {
 		It("should return error", func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rsc)).To(Succeed(), "should create RSC")
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create RV")
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: []string{"node-1"},
+			}
+			Expect(cl.Status().Update(ctx, rv)).To(Succeed(), "should update RV status")
 
 			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(testError), "should return error when Create RVR fails")
 		})
@@ -550,7 +550,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					AttachTo:                   []string{}, // No attachTo - will trigger delete
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
