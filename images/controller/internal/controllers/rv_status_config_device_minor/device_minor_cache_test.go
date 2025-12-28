@@ -1,7 +1,24 @@
+/*
+Copyright 2025 Flant JSC
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package rvstatusconfigdeviceminor_test
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 
 	. "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
@@ -13,7 +30,6 @@ type testDeviceMinorCache struct {
 }
 
 func TestDeviceMinorCache(t *testing.T) {
-	// TODO: check that holes are filled from the smallest
 	testDeviceMinorCache{t, NewDeviceMinorCache()}.
 		// []
 		expectEmpty().
@@ -118,6 +134,19 @@ func TestDeviceMinorCache(t *testing.T) {
 		expect(1, 5, holes(0, 1, 2, 3, 4)).
 		// -
 		getOrCreate("F", 5, "").
+		expect(1, 5, holes(0, 1, 2, 3, 4)).
+		// [_, _, ..., M]
+		initialize(map[string]DeviceMinor{"M": MaxDeviceMinor}, "").
+		expectLen(1).
+		expectMax(MaxDeviceMinor).
+		// [1, 2, ..., M]
+		getOrCreateMany(int(MaxDeviceMinor), "").
+		expectLen(int(MaxDeviceMinor)+1).
+		expectMax(MaxDeviceMinor).
+		// -
+		getOrCreate("E", DeviceMinorZero, "ran out of device minors").
+		expectLen(int(MaxDeviceMinor) + 1).
+		expectMax(MaxDeviceMinor).
 		// []
 		cleanup()
 }
@@ -130,6 +159,17 @@ func (tc testDeviceMinorCache) getOrCreate(rvName string, expectedDM DeviceMinor
 	}
 	if !errIsExpected(err, expectedErr) {
 		tc.Fatalf("expected GetOrCreate error to be %s, got %v", expectedErr, err)
+	}
+	return tc
+}
+
+func (tc testDeviceMinorCache) getOrCreateMany(num int, expectedErr string) testDeviceMinorCache {
+	tc.Helper()
+	for i := range num {
+		_, err := tc.GetOrCreate(strconv.Itoa(i))
+		if !errIsExpected(err, expectedErr) {
+			tc.Fatalf("expected GetOrCreate error to be %s, got %v", expectedErr, err)
+		}
 	}
 	return tc
 }
@@ -202,6 +242,7 @@ func errIsExpected(err error, expectedErr string) bool {
 	return ((err == nil) == (expectedErr == "")) && (err == nil || err.Error() == expectedErr)
 }
 
+// only for test cases to look better
 func holes(d ...DeviceMinor) []DeviceMinor {
 	return d
 }
