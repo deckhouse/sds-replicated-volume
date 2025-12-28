@@ -183,16 +183,13 @@ func (r *Reconciler) getReplicatedVolumeReplicas(ctx context.Context, rvName str
 // to the given RV, sorted by creation timestamp (FIFO).
 func (r *Reconciler) getSortedReplicatedVolumeAttachments(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
 	rvaList := &v1alpha1.ReplicatedVolumeAttachmentList{}
-	if err := r.cl.List(ctx, rvaList); err != nil {
+	if err := r.cl.List(ctx, rvaList, client.MatchingFields{
+		v1alpha1.IndexFieldRVAByReplicatedVolumeName: rvName,
+	}); err != nil {
 		return nil, err
 	}
 
-	var rvasForRV []v1alpha1.ReplicatedVolumeAttachment
-	for _, rva := range rvaList.Items {
-		if rva.Spec.ReplicatedVolumeName == rvName {
-			rvasForRV = append(rvasForRV, rva)
-		}
-	}
+	rvasForRV := rvaList.Items
 
 	// Sort by creation timestamp
 	sort.SliceStable(rvasForRV, func(i, j int) bool {

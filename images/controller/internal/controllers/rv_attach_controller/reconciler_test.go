@@ -39,6 +39,19 @@ import (
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 )
 
+func withRVAIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeAttachment{}, v1alpha1.IndexFieldRVAByReplicatedVolumeName, func(obj client.Object) []string {
+		rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+		if !ok {
+			return nil
+		}
+		if rva.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+		return []string{rva.Spec.ReplicatedVolumeName}
+	})
+}
+
 func TestRvAttachReconciler(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "rv-attach-controller Reconciler Suite")
@@ -58,8 +71,7 @@ var _ = Describe("Reconcile", func() {
 	)
 
 	BeforeEach(func() {
-		builder = fake.NewClientBuilder().
-			WithScheme(scheme).
+		builder = withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{})
@@ -100,8 +112,7 @@ var _ = Describe("Reconcile", func() {
 			},
 		}
 
-		localBuilder := fake.NewClientBuilder().
-			WithScheme(scheme).
+		localBuilder := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).
@@ -147,8 +158,7 @@ var _ = Describe("Reconcile", func() {
 			},
 		}
 
-		localCl := fake.NewClientBuilder().
-			WithScheme(scheme).
+		localCl := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).
@@ -320,8 +330,7 @@ var _ = Describe("Reconcile", func() {
 			},
 		}
 
-		localCl := fake.NewClientBuilder().
-			WithScheme(scheme).
+		localCl := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).
@@ -1710,8 +1719,7 @@ var _ = Describe("Reconcile", func() {
 						VolumeAccess: "Remote",
 					},
 				}
-				localCl := fake.NewClientBuilder().
-					WithScheme(scheme).
+				localCl := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).
@@ -1875,8 +1883,7 @@ var _ = Describe("Reconcile", func() {
 						VolumeAccess: "Remote",
 					},
 				}
-				localCl := fake.NewClientBuilder().
-					WithScheme(scheme).
+				localCl := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).
@@ -1955,8 +1962,7 @@ var _ = Describe("Reconcile", func() {
 						VolumeAccess: "Remote",
 					},
 				}
-				localCl := fake.NewClientBuilder().
-					WithScheme(scheme).
+				localCl := withRVAIndex(fake.NewClientBuilder().WithScheme(scheme)).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 					WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{}).

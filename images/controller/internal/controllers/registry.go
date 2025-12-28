@@ -43,6 +43,9 @@ import (
 var registry = []func(mgr manager.Manager) error{}
 
 func init() {
+	// Must be first: controllers rely on MatchingFields against these indexes.
+	registry = append(registry, RegisterIndexes)
+
 	registry = append(registry, rvrdiskfulcount.BuildController)
 	registry = append(registry, rvrtiebreakercount.BuildController)
 	registry = append(registry, rvstatusconfigquorum.BuildController)
