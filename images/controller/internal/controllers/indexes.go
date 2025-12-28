@@ -50,5 +50,3 @@ func RegisterIndexes(mgr manager.Manager) error {
 
 	return nil
 }
-
-

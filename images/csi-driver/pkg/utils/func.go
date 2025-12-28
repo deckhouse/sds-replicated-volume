@@ -495,6 +495,10 @@ type RVAWaitError struct {
 	// LastReadyCondition is the last observed Ready condition (may be nil if status/condition was never observed).
 	LastReadyCondition *metav1.Condition
 
+	// LastAttachedCondition is the last observed Attached condition (may be nil if missing).
+	// This is useful for surfacing detailed attach progress and permanent attach failures.
+	LastAttachedCondition *metav1.Condition
+
 	// Permanent indicates that waiting won't help (e.g. locality constraint violation).
 	Permanent bool
 
@@ -509,8 +513,11 @@ func (e *RVAWaitError) Error() string {
 	if e.LastReadyCondition != nil {
 		base = fmt.Sprintf("%s: Ready=%s reason=%s message=%q", base, e.LastReadyCondition.Status, e.LastReadyCondition.Reason, e.LastReadyCondition.Message)
 	}
+	if e.LastAttachedCondition != nil {
+		base = fmt.Sprintf("%s: Attached=%s reason=%s message=%q", base, e.LastAttachedCondition.Status, e.LastAttachedCondition.Reason, e.LastAttachedCondition.Message)
+	}
 	if e.Permanent {
-		base = base + " (permanent)"
+		base += " (permanent)"
 	}
 	if e.Cause != nil {
 		base = fmt.Sprintf("%s: %v", base, e.Cause)
@@ -518,8 +525,8 @@ func (e *RVAWaitError) Error() string {
 	return base
 }
 
-func sleepWithContext(ctx context.Context, d time.Duration) error {
-	t := time.NewTimer(d)
+func sleepWithContext(ctx context.Context) error {
+	t := time.NewTimer(500 * time.Millisecond)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
@@ -538,17 +545,19 @@ func WaitForRVAReady(
 	rvaName := BuildRVAName(volumeName, nodeName)
 	var attemptCounter int
 	var lastReadyCond *metav1.Condition
+	var lastAttachedCond *metav1.Condition
 	log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Waiting for ReplicatedVolumeAttachment %s to become Ready=True", traceID, volumeName, nodeName, rvaName))
 	for {
 		attemptCounter++
 		if err := ctx.Err(); err != nil {
 			log.Warning(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] context done", traceID, volumeName, nodeName))
 			return &RVAWaitError{
-				VolumeName:         volumeName,
-				NodeName:           nodeName,
-				RVAName:            rvaName,
-				LastReadyCondition: lastReadyCond,
-				Cause:              err,
+				VolumeName:            volumeName,
+				NodeName:              nodeName,
+				RVAName:               rvaName,
+				LastReadyCondition:    lastReadyCond,
+				LastAttachedCondition: lastAttachedCond,
+				Cause:                 err,
 			}
 		}
 
@@ -558,13 +567,14 @@ func WaitForRVAReady(
 				if attemptCounter%10 == 0 {
 					log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA not found yet", traceID, volumeName, nodeName, attemptCounter))
 				}
-				if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+				if err := sleepWithContext(ctx); err != nil {
 					return &RVAWaitError{
-						VolumeName:         volumeName,
-						NodeName:           nodeName,
-						RVAName:            rvaName,
-						LastReadyCondition: lastReadyCond,
-						Cause:              err,
+						VolumeName:            volumeName,
+						NodeName:              nodeName,
+						RVAName:               rvaName,
+						LastReadyCondition:    lastReadyCond,
+						LastAttachedCondition: lastAttachedCond,
+						Cause:                 err,
 					}
 				}
 				continue
@@ -576,67 +586,80 @@ func WaitForRVAReady(
 			if attemptCounter%10 == 0 {
 				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA status is nil", traceID, volumeName, nodeName, attemptCounter))
 			}
-			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			if err := sleepWithContext(ctx); err != nil {
 				return &RVAWaitError{
-					VolumeName:         volumeName,
-					NodeName:           nodeName,
-					RVAName:            rvaName,
-					LastReadyCondition: lastReadyCond,
-					Cause:              err,
+					VolumeName:            volumeName,
+					NodeName:              nodeName,
+					RVAName:               rvaName,
+					LastReadyCondition:    lastReadyCond,
+					LastAttachedCondition: lastAttachedCond,
+					Cause:                 err,
 				}
 			}
 			continue
 		}
 
-		cond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeReady)
-		if cond == nil {
+		readyCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeReady)
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeAttached)
+
+		if attachedCond != nil {
+			attachedCopy := *attachedCond
+			lastAttachedCond = &attachedCopy
+		}
+
+		if readyCond == nil {
 			if attemptCounter%10 == 0 {
 				log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, RVA Ready condition missing", traceID, volumeName, nodeName, attemptCounter))
 			}
-			if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+			if err := sleepWithContext(ctx); err != nil {
 				return &RVAWaitError{
-					VolumeName:         volumeName,
-					NodeName:           nodeName,
-					RVAName:            rvaName,
-					LastReadyCondition: lastReadyCond,
-					Cause:              err,
+					VolumeName:            volumeName,
+					NodeName:              nodeName,
+					RVAName:               rvaName,
+					LastReadyCondition:    lastReadyCond,
+					LastAttachedCondition: lastAttachedCond,
+					Cause:                 err,
 				}
 			}
 			continue
 		}
 
 		// Keep a stable copy of the last observed condition for error reporting.
-		condCopy := *cond
+		condCopy := *readyCond
 		lastReadyCond = &condCopy
 
 		if attemptCounter%10 == 0 {
-			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, Ready=%s reason=%s message=%q", traceID, volumeName, nodeName, attemptCounter, cond.Status, cond.Reason, cond.Message))
+			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] Attempt: %d, Ready=%s reason=%s message=%q", traceID, volumeName, nodeName, attemptCounter, readyCond.Status, readyCond.Reason, readyCond.Message))
 		}
 
-		if cond.Status == metav1.ConditionTrue {
+		if readyCond.Status == metav1.ConditionTrue {
 			log.Info(fmt.Sprintf("[WaitForRVAReady][traceID:%s][volumeID:%s][node:%s] RVA Ready=True", traceID, volumeName, nodeName))
 			return nil
 		}
 
 		// Early exit for conditions that will not become Ready without changing the request or topology.
 		// Waiting here only burns time and hides the real cause from CSI callers.
-		if cond.Status == metav1.ConditionFalse && (cond.Reason == srv.RVAReasonLocalityNotSatisfied || cond.Reason == srv.RVAReasonUnableToProvideLocalVolumeAccess) {
+		if lastAttachedCond != nil &&
+			lastAttachedCond.Status == metav1.ConditionFalse &&
+			(lastAttachedCond.Reason == srv.RVAAttachedReasonLocalityNotSatisfied || lastAttachedCond.Reason == srv.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
 			return &RVAWaitError{
-				VolumeName:         volumeName,
-				NodeName:           nodeName,
-				RVAName:            rvaName,
-				LastReadyCondition: lastReadyCond,
-				Permanent:          true,
+				VolumeName:            volumeName,
+				NodeName:              nodeName,
+				RVAName:               rvaName,
+				LastReadyCondition:    lastReadyCond,
+				LastAttachedCondition: lastAttachedCond,
+				Permanent:             true,
 			}
 		}
 
-		if err := sleepWithContext(ctx, 500*time.Millisecond); err != nil {
+		if err := sleepWithContext(ctx); err != nil {
 			return &RVAWaitError{
-				VolumeName:         volumeName,
-				NodeName:           nodeName,
-				RVAName:            rvaName,
-				LastReadyCondition: lastReadyCond,
-				Cause:              err,
+				VolumeName:            volumeName,
+				NodeName:              nodeName,
+				RVAName:               rvaName,
+				LastReadyCondition:    lastReadyCond,
+				LastAttachedCondition: lastAttachedCond,
+				Cause:                 err,
 			}
 		}
 	}

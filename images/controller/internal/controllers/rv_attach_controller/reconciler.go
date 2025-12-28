@@ -378,7 +378,7 @@ func (r *Reconciler) reconcileRVAsFinalizers(
 	return joinedErr
 }
 
-// reconcileRVAsStatus reconciles status (phase + Ready condition) for all provided RVAs.
+// reconcileRVAsStatus reconciles status (phase + conditions) for all provided RVAs.
 // It continues through all RVAs, joining any errors encountered.
 func (r *Reconciler) reconcileRVAsStatus(
 	ctx context.Context,
@@ -472,7 +472,7 @@ func (r *Reconciler) ensureRVAFinalizers(
 	return nil
 }
 
-// reconcileRVAStatus computes desired phase and Ready condition for a single RVA and persists it via ensureRVAStatus.
+// reconcileRVAStatus computes desired phase and RVA conditions for a single RVA and persists them via ensureRVAStatus.
 func (r *Reconciler) reconcileRVAStatus(
 	ctx context.Context,
 	rva *v1alpha1.ReplicatedVolumeAttachment,
@@ -487,7 +487,23 @@ func (r *Reconciler) reconcileRVAStatus(
 	}
 
 	desiredPhase := ""
-	var desiredReadyCondition metav1.Condition
+	var desiredAttachedCondition metav1.Condition
+
+	// ReplicaIOReady mirrors replica condition IOReady (if available).
+	desiredReplicaIOReadyCondition := metav1.Condition{
+		Status:  metav1.ConditionUnknown,
+		Reason:  v1alpha1.RVAReplicaIOReadyReasonWaitingForReplica,
+		Message: "Waiting for replica IOReady condition on the requested node",
+	}
+
+	// Helper: if we have replica and its IOReady condition, mirror it.
+	if replicaOnNode != nil && replicaOnNode.Status != nil {
+		if rvrIOReady := meta.FindStatusCondition(replicaOnNode.Status.Conditions, v1alpha1.ConditionTypeIOReady); rvrIOReady != nil {
+			desiredReplicaIOReadyCondition.Status = rvrIOReady.Status
+			desiredReplicaIOReadyCondition.Reason = rvrIOReady.Reason
+			desiredReplicaIOReadyCondition.Message = rvrIOReady.Message
+		}
+	}
 
 	// Attached always wins (even if RVA/RV are deleting): reflect the actual state.
 	if slices.Contains(actuallyAttachedTo, rva.Spec.NodeName) {
@@ -496,34 +512,34 @@ func (r *Reconciler) reconcileRVAStatus(
 		} else {
 			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttached
 		}
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionTrue,
-			Reason:  v1alpha1.RVAReasonAttached,
+			Reason:  v1alpha1.RVAAttachedReasonAttached,
 			Message: "Volume is attached to the requested node",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// RV might be missing (not yet created / already deleted). In this case we can't attach and keep RVA Pending.
 	if rv == nil {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolume,
+			Reason:  v1alpha1.RVAAttachedReasonWaitingForReplicatedVolume,
 			Message: "Waiting for ReplicatedVolume to exist",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// StorageClass might be missing (not yet created / already deleted). In this case we can't attach and keep RVA Pending.
 	if sc == nil {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolume,
+			Reason:  v1alpha1.RVAAttachedReasonWaitingForReplicatedVolume,
 			Message: "Waiting for ReplicatedStorageClass to exist",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// For Local volume access, attachment is only possible when the requested node has a Diskful replica.
@@ -531,67 +547,67 @@ func (r *Reconciler) reconcileRVAStatus(
 	if sc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal {
 		if replicaOnNode == nil || replicaOnNode.Status == nil || replicaOnNode.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
 			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
-			desiredReadyCondition = metav1.Condition{
+			desiredAttachedCondition = metav1.Condition{
 				Status:  metav1.ConditionFalse,
-				Reason:  v1alpha1.RVAReasonLocalityNotSatisfied,
+				Reason:  v1alpha1.RVAAttachedReasonLocalityNotSatisfied,
 				Message: "Local volume access requires a Diskful replica on the requested node",
 			}
-			return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+			return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 		}
 	}
 
 	// If RV status is not initialized or not IOReady, we can't progress attachment; keep informative Pending.
 	if rv.Status == nil || !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonWaitingForReplicatedVolumeIOReady,
+			Reason:  v1alpha1.RVAAttachedReasonWaitingForReplicatedVolumeIOReady,
 			Message: "Waiting for ReplicatedVolume to become IOReady",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// Not active (not in desiredAttachTo): must wait until one of the active nodes detaches.
 	if !slices.Contains(desiredAttachTo, rva.Spec.NodeName) {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonWaitingForActiveAttachmentsToDetach,
+			Reason:  v1alpha1.RVAAttachedReasonWaitingForActiveAttachmentsToDetach,
 			Message: "Waiting for active nodes to detach (maximum 2 nodes are supported)",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// Active but not yet attached.
 	if replicaOnNode == nil {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonWaitingForReplica,
+			Reason:  v1alpha1.RVAAttachedReasonWaitingForReplica,
 			Message: "Waiting for replica on the requested node",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	// TieBreaker replica cannot be promoted directly; it must be converted first.
 	if replicaOnNode.Spec.Type == v1alpha1.ReplicaTypeTieBreaker ||
 		(replicaOnNode.Status != nil && replicaOnNode.Status.ActualType == v1alpha1.ReplicaTypeTieBreaker) {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
-		desiredReadyCondition = metav1.Condition{
+		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
-			Reason:  v1alpha1.RVAReasonConvertingTieBreakerToAccess,
+			Reason:  v1alpha1.RVAAttachedReasonConvertingTieBreakerToAccess,
 			Message: "Converting TieBreaker replica to Access to allow promotion",
 		}
-		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+		return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 	}
 
 	desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
-	desiredReadyCondition = metav1.Condition{
+	desiredAttachedCondition = metav1.Condition{
 		Status:  metav1.ConditionFalse,
-		Reason:  v1alpha1.RVAReasonSettingPrimary,
+		Reason:  v1alpha1.RVAAttachedReasonSettingPrimary,
 		Message: "Waiting for replica to become Primary",
 	}
-	return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredReadyCondition)
+	return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
 }
 
 func statusConditionEqual(current *metav1.Condition, desired metav1.Condition) bool {
@@ -605,31 +621,65 @@ func statusConditionEqual(current *metav1.Condition, desired metav1.Condition) b
 		current.ObservedGeneration == desired.ObservedGeneration
 }
 
-// ensureRVAStatus ensures RVA status.phase and Ready condition match desired values.
+func computeAggregateReadyCondition(attached metav1.Condition, replicaIOReady metav1.Condition) metav1.Condition {
+	// Ready is a strict aggregate: Attached=True AND ReplicaIOReady=True
+	if attached.Status != metav1.ConditionTrue {
+		return metav1.Condition{
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.RVAReadyReasonNotAttached,
+			Message: "Waiting for volume to be attached to the requested node",
+		}
+	}
+	if replicaIOReady.Status != metav1.ConditionTrue {
+		return metav1.Condition{
+			Status:  metav1.ConditionFalse,
+			Reason:  v1alpha1.RVAReadyReasonReplicaNotIOReady,
+			Message: "Waiting for replica on the requested node to become IOReady",
+		}
+	}
+	return metav1.Condition{
+		Status:  metav1.ConditionTrue,
+		Reason:  v1alpha1.RVAReadyReasonReady,
+		Message: "Volume is attached and replica is IOReady on the requested node",
+	}
+}
+
+// ensureRVAStatus ensures RVA status.phase and conditions match desired values.
 // It patches status with optimistic lock only when something actually changes.
 func (r *Reconciler) ensureRVAStatus(
 	ctx context.Context,
 	rva *v1alpha1.ReplicatedVolumeAttachment,
 	desiredPhase string,
+	desiredAttachedCondition metav1.Condition,
+	desiredReplicaIOReadyCondition metav1.Condition,
 	desiredReadyCondition metav1.Condition,
 ) error {
 	if rva == nil {
 		panic("ensureRVAStatus: nil rva (programmer error)")
 	}
 
+	desiredAttachedCondition.Type = v1alpha1.RVAConditionTypeAttached
+	desiredReplicaIOReadyCondition.Type = v1alpha1.RVAConditionTypeReplicaIOReady
 	desiredReadyCondition.Type = v1alpha1.RVAConditionTypeReady
+
+	desiredAttachedCondition.ObservedGeneration = rva.Generation
+	desiredReplicaIOReadyCondition.ObservedGeneration = rva.Generation
 	desiredReadyCondition.ObservedGeneration = rva.Generation
 
 	currentPhase := ""
-	var currentReady *metav1.Condition
+	var currentAttached, currentReplicaIOReady, currentReady *metav1.Condition
 	if rva.Status != nil {
 		currentPhase = rva.Status.Phase
+		currentAttached = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
+		currentReplicaIOReady = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReplicaIOReady)
 		currentReady = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReady)
 	}
 
 	phaseEqual := currentPhase == desiredPhase
-	condEqual := statusConditionEqual(currentReady, desiredReadyCondition)
-	if phaseEqual && condEqual {
+	attachedEqual := statusConditionEqual(currentAttached, desiredAttachedCondition)
+	replicaIOReadyEqual := statusConditionEqual(currentReplicaIOReady, desiredReplicaIOReadyCondition)
+	readyEqual := statusConditionEqual(currentReady, desiredReadyCondition)
+	if phaseEqual && attachedEqual && replicaIOReadyEqual && readyEqual {
 		return nil
 	}
 
@@ -638,6 +688,8 @@ func (r *Reconciler) ensureRVAStatus(
 		rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
 	}
 	rva.Status.Phase = desiredPhase
+	meta.SetStatusCondition(&rva.Status.Conditions, desiredAttachedCondition)
+	meta.SetStatusCondition(&rva.Status.Conditions, desiredReplicaIOReadyCondition)
 	meta.SetStatusCondition(&rva.Status.Conditions, desiredReadyCondition)
 
 	if err := r.cl.Status().Patch(ctx, rva, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {

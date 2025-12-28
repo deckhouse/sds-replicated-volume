@@ -533,6 +533,14 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 		if cond != nil && cond.Status == metav1.ConditionTrue {
 			return nil
 		}
+		// Early exit for permanent attach failures: these are reported via Attached condition reason.
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
+		if attachedCond != nil &&
+			attachedCond.Status == metav1.ConditionFalse &&
+			(attachedCond.Reason == v1alpha1.RVAAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
+			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
+				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
+		}
 		time.Sleep(500 * time.Millisecond)
 	}
 }

@@ -17,11 +17,10 @@ limitations under the License.
 package rvattachcontroller
 
 import (
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-
-	"k8s.io/apimachinery/pkg/api/meta"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -62,11 +61,7 @@ func replicatedVolumePredicate() predicate.Predicate {
 			// IOReady condition gates attachments; it is status-managed by another controller.
 			oldIOReady := oldRV.Status != nil && meta.IsStatusConditionTrue(oldRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
 			newIOReady := newRV.Status != nil && meta.IsStatusConditionTrue(newRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			if oldIOReady != newIOReady {
-				return true
-			}
-
-			return false
+			return oldIOReady != newIOReady
 		},
 	}
 }
@@ -127,6 +122,19 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 				return true
 			}
 
+			// RVA ReplicaIOReady mirrors replica condition IOReady, so changes must trigger reconcile.
+			// Compare (status, reason, message) to keep mirroring accurate even when status doesn't change.
+			var oldCond, newCond *metav1.Condition
+			if oldRVR.Status != nil {
+				oldCond = meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
+			}
+			if newRVR.Status != nil {
+				newCond = meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
+			}
+			if !conditionEqual(oldCond, newCond) {
+				return true
+			}
+
 			return false
 		},
 	}
@@ -178,6 +186,18 @@ func rvrAllowTwoPrimariesActual(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 		return false
 	}
 	return rvr.Status.DRBD.Actual.AllowTwoPrimaries
+}
+
+func conditionEqual(a, b *metav1.Condition) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return a.Status == b.Status &&
+		a.Reason == b.Reason &&
+		a.Message == b.Message
 }
 
 func sliceEqual(a, b []string) bool {

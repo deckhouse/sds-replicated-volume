@@ -26,5 +26,3 @@ const (
 	// - fake.ClientBuilder.WithIndex(...)
 	IndexFieldRVAByReplicatedVolumeName = "spec.replicatedVolumeName"
 )
-
-

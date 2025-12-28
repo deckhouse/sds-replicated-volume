@@ -157,9 +157,6 @@ TB в любой ситуации поддерживает нечетное, и 
   - `type=SharedSecretAlgorithmSelected`
     - Обновляется: **rv-status-config-shared-secret-controller**.
     - При исчерпании вариантов: `status=False`, `reason=UnableToSelectSharedSecretAlgorithm`, `message=<node, alg>`.
-  - `type=PublishSucceeded`
-    - Обновляется: **rv-attach-controller**.
-    - При невозможности локального доступа: `status=False`, `reason=UnableToProvideLocalVolumeAccess`, `message=<пояснение>`.
   - `type=DiskfulReplicaCountReached`
     - Обновляется: **rvr-diskful-count-controller**.
 - `drbd.config`
@@ -205,8 +202,8 @@ RVA — это ресурс «намерения публикации» тома
 ## `status`
 - `phase` (Enum: `Pending`, `Attaching`, `Attached`, `Detaching`)
 - `conditions[]`
-  - `type=Ready`
-    - `status=True`, `reason=Attached` — том опубликован на `spec.nodeName`.
+  - `type=Attached`
+    - `status=True`, `reason=Attached` — том опубликован (replica Primary) на `spec.nodeName`.
     - `status=False` — ожидание/ошибка публикации. Основные `reason`:
       - `WaitingForActiveAttachmentsToDetach`
       - `WaitingForReplicatedVolume`
@@ -216,6 +213,13 @@ RVA — это ресурс «намерения публикации» тома
       - `UnableToProvideLocalVolumeAccess`
       - `LocalityNotSatisfied`
       - `SettingPrimary`
+  - `type=ReplicaIOReady`
+    - Зеркалирует `rvr.status.conditions[type=IOReady]` для реплики на `spec.nodeName`
+      (копируются `status`, `reason`, `message`).
+  - `type=Ready`
+    - Агрегат: `Attached=True` **и** `ReplicaIOReady=True`.
+    - `status=True`, `reason=Ready`.
+    - `status=False`, `reason=NotAttached` или `ReplicaNotIOReady`.
 
 # Контракт данных: `ReplicatedVolumeReplica`
 ## `spec`
@@ -624,10 +628,11 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 целевой набор нод как `rv.status.desiredAttachTo` и уже по нему промоут/демоут реплик.
 
 В случае, если `rsc.spec.volumeAccess==Local`, но реплика не `rvr.spec.type==Diskful`,
-либо её нет вообще, промоут невозможен, и требуется обновить rv и прекратить реконсайл:
-   - `rv.status.conditions[type=PublishSucceeded].status=False`
-   - `rv.status.conditions[type=PublishSucceeded].reason=UnableToProvideLocalVolumeAccess`
-   - `rv.status.conditions[type=PublishSucceeded].message=<сообщение для пользователя>`
+либо её нет вообще, промоут невозможен. В этом случае контроллер отражает проблему в статусе RVA:
+   - `rva.status.conditions[type=Attached].status=False`
+   - `rva.status.conditions[type=Attached].reason=UnableToProvideLocalVolumeAccess` или `LocalityNotSatisfied`
+   - `rva.status.conditions[type=Attached].message=<сообщение для пользователя>`
+и не добавляет ноду в `rv.status.desiredAttachTo` (для Local access).
 
 Не все реплики могут быть primary. Для `rvr.spec.type=TieBreaker` требуется поменять тип на
 `rvr.spec.type=Accees` (в одном патче вместе с `rvr.status.drbd.config.primary`).
@@ -648,7 +653,6 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
   - `rvr.status.drbd.config.primary`
   - `rv.status.drbd.config.allowTwoPrimaries`
   - `rv.status.actuallyAttachedTo`
-  - `rv.status.conditions[type=PublishSucceeded]`
 
 ## `rvr-volume-controller`
 

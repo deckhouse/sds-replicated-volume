@@ -28,12 +28,14 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ReplicaIOReady')].status
+      name: ReplicaIOReady
+      type: string
     - jsonPath: .status.conditions[?(@.type=='Ready')].status
       name: Ready
-      type: string
-    - jsonPath: .status.conditions[?(@.type=='Ready')].reason
-      name: Reason
-      priority: 1
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
