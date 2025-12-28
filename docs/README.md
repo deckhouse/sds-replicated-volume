@@ -13,20 +13,26 @@ This module manages replicated block storage based on `DRBD`. Currently, `LINSTO
 
 The module allows you to create a `Storage Pool` as well as a `StorageClass` by creating [Kubernetes custom resources](./cr.html).
 
-To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](../../sds-node-configurator/stable/) module.
+To create a `Storage Pool`, you will need the `LVMVolumeGroup` configured on the cluster nodes. The `LVM` configuration is done by the [sds-node-configurator](/modules/sds-node-configurator/) module.
 
-> **Caution.** Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
->
-> **Caution.** Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+{{< alert level="warning" >}}
+Before enabling the `sds-replicated-volume` module, you must enable the `sds-node-configurator` module.
 
-> **Caution.** If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
-> To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+Data synchronization during volume replication is carried out in synchronous mode only, asynchronous mode is not supported.
+
+If your cluster has only a single node, use `sds-local-volume` instead of `sds-replicated-volume`.
+To use `sds-replicated-volume`, a minimum of 3 nodes is required. It is advisable to have 4 or more nodes to mitigate the impact of potential node failures.
+{{< /alert >}}
+
+{{< alert level="info" >}}
+Supported access modes: RWO; RWX — only in DVP;
+{{< /alert >}}
 
 After you enable the `sds-replicated-volume` module in the Deckhouse configuration, you will only have to create [ReplicatedStoragePool and ReplicatedStorageClass](./usage.html#configuring-the-linstor-backend).
 
 To ensure the proper functioning of the `sds-replicated-volume` module, follow these steps:
 
-- Enable the [sds-node-configurator](../../sds-node-configurator/stable/) module.  
+- Enable the [sds-node-configurator](/modules/sds-node-configurator/) module.  
   Ensure that the `sds-node-configurator` module is enabled **before** enabling the `sds-replicated-volume` module.
 
 {{< alert level="warning" >}}
@@ -34,15 +40,11 @@ Direct configuration of the LINSTOR backend by the user is prohibited.
 {{< /alert >}}
 
 {{< alert level="info" >}}
-Data synchronization during volume replication occurs only in synchronous mode. Asynchronous mode is not supported.
-{{< /alert >}}
-
-{{< alert level="info" >}}
-For working with snapshots, the [snapshot-controller](../../snapshot-controller/) module must be connected.
+For working with snapshots, the [snapshot-controller](/modules/snapshot-controller/) module must be connected.
 {{< /alert >}}
 
 - Configure LVMVolumeGroup.
-  Before creating a StorageClass, create the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
+  Before creating a StorageClass, create the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for the `sds-node-configurator` module on the cluster nodes.
 
 - Create Storage Pools and Corresponding StorageClasses.
 
@@ -75,15 +77,15 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-   2. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
+1. Wait for the `sds-node-configurator` module to reaches the `Ready` state.
 
-      ```shell
-      kubectl get module sds-node-configurator -w
-      ```
+   ```shell
+   kubectl get module sds-node-configurator -w
+   ```
 
-   3. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
+1. Activate the `sds-replicated-volume` module. Before enabling, it is recommended to review the [available settings](./configuration.html).
 
-  The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
+   The example below launches the module with default settings, which will result in creating service pods for the `sds-replicated-volume` component on all cluster nodes, installing the DRBD kernel module, and registering the CSI driver:
 
    ```yaml
    kubectl apply -f - <<EOF
@@ -97,18 +99,18 @@ Enabling the `sds-node-configurator` module:
    EOF
    ```
 
-4. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
+1. Wait for the `sds-replicated-volume` module to reach the `Ready` state.
 
    ```shell
    kubectl get module sds-replicated-volume -w
    ```
 
-   5. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
+1. Make sure that all pods in `d8-sds-replicated-volume` and `d8-sds-node-configurator` namespaces are `Running` or `Completed` and are running on all nodes where DRBD resources are intended to be used:
   
-      ```shell
-      kubectl -n d8-sds-replicated-volume get pod -o wide -w
-      kubectl -n d8-sds-node-configurator get pod -o wide -w
-      ```
+   ```shell
+   kubectl -n d8-sds-replicated-volume get pod -o wide -w
+   kubectl -n d8-sds-node-configurator get pod -o wide -w
+   ```
 
 ### Configuring storage on nodes
 
@@ -116,7 +118,7 @@ You need to create `LVM` volume groups on the nodes using `LVMVolumeGroup` custo
 
 To configure the storage:
 
-- List all the [BlockDevice](../../sds-node-configurator/stable/cr.html#blockdevice) resources available in your cluster:
+- List all the [BlockDevice](/modules/sds-node-configurator/cr.html#blockdevice) resources available in your cluster:
 
 ```shell
 kubectl get bd
@@ -130,7 +132,7 @@ dev-ecf886f85638ee6af563e5f848d2878abae1dcfd   worker-0   true         5Gi      
 ```
 
 
-- Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-0`:
+- Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-0`:
 
 ```yaml
 kubectl apply -f - <<EOF
@@ -161,7 +163,7 @@ kubectl get lvg vg-1-on-worker-0 -w
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vdd` and `/dev/vdb` block devices has been created on the `worker-0` node.
 
-  - Next, create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-1`:
+  - Next, create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-1`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -191,7 +193,7 @@ kubectl get lvg vg-1-on-worker-1 -w
 
 - The resource becoming `Ready` means that an LVM VG named `vg-1` made up of the `/dev/vde` block device has been created on the `worker-1` node.
 
-  - Create an [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resource for `worker-2`:
+  - Create an [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resource for `worker-2`:
 
 ```shell
 kubectl apply -f - <<EOF
@@ -302,11 +304,12 @@ Applicable to both single-zone clusters and clusters using multiple availability
 
 - Use stock kernels provided with [supported distributions](https://deckhouse.io/documentation/v1/supported_versions.html#linux).
   - A network infrastructure with a bandwidth of 10 Gbps or higher is required for network connectivity.
-  - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms.
+  - To achieve maximum performance, the network latency between nodes should be between 0.5–1 ms. Latencies greater than 5 ms will cause serious performance issues.
   - Do not use another SDS (Software Defined Storage) to provide disks for SDS Deckhouse.
 
 ### Recommendations
 
 - Avoid using RAID. The reasons are detailed [in the FAQ](./faq.html#why-is-it-not-recommended-to-use-raid-for-disks-that-are-used-by-the-sds-replicated-volume-module).
   - Use local physical disks. The reasons are detailed [in the FAQ](./faq.html#why-do-you-recommend-using-local-disks-and-not-nas).
-  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 20ms between nodes
+  - In order for cluster to be operational, but with performance degradation, network latency should not be higher than 10ms between nodes
+  - For guaranteed data consistency, use `ReplicatedStorageClass` with the `ConsistencyAndAvailability` replication mode (spec.replication) — this mode is used by default. **Important:** changing the mode to `Availability` may lead to split brain and data loss in case of network connectivity issues.

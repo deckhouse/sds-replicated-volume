@@ -91,8 +91,11 @@ spec:
               {{- include "sds_drbd_controller_resources" . | nindent 14 }}
 {{- end }}
           securityContext:
+            allowPrivilegeEscalation: true
             privileged: true
             readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
             seLinuxOptions:
               level: s0
               type: spc_t

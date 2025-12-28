@@ -12,17 +12,17 @@ description: "Использование и примеры работы sds-repl
 
 ## Конфигурация sds-replicated-volume
 
-Конфигурация осуществляется `sds-replicated-volume-controller'ом` через [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](../../sds-node-configurator/stable/).
+Конфигурация осуществляется `sds-replicated-volume-controller'ом` через [пользовательских ресурсов](./cr.html): `ReplicatedStoragePool` и `ReplicatedStorageClass`. Для создания `Storage Pool` потребуются настроенные на узлах кластера `LVM Volume Group` и `LVM Thin-pool`. Настройка `LVM` осуществляется модулем [sds-node-configurator](/modules/sds-node-configurator/usage.html).
 
 ### Настройка LVM
 
-Примеры конфигурации можно найти в документации модуля [sds-node-configurator](../../sds-node-configurator/stable/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
+Примеры конфигурации можно найти в документации модуля [sds-node-configurator](/modules/sds-node-configurator/usage.html). В результате настройки в кластере окажутся ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup), которые необходимы для дальнейшей конфигурации.
 
 ### Работа с ресурсами ReplicatedStoragePool
 
 #### Создание ресурса ReplicatedStoragePool
 
-- Для создания `Storage Pool` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup).
+- Для создания `Storage Pool` пользователь создает ресурс [ReplicatedStoragePool](./cr.html#replicatedstoragepool) и заполняет поле `spec`, указывая тип пула и используемые ресурсы [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup).
 
 Пример ресурса для классических LVM-томов (Thick):
 
@@ -32,7 +32,7 @@ kind: ReplicatedStoragePool
 metadata:
   name: data
 spec:
-type: LVM
+  type: LVM
   lvmVolumeGroups:
   - name: lvg-1
   - name: lvg-2
@@ -93,14 +93,14 @@ kind: ReplicatedStorageClass
 metadata:
 name: haclass
 spec:
-storagePool: storage-pool-name
-volumeAccess: Local
-reclaimPolicy: Delete
-topology: TransZonal
-zones:
-- zone-a
-- zone-b
-- zone-c
+  storagePool: storage-pool-name
+  volumeAccess: Local
+  reclaimPolicy: Delete
+  topology: TransZonal
+  zones:
+  - zone-a
+  - zone-b
+  - zone-c
 ```
 
 Параметр `replication` не указан, поскольку по умолчанию его значение устанавливается в `ConsistencyAndAvailability`, что соответствует требованиям высокой степени резервирования.

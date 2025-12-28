@@ -1,0 +1,3 @@
+Changes:
+  - Update base images to v0.5.34
+  - Add pull secrets to CSI controller and node

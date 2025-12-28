@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"testing"
 
 	client2 "github.com/LINBIT/golinstor/client"
@@ -31,13 +30,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func TestReplicatedStorageClassWatcher(t *testing.T) {
 	var (
 		cl        = newFakeClient()
-		ctx       = context.Background()
+		ctx       = t.Context()
 		log       = logger.Logger{}
 		namespace = "test_namespace"
 	)

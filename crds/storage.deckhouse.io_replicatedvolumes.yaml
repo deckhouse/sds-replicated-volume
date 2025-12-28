@@ -3,7 +3,9 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.19.0
+    controller-gen.kubebuilder.io/version: v0.20.0
+  labels:
+    module: sds-replicated-volume
   name: replicatedvolumes.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
@@ -17,20 +19,22 @@ spec:
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='Ready')].status
-      name: Ready
+    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
+      name: IOReady
       type: string
-    - format: int64
-      jsonPath: .spec.size
+    - jsonPath: .spec.size
       name: Size
-      type: integer
-    - jsonPath: .spec.replicas
-      name: Replicas
-      type: integer
-    - jsonPath: .spec.topology
-      name: Topology
       type: string
-    name: v1alpha2
+    - jsonPath: .status.actualSize
+      name: ActualSize
+      type: string
+    - jsonPath: .status.diskfulReplicaCount
+      name: DiskfulReplicas
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         properties:
@@ -53,44 +57,12 @@ spec:
             type: object
           spec:
             properties:
-              lvm:
-                properties:
-                  type:
-                    enum:
-                    - Thin
-                    - Thick
-                    type: string
-                  volumeGroups:
-                    items:
-                      properties:
-                        name:
-                          maxLength: 255
-                          minLength: 1
-                          type: string
-                        thinPoolName:
-                          maxLength: 255
-                          type: string
-                      required:
-                      - name
-                      type: object
-                    type: array
-                    x-kubernetes-list-map-keys:
-                    - name
-                    x-kubernetes-list-type: map
-                required:
-                - type
-                - volumeGroups
-                type: object
-              publishRequested:
+              publishOn:
                 items:
                   type: string
                 maxItems: 2
                 type: array
-              replicas:
-                maximum: 8
-                minimum: 1
-                type: integer
-              sharedSecret:
+              replicatedStorageClassName:
                 minLength: 1
                 type: string
               size:
@@ -99,27 +71,19 @@ spec:
                 - type: string
                 pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
                 x-kubernetes-int-or-string: true
-              topology:
-                enum:
-                - TransZonal
-                - Zonal
-                - Ignored
-                type: string
-              zones:
-                items:
-                  type: string
-                maxItems: 1024
-                type: array
             required:
-            - lvm
-            - publishRequested
-            - replicas
-            - sharedSecret
+            - publishOn
+            - replicatedStorageClassName
             - size
-            - topology
             type: object
           status:
             properties:
+              actualSize:
+                anyOf:
+                - type: integer
+                - type: string
+                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                x-kubernetes-int-or-string: true
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -179,13 +143,67 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              publishProvided:
+              diskfulReplicaCount:
+                description: |-
+                  DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
+                  Example: "2/3" means 2 current diskful replicas out of 3 desired
+                type: string
+              diskfulReplicasInSync:
+                description: |-
+                  DiskfulReplicasInSync represents the number of diskful replicas that are in sync in format "inSync/total"
+                  Example: "2/3" means 2 diskful replicas are in sync out of 3 total diskful replicas
+                type: string
+              drbd:
+                properties:
+                  config:
+                    properties:
+                      allowTwoPrimaries:
+                        default: false
+                        type: boolean
+                      deviceMinor:
+                        maximum: 1048575
+                        minimum: 0
+                        type: integer
+                      quorum:
+                        maximum: 8
+                        minimum: 0
+                        type: integer
+                      quorumMinimumRedundancy:
+                        maximum: 8
+                        minimum: 0
+                        type: integer
+                      sharedSecret:
+                        minLength: 1
+                        type: string
+                      sharedSecretAlg:
+                        enum:
+                        - SHA256
+                        - SHA1
+                        - DummyForTest
+                        type: string
+                    type: object
+                type: object
+              errors:
+                properties:
+                  duplicateDeviceMinor:
+                    properties:
+                      message:
+                        maxLength: 1024
+                        type: string
+                    type: object
+                type: object
+              phase:
+                type: string
+              publishedAndIOReadyCount:
+                description: |-
+                  PublishedAndIOReadyCount represents the number of published replicas that are IOReady in format "ready/published"
+                  Example: "1/2" means 1 replica is IOReady out of 2 published
+                type: string
+              publishedOn:
                 items:
                   type: string
                 maxItems: 2
                 type: array
-            required:
-            - publishProvided
             type: object
         required:
         - metadata

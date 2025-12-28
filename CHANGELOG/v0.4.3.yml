@@ -1,0 +1,2 @@
+Changes:
+  - Technical release. Fixes and additions to evict.sh script for resource eviction from node, fixes in templates and documentation

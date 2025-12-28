@@ -17,7 +17,6 @@ limitations under the License.
 package controller
 
 import (
-	"context"
 	"fmt"
 	"strconv"
 	"testing"
@@ -30,11 +29,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 func TestLinstorPortRangeWatcher(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	log := logger.Logger{}
 	cl := newFakeClient()
 

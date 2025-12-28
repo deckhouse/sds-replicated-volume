@@ -12,17 +12,17 @@ Once the `sds-replicated-volume` module is enabled in the Deckhouse configuratio
 
 ## Configuring the `sds-replicated-volume` backend
 
-In `Deckhouse`, the `sds-replicated-volume-controller` is configured by creating `ReplicatedStoragePool` and `ReplicatedStorageClass` [custom resources](./cr.html). The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](../../sds-node-configurator/stable/) module handles the configuration of `LVM`.
+In `Deckhouse`, the `sds-replicated-volume-controller` is configured by creating `ReplicatedStoragePool` and `ReplicatedStorageClass` [custom resources](./cr.html). The `LVM Volume Group` and `LVM Thin pool` configured on the cluster nodes are required to create a `Storage Pool`. The [sds-node-configurator](/modules/sds-node-configurator/usage.html) module handles the configuration of `LVM`.
 
 ### Setting up LVM
 
-Configuration examples can be found in the [sds-node-configurator](../../sds-node-configurator/stable/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](./../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
+Configuration examples can be found in the [sds-node-configurator](/modules/sds-node-configurator/usage.html) module documentation. The configuration will result in [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources to be created in the cluster (the latter are required for further configuration).
 
 ### Using ReplicatedStoragePool resources
 
 #### Creating a ReplicatedStoragePool resource
 
-- To create a `Storage Pool` the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](../../sds-node-configurator/stable/cr.html#lvmvolumegroup) resources used.
+- To create a `Storage Pool` the user has to create a [ReplicatedStoragePool](./cr.html#replicatedstoragepool) resource and fill in the `spec` field, specifying the pool type as well as the [LVMVolumeGroup](/modules/sds-node-configurator/cr.html#lvmvolumegroup) resources used.
 
 An example of a resource for classic LVM volumes (Thick):
 

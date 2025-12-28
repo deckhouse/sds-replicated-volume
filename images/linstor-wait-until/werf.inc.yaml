@@ -1,6 +1,6 @@
 ---
 image: {{ $.ImageName }}-golang-artifact
-from: {{ $.Root.BASE_GOLANG_1_22 }}
+fromImage: builder/golang-alpine
 final: false
 
 git:
@@ -25,6 +25,7 @@ mount:
     to: /go/pkg
 shell:
   setup:
+    - apk add --no-cache git
     - cd /usr/local/go/{{ $.ImageName }}
     - git apply /patches/*.patch
     - GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags="-s -w"

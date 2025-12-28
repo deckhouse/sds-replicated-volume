@@ -1,0 +1,42 @@
+From 83795f5c2d6fa98b77abb26af61f234aa7e1caf1 Mon Sep 17 00:00:00 2001
+From: "v.oleynikov" <vasily.oleynikov@flant.com>
+Date: Wed, 10 Dec 2025 17:52:07 +0300
+Subject: [PATCH] fix cve
+
+Signed-off-by: v.oleynikov <vasily.oleynikov@flant.com>
+---
+ go.mod | 2 +-
+ go.sum | 4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/go.mod b/go.mod
+index 01d469b..1ce542f 100644
+--- a/go.mod
++++ b/go.mod
+@@ -62,7 +62,7 @@ require (
+ 	github.com/stretchr/objx v0.5.2 // indirect
+ 	github.com/x448/float16 v0.8.4 // indirect
+ 	golang.org/x/net v0.33.0 // indirect
+-	golang.org/x/oauth2 v0.23.0 // indirect
++	golang.org/x/oauth2 v0.27.0 // indirect
+ 	golang.org/x/term v0.27.0 // indirect
+ 	golang.org/x/text v0.21.0 // indirect
+ 	golang.org/x/tools v0.26.0 // indirect
+diff --git a/go.sum b/go.sum
+index 39d1fce..79610bd 100644
+--- a/go.sum
++++ b/go.sum
+@@ -125,8 +125,8 @@ golang.org/x/net v0.0.0-20200226121028-0de0cce0169b/go.mod h1:z5CRVTTTmAJ677TzLL
+ golang.org/x/net v0.0.0-20201021035429-f5854403a974/go.mod h1:sp8m0HH+o8qH0wwXwYZr8TS3Oi6o0r6Gce1SSxlDquU=
+ golang.org/x/net v0.33.0 h1:74SYHlV8BIgHIFC/LrYkOGIwL19eTYXQ5wc6TBuO36I=
+ golang.org/x/net v0.33.0/go.mod h1:HXLR5J+9DxmrqMwG9qjGCxZ+zKXxBru04zlTvWlWuN4=
+-golang.org/x/oauth2 v0.23.0 h1:PbgcYx2W7i4LvjJWEbf0ngHV6qJYr86PkAV3bXdLEbs=
+-golang.org/x/oauth2 v0.23.0/go.mod h1:XYTD2NtWslqkgxebSiOHnXEap4TF09sJSc7H1sXbhtI=
++golang.org/x/oauth2 v0.27.0 h1:da9Vo7/tDv5RH/7nZDz1eMGS/q1Vv1N/7FCrBhI9I3M=
++golang.org/x/oauth2 v0.27.0/go.mod h1:onh5ek6nERTohokkhCD/y2cV4Do3fxFHFuAejCkRWT8=
+ golang.org/x/sync v0.0.0-20190423024810-112230192c58/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+ golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9/go.mod h1:RxMgew5VJxzue5/jJTE5uejpjVlOe/izrB70Jof72aM=
+-- 
+2.43.0
+
