@@ -55,15 +55,40 @@ const (
 )
 
 type linstorDB struct {
-	VolumeDefinitions            map[string]srvlinstor.VolumeDefinitions
-	ResourceDefinitions          map[string]srvlinstor.ResourceDefinitions
-	ResourceGroups               map[string]srvlinstor.ResourceGroups
-	Resources                    map[string][]srvlinstor.Resources
-	LayerResourcesIds            *srvlinstor.LayerResourceIdsList
-	LayerDrbdResources           map[int]srvlinstor.LayerDrbdResources
-	NodeNetInterfaces            *srvlinstor.NodeNetInterfacesList
+	// VolumeDefinitions stores Linstor volume definitions.
+	// Key: resource name in lowercase (ResourceName).
+	VolumeDefinitions map[string]srvlinstor.VolumeDefinitions
+
+	// ResourceDefinitions stores Linstor resource definitions.
+	// Key: resource name in lowercase (ResourceName).
+	ResourceDefinitions map[string]srvlinstor.ResourceDefinitions
+
+	// ResourceGroups stores Linstor resource groups.
+	// Key: resource group name (ResourceGroupName).
+	ResourceGroups map[string]srvlinstor.ResourceGroups
+
+	// Resources stores Linstor resources grouped by resource name.
+	// Key: resource name in lowercase (ResourceName).
+	// Value: array of resources (there can be multiple resources with the same name on different nodes).
+	Resources map[string][]srvlinstor.Resources
+
+	// LayerResourcesIds stores the list of Linstor layer resource identifiers.
+	LayerResourcesIds *srvlinstor.LayerResourceIdsList
+
+	// LayerDrbdResources stores Linstor layer DRBD resources.
+	// Key: layer resource identifier (LayerResourceID).
+	LayerDrbdResources map[int]srvlinstor.LayerDrbdResources
+
+	// NodeNetInterfaces stores the list of Linstor node network interfaces.
+	NodeNetInterfaces *srvlinstor.NodeNetInterfacesList
+
+	// LayerDrbdResourceDefinitions stores Linstor layer DRBD resource definitions.
+	// Key: resource name in lowercase (ResourceName).
 	LayerDrbdResourceDefinitions map[string]srvlinstor.LayerDrbdResourceDefinitions
-	LayerDrbdVolumeDefinitions   map[string]srvlinstor.LayerDrbdVolumeDefinitions
+
+	// LayerDrbdVolumeDefinitions stores Linstor layer DRBD volume definitions.
+	// Key: resource name in lowercase (ResourceName).
+	LayerDrbdVolumeDefinitions map[string]srvlinstor.LayerDrbdVolumeDefinitions
 }
 
 func main() {
@@ -233,12 +258,12 @@ func migratePV(
 	}
 
 	// Fetch all LVMVolumeGroups for this poolName/ReplicatedStoragePool
-	myLvmVolumeGroups, err := getMyLvmVolumeGroups(ctx, kClient, log, repStorPool)
+	poolLVMVolumeGroups, err := getLVMVolumeGroupsFromPool(ctx, kClient, log, repStorPool)
 	if err != nil {
 		return err
 	}
 
-	_ = myLvmVolumeGroups
+	_ = poolLVMVolumeGroups
 	_ = repStorClass
 
 	//// TODO:
@@ -254,13 +279,13 @@ func migratePV(
 	//for _, linstorResource := range linstorResources {
 	//	// 0-Diskful|388-TieBreaker|260-Diskless
 	//	if linstorResource.Spec.ResourceFlags == 0 {
-	//		err := createOrGetLLV(ctx, kClient, log, pv.Name, rv, size, myLvmVolumeGroups, linstorResource)
+	//		err := createOrGetLLV(ctx, kClient, log, pv.Name, rv, size, poolLVMVolumeGroups, linstorResource)
 	//		if err != nil {
 	//			return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 	//		}
 	//	}
 
-	//	err := createOrGetRVR(ctx, kClient, log, pv.Name, rv, myLvmVolumeGroups, linstorResource, linstorDB)
+	//	err := createOrGetRVR(ctx, kClient, log, pv.Name, rv, poolLVMVolumeGroups, linstorResource, linstorDB)
 	//	if err != nil {
 	//		return fmt.Errorf("node: %s; err: %w", linstorResource.Spec.NodeName, err)
 	//	}
@@ -373,7 +398,7 @@ func migratePV(
 //	pvName string,
 //	rv *corev1.ConfigMap,
 //	size int,
-//	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
+//	poolLVMVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
 //	linstorResource srvlinstor.Resources,
 //) error {
 //	generateLlvName := fmt.Sprintf("%s%s", pvName, "-")
@@ -381,7 +406,7 @@ func migratePV(
 //	log = log.With("node_name", linstorResource.Spec.NodeName, "generate_llv_name", generateLlvName)
 //	log.Info("Creating LLV")
 //
-//	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(linstorResource.Spec.NodeName, myLvmVolumeGroups)
+//	lvmVolumeGroupName, thinPoolName, err := getLVMVolumeGroupNameAndThinPoolName(linstorResource.Spec.NodeName, poolLVMVolumeGroups)
 //	if err != nil {
 //		return err
 //	}
@@ -475,7 +500,7 @@ func migratePV(
 //	log *slog.Logger,
 //	pvName string,
 //	rv *corev1.ConfigMap,
-//	myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
+//	poolLVMVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup,
 //	linstorResource srvlinstor.Resources,
 //	linstorDB *linstorDB,
 //) error {
@@ -621,7 +646,7 @@ func migratePV(
 //		},
 //	}
 //	if !diskless {
-//		lvmVolumeGroupName, _, err := getLVMVolumeGroupNameAndThinPoolName(nodeName, myLvmVolumeGroups)
+//		lvmVolumeGroupName, _, err := getLVMVolumeGroupNameAndThinPoolName(nodeName, poolLVMVolumeGroups)
 //		if err != nil {
 //			return err
 //		}
@@ -670,13 +695,15 @@ func migratePV(
 //	return nil
 //}
 
-func getMyLvmVolumeGroups(
+// getLVMVolumeGroupsFromPool fetches all LVMVolumeGroup resources referenced in the ReplicatedStoragePool.
+// It returns a map where keys are LVMVolumeGroup names and values are the corresponding LVMVolumeGroup objects.
+func getLVMVolumeGroupsFromPool(
 	ctx context.Context,
 	kClient kubecl.Client,
 	log *slog.Logger,
 	repStorPool srvv1alpha1.ReplicatedStoragePool,
 ) (map[string]sncv1alpha1.LVMVolumeGroup, error) {
-	log.Debug("Getting my LVMVolumeGroups")
+	log.Debug("Getting LVMVolumeGroups from ReplicatedStoragePool")
 
 	lvmVolumeGroups := make(map[string]sncv1alpha1.LVMVolumeGroup, len(repStorPool.Spec.LVMVolumeGroups))
 	for _, rspLvmVolumeGroup := range repStorPool.Spec.LVMVolumeGroups {
@@ -934,11 +961,11 @@ func getDRBDMinor(pvName string, linstorDB *linstorDB) (int, error) {
 	return layerDrbdVolumeDefinition.Spec.VlmMinorNr, nil
 }
 
-func getLVMVolumeGroupNameAndThinPoolName(nodeName string, myLvmVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup) (string, string, error) {
+func getLVMVolumeGroupNameAndThinPoolName(nodeName string, poolLVMVolumeGroups map[string]sncv1alpha1.LVMVolumeGroup) (string, string, error) {
 	var lvmVolumeGroupName string
 	var thinPoolName string
 
-	for _, lvg := range myLvmVolumeGroups {
+	for _, lvg := range poolLVMVolumeGroups {
 		if strings.EqualFold(lvg.Spec.Local.NodeName, nodeName) {
 			lvmVolumeGroupName = lvg.Name
 			if lvg.Spec.ThinPools != nil {
