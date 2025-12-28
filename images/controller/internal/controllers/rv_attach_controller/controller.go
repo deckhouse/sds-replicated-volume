@@ -37,10 +37,11 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
-		For(&v1alpha1.ReplicatedVolume{}).
+		For(&v1alpha1.ReplicatedVolume{}, builder.WithPredicates(replicatedVolumePredicate())).
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolume{}),
+			builder.WithPredicates(replicatedVolumeReplicaPredicate()),
 		).
 		Watches(
 			&v1alpha1.ReplicatedVolumeAttachment{},
@@ -51,6 +52,7 @@ func BuildController(mgr manager.Manager) error {
 				}
 				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: rva.Spec.ReplicatedVolumeName}}}
 			}),
+			builder.WithPredicates(replicatedVolumeAttachmentPredicate()),
 		).
 		Complete(rec)
 }
