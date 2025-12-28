@@ -69,7 +69,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr)
+		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr, rvstatusconfigdeviceminor.NewDeviceMinorCache())
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {

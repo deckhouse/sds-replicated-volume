@@ -28,6 +28,11 @@ type DeviceMinor int
 
 const DeviceMinorZero DeviceMinor = DeviceMinor(0)
 
+type DuplicateDeviceMinorError struct {
+	error
+	ConflictingRVNames []string
+}
+
 func NewDeviceMinor(val int) (DeviceMinor, bool) {
 	dm := DeviceMinor(val)
 	if dm < DeviceMinorZero || dm > MaxDeviceMinor {
@@ -66,6 +71,10 @@ func (c *DeviceMinorCache) Len() int {
 	return len(c.byRVName)
 }
 
+func (c *DeviceMinorCache) ReleasedLen() int {
+	return len(c.released)
+}
+
 func (c *DeviceMinorCache) Max() DeviceMinor {
 	return c.max
 }
@@ -85,14 +94,23 @@ func (c *DeviceMinorCache) Initialize(byRVName map[string]DeviceMinor) error {
 	dms := make([]DeviceMinor, 0, len(byRVName))
 	rvNames := make([]string, 0, len(byRVName)) // same index with dms
 
+	var dupErr DuplicateDeviceMinorError
 	for rvName, dm := range byRVName {
 		i, found := slices.BinarySearch(dms, dm)
 		if found {
-			return fmt.Errorf("rvs '%s' and '%s' have same device minor %d", rvNames[i], rvName, dm)
+			dupErr = DuplicateDeviceMinorError{
+				error:              fmt.Errorf("rvs '%s' and '%s' have same device minor %d", rvNames[i], rvName, dm),
+				ConflictingRVNames: append(dupErr.ConflictingRVNames, rvNames[i], rvName),
+			}
+			continue
 		}
 
 		dms = slices.Insert(dms, i, dm)
 		rvNames = slices.Insert(rvNames, i, rvName)
+	}
+
+	if len(dupErr.ConflictingRVNames) > 0 {
+		return dupErr
 	}
 
 	// Clear state
