@@ -51,14 +51,14 @@ func (r *Reconciler) Reconcile(
 ) (reconcile.Result, error) {
 	log := r.log.WithName("Reconcile").WithValues("request", req)
 
-	// fetch ReplicatedVolume, if possible
+	// Fetch ReplicatedVolume, if possible (RV might be missing)
 	rv, err := r.getReplicatedVolume(ctx, req.Name)
 	if err != nil {
 		log.Error(err, "unable to get ReplicatedVolume")
 		return reconcile.Result{}, err
 	}
 
-	// fetch ReplicatedStorageClass, if possible
+	// Fetch ReplicatedStorageClass, if possible (SC might be missing)
 	var sc *v1alpha1.ReplicatedStorageClass
 	if rv != nil {
 		sc, err = r.getReplicatedVolumeStorageClass(ctx, *rv)
@@ -69,36 +69,37 @@ func (r *Reconciler) Reconcile(
 		}
 	}
 
-	// fetch ReplicatedVolumeReplicas
+	// Fetch ReplicatedVolumeReplicas
 	replicas, err := r.getReplicatedVolumeReplicas(ctx, req.Name)
 	if err != nil {
 		log.Error(err, "unable to get ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
-	// fetch ReplicatedVolumeAttachments
+	// Fetch ReplicatedVolumeAttachments
 	rvas, err := r.getSortedReplicatedVolumeAttachments(ctx, req.Name)
 	if err != nil {
 		log.Error(err, "unable to get ReplicatedVolumeAttachments")
 		return reconcile.Result{}, err
 	}
 
-	// compute actuallyAttachedTo
+	// Compute actuallyAttachedTo (based on RVRs)
 	actuallyAttachedTo := computeActuallyAttachedTo(replicas)
 
-	// compute desiredAttachTo
+	// Compute desiredAttachTo (based on RVAs and RVRs)
 	rvaDesiredAttachTo := computeDesiredAttachToBaseOnlyOnRVA(rvas)
 	desiredAttachTo := computeDesiredAttachTo(rv, sc, replicas, rvaDesiredAttachTo)
 
-	// compute desiredAllowTwoPrimaries
+	// Compute desiredAllowTwoPrimaries (based on RVAs and actual attachments)
 	desiredAllowTwoPrimaries := computeDesiredTwoPrimaries(desiredAttachTo, actuallyAttachedTo)
 
+	// Reconcile RVA finalizers (don't release deleting RVA while it's still attached).
 	if err := r.reconcileRVAsFinalizers(ctx, rvas, actuallyAttachedTo, rvaDesiredAttachTo); err != nil {
 		log.Error(err, "unable to reconcile ReplicatedVolumeAttachments finalizers", "rvaCount", len(rvas))
 		return reconcile.Result{}, err
 	}
 
-	// reconcile RV status (desiredAttachTo + actuallyAttachedTo), if possible
+	// Reconcile RV status (desiredAttachTo + actuallyAttachedTo), if possible
 	if rv != nil {
 		if err := r.ensureRV(ctx, rv, desiredAttachTo, actuallyAttachedTo, desiredAllowTwoPrimaries); err != nil {
 			log.Error(err, "unable to patch ReplicatedVolume status")
@@ -805,7 +806,7 @@ func (r *Reconciler) reconcileRVRs(
 // - if we desire two attachments, we must allow two Primaries;
 // - if we already have >1 Primary (actuallyAttachedTo), we MUST NOT disable allowTwoPrimaries until we demote down to <=1.
 func computeDesiredTwoPrimaries(desiredAttachTo []string, actuallyAttachedTo []string) bool {
-	// desiredAttachTo can't be more than 2 nodes, this is enforced by computeDesiredAttachTo.
+	// The desiredAttachTo list can't be more than 2 nodes; this is enforced by computeDesiredAttachTo.
 	return len(desiredAttachTo) == 2 || len(actuallyAttachedTo) > 1
 }
 
@@ -877,8 +878,7 @@ func demoteNotAnyMoreDesiredNodes(
 }
 
 // reconcileRVR reconciles a single replica (spec.type + status: DRBD config.primary and Attached condition)
-// for the given RV plan.
-// desiredPrimary is derived from whether the replica node is present in desiredPrimaryNodes.
+// for the given RV plan. desiredPrimary is derived from whether the replica node is present in desiredPrimaryNodes.
 func (r *Reconciler) reconcileRVR(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
@@ -890,7 +890,7 @@ func (r *Reconciler) reconcileRVR(
 
 	desiredPrimaryWanted := slices.Contains(desiredPrimaryNodes, rvr.Spec.NodeName)
 
-	// desiredType: TieBreaker cannot be promoted, so convert it to Access first.
+	// TieBreaker cannot be promoted, so convert it to Access first.
 	desiredType := rvr.Spec.Type
 	if desiredPrimaryWanted && rvr.Spec.Type == v1alpha1.ReplicaTypeTieBreaker {
 		desiredType = v1alpha1.ReplicaTypeAccess
