@@ -21,6 +21,7 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -37,6 +38,7 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		For(&v1alpha1.ReplicatedVolume{}, builder.WithPredicates(replicatedVolumePredicate())).
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},
