@@ -21,11 +21,11 @@ import (
 	"fmt"
 	"slices"
 
+	u "github.com/deckhouse/sds-common-lib/utils"
+	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 type Reconciler struct {
@@ -93,14 +93,7 @@ func (r *Reconciler) Reconcile(
 		// Check if Config exists and has valid nodeID
 		if item.Status != nil && item.Status.DRBD != nil && item.Status.DRBD.Config != nil && item.Status.DRBD.Config.NodeId != nil {
 			nodeID := *item.Status.DRBD.Config.NodeId
-			if v1alpha1.IsValidNodeID(nodeID) {
-				usedNodeIDs[nodeID] = struct{}{}
-				continue
-			}
-			// NOTE: Logging invalid nodeID is NOT in the spec.
-			// This was added to improve observability - administrators can see invalid nodeIDs in logs.
-			// To revert: remove this log line.
-			log.V(1).Info("ignoring nodeID outside valid range", "nodeID", nodeID, "validRange", v1alpha1.FormatValidNodeIDRange(), "rvr", item.Name, "volume", rv.Name)
+			usedNodeIDs[nodeID] = struct{}{}
 			continue
 		}
 		// RVR needs nodeID assignment
@@ -113,69 +106,37 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	// Find available nodeIDs (not in usedNodeIDs map)
-	availableNodeIDs := make([]uint, 0, int(v1alpha1.RVRMaxNodeID)+1)
-	for i := v1alpha1.RVRMinNodeID; i <= v1alpha1.RVRMaxNodeID; i++ {
-		if _, exists := usedNodeIDs[i]; !exists {
-			availableNodeIDs = append(availableNodeIDs, i)
-		}
-	}
-
-	// Warn if we don't have enough available nodeIDs, but continue assigning what we have
-	// Remaining RVRs will get nodeIDs in the next reconcile when more become available
-	if len(availableNodeIDs) < len(rvrsNeedingNodeID) {
-		totalReplicas := len(rvrList.Items)
-		log.Info(
-			"not enough available nodeIDs to assign all replicas; will assign to as many as possible and fail reconcile",
-			"needed", len(rvrsNeedingNodeID),
-			"available", len(availableNodeIDs),
-			"replicas", totalReplicas,
-			"max", int(v1alpha1.RVRMaxNodeID)+1,
-			"volume", rv.Name,
-		)
-	}
-
 	// Assign nodeIDs to RVRs that need them sequentially
 	// Note: We use ResourceVersion from List. Since we reconcile RV (not RVR) and process RVRs sequentially
 	// for each RV, no one can edit the same RVR simultaneously within our controller. This makes the code
 	// simple and solid, though not the fastest (no parallel processing of RVRs).
 	// If we run out of available nodeIDs, we stop assigning, fail the reconcile, and let the next reconcile handle remaining RVRs once some replicas are removed.
+
+	rvPrefix := rv.Name + "-"
 	for i := range rvrsNeedingNodeID {
 		rvr := &rvrsNeedingNodeID[i]
 
-		// Get next available nodeID from the list
-		// If no more available, stop assigning (remaining RVRs will be handled in next reconcile)
-		if i >= len(availableNodeIDs) {
-			// We will fail reconcile and let the next reconcile handle remaining RVRs
-			err := fmt.Errorf(
-				"%s for volume %s: remaining RVRs without nodeID=%d, usedNodeIDs=%d, maxNodeIDs=%d",
-				ErrNotEnoughAvailableNodeIDsPrefix,
-				rv.Name,
-				len(rvrsNeedingNodeID)-i,
-				len(usedNodeIDs),
-				int(v1alpha1.RVRMaxNodeID)+1,
-			)
-			log.Error(err, "no more available nodeIDs, remaining RVRs will be assigned only after some replicas are removed")
-			return reconcile.Result{}, err
+		nodeID, ok := rvr.NodeIdFromName(rvPrefix)
+		if !ok {
+			log.V(1).Info(fmt.Sprintf("failed parsing node id from rvr name: %s", rvr.Name))
+			continue
 		}
-		nodeID := availableNodeIDs[i]
 
 		// Prepare patch: initialize status fields if needed and set nodeID
-		from := client.MergeFrom(rvr)
-		changedRVR := rvr.DeepCopy()
-		if changedRVR.Status == nil {
-			changedRVR.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
+		orig := client.MergeFrom(rvr.DeepCopy())
+		if rvr.Status == nil {
+			rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 		}
-		if changedRVR.Status.DRBD == nil {
-			changedRVR.Status.DRBD = &v1alpha1.DRBD{}
+		if rvr.Status.DRBD == nil {
+			rvr.Status.DRBD = &v1alpha1.DRBD{}
 		}
-		if changedRVR.Status.DRBD.Config == nil {
-			changedRVR.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
+		if rvr.Status.DRBD.Config == nil {
+			rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 		}
-		changedRVR.Status.DRBD.Config.NodeId = &nodeID
+		rvr.Status.DRBD.Config.NodeId = u.Ptr(uint(nodeID))
 
 		// Patch RVR status with assigned nodeID
-		if err := r.cl.Status().Patch(ctx, changedRVR, from); err != nil {
+		if err := r.cl.Status().Patch(ctx, rvr, orig); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				// RVR was deleted, skip
 				continue

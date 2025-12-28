@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +45,8 @@ import (
 // +kubebuilder:printcolumn:name="InQuorum",type=string,JSONPath=".status.conditions[?(@.type=='InQuorum')].status"
 // +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.conditions[?(@.type=='InSync')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
+// +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -52,6 +56,43 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+func (rvr *ReplicatedVolumeReplica) NodeIdFromName(prefix string) (int, bool) {
+	idStr := strings.TrimPrefix(rvr.Name, prefix)
+
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
+func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
+	reservedNodeIds := make([]int, 0, RVRMaxNodeID)
+
+	prefix := rvr.Spec.ReplicatedVolumeName + "-"
+	for i := range otherRVRs {
+		otherRVR := &otherRVRs[i]
+		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
+			continue
+		}
+
+		id, ok := otherRVR.NodeIdFromName(prefix)
+		if !ok {
+			continue
+		}
+		reservedNodeIds = append(reservedNodeIds, id)
+	}
+
+	for i := int(RVRMinNodeID); i <= int(RVRMaxNodeID); i++ {
+		if !slices.Contains(reservedNodeIds, i) {
+			rvr.Name = prefix + strconv.Itoa(i)
+			return true
+		}
+	}
+
+	return false
 }
 
 // SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.
