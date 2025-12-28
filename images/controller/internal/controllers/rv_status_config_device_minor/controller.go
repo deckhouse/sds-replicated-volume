@@ -81,10 +81,7 @@ func BuildController(mgr manager.Manager) error {
 				},
 			),
 		).
-		// MaxConcurrentReconciles: 1
-		// prevents race conditions when assigning unique deviceMinor values
-		// to different ReplicatedVolume resources
-		WithOptions(controller.Options{MaxConcurrentReconciles: 1}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }
 
