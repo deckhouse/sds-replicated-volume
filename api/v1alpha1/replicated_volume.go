@@ -101,7 +101,7 @@ type ReplicatedVolumeStatus struct {
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeStatusErrors struct {
 	// +patchStrategy=merge
-	DuplicateDeviceMinor *MessageError `json:"duplicateDeviceMinor,omitempty" patchStrategy:"merge"`
+	DeviceMinor *MessageError `json:"deviceMinor,omitempty" patchStrategy:"merge"`
 }
 
 func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {

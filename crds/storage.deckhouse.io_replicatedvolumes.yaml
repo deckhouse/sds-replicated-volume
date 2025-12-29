@@ -185,7 +185,7 @@ spec:
                 type: object
               errors:
                 properties:
-                  duplicateDeviceMinor:
+                  deviceMinor:
                     properties:
                       message:
                         maxLength: 1024
