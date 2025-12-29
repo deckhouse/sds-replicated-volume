@@ -11,8 +11,8 @@ shell:
     #- rm -rf /src/drbd-utils/.git # needed for make
 
 ---
-# do not remove this image: used in external audits (DKP CSE)
-image: {{ .ImageName }}-src-artifact
+# Separate artifact for Go sources - depends on Go code changes
+image: {{ .ImageName }}-go-src-artifact
 fromImage: builder/src
 final: false
 git:
@@ -27,6 +27,22 @@ git:
         - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
+
+---
+# do not remove this image: used in external audits (DKP CSE)
+# Combined artifact with all sources for FSTEC certification
+image: {{ .ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+import:
+  - image: {{ .ImageName }}-drbd-src-artifact
+    add: /src/drbd-utils
+    to: /src/drbd-utils
+    before: install
+  - image: {{ .ImageName }}-go-src-artifact
+    add: /src
+    to: /src
+    before: install
 
 ---
 {{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf" }}
@@ -74,7 +90,7 @@ image: {{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
 final: false
 import:
-  - image: {{ .ImageName }}-src-artifact
+  - image: {{ .ImageName }}-go-src-artifact
     add: /src
     to: /src
     before: setup
