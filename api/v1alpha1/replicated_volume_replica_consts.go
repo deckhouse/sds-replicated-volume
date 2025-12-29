@@ -39,7 +39,7 @@ const (
 	// RVRMinNodeID is the minimum valid node ID for DRBD configuration in ReplicatedVolumeReplica
 	RVRMinNodeID = uint(0)
 	// RVRMaxNodeID is the maximum valid node ID for DRBD configuration in ReplicatedVolumeReplica
-	RVRMaxNodeID = uint(7)
+	RVRMaxNodeID = uint(31)
 )
 
 // IsValidNodeID checks if nodeID is within valid range [RVRMinNodeID; RVRMaxNodeID].

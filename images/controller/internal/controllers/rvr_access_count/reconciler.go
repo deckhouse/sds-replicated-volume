@@ -19,6 +19,7 @@ package rvraccesscount
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/go-logr/logr"
@@ -184,7 +185,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Create Access RVRs for nodes that need them
 	for _, nodeName := range nodesNeedingAccess {
-		if err := r.createAccessRVR(ctx, rv, nodeName, log); err != nil {
+		if err := r.createAccessRVR(ctx, rv, nodeName, log, &rvrList.Items); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
@@ -200,17 +201,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	return reconcile.Result{}, nil
 }
 
-func (r *Reconciler) createAccessRVR(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string, log logr.Logger) error {
+func (r *Reconciler) createAccessRVR(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	nodeName string,
+	log logr.Logger,
+	otherRVRs *[]v1alpha1.ReplicatedVolumeReplica,
+) error {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
-			// GenerateName: Kubernetes will append unique suffix, e.g. "pvc-xxx-" -> "pvc-xxx-abc12"
-			GenerateName: rv.Name + "-",
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			NodeName:             nodeName,
 			Type:                 v1alpha1.ReplicaTypeAccess,
 		},
+	}
+
+	if !rvr.ChooseNewName(*otherRVRs) {
+		return fmt.Errorf("unable to create new rvr: too many existing replicas for rv %s", rv.Name)
 	}
 
 	if err := controllerutil.SetControllerReference(rv, rvr, r.scheme); err != nil {
@@ -222,6 +232,8 @@ func (r *Reconciler) createAccessRVR(ctx context.Context, rv *v1alpha1.Replicate
 		log.Error(err, "Creating Access RVR", "nodeName", nodeName)
 		return err
 	}
+
+	*otherRVRs = append((*otherRVRs), *rvr)
 
 	log.Info("Created Access RVR", "rvr", rvr.Name, "nodeName", nodeName)
 	return nil
