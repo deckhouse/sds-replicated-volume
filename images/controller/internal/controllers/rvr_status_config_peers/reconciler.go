@@ -108,9 +108,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			log.Error(ErrMultiplePeersOnSameNode, "Can't build peers map")
 			return reconcile.Result{}, ErrMultiplePeersOnSameNode
 		}
-		nodeId, _ := rvr.NodeId()
+		nodeID, _ := rvr.NodeID()
 		peers[rvr.Spec.NodeName] = v1alpha1.Peer{
-			NodeId:   nodeId,
+			NodeId:   nodeID,
 			Address:  *rvr.Status.DRBD.Config.Address,
 			Diskless: rvr.Spec.IsDiskless(),
 		}

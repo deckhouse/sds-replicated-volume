@@ -525,7 +525,7 @@ func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries b
 func readyRVR(
 	name string,
 	rvrType v1alpha1.ReplicaType,
-	nodeID uint,
+	_ uint,
 	address v1alpha1.Address,
 	peers map[string]v1alpha1.Peer,
 	lvmLogicalVolumeName string,

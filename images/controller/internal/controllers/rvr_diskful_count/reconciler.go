@@ -119,10 +119,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		func(rvr v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Spec.ReplicatedVolumeName != rv.Name },
 	)
 
-	totalRvrMap, err := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log, rvrList.Items)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
+	totalRvrMap := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log, rvrList.Items)
 
 	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
 
@@ -202,12 +199,12 @@ func getDiskfulReplicaCountFromReplicatedStorageClass(rsc *v1alpha1.ReplicatedSt
 // by the spec.replicatedVolumeName and spec.type fields. Returns a map with RVR name as key and RVR object as value.
 // Returns empty map if no RVRs are found.
 func getDiskfulReplicatedVolumeReplicas(
-	ctx context.Context,
-	cl client.Client,
+	_ context.Context,
+	_ client.Client,
 	rv *v1alpha1.ReplicatedVolume,
-	log logr.Logger,
+	_ logr.Logger,
 	rvRVRs []v1alpha1.ReplicatedVolumeReplica,
-) (map[string]*v1alpha1.ReplicatedVolumeReplica, error) {
+) map[string]*v1alpha1.ReplicatedVolumeReplica {
 	// Filter by spec.replicatedVolumeName and build map
 	rvrMap := make(map[string]*v1alpha1.ReplicatedVolumeReplica)
 
@@ -217,7 +214,7 @@ func getDiskfulReplicatedVolumeReplicas(
 		}
 	}
 
-	return rvrMap, nil
+	return rvrMap
 }
 
 // splitReplicasByDeletionStatus splits replicas into two maps: one with replicas that have DeletionTimestamp,

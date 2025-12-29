@@ -36,19 +36,19 @@ import (
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-func createReplicatedVolumeReplica(nodeId uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
-	return createReplicatedVolumeReplicaWithType(nodeId, rv, scheme, v1alpha1.ReplicaTypeDiskful, ready, deletionTimestamp)
+func createReplicatedVolumeReplica(nodeID uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+	return createReplicatedVolumeReplicaWithType(nodeID, rv, scheme, v1alpha1.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-func createReplicatedVolumeReplicaWithType(nodeId uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			Type:                 rvrType,
 		},
 	}
-	rvr.SetNameWithNodeId(nodeId)
+	rvr.SetNameWithNodeID(nodeID)
 
 	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
 		panic(fmt.Sprintf("failed to set controller reference: %v", err))

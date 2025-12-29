@@ -316,8 +316,8 @@ func (h *UpAndAdjustHandler) generateResourceConfig() *v9.Resource {
 	}
 
 	// current node
-	nodeId, _ := h.rvr.NodeId()
-	h.populateResourceForNode(res, h.nodeName, nodeId, nil)
+	nodeID, _ := h.rvr.NodeID()
+	h.populateResourceForNode(res, h.nodeName, nodeID, nil)
 
 	// peers
 	for peerName, peer := range h.rvr.Status.DRBD.Config.Peers {

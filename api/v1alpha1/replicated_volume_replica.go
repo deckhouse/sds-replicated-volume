@@ -58,7 +58,7 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
-func (rvr *ReplicatedVolumeReplica) NodeId() (uint, bool) {
+func (rvr *ReplicatedVolumeReplica) NodeID() (uint, bool) {
 	idx := strings.LastIndex(rvr.Name, "-")
 	if idx < 0 {
 		return 0, false
@@ -71,12 +71,12 @@ func (rvr *ReplicatedVolumeReplica) NodeId() (uint, bool) {
 	return uint(id), true
 }
 
-func (rvr *ReplicatedVolumeReplica) SetNameWithNodeId(nodeId uint) {
-	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeId)
+func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint) {
+	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeID)
 }
 
 func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
-	reservedNodeIds := make([]uint, 0, RVRMaxNodeID)
+	reservedNodeIDs := make([]uint, 0, RVRMaxNodeID)
 
 	for i := range otherRVRs {
 		otherRVR := &otherRVRs[i]
@@ -84,16 +84,16 @@ func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeRe
 			continue
 		}
 
-		id, ok := otherRVR.NodeId()
+		id, ok := otherRVR.NodeID()
 		if !ok {
 			continue
 		}
-		reservedNodeIds = append(reservedNodeIds, id)
+		reservedNodeIDs = append(reservedNodeIDs, id)
 	}
 
 	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {
-		if !slices.Contains(reservedNodeIds, i) {
-			rvr.SetNameWithNodeId(i)
+		if !slices.Contains(reservedNodeIDs, i) {
+			rvr.SetNameWithNodeID(i)
 			return true
 		}
 	}

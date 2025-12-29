@@ -194,7 +194,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				}
-				diskfulRVR.SetNameWithNodeId(10)
+				diskfulRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -235,7 +235,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeTieBreaker,
 					},
 				}
-				tieBreakerRVR.SetNameWithNodeId(10)
+				tieBreakerRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -276,7 +276,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
-				accessRVR.SetNameWithNodeId(10)
+				accessRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -319,7 +319,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
-				accessRVR.SetNameWithNodeId(10)
+				accessRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -561,24 +561,24 @@ var _ = Describe("Reconciler", func() {
 					VolumeAccess: v1alpha1.VolumeAccessPreferablyLocal,
 				},
 			}
-		accessRVR = &v1alpha1.ReplicatedVolumeReplica{
-			ObjectMeta: metav1.ObjectMeta{
-				OwnerReferences: []metav1.OwnerReference{
-					{
-						APIVersion: "storage.deckhouse.io/v1alpha1",
-						Kind:       "ReplicatedVolume",
-						Name:       "test-volume",
-						UID:        "test-uid",
+			accessRVR = &v1alpha1.ReplicatedVolumeReplica{
+				ObjectMeta: metav1.ObjectMeta{
+					OwnerReferences: []metav1.OwnerReference{
+						{
+							APIVersion: "storage.deckhouse.io/v1alpha1",
+							Kind:       "ReplicatedVolume",
+							Name:       "test-volume",
+							UID:        "test-uid",
+						},
 					},
 				},
-			},
-			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-				ReplicatedVolumeName: "test-volume",
-				NodeName:             "node-1",
-				Type:                 v1alpha1.ReplicaTypeAccess,
-			},
-		}
-		accessRVR.SetNameWithNodeId(10)
+				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+					ReplicatedVolumeName: "test-volume",
+					NodeName:             "node-1",
+					Type:                 v1alpha1.ReplicaTypeAccess,
+				},
+			}
+			accessRVR.SetNameWithNodeID(10)
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				interceptor.Funcs{
 					Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {

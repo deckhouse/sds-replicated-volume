@@ -34,7 +34,7 @@ func TestRvrStatusConfigAddress(t *testing.T) {
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
-func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alpha1.Address) {
+func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, _ uint, address v1alpha1.Address) {
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
