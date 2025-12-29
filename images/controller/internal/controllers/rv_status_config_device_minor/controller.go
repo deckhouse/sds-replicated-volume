@@ -59,10 +59,10 @@ func BuildController(mgr manager.Manager) error {
 			&v1alpha1.ReplicatedVolume{},
 			builder.WithPredicates(
 				predicate.Funcs{
-					CreateFunc: func(e event.TypedCreateEvent[client.Object]) bool {
+					CreateFunc: func(_ event.TypedCreateEvent[client.Object]) bool {
 						return true
 					},
-					UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
+					UpdateFunc: func(_ event.TypedUpdateEvent[client.Object]) bool {
 						// deviceMinor can only be changed once, by this controller
 						return false
 					},
@@ -70,7 +70,7 @@ func BuildController(mgr manager.Manager) error {
 						// Release device minor from cache if available.
 						// If cache is not ready yet, that's fine - deletions during startup
 						// will be handled correctly when the cache is initialized.
-						if cache := cacheSource.CacheOrNil(); cache != nil {
+						if cache := cacheSource.DeviceMinorCacheOrNil(); cache != nil {
 							cache.Release(e.Object.GetName())
 						}
 						return false

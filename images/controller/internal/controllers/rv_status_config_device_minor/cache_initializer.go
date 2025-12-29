@@ -35,15 +35,15 @@ type DeviceMinorCacheSource interface {
 	// Returns an error if initialization failed or context was cancelled.
 	DeviceMinorCache(ctx context.Context) (*DeviceMinorCache, error)
 
-	// CacheOrNil returns the cache if it's ready, or nil if not yet initialized.
+	// DeviceMinorCacheOrNil returns the cache if it's ready, or nil if not yet initialized.
 	// This is useful for non-blocking access, e.g., in predicates.
-	CacheOrNil() *DeviceMinorCache
+	DeviceMinorCacheOrNil() *DeviceMinorCache
 }
 
-// cacheInitializer is a manager.Runnable that initializes the device minor cache
+// CacheInitializer is a manager.Runnable that initializes the device minor cache
 // after leader election. It implements DeviceMinorCacheSource to provide
 // blocking access to the initialized cache.
-type cacheInitializer struct {
+type CacheInitializer struct {
 	mgr manager.Manager
 	cl  client.Client
 	log logr.Logger
@@ -56,14 +56,14 @@ type cacheInitializer struct {
 	initErr error
 }
 
-var _ manager.Runnable = (*cacheInitializer)(nil)
-var _ manager.LeaderElectionRunnable = (*cacheInitializer)(nil)
-var _ DeviceMinorCacheSource = (*cacheInitializer)(nil)
+var _ manager.Runnable = (*CacheInitializer)(nil)
+var _ manager.LeaderElectionRunnable = (*CacheInitializer)(nil)
+var _ DeviceMinorCacheSource = (*CacheInitializer)(nil)
 
 // NewCacheInitializer creates a new cache initializer that will populate
 // the device minor cache after leader election.
-func NewCacheInitializer(mgr manager.Manager) *cacheInitializer {
-	return &cacheInitializer{
+func NewCacheInitializer(mgr manager.Manager) *CacheInitializer {
+	return &CacheInitializer{
 		mgr:     mgr,
 		cl:      mgr.GetClient(),
 		log:     mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName),
@@ -73,13 +73,13 @@ func NewCacheInitializer(mgr manager.Manager) *cacheInitializer {
 
 // NeedLeaderElection returns true to ensure this runnable only runs after
 // leader election is won.
-func (c *cacheInitializer) NeedLeaderElection() bool {
+func (c *CacheInitializer) NeedLeaderElection() bool {
 	return true
 }
 
 // Start waits for leader election, then initializes the cache.
 // It blocks until the context is cancelled after initialization completes.
-func (c *cacheInitializer) Start(ctx context.Context) error {
+func (c *CacheInitializer) Start(ctx context.Context) error {
 	// Wait for leader election to complete
 	select {
 	case <-ctx.Done():
@@ -117,7 +117,7 @@ func (c *cacheInitializer) Start(ctx context.Context) error {
 
 // DeviceMinorCache blocks until the cache is initialized and returns it.
 // Returns an error if initialization failed or context was cancelled.
-func (c *cacheInitializer) DeviceMinorCache(ctx context.Context) (*DeviceMinorCache, error) {
+func (c *CacheInitializer) DeviceMinorCache(ctx context.Context) (*DeviceMinorCache, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -129,9 +129,9 @@ func (c *cacheInitializer) DeviceMinorCache(ctx context.Context) (*DeviceMinorCa
 	}
 }
 
-// CacheOrNil returns the cache if it's ready, or nil if not yet initialized.
+// DeviceMinorCacheOrNil returns the cache if it's ready, or nil if not yet initialized.
 // This is useful for non-blocking access, e.g., in predicates.
-func (c *cacheInitializer) CacheOrNil() *DeviceMinorCache {
+func (c *CacheInitializer) DeviceMinorCacheOrNil() *DeviceMinorCache {
 	select {
 	case <-c.readyCh:
 		if c.initErr != nil {
@@ -144,7 +144,7 @@ func (c *cacheInitializer) CacheOrNil() *DeviceMinorCache {
 }
 
 // doInitialize reads all ReplicatedVolumes and populates the cache.
-func (c *cacheInitializer) doInitialize(ctx context.Context) (*DeviceMinorCache, error) {
+func (c *CacheInitializer) doInitialize(ctx context.Context) (*DeviceMinorCache, error) {
 	dmCache := NewDeviceMinorCache()
 
 	rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -185,4 +185,3 @@ func (c *cacheInitializer) doInitialize(ctx context.Context) (*DeviceMinorCache,
 
 	return dmCache, nil
 }
-

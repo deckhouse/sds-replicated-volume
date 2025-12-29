@@ -89,10 +89,10 @@ func TestDeviceMinorCache(t *testing.T) {
 		release("e").
 		expect(0, 0, nil).
 		// [a, _, _, _, e]
-		initialize(map[string]DeviceMinor{"a": 0, "e": 4}, "").
+		initialize(map[string]DeviceMinor{"a": 0, "e": 4}).
 		expect(2, 4, holes(1, 2, 3)).
 		// -
-		initialize(map[string]DeviceMinor{"a": 0, "e": 4}, "").
+		initialize(map[string]DeviceMinor{"a": 0, "e": 4}).
 		expect(2, 4, holes(1, 2, 3)).
 		// - (error message order depends on map iteration, so check for key parts)
 		initializeErrContains(map[string]DeviceMinor{"a": 99, "e": 99}, "a", "e", "have same device minor 99").
@@ -119,7 +119,7 @@ func TestDeviceMinorCache(t *testing.T) {
 			"F": 5,
 			"G": 6,
 			"H": 7,
-		}, "").
+		}).
 		expect(6, 7, holes(3, 4)).
 		// -
 		getOrCreate("F", 5, "").
@@ -131,13 +131,13 @@ func TestDeviceMinorCache(t *testing.T) {
 		getOrCreate("A", 0, "").
 		expect(6, 7, holes(3, 4)).
 		// [_, _, _, _, _, F]
-		initialize(map[string]DeviceMinor{"F": 5}, "").
+		initialize(map[string]DeviceMinor{"F": 5}).
 		expect(1, 5, holes(0, 1, 2, 3, 4)).
 		// -
 		getOrCreate("F", 5, "").
 		expect(1, 5, holes(0, 1, 2, 3, 4)).
 		// [_, _, ..., M]
-		initialize(map[string]DeviceMinor{"M": MaxDeviceMinor}, "").
+		initialize(map[string]DeviceMinor{"M": MaxDeviceMinor}).
 		expectLen(1).
 		expectMax(MaxDeviceMinor).
 		// [1, 2, ..., M]
@@ -183,12 +183,11 @@ func (tc testDeviceMinorCache) release(rvName string) testDeviceMinorCache {
 
 func (tc testDeviceMinorCache) initialize(
 	byRVName map[string]DeviceMinor,
-	expectedErr string,
 ) testDeviceMinorCache {
 	tc.Helper()
 	err := tc.Initialize(byRVName)
-	if !errIsExpected(err, expectedErr) {
-		tc.Fatalf("expected Initialize error to be %s, got %v", expectedErr, err)
+	if err != nil {
+		tc.Fatalf("expected Initialize to succeed, got %v", err)
 	}
 	return tc
 }
@@ -243,7 +242,7 @@ func (tc testDeviceMinorCache) expectReleased(expectedReleased ...DeviceMinor) t
 
 func (tc testDeviceMinorCache) cleanup() testDeviceMinorCache {
 	tc.Helper()
-	return tc.initialize(nil, "").expectEmpty()
+	return tc.initialize(nil).expectEmpty()
 }
 
 func (tc testDeviceMinorCache) expectEmpty() testDeviceMinorCache {

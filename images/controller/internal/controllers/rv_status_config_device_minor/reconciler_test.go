@@ -52,7 +52,7 @@ func (s *testCacheSource) DeviceMinorCache(_ context.Context) (*rvstatusconfigde
 	return s.cache, nil
 }
 
-func (s *testCacheSource) CacheOrNil() *rvstatusconfigdeviceminor.DeviceMinorCache {
+func (s *testCacheSource) DeviceMinorCacheOrNil() *rvstatusconfigdeviceminor.DeviceMinorCache {
 	return s.cache
 }
 
