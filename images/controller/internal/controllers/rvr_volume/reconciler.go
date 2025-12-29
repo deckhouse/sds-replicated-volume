@@ -261,7 +261,7 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 			Name: rvr.Name,
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
-			ActualLVNameOnTheNode: rvr.Spec.ReplicatedVolumeName,
+			ActualLVNameOnTheNode: rvr.Name,
 			LVMVolumeGroupName:    lvmVolumeGroupName,
 			Size:                  rv.Spec.Size.String(),
 		},

@@ -541,7 +541,7 @@ var _ = Describe("Reconciler", func() {
 						Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
 						Expect(llv.Spec.Size).To(Equal("1Gi"))
 						Expect(llv.Spec.Type).To(Equal("Thick"))
-						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
+						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
 
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
@@ -568,7 +568,7 @@ var _ = Describe("Reconciler", func() {
 							Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
 							Expect(llv.Spec.Size).To(Equal("1Gi"))
 							Expect(llv.Spec.Type).To(Equal("Thick"))
-							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("test-rv"))
+							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
 
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 							Expect(rvr).To(HaveNoLVMLogicalVolumeName())
@@ -748,9 +748,11 @@ var _ = Describe("Reconciler", func() {
 							Expect(llvList.Items).To(HaveLen(1))
 
 							llv := &llvList.Items[0]
+							Expect(llv.Name).To(Equal(rvr.Name))
 							Expect(llv.Spec.Type).To(Equal("Thin"))
 							Expect(llv.Spec.Thin).NotTo(BeNil())
 							Expect(llv.Spec.Thin.PoolName).To(Equal("test-thin-pool"))
+							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
 						})
 					})
 				})
@@ -1130,6 +1132,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(llvList.Items).To(HaveLen(1))
 			llvName := llvList.Items[0].Name
 			Expect(llvName).To(Equal(rvr.Name))
+			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
 
 			// Verify condition is set to NotReady after LLV creation
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
@@ -1217,6 +1220,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.List(ctx, &llvList)).To(Succeed())
 			Expect(llvList.Items).To(HaveLen(1))
 			Expect(llvList.Items[0].Name).To(Equal(rvr.Name))
+			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
 		})
 	})
 })
