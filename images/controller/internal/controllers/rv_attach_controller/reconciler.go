@@ -125,8 +125,10 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
+	promoteEnabled := rv.Status != nil && meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+
 	// Reconcile RVRs
-	if err := r.reconcileRVRs(ctx, replicas, desiredAttachTo, actuallyAttachedTo); err != nil {
+	if err := r.reconcileRVRs(ctx, replicas, desiredAttachTo, actuallyAttachedTo, promoteEnabled); err != nil {
 		log.Error(err, "unable to reconcile ReplicatedVolumeReplicas", "replicaCount", len(replicas))
 		return reconcile.Result{}, err
 	}
@@ -771,6 +773,7 @@ func (r *Reconciler) reconcileRVRs(
 	replicas []v1alpha1.ReplicatedVolumeReplica,
 	desiredAttachTo []string,
 	actuallyAttachedTo []string,
+	promoteEnabled bool,
 ) error {
 	actualAllowTwoPrimaries := computeActualTwoPrimaries(replicas)
 
@@ -785,8 +788,11 @@ func (r *Reconciler) reconcileRVRs(
 	// Start from the current reality: nodes that are Primary right now.
 	desiredPrimaryNodes := append([]string(nil), actuallyAttachedTo...)
 
-	// Try to promote additional desired nodes if we have capacity (capacity depends on actualAllowTwoPrimaries).
-	desiredPrimaryNodes = promoteNewDesiredNodesIfPossible(actualAllowTwoPrimaries, desiredPrimaryNodes, desiredAttachTo)
+	// Try to promote additional desired nodes if we have capacity (capacity depends on actualAllowTwoPrimaries),
+	// but only when promotions are enabled (RV must be IOReady).
+	if promoteEnabled {
+		desiredPrimaryNodes = promoteNewDesiredNodesIfPossible(actualAllowTwoPrimaries, desiredPrimaryNodes, desiredAttachTo)
+	}
 
 	// Demote nodes that are Primary but are no longer desired. This is necessary to free up "places" for furutre new promotions.
 	desiredPrimaryNodes = demoteNotAnyMoreDesiredNodes(desiredPrimaryNodes, desiredAttachTo)

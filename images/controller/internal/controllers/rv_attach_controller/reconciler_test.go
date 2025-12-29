@@ -419,6 +419,9 @@ var _ = Describe("Reconcile", func() {
 							Status: metav1.ConditionFalse,
 						},
 					},
+					// Keep desiredAttachTo pre-initialized to ensure the controller does not attempt
+					// to promote replicas just because desiredAttachTo already contains nodes.
+					DesiredAttachTo: []string{"node-1", "node-2"},
 				}
 
 				// ensure that if controller tried to read RSC, it would fail
@@ -434,6 +437,76 @@ var _ = Describe("Reconcile", func() {
 
 			It("runs detach-only when IOReady condition is False without touching ReplicatedStorageClass", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+			})
+
+			It("does not request Primary on replicas before RV IOReady even if desiredAttachTo already contains nodes", func(ctx SpecContext) {
+				rva1 := &v1alpha1.ReplicatedVolumeAttachment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rva-node-1-not-ioready",
+					},
+					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+						ReplicatedVolumeName: rv.Name,
+						NodeName:             "node-1",
+					},
+				}
+				rva2 := &v1alpha1.ReplicatedVolumeAttachment{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rva-node-2-not-ioready",
+					},
+					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+						ReplicatedVolumeName: rv.Name,
+						NodeName:             "node-2",
+					},
+				}
+				Expect(cl.Create(ctx, rva1)).To(Succeed())
+				Expect(cl.Create(ctx, rva2)).To(Succeed())
+
+				rvr1 := &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rvr-node-1-not-ioready",
+					},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: rv.Name,
+						NodeName:             "node-1",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
+					},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+						ActualType: v1alpha1.ReplicaTypeDiskful,
+					},
+				}
+				rvr2 := &v1alpha1.ReplicatedVolumeReplica{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "rvr-node-2-not-ioready",
+					},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: rv.Name,
+						NodeName:             "node-2",
+						Type:                 v1alpha1.ReplicaTypeDiskful,
+					},
+					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+						ActualType: v1alpha1.ReplicaTypeDiskful,
+					},
+				}
+				Expect(cl.Create(ctx, rvr1)).To(Succeed())
+				Expect(cl.Create(ctx, rvr2)).To(Succeed())
+
+				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
+
+				gotRVR1 := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr1), gotRVR1)).To(Succeed())
+				primaryRequested1 := false
+				if gotRVR1.Status != nil && gotRVR1.Status.DRBD != nil && gotRVR1.Status.DRBD.Config != nil && gotRVR1.Status.DRBD.Config.Primary != nil {
+					primaryRequested1 = *gotRVR1.Status.DRBD.Config.Primary
+				}
+				Expect(primaryRequested1).To(BeFalse())
+
+				gotRVR2 := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr2), gotRVR2)).To(Succeed())
+				primaryRequested2 := false
+				if gotRVR2.Status != nil && gotRVR2.Status.DRBD != nil && gotRVR2.Status.DRBD.Config != nil && gotRVR2.Status.DRBD.Config.Primary != nil {
+					primaryRequested2 = *gotRVR2.Status.DRBD.Config.Primary
+				}
+				Expect(primaryRequested2).To(BeFalse())
 			})
 		})
 

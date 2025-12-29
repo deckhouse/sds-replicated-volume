@@ -24,7 +24,6 @@ import (
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
-	rvpublishcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_publish_controller"
 	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
