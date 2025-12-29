@@ -17,6 +17,8 @@ limitations under the License.
 package rvattachcontroller
 
 import (
+	"slices"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/event"
@@ -36,12 +38,8 @@ func replicatedVolumePredicate() predicate.Predicate {
 			return false
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldRV, ok := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
-			newRV, ok2 := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
-			if !ok || !ok2 {
-				// If types are unexpected, do not accidentally drop the event.
-				return true
-			}
+			oldRV := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
+			newRV := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
 
 			// Spec change (generation bump) can affect which storage class we load.
 			if oldRV.Generation != newRV.Generation {
@@ -73,11 +71,8 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 		DeleteFunc:  func(event.DeleteEvent) bool { return true },
 		GenericFunc: func(event.GenericEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldRVR, ok := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
-			newRVR, ok2 := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
-			if !ok || !ok2 {
-				return true
-			}
+			oldRVR := e.ObjectOld.(*v1alpha1.ReplicatedVolumeReplica)
+			newRVR := e.ObjectNew.(*v1alpha1.ReplicatedVolumeReplica)
 
 			// If controller owner reference is set later, allow this update so EnqueueRequestForOwner can start working.
 			if metav1.GetControllerOf(oldRVR) == nil && metav1.GetControllerOf(newRVR) != nil {
@@ -148,11 +143,8 @@ func replicatedVolumeAttachmentPredicate() predicate.Predicate {
 		DeleteFunc:  func(event.DeleteEvent) bool { return true },
 		GenericFunc: func(event.GenericEvent) bool { return false },
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			oldRVA, ok := e.ObjectOld.(*v1alpha1.ReplicatedVolumeAttachment)
-			newRVA, ok2 := e.ObjectNew.(*v1alpha1.ReplicatedVolumeAttachment)
-			if !ok || !ok2 {
-				return true
-			}
+			oldRVA := e.ObjectOld.(*v1alpha1.ReplicatedVolumeAttachment)
+			newRVA := e.ObjectNew.(*v1alpha1.ReplicatedVolumeAttachment)
 
 			// Start of deletion affects desiredAttachTo and finalizer reconciliation.
 			if oldRVA.DeletionTimestamp.IsZero() != newRVA.DeletionTimestamp.IsZero() {
@@ -165,7 +157,7 @@ func replicatedVolumeAttachmentPredicate() predicate.Predicate {
 			}
 
 			// Finalizers are important for safe detach/cleanup.
-			if !sliceEqual(oldRVA.Finalizers, newRVA.Finalizers) {
+			if !slices.Equal(oldRVA.Finalizers, newRVA.Finalizers) {
 				return true
 			}
 
@@ -198,16 +190,4 @@ func conditionEqual(a, b *metav1.Condition) bool {
 	return a.Status == b.Status &&
 		a.Reason == b.Reason &&
 		a.Message == b.Message
-}
-
-func sliceEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }

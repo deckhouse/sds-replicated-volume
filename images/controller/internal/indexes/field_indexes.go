@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package v1alpha1
+package indexes
 
 const (
 	// IndexFieldRVAByReplicatedVolumeName is a controller-runtime cache index field name

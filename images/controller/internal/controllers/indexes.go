@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 // RegisterIndexes registers controller-runtime cache indexes used by controllers.
@@ -33,7 +34,7 @@ func RegisterIndexes(mgr manager.Manager) error {
 	if err := mgr.GetFieldIndexer().IndexField(
 		context.Background(),
 		&v1alpha1.ReplicatedVolumeAttachment{},
-		v1alpha1.IndexFieldRVAByReplicatedVolumeName,
+		indexes.IndexFieldRVAByReplicatedVolumeName,
 		func(obj client.Object) []string {
 			rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
 			if !ok {

@@ -37,10 +37,11 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 func withRVAIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeAttachment{}, v1alpha1.IndexFieldRVAByReplicatedVolumeName, func(obj client.Object) []string {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeAttachment{}, indexes.IndexFieldRVAByReplicatedVolumeName, func(obj client.Object) []string {
 		rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
 		if !ok {
 			return nil
