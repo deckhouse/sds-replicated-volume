@@ -71,7 +71,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors(r.cfg.NodeName(), rvr) {
+	if !thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors(r.cfg.NodeName(), rvr) {
 		log.V(4).Info("ReplicatedVolumeReplica does not pass thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors check, skipping")
 		return reconcile.Result{}, nil
 	}
