@@ -10,6 +10,7 @@ require (
 	github.com/deckhouse/sds-replicated-volume/api v0.0.0-00010101000000-000000000000
 	github.com/spf13/cobra v1.9.1
 	k8s.io/api v0.34.1
+	k8s.io/apiextensions-apiserver v0.34.1
 	k8s.io/apimachinery v0.34.3
 	k8s.io/client-go v0.34.1
 	sigs.k8s.io/controller-runtime v0.22.4

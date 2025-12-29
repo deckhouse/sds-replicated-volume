@@ -16,9 +16,6 @@ limitations under the License.
 
 package main
 
-// TODO:
-// do not fall if there is no cdr from linstor db
-
 import (
 	"context"
 	"encoding/json"
@@ -32,15 +29,17 @@ import (
 	kubeutils "github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/pkg/kubeutils"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
-	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
-	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
-	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kubecl "sigs.k8s.io/controller-runtime/pkg/client"
+
+	sncv1alpha1 "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	srvlinstor "github.com/deckhouse/sds-replicated-volume/api/linstor"
+	srvv1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 const (
@@ -132,6 +131,15 @@ func runApp(ctx context.Context, log *slog.Logger, opt *Opt) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create Kubernetes client: %w", err)
+	}
+
+	// Check LINSTOR DB
+	if err := CRDExists(ctx, kClient, "nodes.internal.linstor.linbit.com"); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("CRD nodes.internal.linstor.linbit.com not found, skipping migration")
+			return nil
+		}
+		return fmt.Errorf("failed to check CRD: %w", err)
 	}
 
 	pvs := &corev1.PersistentVolumeList{}
@@ -771,6 +779,7 @@ func newScheme() (*runtime.Scheme, error) {
 		srvlinstor.AddToScheme,
 		sncv1alpha1.AddToScheme,
 		storagev1.AddToScheme,
+		apiextensionsv1.AddToScheme,
 	}
 
 	for i, f := range schemeFuncs {
@@ -1026,3 +1035,11 @@ func getReplicaCount(pvName string, linstorDB *linstorDB) (byte, error) {
 //	}
 //	return nil
 //}
+
+func CRDExists(ctx context.Context, kClient kubecl.Client, crdName string) error {
+	crd := &apiextensionsv1.CustomResourceDefinition{}
+	if err := kClient.Get(ctx, types.NamespacedName{Name: crdName}, crd); err != nil {
+		return err
+	}
+	return nil
+}
