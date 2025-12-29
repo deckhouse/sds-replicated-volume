@@ -128,27 +128,8 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 		}
 	}
 
-	// Set hostname label if NodeName is set (after scheduling).
-	// NodeName is set once and not expected to change afterward.
-	if rvr.Spec.NodeName != "" {
-		// Warn if hostname label exists but differs from NodeName (indicates manual change or potential issue)
-		if existingHostname, exists := rvr.Labels[v1alpha1.LabelNodeHostname]; exists && existingHostname != rvr.Spec.NodeName {
-			log.Info("WARNING: hostname label differs from NodeName, will be corrected",
-				"existingLabel", existingHostname,
-				"nodeName", rvr.Spec.NodeName)
-		}
-
-		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
-			rvr.Labels,
-			v1alpha1.LabelNodeHostname,
-			rvr.Spec.NodeName,
-		)
-		if labelChanged {
-			log.V(1).Info("hostname label set on rvr",
-				"node", rvr.Spec.NodeName)
-			changed = true
-		}
-	}
+	// Note: hostname label (kubernetes.io/hostname) is managed by rvr_scheduling_controller,
+	// which sets it when scheduling and restores if manually removed.
 
 	return changed
 }

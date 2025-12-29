@@ -25,7 +25,8 @@ limitations under the License.
 //   - Updating owner references if they become missing or incorrect
 //   - Setting replicated-storage-class label from the parent RV
 //   - Setting replicated-volume label from rvr.spec.replicatedVolumeName
-//   - Setting kubernetes.io/hostname label from rvr.spec.nodeName (after scheduling)
+//
+// Note: kubernetes.io/hostname label is managed by rvr_scheduling_controller.
 //
 // # Watched Resources
 //
@@ -46,7 +47,9 @@ limitations under the License.
 //
 //   - sds-replicated-volume.storage.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass (from RV)
 //   - sds-replicated-volume.storage.deckhouse.io/replicated-volume: Name of the ReplicatedVolume
-//   - kubernetes.io/hostname: Node hostname where replica is scheduled (from rvr.spec.nodeName)
+//
+// Note: kubernetes.io/hostname label is managed by rvr_scheduling_controller (set during scheduling,
+// restored if manually removed).
 //
 // # Reconciliation Flow
 //
@@ -55,8 +58,7 @@ limitations under the License.
 //  3. Set owner reference using controllerutil.SetControllerReference()
 //  4. Ensure replicated-storage-class label is set from rv.spec.replicatedStorageClassName
 //  5. Ensure replicated-volume label is set from rvr.spec.replicatedVolumeName
-//  6. Ensure kubernetes.io/hostname label is set from rvr.spec.nodeName (if scheduled)
-//  7. Patch RVR if any changes were made
+//  6. Patch RVR if any changes were made
 //
 // # Special Notes
 //

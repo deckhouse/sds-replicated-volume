@@ -123,21 +123,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
 		})
 
-		When("RVR has NodeName set (scheduled)", func() {
-			BeforeEach(func() {
-				rvr.Spec.NodeName = "worker-node-1"
-			})
-
-			It("sets hostname label", func(ctx SpecContext) {
-				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
-				Expect(err).NotTo(HaveOccurred())
-
-				got := &v1alpha1.ReplicatedVolumeReplica{}
-				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-
-				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelNodeHostname, "worker-node-1"))
-			})
-		})
+		// Note: hostname label (kubernetes.io/hostname) is tested in rvr_scheduling_controller tests
+		// as it's managed by that controller, not rvr_metadata.
 
 		When("labels are already set correctly", func() {
 			BeforeEach(func() {
