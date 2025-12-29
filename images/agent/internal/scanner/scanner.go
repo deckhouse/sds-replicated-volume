@@ -130,13 +130,9 @@ func (s *Scanner) Run() error {
 type updatedResourceName string
 
 func appendUpdatedResourceNameToBatch(batch []updatedResourceName, newItem updatedResourceName) []updatedResourceName {
-	if !slices.ContainsFunc(
-		batch,
-		func(e updatedResourceName) bool { return e == newItem },
-	) {
+	if !slices.Contains(batch, newItem) {
 		return append(batch, newItem)
 	}
-
 	return batch
 }
 
@@ -187,13 +183,14 @@ func (s *Scanner) processEvents(
 }
 
 func (s *Scanner) ConsumeBatches() error {
-	return s.retryUntilCancel(func() error {
-		cd := cooldown.NewExponentialCooldown(
-			50*time.Millisecond,
-			5*time.Second,
-		)
-		log := s.log.With("goroutine", "consumeBatches")
+	// Create cooldown OUTSIDE the retry loop to preserve its state across retries
+	cd := cooldown.NewExponentialCooldown(
+		1*time.Second,
+		5*time.Second,
+	)
+	log := s.log.With("goroutine", "consumeBatches")
 
+	return s.retryUntilCancel(func() error {
 		for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
 			log.Debug("got batch of 'n' resources", "n", len(batch))
 
@@ -203,13 +200,6 @@ func (s *Scanner) ConsumeBatches() error {
 			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
-
-			// TODO: add index
-			rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-			err = s.cl.List(s.ctx, rvrList)
-			if err != nil {
-				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
-			}
 
 			for _, item := range batch {
 				resourceName := string(item)
@@ -226,17 +216,32 @@ func (s *Scanner) ConsumeBatches() error {
 					continue
 				}
 
-				rvr, ok := uiter.Find(
-					uslices.Ptrs(rvrList.Items),
-					func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-						return rvr.Spec.ReplicatedVolumeName == resourceName &&
-							rvr.Spec.NodeName == s.hostname
+				rvr := &v1alpha1.ReplicatedVolumeReplica{
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						// required for SetNameWithNodeID
+						ReplicatedVolumeName: resourceName,
 					},
-				)
-				if !ok {
-					log.Debug(
-						"didn't find rvr with 'replicatedVolumeName'",
-						"replicatedVolumeName", resourceName,
+				}
+				rvr.SetNameWithNodeID(uint(resourceStatus.NodeID))
+				if err := s.cl.Get(s.ctx, client.ObjectKeyFromObject(rvr), rvr); err != nil {
+					if client.IgnoreNotFound(err) == nil {
+						log.Warn(
+							"got update event for resource 'resourceName' nodeId='nodeId', but rvr 'rvrName' missing in cluster",
+							"resourceName", resourceName,
+							"nodeId", resourceStatus.NodeID,
+							"rvrName", rvr.Name,
+						)
+						continue
+					}
+					log.Error("getting rvr 'rvrName' failed", "rvrName", rvr.Name, "err", err)
+					continue
+				}
+
+				if rvr.Spec.NodeName != s.hostname {
+					log.Error(
+						"got update event for rvr 'rvrNodeName', but it has unexpected node name",
+						"hostname", s.hostname,
+						"rvrNodeName", rvr.Spec.NodeName,
 					)
 					continue
 				}
