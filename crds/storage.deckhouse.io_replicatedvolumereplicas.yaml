@@ -46,7 +46,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
       name: InQuorum
       type: string
-    - jsonPath: .status.conditions[?(@.type=='InSync')].status
+    - jsonPath: .status.syncProgress
       name: InSync
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -477,6 +477,13 @@ spec:
                 type: object
               lvmLogicalVolumeName:
                 maxLength: 256
+                type: string
+              syncProgress:
+                description: |-
+                  SyncProgress shows sync status for kubectl output:
+                  - "True" when fully synced (InSync condition is True)
+                  - "XX.XX%" during active synchronization (SyncTarget)
+                  - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
                 type: string
             type: object
         required:

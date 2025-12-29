@@ -27,6 +27,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -268,11 +270,73 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	_ = rvr.UpdateStatusConditionInQuorum()
 	_ = rvr.UpdateStatusConditionInSync()
 
+	// Calculate SyncProgress for kubectl display
+	rvr.Status.SyncProgress = calculateSyncProgress(rvr, resource)
+
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
 	}
 
 	return nil
+}
+
+// calculateSyncProgress returns a string for the SyncProgress field:
+// - "True" when InSync condition is True
+// - "Unknown" when InSync condition is Unknown or not set
+// - "XX.XX%" during active synchronization (when this replica is SyncTarget)
+// - DiskState (e.g. "Outdated") when not syncing but not in sync
+func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbdsetup.Resource) string {
+	// Check InSync condition first
+	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInSync)
+	if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
+		return "True"
+	}
+
+	// Return Unknown if condition is not yet set or explicitly Unknown
+	if inSyncCond == nil || inSyncCond.Status == metav1.ConditionUnknown {
+		return "Unknown"
+	}
+
+	// Get local disk state
+	if len(resource.Devices) == 0 {
+		return "Unknown"
+	}
+	localDiskState := resource.Devices[0].DiskState
+
+	// Check if we are SyncTarget - find minimum PercentInSync from connections
+	// where replication state indicates active sync
+	var minPercent float64 = -1
+	for _, conn := range resource.Connections {
+		for _, pd := range conn.PeerDevices {
+			if isSyncingState(pd.ReplicationState) {
+				if minPercent < 0 || pd.PercentInSync < minPercent {
+					minPercent = pd.PercentInSync
+				}
+			}
+		}
+	}
+
+	// If we found active sync, return the percentage
+	if minPercent >= 0 {
+		return fmt.Sprintf("%.2f%%", minPercent)
+	}
+
+	// Not syncing - return disk state
+	return localDiskState
+}
+
+// isSyncingState returns true if the replication state indicates active synchronization
+func isSyncingState(state string) bool {
+	switch state {
+	case "SyncSource", "SyncTarget",
+		"StartingSyncS", "StartingSyncT",
+		"PausedSyncS", "PausedSyncT",
+		"WFBitMapS", "WFBitMapT",
+		"WFSyncUUID":
+		return true
+	default:
+		return false
+	}
 }
 
 func copyStatusFields(
