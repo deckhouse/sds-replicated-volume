@@ -14,16 +14,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrownerreference_test
+package rvmetadata
 
-import (
-	"testing"
-
-	. "github.com/onsi/ginkgo/v2"
-	. "github.com/onsi/gomega"
-)
-
-func TestRvrOwnerReferenceController(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "RvrOwnerReferenceController Suite")
-}
+var ControllerName = "rv_metadata_controller"

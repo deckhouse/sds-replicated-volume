@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrownerreference
+package rvrmetadata
 
 import (
 	"context"
@@ -68,12 +68,18 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	originalRVR := rvr.DeepCopy()
 
+	// Set owner reference
 	if err := controllerutil.SetControllerReference(rv, rvr, r.scheme); err != nil {
 		log.Error(err, "unable to set controller reference")
 		return reconcile.Result{}, err
 	}
 
-	if ownerReferencesUnchanged(originalRVR, rvr) {
+	// Process labels
+	labelsChanged := r.processLabels(log, rvr, rv)
+
+	ownerRefChanged := !ownerReferencesUnchanged(originalRVR, rvr)
+
+	if !ownerRefChanged && !labelsChanged {
 		return reconcile.Result{}, nil
 	}
 
@@ -82,11 +88,69 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			log.V(1).Info("ReplicatedVolumeReplica was deleted during reconciliation, skipping patch", "rvr", rvr.Name)
 			return reconcile.Result{}, nil
 		}
-		log.Error(err, "unable to patch ReplicatedVolumeReplica ownerReference", "rvr", rvr.Name)
+		log.Error(err, "unable to patch ReplicatedVolumeReplica metadata", "rvr", rvr.Name)
 		return reconcile.Result{}, err
 	}
 
 	return reconcile.Result{}, nil
+}
+
+// processLabels ensures required labels are set on the RVR.
+// Returns true if any label was changed.
+func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica, rv *v1alpha1.ReplicatedVolume) bool {
+	var changed, labelChanged bool
+
+	// Set replicated-volume label from spec
+	if rvr.Spec.ReplicatedVolumeName != "" {
+		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
+			rvr.Labels,
+			v1alpha1.LabelReplicatedVolume,
+			rvr.Spec.ReplicatedVolumeName,
+		)
+		if labelChanged {
+			log.V(1).Info("replicated-volume label set on rvr",
+				"rv", rvr.Spec.ReplicatedVolumeName)
+			changed = true
+		}
+	}
+
+	// Set replicated-storage-class label from RV
+	if rv.Spec.ReplicatedStorageClassName != "" {
+		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
+			rvr.Labels,
+			v1alpha1.LabelReplicatedStorageClass,
+			rv.Spec.ReplicatedStorageClassName,
+		)
+		if labelChanged {
+			log.V(1).Info("replicated-storage-class label set on rvr",
+				"rsc", rv.Spec.ReplicatedStorageClassName)
+			changed = true
+		}
+	}
+
+	// Set hostname label if NodeName is set (after scheduling).
+	// NodeName is set once and not expected to change afterward.
+	if rvr.Spec.NodeName != "" {
+		// Warn if hostname label exists but differs from NodeName (indicates manual change or potential issue)
+		if existingHostname, exists := rvr.Labels[v1alpha1.LabelNodeHostname]; exists && existingHostname != rvr.Spec.NodeName {
+			log.Info("WARNING: hostname label differs from NodeName, will be corrected",
+				"existingLabel", existingHostname,
+				"nodeName", rvr.Spec.NodeName)
+		}
+
+		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
+			rvr.Labels,
+			v1alpha1.LabelNodeHostname,
+			rvr.Spec.NodeName,
+		)
+		if labelChanged {
+			log.V(1).Info("hostname label set on rvr",
+				"node", rvr.Spec.NodeName)
+			changed = true
+		}
+	}
+
+	return changed
 }
 
 func ownerReferencesUnchanged(before, after *v1alpha1.ReplicatedVolumeReplica) bool {

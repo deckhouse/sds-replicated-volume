@@ -187,6 +187,10 @@ func (r *Reconciler) patchScheduledReplicas(
 		original := rvr.DeepCopy()
 		original.Spec.NodeName = ""
 
+		// Note: hostname label is set by rvr_metadata_controller after this patch.
+		// Placed there to cover existing RVRs and handle label restoration if removed.
+		// NodeName is set once and not expected to change afterward.
+
 		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
 		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
 			if apierrors.IsNotFound(err) {

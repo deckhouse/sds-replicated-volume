@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrownerreference_test
+package rvrmetadata_test
 
 import (
 	"context"
@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvrownerreference "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference"
+	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -46,7 +46,7 @@ var _ = Describe("Reconciler", func() {
 
 	var (
 		cl  client.Client
-		rec *rvrownerreference.Reconciler
+		rec *rvrmetadata.Reconciler
 	)
 
 	BeforeEach(func() {
@@ -59,7 +59,7 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvrownerreference.NewReconciler(cl, GinkgoLogr, scheme)
+		rec = rvrmetadata.NewReconciler(cl, GinkgoLogr, scheme)
 	})
 
 	It("returns no error when ReplicatedVolumeReplica does not exist", func(ctx SpecContext) {
@@ -76,6 +76,9 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "rv1",
 					UID:  "good-uid",
+				},
+				Spec: v1alpha1.ReplicatedVolumeSpec{
+					ReplicatedStorageClassName: "test-storage-class",
 				},
 			}
 			rvr = &v1alpha1.ReplicatedVolumeReplica{
@@ -107,6 +110,68 @@ var _ = Describe("Reconciler", func() {
 				HaveField("Controller", Not(BeNil())),
 				HaveField("BlockOwnerDeletion", Not(BeNil())),
 			)))
+		})
+
+		It("sets replicated-volume and replicated-storage-class labels", func(ctx SpecContext) {
+			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+			Expect(err).NotTo(HaveOccurred())
+
+			got := &v1alpha1.ReplicatedVolumeReplica{}
+			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+
+			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
+			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
+		})
+
+		When("RVR has NodeName set (scheduled)", func() {
+			BeforeEach(func() {
+				rvr.Spec.NodeName = "worker-node-1"
+			})
+
+			It("sets hostname label", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelNodeHostname, "worker-node-1"))
+			})
+		})
+
+		When("labels are already set correctly", func() {
+			BeforeEach(func() {
+				rvr.Labels = map[string]string{
+					v1alpha1.LabelReplicatedVolume:       rv.Name,
+					v1alpha1.LabelReplicatedStorageClass: rv.Spec.ReplicatedStorageClassName,
+				}
+				rvr.OwnerReferences = []metav1.OwnerReference{
+					{
+						Name:               rv.Name,
+						Kind:               "ReplicatedVolume",
+						APIVersion:         "storage.deckhouse.io/v1alpha1",
+						Controller:         ptr.To(true),
+						BlockOwnerDeletion: ptr.To(true),
+						UID:                rv.UID,
+					},
+				}
+
+				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Patch: func(_ context.Context, _ client.WithWatch, _ client.Object, _ client.Patch, _ ...client.PatchOption) error {
+						return errors.NewInternalError(fmt.Errorf("patch should not be called"))
+					},
+				})
+			})
+
+			It("does nothing and returns no error", func(ctx SpecContext) {
+				_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(rvr)})
+				Expect(err).NotTo(HaveOccurred())
+
+				got := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
+			})
 		})
 
 		When("ReplicatedVolumeReplica has DeletionTimestamp", func() {
@@ -258,7 +323,7 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("ReplicatedVolumeReplica already has ownerReference to the correct ReplicatedVolume", func() {
+		When("ReplicatedVolumeReplica already has ownerReference and labels set correctly", func() {
 			BeforeEach(func() {
 				rvr.OwnerReferences = []metav1.OwnerReference{
 					{
@@ -269,6 +334,10 @@ var _ = Describe("Reconciler", func() {
 						BlockOwnerDeletion: ptr.To(true),
 						UID:                "good-uid",
 					},
+				}
+				rvr.Labels = map[string]string{
+					v1alpha1.LabelReplicatedVolume:       rv.Name,
+					v1alpha1.LabelReplicatedStorageClass: rv.Spec.ReplicatedStorageClassName,
 				}
 
 				clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
@@ -286,6 +355,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 				Expect(got.OwnerReferences).To(HaveLen(1))
 				Expect(got.OwnerReferences).To(ContainElement(HaveField("Name", Equal("rv1"))))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedVolume, rv.Name))
+				Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
 			})
 		})
 

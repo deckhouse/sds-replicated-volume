@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvfinalizer
+package rvmetadata
 
 import (
 	"context"
@@ -59,21 +59,44 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	patch := client.MergeFrom(rv.DeepCopy())
 
-	hasChanged, err := r.processFinalizers(ctx, log, rv)
+	finalizerChanged, err := r.processFinalizers(ctx, log, rv)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
 
-	if hasChanged {
+	labelChanged := r.processLabels(log, rv)
+
+	if finalizerChanged || labelChanged {
 		if err := r.cl.Patch(ctx, rv, patch); err != nil {
 			if client.IgnoreNotFound(err) == nil {
 				log.Info("ReplicatedVolume was deleted during reconciliation, skipping patch")
 				return reconcile.Result{}, nil
 			}
-			return reconcile.Result{}, fmt.Errorf("patching rv finalizers: %w", err)
+			return reconcile.Result{}, fmt.Errorf("patching rv metadata: %w", err)
 		}
 	}
 	return reconcile.Result{}, nil
+}
+
+// processLabels ensures required labels are set on the RV.
+// Returns true if any label was changed.
+func (r *Reconciler) processLabels(log *slog.Logger, rv *v1alpha1.ReplicatedVolume) bool {
+	var changed bool
+
+	// Set replicated-storage-class label from spec
+	if rv.Spec.ReplicatedStorageClassName != "" {
+		rv.Labels, changed = v1alpha1.EnsureLabel(
+			rv.Labels,
+			v1alpha1.LabelReplicatedStorageClass,
+			rv.Spec.ReplicatedStorageClassName,
+		)
+		if changed {
+			log.Info("replicated-storage-class label set on rv",
+				"rsc", rv.Spec.ReplicatedStorageClassName)
+		}
+	}
+
+	return changed
 }
 
 func (r *Reconciler) processFinalizers(
