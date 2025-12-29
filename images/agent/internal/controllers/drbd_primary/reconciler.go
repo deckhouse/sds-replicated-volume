@@ -82,39 +82,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	if !rvr.DeletionTimestamp.IsZero() && !v1alpha1.HasExternalFinalizers(rvr) {
-		log.Info("ReplicatedVolumeReplica is being deleted, ignoring reconcile request")
+	wantPrimary, actuallyPrimary, initialized := r.rvrDesiredAndActualRole(rvr)
+	if !initialized {
+		log.V(4).Info("ReplicatedVolumeReplica is not initialized, skipping")
 		return reconcile.Result{}, nil
 	}
 
-	ready, reason := r.rvrIsReady(rvr)
-	if !ready {
-		log.V(4).Info("ReplicatedVolumeReplica is not ready, skipping", "reason", reason)
-		return reconcile.Result{}, nil
-	}
-
-	// Check if ReplicatedVolume is IOReady
-	ready, err = r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
-	if err != nil {
-		log.Error(err, "checking ReplicatedVolume")
-		return reconcile.Result{}, err
-	}
-	if !ready {
-		log.V(4).Info("ReplicatedVolume is not Ready, requeuing", "rvName", rvr.Spec.ReplicatedVolumeName)
-		return reconcile.Result{
-			RequeueAfter: reconcileAfter,
-		}, nil
-	}
-
-	desiredPrimary := *rvr.Status.DRBD.Config.Primary
-	currentRole := rvr.Status.DRBD.Status.Role
-
-	// Check if role change is needed
-	needPrimary := desiredPrimary && currentRole != "Primary"
-	needSecondary := !desiredPrimary && currentRole == "Primary"
-
-	if !needPrimary && !needSecondary {
-		log.V(4).Info("DRBD role already matches desired state", "role", currentRole, "desiredPrimary", desiredPrimary)
+	if wantPrimary == actuallyPrimary {
+		log.V(4).Info("DRBD role already matches desired state", "wantPrimary", wantPrimary, "actuallyPrimary", actuallyPrimary)
 		// Clear any previous errors
 		err = r.clearErrors(ctx, rvr)
 		if err != nil {
@@ -123,12 +98,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
+	if wantPrimary {
+		// promote
+		canPromote, err := r.canPromote(ctx, log, rvr)
+		if err != nil {
+			return reconcile.Result{}, err
+		}
+		if !canPromote {
+			return reconcile.Result{}, nil
+		}
+	} // we can always demote
+
 	// Execute drbdadm command
 	var cmdErr error
 	var cmdOutput string
 	var exitCode int
 
-	if needPrimary {
+	if wantPrimary {
 		log.Info("Promoting to primary")
 		cmdErr = drbdadm.ExecutePrimary(ctx, rvr.Spec.ReplicatedVolumeName)
 	} else {
@@ -145,13 +131,25 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		// The error from drbdadm.ExecutePrimary/ExecuteSecondary is a joined error
 		// containing both the exec error and the command output
 		cmdOutput = cmdErr.Error()
-		log.Error(cmdErr, "executed command failed", "command", drbdadm.Command, "args", map[bool][]string{true: drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName), false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName)}[needPrimary], "output", cmdOutput)
+		log.Error(cmdErr, "executed command failed",
+			"command", drbdadm.Command,
+			"args", map[bool][]string{
+				true:  drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName),
+				false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName),
+			}[wantPrimary],
+			"output", cmdOutput)
 	} else {
-		log.V(4).Info("executed command successfully", "command", drbdadm.Command, "args", map[bool][]string{true: drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName), false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName)}[needPrimary])
+		log.V(4).Info("executed command successfully",
+			"command", drbdadm.Command,
+			"args", map[bool][]string{
+				true:  drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName),
+				false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName),
+			}[wantPrimary],
+		)
 	}
 
 	// Update status with error or clear it
-	err = r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, needPrimary)
+	err = r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, wantPrimary)
 	if err != nil {
 		log.Error(err, "updating error status")
 	}
@@ -230,29 +228,44 @@ func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVo
 	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
-// rvrIsReady checks if ReplicatedVolumeReplica is ready for primary/secondary operations.
-// It returns true if all required fields are present, false otherwise.
-// The second return value contains a reason string when the RVR is not ready.
-func (r *Reconciler) rvrIsReady(rvr *v1alpha1.ReplicatedVolumeReplica) (bool, string) {
-	// rvr.spec.nodeName will be set once and will not change again.
-	if rvr.Spec.NodeName == "" {
-		return false, "ReplicatedVolumeReplica does not have a nodeName"
+func (r *Reconciler) rvrDesiredAndActualRole(rvr *v1alpha1.ReplicatedVolumeReplica) (wantPrimary bool, actuallyPrimary bool, initialized bool) {
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil || rvr.Status.DRBD.Config.Primary == nil {
+		// not initialized
+		return
 	}
 
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil || rvr.Status.DRBD.Actual == nil {
-		return false, "DRBD status not initialized"
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil || rvr.Status.DRBD.Status.Role == "" {
+		// not initialized
+		return
 	}
 
-	// Check if we need to execute drbdadm primary or secondary
-	if rvr.Status.DRBD.Config == nil || rvr.Status.DRBD.Config.Primary == nil {
-		return false, "DRBD config primary not set"
+	wantPrimary = *rvr.Status.DRBD.Config.Primary
+	actuallyPrimary = rvr.Status.DRBD.Status.Role == "Primary"
+	initialized = true
+	return
+}
+
+func (r *Reconciler) canPromote(ctx context.Context, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) (bool, error) {
+	if rvr.DeletionTimestamp != nil {
+		log.V(1).Info("can not promote, because deleted")
+		return false, nil
 	}
 
-	if !rvr.Status.DRBD.Actual.InitialSyncCompleted {
-		return false, "Initial sync not completed, skipping"
+	if rvr.Status.DRBD.Actual == nil || !rvr.Status.DRBD.Actual.InitialSyncCompleted {
+		log.V(1).Info("can not promote, because initialSyncCompleted is false")
+		return false, nil
 	}
 
-	return true, ""
+	rvReady, err := r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
+	if err != nil {
+		return false, err
+	}
+
+	if !rvReady {
+		log.V(1).Info("can not promote, because RV is not IOReady or has no controller finalizer")
+	}
+
+	return true, nil
 }
 
 // rvIsReady checks if the ReplicatedVolume is IOReady.
