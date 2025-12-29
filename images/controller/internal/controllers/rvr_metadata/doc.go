@@ -26,7 +26,7 @@ limitations under the License.
 //   - Setting replicated-storage-class label from the parent RV
 //   - Setting replicated-volume label from rvr.spec.replicatedVolumeName
 //
-// Note: kubernetes.io/hostname label is managed by rvr_scheduling_controller.
+// Note: node-name label (sds-replicated-volume.storage.deckhouse.io/node-name) is managed by rvr_scheduling_controller.
 //
 // # Watched Resources
 //
@@ -48,8 +48,8 @@ limitations under the License.
 //   - sds-replicated-volume.storage.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass (from RV)
 //   - sds-replicated-volume.storage.deckhouse.io/replicated-volume: Name of the ReplicatedVolume
 //
-// Note: kubernetes.io/hostname label is managed by rvr_scheduling_controller (set during scheduling,
-// restored if manually removed).
+// Note: sds-replicated-volume.storage.deckhouse.io/node-name label is managed by rvr_scheduling_controller
+// (set during scheduling, restored if manually removed).
 //
 // # Reconciliation Flow
 //

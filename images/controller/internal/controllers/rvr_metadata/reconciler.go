@@ -128,8 +128,8 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 		}
 	}
 
-	// Note: hostname label (kubernetes.io/hostname) is managed by rvr_scheduling_controller,
-	// which sets it when scheduling and restores if manually removed.
+	// Note: node-name label (sds-replicated-volume.storage.deckhouse.io/node-name) is managed
+	// by rvr_scheduling_controller, which sets it when scheduling and restores if manually removed.
 
 	return changed
 }

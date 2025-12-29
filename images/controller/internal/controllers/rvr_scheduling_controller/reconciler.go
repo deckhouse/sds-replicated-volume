@@ -183,14 +183,14 @@ func (r *Reconciler) patchScheduledReplicas(
 
 	for _, rvr := range sctx.RVRsToSchedule {
 		log.V(2).Info("patching replica", "rvr", rvr.Name, "nodeName", rvr.Spec.NodeName, "type", rvr.Spec.Type)
-		// Create original state for patch (without NodeName and hostname label)
+		// Create original state for patch (without NodeName and node-name label)
 		original := rvr.DeepCopy()
 		original.Spec.NodeName = ""
 
-		// Set hostname label together with NodeName.
+		// Set node-name label together with NodeName.
 		// Note: if label is removed manually, it won't be restored until next condition check
 		// in ensureScheduledConditionOnExistingReplicas (which runs on each reconcile).
-		rvr.Labels, _ = v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeHostname, rvr.Spec.NodeName)
+		rvr.Labels, _ = v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
 
 		// Apply the patch; ignore NotFound errors because the replica may have been deleted meanwhile.
 		if err := r.cl.Patch(ctx, rvr, client.MergeFrom(original)); err != nil {
@@ -237,9 +237,9 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 	for _, rvr := range alreadyScheduledReplicas {
 		log.V(2).Info("fixing Scheduled condition on existing replica", "rvr", rvr.Name)
 
-		// Ensure hostname label is set (restores label if manually removed)
-		if err := r.ensureHostnameLabel(ctx, log, rvr); err != nil {
-			return fmt.Errorf("failed to ensure hostname label on RVR %s: %w", rvr.Name, err)
+		// Ensure node-name label is set (restores label if manually removed)
+		if err := r.ensureNodeNameLabel(ctx, log, rvr); err != nil {
+			return fmt.Errorf("failed to ensure node-name label on RVR %s: %w", rvr.Name, err)
 		}
 
 		if err := r.setScheduledConditionOnRVR(
@@ -909,9 +909,9 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 	return err
 }
 
-// ensureHostnameLabel ensures the hostname label is set on RVR matching its NodeName.
+// ensureNodeNameLabel ensures the node-name label is set on RVR matching its NodeName.
 // This restores label if manually removed.
-func (r *Reconciler) ensureHostnameLabel(
+func (r *Reconciler) ensureNodeNameLabel(
 	ctx context.Context,
 	log logr.Logger,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
@@ -920,12 +920,12 @@ func (r *Reconciler) ensureHostnameLabel(
 		return nil
 	}
 
-	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeHostname, rvr.Spec.NodeName)
+	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelNodeName, rvr.Spec.NodeName)
 	if !changed {
 		return nil
 	}
 
-	log.V(2).Info("restoring hostname label on RVR", "rvr", rvr.Name, "node", rvr.Spec.NodeName)
+	log.V(2).Info("restoring node-name label on RVR", "rvr", rvr.Name, "node", rvr.Spec.NodeName)
 
 	patch := client.MergeFrom(rvr.DeepCopy())
 	rvr.Labels = labels

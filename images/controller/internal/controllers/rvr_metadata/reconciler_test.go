@@ -123,7 +123,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(got.Labels).To(HaveKeyWithValue(v1alpha1.LabelReplicatedStorageClass, rv.Spec.ReplicatedStorageClassName))
 		})
 
-		// Note: hostname label (kubernetes.io/hostname) is tested in rvr_scheduling_controller tests
+		// Note: node-name label is tested in rvr_scheduling_controller tests
 		// as it's managed by that controller, not rvr_metadata.
 
 		When("labels are already set correctly", func() {

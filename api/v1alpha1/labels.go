@@ -36,8 +36,9 @@ const (
 	// LabelThinPool = LabelPrefix + "thin-pool"
 )
 
-// LabelNodeHostname is the standard Kubernetes label for node hostname
-const LabelNodeHostname = "kubernetes.io/hostname"
+// LabelNodeName is the label key for the Kubernetes node name where the RVR is scheduled.
+// Note: This stores node.metadata.name, not the OS hostname (kubernetes.io/hostname).
+const LabelNodeName = LabelPrefix + "node-name"
 
 // EnsureLabel sets a label on the given labels map if it's not already set to the expected value.
 // Returns the updated labels map and a boolean indicating if a change was made.
