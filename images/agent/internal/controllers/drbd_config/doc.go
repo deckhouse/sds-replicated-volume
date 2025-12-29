@@ -53,8 +53,8 @@ limitations under the License.
 //
 // When the replica is not being deleted (rvr.metadata.deletionTimestamp is not set):
 //  1. Add finalizers to RVR:
-//     - sds-replicated-volume.storage.deckhouse.io/agent
-//     - sds-replicated-volume.storage.deckhouse.io/controller
+//     - sds-replicated-volume.deckhouse.io/agent
+//     - sds-replicated-volume.deckhouse.io/controller
 //  2. Write configuration to temporary file and validate with `drbdadm sh-nop`
 //  3. If valid, move configuration to main file; otherwise report error and stop
 //  4. For Diskful replicas:
@@ -90,10 +90,10 @@ limitations under the License.
 // to the node (no local disk storage).
 //
 // The controller only processes resources when the RV has the controller finalizer
-// (sds-replicated-volume.storage.deckhouse.io/controller) set, ensuring proper
+// (sds-replicated-volume.deckhouse.io/controller) set, ensuring proper
 // initialization order.
 //
 // Resources marked for deletion (metadata.deletionTimestamp set) are only considered
 // deleted if they don't have non-module finalizers (those not starting with
-// sds-replicated-volume.storage.deckhouse.io/).
+// sds-replicated-volume.deckhouse.io/).
 package drbdconfig

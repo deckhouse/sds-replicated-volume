@@ -14,21 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package rvrownerreference implements the rvr-owner-reference-controller, which
-// maintains the owner reference relationship between ReplicatedVolumeReplicas and
-// their parent ReplicatedVolume.
+// Package rvrmetadata implements the rvr-metadata-controller, which manages
+// metadata (owner references and labels) on ReplicatedVolumeReplica resources.
 //
 // # Controller Responsibilities
 //
-// The controller ensures proper ownership by:
+// The controller ensures proper ownership and metadata by:
 //   - Setting metadata.ownerReferences on each RVR to point to its parent RV
 //   - Using the controller reference pattern for proper cascading deletion
 //   - Updating owner references if they become missing or incorrect
+//   - Setting replicated-storage-class label from the parent RV
+//   - Setting replicated-volume label from rvr.spec.replicatedVolumeName
+//
+// Note: node-name label (sds-replicated-volume.deckhouse.io/node-name) is managed by rvr_scheduling_controller.
 //
 // # Watched Resources
 //
 // The controller watches:
-//   - ReplicatedVolumeReplica: To maintain owner references
+//   - ReplicatedVolumeReplica: To maintain owner references and labels
 //
 // # Owner Reference Configuration
 //
@@ -40,23 +43,22 @@ limitations under the License.
 //   - controller: true
 //   - blockOwnerDeletion: true
 //
+// # Labels Managed
+//
+//   - sds-replicated-volume.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass (from RV)
+//   - sds-replicated-volume.deckhouse.io/replicated-volume: Name of the ReplicatedVolume
+//
+// Note: sds-replicated-volume.deckhouse.io/node-name label is managed by rvr_scheduling_controller
+// (set during scheduling, restored if manually removed).
+//
 // # Reconciliation Flow
 //
-//  1. Check prerequisites:
-//     - RV must have the controller finalizer
-//  2. Get the RVR being reconciled
-//  3. Fetch the parent ReplicatedVolume using rvr.spec.replicatedVolumeName
-//  4. Check if owner reference is correctly set:
-//     - Reference exists in rvr.metadata.ownerReferences
-//     - Reference points to correct RV (name and UID match)
-//     - controller=true and blockOwnerDeletion=true are set
-//  5. If owner reference is missing or incorrect:
-//     - Call controllerutil.SetControllerReference(rv, rvr, scheme)
-//     - Update the RVR
-//
-// # Status Updates
-//
-// This controller does not update status fields; it only manages metadata.ownerReferences.
+//  1. Get the RVR being reconciled
+//  2. Fetch the parent ReplicatedVolume using rvr.spec.replicatedVolumeName
+//  3. Set owner reference using controllerutil.SetControllerReference()
+//  4. Ensure replicated-storage-class label is set from rv.spec.replicatedStorageClassName
+//  5. Ensure replicated-volume label is set from rvr.spec.replicatedVolumeName
+//  6. Patch RVR if any changes were made
 //
 // # Special Notes
 //
@@ -67,6 +69,6 @@ limitations under the License.
 // The controller reference pattern ensures only one controller owns each RVR,
 // preventing conflicts in lifecycle management.
 //
-// This controller complements rv-finalizer-controller and rv-delete-propagation-controller
+// This controller complements rv-metadata-controller and rv-delete-propagation-controller
 // to provide robust lifecycle management.
-package rvrownerreference
+package rvrmetadata

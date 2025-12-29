@@ -194,9 +194,26 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 	}
 
 	log.Info("LVMLogicalVolume is ready, updating status", "llvName", llv.Name)
+
+	// TODO: Analyze for future optimization: consider combining multiple patches into fewer API calls.
+	// Currently we have separate patches for status (LVMLogicalVolumeName + condition) and labels (LVG).
+	// This could potentially be optimized to reduce API server load and avoid cache inconsistency issues.
+
 	if err := ensureLVMLogicalVolumeNameInStatus(ctx, cl, rvr, llv.Name); err != nil {
 		return fmt.Errorf("updating LVMLogicalVolumeName in status: %w", err)
 	}
+
+	// Set LVG label when LLV is ready
+	if err := ensureLVGLabel(ctx, cl, log, rvr, llv.Spec.LVMVolumeGroupName); err != nil {
+		return fmt.Errorf("setting LVG label: %w", err)
+	}
+
+	// TODO: Uncomment when thin pools are extracted to separate objects
+	// if llv.Spec.Thin != nil && llv.Spec.Thin.PoolName != "" {
+	//     if err := ensureThinPoolLabel(ctx, cl, log, rvr, llv.Spec.Thin.PoolName); err != nil {
+	//         return fmt.Errorf("setting thin pool label: %w", err)
+	//     }
+	// }
 
 	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeReady, "Backing volume is ready"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
@@ -237,6 +254,26 @@ func ensureLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, r
 	}
 	rvr.Status.LVMLogicalVolumeName = llvName
 	return cl.Status().Patch(ctx, rvr, patch)
+}
+
+// ensureLVGLabel sets the LVG label on RVR if not already set correctly.
+func ensureLVGLabel(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica, lvgName string) error {
+	if lvgName == "" {
+		return nil
+	}
+
+	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelLVMVolumeGroup, lvgName)
+	if !changed {
+		return nil
+	}
+
+	patch := client.MergeFrom(rvr.DeepCopy())
+	rvr.Labels = labels
+	if err := cl.Patch(ctx, rvr, patch); err != nil {
+		return err
+	}
+	log.V(4).Info("LVG label set on RVR", "lvg", lvgName)
+	return nil
 }
 
 // createLLV creates a LVMLogicalVolume with ownerReference pointing to RVR.

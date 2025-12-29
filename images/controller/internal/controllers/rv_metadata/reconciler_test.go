@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvfinalizer_test
+package rvmetadata_test
 
 import (
 	"log/slog"
@@ -30,7 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
+	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
 )
 
 func TestReconciler_Reconcile(t *testing.T) {
@@ -40,12 +40,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string // description of this test case
-		objects []client.Object
-		req     reconcile.Request
-		want    reconcile.Result
-		wantErr bool
-		wantFin []string
+		name       string // description of this test case
+		objects    []client.Object
+		req        reconcile.Request
+		want       reconcile.Result
+		wantErr    bool
+		wantFin    []string
+		wantLabels map[string]string
 	}{
 		{
 			name: "adds finalizer to new rv without rvrs",
@@ -59,6 +60,25 @@ func TestReconciler_Reconcile(t *testing.T) {
 			},
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-new"}},
 			wantFin: []string{v1alpha1.ControllerAppFinalizer},
+		},
+		{
+			name: "adds finalizer and label when rsc specified",
+			objects: []client.Object{
+				&v1alpha1.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:            "rv-with-rsc",
+						ResourceVersion: "1",
+					},
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "my-storage-class",
+					},
+				},
+			},
+			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-with-rsc"}},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
+			wantLabels: map[string]string{
+				v1alpha1.LabelReplicatedStorageClass: "my-storage-class",
+			},
 		},
 		{
 			name: "adds finalizer when rvr exists",
@@ -159,6 +179,29 @@ func TestReconciler_Reconcile(t *testing.T) {
 			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-newly-deleting"}},
 			wantFin: []string{"keep-me"},
 		},
+		{
+			name: "does not change label if already set correctly",
+			objects: []client.Object{
+				&v1alpha1.ReplicatedVolume{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:            "rv-with-label",
+						Finalizers:      []string{v1alpha1.ControllerAppFinalizer},
+						ResourceVersion: "1",
+						Labels: map[string]string{
+							v1alpha1.LabelReplicatedStorageClass: "existing-class",
+						},
+					},
+					Spec: v1alpha1.ReplicatedVolumeSpec{
+						ReplicatedStorageClassName: "existing-class",
+					},
+				},
+			},
+			req:     reconcile.Request{NamespacedName: types.NamespacedName{Name: "rv-with-label"}},
+			wantFin: []string{v1alpha1.ControllerAppFinalizer},
+			wantLabels: map[string]string{
+				v1alpha1.LabelReplicatedStorageClass: "existing-class",
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -166,7 +209,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				WithScheme(scheme).
 				WithObjects(tt.objects...).
 				Build()
-			r := rvfinalizer.NewReconciler(cl, slog.Default())
+			r := rvmetadata.NewReconciler(cl, slog.Default())
 			got, gotErr := r.Reconcile(t.Context(), tt.req)
 			if gotErr != nil {
 				if !tt.wantErr {
@@ -187,6 +230,13 @@ func TestReconciler_Reconcile(t *testing.T) {
 			}
 			if !slices.Equal(rv.Finalizers, tt.wantFin) {
 				t.Fatalf("finalizers mismatch: got %v, want %v", rv.Finalizers, tt.wantFin)
+			}
+
+			// Check labels if expected
+			for key, wantValue := range tt.wantLabels {
+				if gotValue := rv.Labels[key]; gotValue != wantValue {
+					t.Errorf("label %s mismatch: got %q, want %q", key, gotValue, wantValue)
+				}
 			}
 		})
 	}
