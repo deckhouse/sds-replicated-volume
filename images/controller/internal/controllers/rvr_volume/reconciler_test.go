@@ -537,11 +537,11 @@ var _ = Describe("Reconciler", func() {
 
 						llv := &llvList.Items[0]
 						Expect(llv).To(HaveLLVWithOwnerReference(rvr.Name))
-						Expect(llv.Name).To(Equal(rvr.Name))
+						Expect(llv.Name).To(Equal("rvr-" + rvr.Name))
 						Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
 						Expect(llv.Spec.Size).To(Equal("1Gi"))
 						Expect(llv.Spec.Type).To(Equal("Thick"))
-						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
+						Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("rvr-" + rvr.Name))
 
 						Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 						Expect(rvr).To(HaveNoLVMLogicalVolumeName())
@@ -564,11 +564,11 @@ var _ = Describe("Reconciler", func() {
 
 							llv := &llvList.Items[0]
 							Expect(llv).To(HaveLLVWithOwnerReference(rvr.Name))
-							Expect(llv.Name).To(Equal(rvr.Name))
+							Expect(llv.Name).To(Equal("rvr-" + rvr.Name))
 							Expect(llv.Spec.LVMVolumeGroupName).To(Equal("test-lvg"))
 							Expect(llv.Spec.Size).To(Equal("1Gi"))
 							Expect(llv.Spec.Type).To(Equal("Thick"))
-							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
+							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("rvr-" + rvr.Name))
 
 							Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 							Expect(rvr).To(HaveNoLVMLogicalVolumeName())
@@ -716,7 +716,7 @@ var _ = Describe("Reconciler", func() {
 						BeforeEach(func() {
 							clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
 								Create: func(ctx context.Context, cl client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
-									if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "test-rvr" {
+									if llvObj, ok := obj.(*snc.LVMLogicalVolume); ok && llvObj.Name == "rvr-test-rvr" {
 										return createError
 									}
 									return cl.Create(ctx, obj, opts...)
@@ -748,11 +748,11 @@ var _ = Describe("Reconciler", func() {
 							Expect(llvList.Items).To(HaveLen(1))
 
 							llv := &llvList.Items[0]
-							Expect(llv.Name).To(Equal(rvr.Name))
+							Expect(llv.Name).To(Equal("rvr-" + rvr.Name))
 							Expect(llv.Spec.Type).To(Equal("Thin"))
 							Expect(llv.Spec.Thin).NotTo(BeNil())
 							Expect(llv.Spec.Thin.PoolName).To(Equal("test-thin-pool"))
-							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
+							Expect(llv.Spec.ActualLVNameOnTheNode).To(Equal("rvr-" + rvr.Name))
 						})
 					})
 				})
@@ -763,7 +763,7 @@ var _ = Describe("Reconciler", func() {
 					BeforeEach(func() {
 						llv = &snc.LVMLogicalVolume{
 							ObjectMeta: metav1.ObjectMeta{
-								Name: rvr.Name,
+								Name: "rvr-" + rvr.Name,
 							},
 						}
 						Expect(controllerutil.SetControllerReference(rvr, llv, scheme)).To(Succeed())
@@ -1131,8 +1131,8 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.List(ctx, &llvList)).To(Succeed())
 			Expect(llvList.Items).To(HaveLen(1))
 			llvName := llvList.Items[0].Name
-			Expect(llvName).To(Equal(rvr.Name))
-			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
+			Expect(llvName).To(Equal("rvr-" + rvr.Name))
+			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal("rvr-" + rvr.Name))
 
 			// Verify condition is set to NotReady after LLV creation
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
@@ -1175,7 +1175,7 @@ var _ = Describe("Reconciler", func() {
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), updatedRVR)).To(Succeed())
 				return updatedRVR
 			}).WithContext(ctx).Should(And(
-				HaveLVMLogicalVolumeName(rvr.Name),
+				HaveLVMLogicalVolumeName(llvName),
 				HaveBackingVolumeCreatedConditionReady(),
 			))
 
@@ -1219,8 +1219,8 @@ var _ = Describe("Reconciler", func() {
 			// Verify LLV was created again
 			Expect(cl.List(ctx, &llvList)).To(Succeed())
 			Expect(llvList.Items).To(HaveLen(1))
-			Expect(llvList.Items[0].Name).To(Equal(rvr.Name))
-			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal(rvr.Name))
+			Expect(llvList.Items[0].Name).To(Equal("rvr-" + rvr.Name))
+			Expect(llvList.Items[0].Spec.ActualLVNameOnTheNode).To(Equal("rvr-" + rvr.Name))
 		})
 	})
 })

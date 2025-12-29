@@ -39,6 +39,10 @@ import (
 const (
 	llvTypeThick = "Thick"
 	llvTypeThin  = "Thin"
+
+	// llvNamePrefix is used for both the K8s object name of LVMLogicalVolume and the actual LV name on the node.
+	// NOTE: Keep in sync with name length constraints (see api/v1alpha1 validations).
+	llvNamePrefix = "rvr-"
 )
 
 type Reconciler struct {
@@ -234,12 +238,13 @@ func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.L
 }
 
 func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha1.ReplicatedVolumeReplica) (*snc.LVMLogicalVolume, error) {
-	llvName := rvr.Name
+	// If status already points to a specific LLV name, trust it (supports legacy names too).
 	if rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
-		llvName = rvr.Status.LVMLogicalVolumeName
+		return getLLVByName(ctx, cl, rvr.Status.LVMLogicalVolumeName)
 	}
 
-	return getLLVByName(ctx, cl, llvName)
+	// Otherwise, use the prefixed name (new behavior).
+	return getLLVByName(ctx, cl, llvNamePrefix+rvr.Name)
 }
 
 // ensureLVMLogicalVolumeNameInStatus sets or clears the LVMLogicalVolumeName field in RVR status if needed.
@@ -280,7 +285,8 @@ func ensureLVGLabel(ctx context.Context, cl client.Client, log logr.Logger, rvr 
 // It retrieves the ReplicatedVolume and determines the appropriate LVMVolumeGroup and ThinPool
 // based on the RVR's node name, then creates the LLV with the correct configuration.
 func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rvr *v1alpha1.ReplicatedVolumeReplica, log logr.Logger) error {
-	log = log.WithValues("llvName", rvr.Name, "nodeName", rvr.Spec.NodeName)
+	llvName := llvNamePrefix + rvr.Name
+	log = log.WithValues("llvName", llvName, "nodeName", rvr.Spec.NodeName)
 	log.Info("Creating LVMLogicalVolume")
 
 	rv, err := getReplicatedVolumeByName(ctx, cl, rvr.Spec.ReplicatedVolumeName)
@@ -295,10 +301,10 @@ func createLLV(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv
 
 	llvNew := &snc.LVMLogicalVolume{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: rvr.Name,
+			Name: llvName,
 		},
 		Spec: snc.LVMLogicalVolumeSpec{
-			ActualLVNameOnTheNode: rvr.Name,
+			ActualLVNameOnTheNode: llvName,
 			LVMVolumeGroupName:    lvmVolumeGroupName,
 			Size:                  rv.Spec.Size.String(),
 		},

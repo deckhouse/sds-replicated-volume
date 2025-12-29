@@ -209,6 +209,10 @@ spec:
         - metadata
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name must be at most 120 characters (to fit derived RVR/LLV
+            names)
+          rule: size(self.metadata.name) <= 120
     served: true
     storage: true
     subresources:
