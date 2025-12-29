@@ -19,8 +19,9 @@ set -euo pipefail
 cd api
 
 # crds
-go get sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20
-go run sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20 \
+# Run controller-gen without pinning it into this module's go.mod.
+# Force module mode to allow updating go.sum for tool dependencies when needed.
+go run -mod=mod sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19 \
     object:headerFile=../hack/boilerplate.txt \
     crd paths=./v1alpha1 output:crd:dir=../crds \
     paths=./v1alpha1
