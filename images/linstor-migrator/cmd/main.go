@@ -25,7 +25,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/deckhouse/sds-common-lib/slogh"
 	kubeutils "github.com/deckhouse/sds-replicated-volume/images/linstor-migrator/pkg/kubeutils"
 	"sigs.k8s.io/controller-runtime/pkg/manager/signals"
 
@@ -96,13 +95,28 @@ func main() {
 
 	ctx := signals.SetupSignalHandler()
 
-	if err := slogh.UpdateConfig(
-		slogh.Config{Level: slogh.LevelDebug, Format: slogh.FormatText, Callsite: slogh.CallsiteDisabled},
-	); err != nil {
-		panic(err)
+	// Convert log level string to slog.Level
+	var logLevel slog.Level
+	switch opt.LogLevel {
+	case "debug":
+		logLevel = slog.LevelDebug
+	case "info":
+		logLevel = slog.LevelInfo
+	case "warn":
+		logLevel = slog.LevelWarn
+	case "error":
+		logLevel = slog.LevelError
+	default:
+		logLevel = slog.LevelInfo
 	}
-	logHandler := &slogh.Handler{}
+
+	// Setup logger with stdout output
+	logHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level:     logLevel,
+		AddSource: false,
+	})
 	log := slog.New(logHandler).With("mode", opt.Mode)
+	slog.SetDefault(log)
 
 	log.Info("linstor-migrator started")
 	err := runApp(ctx, log, opt)
