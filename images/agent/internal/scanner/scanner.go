@@ -41,14 +41,18 @@ import (
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
-var defaultScanner atomic.Pointer[Scanner]
-
-func DefaultScanner() *Scanner {
-	return defaultScanner.Load()
+type ResourceScanner interface {
+	ResourceShouldBeRefreshed(resourceName string)
 }
 
-func SetDefaultScanner(s *Scanner) {
-	defaultScanner.Store(s)
+var defaultScanner atomic.Pointer[ResourceScanner]
+
+func DefaultScanner() ResourceScanner {
+	return *defaultScanner.Load()
+}
+
+func SetDefaultScanner(s ResourceScanner) {
+	defaultScanner.Store(&s)
 }
 
 type Scanner struct {

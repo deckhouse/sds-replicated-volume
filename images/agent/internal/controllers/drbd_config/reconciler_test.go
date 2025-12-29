@@ -37,6 +37,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	fakedrbdadm "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm/fake"
@@ -114,7 +115,7 @@ func (t *testResourceScanner) ResourceShouldBeRefreshed(resourceName string) {
 	t.resourceNames[resourceName] = struct{}{}
 }
 
-var _ drbdconfig.ResourceScanner = &testResourceScanner{}
+var _ scanner.ResourceScanner = &testResourceScanner{}
 
 func TestReconciler_Reconcile(t *testing.T) {
 	testCases := []*reconcileTestCase{
@@ -352,8 +353,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 				fakeExec.Setup(t)
 
 				resScanner := &testResourceScanner{}
+				scanner.SetDefaultScanner(resScanner)
 
-				rec := drbdconfig.NewReconciler(cl, nil, testNodeName, resScanner)
+				rec := drbdconfig.NewReconciler(cl, nil, testNodeName)
 
 				_, err := rec.Reconcile(
 					t.Context(),

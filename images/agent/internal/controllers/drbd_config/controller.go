@@ -26,7 +26,6 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 )
 
 func BuildController(mgr manager.Manager) error {
@@ -41,7 +40,6 @@ func BuildController(mgr manager.Manager) error {
 		mgr.GetClient(),
 		log,
 		cfg.NodeName(),
-		scanner.DefaultScanner(),
 	)
 
 	return u.LogError(
