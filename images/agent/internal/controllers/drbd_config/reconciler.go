@@ -198,10 +198,6 @@ func rvrFullyInitialized(log *slog.Logger, rv *v1alpha1.ReplicatedVolume, rvr *v
 		logNotInitializedField("status.drbd.config")
 		return false
 	}
-	if rvr.Status.DRBD.Config.NodeId == nil {
-		logNotInitializedField("status.drbd.config.nodeId")
-		return false
-	}
 	if rvr.Status.DRBD.Config.Address == nil {
 		logNotInitializedField("status.drbd.config.address")
 		return false

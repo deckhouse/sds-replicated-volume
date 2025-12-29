@@ -86,7 +86,16 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	fds, tbs, nonFDtbs, err := r.loadFailureDomains(ctx, log, rv.Name, rsc)
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err = r.cl.List(ctx, rvrList); err != nil {
+		return reconcile.Result{}, logError(log, fmt.Errorf("listing rvrs: %w", err))
+	}
+	rvrList.Items = slices.DeleteFunc(
+		rvrList.Items,
+		func(rvr v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Spec.ReplicatedVolumeName != rv.Name },
+	)
+
+	fds, tbs, nonFDtbs, err := r.loadFailureDomains(ctx, log, rv.Name, rvrList.Items, rsc)
 	if err != nil {
 		return reconcile.Result{}, err
 	}
@@ -102,7 +111,7 @@ func (r *Reconciler) Reconcile(
 		log.Info(fmt.Sprintf("deleted rvr %d/%d", i+1, len(nonFDtbs)), "tbToDelete", tbToDelete.Name)
 	}
 
-	return r.syncTieBreakers(ctx, log, rv, fds, tbs)
+	return r.syncTieBreakers(ctx, log, rv, fds, tbs, rvrList.Items)
 }
 
 func (r *Reconciler) getReplicatedVolume(
@@ -162,6 +171,7 @@ func (r *Reconciler) loadFailureDomains(
 	ctx context.Context,
 	log logr.Logger,
 	rvName string,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
 	rsc *v1alpha1.ReplicatedStorageClass,
 ) (fds map[string]*failureDomain, tbs []tb, nonFDtbs []tb, err error) {
 	// initialize empty failure domains
@@ -198,12 +208,8 @@ func (r *Reconciler) loadFailureDomains(
 	}
 
 	// init failure domains with RVRs
-	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err = r.cl.List(ctx, rvrList); err != nil {
-		return nil, nil, nil, logError(log, fmt.Errorf("listing rvrs: %w", err))
-	}
 
-	for rvr := range uslices.Ptrs(rvrList.Items) {
+	for rvr := range uslices.Ptrs(rvrs) {
 		if rvr.Spec.ReplicatedVolumeName != rvName {
 			continue
 		}
@@ -262,6 +268,7 @@ func (r *Reconciler) syncTieBreakers(
 	rv *v1alpha1.ReplicatedVolume,
 	fds map[string]*failureDomain,
 	tbs []tb,
+	rvrs []v1alpha1.ReplicatedVolumeReplica,
 ) (reconcile.Result, error) {
 	var maxBaseReplicaCount, totalBaseReplicaCount int
 	for _, fd := range fds {
@@ -327,13 +334,17 @@ func (r *Reconciler) syncTieBreakers(
 		// creating
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
-				GenerateName: rv.Name + "-",
-				Finalizers:   []string{v1alpha1.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 				ReplicatedVolumeName: rv.Name,
 				Type:                 v1alpha1.ReplicaTypeTieBreaker,
 			},
+		}
+
+		if !rvr.ChooseNewName(rvrs) {
+			return reconcile.Result{},
+				fmt.Errorf("unable to create new rvr: too many existing replicas for rv %s", rv.Name)
 		}
 
 		if err := controllerutil.SetControllerReference(rv, rvr, r.scheme); err != nil {
@@ -343,6 +354,8 @@ func (r *Reconciler) syncTieBreakers(
 		if err := r.cl.Create(ctx, rvr); err != nil {
 			return reconcile.Result{}, err
 		}
+
+		rvrs = append(rvrs, *rvr)
 
 		log.Info(fmt.Sprintf("created rvr %d/%d", i+1, desiredTB-currentTB), "newRVR", rvr.Name)
 	}

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -36,6 +37,47 @@ import (
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 )
+
+// testCacheSource is a simple test implementation of DeviceMinorCacheSource
+// that returns a pre-initialized cache immediately without blocking.
+type testCacheSource struct {
+	cache *rvstatusconfigdeviceminor.DeviceMinorCache
+}
+
+func newTestCacheSource(cache *rvstatusconfigdeviceminor.DeviceMinorCache) *testCacheSource {
+	return &testCacheSource{cache: cache}
+}
+
+func (s *testCacheSource) DeviceMinorCache(_ context.Context) (*rvstatusconfigdeviceminor.DeviceMinorCache, error) {
+	return s.cache, nil
+}
+
+func (s *testCacheSource) DeviceMinorCacheOrNil() *rvstatusconfigdeviceminor.DeviceMinorCache {
+	return s.cache
+}
+
+// initReconcilerFromClient creates a new reconciler with cache initialized from existing volumes in the client.
+// This simulates the production behavior where cache is initialized at controller startup.
+func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Logger) *rvstatusconfigdeviceminor.Reconciler {
+	dmCache := rvstatusconfigdeviceminor.NewDeviceMinorCache()
+
+	rvList := &v1alpha1.ReplicatedVolumeList{}
+	ExpectWithOffset(1, cl.List(ctx, rvList)).To(Succeed(), "should list ReplicatedVolumes")
+
+	dmByRVName := make(map[string]rvstatusconfigdeviceminor.DeviceMinor, len(rvList.Items))
+	for i := range rvList.Items {
+		rv := &rvList.Items[i]
+		if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil && rv.Status.DRBD.Config.DeviceMinor != nil {
+			dm, valid := rvstatusconfigdeviceminor.NewDeviceMinor(int(*rv.Status.DRBD.Config.DeviceMinor))
+			if valid {
+				dmByRVName[rv.Name] = dm
+			}
+		}
+	}
+
+	ExpectWithOffset(1, dmCache.Initialize(dmByRVName)).To(Succeed(), "should initialize cache")
+	return rvstatusconfigdeviceminor.NewReconciler(cl, log, newTestCacheSource(dmCache))
+}
 
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
@@ -69,7 +111,8 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr)
+		// Use a test cache source that returns an empty cache immediately
+		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr, newTestCacheSource(rvstatusconfigdeviceminor.NewDeviceMinorCache()))
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
@@ -113,31 +156,6 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("List fails", func() {
-			var testError error
-
-			BeforeEach(func() {
-				testError = errors.New("failed to list ReplicatedVolumes")
-				clientBuilder = clientBuilder.WithInterceptorFuncs(
-					interceptor.Funcs{
-						Get: func(ctx context.Context, client client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-							return client.Get(ctx, key, obj, opts...)
-						},
-						List: func(ctx context.Context, client client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-							if _, ok := list.(*v1alpha1.ReplicatedVolumeList); ok {
-								return testError
-							}
-							return client.List(ctx, list, opts...)
-						},
-					},
-				)
-			})
-
-			It("should fail if listing ReplicatedVolumes failed", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(testError), "should return error when List fails")
-			})
-		})
-
 		DescribeTableSubtree("when rv has",
 			Entry("nil Status", func() { rv.Status = nil }),
 			Entry("nil Status.DRBD", func() {
@@ -168,221 +186,6 @@ var _ = Describe("Reconciler", func() {
 		)
 
 		When("RV without deviceMinor", func() {
-			It("detects duplicates and sets/clears error messages", func(ctx SpecContext) {
-				By("Creating volumes with duplicate deviceMinors")
-				// Group A: 2 volumes with deviceMinor=0 (duplicate)
-				rvA1 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "volume-dup-a1",
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor),
-							},
-						},
-					},
-				}
-				rvA2 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:       "volume-dup-a2",
-						Finalizers: []string{v1alpha1.ControllerAppFinalizer},
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor),
-							},
-						},
-					},
-				}
-				// Group B: 3 volumes with deviceMinor=1 (duplicate)
-				rvB1 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "volume-dup-b1",
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
-							},
-						},
-					},
-				}
-				rvB2 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name: "volume-dup-b2",
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
-							},
-						},
-					},
-				}
-				rvB3 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:       "volume-dup-b3",
-						Finalizers: []string{v1alpha1.ControllerAppFinalizer},
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 1),
-							},
-						},
-					},
-				}
-				// Group C: 1 volume with deviceMinor=2 (no duplicate)
-				rvC1 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:       "volume-dup-c1",
-						Finalizers: []string{v1alpha1.ControllerAppFinalizer},
-					},
-					Status: &v1alpha1.ReplicatedVolumeStatus{
-						DRBD: &v1alpha1.DRBDResource{
-							Config: &v1alpha1.DRBDResourceConfig{
-								DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor + 2),
-							},
-						},
-					},
-				}
-				// Volume without deviceMinor
-				rvD1 := &v1alpha1.ReplicatedVolume{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:       "volume-dup-d1",
-						Finalizers: []string{v1alpha1.ControllerAppFinalizer},
-					},
-				}
-
-				for _, rv := range []*v1alpha1.ReplicatedVolume{rvA1, rvA2, rvB1, rvB2, rvB3, rvC1, rvD1} {
-					Expect(cl.Create(ctx, rv)).To(Succeed(), fmt.Sprintf("should create ReplicatedVolume %s", rv.Name))
-				}
-
-				By("Reconciling D1 to assign deviceMinor and trigger duplicate detection")
-				Eventually(func(g Gomega) *v1alpha1.ReplicatedVolume {
-					g.Expect(rec.Reconcile(ctx, RequestFor(rvD1))).ToNot(Requeue(), "should not requeue after successful assignment")
-					updatedRV := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvD1), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-					return updatedRV
-				}).Should(HaveField("Status.DRBD.Config.DeviceMinor", PointTo(BeNumerically("==", v1alpha1.RVMinDeviceMinor+3))), "should assign deviceMinor 3 to D1")
-
-				// Reconcile any volume to trigger duplicate detection
-				Expect(rec.Reconcile(ctx, RequestFor(rvA1))).ToNot(Requeue(), "should trigger duplicate detection")
-
-				By("Verifying error messages are set for duplicate volumes")
-				Eventually(func(g Gomega) {
-					// Check A1 and A2 have duplicate error
-					updatedA1 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA1), updatedA1)).To(Succeed())
-					g.Expect(updatedA1).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
-						SatisfyAll(
-							ContainSubstring("deviceMinor"),
-							ContainSubstring("0"),
-							ContainSubstring("is used by volumes:"),
-							ContainSubstring("volume-dup-a1"),
-							ContainSubstring("volume-dup-a2"),
-						),
-					), "A1 should have duplicate error message")
-
-					updatedA2 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA2), updatedA2)).To(Succeed())
-					g.Expect(updatedA2).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
-						SatisfyAll(
-							ContainSubstring("deviceMinor"),
-							ContainSubstring("0"),
-							ContainSubstring("is used by volumes:"),
-							ContainSubstring("volume-dup-a1"),
-							ContainSubstring("volume-dup-a2"),
-						),
-					), "A2 should have duplicate error message")
-
-					// Check B1, B2, B3 have duplicate error
-					updatedB1 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB1), updatedB1)).To(Succeed())
-					g.Expect(updatedB1).To(HaveField("Status.Errors.DuplicateDeviceMinor.Message",
-						SatisfyAll(
-							ContainSubstring("deviceMinor"),
-							ContainSubstring("1"),
-							ContainSubstring("is used by volumes:"),
-							ContainSubstring("volume-dup-b1"),
-							ContainSubstring("volume-dup-b2"),
-							ContainSubstring("volume-dup-b3"),
-						),
-					), "B1 should have duplicate error message")
-
-					updatedB2 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB2), updatedB2)).To(Succeed())
-					g.Expect(updatedB2).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B2 should have duplicate error")
-
-					updatedB3 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					g.Expect(updatedB3).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B3 should have duplicate error")
-
-					// Check C1 has no error (single volume, no duplicate)
-					updatedC1 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvC1), updatedC1)).To(Succeed())
-					g.Expect(updatedC1).To(Or(
-						HaveField("Status.Errors", BeNil()),
-						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
-					), "C1 should not have duplicate error")
-
-					// Check D1 has no error (single volume, no duplicate)
-					updatedD1 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvD1), updatedD1)).To(Succeed())
-					g.Expect(updatedD1).To(Or(
-						HaveField("Status.Errors", BeNil()),
-						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
-					), "D1 should not have duplicate error")
-				}).Should(Succeed(), "error messages should be set correctly")
-
-				By("Removing A1 and B1, verifying partial resolution")
-				Expect(cl.Delete(ctx, rvA1)).To(Succeed(), "should delete A1")
-				Expect(cl.Delete(ctx, rvB1)).To(Succeed(), "should delete B1")
-				// Reconcile volumes to trigger error clearing
-				// Note: We need to reconcile all volumes to trigger duplicate detection for all volumes
-				Expect(rec.Reconcile(ctx, RequestFor(rvA2))).ToNot(Requeue(), "should trigger error clearing for A2")
-				Expect(rec.Reconcile(ctx, RequestFor(rvB2))).ToNot(Requeue(), "should trigger error clearing for B2")
-				Expect(rec.Reconcile(ctx, RequestFor(rvB3))).ToNot(Requeue(), "should trigger error clearing for B3")
-
-				Eventually(func(g Gomega) {
-					// A2 should have no error (only one volume left with deviceMinor=0)
-					updatedA2 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvA2), updatedA2)).To(Succeed())
-					g.Expect(updatedA2).To(Or(
-						HaveField("Status.Errors", BeNil()),
-						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
-					), "A2 should not have duplicate error after A1 deletion")
-
-					// B2 and B3 should still have errors (2 volumes still share deviceMinor=1)
-					updatedB2 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB2), updatedB2)).To(Succeed())
-					g.Expect(updatedB2).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B2 should still have duplicate error")
-
-					updatedB3 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					g.Expect(updatedB3).To(HaveField("Status.Errors.DuplicateDeviceMinor", Not(BeNil())), "B3 should still have duplicate error")
-				}).Should(Succeed(), "partial resolution should work correctly")
-
-				By("Removing B2, verifying full resolution")
-				Expect(cl.Delete(ctx, rvB2)).To(Succeed(), "should delete B2")
-
-				// Reconcile B3 to trigger error clearing
-				// Note: We need to reconcile volumes to trigger duplicate detection for all volumes
-				Expect(rec.Reconcile(ctx, RequestFor(rvB3))).ToNot(Requeue(), "should trigger error clearing for B3")
-
-				Eventually(func(g Gomega) {
-					// B3 should have no error (only one volume left with deviceMinor=1)
-					updatedB3 := &v1alpha1.ReplicatedVolume{}
-					g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvB3), updatedB3)).To(Succeed())
-					g.Expect(updatedB3).To(Or(
-						HaveField("Status.Errors", BeNil()),
-						HaveField("Status.Errors.DuplicateDeviceMinor", BeNil()),
-					), "B3 should not have duplicate error after B2 deletion")
-				}).Should(Succeed(), "full resolution should work correctly")
-			})
-
 			When("assigning deviceMinor sequentially and filling gaps", func() {
 				var (
 					rvSeqList []*v1alpha1.ReplicatedVolume
@@ -472,6 +275,8 @@ var _ = Describe("Reconciler", func() {
 					for _, rv := range rvGapList {
 						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 					}
+					// Reinitialize reconciler with cache populated from existing volumes
+					rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
 				})
 
 				It("assigns deviceMinor sequentially and fills gaps", func(ctx SpecContext) {
@@ -509,6 +314,8 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("does not reassign deviceMinor and is idempotent", func(ctx SpecContext) {
+				// Reinitialize reconciler with cache populated from existing volumes
+				rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
 				By("Reconciling multiple times and verifying deviceMinor remains unchanged")
 				Eventually(func(g Gomega) *v1alpha1.ReplicatedVolume {
 					for i := 0; i < 3; i++ {
@@ -565,6 +372,8 @@ var _ = Describe("Reconciler", func() {
 		JustBeforeEach(func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rvExisting)).To(Succeed(), "should create existing ReplicatedVolume")
 			Expect(cl.Create(ctx, rvNew)).To(Succeed(), "should create new ReplicatedVolume")
+			// Reinitialize reconciler with cache populated from existing volumes
+			rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
 		})
 
 		It("treats zero-value deviceMinor as unassigned and picks next free value", func(ctx SpecContext) {

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -108,10 +109,17 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	log.V(4).Info("Calculated diskful replica count", "count", neededNumberOfReplicas)
 
 	// Get all RVRs for this RV
-	totalRvrMap, err := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log)
-	if err != nil {
+	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
+	if err = r.cl.List(ctx, rvrList); err != nil {
+		log.Error(err, "listing all ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
+	rvrList.Items = slices.DeleteFunc(
+		rvrList.Items,
+		func(rvr v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Spec.ReplicatedVolumeName != rv.Name },
+	)
+
+	totalRvrMap := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log, rvrList.Items)
 
 	deletedRvrMap, nonDeletedRvrMap := splitReplicasByDeletionStatus(totalRvrMap)
 
@@ -120,7 +128,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	switch {
 	case len(nonDeletedRvrMap) == 0:
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
-		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
+		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log, &rvrList.Items)
 		if err != nil {
 			log.Error(err, "creating ReplicatedVolumeReplica")
 			return reconcile.Result{}, err
@@ -156,7 +164,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		log.Info("Creating replicas", "creatingNumberOfReplicas", creatingNumberOfReplicas)
 		for i := 0; i < creatingNumberOfReplicas; i++ {
 			log.V(4).Info("Creating replica", "replica", i)
-			err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log)
+			err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log, &rvrList.Items)
 			if err != nil {
 				log.Error(err, "creating ReplicatedVolumeReplica")
 				return reconcile.Result{}, err
@@ -190,24 +198,23 @@ func getDiskfulReplicaCountFromReplicatedStorageClass(rsc *v1alpha1.ReplicatedSt
 // getDiskfulReplicatedVolumeReplicas gets all Diskful ReplicatedVolumeReplica objects for the given ReplicatedVolume
 // by the spec.replicatedVolumeName and spec.type fields. Returns a map with RVR name as key and RVR object as value.
 // Returns empty map if no RVRs are found.
-func getDiskfulReplicatedVolumeReplicas(ctx context.Context, cl client.Client, rv *v1alpha1.ReplicatedVolume, log logr.Logger) (map[string]*v1alpha1.ReplicatedVolumeReplica, error) {
-	allRvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	err := cl.List(ctx, allRvrList)
-	if err != nil {
-		log.Error(err, "listing all ReplicatedVolumeReplicas")
-		return nil, err
-	}
-
+func getDiskfulReplicatedVolumeReplicas(
+	_ context.Context,
+	_ client.Client,
+	rv *v1alpha1.ReplicatedVolume,
+	_ logr.Logger,
+	rvRVRs []v1alpha1.ReplicatedVolumeReplica,
+) map[string]*v1alpha1.ReplicatedVolumeReplica {
 	// Filter by spec.replicatedVolumeName and build map
 	rvrMap := make(map[string]*v1alpha1.ReplicatedVolumeReplica)
 
-	for i := range allRvrList.Items {
-		if allRvrList.Items[i].Spec.ReplicatedVolumeName == rv.Name && allRvrList.Items[i].Spec.Type == v1alpha1.ReplicaTypeDiskful {
-			rvrMap[allRvrList.Items[i].Name] = &allRvrList.Items[i]
+	for i := range rvRVRs {
+		if rvRVRs[i].Spec.ReplicatedVolumeName == rv.Name && rvRVRs[i].Spec.Type == v1alpha1.ReplicaTypeDiskful {
+			rvrMap[rvRVRs[i].Name] = &rvRVRs[i]
 		}
 	}
 
-	return rvrMap, nil
+	return rvrMap
 }
 
 // splitReplicasByDeletionStatus splits replicas into two maps: one with replicas that have DeletionTimestamp,
@@ -236,17 +243,26 @@ func isRvrReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.
-func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme *runtime.Scheme, rv *v1alpha1.ReplicatedVolume, log logr.Logger) error {
-	generateName := fmt.Sprintf("%s-", rv.Name)
-
+func createReplicatedVolumeReplica(
+	ctx context.Context,
+	cl client.Client,
+	scheme *runtime.Scheme,
+	rv *v1alpha1.ReplicatedVolume,
+	log logr.Logger,
+	otherRVRs *[]v1alpha1.ReplicatedVolumeReplica,
+) error {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: generateName,
+			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			Type:                 v1alpha1.ReplicaTypeDiskful,
 		},
+	}
+
+	if !rvr.ChooseNewName(*otherRVRs) {
+		return fmt.Errorf("unable to create new rvr: too many existing replicas for rv %s", rv.Name)
 	}
 
 	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
@@ -256,9 +272,11 @@ func createReplicatedVolumeReplica(ctx context.Context, cl client.Client, scheme
 
 	err := cl.Create(ctx, rvr)
 	if err != nil {
-		log.Error(err, "creating ReplicatedVolumeReplica", "generateName", generateName)
+		log.Error(err, "creating ReplicatedVolumeReplica")
 		return err
 	}
+
+	*otherRVRs = append((*otherRVRs), *rvr)
 
 	log.Info("Created ReplicatedVolumeReplica", "name", rvr.Name)
 

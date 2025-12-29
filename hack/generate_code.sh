@@ -19,7 +19,7 @@ set -e
 cd api
 
 # crds
-go get sigs.k8s.io/controller-tools/cmd/controller-gen
+go get sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19
 go run sigs.k8s.io/controller-tools/cmd/controller-gen \
     object:headerFile=../hack/boilerplate.txt \
     crd paths=./v1alpha1 output:crd:dir=../crds \
@@ -31,7 +31,7 @@ go run k8s.io/code-generator/cmd/deepcopy-gen -v 2 \
     ./linstor
 
 # remove development dependencies
-go mod tidy
+go mod tidy -go=1.24.11
 
 cd ..
 

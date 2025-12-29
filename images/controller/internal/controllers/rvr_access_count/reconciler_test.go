@@ -179,7 +179,6 @@ var _ = Describe("Reconciler", func() {
 				rv.Spec.PublishOn = []string{"node-1"}
 				diskfulRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "diskful-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -195,6 +194,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
 				}
+				diskfulRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -220,7 +220,6 @@ var _ = Describe("Reconciler", func() {
 				rv.Spec.PublishOn = []string{"node-1"}
 				tieBreakerRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "tiebreaker-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -236,6 +235,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeTieBreaker,
 					},
 				}
+				tieBreakerRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -261,7 +261,6 @@ var _ = Describe("Reconciler", func() {
 				rv.Spec.PublishOn = []string{}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "access-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -277,6 +276,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
+				accessRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -304,7 +304,6 @@ var _ = Describe("Reconciler", func() {
 				}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "access-rvr",
 						OwnerReferences: []metav1.OwnerReference{
 							{
 								APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -320,6 +319,7 @@ var _ = Describe("Reconciler", func() {
 						Type:                 v1alpha1.ReplicaTypeAccess,
 					},
 				}
+				accessRVR.SetNameWithNodeID(10)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -563,7 +563,6 @@ var _ = Describe("Reconciler", func() {
 			}
 			accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "access-rvr-to-delete",
 					OwnerReferences: []metav1.OwnerReference{
 						{
 							APIVersion: "storage.deckhouse.io/v1alpha1",
@@ -579,6 +578,7 @@ var _ = Describe("Reconciler", func() {
 					Type:                 v1alpha1.ReplicaTypeAccess,
 				},
 			}
+			accessRVR.SetNameWithNodeID(10)
 			clientBuilder = clientBuilder.WithInterceptorFuncs(
 				interceptor.Funcs{
 					Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {

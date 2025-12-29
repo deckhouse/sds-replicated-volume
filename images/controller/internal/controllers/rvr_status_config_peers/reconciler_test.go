@@ -299,7 +299,6 @@ var _ = Describe("Reconciler", func() {
 							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
 							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
-							Entry("without nodeId", func() { secondRvr.Status.DRBD.Config.NodeId = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
 							Entry("without owner reference", func() { secondRvr.OwnerReferences = []metav1.OwnerReference{} }),
 							Entry("with other owner reference", func() {
@@ -443,7 +442,6 @@ var _ = Describe("Reconciler", func() {
 							{IPv4: "192.168.1.1", Port: 7001}, // Same IP, different port
 							{IPv4: "192.168.1.2", Port: 7000},
 						}
-						nodeIDs := []uint{1, 2, 3}
 						for i := range rvrList {
 							if rvrList[i].Status == nil {
 								rvrList[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
@@ -454,7 +452,6 @@ var _ = Describe("Reconciler", func() {
 							if rvrList[i].Status.DRBD.Config == nil {
 								rvrList[i].Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 							}
-							rvrList[i].Status.DRBD.Config.NodeId = &nodeIDs[i]
 							rvrList[i].Status.DRBD.Config.Address = &addresses[i]
 						}
 					})
