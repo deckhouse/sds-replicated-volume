@@ -198,10 +198,6 @@ spec:
                         - ipv4
                         - port
                         type: object
-                      nodeId:
-                        maximum: 7
-                        minimum: 0
-                        type: integer
                       peers:
                         additionalProperties:
                           properties:

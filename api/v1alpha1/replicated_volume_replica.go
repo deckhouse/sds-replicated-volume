@@ -58,36 +58,42 @@ type ReplicatedVolumeReplica struct {
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
-func (rvr *ReplicatedVolumeReplica) NodeIdFromName(prefix string) (int, bool) {
-	idStr := strings.TrimPrefix(rvr.Name, prefix)
+func (rvr *ReplicatedVolumeReplica) NodeId() (uint, bool) {
+	idx := strings.LastIndex(rvr.Name, "-")
+	if idx < 0 {
+		return 0, false
+	}
 
-	id, err := strconv.Atoi(idStr)
+	id, err := strconv.ParseUint(rvr.Name[idx+1:], 10, 0)
 	if err != nil {
 		return 0, false
 	}
-	return id, true
+	return uint(id), true
+}
+
+func (rvr *ReplicatedVolumeReplica) SetNameWithNodeId(nodeId uint) {
+	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeId)
 }
 
 func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
-	reservedNodeIds := make([]int, 0, RVRMaxNodeID)
+	reservedNodeIds := make([]uint, 0, RVRMaxNodeID)
 
-	prefix := rvr.Spec.ReplicatedVolumeName + "-"
 	for i := range otherRVRs {
 		otherRVR := &otherRVRs[i]
 		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
 			continue
 		}
 
-		id, ok := otherRVR.NodeIdFromName(prefix)
+		id, ok := otherRVR.NodeId()
 		if !ok {
 			continue
 		}
 		reservedNodeIds = append(reservedNodeIds, id)
 	}
 
-	for i := int(RVRMinNodeID); i <= int(RVRMaxNodeID); i++ {
+	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {
 		if !slices.Contains(reservedNodeIds, i) {
-			rvr.Name = prefix + strconv.Itoa(i)
+			rvr.SetNameWithNodeId(i)
 			return true
 		}
 	}
@@ -180,13 +186,6 @@ type ReplicatedVolumeReplicaList struct {
 
 // +kubebuilder:object:generate=true
 type DRBDConfig struct {
-	// TODO: forbid changing properties more then once
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	// +optional
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId *uint `json:"nodeId"`
-
 	// +optional
 	Address *Address `json:"address,omitempty"`
 

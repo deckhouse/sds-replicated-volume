@@ -94,11 +94,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return true
 		}
 
-		if rvr.Status.DRBD.Config.NodeId == nil {
-			log.V(2).Info("No status.drbd.config.nodId. Skipping")
-			return true
-		}
-
 		if rvr.Status.DRBD.Config.Address == nil {
 			log.V(2).Info("No status.drbd.config.address. Skipping")
 			return true
@@ -113,8 +108,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			log.Error(ErrMultiplePeersOnSameNode, "Can't build peers map")
 			return reconcile.Result{}, ErrMultiplePeersOnSameNode
 		}
+		nodeId, _ := rvr.NodeId()
 		peers[rvr.Spec.NodeName] = v1alpha1.Peer{
-			NodeId:   *rvr.Status.DRBD.Config.NodeId,
+			NodeId:   nodeId,
 			Address:  *rvr.Status.DRBD.Config.Address,
 			Diskless: rvr.Spec.IsDiskless(),
 		}

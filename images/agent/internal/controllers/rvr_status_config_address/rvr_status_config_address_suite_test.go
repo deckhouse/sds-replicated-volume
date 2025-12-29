@@ -47,7 +47,6 @@ func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alp
 		rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 	}
 
-	rvr.Status.DRBD.Config.NodeId = &nodeID
 	rvr.Status.DRBD.Config.Address = &address
 }
 

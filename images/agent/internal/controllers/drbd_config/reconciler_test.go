@@ -543,7 +543,6 @@ func readyRVR(
 			LVMLogicalVolumeName: lvmLogicalVolumeName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{
-					NodeId:           &nodeID,
 					Address:          &address,
 					Peers:            peers,
 					PeersInitialized: true,
@@ -572,7 +571,6 @@ func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 			LVMLogicalVolumeName: llvName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{
-					NodeId:           ptrUint(0),
 					Address:          &v1alpha1.Address{IPv4: testNodeIPv4, Port: port(3)},
 					PeersInitialized: true,
 				},
