@@ -20,7 +20,7 @@ limitations under the License.
 // # Controller Responsibilities
 //
 // The controller ensures proper lifecycle and metadata management by:
-//   - Adding the controller finalizer (sds-replicated-volume.storage.deckhouse.io/controller) to new RVs
+//   - Adding the controller finalizer (sds-replicated-volume.deckhouse.io/controller) to new RVs
 //   - Removing the finalizer when deletion is safe (all RVRs are gone)
 //   - Setting the replicated-storage-class label on RVs
 //
@@ -33,7 +33,7 @@ limitations under the License.
 // # Reconciliation Flow
 //
 // When RV is not being deleted (metadata.deletionTimestamp is not set):
-//  1. Check if the finalizer sds-replicated-volume.storage.deckhouse.io/controller exists
+//  1. Check if the finalizer sds-replicated-volume.deckhouse.io/controller exists
 //  2. If not present, add it to rv.metadata.finalizers
 //  3. Ensure replicated-storage-class label is set from rv.spec.replicatedStorageClassName
 //
@@ -44,7 +44,7 @@ limitations under the License.
 //
 // # Labels Managed
 //
-//   - sds-replicated-volume.storage.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass
+//   - sds-replicated-volume.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass
 //
 // # Special Notes
 //

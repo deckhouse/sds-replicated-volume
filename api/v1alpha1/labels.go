@@ -20,7 +20,7 @@ package v1alpha1
 // Pattern: if key is short/generic -> module name in prefix (like finalizers)
 //
 //	if key contains module name -> short prefix (like node label storage.deckhouse.io/sds-replicated-volume-node)
-const LabelPrefix = "sds-replicated-volume.storage.deckhouse.io/"
+const LabelPrefix = "sds-replicated-volume.deckhouse.io/"
 
 const (
 	// LabelReplicatedStorageClass is the label key for ReplicatedStorageClass name on RV and RVR

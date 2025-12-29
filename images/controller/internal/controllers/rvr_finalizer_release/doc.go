@@ -30,8 +30,8 @@ limitations under the License.
 // # Background
 //
 // The agent sets two finalizers on each RVR:
-//   - sds-replicated-volume.storage.deckhouse.io/agent (F/agent)
-//   - sds-replicated-volume.storage.deckhouse.io/controller (F/controller)
+//   - sds-replicated-volume.deckhouse.io/agent (F/agent)
+//   - sds-replicated-volume.deckhouse.io/controller (F/controller)
 //
 // The agent will not remove DRBD resources or remove its finalizer while F/controller
 // remains. This controller's job is to release F/controller only when safe to do so.
@@ -79,7 +79,7 @@ limitations under the License.
 //     e. Verify count meets replication requirements
 //     f. Verify current RVR node not in rv.status.publishedOn
 //  6. If all conditions met:
-//     - Remove sds-replicated-volume.storage.deckhouse.io/controller from finalizers
+//     - Remove sds-replicated-volume.deckhouse.io/controller from finalizers
 //
 // # Status Updates
 //

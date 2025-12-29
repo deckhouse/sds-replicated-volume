@@ -126,12 +126,12 @@ TB в любой ситуации поддерживает нечетное, и 
 
 ### Финализаторы ресурсов
 - `rv`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.deckhouse.io/controller`
 - `rvr`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
-  - `sds-replicated-volume.storage.deckhouse.io/agent`
+  - `sds-replicated-volume.deckhouse.io/controller`
+  - `sds-replicated-volume.deckhouse.io/agent`
 - `llv`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.deckhouse.io/controller`
 
 # Контракт данных: `ReplicatedVolume`
 ## `spec`
@@ -303,8 +303,8 @@ TB в любой ситуации поддерживает нечетное, и 
 
 Последовательность реконсайла, если не заполнен `rvr.metadata.deletionTimestamp`:
 - ставим финализаторы на rvr
-  - `sds-replicated-volume.storage.deckhouse.io/agent`
-  - `sds-replicated-volume.storage.deckhouse.io/controller`
+  - `sds-replicated-volume.deckhouse.io/agent`
+  - `sds-replicated-volume.deckhouse.io/controller`
 - пишем конфиг во временный файл и проверяем валидность
   - команда (новая, нужно реализовать аналогично другим): `drbdadm --config-to-test <...>.res_tmp --config-to-exclude <...>.res sh-nop`
   - в случае невалидного конфига, нужно вывести ошибку в `rvr.status.drbd.errors.<...>` и прекратить реконсайл
@@ -337,7 +337,7 @@ TB в любой ситуации поддерживает нечетное, и 
   - см. существующую реализацию
 
 Если заполнен `rvr.metadata.deletionTimestamp`:
-- если есть другие финализаторы, кроме `sds-replicated-volume.storage.deckhouse.io/agent`,
+- если есть другие финализаторы, кроме `sds-replicated-volume.deckhouse.io/agent`,
 то прекращаем реконсайл, т.к. агент должен быть последним, кто удаляет свой финализатор
 - выполнить `drbdadm down`
   - см. существующую реализацию
@@ -643,8 +643,8 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 ### Контекст
 
 Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD.
-  - `sds-replicated-volume.storage.deckhouse.io/agent` (далее - `F/agent`)
-  - `sds-replicated-volume.storage.deckhouse.io/controller` (далее - `F/controller`)
+  - `sds-replicated-volume.deckhouse.io/agent` (далее - `F/agent`)
+  - `sds-replicated-volume.deckhouse.io/controller` (далее - `F/controller`)
 
 При удалении RVR, agent не удаляет ресурс из DRBD, и не снимает финализаторы,
 пока стоит `F/controller`.
@@ -662,7 +662,7 @@ Failure domain (FD) - либо - нода, либо, в случае, если `
 
 
 ### Вывод
- - удалить `rvr.metadata.finalizers[sds-replicated-volume.storage.deckhouse.io/controller]`
+ - удалить `rvr.metadata.finalizers[sds-replicated-volume.deckhouse.io/controller]`
 
 ## `rvr-owner-reference-controller`
 
