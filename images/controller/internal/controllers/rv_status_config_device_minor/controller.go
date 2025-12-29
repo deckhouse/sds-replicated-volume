@@ -17,8 +17,6 @@ limitations under the License.
 package rvstatusconfigdeviceminor
 
 import (
-	"context"
-	"errors"
 	"fmt"
 
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -38,24 +36,21 @@ const (
 
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
-
 	log := mgr.GetLogger().WithName(RVStatusConfigDeviceMinorControllerName)
 
-	dmCache, err := initializeDMCache(context.Background(), cl)
-	if err != nil {
-		return err
-	}
+	// Create cache initializer that will populate the cache after leader election.
+	// This ensures the cache is populated with the latest state right before
+	// the controller starts processing events, avoiding stale cache issues.
+	cacheSource := NewCacheInitializer(mgr)
 
-	log.Info("initialized device minor cache",
-		"len", dmCache.Len(),
-		"max", dmCache.Max(),
-		"releasedLen", dmCache.ReleasedLen(),
-	)
+	if err := mgr.Add(cacheSource); err != nil {
+		return fmt.Errorf("adding cache initializer runnable: %w", err)
+	}
 
 	rec := NewReconciler(
 		cl,
 		log.WithName("Reconciler"),
-		dmCache,
+		cacheSource,
 	)
 
 	return builder.ControllerManagedBy(mgr).
@@ -72,7 +67,12 @@ func BuildController(mgr manager.Manager) error {
 						return false
 					},
 					DeleteFunc: func(e event.TypedDeleteEvent[client.Object]) bool {
-						dmCache.Release(e.Object.GetName())
+						// Release device minor from cache if available.
+						// If cache is not ready yet, that's fine - deletions during startup
+						// will be handled correctly when the cache is initialized.
+						if cache := cacheSource.CacheOrNil(); cache != nil {
+							cache.Release(e.Object.GetName())
+						}
 						return false
 					},
 					GenericFunc: func(event.TypedGenericEvent[client.Object]) bool {
@@ -90,46 +90,4 @@ func deviceMinor(rv *v1alpha1.ReplicatedVolume) (int, bool) {
 		return int(*rv.Status.DRBD.Config.DeviceMinor), true
 	}
 	return 0, false
-}
-
-func initializeDMCache(ctx context.Context, cl client.Client) (*DeviceMinorCache, error) {
-	dmCache := NewDeviceMinorCache()
-
-	rvList := &v1alpha1.ReplicatedVolumeList{}
-	if err := cl.List(ctx, rvList); err != nil {
-		return nil, fmt.Errorf("listing rvs: %w", err)
-	}
-
-	rvByName := make(map[string]*v1alpha1.ReplicatedVolume, len(rvList.Items))
-	dmByRVName := make(map[string]DeviceMinor, len(rvList.Items))
-
-	for i := range rvList.Items {
-		rv := &rvList.Items[i]
-		rvByName[rv.Name] = rv
-
-		deviceMinorVal, isSet := deviceMinor(rv)
-		if !isSet {
-			continue
-		}
-
-		dm, valid := NewDeviceMinor(deviceMinorVal)
-		if !valid {
-			return nil, fmt.Errorf("invalid device minor for rv %s: %d", rv.Name, rv.Status.DRBD.Config.DeviceMinor)
-		}
-
-		dmByRVName[rv.Name] = dm
-	}
-
-	if initErr := dmCache.Initialize(dmByRVName); initErr != nil {
-		if dupErr, ok := initErr.(DuplicateDeviceMinorError); ok {
-			for _, rvName := range dupErr.ConflictingRVNames {
-				if err := patchDupErr(ctx, cl, rvByName[rvName], dupErr.ConflictingRVNames); err != nil {
-					initErr = errors.Join(initErr, err)
-				}
-			}
-		}
-		return nil, fmt.Errorf("initializing device minor cache: %w", initErr)
-	}
-
-	return dmCache, nil
 }

@@ -28,9 +28,9 @@ import (
 )
 
 type Reconciler struct {
-	cl      client.Client
-	log     logr.Logger
-	dmCache *DeviceMinorCache
+	cl          client.Client
+	log         logr.Logger
+	cacheSource DeviceMinorCacheSource
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
@@ -39,12 +39,12 @@ var _ reconcile.Reconciler = (*Reconciler)(nil)
 func NewReconciler(
 	cl client.Client,
 	log logr.Logger,
-	dmCache *DeviceMinorCache,
+	cacheSource DeviceMinorCacheSource,
 ) *Reconciler {
 	return &Reconciler{
-		cl:      cl,
-		log:     log,
-		dmCache: dmCache,
+		cl:          cl,
+		log:         log,
+		cacheSource: cacheSource,
 	}
 }
 
@@ -54,6 +54,13 @@ func (r *Reconciler) Reconcile(
 ) (reconcile.Result, error) {
 	log := r.log.WithValues("req", req)
 	log.Info("Reconciling")
+
+	// Wait for cache to be ready (blocks until initialized after leader election)
+	dmCache, err := r.cacheSource.DeviceMinorCache(ctx)
+	if err != nil {
+		log.Error(err, "Failed to get device minor cache")
+		return reconcile.Result{}, err
+	}
 
 	// Get the ReplicatedVolume
 	rv := &v1alpha1.ReplicatedVolume{}
@@ -72,7 +79,7 @@ func (r *Reconciler) Reconcile(
 	// 	return reconcile.Result{}, nil
 	// }
 
-	dm, err := r.dmCache.GetOrCreate(rv.Name)
+	dm, err := dmCache.GetOrCreate(rv.Name)
 	if err != nil {
 		if patchErr := patchRV(ctx, r.cl, rv, err.Error(), nil); patchErr != nil {
 			err = errors.Join(err, patchErr)

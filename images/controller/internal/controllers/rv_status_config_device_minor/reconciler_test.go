@@ -38,6 +38,24 @@ import (
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 )
 
+// testCacheSource is a simple test implementation of DeviceMinorCacheSource
+// that returns a pre-initialized cache immediately without blocking.
+type testCacheSource struct {
+	cache *rvstatusconfigdeviceminor.DeviceMinorCache
+}
+
+func newTestCacheSource(cache *rvstatusconfigdeviceminor.DeviceMinorCache) *testCacheSource {
+	return &testCacheSource{cache: cache}
+}
+
+func (s *testCacheSource) DeviceMinorCache(_ context.Context) (*rvstatusconfigdeviceminor.DeviceMinorCache, error) {
+	return s.cache, nil
+}
+
+func (s *testCacheSource) CacheOrNil() *rvstatusconfigdeviceminor.DeviceMinorCache {
+	return s.cache
+}
+
 // initReconcilerFromClient creates a new reconciler with cache initialized from existing volumes in the client.
 // This simulates the production behavior where cache is initialized at controller startup.
 func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Logger) *rvstatusconfigdeviceminor.Reconciler {
@@ -58,7 +76,7 @@ func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Lo
 	}
 
 	ExpectWithOffset(1, dmCache.Initialize(dmByRVName)).To(Succeed(), "should initialize cache")
-	return rvstatusconfigdeviceminor.NewReconciler(cl, log, dmCache)
+	return rvstatusconfigdeviceminor.NewReconciler(cl, log, newTestCacheSource(dmCache))
 }
 
 var _ = Describe("Reconciler", func() {
@@ -93,7 +111,8 @@ var _ = Describe("Reconciler", func() {
 
 	JustBeforeEach(func() {
 		cl = clientBuilder.Build()
-		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr, rvstatusconfigdeviceminor.NewDeviceMinorCache())
+		// Use a test cache source that returns an empty cache immediately
+		rec = rvstatusconfigdeviceminor.NewReconciler(cl, GinkgoLogr, newTestCacheSource(rvstatusconfigdeviceminor.NewDeviceMinorCache()))
 	})
 
 	It("returns no error when ReplicatedVolume does not exist", func(ctx SpecContext) {
