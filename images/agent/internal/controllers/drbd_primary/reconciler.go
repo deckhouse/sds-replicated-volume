@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -42,10 +41,6 @@ type Reconciler struct {
 }
 
 var _ reconcile.Reconciler = (*Reconciler)(nil)
-
-const (
-	reconcileAfter = 10 * time.Second
-)
 
 // NewReconciler is a small helper constructor that is primarily useful for tests.
 func NewReconciler(cl client.Client, log logr.Logger, scheme *runtime.Scheme, cfg env.Config) *Reconciler {
@@ -76,13 +71,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	// Check if this RVR belongs to this node
-	if rvr.Spec.NodeName != r.cfg.NodeName() {
-		log.V(4).Info("ReplicatedVolumeReplica does not belong to this node, skipping")
+	if thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors(r.cfg.NodeName(), rvr) {
+		log.V(4).Info("ReplicatedVolumeReplica does not pass thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors check, skipping")
 		return reconcile.Result{}, nil
 	}
 
-	wantPrimary, actuallyPrimary, initialized := r.rvrDesiredAndActualRole(rvr)
+	wantPrimary, actuallyPrimary, initialized := rvrDesiredAndActualRole(rvr)
 	if !initialized {
 		log.V(4).Info("ReplicatedVolumeReplica is not initialized, skipping")
 		return reconcile.Result{}, nil
@@ -100,11 +94,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if wantPrimary {
 		// promote
-		canPromote, err := r.canPromote(ctx, log, rvr)
-		if err != nil {
-			return reconcile.Result{}, err
-		}
-		if !canPromote {
+		if !r.canPromote(log, rvr) {
 			return reconcile.Result{}, nil
 		}
 	} // we can always demote
@@ -212,12 +202,7 @@ func (r *Reconciler) updateErrorStatus(
 
 func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	// Check if there are any errors to clear
-	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
-		return nil
-	}
-
-	// Only patch if there are errors to clear
-	if rvr.Status.DRBD.Errors.LastPrimaryError == nil && rvr.Status.DRBD.Errors.LastSecondaryError == nil {
+	if allErrorsAreNil(rvr) {
 		return nil
 	}
 
@@ -228,7 +213,7 @@ func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVo
 	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
-func (r *Reconciler) rvrDesiredAndActualRole(rvr *v1alpha1.ReplicatedVolumeReplica) (wantPrimary bool, actuallyPrimary bool, initialized bool) {
+func rvrDesiredAndActualRole(rvr *v1alpha1.ReplicatedVolumeReplica) (wantPrimary bool, actuallyPrimary bool, initialized bool) {
 	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil || rvr.Status.DRBD.Config.Primary == nil {
 		// not initialized
 		return
@@ -245,46 +230,26 @@ func (r *Reconciler) rvrDesiredAndActualRole(rvr *v1alpha1.ReplicatedVolumeRepli
 	return
 }
 
-func (r *Reconciler) canPromote(ctx context.Context, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) (bool, error) {
+func (r *Reconciler) canPromote(log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	if rvr.DeletionTimestamp != nil {
 		log.V(1).Info("can not promote, because deleted")
-		return false, nil
+		return false
 	}
 
 	if rvr.Status.DRBD.Actual == nil || !rvr.Status.DRBD.Actual.InitialSyncCompleted {
 		log.V(1).Info("can not promote, because initialSyncCompleted is false")
-		return false, nil
+		return false
 	}
 
-	rvReady, err := r.rvIsReady(ctx, rvr.Spec.ReplicatedVolumeName)
-	if err != nil {
-		return false, err
-	}
-
-	if !rvReady {
-		log.V(1).Info("can not promote, because RV is not IOReady or has no controller finalizer")
-	}
-
-	return true, nil
+	return true
 }
 
-// rvIsReady checks if the ReplicatedVolume is IOReady.
-// It returns true if the ReplicatedVolume exists and has IOReady condition set to True,
-// false if the condition is not True, and an error if the ReplicatedVolume cannot be retrieved.
-func (r *Reconciler) rvIsReady(ctx context.Context, rvName string) (bool, error) {
-	rv := &v1alpha1.ReplicatedVolume{}
-	err := r.cl.Get(ctx, client.ObjectKey{Name: rvName}, rv)
-	if err != nil {
-		return false, err
+func allErrorsAreNil(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
+		return true
 	}
-
-	if !v1alpha1.HasControllerFinalizer(rv) {
-		return false, nil
+	if rvr.Status.DRBD.Errors.LastPrimaryError == nil && rvr.Status.DRBD.Errors.LastSecondaryError == nil {
+		return true
 	}
-
-	if rv.Status == nil {
-		return false, nil
-	}
-
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady), nil
+	return false
 }
