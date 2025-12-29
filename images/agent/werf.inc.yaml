@@ -5,10 +5,10 @@ fromImage: builder/src
 final: false
 shell:
   install:
-    - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/drbd-utils
-    - cd /src/drbd-utils
+    - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/external/drbd-utils
+    - cd /src/external/drbd-utils
     - git submodule update --init --recursive
-    #- rm -rf /src/drbd-utils/.git # needed for make
+    #- rm -rf /src/external/drbd-utils/.git # needed for make
 
 ---
 # Separate artifact for Go sources - depends on Go code changes
@@ -17,7 +17,7 @@ fromImage: builder/src
 final: false
 git:
   - add: /
-    to: /src
+    to: /src/project
     includePaths:
       - api
       - lib/go
@@ -36,12 +36,12 @@ fromImage: builder/src
 final: false
 import:
   - image: {{ .ImageName }}-drbd-src-artifact
-    add: /src/drbd-utils
-    to: /src/drbd-utils
+    add: /src/external
+    to: /src/external
     before: install
   - image: {{ .ImageName }}-go-src-artifact
-    add: /src
-    to: /src
+    add: /src/project
+    to: /src/project
     before: install
 
 ---
@@ -51,7 +51,7 @@ fromImage: builder/alt
 final: false
 import:
   - image: {{ .ImageName }}-drbd-src-artifact
-    add: /src/drbd-utils
+    add: /src/external/drbd-utils
     to: /src/drbd-utils
     before: install
 git:
@@ -91,7 +91,7 @@ fromImage: builder/golang-alpine
 final: false
 import:
   - image: {{ .ImageName }}-go-src-artifact
-    add: /src
+    add: /src/project
     to: /src
     before: setup
 mount:
