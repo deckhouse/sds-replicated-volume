@@ -65,8 +65,9 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) go
 			return gcustom.MakeMatcher(func(_ any) bool { return false }).
 				WithMessage("expected rvr to have status.drbd.config, but it's nil")
 		}
+		nodeID, _ := rvr.NodeID()
 		expectedPeers[rvr.Spec.NodeName] = v1alpha1.Peer{
-			NodeId:   *rvr.Status.DRBD.Config.NodeId,
+			NodeId:   nodeID,
 			Address:  *rvr.Status.DRBD.Config.Address,
 			Diskless: rvr.Spec.IsDiskless(),
 		}
@@ -75,8 +76,9 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) go
 		HaveField("Status.DRBD.Config.Peers", HaveLen(len(expectedPeerReplicas)-1)),
 		WithTransform(func(rvr v1alpha1.ReplicatedVolumeReplica) map[string]v1alpha1.Peer {
 			ret := maps.Clone(rvr.Status.DRBD.Config.Peers)
+			nodeID, _ := rvr.NodeID()
 			ret[rvr.Spec.NodeName] = v1alpha1.Peer{
-				NodeId:   *rvr.Status.DRBD.Config.NodeId,
+				NodeId:   nodeID,
 				Address:  *rvr.Status.DRBD.Config.Address,
 				Diskless: rvr.Spec.IsDiskless(),
 			}
@@ -86,7 +88,7 @@ func HaveAllPeersSet(expectedPeerReplicas []v1alpha1.ReplicatedVolumeReplica) go
 }
 
 // makeReady sets up an RVR to be in ready state by initializing Status and DRBD.Config with NodeId and Address
-func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alpha1.Address) {
+func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, _ uint, address v1alpha1.Address) {
 	if rvr.Status == nil {
 		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
 	}
@@ -99,7 +101,6 @@ func makeReady(rvr *v1alpha1.ReplicatedVolumeReplica, nodeID uint, address v1alp
 		rvr.Status.DRBD.Config = &v1alpha1.DRBDConfig{}
 	}
 
-	rvr.Status.DRBD.Config.NodeId = &nodeID
 	rvr.Status.DRBD.Config.Address = &address
 }
 

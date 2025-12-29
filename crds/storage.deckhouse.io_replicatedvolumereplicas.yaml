@@ -198,10 +198,6 @@ spec:
                         - ipv4
                         - port
                         type: object
-                      nodeId:
-                        maximum: 7
-                        minimum: 0
-                        type: integer
                       peers:
                         additionalProperties:
                           properties:
@@ -487,6 +483,12 @@ spec:
         - metadata
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name must start with spec.replicatedVolumeName + '-'
+          rule: self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')
+        - message: numeric suffix must be between 0 and 31
+          rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
+            + 1)) <= 31
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName

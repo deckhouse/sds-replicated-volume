@@ -18,6 +18,8 @@ package v1alpha1
 
 import (
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,6 +45,8 @@ import (
 // +kubebuilder:printcolumn:name="InQuorum",type=string,JSONPath=".status.conditions[?(@.type=='InQuorum')].status"
 // +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.conditions[?(@.type=='InSync')].status"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
+// +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -52,6 +56,49 @@ type ReplicatedVolumeReplica struct {
 
 	// +patchStrategy=merge
 	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+}
+
+func (rvr *ReplicatedVolumeReplica) NodeID() (uint, bool) {
+	idx := strings.LastIndex(rvr.Name, "-")
+	if idx < 0 {
+		return 0, false
+	}
+
+	id, err := strconv.ParseUint(rvr.Name[idx+1:], 10, 0)
+	if err != nil {
+		return 0, false
+	}
+	return uint(id), true
+}
+
+func (rvr *ReplicatedVolumeReplica) SetNameWithNodeID(nodeID uint) {
+	rvr.Name = fmt.Sprintf("%s-%d", rvr.Spec.ReplicatedVolumeName, nodeID)
+}
+
+func (rvr *ReplicatedVolumeReplica) ChooseNewName(otherRVRs []ReplicatedVolumeReplica) bool {
+	reservedNodeIDs := make([]uint, 0, RVRMaxNodeID)
+
+	for i := range otherRVRs {
+		otherRVR := &otherRVRs[i]
+		if otherRVR.Spec.ReplicatedVolumeName != rvr.Spec.ReplicatedVolumeName {
+			continue
+		}
+
+		id, ok := otherRVR.NodeID()
+		if !ok {
+			continue
+		}
+		reservedNodeIDs = append(reservedNodeIDs, id)
+	}
+
+	for i := RVRMinNodeID; i <= RVRMaxNodeID; i++ {
+		if !slices.Contains(reservedNodeIDs, i) {
+			rvr.SetNameWithNodeID(i)
+			return true
+		}
+	}
+
+	return false
 }
 
 // SetReplicatedVolume sets the ReplicatedVolumeName in Spec and ControllerReference for the RVR.
@@ -139,13 +186,6 @@ type ReplicatedVolumeReplicaList struct {
 
 // +kubebuilder:object:generate=true
 type DRBDConfig struct {
-	// TODO: forbid changing properties more then once
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=7
-	// +optional
-	//nolint:revive // var-naming: NodeId kept for API compatibility with JSON tag
-	NodeId *uint `json:"nodeId"`
-
 	// +optional
 	Address *Address `json:"address,omitempty"`
 

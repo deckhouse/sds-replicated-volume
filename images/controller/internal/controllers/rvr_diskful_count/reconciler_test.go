@@ -36,23 +36,19 @@ import (
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-//
-//nolint:unparam // name and rv parameters are kept for flexibility in tests
-func createReplicatedVolumeReplica(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
-	return createReplicatedVolumeReplicaWithType(name, rv, scheme, v1alpha1.ReplicaTypeDiskful, ready, deletionTimestamp)
+func createReplicatedVolumeReplica(nodeID uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+	return createReplicatedVolumeReplicaWithType(nodeID, rv, scheme, v1alpha1.ReplicaTypeDiskful, ready, deletionTimestamp)
 }
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
-func createReplicatedVolumeReplicaWithType(name string, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
+func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedVolume, scheme *runtime.Scheme, rvrType v1alpha1.ReplicaType, ready bool, deletionTimestamp *metav1.Time) *v1alpha1.ReplicatedVolumeReplica {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,
 			Type:                 rvrType,
 		},
 	}
+	rvr.SetNameWithNodeID(nodeID)
 
 	if err := controllerutil.SetControllerReference(rv, rvr, scheme); err != nil {
 		panic(fmt.Sprintf("failed to set controller reference: %v", err))
@@ -281,7 +277,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, &now)
+				rvr1 = createReplicatedVolumeReplica(10, rv, scheme, false, &now)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -319,7 +315,7 @@ var _ = Describe("Reconciler", func() {
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, false, nil)
+				rvr1 = createReplicatedVolumeReplica(10, rv, scheme, false, nil)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -338,8 +334,8 @@ var _ = Describe("Reconciler", func() {
 
 			BeforeEach(func() {
 				rsc.Spec.Replication = "None"
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
-				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
+				rvr1 = createReplicatedVolumeReplica(10, rv, scheme, true, nil)
+				rvr2 = createReplicatedVolumeReplica(11, rv, scheme, true, nil)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -360,7 +356,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "Availability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
+					rvr1 = createReplicatedVolumeReplica(10, rv, scheme, true, nil)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -379,7 +375,7 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
-					rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil)
+					rvr1 = createReplicatedVolumeReplica(10, rv, scheme, true, nil)
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -402,22 +398,22 @@ var _ = Describe("Reconciler", func() {
 				Entry("None replication", func() {
 					rsc.Spec.Replication = "None"
 					replicas = []*v1alpha1.ReplicatedVolumeReplica{
-						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
+						createReplicatedVolumeReplica(10, rv, scheme, true, nil),
 					}
 				}),
 				Entry("Availability replication", func() {
 					rsc.Spec.Replication = "Availability"
 					replicas = []*v1alpha1.ReplicatedVolumeReplica{
-						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
-						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
+						createReplicatedVolumeReplica(10, rv, scheme, true, nil),
+						createReplicatedVolumeReplica(11, rv, scheme, true, nil),
 					}
 				}),
 				Entry("ConsistencyAndAvailability replication", func() {
 					rsc.Spec.Replication = "ConsistencyAndAvailability"
 					replicas = []*v1alpha1.ReplicatedVolumeReplica{
-						createReplicatedVolumeReplica("rvr-1", rv, scheme, true, nil),
-						createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil),
-						createReplicatedVolumeReplica("rvr-3", rv, scheme, true, nil),
+						createReplicatedVolumeReplica(10, rv, scheme, true, nil),
+						createReplicatedVolumeReplica(11, rv, scheme, true, nil),
+						createReplicatedVolumeReplica(12, rv, scheme, true, nil),
 					}
 				}),
 				func(beforeEach func()) {
@@ -444,8 +440,8 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				rsc.Spec.Replication = "Availability"
 				now := metav1.Now()
-				rvr1 = createReplicatedVolumeReplica("rvr-1", rv, scheme, true, &now)
-				rvr2 = createReplicatedVolumeReplica("rvr-2", rv, scheme, true, nil)
+				rvr1 = createReplicatedVolumeReplica(10, rv, scheme, true, &now)
+				rvr2 = createReplicatedVolumeReplica(11, rv, scheme, true, nil)
 			})
 
 			JustBeforeEach(func(ctx SpecContext) {
@@ -474,7 +470,7 @@ var _ = Describe("Reconciler", func() {
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
 					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
-						"rvr-non-diskful",
+						10,
 						rv,
 						scheme,
 						v1alpha1.ReplicaTypeAccess,
@@ -508,9 +504,9 @@ var _ = Describe("Reconciler", func() {
 
 				BeforeEach(func() {
 					rsc.Spec.Replication = "None"
-					rvrDiskful = createReplicatedVolumeReplica("rvr-diskful", rv, scheme, true, nil)
+					rvrDiskful = createReplicatedVolumeReplica(10, rv, scheme, true, nil)
 					rvrNonDiskful = createReplicatedVolumeReplicaWithType(
-						"rvr-non-diskful",
+						11,
 						rv,
 						scheme,
 						v1alpha1.ReplicaTypeAccess,
