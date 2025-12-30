@@ -190,7 +190,6 @@ func (s *Scanner) ConsumeBatches() error {
 	log := s.log.With("goroutine", "consumeBatches")
 
 	return s.retryUntilCancel(func() error {
-
 		for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
 			log.Debug("got batch of 'n' resources", "n", len(batch))
 
@@ -221,7 +220,7 @@ func (s *Scanner) ConsumeBatches() error {
 				if err := s.refreshResource(log, resourceStatus); err != nil {
 					batchErrors = errors.Join(batchErrors, err)
 					// requeue same item
-					s.batcher.Add(item)
+					_ = s.batcher.Add(item)
 				}
 			}
 
