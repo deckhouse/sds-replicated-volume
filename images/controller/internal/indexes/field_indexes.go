@@ -1,5 +1,5 @@
 /*
-Copyright 2022 Flant JSC
+Copyright 2025 Flant JSC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,25 +14,15 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package manualcertrenewal
+package indexes
 
-import (
-	"os"
-	"testing"
-
-	"github.com/deckhouse/deckhouse/pkg/log"
-	"github.com/deckhouse/module-sdk/pkg"
+const (
+	// IndexFieldRVAByReplicatedVolumeName is a controller-runtime cache index field name
+	// used to quickly list ReplicatedVolumeAttachment objects belonging to a specific RV.
+	//
+	// NOTE: this is not a JSONPath; it must match the field name used with:
+	// - mgr.GetFieldIndexer().IndexField(...)
+	// - client.MatchingFields{...}
+	// - fake.ClientBuilder.WithIndex(...)
+	IndexFieldRVAByReplicatedVolumeName = "spec.replicatedVolumeName"
 )
-
-func TestManualCertRenewal(t *testing.T) {
-	devMode = true
-	os.Setenv("LOG_LEVEL", "INFO")
-
-	err := manualCertRenewal(t.Context(), &pkg.HookInput{
-		Logger: log.Default(),
-	})
-
-	if err != nil {
-		t.Fatal(err)
-	}
-}

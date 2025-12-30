@@ -342,28 +342,28 @@ func (r *Reconciler) prepareSchedulingContext(
 		return nil, fmt.Errorf("unable to get node to zone mapping: %w", err)
 	}
 
-	publishOnList := getPublishOnNodeList(rv)
+	attachToList := getAttachToNodeList(rv)
 	scheduledDiskfulReplicas, unscheduledDiskfulReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeDiskful)
 	_, unscheduledAccessReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeAccess)
 	_, unscheduledTieBreakerReplicas := getTypedReplicasLists(replicasForRV, v1alpha1.ReplicaTypeTieBreaker)
-	publishNodesWithoutAnyReplica := getPublishNodesWithoutAnyReplica(publishOnList, nodesWithRVReplica)
+	attachToNodesWithoutAnyReplica := getAttachToNodesWithoutAnyReplica(attachToList, nodesWithRVReplica)
 
 	schedulingCtx := &SchedulingContext{
-		Log:                            log,
-		Rv:                             rv,
-		Rsc:                            rsc,
-		Rsp:                            rsp,
-		RvrList:                        replicasForRV,
-		PublishOnNodes:                 publishOnList,
-		PublishOnNodesWithoutRvReplica: publishNodesWithoutAnyReplica,
-		RspLvgToNodeInfoMap:            rspLvgToNodeInfoMap,
-		NodesWithAnyReplica:            nodesWithRVReplica,
-		UnscheduledDiskfulReplicas:     unscheduledDiskfulReplicas,
-		ScheduledDiskfulReplicas:       scheduledDiskfulReplicas,
-		UnscheduledAccessReplicas:      unscheduledAccessReplicas,
-		UnscheduledTieBreakerReplicas:  unscheduledTieBreakerReplicas,
-		RspNodesWithoutReplica:         rspNodesWithoutReplica,
-		NodeNameToZone:                 nodeNameToZone,
+		Log:                           log,
+		Rv:                            rv,
+		Rsc:                           rsc,
+		Rsp:                           rsp,
+		RvrList:                       replicasForRV,
+		AttachToNodes:                 attachToList,
+		AttachToNodesWithoutRvReplica: attachToNodesWithoutAnyReplica,
+		RspLvgToNodeInfoMap:           rspLvgToNodeInfoMap,
+		NodesWithAnyReplica:           nodesWithRVReplica,
+		UnscheduledDiskfulReplicas:    unscheduledDiskfulReplicas,
+		ScheduledDiskfulReplicas:      scheduledDiskfulReplicas,
+		UnscheduledAccessReplicas:     unscheduledAccessReplicas,
+		UnscheduledTieBreakerReplicas: unscheduledTieBreakerReplicas,
+		RspNodesWithoutReplica:        rspNodesWithoutReplica,
+		NodeNameToZone:                nodeNameToZone,
 	}
 
 	return schedulingCtx, nil
@@ -421,8 +421,8 @@ func (r *Reconciler) tryScheduleDiskfulReplicas(
 	}
 	sctx.Log.V(1).Info("capacity filter applied and candidates scored", "zonesCount", len(sctx.ZonesToNodeCandidatesMap))
 
-	sctx.ApplyPublishOnBonus()
-	sctx.Log.V(1).Info("publishOn bonus applied")
+	sctx.ApplyAttachToBonus()
+	sctx.Log.V(1).Info("attachTo bonus applied")
 
 	// Assign replicas in best-effort mode
 	assignedReplicas, err := r.assignReplicasToNodes(sctx, sctx.UnscheduledDiskfulReplicas, v1alpha1.ReplicaTypeDiskful, true)
@@ -675,10 +675,10 @@ func (r *Reconciler) scheduleAccessPhase(
 	sctx *SchedulingContext,
 ) error {
 	// Spec «Access»: phase works only when:
-	// - rv.spec.publishOn is set AND not all publishOn nodes have replicas
+	// - rv.status.desiredAttachTo is set AND not all desiredAttachTo nodes have replicas
 	// - rsc.spec.volumeAccess != Local
-	if len(sctx.PublishOnNodes) == 0 {
-		sctx.Log.V(1).Info("skipping Access phase: no publishOn nodes")
+	if len(sctx.AttachToNodes) == 0 {
+		sctx.Log.V(1).Info("skipping Access phase: no attachTo nodes")
 		return nil
 	}
 
@@ -694,18 +694,18 @@ func (r *Reconciler) scheduleAccessPhase(
 	sctx.Log.V(1).Info("Access phase: processing replicas", "unscheduledCount", len(sctx.UnscheduledAccessReplicas))
 
 	// Spec «Access»: exclude nodes that already host any replica of this RV (any type)
-	// Use PublishOnNodesWithoutRvReplica which already contains publishOn nodes without any replica
-	candidateNodes := sctx.PublishOnNodesWithoutRvReplica
+	// Use AttachToNodesWithoutRvReplica which already contains attachTo nodes without any replica
+	candidateNodes := sctx.AttachToNodesWithoutRvReplica
 	if len(candidateNodes) == 0 {
-		// All publishOn nodes already have replicas; nothing to do.
+		// All attachTo nodes already have replicas; nothing to do.
 		// Spec «Access»: it is allowed to have replicas that could not be scheduled
-		sctx.Log.V(1).Info("Access phase: all publishOn nodes already have replicas")
+		sctx.Log.V(1).Info("Access phase: all attachTo nodes already have replicas")
 		return nil
 	}
 	sctx.Log.V(1).Info("Access phase: candidate nodes", "count", len(candidateNodes), "nodes", candidateNodes)
 
-	// We are not required to place all Access replicas or to cover all publishOn nodes.
-	// Spec «Access»: it is allowed to have nodes in rv.spec.publishOn without enough replicas
+	// We are not required to place all Access replicas or to cover all desiredAttachTo nodes.
+	// Spec «Access»: it is allowed to have nodes in rv.status.desiredAttachTo without enough replicas
 	// Spec «Access»: it is allowed to have replicas that could not be scheduled
 	nodesToFill := min(len(candidateNodes), len(sctx.UnscheduledAccessReplicas))
 	sctx.Log.V(1).Info("Access phase: scheduling replicas", "nodesToFill", nodesToFill)
@@ -804,8 +804,11 @@ func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []stri
 	return candidateNodes
 }
 
-func getPublishOnNodeList(rv *v1alpha1.ReplicatedVolume) []string {
-	return slices.Clone(rv.Spec.PublishOn)
+func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
+	if rv == nil || rv.Status == nil {
+		return nil
+	}
+	return slices.Clone(rv.Status.DesiredAttachTo)
 }
 
 // collectReplicasAndOccupiedNodes filters replicas for a given RV and returns:
@@ -981,23 +984,23 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	return nil
 }
 
-func getPublishNodesWithoutAnyReplica(
-	publishOnList []string,
+func getAttachToNodesWithoutAnyReplica(
+	attachToList []string,
 	nodesWithRVReplica map[string]struct{},
 ) []string {
-	publishNodesWithoutAnyReplica := make([]string, 0, len(publishOnList))
+	attachToNodesWithoutAnyReplica := make([]string, 0, len(attachToList))
 
-	for _, node := range publishOnList {
+	for _, node := range attachToList {
 		if _, hasReplica := nodesWithRVReplica[node]; !hasReplica {
-			publishNodesWithoutAnyReplica = append(publishNodesWithoutAnyReplica, node)
+			attachToNodesWithoutAnyReplica = append(attachToNodesWithoutAnyReplica, node)
 		}
 	}
-	return publishNodesWithoutAnyReplica
+	return attachToNodesWithoutAnyReplica
 }
 
 // applyTopologyFilter groups candidate nodes by zones based on RSC topology.
 // isDiskfulPhase affects only Zonal topology:
-//   - true: falls back to publishOn or any allowed zone if no ScheduledDiskfulReplicas
+//   - true: falls back to attachTo or any allowed zone if no ScheduledDiskfulReplicas
 //   - false: returns error if no ScheduledDiskfulReplicas (TieBreaker needs Diskful zone)
 //
 // For Ignored and TransZonal, logic is the same for both phases.
@@ -1048,7 +1051,7 @@ func (r *Reconciler) applyTopologyFilter(
 }
 
 // applyZonalTopologyFilter handles Zonal topology logic.
-// For isDiskfulPhase=true: ScheduledDiskfulReplicas -> publishOn -> any allowed zone
+// For isDiskfulPhase=true: ScheduledDiskfulReplicas -> attachTo -> any allowed zone
 // For isDiskfulPhase=false: ScheduledDiskfulReplicas -> ERROR (TieBreaker needs Diskful zone)
 func (r *Reconciler) applyZonalTopologyFilter(
 	candidateNodes []string,
@@ -1089,18 +1092,18 @@ func (r *Reconciler) applyZonalTopologyFilter(
 		return fmt.Errorf("%w: cannot schedule TieBreaker for Zonal topology: no Diskful replicas scheduled",
 			errSchedulingNoCandidateNodes)
 	default:
-		// Diskful phase: fallback to publishOn zones
-		for _, nodeName := range sctx.PublishOnNodes {
+		// Diskful phase: fallback to attachTo zones
+		for _, nodeName := range sctx.AttachToNodes {
 			zone, ok := sctx.NodeNameToZone[nodeName]
 			if !ok || zone == "" {
-				return fmt.Errorf("%w: publishOn node %s has no zone label for Zonal topology",
+				return fmt.Errorf("%w: attachTo node %s has no zone label for Zonal topology",
 					errSchedulingTopologyConflict, nodeName)
 			}
 			if !slices.Contains(targetZones, zone) {
 				targetZones = append(targetZones, zone)
 			}
 		}
-		sctx.Log.V(2).Info("applyZonalTopologyFilter: publishOn zones", "zones", targetZones)
+		sctx.Log.V(2).Info("applyZonalTopologyFilter: attachTo zones", "zones", targetZones)
 		// If still empty, getAllowedZones will use rsc.spec.zones or all cluster zones
 	}
 

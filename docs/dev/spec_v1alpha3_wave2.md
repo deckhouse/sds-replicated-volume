@@ -12,9 +12,9 @@
   - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
   - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
   - [`rvr-access-count-controller`](#rvr-access-count-controller)
-  - [`rv-publish-controller`](#rv-publish-controller)
+  - [`rv-attach-controller`](#rv-attach-controller)
   - [`rvr-volume-controller`](#rvr-volume-controller)
-  - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
+  - [`rvr-quorum-and-attach-constrained-release-controller`](#rvr-quorum-and-attach-constrained-release-controller)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
@@ -148,7 +148,7 @@ Cм. существующую реализацию `drbdadm resize`.
 ### Добавление
 - начинать работу только если у RV  status.condition[type=IOReady].status=True
 
-## `rv-publish-controller`
+## `rv-attach-controller`
 
 ### Уточнение
 Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
@@ -162,7 +162,7 @@ Cм. существующую реализацию `drbdadm resize`.
 ### Уточнение
 Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
-## `rvr-quorum-and-publish-constrained-release-controller`
+## `rvr-quorum-and-attach-constrained-release-controller`
 
 ### Уточнение
 Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
@@ -223,7 +223,7 @@ Cм. существующую реализацию `drbdadm resize`.
 
 ### Обновление
 
-Контроллер заменяет `rvr-quorum-and-publish-constrained-release-controller`
+Контроллер заменяет `rvr-quorum-and-attach-constrained-release-controller`
 
 ### Контекст
 
@@ -240,8 +240,8 @@ Cм. существующую реализацию `drbdadm resize`.
 кластер к этому готов.
 
 Условие готовности (даже если `rv.metadata.deletionTimestamp!=nil`):
-- удаляемые реплики не опубликованы (`rv.status.publishedOn`), при этом при удалении RV, удаляемыми
-считаются все реплики (`len(rv.status.publishedOn)==0`)
+- удаляемые реплики не опубликованы (`rv.status.actuallyAttachedTo`), при этом при удалении RV, удаляемыми
+считаются все реплики (`len(rv.status.actuallyAttachedTo)==0`)
 
 В случае, когда RV не удаляется (`rv.metadata.deletionTimestamp==nil`), требуется
 проверить дополнительные условия:

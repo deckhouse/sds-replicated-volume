@@ -102,6 +102,10 @@ const (
 	// [ConditionTypeReady] indicates whether the replica is ready and operational
 	ConditionTypeReady = "Ready"
 
+	// [RVRConditionTypeReady] is an alias for [ConditionTypeReady].
+	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
+	RVRConditionTypeReady = ConditionTypeReady
+
 	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigured = "Configured"
 
@@ -111,8 +115,57 @@ const (
 	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
 	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
 
-	// [ConditionTypePublished] indicates whether the replica has been published
-	ConditionTypePublished = "Published"
+	// [ConditionTypeAttached] indicates whether the replica has been attached
+	ConditionTypeAttached = "Attached"
+
+	// [RVRConditionTypeAttached] is an alias for [ConditionTypeAttached].
+	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
+	RVRConditionTypeAttached = ConditionTypeAttached
+)
+
+// =============================================================================
+// Condition types and reasons for RVA (ReplicatedVolumeAttachment) controllers
+// =============================================================================
+
+const (
+	// [RVAConditionTypeReady] indicates whether the attachment is ready for use:
+	// Attached=True AND ReplicaIOReady=True.
+	RVAConditionTypeReady = "Ready"
+
+	// [RVAConditionTypeAttached] indicates whether the volume is attached to the requested node.
+	// This condition is the former RVA "Ready" condition and contains detailed attach progress reasons.
+	RVAConditionTypeAttached = "Attached"
+
+	// [RVAConditionTypeReplicaIOReady] indicates whether the replica on the requested node is IOReady.
+	// It mirrors ReplicatedVolumeReplica condition IOReady (Status/Reason/Message) for the replica on rva.spec.nodeName.
+	RVAConditionTypeReplicaIOReady = "ReplicaIOReady"
+)
+
+const (
+	// RVA Ready condition reasons reported via [RVAConditionTypeReady] (aggregate).
+	RVAReadyReasonReady             = "Ready"
+	RVAReadyReasonNotAttached       = "NotAttached"
+	RVAReadyReasonReplicaNotIOReady = "ReplicaNotIOReady"
+)
+
+const (
+	// RVA Attached condition reasons reported via [RVAConditionTypeAttached].
+	RVAAttachedReasonWaitingForActiveAttachmentsToDetach = "WaitingForActiveAttachmentsToDetach"
+	RVAAttachedReasonWaitingForReplicatedVolume          = "WaitingForReplicatedVolume"
+	RVAAttachedReasonWaitingForReplicatedVolumeIOReady   = "WaitingForReplicatedVolumeIOReady"
+	RVAAttachedReasonWaitingForReplica                   = "WaitingForReplica"
+	RVAAttachedReasonConvertingTieBreakerToAccess        = "ConvertingTieBreakerToAccess"
+	RVAAttachedReasonUnableToProvideLocalVolumeAccess    = "UnableToProvideLocalVolumeAccess"
+	RVAAttachedReasonLocalityNotSatisfied                = "LocalityNotSatisfied"
+	RVAAttachedReasonSettingPrimary                      = "SettingPrimary"
+	RVAAttachedReasonAttached                            = "Attached"
+)
+
+const (
+	// RVA ReplicaIOReady condition reasons reported via [RVAConditionTypeReplicaIOReady].
+	// Most of the time this condition mirrors the replica's IOReady condition reason;
+	// this reason is used only when replica/condition is not yet observable.
+	RVAReplicaIOReadyReasonWaitingForReplica = "WaitingForReplica"
 )
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -280,14 +333,14 @@ const (
 	ReasonDemoteFailed                   = "DemoteFailed"
 )
 
-// Condition reasons for [ConditionTypePublished] condition (reserved, not used yet)
+// Condition reasons for [ConditionTypeAttached] condition (reserved, not used yet)
 const (
 	// status=True
-	ReasonPublished = "Published"
+	ReasonAttached = "Attached"
 	// status=False
-	ReasonUnpublished             = "Unpublished"
-	ReasonPublishPending          = "PublishPending"
-	ReasonPublishingNotApplicable = "PublishingNotApplicable"
+	ReasonDetached               = "Detached"
+	ReasonAttachPending          = "AttachPending"
+	ReasonAttachingNotApplicable = "AttachingNotApplicable"
 	// status=Unknown
-	ReasonPublishingNotInitialized = "PublishingNotInitialized"
+	ReasonAttachingNotInitialized = "AttachingNotInitialized"
 )

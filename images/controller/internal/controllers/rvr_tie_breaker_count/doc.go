@@ -94,7 +94,7 @@ limitations under the License.
 //   - Maintains odd count and balanced distribution automatically
 //
 // Conversion to Access:
-//   - rv-publish-controller may convert TieBreaker to Access when needed for publishing
+//   - rv-attach-controller may convert TieBreaker to Access when needed for attaching
 //   - This controller will create new TieBreaker replicas if balance is disrupted
 //
 // The TieBreaker mechanism is crucial for maintaining data consistency and

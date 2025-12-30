@@ -87,7 +87,7 @@ type IntegrationTestCase struct {
 	Name       string
 	Cluster    string // reference to ClusterSetup.Name
 	Topology   string // Zonal, TransZonal, Ignored
-	PublishOn  []string
+	AttachTo   []string
 	Existing   []ExistingReplica
 	ToSchedule ReplicasToSchedule
 	Expected   ExpectedResult
@@ -303,9 +303,9 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-test",
-				PublishOn:                  tc.PublishOn,
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: tc.AttachTo,
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
@@ -514,34 +514,34 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "1. small-1z: D:2, TB:1 - all in zone-a",
 				Cluster:    "small-1z",
 				Topology:   "Zonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
 			},
 			{
-				Name:       "2. small-1z: publishOn node-a1 - D on node-a1",
+				Name:       "2. small-1z: attachTo node-a1 - D on node-a1",
 				Cluster:    "small-1z",
 				Topology:   "Zonal",
-				PublishOn:  []string{"node-a1"},
+				AttachTo:   []string{"node-a1"},
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulNodes: []string{"node-a1"}, TieBreakerNodes: []string{"node-a2"}},
 			},
 			{
-				Name:       "3. medium-2z: publishOn same zone - all in zone-a",
+				Name:       "3. medium-2z: attachTo same zone - all in zone-a",
 				Cluster:    "medium-2z",
 				Topology:   "Zonal",
-				PublishOn:  []string{"node-a1", "node-a2"},
+				AttachTo:   []string{"node-a1", "node-a2"},
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
 			},
 			{
-				Name:       "4. medium-2z: publishOn different zones - pick one zone",
+				Name:       "4. medium-2z: attachTo different zones - pick one zone",
 				Cluster:    "medium-2z",
 				Topology:   "Zonal",
-				PublishOn:  []string{"node-a1", "node-b1"},
+				AttachTo:   []string{"node-a1", "node-b1"},
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{}, // any zone is ok
@@ -550,16 +550,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "5. medium-2z-4n: existing D in zone-a - new D and TB in zone-a",
 				Cluster:    "medium-2z-4n",
 				Topology:   "Zonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   []ExistingReplica{{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"}},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}, TieBreakerZones: []string{"zone-a"}},
 			},
 			{
-				Name:      "6. medium-2z: existing D in different zones - topology conflict",
-				Cluster:   "medium-2z",
-				Topology:  "Zonal",
-				PublishOn: nil,
+				Name:     "6. medium-2z: existing D in different zones - topology conflict",
+				Cluster:  "medium-2z",
+				Topology: "Zonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
@@ -574,28 +574,28 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 			},
 			{
-				Name:       "7. large-3z: no publishOn - pick best zone by score",
+				Name:       "7. large-3z: no attachTo - pick best zone by score",
 				Cluster:    "large-3z",
 				Topology:   "Zonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 0},
 				Expected:   ExpectedResult{}, // any zone, best score wins
 			},
 			{
-				Name:       "8. xlarge-4z: publishOn zone-d (not in RSC) - D in zone-d (targetZones priority)",
+				Name:       "8. xlarge-4z: attachTo zone-d (not in RSC) - D in zone-d (targetZones priority)",
 				Cluster:    "xlarge-4z",
 				Topology:   "Zonal",
-				PublishOn:  []string{"node-d1"},
+				AttachTo:   []string{"node-d1"},
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-d"}, TieBreakerZones: []string{"zone-d"}},
 			},
 			{
-				Name:      "9. small-1z: all nodes occupied - no candidate nodes",
-				Cluster:   "small-1z",
-				Topology:  "Zonal",
-				PublishOn: nil,
+				Name:     "9. small-1z: all nodes occupied - no candidate nodes",
+				Cluster:  "small-1z",
+				Topology: "Zonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
@@ -611,7 +611,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "10. medium-2z: TB only without Diskful - no candidate nodes",
 				Cluster:    "medium-2z",
 				Topology:   "Zonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected: ExpectedResult{
@@ -621,10 +621,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 			},
 			{
-				Name:      "11. medium-2z-4n: existing D+TB in zone-a - new D in zone-a",
-				Cluster:   "medium-2z-4n",
-				Topology:  "Zonal",
-				PublishOn: nil,
+				Name:     "11. medium-2z-4n: existing D+TB in zone-a - new D in zone-a",
+				Cluster:  "medium-2z-4n",
+				Topology: "Zonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
@@ -633,10 +633,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a"}},
 			},
 			{
-				Name:      "12. medium-2z-4n: existing D+Access in zone-a - new TB in zone-a",
-				Cluster:   "medium-2z-4n",
-				Topology:  "Zonal",
-				PublishOn: nil,
+				Name:     "12. medium-2z-4n: existing D+Access in zone-a - new TB in zone-a",
+				Cluster:  "medium-2z-4n",
+				Topology: "Zonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
@@ -660,7 +660,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "1. large-3z: D:3 - one per zone",
 				Cluster:    "large-3z",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a", "zone-b", "zone-c"}},
@@ -669,7 +669,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "2. large-3z: D:2, TB:1 - even distribution across 3 zones",
 				Cluster:    "large-3z",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
 				// TransZonal distributes replicas evenly across zones
@@ -678,10 +678,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{}, // all 3 zones should be covered (verified by runTestCase)
 			},
 			{
-				Name:      "3. large-3z: existing D in zone-a,b - new D in zone-c",
-				Cluster:   "large-3z",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "3. large-3z: existing D in zone-a,b - new D in zone-c",
+				Cluster:  "large-3z",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
@@ -690,10 +690,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
 			},
 			{
-				Name:      "4. large-3z: existing D in zone-a,b - TB in zone-c",
-				Cluster:   "large-3z",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "4. large-3z: existing D in zone-a,b - TB in zone-c",
+				Cluster:  "large-3z",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
@@ -705,16 +705,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "5. medium-2z: existing D in zone-a - new D in zone-b",
 				Cluster:    "medium-2z",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   []ExistingReplica{{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"}},
 				ToSchedule: ReplicasToSchedule{Diskful: 1, TieBreaker: 0},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-b"}},
 			},
 			{
-				Name:      "6. medium-2z: zones full, new D - cannot guarantee even",
-				Cluster:   "medium-2z",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "6. medium-2z: zones full, new D - cannot guarantee even",
+				Cluster:  "medium-2z",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-b1"},
@@ -726,7 +726,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "7. xlarge-4z: D:3, TB:1 - D in RSC zones only",
 				Cluster:    "xlarge-4z",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-a", "zone-b", "zone-c"}},
@@ -735,16 +735,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "8. large-3z-3n: D:5, TB:1 - distribution 2-2-1",
 				Cluster:    "large-3z-3n",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 5, TieBreaker: 1},
 				Expected:   ExpectedResult{}, // 2-2-1 distribution + 1 TB
 			},
 			{
-				Name:      "9. medium-2z: all nodes occupied - no candidate nodes",
-				Cluster:   "medium-2z",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "9. medium-2z: all nodes occupied - no candidate nodes",
+				Cluster:  "medium-2z",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
@@ -762,16 +762,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "10. large-3z: TB only, no existing - TB in any zone",
 				Cluster:    "large-3z",
 				Topology:   "TransZonal",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 0, TieBreaker: 1},
 				Expected:   ExpectedResult{}, // any zone ok (all have 0 replicas)
 			},
 			{
-				Name:      "11. large-3z-3n: existing D+TB in zone-a,b - new D in zone-c",
-				Cluster:   "large-3z-3n",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "11. large-3z-3n: existing D+TB in zone-a,b - new D in zone-c",
+				Cluster:  "large-3z-3n",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
@@ -781,10 +781,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{DiskfulZones: []string{"zone-c"}},
 			},
 			{
-				Name:      "12. large-3z-3n: existing D+Access across zones - new TB balances",
-				Cluster:   "large-3z-3n",
-				Topology:  "TransZonal",
-				PublishOn: nil,
+				Name:     "12. large-3z-3n: existing D+Access across zones - new TB balances",
+				Cluster:  "large-3z-3n",
+				Topology: "TransZonal",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
@@ -809,7 +809,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "1. large-3z: D:2, TB:1 - Diskful uses best scores",
 				Cluster:    "large-3z",
 				Topology:   "Ignored",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
 				// Scores: node-a1(100), node-b1(90) - D:2 get best 2 nodes
@@ -820,10 +820,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 			},
 			{
-				Name:       "2. medium-2z: publishOn - prefer publishOn nodes",
+				Name:       "2. medium-2z: attachTo - prefer attachTo nodes",
 				Cluster:    "medium-2z",
 				Topology:   "Ignored",
-				PublishOn:  []string{"node-a1", "node-b1"},
+				AttachTo:   []string{"node-a1", "node-b1"},
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 1},
 				Expected:   ExpectedResult{DiskfulNodes: []string{"node-a1", "node-b1"}},
@@ -832,7 +832,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "3. small-1z-4n: D:2, TB:2 - 4 replicas on 4 nodes",
 				Cluster:    "small-1z-4n",
 				Topology:   "Ignored",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 2, TieBreaker: 2},
 				Expected:   ExpectedResult{}, // all 4 nodes used
@@ -841,16 +841,16 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Name:       "4. xlarge-4z: D:3, TB:1 - any 4 nodes by score",
 				Cluster:    "xlarge-4z",
 				Topology:   "Ignored",
-				PublishOn:  nil,
+				AttachTo:   nil,
 				Existing:   nil,
 				ToSchedule: ReplicasToSchedule{Diskful: 3, TieBreaker: 1},
 				Expected:   ExpectedResult{}, // best 4 nodes
 			},
 			{
-				Name:      "5. small-1z: all nodes occupied - no candidate nodes",
-				Cluster:   "small-1z",
-				Topology:  "Ignored",
-				PublishOn: nil,
+				Name:     "5. small-1z: all nodes occupied - no candidate nodes",
+				Cluster:  "small-1z",
+				Topology: "Ignored",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a2"},
@@ -863,10 +863,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 			},
 			{
-				Name:      "6. small-1z-4n: existing D+TB - new D on best remaining",
-				Cluster:   "small-1z-4n",
-				Topology:  "Ignored",
-				PublishOn: nil,
+				Name:     "6. small-1z-4n: existing D+TB - new D on best remaining",
+				Cluster:  "small-1z-4n",
+				Topology: "Ignored",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeTieBreaker, NodeName: "node-a2"},
@@ -875,10 +875,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{}, // any of remaining nodes
 			},
 			{
-				Name:      "7. small-1z-4n: existing D+Access - new TB",
-				Cluster:   "small-1z-4n",
-				Topology:  "Ignored",
-				PublishOn: nil,
+				Name:     "7. small-1z-4n: existing D+Access - new TB",
+				Cluster:  "small-1z-4n",
+				Topology: "Ignored",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
@@ -887,10 +887,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected:   ExpectedResult{}, // any of remaining nodes
 			},
 			{
-				Name:      "8. medium-2z-4n: existing mixed types - new D+TB",
-				Cluster:   "medium-2z-4n",
-				Topology:  "Ignored",
-				PublishOn: nil,
+				Name:     "8. medium-2z-4n: existing mixed types - new D+TB",
+				Cluster:  "medium-2z-4n",
+				Topology: "Ignored",
+				AttachTo: nil,
 				Existing: []ExistingReplica{
 					{Type: v1alpha1.ReplicaTypeDiskful, NodeName: "node-a1"},
 					{Type: v1alpha1.ReplicaTypeAccess, NodeName: "node-a2"},
@@ -1127,9 +1127,9 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-access",
-				PublishOn:                  []string{"node-a", "node-b"},
 			},
 			Status: &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: []string{"node-a", "node-b"},
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
@@ -1203,7 +1203,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		Expect(err).ToNot(HaveOccurred())
 	})
 
-	When("one publishOn node has diskful replica", func() {
+	When("one attachTo node has diskful replica", func() {
 		BeforeEach(func() {
 			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
@@ -1231,7 +1231,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			}
 		})
 
-		It("schedules access replica only on free publishOn node", func(ctx SpecContext) {
+		It("schedules access replica only on free attachTo node", func(ctx SpecContext) {
 			_, err := rec.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: rv.Name}})
 			Expect(err).ToNot(HaveOccurred())
 
@@ -1246,7 +1246,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		})
 	})
 
-	When("all publishOn nodes already have replicas", func() {
+	When("all attachTo nodes already have replicas", func() {
 		BeforeEach(func() {
 			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
@@ -1287,7 +1287,10 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 
 	When("checking Scheduled condition", func() {
 		BeforeEach(func() {
-			rv.Spec.PublishOn = []string{"node-a", "node-b"}
+			if rv.Status == nil {
+				rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
+			}
+			rv.Status.DesiredAttachTo = []string{"node-a", "node-b"}
 			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-scheduled"},

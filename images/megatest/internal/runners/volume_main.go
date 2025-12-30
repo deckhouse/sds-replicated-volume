@@ -33,7 +33,7 @@ import (
 )
 
 var (
-	publisherPeriodMinMax        = []int{30, 60}
+	attacherPeriodMinMax         = []int{30, 60}
 	replicaDestroyerPeriodMinMax = []int{30, 300}
 	replicaCreatorPeriodMinMax   = []int{30, 300}
 
@@ -113,17 +113,17 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	lifetimeCtx, lifetimeCancel := context.WithTimeout(ctx, v.volumeLifetime)
 	defer lifetimeCancel()
 
-	// Determine initial publish nodes (random distribution: 0=30%, 1=60%, 2=10%)
+	// Determine initial attach nodes (random distribution: 0=30%, 1=60%, 2=10%)
 	numberOfPublishNodes := v.getRundomNumberForNodes()
-	publishNodes, err := v.getPublishNodes(ctx, numberOfPublishNodes)
+	attachNodes, err := v.getPublishNodes(ctx, numberOfPublishNodes)
 	if err != nil {
-		v.log.Error("failed to get published nodes", "error", err)
+		v.log.Error("failed to get attached nodes", "error", err)
 		return err
 	}
-	v.log.Debug("published nodes", "nodes", publishNodes)
+	v.log.Debug("attached nodes", "nodes", attachNodes)
 
 	// Create RV
-	createDuration, err := v.createRV(ctx, publishNodes)
+	createDuration, err := v.createRV(ctx, attachNodes)
 	if err != nil {
 		v.log.Error("failed to create RV", "error", err)
 		return err
@@ -248,14 +248,8 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 	return names, nil
 }
 
-func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.Duration, error) {
+func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.Duration, error) {
 	startTime := time.Now()
-
-	// Ensure PublishOn is never nil (use empty slice instead)
-	publishOn := publishNodes
-	if publishOn == nil {
-		publishOn = []string{}
-	}
 
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -264,13 +258,25 @@ func (v *VolumeMain) createRV(ctx context.Context, publishNodes []string) (time.
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       v.initialSize,
 			ReplicatedStorageClassName: v.storageClass,
-			PublishOn:                  publishOn,
 		},
 	}
 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
 		return time.Since(startTime), err
+	}
+
+	// Create initial attachment intents via RVA (if requested).
+	for _, nodeName := range attachNodes {
+		if nodeName == "" {
+			continue
+		}
+		if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
+			return time.Since(startTime), err
+		}
+		if err := v.client.WaitForRVAReady(ctx, v.rvName, nodeName); err != nil {
+			return time.Since(startTime), err
+		}
 	}
 
 	// Increment statistics counter on successful creation
@@ -355,15 +361,15 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 }
 
 func (v *VolumeMain) startSubRunners(ctx context.Context) {
-	// Start publisher
-	publisherCfg := config.VolumePublisherConfig{
+	// Start attacher
+	attacherCfg := config.VolumeAttacherConfig{
 		Period: config.DurationMinMax{
-			Min: time.Duration(publisherPeriodMinMax[0]) * time.Second,
-			Max: time.Duration(publisherPeriodMinMax[1]) * time.Second,
+			Min: time.Duration(attacherPeriodMinMax[0]) * time.Second,
+			Max: time.Duration(attacherPeriodMinMax[1]) * time.Second,
 		},
 	}
-	publisher := NewVolumePublisher(v.rvName, publisherCfg, v.client, publisherPeriodMinMax, v.forceCleanupChan)
-	publisherCtx, cancel := context.WithCancel(ctx)
+	attacher := NewVolumeAttacher(v.rvName, attacherCfg, v.client, attacherPeriodMinMax, v.forceCleanupChan)
+	attacherCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		v.runningSubRunners.Add(1)
 		defer func() {
@@ -371,7 +377,7 @@ func (v *VolumeMain) startSubRunners(ctx context.Context) {
 			v.runningSubRunners.Add(-1)
 		}()
 
-		_ = publisher.Run(publisherCtx)
+		_ = attacher.Run(attacherCtx)
 	}()
 
 	// Start replica destroyer

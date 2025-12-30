@@ -100,8 +100,8 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					PublishOn:                  []string{},
 				},
+				Status: &v1alpha1.ReplicatedVolumeStatus{},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -116,6 +116,7 @@ var _ = Describe("Reconciler", func() {
 		JustBeforeEach(func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rsc)).To(Succeed(), "should create RSC")
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create RV")
+			Expect(cl.Status().Update(ctx, rv)).To(Succeed(), "should update RV status")
 		})
 
 		When("RV is being deleted", func() {
@@ -141,8 +142,8 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should skip without creating Access RVR", func(ctx SpecContext) {
-				rv.Spec.PublishOn = []string{"node-1"}
-				Expect(cl.Update(ctx, rv)).To(Succeed())
+				rv.Status.DesiredAttachTo = []string{"node-1"}
+				Expect(cl.Status().Update(ctx, rv)).To(Succeed())
 
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue for Local volumeAccess")
 
@@ -153,13 +154,13 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("publishOn has node without replicas", func() {
+		When("attachTo has node without replicas", func() {
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 			})
 
 			It("should create Access RVR", func(ctx SpecContext) {
-				By("Reconciling RV with publishOn node")
+				By("Reconciling RV with attachTo node")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue after creating Access RVR")
 
 				By("Verifying Access RVR was created")
@@ -172,11 +173,11 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("publishOn has node with Diskful replica", func() {
+		When("attachTo has node with Diskful replica", func() {
 			var diskfulRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 				diskfulRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -202,7 +203,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should NOT create Access RVR", func(ctx SpecContext) {
-				By("Reconciling RV with Diskful replica on publishOn node")
+				By("Reconciling RV with Diskful replica on attachTo node")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying no additional RVR was created")
@@ -213,11 +214,11 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("publishOn has node with TieBreaker replica", func() {
+		When("attachTo has node with TieBreaker replica", func() {
 			var tieBreakerRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 				tieBreakerRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -242,8 +243,8 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Create(ctx, tieBreakerRVR)).To(Succeed(), "should create TieBreaker RVR")
 			})
 
-			It("should NOT create Access RVR (TieBreaker can be converted to Access by rv-publish-controller)", func(ctx SpecContext) {
-				By("Reconciling RV with TieBreaker replica on publishOn node")
+			It("should NOT create Access RVR (TieBreaker can be converted to Access by rv-attach-controller)", func(ctx SpecContext) {
+				By("Reconciling RV with TieBreaker replica on attachTo node")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying no additional RVR was created")
@@ -254,11 +255,11 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("Access RVR exists on node not in publishOn and not in publishedOn", func() {
+		When("Access RVR exists on node not in attachTo and not in attachedTo", func() {
 			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{}
+				rv.Status.DesiredAttachTo = []string{}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -284,7 +285,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should delete Access RVR", func(ctx SpecContext) {
-				By("Reconciling RV with Access RVR on node not in publishOn/publishedOn")
+				By("Reconciling RV with Access RVR on node not in attachTo/attachedTo")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVR was deleted")
@@ -294,14 +295,12 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("Access RVR exists on node not in publishOn but in publishedOn", func() {
+		When("Access RVR exists on node not in attachTo but in attachedTo", func() {
 			var accessRVR *v1alpha1.ReplicatedVolumeReplica
 
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{}
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-					PublishedOn: []string{"node-1"},
-				}
+				rv.Status.DesiredAttachTo = []string{}
+				rv.Status.ActuallyAttachedTo = []string{"node-1"}
 				accessRVR = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						OwnerReferences: []metav1.OwnerReference{
@@ -329,7 +328,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should NOT delete Access RVR", func(ctx SpecContext) {
-				By("Reconciling RV with Access RVR on node in publishedOn")
+				By("Reconciling RV with Access RVR on node in attachedTo")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVR was NOT deleted")
@@ -340,13 +339,13 @@ var _ = Describe("Reconciler", func() {
 			})
 		})
 
-		When("multiple nodes in publishOn", func() {
+		When("multiple nodes in attachTo", func() {
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-1", "node-2"}
+				rv.Status.DesiredAttachTo = []string{"node-1", "node-2"}
 			})
 
 			It("should create Access RVR for each node without replicas", func(ctx SpecContext) {
-				By("Reconciling RV with multiple publishOn nodes")
+				By("Reconciling RV with multiple attachTo nodes")
 				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue(), "should not requeue")
 
 				By("Verifying Access RVRs were created for both nodes")
@@ -366,7 +365,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("reconcile is called twice (idempotency)", func() {
 			BeforeEach(func() {
-				rv.Spec.PublishOn = []string{"node-1"}
+				rv.Status.DesiredAttachTo = []string{"node-1"}
 			})
 
 			It("should not create duplicate Access RVRs", func(ctx SpecContext) {
@@ -407,7 +406,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					PublishOn:                  []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -453,7 +451,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					PublishOn:                  []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -501,7 +498,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					PublishOn:                  []string{"node-1"},
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
@@ -527,6 +523,10 @@ var _ = Describe("Reconciler", func() {
 		It("should return error", func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rsc)).To(Succeed(), "should create RSC")
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create RV")
+			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				DesiredAttachTo: []string{"node-1"},
+			}
+			Expect(cl.Status().Update(ctx, rv)).To(Succeed(), "should update RV status")
 
 			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(testError), "should return error when Create RVR fails")
 		})
@@ -550,7 +550,6 @@ var _ = Describe("Reconciler", func() {
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
-					PublishOn:                  []string{}, // No publishOn - will trigger delete
 				},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
