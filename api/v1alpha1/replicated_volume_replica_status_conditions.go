@@ -285,50 +285,50 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	return nil
 }
 
-func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionPublished(shouldBePrimary bool) error {
+func (rvr *ReplicatedVolumeReplica) ComputeStatusConditionAttached(shouldBePrimary bool) (v1.Condition, error) {
 	if rvr.Spec.Type != ReplicaTypeAccess && rvr.Spec.Type != ReplicaTypeDiskful {
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:   ConditionTypePublished,
-				Status: v1.ConditionFalse,
-				Reason: ReasonPublishingNotApplicable,
-			},
-		)
-		return nil
+		return v1.Condition{
+			Type:   ConditionTypeAttached,
+			Status: v1.ConditionFalse,
+			Reason: ReasonAttachingNotApplicable,
+		}, nil
 	}
-	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
-		if rvr.Status == nil {
-			rvr.Status = &ReplicatedVolumeReplicaStatus{}
-		}
 
-		meta.SetStatusCondition(
-			&rvr.Status.Conditions,
-			v1.Condition{
-				Type:   ConditionTypePublished,
-				Status: v1.ConditionUnknown,
-				Reason: ReasonPublishingNotInitialized,
-			},
-		)
-		return nil
+	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+		return v1.Condition{
+			Type:   ConditionTypeAttached,
+			Status: v1.ConditionUnknown,
+			Reason: ReasonAttachingNotInitialized,
+		}, nil
 	}
 
 	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
 
-	cond := v1.Condition{Type: ConditionTypePublished}
+	cond := v1.Condition{Type: ConditionTypeAttached}
 
 	if isPrimary {
 		cond.Status = v1.ConditionTrue
-		cond.Reason = ReasonPublished
+		cond.Reason = ReasonAttached
 	} else {
 		cond.Status = v1.ConditionFalse
 		if shouldBePrimary {
-			cond.Reason = ReasonPublishPending
+			cond.Reason = ReasonAttachPending
 		} else {
-			cond.Reason = ReasonUnpublished
+			cond.Reason = ReasonDetached
 		}
 	}
 
+	return cond, nil
+}
+
+func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimary bool) error {
+	cond, err := rvr.ComputeStatusConditionAttached(shouldBePrimary)
+	if err != nil {
+		return err
+	}
+	if rvr.Status == nil {
+		rvr.Status = &ReplicatedVolumeReplicaStatus{}
+	}
 	meta.SetStatusCondition(&rvr.Status.Conditions, cond)
 
 	return nil

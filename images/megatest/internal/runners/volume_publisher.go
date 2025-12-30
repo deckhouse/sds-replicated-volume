@@ -24,38 +24,37 @@ import (
 	"slices"
 	"time"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/config"
 	"github.com/deckhouse/sds-replicated-volume/images/megatest/internal/kubeutils"
 )
 
 const (
-	// publishCycleProbability is the probability of a publish cycle (vs unpublish)
-	publishCycleProbability = 0.10
+	// attachCycleProbability is the probability of a attach cycle (vs detach)
+	attachCycleProbability = 0.10
 )
 
-// VolumePublisher periodically publishes and unpublishes a volume to random nodes
-type VolumePublisher struct {
+// VolumeAttacher periodically attaches and detaches a volume to random nodes
+type VolumeAttacher struct {
 	rvName           string
-	cfg              config.VolumePublisherConfig
+	cfg              config.VolumeAttacherConfig
 	client           *kubeutils.Client
 	log              *slog.Logger
 	forceCleanupChan <-chan struct{}
 }
 
-// NewVolumePublisher creates a new VolumePublisher
-func NewVolumePublisher(rvName string, cfg config.VolumePublisherConfig, client *kubeutils.Client, periodrMinMax []int, forceCleanupChan <-chan struct{}) *VolumePublisher {
-	return &VolumePublisher{
+// NewVolumeAttacher creates a new VolumeAttacher
+func NewVolumeAttacher(rvName string, cfg config.VolumeAttacherConfig, client *kubeutils.Client, periodrMinMax []int, forceCleanupChan <-chan struct{}) *VolumeAttacher {
+	return &VolumeAttacher{
 		rvName:           rvName,
 		cfg:              cfg,
 		client:           client,
-		log:              slog.Default().With("runner", "volume-publisher", "rv_name", rvName, "period_min_max", periodrMinMax),
+		log:              slog.Default().With("runner", "volume-attacher", "rv_name", rvName, "period_min_max", periodrMinMax),
 		forceCleanupChan: forceCleanupChan,
 	}
 }
 
-// Run starts the publish/unpublish cycle until context is cancelled
-func (v *VolumePublisher) Run(ctx context.Context) error {
+// Run starts the attach/detach cycle until context is cancelled
+func (v *VolumeAttacher) Run(ctx context.Context) error {
 	v.log.Info("started")
 	defer v.log.Info("finished")
 
@@ -65,10 +64,18 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 			return nil
 		}
 
-		rv, err := v.client.GetRV(ctx, v.rvName)
+		// Determine current desired attachments from RVA set (max 2 active attachments supported).
+		rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
 		if err != nil {
-			v.log.Error("failed to get RV", "error", err)
+			v.log.Error("failed to list RVAs", "error", err)
 			return err
+		}
+		desiredNodes := make([]string, 0, len(rvas))
+		for _, rva := range rvas {
+			if rva.Spec.NodeName == "" {
+				continue
+			}
+			desiredNodes = append(desiredNodes, rva.Spec.NodeName)
 		}
 
 		// get a random node
@@ -81,48 +88,49 @@ func (v *VolumePublisher) Run(ctx context.Context) error {
 		log := v.log.With("node_name", nodeName)
 
 		// TODO: maybe it's necessary to collect time statistics by cycles?
-		switch len(rv.Spec.PublishOn) {
+		switch len(desiredNodes) {
 		case 0:
 			if v.isAPublishCycle() {
-				if err := v.publishCycle(ctx, rv, nodeName); err != nil {
-					log.Error("failed to publishCycle", "error", err, "case", 0)
+				if err := v.attachCycle(ctx, nodeName); err != nil {
+					log.Error("failed to attachCycle", "error", err, "case", 0)
 					return err
 				}
 			} else {
-				if err := v.publishAndUnpublishCycle(ctx, rv, nodeName); err != nil {
-					log.Error("failed to publishAndUnpublishCycle", "error", err, "case", 0)
+				if err := v.attachAndDetachCycle(ctx, nodeName); err != nil {
+					log.Error("failed to attachAndDetachCycle", "error", err, "case", 0)
 					return err
 				}
 			}
 		case 1:
-			if slices.Contains(rv.Spec.PublishOn, nodeName) {
-				if err := v.unpublishCycle(ctx, rv, nodeName); err != nil {
-					log.Error("failed to unpublishCycle", "error", err, "case", 1)
+			otherNodeName := desiredNodes[0]
+			if otherNodeName == nodeName {
+				if err := v.detachCycle(ctx, nodeName); err != nil {
+					log.Error("failed to detachCycle", "error", err, "case", 1)
 					return err
 				}
 			} else {
-				if err := v.migrationCycle(ctx, rv, nodeName); err != nil {
+				if err := v.migrationCycle(ctx, otherNodeName, nodeName); err != nil {
 					log.Error("failed to migrationCycle", "error", err, "case", 1)
 					return err
 				}
 			}
 		case 2:
-			if !slices.Contains(rv.Spec.PublishOn, nodeName) {
-				nodeName = rv.Spec.PublishOn[0]
+			if !slices.Contains(desiredNodes, nodeName) {
+				nodeName = desiredNodes[0]
 			}
-			if err := v.unpublishCycle(ctx, rv, nodeName); err != nil {
-				log.Error("failed to unpublishCycle", "error", err, "case", 2)
+			if err := v.detachCycle(ctx, nodeName); err != nil {
+				log.Error("failed to detachCycle", "error", err, "case", 2)
 				return err
 			}
 		default:
-			err := fmt.Errorf("unexpected number of nodes in PublishOn: %d", len(rv.Spec.PublishOn))
+			err := fmt.Errorf("unexpected number of active attachments (RVA): %d", len(desiredNodes))
 			log.Error("error", "error", err)
 			return err
 		}
 	}
 }
 
-func (v *VolumePublisher) cleanup(ctx context.Context, reason error) {
+func (v *VolumeAttacher) cleanup(ctx context.Context, reason error) {
 	log := v.log.With("reason", reason, "func", "cleanup")
 	log.Info("started")
 	defer log.Info("finished")
@@ -147,99 +155,61 @@ func (v *VolumePublisher) cleanup(ctx context.Context, reason error) {
 		}()
 	}
 
-	rv, err := v.client.GetRV(cleanupCtx, v.rvName)
-	if err != nil {
-		log.Error("failed to get RV for cleanup", "error", err)
-		return
-	}
-
-	if err := v.unpublishCycle(cleanupCtx, rv, ""); err != nil {
-		v.log.Error("failed to unpublishCycle", "error", err)
+	if err := v.detachCycle(cleanupCtx, ""); err != nil {
+		v.log.Error("failed to detachCycle", "error", err)
 	}
 }
 
-func (v *VolumePublisher) publishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
-	log := v.log.With("node_name", nodeName, "func", "publishCycle")
+func (v *VolumeAttacher) attachCycle(ctx context.Context, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "attachCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	if err := v.doPublish(ctx, rv, nodeName); err != nil {
+	if err := v.doPublish(ctx, nodeName); err != nil {
 		log.Error("failed to doPublish", "error", err)
 		return err
 	}
-
-	// Wait for node to be published
-	for {
-		log.Debug("waiting for node to be published")
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-
-		rv, err := v.client.GetRV(ctx, v.rvName)
-		if err != nil {
-			return err
-		}
-
-		if rv.Status != nil && slices.Contains(rv.Status.PublishedOn, nodeName) {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-	}
+	return nil
 }
 
-func (v *VolumePublisher) publishAndUnpublishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
-	log := v.log.With("node_name", nodeName, "func", "publishAndUnpublishCycle")
+func (v *VolumeAttacher) attachAndDetachCycle(ctx context.Context, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "attachAndDetachCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	// Step 1: Publish the node and wait for it to be published
-	if err := v.publishCycle(ctx, rv, nodeName); err != nil {
+	// Step 1: Attach the node and wait for it to be attached
+	if err := v.attachCycle(ctx, nodeName); err != nil {
 		return err
 	}
 
-	// Step 2: Random delay between publish and unpublish
+	// Step 2: Random delay between attach and detach
 	randomDelay := randomDuration(v.cfg.Period)
-	log.Debug("waiting random delay before unpublish", "duration", randomDelay.String())
+	log.Debug("waiting random delay before detach", "duration", randomDelay.String())
 	if err := waitWithContext(ctx, randomDelay); err != nil {
 		return err
 	}
 
-	// Step 3: Get fresh RV and unpublish
-	rv, err := v.client.GetRV(ctx, v.rvName)
-	if err != nil {
-		return err
-	}
-
-	return v.unpublishCycle(ctx, rv, nodeName)
+	// Step 3: Get fresh RV and detach
+	return v.detachCycle(ctx, nodeName)
 }
 
-func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
+func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, nodeName string) error {
 	log := v.log.With("node_name", nodeName, "func", "migrationCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	// Find the other node (not nodeName) from current PublishOn
-	// In case 1, there should be exactly one node in PublishOn
-	if len(rv.Spec.PublishOn) != 1 {
-		return fmt.Errorf("expected exactly one node in PublishOn for migration, got %d", len(rv.Spec.PublishOn))
-	}
-	otherNodeName := rv.Spec.PublishOn[0]
 	if otherNodeName == nodeName {
 		return fmt.Errorf("other node name equals selected node name: %s", nodeName)
 	}
 
-	// Step 1: Publish the selected node and wait for it
-	if err := v.publishCycle(ctx, rv, nodeName); err != nil {
+	// Step 1: Attach the selected node and wait for it
+	if err := v.attachCycle(ctx, nodeName); err != nil {
 		return err
 	}
 
-	// Verify both nodes are now published
+	// Verify both nodes are now attached
 	for {
-		log.Debug("waiting for both nodes to be published", "selected_node", nodeName, "other_node", otherNodeName)
+		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
 		select {
 		case <-ctx.Done():
@@ -252,7 +222,7 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha1.Repli
 			return err
 		}
 
-		if rv.Status != nil && len(rv.Status.PublishedOn) == 2 {
+		if rv.Status != nil && len(rv.Status.ActuallyAttachedTo) == 2 {
 			break
 		}
 
@@ -261,71 +231,53 @@ func (v *VolumePublisher) migrationCycle(ctx context.Context, rv *v1alpha1.Repli
 
 	// Step 2: Random delay
 	randomDelay1 := randomDuration(v.cfg.Period)
-	log.Debug("waiting random delay before unpublishing other node", "duration", randomDelay1.String())
+	log.Debug("waiting random delay before detaching other node", "duration", randomDelay1.String())
 	if err := waitWithContext(ctx, randomDelay1); err != nil {
 		return err
 	}
 
-	// Step 3: Get fresh RV and unpublish the other node
-	rv, err := v.client.GetRV(ctx, v.rvName)
-	if err != nil {
-		return err
-	}
-
-	if err := v.unpublishCycle(ctx, rv, otherNodeName); err != nil {
+	// Step 3: Get fresh RV and detach the other node
+	if err := v.detachCycle(ctx, otherNodeName); err != nil {
 		return err
 	}
 
 	// Step 4: Random delay
 	randomDelay2 := randomDuration(v.cfg.Period)
-	log.Debug("waiting random delay before unpublishing selected node", "duration", randomDelay2.String())
+	log.Debug("waiting random delay before detaching selected node", "duration", randomDelay2.String())
 	if err := waitWithContext(ctx, randomDelay2); err != nil {
 		return err
 	}
 
-	// Step 5: Get fresh RV and unpublish the selected node
-	rv, err = v.client.GetRV(ctx, v.rvName)
-	if err != nil {
-		return err
-	}
-
-	return v.unpublishCycle(ctx, rv, nodeName)
+	// Step 5: Get fresh RV and detach the selected node
+	return v.detachCycle(ctx, nodeName)
 }
 
-func (v *VolumePublisher) doPublish(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
-	// Check if node is already in PublishOn
-	if slices.Contains(rv.Spec.PublishOn, nodeName) {
-		v.log.Debug("node already in PublishOn", "node_name", nodeName)
-		return nil
+func (v *VolumeAttacher) doPublish(ctx context.Context, nodeName string) error {
+	if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
+		return fmt.Errorf("failed to create RVA: %w", err)
 	}
-
-	originalRV := rv.DeepCopy()
-	rv.Spec.PublishOn = append(rv.Spec.PublishOn, nodeName)
-
-	err := v.client.PatchRV(ctx, originalRV, rv)
-	if err != nil {
-		return fmt.Errorf("failed to patch RV with new publish node: %w", err)
+	if err := v.client.WaitForRVAReady(ctx, v.rvName, nodeName); err != nil {
+		return fmt.Errorf("failed to wait for RVA Ready: %w", err)
 	}
-
 	return nil
 }
 
-func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
-	log := v.log.With("node_name", nodeName, "func", "unpublishCycle")
+func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error {
+	log := v.log.With("node_name", nodeName, "func", "detachCycle")
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	if err := v.doUnpublish(ctx, rv, nodeName); err != nil {
-		log.Error("failed to doUnpublish", "error", err)
+	if err := v.doUnattach(ctx, nodeName); err != nil {
+		log.Error("failed to doUnattach", "error", err)
 		return err
 	}
 
-	// Wait for node(s) to be unpublished
+	// Wait for node(s) to be detached
 	for {
 		if nodeName == "" {
-			log.Debug("waiting for all nodes to be unpublished")
+			log.Debug("waiting for all nodes to be detached")
 		} else {
-			log.Debug("waiting for node to be unpublished")
+			log.Debug("waiting for node to be detached")
 		}
 
 		select {
@@ -340,18 +292,18 @@ func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha1.Repli
 		}
 
 		if rv.Status == nil {
-			// If status is nil, consider it as unpublished
+			// If status is nil, consider it as detached
 			return nil
 		}
 
 		if nodeName == "" {
-			// Check if all nodes are unpublished
-			if len(rv.Status.PublishedOn) == 0 {
+			// Check if all nodes are detached
+			if len(rv.Status.ActuallyAttachedTo) == 0 {
 				return nil
 			}
 		} else {
-			// Check if specific node is unpublished
-			if !slices.Contains(rv.Status.PublishedOn, nodeName) {
+			// Check if specific node is detached
+			if !slices.Contains(rv.Status.ActuallyAttachedTo, nodeName) {
 				return nil
 			}
 		}
@@ -360,39 +312,31 @@ func (v *VolumePublisher) unpublishCycle(ctx context.Context, rv *v1alpha1.Repli
 	}
 }
 
-func (v *VolumePublisher) doUnpublish(ctx context.Context, rv *v1alpha1.ReplicatedVolume, nodeName string) error {
-	originalRV := rv.DeepCopy()
-
+func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error {
 	if nodeName == "" {
-		// Unpublish from all nodes - make PublishOn empty
-		rv.Spec.PublishOn = []string{}
-	} else {
-		// Check if node is in PublishOn
-		if !slices.Contains(rv.Spec.PublishOn, nodeName) {
-			v.log.Debug("node not in PublishOn", "node_name", nodeName)
-			return nil
+		// Detach from all nodes - delete all RVAs for this RV.
+		rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+		if err != nil {
+			return err
 		}
-
-		// Remove node from PublishOn
-		newPublishOn := make([]string, 0, len(rv.Spec.PublishOn))
-		for _, node := range rv.Spec.PublishOn {
-			if node != nodeName {
-				newPublishOn = append(newPublishOn, node)
+		for _, rva := range rvas {
+			if rva.Spec.NodeName == "" {
+				continue
 			}
+			_ = v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName)
 		}
-		rv.Spec.PublishOn = newPublishOn
+		return nil
 	}
 
-	err := v.client.PatchRV(ctx, originalRV, rv)
-	if err != nil {
-		return fmt.Errorf("failed to patch RV to unpublish node: %w", err)
+	// Detach from a specific node
+	if err := v.client.DeleteRVA(ctx, v.rvName, nodeName); err != nil {
+		return err
 	}
-
 	return nil
 }
 
-func (v *VolumePublisher) isAPublishCycle() bool {
+func (v *VolumeAttacher) isAPublishCycle() bool {
 	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
 	r := rand.Float64()
-	return r < publishCycleProbability
+	return r < attachCycleProbability
 }

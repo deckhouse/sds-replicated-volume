@@ -21,9 +21,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
 	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
-	rvpublishcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_publish_controller"
 	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
@@ -42,6 +42,9 @@ import (
 var registry = []func(mgr manager.Manager) error{}
 
 func init() {
+	// Must be first: controllers rely on MatchingFields against these indexes.
+	registry = append(registry, RegisterIndexes)
+
 	registry = append(registry, rvrdiskfulcount.BuildController)
 	registry = append(registry, rvrtiebreakercount.BuildController)
 	registry = append(registry, rvstatusconfigquorum.BuildController)
@@ -57,7 +60,7 @@ func init() {
 	registry = append(registry, rvrstatusconditions.BuildController)
 	registry = append(registry, rvstatusconditions.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)
-	registry = append(registry, rvpublishcontroller.BuildController)
+	registry = append(registry, rvattachcontroller.BuildController)
 
 	// ...
 }
