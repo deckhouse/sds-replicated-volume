@@ -22,15 +22,14 @@ import (
 	"log/slog"
 
 	"github.com/go-logr/logr"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	u "github.com/deckhouse/sds-common-lib/utils"
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 )
 
@@ -69,21 +68,8 @@ func newManager(
 		return nil, u.LogError(log, fmt.Errorf("creating manager: %w", err))
 	}
 
-	err = mgr.GetFieldIndexer().IndexField(
-		ctx,
-		&v1alpha1.ReplicatedVolumeReplica{},
-		"spec.nodeName",
-		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha1.ReplicatedVolumeReplica)
-			if replica.Spec.NodeName == "" {
-				return nil
-			}
-			return []string{replica.Spec.NodeName}
-		},
-	)
-	if err != nil {
-		return nil,
-			u.LogError(log, fmt.Errorf("indexing %s: %w", "spec.nodeName", err))
+	if err := indexes.RegisterIndexes(ctx, mgr); err != nil {
+		return nil, u.LogError(log, fmt.Errorf("registering indexes: %w", err))
 	}
 
 	if err = mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
