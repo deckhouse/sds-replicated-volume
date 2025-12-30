@@ -88,31 +88,46 @@ func (r *Reconciler) RVRUpdateShouldBeReconciled(
 		return false
 	}
 
-	// ignore unimportant changes
-	rvrOldCopy := rvrOld.DeepCopy()
-	rvrNewCopy := rvrNew.DeepCopy()
-	cleanIgnoredFields(rvrOldCopy)
-	cleanIgnoredFields(rvrNewCopy)
+	// only consider important changes
+	if !equality.Semantic.DeepEqual(rvrOld.Spec, rvrNew.Spec) {
+		return true
+	}
+	if !equality.Semantic.DeepEqual(rvrOld.Finalizers, rvrNew.Finalizers) {
+		return true
+	}
+	if !equality.Semantic.DeepEqual(rvrOld.DeletionTimestamp, rvrNew.DeletionTimestamp) {
+		return true
+	}
+	if !rvrStatusDRBDConfigEqual(rvrOld, rvrNew) {
+		return true
+	}
+	if !rvrStatusLVMLogicalVolumeNameEqual(rvrOld, rvrNew) {
+		return true
+	}
 
-	return !equality.Semantic.DeepEqual(rvrOldCopy, rvrNewCopy)
+	return false
 }
 
-func cleanIgnoredFields(rvrCopy *v1alpha1.ReplicatedVolumeReplica) {
-	// because it is incremented on each update
-	rvrCopy.ResourceVersion = ""
-	if rvrCopy.Status != nil {
-		if rvrCopy.Status.DRBD != nil {
-			// because drbd-config updates it itself
-			rvrCopy.Status.DRBD.Actual = nil
-			// because scanner updates should not be important to drbd-config
-			rvrCopy.Status.DRBD.Status = nil
-			// because drbd-config is not responsible
-			// for error handling, except own errors, which will be retried anyways
-			rvrCopy.Status.DRBD.Errors = nil
-			// rvrCopy.Status.DRBD.Config is important, don't add!
-		}
-		// because those updates are for external clients and should not be important to drbd-config
-		rvrCopy.Status.Conditions = nil
-		rvrCopy.Status.SyncProgress = ""
+func rvrStatusDRBDConfigEqual(rvrOld, rvrNew *v1alpha1.ReplicatedVolumeReplica) bool {
+	oldConfig := getDRBDConfig(rvrOld)
+	newConfig := getDRBDConfig(rvrNew)
+	return equality.Semantic.DeepEqual(oldConfig, newConfig)
+}
+
+func getDRBDConfig(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.DRBDConfig {
+	if rvr.Status == nil || rvr.Status.DRBD == nil {
+		return nil
 	}
+	return rvr.Status.DRBD.Config
+}
+
+func rvrStatusLVMLogicalVolumeNameEqual(rvrOld, rvrNew *v1alpha1.ReplicatedVolumeReplica) bool {
+	return getLVMLogicalVolumeName(rvrOld) == getLVMLogicalVolumeName(rvrNew)
+}
+
+func getLVMLogicalVolumeName(rvr *v1alpha1.ReplicatedVolumeReplica) string {
+	if rvr.Status == nil {
+		return ""
+	}
+	return rvr.Status.LVMLogicalVolumeName
 }
