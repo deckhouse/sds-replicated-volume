@@ -46,8 +46,8 @@ type ResourceScanner interface {
 
 var defaultScanner atomic.Pointer[ResourceScanner]
 
-func DefaultScanner() ResourceScanner {
-	return *defaultScanner.Load()
+func DefaultScanner() *ResourceScanner {
+	return defaultScanner.Load()
 }
 
 func SetDefaultScanner(s ResourceScanner) {

@@ -148,7 +148,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	s := scanner.DefaultScanner()
 	if s != nil {
-		s.ResourceShouldBeRefreshed(rvr.Spec.ReplicatedVolumeName)
+		(*s).ResourceShouldBeRefreshed(rvr.Spec.ReplicatedVolumeName)
 	}
 
 	return reconcile.Result{}, nil
