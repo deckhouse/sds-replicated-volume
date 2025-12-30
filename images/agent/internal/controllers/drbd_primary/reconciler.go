@@ -30,6 +30,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
@@ -142,8 +143,15 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	err = r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, wantPrimary)
 	if err != nil {
 		log.Error(err, "updating error status")
+		return reconcile.Result{}, err
 	}
-	return reconcile.Result{}, err
+
+	s := scanner.DefaultScanner()
+	if s != nil {
+		(*s).ResourceShouldBeRefreshed(rvr.Spec.ReplicatedVolumeName)
+	}
+
+	return reconcile.Result{}, nil
 }
 
 func (r *Reconciler) updateErrorStatus(

@@ -20,6 +20,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -35,8 +36,6 @@ import (
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	u "github.com/deckhouse/sds-common-lib/utils"
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
@@ -47,8 +46,8 @@ type ResourceScanner interface {
 
 var defaultScanner atomic.Pointer[ResourceScanner]
 
-func DefaultScanner() ResourceScanner {
-	return *defaultScanner.Load()
+func DefaultScanner() *ResourceScanner {
+	return defaultScanner.Load()
 }
 
 func SetDefaultScanner(s ResourceScanner) {
@@ -85,7 +84,7 @@ func NewScanner(
 func (s *Scanner) retryUntilCancel(fn func() error) error {
 	return retry.OnError(
 		wait.Backoff{
-			Steps:    7,
+			Steps:    8,
 			Duration: 50 * time.Millisecond,
 			Factor:   2.0,
 			Cap:      5 * time.Second,
@@ -198,16 +197,18 @@ func (s *Scanner) ConsumeBatches() error {
 			if err != nil {
 				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
+			resourceStatusByName := make(map[string]*drbdsetup.Resource, len(statusResult))
+			for i := range statusResult {
+				resourceStatusByName[statusResult[i].Name] = &statusResult[i]
+			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
 
+			var batchErrors error
 			for _, item := range batch {
 				resourceName := string(item)
 
-				resourceStatus, ok := uiter.Find(
-					uslices.Ptrs(statusResult),
-					func(res *drbdsetup.Resource) bool { return res.Name == resourceName },
-				)
+				resourceStatus, ok := resourceStatusByName[resourceName]
 				if !ok {
 					log.Warn(
 						"got update event for resource 'resourceName', but it's missing in drbdsetup status",
@@ -216,49 +217,58 @@ func (s *Scanner) ConsumeBatches() error {
 					continue
 				}
 
-				rvr := &v1alpha1.ReplicatedVolumeReplica{
-					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
-						// required for SetNameWithNodeID
-						ReplicatedVolumeName: resourceName,
-					},
+				if err := s.refreshResource(log, resourceStatus); err != nil {
+					batchErrors = errors.Join(batchErrors, err)
+					// requeue same item
+					_ = s.batcher.Add(item)
 				}
-				rvr.SetNameWithNodeID(uint(resourceStatus.NodeID))
-				if err := s.cl.Get(s.ctx, client.ObjectKeyFromObject(rvr), rvr); err != nil {
-					if client.IgnoreNotFound(err) == nil {
-						log.Warn(
-							"got update event for resource 'resourceName' nodeId='nodeId', but rvr 'rvrName' missing in cluster",
-							"resourceName", resourceName,
-							"nodeId", resourceStatus.NodeID,
-							"rvrName", rvr.Name,
-						)
-						continue
-					}
-					log.Error("getting rvr 'rvrName' failed", "rvrName", rvr.Name, "err", err)
-					continue
-				}
+			}
 
-				if rvr.Spec.NodeName != s.hostname {
-					log.Error(
-						"got update event for rvr 'rvrNodeName', but it has unexpected node name",
-						"hostname", s.hostname,
-						"rvrNodeName", rvr.Spec.NodeName,
-					)
-					continue
-				}
-
-				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
-				if err != nil {
-					return u.LogError(
-						log,
-						fmt.Errorf("updating replica status: %w", err),
-					)
-				}
-				log.Debug("updated replica status", "resourceName", resourceName)
+			if batchErrors != nil {
+				return batchErrors
 			}
 		}
 
 		return s.ctx.Err()
 	})
+}
+
+func (s *Scanner) refreshResource(log *slog.Logger, resourceStatus *drbdsetup.Resource) error {
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+			// required for SetNameWithNodeID
+			ReplicatedVolumeName: resourceStatus.Name,
+		},
+	}
+	rvr.SetNameWithNodeID(uint(resourceStatus.NodeID))
+	if err := s.cl.Get(s.ctx, client.ObjectKeyFromObject(rvr), rvr); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.Warn(
+				"got update event for resource 'resourceName' nodeId='nodeId', but rvr 'rvrName' missing in cluster",
+				"resourceName", resourceStatus.Name,
+				"nodeId", resourceStatus.NodeID,
+				"rvrName", rvr.Name,
+			)
+			return nil
+		}
+		return u.LogError(log, fmt.Errorf("getting rvr for resource: %w", err))
+	}
+
+	if rvr.Spec.NodeName != s.hostname {
+		log.Error(
+			"got update event for rvr 'rvrNodeName', but it has unexpected node name",
+			"hostname", s.hostname,
+			"rvrNodeName", rvr.Spec.NodeName,
+		)
+		return nil
+	}
+
+	err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
+	if err != nil {
+		return u.LogError(log, fmt.Errorf("updating replica status: %w", err))
+	}
+	log.Debug("updated replica status", "resourceName", resourceStatus.Name)
+	return nil
 }
 
 func (s *Scanner) updateReplicaStatusIfNeeded(

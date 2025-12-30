@@ -86,7 +86,7 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 
 	s := scanner.DefaultScanner()
 	if s != nil {
-		s.ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
+		(*s).ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
 	} // scanner didn't start yet, and it will refresh all resources when it starts anyway, so no need to trigger
 
 	return err
