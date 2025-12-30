@@ -80,7 +80,7 @@ spec:
                 minLength: 1
                 type: string
               replicatedVolumeName:
-                maxLength: 127
+                maxLength: 120
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
@@ -496,6 +496,9 @@ spec:
         - message: numeric suffix must be between 0 and 31
           rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
             + 1)) <= 31
+        - message: metadata.name must be at most 123 characters (to fit derived LLV
+            name with prefix)
+          rule: size(self.metadata.name) <= 123
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName
