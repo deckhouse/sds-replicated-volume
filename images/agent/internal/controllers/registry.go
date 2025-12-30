@@ -32,7 +32,7 @@ func init() {
 	registry = append(registry, rvrstatusconfigaddress.BuildController)
 	registry = append(registry, drbdconfig.BuildController)
 	registry = append(registry, drbdprimary.BuildController)
-	// ...
+	//
 }
 
 func BuildAll(mgr manager.Manager) error {

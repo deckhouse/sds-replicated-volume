@@ -1,6 +1,18 @@
 ---
-# do not remove this image: used in external audits (DKP CSE)
-image: {{ .ImageName }}-src-artifact
+# Separate artifact for drbd-utils sources - depends only on DRBD_UTILS version
+image: {{ .ImageName }}-drbd-src-artifact
+fromImage: builder/src
+final: false
+shell:
+  install:
+    - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/drbd-utils
+    - cd /src/drbd-utils
+    - git submodule update --init --recursive
+    #- rm -rf /src/drbd-utils/.git # needed for make
+
+---
+# Separate artifact for Go sources - depends on Go code changes
+image: {{ .ImageName }}-go-src-artifact
 fromImage: builder/src
 final: false
 git:
@@ -15,12 +27,22 @@ git:
         - '**/*'
     excludePaths:
       - images/{{ $.ImageName }}/werf.yaml
-shell:
-  install:
-    - git clone --depth 1 --branch v{{ $.Versions.DRBD_UTILS }} {{ $.Root.SOURCE_REPO }}/LINBIT/drbd-utils /src/drbd-utils
-    - cd /src/drbd-utils
-    - git submodule update --init --recursive
-    #- rm -rf /src/drbd-utils/.git # needed for make
+
+---
+# do not remove this image: used in external audits (DKP CSE)
+# Combined artifact with all sources for FSTEC certification
+image: {{ .ImageName }}-src-artifact
+fromImage: builder/src
+final: false
+import:
+  - image: {{ .ImageName }}-drbd-src-artifact
+    add: /src/drbd-utils
+    to: /src/drbd-utils
+    before: install
+  - image: {{ .ImageName }}-go-src-artifact
+    add: /src
+    to: /src
+    before: install
 
 ---
 {{- $drbdBinaries := "/drbd-utils/sbin/* /drbd-utils/etc/drbd.conf /drbd-utils/etc/drbd.d/global_common.conf /drbd-utils/etc/multipath/conf.d/drbd.conf" }}
@@ -28,11 +50,9 @@ image: {{ .ImageName }}-binaries-artifact
 fromImage: builder/alt
 final: false
 import:
-  - image: {{ .ImageName }}-src-artifact
-    add: /src
-    to: /src
-    includePaths:
-      - drbd-utils
+  - image: {{ .ImageName }}-drbd-src-artifact
+    add: /src/drbd-utils
+    to: /src/drbd-utils
     before: install
 git:
   - add: /tools/dev_images/additional_tools/alt/binary_replace.sh
@@ -70,11 +90,9 @@ image: {{ .ImageName }}-golang-artifact
 fromImage: builder/golang-alpine
 final: false
 import:
-  - image: {{ .ImageName }}-src-artifact
+  - image: {{ .ImageName }}-go-src-artifact
     add: /src
     to: /src
-    excludePaths:
-      - drbd-utils
     before: setup
 mount:
   - fromPath: ~/go-pkg-cache
