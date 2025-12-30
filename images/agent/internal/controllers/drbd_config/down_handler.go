@@ -48,7 +48,7 @@ func (h *DownHandler) Handle(ctx context.Context) error {
 	}
 
 	rvName := h.rvr.Spec.ReplicatedVolumeName
-	regularFilePath, tmpFilePath := FilePaths(rvName)
+	regularFilePath, tmpFilePath := FilePaths(h.rvr.Name)
 
 	// Try drbdadm first (uses config file)
 	if err := drbdadm.ExecuteDown(ctx, rvName); err != nil {
