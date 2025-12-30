@@ -362,6 +362,8 @@ func copyStatusFields(
 	target *v1alpha1.DRBDStatus,
 	source *drbdsetup.Resource,
 ) {
+	// Some properties were removed, as they are too verbose. See "removed (verbose):"
+
 	target.Name = source.Name
 	target.NodeId = source.NodeID
 	target.Role = source.Role
@@ -377,19 +379,19 @@ func copyStatusFields(
 	target.Devices = make([]v1alpha1.DeviceStatus, 0, len(source.Devices))
 	for _, d := range source.Devices {
 		target.Devices = append(target.Devices, v1alpha1.DeviceStatus{
-			Volume:       d.Volume,
-			Minor:        d.Minor,
-			DiskState:    v1alpha1.ParseDiskState(d.DiskState),
-			Client:       d.Client,
-			Open:         d.Open,
-			Quorum:       d.Quorum,
-			Size:         d.Size,
-			Read:         d.Read,
-			Written:      d.Written,
-			ALWrites:     d.ALWrites,
-			BMWrites:     d.BMWrites,
-			UpperPending: d.UpperPending,
-			LowerPending: d.LowerPending,
+			Volume:    d.Volume,
+			Minor:     d.Minor,
+			DiskState: v1alpha1.ParseDiskState(d.DiskState),
+			Client:    d.Client,
+			Open:      d.Open,
+			Quorum:    d.Quorum,
+			Size:      d.Size,
+			// removed (verbose): Read:         d.Read,
+			// removed (verbose): Written:      d.Written,
+			// removed (verbose): ALWrites:     d.ALWrites,
+			// removed (verbose): BMWrites:     d.BMWrites,
+			// removed (verbose): UpperPending: d.UpperPending,
+			// removed (verbose): LowerPending: d.LowerPending,
 		})
 	}
 
@@ -403,8 +405,8 @@ func copyStatusFields(
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
-			APInFlight:      c.APInFlight,
-			RSInFlight:      c.RSInFlight,
+			// removed (verbose): APInFlight:      c.APInFlight,
+			// removed (verbose): RSInFlight:      c.RSInFlight,
 		}
 
 		// Paths
@@ -429,17 +431,17 @@ func copyStatusFields(
 		conn.PeerDevices = make([]v1alpha1.PeerDeviceStatus, 0, len(c.PeerDevices))
 		for _, pd := range c.PeerDevices {
 			conn.PeerDevices = append(conn.PeerDevices, v1alpha1.PeerDeviceStatus{
-				Volume:                 pd.Volume,
-				ReplicationState:       v1alpha1.ParseReplicationState(pd.ReplicationState),
-				PeerDiskState:          v1alpha1.ParseDiskState(pd.PeerDiskState),
-				PeerClient:             pd.PeerClient,
-				ResyncSuspended:        pd.ResyncSuspended,
-				OutOfSync:              pd.OutOfSync,
-				Pending:                pd.Pending,
-				Unacked:                pd.Unacked,
+				Volume:           pd.Volume,
+				ReplicationState: v1alpha1.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:    v1alpha1.ParseDiskState(pd.PeerDiskState),
+				PeerClient:       pd.PeerClient,
+				ResyncSuspended:  pd.ResyncSuspended,
+				OutOfSync:        pd.OutOfSync,
+				// removed (verbose): Pending:                pd.Pending,
+				// removed (verbose): Unacked:                pd.Unacked,
 				HasSyncDetails:         pd.HasSyncDetails,
 				HasOnlineVerifyDetails: pd.HasOnlineVerifyDetails,
-				PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),
+				// removed (verbose): PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),
 			})
 		}
 
