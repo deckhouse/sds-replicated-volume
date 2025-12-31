@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -147,18 +148,18 @@ func (r *Reconciler) processFinalizers(
 
 func (r *Reconciler) rvHasRVRs(ctx context.Context, log *slog.Logger, rvName string) (bool, error) {
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
 		return false, fmt.Errorf("listing rvrs: %w", err)
 	}
 
 	for i := range rvrList.Items {
-		if rvrList.Items[i].Spec.ReplicatedVolumeName == rvName {
-			log.Debug(
-				"found rvr 'rvrName' linked to rv 'rvName', therefore skip removing finalizer from rv",
-				"rvrName", rvrList.Items[i].Name,
-			)
-			return true, nil
-		}
+		log.Debug(
+			"found rvr 'rvrName' linked to rv 'rvName', therefore skip removing finalizer from rv",
+			"rvrName", rvrList.Items[i].Name,
+		)
+		return true, nil
 	}
 	return false, nil
 }

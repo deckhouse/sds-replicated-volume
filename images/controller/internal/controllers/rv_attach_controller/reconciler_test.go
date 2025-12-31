@@ -41,7 +41,7 @@ import (
 )
 
 func withRVAIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
-	return b.WithIndex(&v1alpha1.ReplicatedVolumeAttachment{}, indexes.IndexFieldRVAByReplicatedVolumeName, func(obj client.Object) []string {
+	b = b.WithIndex(&v1alpha1.ReplicatedVolumeAttachment{}, indexes.IndexFieldRVAByReplicatedVolumeName, func(obj client.Object) []string {
 		rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
 		if !ok {
 			return nil
@@ -51,6 +51,19 @@ func withRVAIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
 		}
 		return []string{rva.Spec.ReplicatedVolumeName}
 	})
+
+	b = b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		if rvr.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+		return []string{rvr.Spec.ReplicatedVolumeName}
+	})
+
+	return b
 }
 
 func TestRvAttachReconciler(t *testing.T) {

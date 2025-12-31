@@ -33,6 +33,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const (
@@ -310,7 +311,9 @@ func (r *Reconciler) prepareSchedulingContext(
 
 	// List all ReplicatedVolumeReplica resources in the cluster.
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
+	if err := r.cl.List(ctx, replicaList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		return nil, fmt.Errorf("unable to list ReplicatedVolumeReplica: %w", err)
 	}
 
@@ -952,7 +955,9 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 ) error {
 	// List all ReplicatedVolumeReplica resources in the cluster.
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
+	if err := r.cl.List(ctx, replicaList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
 		return err
 	}
@@ -960,7 +965,7 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	// Update Scheduled condition on all RVRs belonging to this RV.
 	for _, rvr := range replicaList.Items {
 		// TODO: fix checking for deletion
-		if rvr.Spec.ReplicatedVolumeName != rvName || !rvr.DeletionTimestamp.IsZero() {
+		if !rvr.DeletionTimestamp.IsZero() {
 			continue
 		}
 

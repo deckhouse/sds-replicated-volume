@@ -42,6 +42,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 // ClusterSetup defines a cluster configuration for tests
@@ -80,6 +81,19 @@ type ExpectedResult struct {
 	ScheduledTieBreakerCount    *int   // expected number of scheduled TieBreaker (nil = all must be scheduled)
 	UnscheduledTieBreakerCount  *int   // expected number of unscheduled TieBreaker (nil = 0)
 	UnscheduledTieBreakerReason string // expected condition reason for unscheduled TieBreaker replicas
+}
+
+func withRVRIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		if rvr.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+		return []string{rvr.Spec.ReplicatedVolumeName}
+	})
 }
 
 // IntegrationTestCase defines a full integration test case
@@ -368,10 +382,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		// Create client and reconciler
-		cl := fake.NewClientBuilder().
+		cl := withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithRuntimeObjects(objects...).
-			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 			Build()
 		rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 		Expect(err).ToNot(HaveOccurred())
@@ -967,10 +981,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -1053,10 +1067,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -1193,7 +1207,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		for _, rvr := range rvrList {
 			objects = append(objects, rvr)
 		}
-		builder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
+		builder := withRVRIndex(fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...))
 		if withStatusSubresource {
 			builder = builder.WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
 		}
@@ -1426,10 +1440,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -1544,10 +1558,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -1630,10 +1644,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())
@@ -1721,10 +1735,10 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
 				WithRuntimeObjects(objects...).
-				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
+				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})).
 				Build()
 			rec, err := rvrschedulingcontroller.NewReconciler(cl, logr.Discard(), scheme)
 			Expect(err).ToNot(HaveOccurred())

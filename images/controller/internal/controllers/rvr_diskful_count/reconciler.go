@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -33,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -110,14 +110,12 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Get all RVRs for this RV
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err = r.cl.List(ctx, rvrList); err != nil {
+	if err = r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "listing all ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
-	rvrList.Items = slices.DeleteFunc(
-		rvrList.Items,
-		func(rvr v1alpha1.ReplicatedVolumeReplica) bool { return rvr.Spec.ReplicatedVolumeName != rv.Name },
-	)
 
 	totalRvrMap := getDiskfulReplicatedVolumeReplicas(ctx, r.cl, rv, log, rvrList.Items)
 

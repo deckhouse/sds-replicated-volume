@@ -169,18 +169,13 @@ func (r *Reconciler) getReplicatedVolumeStorageClass(ctx context.Context, rv v1a
 // getReplicatedVolumeReplicas lists all ReplicatedVolumeReplica objects and returns those belonging to the given RV.
 func (r *Reconciler) getReplicatedVolumeReplicas(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
 		return nil, err
 	}
 
-	var replicasForRV []v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range rvrList.Items {
-		if rvr.Spec.ReplicatedVolumeName == rvName {
-			replicasForRV = append(replicasForRV, rvr)
-		}
-	}
-
-	return replicasForRV, nil
+	return rvrList.Items, nil
 }
 
 // getSortedReplicatedVolumeAttachments lists all ReplicatedVolumeAttachment objects and returns those belonging

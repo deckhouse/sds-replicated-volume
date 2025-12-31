@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -70,7 +71,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 
 	log.V(1).Info("Listing replicas")
 	var list v1alpha1.ReplicatedVolumeReplicaList
-	if err := r.cl.List(ctx, &list, &client.ListOptions{}); err != nil {
+	if err := r.cl.List(ctx, &list, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplica")
 		return reconcile.Result{}, err
 	}

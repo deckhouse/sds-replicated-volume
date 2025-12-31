@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const requeueAfterSec = 10
@@ -134,19 +135,14 @@ func (r *Reconciler) loadGCContext(
 	}
 
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "Can't list ReplicatedVolumeReplica")
 		return nil, nil, nil, err
 	}
 
-	var replicasForRV []v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range rvrList.Items {
-		if rvr.Spec.ReplicatedVolumeName == rv.Name {
-			replicasForRV = append(replicasForRV, rvr)
-		}
-	}
-
-	return rv, rsc, replicasForRV, nil
+	return rv, rsc, rvrList.Items, nil
 }
 
 func isThisReplicaCountEnoughForQuorum(

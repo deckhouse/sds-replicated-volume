@@ -31,6 +31,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvquorumcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -43,14 +44,27 @@ var _ = Describe("Reconciler", func() {
 	var cl client.Client
 	var rec *rvquorumcontroller.Reconciler
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		cl = nil
 		rec = nil
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
-				&v1alpha1.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolume{}))
 	})
 
 	JustBeforeEach(func() {

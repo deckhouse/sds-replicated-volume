@@ -31,7 +31,21 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
+
+func withRVRIndex(b *fake.ClientBuilder) *fake.ClientBuilder {
+	return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+		rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+		if !ok {
+			return nil
+		}
+		if rvr.Spec.ReplicatedVolumeName == "" {
+			return nil
+		}
+		return []string{rvr.Spec.ReplicatedVolumeName}
+	})
+}
 
 func TestReconciler_Reconcile(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -205,9 +219,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cl := fake.NewClientBuilder().
+			cl := withRVRIndex(fake.NewClientBuilder().
 				WithScheme(scheme).
-				WithObjects(tt.objects...).
+				WithObjects(tt.objects...)).
 				Build()
 			r := rvmetadata.NewReconciler(cl, slog.Default())
 			got, gotErr := r.Reconcile(t.Context(), tt.req)

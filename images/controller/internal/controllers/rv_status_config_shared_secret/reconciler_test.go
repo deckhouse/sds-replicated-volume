@@ -34,6 +34,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 func TestReconciler(t *testing.T) {
@@ -62,16 +63,29 @@ var _ = Describe("Reconciler", func() {
 	secondAlg := func() string { return string(algs()[1]) }
 	lastAlg := func() string { return string(algs()[len(algs())-1]) }
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		// Ensure test assumptions are met
 		Expect(len(algs())).To(BeNumerically(">=", 2),
 			"tests require at least 2 algorithms to test switching logic")
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
-			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}))
 		cl = nil
 		rec = nil
 	})
