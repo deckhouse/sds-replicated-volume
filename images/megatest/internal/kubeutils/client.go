@@ -416,7 +416,7 @@ func (c *Client) GetRV(ctx context.Context, name string) (*v1alpha1.ReplicatedVo
 
 // IsRVReady checks if a ReplicatedVolume is in IOReady and Quorum conditions
 func (c *Client) IsRVReady(rv *v1alpha1.ReplicatedVolume) bool {
-	if rv.Status == nil {
+	if rv == nil {
 		return false
 	}
 	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) &&
@@ -522,10 +522,6 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 			if client.IgnoreNotFound(err) != nil {
 				return err
 			}
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
-		if rva.Status == nil {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}

@@ -61,11 +61,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Ensure Status is not nil to avoid panic
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
 	// Check agent availability and determine reason if not available
 	agentReady, unavailabilityReason, shouldRetry := r.checkAgentAvailability(ctx, rvr.Spec.NodeName, log)
 

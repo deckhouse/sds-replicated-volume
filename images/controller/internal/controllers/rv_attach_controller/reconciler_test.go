@@ -107,7 +107,7 @@ var _ = Describe("Reconcile", func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				ReplicatedStorageClassName: "rsc1",
 			},
-			Status: &v1alpha1.ReplicatedVolumeStatus{
+			Status: v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionTrue,
@@ -191,7 +191,6 @@ var _ = Describe("Reconcile", func() {
 		Expect(err).NotTo(HaveOccurred())
 		// When RV is missing, deleting RVA finalizer must be released.
 		Expect(got.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
-		Expect(got.Status).NotTo(BeNil())
 		Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
 		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
 		Expect(cond).NotTo(BeNil())
@@ -227,7 +226,6 @@ var _ = Describe("Reconcile", func() {
 
 		got := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), got)).To(Succeed())
-		Expect(got.Status).NotTo(BeNil())
 		Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
 		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
 		Expect(cond).NotTo(BeNil())
@@ -245,7 +243,7 @@ var _ = Describe("Reconcile", func() {
 				NodeName:             "node-1",
 				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
-			Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				ActualType: v1alpha1.ReplicaTypeDiskful,
 				DRBD: &v1alpha1.DRBD{
 					Status: &v1alpha1.DRBDStatus{
@@ -271,7 +269,7 @@ var _ = Describe("Reconcile", func() {
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				ReplicatedStorageClassName: "rsc1",
 			},
-			Status: &v1alpha1.ReplicatedVolumeStatus{
+			Status: v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
 					Status: metav1.ConditionFalse,
@@ -314,7 +312,7 @@ var _ = Describe("Reconcile", func() {
 				NodeName:             "node-1",
 				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
-			Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				ActualType: v1alpha1.ReplicaTypeDiskful,
 				DRBD: &v1alpha1.DRBD{
 					Status: &v1alpha1.DRBDStatus{
@@ -335,7 +333,7 @@ var _ = Describe("Reconcile", func() {
 				NodeName:             "node-2",
 				Type:                 v1alpha1.ReplicaTypeDiskful,
 			},
-			Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+			Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 				DRBD: &v1alpha1.DRBD{
 					Config: &v1alpha1.DRBDConfig{
 						Primary: &primaryTrue,
@@ -413,19 +411,19 @@ var _ = Describe("Reconcile", func() {
 			Expect(cl.Create(ctx, &rv)).To(Succeed())
 		})
 
-		When("status is nil", func() {
+		When("status is empty", func() {
 			BeforeEach(func() {
-				rv.Status = nil
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{}
 			})
 
-			It("does not error when status is nil", func(ctx SpecContext) {
+			It("does not error when status is empty", func(ctx SpecContext) {
 				Expect(rec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKeyFromObject(&rv)})).To(Equal(reconcile.Result{}))
 			})
 		})
 
 		When("IOReady condition is False", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -483,7 +481,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
@@ -496,7 +494,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-2",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
@@ -508,7 +506,7 @@ var _ = Describe("Reconcile", func() {
 				gotRVR1 := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr1), gotRVR1)).To(Succeed())
 				primaryRequested1 := false
-				if gotRVR1.Status != nil && gotRVR1.Status.DRBD != nil && gotRVR1.Status.DRBD.Config != nil && gotRVR1.Status.DRBD.Config.Primary != nil {
+				if gotRVR1.Status.DRBD != nil && gotRVR1.Status.DRBD.Config != nil && gotRVR1.Status.DRBD.Config.Primary != nil {
 					primaryRequested1 = *gotRVR1.Status.DRBD.Config.Primary
 				}
 				Expect(primaryRequested1).To(BeFalse())
@@ -516,7 +514,7 @@ var _ = Describe("Reconcile", func() {
 				gotRVR2 := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr2), gotRVR2)).To(Succeed())
 				primaryRequested2 := false
-				if gotRVR2.Status != nil && gotRVR2.Status.DRBD != nil && gotRVR2.Status.DRBD.Config != nil && gotRVR2.Status.DRBD.Config.Primary != nil {
+				if gotRVR2.Status.DRBD != nil && gotRVR2.Status.DRBD.Config != nil && gotRVR2.Status.DRBD.Config.Primary != nil {
 					primaryRequested2 = *gotRVR2.Status.DRBD.Config.Primary
 				}
 				Expect(primaryRequested2).To(BeFalse())
@@ -555,7 +553,7 @@ var _ = Describe("Reconcile", func() {
 				volumeAccess = "Local"
 				attachTo = []string{"node-1", "node-2"}
 
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -663,7 +661,7 @@ var _ = Describe("Reconcile", func() {
 						got := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, got)).To(Succeed())
 						orig := got.DeepCopy()
-						got.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						got.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: item.actualType,
 						}
 						Expect(cl.Status().Patch(ctx, got, client.MergeFrom(orig))).To(Succeed())
@@ -710,7 +708,7 @@ var _ = Describe("Reconcile", func() {
 						rvr1 := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 						orig1 := rvr1.DeepCopy()
-						rvr1.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Status: &v1alpha1.DRBDStatus{Role: "Secondary"},
@@ -721,7 +719,7 @@ var _ = Describe("Reconcile", func() {
 						rvr2 := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 						orig2 := rvr2.DeepCopy()
-						rvr2.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeAccess,
 							DRBD: &v1alpha1.DRBD{
 								Status: &v1alpha1.DRBDStatus{Role: "Primary"},
@@ -788,7 +786,7 @@ var _ = Describe("Reconcile", func() {
 							got := &v1alpha1.ReplicatedVolumeReplica{}
 							Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, got)).To(Succeed())
 							orig := got.DeepCopy()
-							got.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+							got.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 								ActualType: item.actualType,
 							}
 							Expect(cl.Status().Patch(ctx, got, client.MergeFrom(orig))).To(Succeed())
@@ -869,14 +867,14 @@ var _ = Describe("Reconcile", func() {
 					attachTo = []string{"node-1", "node-2"}
 
 					// replicas without actual.AllowTwoPrimaries
-					rvrList.Items[0].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvrList.Items[0].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{
 								AllowTwoPrimaries: false,
 							},
 						},
 					}
-					rvrList.Items[1].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvrList.Items[1].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{
 								AllowTwoPrimaries: false,
@@ -903,7 +901,7 @@ var _ = Describe("Reconcile", func() {
 					rvr1 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
-					rvr1.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -915,7 +913,7 @@ var _ = Describe("Reconcile", func() {
 					rvr2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
-					rvr2.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -936,8 +934,7 @@ var _ = Describe("Reconcile", func() {
 
 					gotRVR2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, gotRVR2)).To(Succeed())
-					if gotRVR2.Status != nil &&
-						gotRVR2.Status.DRBD != nil &&
+					if gotRVR2.Status.DRBD != nil &&
 						gotRVR2.Status.DRBD.Config != nil &&
 						gotRVR2.Status.DRBD.Config.Primary != nil {
 						Expect(*gotRVR2.Status.DRBD.Config.Primary).To(BeFalse())
@@ -958,7 +955,7 @@ var _ = Describe("Reconcile", func() {
 					rvr1 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
-					rvr1.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -970,7 +967,7 @@ var _ = Describe("Reconcile", func() {
 					rvr2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
-					rvr2.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -987,8 +984,7 @@ var _ = Describe("Reconcile", func() {
 					// Do not allow a request to become Primary on the 2nd node until allowTwoPrimaries is applied.
 					// Primary can be nil (no request) or false (explicit demotion request); it must not be true.
 					primaryRequested := false
-					if gotRVR2.Status != nil &&
-						gotRVR2.Status.DRBD != nil &&
+					if gotRVR2.Status.DRBD != nil &&
 						gotRVR2.Status.DRBD.Config != nil &&
 						gotRVR2.Status.DRBD.Config.Primary != nil {
 						primaryRequested = *gotRVR2.Status.DRBD.Config.Primary
@@ -1031,7 +1027,7 @@ var _ = Describe("Reconcile", func() {
 					// Both replicas are initialized by the agent (status.actualType is set) and already have
 					// actual.AllowTwoPrimaries=true.
 					for i := range rvrList.Items {
-						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvrList.Items[i].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
@@ -1062,7 +1058,7 @@ var _ = Describe("Reconcile", func() {
 							"node-2": {},
 						}[rvr.Spec.NodeName]
 
-						if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+						if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 							// if no config present, it must not be primary
 							Expect(shouldBePrimary).To(BeFalse())
 							continue
@@ -1104,7 +1100,7 @@ var _ = Describe("Reconcile", func() {
 						rvr := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: true},
@@ -1126,7 +1122,7 @@ var _ = Describe("Reconcile", func() {
 							NodeName:             "node-3",
 							Type:                 v1alpha1.ReplicaTypeDiskful,
 						},
-						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+						Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -1142,8 +1138,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, gotRVR2)).To(Succeed())
 					// Deleting replica still exists with actual.allowTwoPrimaries=false -> must not request the 2nd Primary.
 					primaryRequested := false
-					if gotRVR2.Status != nil &&
-						gotRVR2.Status.DRBD != nil &&
+					if gotRVR2.Status.DRBD != nil &&
 						gotRVR2.Status.DRBD.Config != nil &&
 						gotRVR2.Status.DRBD.Config.Primary != nil {
 						primaryRequested = *gotRVR2.Status.DRBD.Config.Primary
@@ -1199,7 +1194,7 @@ var _ = Describe("Reconcile", func() {
 									NodeName:             "node-1",
 									Type:                 v1alpha1.ReplicaTypeTieBreaker,
 								},
-								Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+								Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 									DRBD: &v1alpha1.DRBD{
 										Actual: &v1alpha1.DRBDActual{
 											AllowTwoPrimaries: false,
@@ -1225,9 +1220,6 @@ var _ = Describe("Reconcile", func() {
 
 					// Simulate the agent updating actualType after conversion (TieBreaker -> Access).
 					orig := gotRVR.DeepCopy()
-					if gotRVR.Status == nil {
-						gotRVR.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					gotRVR.Status.ActualType = v1alpha1.ReplicaTypeAccess
 					if gotRVR.Status.DRBD == nil {
 						gotRVR.Status.DRBD = &v1alpha1.DRBD{}
@@ -1301,7 +1293,7 @@ var _ = Describe("Reconcile", func() {
 						rvr := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: item.actualType,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
@@ -1343,8 +1335,7 @@ var _ = Describe("Reconcile", func() {
 
 					// node-2 не должен стать primary
 					primaryRequested := false
-					if rvrNode2.Status != nil &&
-						rvrNode2.Status.DRBD != nil &&
+					if rvrNode2.Status.DRBD != nil &&
 						rvrNode2.Status.DRBD.Config != nil &&
 						rvrNode2.Status.DRBD.Config.Primary != nil {
 						primaryRequested = *rvrNode2.Status.DRBD.Config.Primary
@@ -1367,7 +1358,7 @@ var _ = Describe("Reconcile", func() {
 					rvr1 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df1"}, rvr1)).To(Succeed())
 					orig1 := rvr1.DeepCopy()
-					rvr1.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr1.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -1379,7 +1370,7 @@ var _ = Describe("Reconcile", func() {
 					rvr2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, rvr2)).To(Succeed())
 					orig2 := rvr2.DeepCopy()
-					rvr2.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr2.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -1402,8 +1393,7 @@ var _ = Describe("Reconcile", func() {
 					gotRVR2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-df2"}, gotRVR2)).To(Succeed())
 					primaryRequested := false
-					if gotRVR2.Status != nil &&
-						gotRVR2.Status.DRBD != nil &&
+					if gotRVR2.Status.DRBD != nil &&
 						gotRVR2.Status.DRBD.Config != nil &&
 						gotRVR2.Status.DRBD.Config.Primary != nil {
 						primaryRequested = *gotRVR2.Status.DRBD.Config.Primary
@@ -1491,7 +1481,7 @@ var _ = Describe("Reconcile", func() {
 						rvr := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: item.name}, rvr)).To(Succeed())
 						orig := rvr.DeepCopy()
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeDiskful,
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: true},
@@ -1516,8 +1506,7 @@ var _ = Describe("Reconcile", func() {
 					for _, name := range []string{"rvr-n3", "rvr-n4"} {
 						got := &v1alpha1.ReplicatedVolumeReplica{}
 						Expect(cl.Get(ctx, client.ObjectKey{Name: name}, got)).To(Succeed())
-						if got.Status != nil &&
-							got.Status.DRBD != nil &&
+						if got.Status.DRBD != nil &&
 							got.Status.DRBD.Config != nil &&
 							got.Status.DRBD.Config.Primary != nil {
 							Expect(*got.Status.DRBD.Config.Primary).To(BeFalse())
@@ -1582,7 +1571,7 @@ var _ = Describe("Reconcile", func() {
 				When("replica type is set via status.actualType", func() {
 					BeforeEach(func() {
 						// Keep spec.type Diskful, but mark replica on node-2 as actually Access (via status).
-						rvrList.Items[1].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvrList.Items[1].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeAccess,
 						}
 					})
@@ -1641,7 +1630,7 @@ var _ = Describe("Reconcile", func() {
 				When("replica type is set via status.actualType", func() {
 					BeforeEach(func() {
 						// Keep spec.type Diskful, but mark replica on node-2 as actually TieBreaker (via status).
-						rvrList.Items[1].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvrList.Items[1].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							ActualType: v1alpha1.ReplicaTypeTieBreaker,
 						}
 					})
@@ -1681,7 +1670,7 @@ var _ = Describe("Reconcile", func() {
 					}
 
 					for i := range rvrList.Items {
-						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvrList.Items[i].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
@@ -1715,7 +1704,7 @@ var _ = Describe("Reconcile", func() {
 						if rvrList.Items[i].Spec.NodeName == "node-1" {
 							role = "Primary"
 						}
-						rvrList.Items[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+						rvrList.Items[i].Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
 								Actual: &v1alpha1.DRBDActual{
 									AllowTwoPrimaries: true,
@@ -1744,7 +1733,7 @@ var _ = Describe("Reconcile", func() {
 
 		When("RVA-driven attachTo and RVA statuses", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -1789,7 +1778,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
@@ -1845,7 +1834,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Actual: &v1alpha1.DRBDActual{AllowTwoPrimaries: false},
@@ -1880,9 +1869,6 @@ var _ = Describe("Reconcile", func() {
 				gotRV2 := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rv), gotRV2)).To(Succeed())
 				origRV2 := gotRV2.DeepCopy()
-				if gotRV2.Status == nil {
-					gotRV2.Status = &v1alpha1.ReplicatedVolumeStatus{}
-				}
 				gotRV2.Status.DesiredAttachTo = []string{"node-1"}
 				Expect(cl.Status().Patch(ctx, gotRV2, client.MergeFrom(origRV2))).To(Succeed())
 
@@ -1943,7 +1929,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
@@ -1958,7 +1944,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-2",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 					},
 				}
@@ -2124,9 +2110,6 @@ var _ = Describe("Reconcile", func() {
 				gotRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rv), gotRV)).To(Succeed())
 				original := gotRV.DeepCopy()
-				if gotRV.Status == nil {
-					gotRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
-				}
 				gotRV.Status.DesiredAttachTo = []string{"node-2", "node-1"}
 				Expect(cl.Status().Patch(ctx, gotRV, client.MergeFrom(original))).To(Succeed())
 
@@ -2253,7 +2236,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: rolePrimary,
@@ -2295,7 +2278,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
@@ -2356,7 +2339,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
@@ -2436,7 +2419,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
 								Role: rolePrimary,
@@ -2495,7 +2478,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-1",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						ActualType: v1alpha1.ReplicaTypeDiskful,
 						DRBD: &v1alpha1.DRBD{
 							Status: &v1alpha1.DRBDStatus{
@@ -2537,7 +2520,7 @@ var _ = Describe("Reconcile", func() {
 
 		When("patching RVR primary status fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -2617,7 +2600,7 @@ var _ = Describe("Reconcile", func() {
 
 		When("Get ReplicatedStorageClass fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -2671,7 +2654,7 @@ var _ = Describe("Reconcile", func() {
 
 		When("List ReplicatedVolumeReplica fails", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
 							Type:   v1alpha1.ConditionTypeRVIOReady,

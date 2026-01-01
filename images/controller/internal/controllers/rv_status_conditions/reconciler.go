@@ -75,9 +75,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Calculate conditions and counters
 	patchedRV := rv.DeepCopy()
-	if patchedRV.Status == nil {
-		patchedRV.Status = &v1alpha1.ReplicatedVolumeStatus{}
-	}
 
 	// Calculate all conditions using simple RV-level reasons from spec
 	r.calculateScheduled(patchedRV, rvrs)
@@ -112,9 +109,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 // getRVRCondition gets a condition from RVR status by type
 func getRVRCondition(rvr *v1alpha1.ReplicatedVolumeReplica, conditionType string) *metav1.Condition {
-	if rvr.Status == nil {
-		return nil
-	}
 	for i := range rvr.Status.Conditions {
 		if rvr.Status.Conditions[i].Type == conditionType {
 			return &rvr.Status.Conditions[i]
@@ -330,7 +324,7 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v1alp
 	}
 
 	var quorumNeeded int
-	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
+	if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		quorumNeeded = int(rv.Status.DRBD.Config.Quorum)
 	}
 	if quorumNeeded == 0 {
@@ -385,7 +379,7 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v
 
 	// QMR from DRBD config or fallback to majority
 	var qmr int
-	if rv.Status != nil && rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
+	if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
 		qmr = int(rv.Status.DRBD.Config.QuorumMinimumRedundancy)
 	}
 	if qmr == 0 {
@@ -471,10 +465,8 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 
 	// Build set of attached nodes for O(1) lookup
 	attachedSet := make(map[string]struct{})
-	if rv.Status != nil {
-		for _, node := range rv.Status.ActuallyAttachedTo {
-			attachedSet[node] = struct{}{}
-		}
+	for _, node := range rv.Status.ActuallyAttachedTo {
+		attachedSet[node] = struct{}{}
 	}
 
 	for _, rvr := range rvrs {
@@ -503,8 +495,6 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 	patchedRV.Status.DiskfulReplicaCount = strconv.Itoa(diskfulCurrent) + "/" + strconv.Itoa(diskfulTotal)
 	patchedRV.Status.DiskfulReplicasInSync = strconv.Itoa(diskfulInSync) + "/" + strconv.Itoa(diskfulTotal)
 	desiredAttachCount := 0
-	if rv.Status != nil {
-		desiredAttachCount = len(rv.Status.DesiredAttachTo)
-	}
+	desiredAttachCount = len(rv.Status.DesiredAttachTo)
 	patchedRV.Status.AttachedAndIOReadyCount = strconv.Itoa(attachedAndIOReady) + "/" + strconv.Itoa(desiredAttachCount)
 }

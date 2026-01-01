@@ -19,12 +19,12 @@ package v1alpha1
 // DRBD device minor number constants for ReplicatedVolume
 const (
 	// RVMinDeviceMinor is the minimum valid device minor number for DRBD devices in ReplicatedVolume
-	RVMinDeviceMinor = uint(0)
+	RVMinDeviceMinor = uint32(0)
 	// RVMaxDeviceMinor is the maximum valid device minor number for DRBD devices in ReplicatedVolume
 	// This value (1048575 = 2^20 - 1) corresponds to the maximum minor number
 	// supported by modern Linux kernels (2.6+). DRBD devices are named as /dev/drbd<minor>,
 	// and this range allows for up to 1,048,576 unique DRBD devices per major number.
-	RVMaxDeviceMinor = uint(1048575)
+	RVMaxDeviceMinor = uint32(1048575)
 )
 
 // DRBD quorum configuration constants for ReplicatedVolume

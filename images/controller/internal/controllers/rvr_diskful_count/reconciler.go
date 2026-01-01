@@ -76,11 +76,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(rv) {
-		log.Info("ReplicatedVolume does not have controller finalizer, ignoring reconcile request")
-		return reconcile.Result{}, nil
-	}
-
 	if rv.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(rv) {
 		log.Info("ReplicatedVolume is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil
@@ -126,6 +121,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	switch {
 	case len(nonDeletedRvrMap) == 0:
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
+		if !v1alpha1.HasControllerFinalizer(rv) {
+			if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
+				if apierrors.IsConflict(err) {
+					return reconcile.Result{Requeue: true}, nil
+				}
+				return reconcile.Result{}, err
+			}
+		}
 		err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log, &rvrList.Items)
 		if err != nil {
 			log.Error(err, "creating ReplicatedVolumeReplica")
@@ -160,6 +163,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if creatingNumberOfReplicas > 0 {
 		log.Info("Creating replicas", "creatingNumberOfReplicas", creatingNumberOfReplicas)
+		if !v1alpha1.HasControllerFinalizer(rv) {
+			if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
+				if apierrors.IsConflict(err) {
+					return reconcile.Result{Requeue: true}, nil
+				}
+				return reconcile.Result{}, err
+			}
+		}
 		for i := 0; i < creatingNumberOfReplicas; i++ {
 			log.V(4).Info("Creating replica", "replica", i)
 			err = createReplicatedVolumeReplica(ctx, r.cl, r.scheme, rv, log, &rvrList.Items)
@@ -173,6 +184,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	return reconcile.Result{}, nil
+}
+
+func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1alpha1.ReplicatedVolume) error {
+	if rv == nil {
+		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
+	}
+	if v1alpha1.HasControllerFinalizer(rv) {
+		return nil
+	}
+
+	original := rv.DeepCopy()
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
 // getDiskfulReplicaCountFromReplicatedStorageClass gets the diskful replica count based on ReplicatedStorageClass.
@@ -232,11 +256,8 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha1.ReplicatedVo
 }
 
 // isRvrReady checks if the ReplicatedVolumeReplica has DataInitialized condition set to True.
-// Returns false if Status is nil, Conditions is nil, DataInitialized condition is not found, or DataInitialized condition status is not True.
+// Returns false if DataInitialized condition is not found, or its status is not True.
 func isRvrReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr.Status == nil || rvr.Status.Conditions == nil {
-		return false
-	}
 	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
 }
 

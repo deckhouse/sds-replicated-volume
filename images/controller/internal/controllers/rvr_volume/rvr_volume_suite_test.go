@@ -140,7 +140,7 @@ func NotHaveDeletionTimestamp() gomegatypes.GomegaMatcher {
 // with the specified status and reason.
 func HaveBackingVolumeCreatedCondition(status metav1.ConditionStatus, reason string) gomegatypes.GomegaMatcher {
 	return gcustom.MakeMatcher(func(rvr *v1alpha1.ReplicatedVolumeReplica) (bool, error) {
-		if rvr.Status == nil || rvr.Status.Conditions == nil {
+		if rvr.Status.Conditions == nil {
 			return false, nil
 		}
 		for _, cond := range rvr.Status.Conditions {

@@ -143,9 +143,9 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		DescribeTableSubtree("when rv does not have config because",
-			Entry("nil Status", func() { rv.Status = nil }),
-			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
+			Entry("empty Status", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{} }),
+			Entry("nil Status.DRBD", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()
@@ -309,9 +309,9 @@ var _ = Describe("Reconciler", func() {
 						})
 
 						DescribeTableSubtree("if rvr-2 is not ready because",
-							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
-							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
+							Entry("with empty status", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
+							Entry("without status.drbd", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+							Entry("without status.drbd.config", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
 							Entry("without owner reference", func() { secondRvr.OwnerReferences = []metav1.OwnerReference{} }),
@@ -457,9 +457,6 @@ var _ = Describe("Reconciler", func() {
 							{IPv4: "192.168.1.2", Port: 7000},
 						}
 						for i := range rvrList {
-							if rvrList[i].Status == nil {
-								rvrList[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-							}
 							if rvrList[i].Status.DRBD == nil {
 								rvrList[i].Status.DRBD = &v1alpha1.DRBD{}
 							}

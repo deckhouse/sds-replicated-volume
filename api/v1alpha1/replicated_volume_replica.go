@@ -56,7 +56,7 @@ type ReplicatedVolumeReplica struct {
 	Spec ReplicatedVolumeReplicaSpec `json:"spec"`
 
 	// +patchStrategy=merge
-	Status *ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeReplicaStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 func (rvr *ReplicatedVolumeReplica) NodeID() (uint, bool) {

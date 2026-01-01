@@ -99,9 +99,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 	// Instantiate the Address field here to simplify code. Zero port means not set
 	for i := range rvrList.Items {
 		rvr := &rvrList.Items[i]
-		if rvr.Status == nil {
-			rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-		}
 		if rvr.Status.Conditions == nil {
 			rvr.Status.Conditions = []metav1.Condition{}
 		}
@@ -205,7 +202,7 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplic
 
 func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
 	// Check if condition is already set correctly
-	if rvr.Status != nil && rvr.Status.Conditions != nil {
+	if rvr.Status.Conditions != nil {
 		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAddressConfigured)
 		if cond != nil &&
 			cond.Status == status &&

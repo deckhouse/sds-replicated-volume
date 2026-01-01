@@ -125,7 +125,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	promoteEnabled := rv.Status != nil && meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+	promoteEnabled := meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
 
 	// Reconcile RVRs
 	if err := r.reconcileRVRs(ctx, replicas, desiredAttachTo, actuallyAttachedTo, promoteEnabled); err != nil {
@@ -213,7 +213,7 @@ func computeActuallyAttachedTo(replicas []v1alpha1.ReplicatedVolumeReplica) []st
 		if rvr.Spec.NodeName == "" {
 			continue
 		}
-		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
 			continue
 		}
 		if rvr.Status.DRBD.Status.Role != "Primary" {
@@ -251,7 +251,7 @@ func computeDesiredAttachTo(
 	desired := []string(nil)
 
 	// Get current desiredAttachTo from ReplicatedVolume status.
-	if rv != nil && rv.Status != nil {
+	if rv != nil {
 		desired = rv.Status.DesiredAttachTo
 	}
 
@@ -264,7 +264,6 @@ func computeDesiredAttachTo(
 		rv != nil &&
 			rv.DeletionTimestamp.IsZero() &&
 			v1alpha1.HasControllerFinalizer(rv) &&
-			rv.Status != nil &&
 			meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) &&
 			sc != nil
 
@@ -293,7 +292,7 @@ func computeDesiredAttachTo(
 		}
 
 		// Add to nodesWithDiskfulReplicas to check if the node has a Diskful replica.
-		if rvr.Status != nil && rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType == v1alpha1.ReplicaTypeDiskful {
+		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType == v1alpha1.ReplicaTypeDiskful {
 			nodesWithDiskfulReplicas = append(nodesWithDiskfulReplicas, rvr.Spec.NodeName)
 		}
 	}
@@ -496,7 +495,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	}
 
 	// Helper: if we have replica and its IOReady condition, mirror it.
-	if replicaOnNode != nil && replicaOnNode.Status != nil {
+	if replicaOnNode != nil {
 		if rvrIOReady := meta.FindStatusCondition(replicaOnNode.Status.Conditions, v1alpha1.ConditionTypeIOReady); rvrIOReady != nil {
 			desiredReplicaIOReadyCondition.Status = rvrIOReady.Status
 			desiredReplicaIOReadyCondition.Reason = rvrIOReady.Reason
@@ -544,7 +543,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	// For Local volume access, attachment is only possible when the requested node has a Diskful replica.
 	// If this is not satisfied, keep RVA in Pending (do not move to Attaching).
 	if sc.Spec.VolumeAccess == v1alpha1.VolumeAccessLocal {
-		if replicaOnNode == nil || replicaOnNode.Status == nil || replicaOnNode.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
+		if replicaOnNode == nil || replicaOnNode.Status.ActualType != v1alpha1.ReplicaTypeDiskful {
 			desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 			desiredAttachedCondition = metav1.Condition{
 				Status:  metav1.ConditionFalse,
@@ -556,7 +555,7 @@ func (r *Reconciler) reconcileRVAStatus(
 	}
 
 	// If RV status is not initialized or not IOReady, we can't progress attachment; keep informative Pending.
-	if rv.Status == nil || !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady) {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhasePending
 		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
@@ -590,7 +589,7 @@ func (r *Reconciler) reconcileRVAStatus(
 
 	// TieBreaker replica cannot be promoted directly; it must be converted first.
 	if replicaOnNode.Spec.Type == v1alpha1.ReplicaTypeTieBreaker ||
-		(replicaOnNode.Status != nil && replicaOnNode.Status.ActualType == v1alpha1.ReplicaTypeTieBreaker) {
+		replicaOnNode.Status.ActualType == v1alpha1.ReplicaTypeTieBreaker {
 		desiredPhase = v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching
 		desiredAttachedCondition = metav1.Condition{
 			Status:  metav1.ConditionFalse,
@@ -607,17 +606,6 @@ func (r *Reconciler) reconcileRVAStatus(
 		Message: "Waiting for replica to become Primary",
 	}
 	return r.ensureRVAStatus(ctx, rva, desiredPhase, desiredAttachedCondition, desiredReplicaIOReadyCondition, computeAggregateReadyCondition(desiredAttachedCondition, desiredReplicaIOReadyCondition))
-}
-
-func statusConditionEqual(current *metav1.Condition, desired metav1.Condition) bool {
-	if current == nil {
-		return false
-	}
-	return current.Type == desired.Type &&
-		current.Status == desired.Status &&
-		current.Reason == desired.Reason &&
-		current.Message == desired.Message &&
-		current.ObservedGeneration == desired.ObservedGeneration
 }
 
 func computeAggregateReadyCondition(attached metav1.Condition, replicaIOReady metav1.Condition) metav1.Condition {
@@ -665,27 +653,20 @@ func (r *Reconciler) ensureRVAStatus(
 	desiredReplicaIOReadyCondition.ObservedGeneration = rva.Generation
 	desiredReadyCondition.ObservedGeneration = rva.Generation
 
-	currentPhase := ""
-	var currentAttached, currentReplicaIOReady, currentReady *metav1.Condition
-	if rva.Status != nil {
-		currentPhase = rva.Status.Phase
-		currentAttached = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
-		currentReplicaIOReady = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReplicaIOReady)
-		currentReady = meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReady)
-	}
+	currentPhase := rva.Status.Phase
+	currentAttached := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
+	currentReplicaIOReady := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReplicaIOReady)
+	currentReady := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReady)
 
 	phaseEqual := currentPhase == desiredPhase
-	attachedEqual := statusConditionEqual(currentAttached, desiredAttachedCondition)
-	replicaIOReadyEqual := statusConditionEqual(currentReplicaIOReady, desiredReplicaIOReadyCondition)
-	readyEqual := statusConditionEqual(currentReady, desiredReadyCondition)
+	attachedEqual := v1alpha1.ConditionSpecAwareEqual(currentAttached, &desiredAttachedCondition)
+	replicaIOReadyEqual := v1alpha1.ConditionSpecAwareEqual(currentReplicaIOReady, &desiredReplicaIOReadyCondition)
+	readyEqual := v1alpha1.ConditionSpecAwareEqual(currentReady, &desiredReadyCondition)
 	if phaseEqual && attachedEqual && replicaIOReadyEqual && readyEqual {
 		return nil
 	}
 
 	original := rva.DeepCopy()
-	if rva.Status == nil {
-		rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-	}
 	rva.Status.Phase = desiredPhase
 	meta.SetStatusCondition(&rva.Status.Conditions, desiredAttachedCondition)
 	meta.SetStatusCondition(&rva.Status.Conditions, desiredReplicaIOReadyCondition)
@@ -720,12 +701,10 @@ func (r *Reconciler) ensureRV(
 	currentDesired := []string(nil)
 	currentActual := []string(nil)
 	currentAllowTwoPrimaries := false
-	if rv.Status != nil {
-		currentDesired = rv.Status.DesiredAttachTo
-		currentActual = rv.Status.ActuallyAttachedTo
-		if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
-			currentAllowTwoPrimaries = rv.Status.DRBD.Config.AllowTwoPrimaries
-		}
+	currentDesired = rv.Status.DesiredAttachTo
+	currentActual = rv.Status.ActuallyAttachedTo
+	if rv.Status.DRBD != nil && rv.Status.DRBD.Config != nil {
+		currentAllowTwoPrimaries = rv.Status.DRBD.Config.AllowTwoPrimaries
 	}
 
 	if slices.Equal(currentDesired, desiredAttachTo) &&
@@ -735,9 +714,6 @@ func (r *Reconciler) ensureRV(
 	}
 
 	original := rv.DeepCopy()
-	if rv.Status == nil {
-		rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
-	}
 	if rv.Status.DRBD == nil {
 		rv.Status.DRBD = &v1alpha1.DRBDResource{}
 	}
@@ -820,7 +796,7 @@ func computeActualTwoPrimaries(replicas []v1alpha1.ReplicatedVolumeReplica) bool
 		if rvr.Spec.NodeName == "" {
 			continue
 		}
-		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Actual == nil || !rvr.Status.DRBD.Actual.AllowTwoPrimaries {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Actual == nil || !rvr.Status.DRBD.Actual.AllowTwoPrimaries {
 			return false
 		}
 	}
@@ -906,8 +882,7 @@ func (r *Reconciler) reconcileRVR(
 	// We only request Primary on replicas that are actually Diskful or Access (by status.actualType).
 	// This prevents trying to promote TieBreaker (or not-yet-initialized replicas).
 	if desiredPrimary {
-		if rvr.Status == nil ||
-			(rvr.Status.ActualType != v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType != v1alpha1.ReplicaTypeAccess) {
+		if rvr.Status.ActualType != v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType != v1alpha1.ReplicaTypeAccess {
 			desiredPrimary = false
 		}
 	}
@@ -959,26 +934,20 @@ func (r *Reconciler) ensureRVRStatus(
 	}
 
 	primary := false
-	if rvr.Status != nil && rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.Primary != nil {
+	if rvr.Status.DRBD != nil && rvr.Status.DRBD.Config != nil && rvr.Status.DRBD.Config.Primary != nil {
 		primary = *rvr.Status.DRBD.Config.Primary
 	}
-	var attachedCond *metav1.Condition
-	if rvr.Status != nil {
-		attachedCond = meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAttached)
-	}
+	attachedCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAttached)
 
 	desiredAttachedCondition.Type = v1alpha1.ConditionTypeAttached
 	desiredAttachedCondition.ObservedGeneration = rvr.Generation
 
 	if primary == desiredPrimary &&
-		statusConditionEqual(attachedCond, desiredAttachedCondition) {
+		v1alpha1.ConditionSpecAwareEqual(attachedCond, &desiredAttachedCondition) {
 		return nil
 	}
 
 	original := rvr.DeepCopy()
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 	if rvr.Status.DRBD == nil {
 		rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}

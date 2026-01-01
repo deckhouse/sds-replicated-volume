@@ -51,7 +51,7 @@ type ReplicatedVolumeAttachment struct {
 	Spec ReplicatedVolumeAttachmentSpec `json:"spec"`
 
 	// +patchStrategy=merge
-	Status *ReplicatedVolumeAttachmentStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true

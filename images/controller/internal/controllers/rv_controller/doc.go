@@ -14,25 +14,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package rvstatusconfigdeviceminor implements the rv-status-config-device-minor-controller,
-// which assigns a unique DRBD device minor number to each ReplicatedVolume.
+// Package rvcontroller implements the rv_controller controller, which manages ReplicatedVolume
+// metadata (labels/finalizers) and assigns a unique DRBD device minor number.
 //
 // # Controller Responsibilities
 //
 // The controller ensures unique device identification by:
 //   - Allocating the smallest available device minor number
 //   - Ensuring uniqueness across all ReplicatedVolumes in the cluster
-//   - Persisting the assignment in rv.status.drbd.config.deviceMinor
+//   - Persisting the assignment in rv.status.deviceMinor
 //
 // # Watched Resources
 //
 // The controller watches:
-//   - ReplicatedVolume: To detect volumes needing device minor assignment
+//   - ReplicatedVolume: To reconcile metadata and device minor assignment
+//   - ReplicatedVolumeReplica: To decide when finalizer can be removed
 //
 // # Triggers
 //
 // The controller reconciles when:
-//   - CREATE/UPDATE(RV) where rv.status.drbd.config.deviceMinor is not set
+//   - RV create/update (idempotent; device minor assigned only once)
+//   - RVR changes (enqueued to RV owner)
 //
 // # Device Minor Allocation
 //
@@ -40,25 +42,25 @@ limitations under the License.
 //  1. Lists all ReplicatedVolumes in the cluster
 //  2. Collects all currently assigned device minor numbers
 //  3. Finds the smallest available (unused) minor number
-//  4. Assigns it to rv.status.drbd.config.deviceMinor
+//  4. Assigns it to rv.status.deviceMinor
 //
 // # Reconciliation Flow
 //
-//  1. Check if rv.status.drbd.config.deviceMinor is already set
+//  1. Check if rv.status.deviceMinor is already set
 //  2. If not set:
 //     a. List all ReplicatedVolumes
 //     b. Build a set of used device minor numbers
 //     c. Find the smallest available number (starting from 0)
-//     d. Update rv.status.drbd.config.deviceMinor
+//     d. Update rv.status.deviceMinor
 //
 // # Status Updates
 //
 // The controller maintains:
-//   - rv.status.drbd.config.deviceMinor - Unique DRBD device minor number
+//   - rv.status.deviceMinor - Unique DRBD device minor number
 //
 // # Special Notes
 //
 // Device minor numbers are permanent once assigned and remain unchanged for the
 // lifetime of the ReplicatedVolume. This ensures consistent DRBD device paths
 // (/dev/drbdX) on all nodes.
-package rvstatusconfigdeviceminor
+package rvcontroller

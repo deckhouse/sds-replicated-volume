@@ -105,9 +105,6 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
 			Type:               v1alpha1.RVAConditionTypeAttached,
 			Status:             metav1.ConditionTrue,
@@ -143,9 +140,6 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
 			Type:               v1alpha1.RVAConditionTypeAttached,
 			Status:             metav1.ConditionFalse,
@@ -185,9 +179,6 @@ var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 
 		rva := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
-		if rva.Status == nil {
-			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
-		}
 		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
 			Type:               v1alpha1.RVAConditionTypeAttached,
 			Status:             metav1.ConditionFalse,
@@ -370,13 +361,13 @@ var _ = Describe("WaitForAttachedToRemoved", func() {
 		})
 	})
 
-	Context("when status is nil", func() {
+	Context("when status is empty", func() {
 		It("should return nil (considered success)", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
 			rv := createTestReplicatedVolume(volumeName)
-			rv.Status = nil
+			rv.Status = v1alpha1.ReplicatedVolumeStatus{}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
@@ -425,7 +416,7 @@ func createTestReplicatedVolume(name string) *v1alpha1.ReplicatedVolume {
 			Size:                       resource.MustParse("1Gi"),
 			ReplicatedStorageClassName: "rsc",
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
 			ActuallyAttachedTo: []string{},
 		},
 	}

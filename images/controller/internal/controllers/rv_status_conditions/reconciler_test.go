@@ -467,7 +467,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			ReplicatedStorageClassName: tc.replicatedStorageClass,
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
 			DRBD: &v1alpha1.DRBDResource{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
@@ -559,7 +559,7 @@ func buildTestRVR(rvName string, spec testRVR) *v1alpha1.ReplicatedVolumeReplica
 			NodeName:             spec.nodeName,
 			Type:                 spec.rvrType,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{},
 		},
 	}

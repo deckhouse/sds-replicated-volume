@@ -318,7 +318,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-test",
 			},
-			Status: &v1alpha1.ReplicatedVolumeStatus{
+			Status: v1alpha1.ReplicatedVolumeStatus{
 				DesiredAttachTo: tc.AttachTo,
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -958,7 +958,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
@@ -1044,7 +1044,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
@@ -1142,7 +1142,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 				Size:                       resource.MustParse("10Gi"),
 				ReplicatedStorageClassName: "rsc-access",
 			},
-			Status: &v1alpha1.ReplicatedVolumeStatus{
+			Status: v1alpha1.ReplicatedVolumeStatus{
 				DesiredAttachTo: []string{"node-a", "node-b"},
 				Conditions: []metav1.Condition{{
 					Type:   v1alpha1.ConditionTypeRVIOReady,
@@ -1301,9 +1301,6 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 
 	When("checking Scheduled condition", func() {
 		BeforeEach(func() {
-			if rv.Status == nil {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
-			}
 			rv.Status.DesiredAttachTo = []string{"node-a", "node-b"}
 			rvrList = []*v1alpha1.ReplicatedVolumeReplica{
 				{
@@ -1313,7 +1310,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 						NodeName:             "node-a",
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{},
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{},
 				},
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-to-schedule"},
@@ -1321,7 +1318,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 						ReplicatedVolumeName: "rv-access",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{},
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{},
 				},
 			}
 		})
@@ -1401,7 +1398,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
@@ -1518,7 +1515,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
@@ -1613,7 +1610,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,
@@ -1703,7 +1700,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 					Size:                       resource.MustParse("10Gi"),
 					ReplicatedStorageClassName: "rsc-test",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
 						Type:   v1alpha1.ConditionTypeRVIOReady,
 						Status: metav1.ConditionTrue,

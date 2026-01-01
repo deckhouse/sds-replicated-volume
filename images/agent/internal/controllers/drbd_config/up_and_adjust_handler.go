@@ -137,10 +137,16 @@ func (h *UpAndAdjustHandler) validateSharedSecretAlg() error {
 func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	rvName := h.rvr.Spec.ReplicatedVolumeName
 
-	// prepare patch for status errors/actual fields
-	if h.rvr.Status == nil {
-		h.rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
+	// Validate required RV status fields before using them to generate DRBD config.
+	// (This also prevents panics on partially-initialized objects.)
+	if h.rv == nil || h.rv.Status.DRBD == nil || h.rv.Status.DRBD.Config == nil {
+		return fmt.Errorf("rv %q status.drbd.config is missing", rvName)
 	}
+	if h.rv.Status.DeviceMinor == nil {
+		return fmt.Errorf("rv %q status.deviceMinor is missing", rvName)
+	}
+
+	// prepare patch for status errors/actual fields
 	if h.rvr.Status.DRBD == nil {
 		h.rvr.Status.DRBD = &v1alpha1.DRBD{}
 	}
@@ -206,14 +212,12 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 		noDiskfulPeers := h.rvr.Status.DRBD.Config.PeersInitialized &&
 			!hasDiskfulPeer(h.rvr.Status.DRBD.Config.Peers)
 
-		upToDate := h.rvr.Status != nil &&
-			h.rvr.Status.DRBD != nil &&
+		upToDate := h.rvr.Status.DRBD != nil &&
 			h.rvr.Status.DRBD.Status != nil &&
 			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
 			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
 
-		rvAlreadyInitialized := h.rv.Status != nil &&
-			meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized)
+		rvAlreadyInitialized := meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized)
 
 		if noDiskfulPeers && !upToDate && !rvAlreadyInitialized {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {
@@ -347,7 +351,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 
 	vol := &v9.Volume{
 		Number:   u.Ptr(0),
-		Device:   u.Ptr(v9.DeviceMinorNumber(*h.rv.Status.DRBD.Config.DeviceMinor)),
+		Device:   u.Ptr(v9.DeviceMinorNumber(*h.rv.Status.DeviceMinor)),
 		MetaDisk: &v9.VolumeMetaDiskInternal{},
 	}
 

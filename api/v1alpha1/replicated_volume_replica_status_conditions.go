@@ -294,7 +294,7 @@ func (rvr *ReplicatedVolumeReplica) ComputeStatusConditionAttached(shouldBePrima
 		}, nil
 	}
 
-	if rvr.Spec.NodeName == "" || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+	if rvr.Spec.NodeName == "" || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
 		return v1.Condition{
 			Type:   ConditionTypeAttached,
 			Status: v1.ConditionUnknown,
@@ -326,18 +326,12 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionAttached(shouldBePrimar
 	if err != nil {
 		return err
 	}
-	if rvr.Status == nil {
-		rvr.Status = &ReplicatedVolumeReplicaStatus{}
-	}
 	meta.SetStatusCondition(&rvr.Status.Conditions, cond)
 
 	return nil
 }
 
 func (rvr *ReplicatedVolumeReplica) validateStatusDRBDNotNil() error {
-	if err := validateArgNotNil(rvr.Status, "rvr.status"); err != nil {
-		return err
-	}
 	if err := validateArgNotNil(rvr.Status.DRBD, "rvr.status.drbd"); err != nil {
 		return err
 	}

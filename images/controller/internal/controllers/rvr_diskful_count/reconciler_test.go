@@ -17,6 +17,7 @@ limitations under the License.
 package rvrdiskfulcount_test
 
 import (
+	"context"
 	"fmt"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -28,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -62,7 +64,7 @@ func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedV
 	}
 
 	if ready {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+		rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
 					Type:   v1alpha1.ConditionTypeDataInitialized,
@@ -143,7 +145,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{},
 				},
 			}
@@ -220,6 +222,36 @@ var _ = Describe("Reconciler", func() {
 					Expect(cl.List(ctx, rvrList)).To(Succeed())
 					Expect(rvrList.Items).ToNot(BeEmpty())
 				})
+			})
+		})
+
+		When("ReplicatedVolume has no controller finalizer and replicas need to be created", func() {
+			BeforeEach(func() {
+				rv.Finalizers = nil
+				rsc.Spec.Replication = v1alpha1.ReplicationNone
+
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
+							currentRV := &v1alpha1.ReplicatedVolume{}
+							Expect(c.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
+							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+						}
+						return c.Create(ctx, obj, opts...)
+					},
+				})
+			})
+
+			It("adds controller finalizer and creates replicas", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+				gotRV := &v1alpha1.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
+				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+
+				gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
+				Expect(cl.List(ctx, gotRVRs)).To(Succeed())
+				Expect(gotRVRs.Items).To(HaveLen(1))
 			})
 		})
 
@@ -558,13 +590,9 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvr.Spec.ReplicatedVolumeName).To(Equal(rv.Name))
 				Expect(rvr.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 
-				if rvr.Status != nil && rvr.Status.Conditions != nil {
-					readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
-					if readyCond != nil {
-						Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-					}
-				} else {
-					Expect(rvr.Status).To(BeNil())
+				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
+				if readyCond != nil {
+					Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 				}
 
 				// Second reconcile: should still have 1 replica (waiting for it to become ready)
@@ -578,9 +606,6 @@ var _ = Describe("Reconciler", func() {
 				Expect(cl.Get(ctx, types.NamespacedName{Name: rvrList.Items[0].Name}, rvr)).To(Succeed())
 
 				patch := client.MergeFrom(rvr.DeepCopy())
-				if rvr.Status == nil {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-				}
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{

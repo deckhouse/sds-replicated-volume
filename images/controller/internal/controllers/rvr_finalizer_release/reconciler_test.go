@@ -131,7 +131,7 @@ var _ = Describe("Reconcile", func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					DRBD: &v1alpha1.DRBDResource{
 						Config: &v1alpha1.DRBDResourceConfig{
 							Quorum: 2,
@@ -150,7 +150,7 @@ var _ = Describe("Reconcile", func() {
 					NodeName:             "node-1",
 					Type:                 v1alpha1.ReplicaTypeDiskful,
 				},
-				Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+				Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
@@ -181,6 +181,45 @@ var _ = Describe("Reconcile", func() {
 			got := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
 			Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+		})
+
+		When("deleting RVR is the last replica and RV is deleting", func() {
+			JustBeforeEach(func(ctx SpecContext) {
+				// Ensure RV has controller finalizer so we can observe removal, and keep an extra finalizer
+				// so fake client won't delete the object immediately.
+				currentRV := &v1alpha1.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
+				currentRV.Finalizers = []string{"keep-me", v1alpha1.ControllerAppFinalizer}
+				currentRV.Status.ActuallyAttachedTo = []string{}
+				Expect(cl.Update(ctx, currentRV)).To(Succeed())
+
+				// Mark RV deleting (sets DeletionTimestamp in fake client).
+				Expect(cl.Delete(ctx, currentRV)).To(Succeed())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(currentRV), currentRV)).To(Succeed())
+				Expect(currentRV.DeletionTimestamp).NotTo(BeNil())
+
+				// Mark RVR deleting (sets DeletionTimestamp in fake client).
+				currentRVR := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), currentRVR)).To(Succeed())
+				Expect(cl.Delete(ctx, currentRVR)).To(Succeed())
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(currentRVR), currentRVR)).To(Succeed())
+				Expect(currentRVR.DeletionTimestamp).NotTo(BeNil())
+			})
+
+			It("removes controller finalizer from RVR and from RV", func(ctx SpecContext) {
+				result, err := rec.Reconcile(ctx, RequestFor(rvr))
+				Expect(err).NotTo(HaveOccurred())
+				Expect(result).To(Equal(reconcile.Result{}))
+
+				gotRVR := &v1alpha1.ReplicatedVolumeReplica{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), gotRVR)).To(Succeed())
+				Expect(gotRVR.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+
+				gotRV := &v1alpha1.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
+				Expect(gotRV.Finalizers).To(ContainElement("keep-me"))
+				Expect(gotRV.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+			})
 		})
 
 		When("there are extra replicas", func() {
@@ -214,7 +253,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-2",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: baseStatus.DeepCopy(),
+					Status: *baseStatus.DeepCopy(),
 				}
 
 				rvr3 = &v1alpha1.ReplicatedVolumeReplica{
@@ -227,7 +266,7 @@ var _ = Describe("Reconcile", func() {
 						NodeName:             "node-3",
 						Type:                 v1alpha1.ReplicaTypeDiskful,
 					},
-					Status: baseStatus.DeepCopy(),
+					Status: *baseStatus.DeepCopy(),
 				}
 			})
 

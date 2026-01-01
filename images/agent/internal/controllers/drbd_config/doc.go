@@ -43,7 +43,7 @@ limitations under the License.
 //   - rv.metadata.name
 //   - rv.status.drbd.config.sharedSecret
 //   - rv.status.drbd.config.sharedSecretAlg
-//   - rv.status.drbd.config.deviceMinor
+//   - rv.status.deviceMinor
 //   - rvr.status.drbd.config.nodeId
 //   - rvr.status.drbd.config.address
 //   - rvr.status.drbd.config.peers (with peersInitialized flag)

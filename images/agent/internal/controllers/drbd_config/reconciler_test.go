@@ -413,7 +413,7 @@ func rvWithoutSecret() *v1alpha1.ReplicatedVolume {
 			Name:       testRVName,
 			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
 			DRBD: &v1alpha1.DRBDResource{
 				Config: &v1alpha1.DRBDResourceConfig{},
 			},
@@ -456,9 +456,6 @@ func firstMapOrNil(ms []map[string]v1alpha1.Peer) map[string]v1alpha1.Peer {
 
 func rvrWithErrors(rvr *v1alpha1.ReplicatedVolumeReplica) *v1alpha1.ReplicatedVolumeReplica {
 	r := rvr.DeepCopy()
-	if r.Status == nil {
-		r.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 	if r.Status.DRBD == nil {
 		r.Status.DRBD = &v1alpha1.DRBD{}
 	}
@@ -503,19 +500,19 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 }
 
 //nolint:unparam // keep secret configurable for future scenarios
-func readyRVWithConfig(secret, alg string, deviceMinor uint, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
+func readyRVWithConfig(secret, alg string, deviceMinor uint32, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,
 			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
 		},
-		Status: &v1alpha1.ReplicatedVolumeStatus{
+		Status: v1alpha1.ReplicatedVolumeStatus{
+			DeviceMinor: &deviceMinor,
 			DRBD: &v1alpha1.DRBDResource{
 				Config: &v1alpha1.DRBDResourceConfig{
 					SharedSecret:            secret,
 					SharedSecretAlg:         v1alpha1.SharedSecretAlg(alg),
 					AllowTwoPrimaries:       allowTwoPrimaries,
-					DeviceMinor:             &deviceMinor,
 					Quorum:                  1,
 					QuorumMinimumRedundancy: 1,
 				},
@@ -541,7 +538,7 @@ func readyRVR(
 			NodeName:             testNodeName,
 			Type:                 rvrType,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: lvmLogicalVolumeName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{
@@ -569,7 +566,7 @@ func deletingRVR(name, llvName string) *v1alpha1.ReplicatedVolumeReplica {
 			NodeName:             testNodeName,
 			Type:                 rvrTypeDiskful,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			LVMLogicalVolumeName: llvName,
 			DRBD: &v1alpha1.DRBD{
 				Config: &v1alpha1.DRBDConfig{

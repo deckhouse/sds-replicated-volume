@@ -16,7 +16,51 @@ limitations under the License.
 
 package v1alpha1
 
+import (
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
 // TODO split RV/RVR conditions :ConditionTypeRVInitialized
+
+// ConditionSpecAgnosticEqual compares only meaning of a condition,
+// ignoring ObservedGeneration and LastTransitionTime.
+func ConditionSpecAgnosticEqual(a, b *metav1.Condition) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Type == b.Type &&
+		a.Status == b.Status &&
+		a.Reason == b.Reason &&
+		a.Message == b.Message
+}
+
+// ConditionSpecAwareEqual compares meaning of a condition and also
+// requires ObservedGeneration to match. It still ignores LastTransitionTime.
+func ConditionSpecAwareEqual(a, b *metav1.Condition) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Type == b.Type &&
+		a.Status == b.Status &&
+		a.Reason == b.Reason &&
+		a.Message == b.Message &&
+		a.ObservedGeneration == b.ObservedGeneration
+}
+
+// IsConditionPresentAndSpecAgnosticEqual checks that a condition with the same Type as expected exists in conditions
+// and is equal to expected ignoring ObservedGeneration and LastTransitionTime.
+func IsConditionPresentAndSpecAgnosticEqual(conditions []metav1.Condition, expected metav1.Condition) bool {
+	actual := meta.FindStatusCondition(conditions, expected.Type)
+	return actual != nil && ConditionSpecAgnosticEqual(actual, &expected)
+}
+
+// IsConditionPresentAndSpecAwareEqual checks that a condition with the same Type as expected exists in conditions
+// and is equal to expected requiring ObservedGeneration to match, but ignoring LastTransitionTime.
+func IsConditionPresentAndSpecAwareEqual(conditions []metav1.Condition, expected metav1.Condition) bool {
+	actual := meta.FindStatusCondition(conditions, expected.Type)
+	return actual != nil && ConditionSpecAwareEqual(actual, &expected)
+}
 
 // =============================================================================
 // Condition types managed by rvr_status_conditions controller
@@ -64,6 +108,9 @@ const (
 const (
 	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
 	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+
+	// [ConditionTypeDeviceMinorAssigned] indicates whether deviceMinor has been assigned to ReplicatedVolume.
+	ConditionTypeDeviceMinorAssigned = "DeviceMinorAssigned"
 )
 
 // =============================================================================
@@ -260,6 +307,15 @@ const (
 const (
 	ReasonConfigurationFailed              = "ConfigurationFailed"
 	ReasonConfigurationAdjustmentSucceeded = "ConfigurationAdjustmentSucceeded"
+)
+
+// Condition reasons for [ConditionTypeDeviceMinorAssigned] condition
+const (
+	// status=True
+	ReasonDeviceMinorAssigned = "Assigned"
+	// status=False
+	ReasonDeviceMinorAssignmentFailed = "AssignmentFailed"
+	ReasonDeviceMinorDuplicate        = "Duplicate"
 )
 
 // Condition reasons for [ConditionTypeScheduled] condition

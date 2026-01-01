@@ -65,6 +65,13 @@ type ReplicatedStoragePoolLVMVolumeGroups struct {
 // Displays current information about the state of the LINSTOR storage pool.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolStatus struct {
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
 	// The actual ReplicatedStoragePool resource's state. Might be:
 	// - Completed (if the controller received correct resource configuration and Linstor Storage-pools configuration is up-to-date)
 	// - Updating (if the controller received correct resource configuration and Linstor Storage-pools configuration needs to be updated)

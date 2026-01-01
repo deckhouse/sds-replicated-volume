@@ -115,6 +115,13 @@ type ReplicatedStorageClassSpec struct {
 // Displays current information about the Storage Class.
 // +kubebuilder:object:generate=true
 type ReplicatedStorageClassStatus struct {
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
 	// The Storage class current state. Might be:
 	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
 	// - Create (if everything went fine)

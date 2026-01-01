@@ -92,7 +92,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 			return true
 		}
 
-		if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
+		if rvr.Status.DRBD == nil || rvr.Status.DRBD.Config == nil {
 			log.V(2).Info("No status.drbd.config. Skipping")
 			return true
 		}

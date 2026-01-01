@@ -155,6 +155,13 @@ spec:
                   type: string
                 maxItems: 2
                 type: array
+              deviceMinor:
+                description: DeviceMinor is a unique DRBD device minor number assigned
+                  to this ReplicatedVolume.
+                format: int32
+                maximum: 1048575
+                minimum: 0
+                type: integer
               diskfulReplicaCount:
                 description: |-
                   DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
@@ -172,10 +179,6 @@ spec:
                       allowTwoPrimaries:
                         default: false
                         type: boolean
-                      deviceMinor:
-                        maximum: 1048575
-                        minimum: 0
-                        type: integer
                       quorum:
                         maximum: 8
                         minimum: 0
@@ -192,15 +195,6 @@ spec:
                         - SHA256
                         - SHA1
                         - DummyForTest
-                        type: string
-                    type: object
-                type: object
-              errors:
-                properties:
-                  deviceMinor:
-                    properties:
-                      message:
-                        maxLength: 1024
                         type: string
                     type: object
                 type: object

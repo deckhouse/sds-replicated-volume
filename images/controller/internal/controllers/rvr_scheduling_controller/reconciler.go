@@ -260,10 +260,6 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 // isRVReadyToSchedule checks if the ReplicatedVolume is ready for scheduling.
 // Returns nil if ready, or an error wrapped with errSchedulingPending if not ready.
 func isRVReadyToSchedule(rv *v1alpha1.ReplicatedVolume) error {
-	if rv.Status == nil {
-		return fmt.Errorf("%w: ReplicatedVolume status is not initialized", errSchedulingPending)
-	}
-
 	if rv.Finalizers == nil {
 		return fmt.Errorf("%w: ReplicatedVolume has no finalizers", errSchedulingPending)
 	}
@@ -808,7 +804,7 @@ func (r *Reconciler) getTieBreakerCandidateNodes(sctx *SchedulingContext) []stri
 }
 
 func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
-	if rv == nil || rv.Status == nil {
+	if rv == nil {
 		return nil
 	}
 	return slices.Clone(rv.Status.DesiredAttachTo)
@@ -887,10 +883,6 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 	message string,
 ) error {
 	patch := client.MergeFrom(rvr.DeepCopy())
-
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 
 	changed := meta.SetStatusCondition(
 		&rvr.Status.Conditions,

@@ -57,8 +57,8 @@ func replicatedVolumePredicate() predicate.Predicate {
 			}
 
 			// IOReady condition gates attachments; it is status-managed by another controller.
-			oldIOReady := oldRV.Status != nil && meta.IsStatusConditionTrue(oldRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			newIOReady := newRV.Status != nil && meta.IsStatusConditionTrue(newRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+			oldIOReady := meta.IsStatusConditionTrue(oldRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
+			newIOReady := meta.IsStatusConditionTrue(newRV.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
 			return oldIOReady != newIOReady
 		},
 	}
@@ -93,14 +93,8 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 			}
 
 			// Local volume access requires Diskful actualType on requested node.
-			oldActualType := v1alpha1.ReplicaType("")
-			if oldRVR.Status != nil {
-				oldActualType = oldRVR.Status.ActualType
-			}
-			newActualType := v1alpha1.ReplicaType("")
-			if newRVR.Status != nil {
-				newActualType = newRVR.Status.ActualType
-			}
+			oldActualType := oldRVR.Status.ActualType
+			newActualType := newRVR.Status.ActualType
 			if oldActualType != newActualType {
 				return true
 			}
@@ -119,18 +113,9 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 
 			// RVA ReplicaIOReady mirrors replica condition IOReady, so changes must trigger reconcile.
 			// Compare (status, reason, message) to keep mirroring accurate even when status doesn't change.
-			var oldCond, newCond *metav1.Condition
-			if oldRVR.Status != nil {
-				oldCond = meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
-			}
-			if newRVR.Status != nil {
-				newCond = meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
-			}
-			if !conditionEqual(oldCond, newCond) {
-				return true
-			}
-
-			return false
+			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
+			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ConditionTypeIOReady)
+			return !v1alpha1.ConditionSpecAgnosticEqual(oldCond, newCond)
 		},
 	}
 }
@@ -167,27 +152,17 @@ func replicatedVolumeAttachmentPredicate() predicate.Predicate {
 }
 
 func rvrDRBDRole(rvr *v1alpha1.ReplicatedVolumeReplica) string {
-	if rvr == nil || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
+	if rvr == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
 		return ""
 	}
 	return rvr.Status.DRBD.Status.Role
 }
 
 func rvrAllowTwoPrimariesActual(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	if rvr == nil || rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Actual == nil {
+	if rvr == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Actual == nil {
 		return false
 	}
 	return rvr.Status.DRBD.Actual.AllowTwoPrimaries
 }
 
-func conditionEqual(a, b *metav1.Condition) bool {
-	if a == nil && b == nil {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return a.Status == b.Status &&
-		a.Reason == b.Reason &&
-		a.Message == b.Message
-}
+// Note: condition equality is delegated to v1alpha1.ConditionSpecAgnosticEqual.

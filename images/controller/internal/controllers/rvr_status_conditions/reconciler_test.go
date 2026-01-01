@@ -319,7 +319,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			NodeName: nodeName,
 		},
-		Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+		Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: buildConditions(tc),
 		},
 	}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -128,16 +129,6 @@ func (r *Reconciler) getReplicatedVolume(
 }
 
 func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
-	if !v1alpha1.HasControllerFinalizer(rv) {
-		log.Info("No controller finalizer on ReplicatedVolume")
-		return true
-	}
-
-	if rv.Status == nil {
-		log.Info("Status is empty on ReplicatedVolume")
-		return true
-	}
-
 	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized) {
 		log.Info("ReplicatedVolume is not initialized yet")
 		return true
@@ -148,6 +139,19 @@ func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
 		return true
 	}
 	return false
+}
+
+func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1alpha1.ReplicatedVolume) error {
+	if rv == nil {
+		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
+	}
+	if v1alpha1.HasControllerFinalizer(rv) {
+		return nil
+	}
+
+	original := rv.DeepCopy()
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) getReplicatedStorageClass(
@@ -328,6 +332,16 @@ func (r *Reconciler) syncTieBreakers(
 	if currentTB == desiredTB {
 		log.Info("No need to change")
 		return reconcile.Result{}, nil
+	}
+
+	if desiredTB > currentTB {
+		// Ensure controller finalizer is installed on RV before creating replicas.
+		if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
+			if apierrors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
+		}
 	}
 
 	for i := range desiredTB - currentTB {

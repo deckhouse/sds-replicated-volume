@@ -171,7 +171,7 @@ var _ = Describe("Reconciler", func() {
 
 				rvrList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-this-node", i+1)},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
 						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
@@ -182,7 +182,7 @@ var _ = Describe("Reconciler", func() {
 				otherNodeRVRList[i] = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("rvr-%d-other-node", i+1)},
 					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "other-node"},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						Conditions: []metav1.Condition{},
 						DRBD:       &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{}}},
 					},
@@ -249,7 +249,7 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			DescribeTableSubtree("should work with nil",
-				Entry("Status", func() { rvr.Status = nil }),
+				Entry("Status", func() { rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
 				Entry("DRBD", func() { rvr.Status.DRBD = nil }),
 				Entry("Config", func() { rvr.Status.DRBD.Config = nil }),
 				Entry("Address", func() { rvr.Status.DRBD.Config.Address = nil }),
@@ -268,7 +268,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("RVR has different IP address", func() {
 				BeforeEach(func() {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+					rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Address: &v1alpha1.Address{
 							IPv4: "192.168.1.99", // different IP
 							Port: 7500,
@@ -351,8 +351,7 @@ func HaveUniquePorts() gomegatypes.GomegaMatcher {
 	return gcustom.MakeMatcher(func(list []v1alpha1.ReplicatedVolumeReplica) (bool, error) {
 		result := make(map[uint]struct{}, len(list))
 		for i := range list {
-			if list[i].Status == nil ||
-				list[i].Status.DRBD == nil ||
+			if list[i].Status.DRBD == nil ||
 				list[i].Status.DRBD.Config == nil ||
 				list[i].Status.DRBD.Config.Address == nil {
 				return false, fmt.Errorf("item %d does not have port", i)

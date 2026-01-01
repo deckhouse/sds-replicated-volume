@@ -22,6 +22,7 @@ import (
 	"fmt"
 
 	"github.com/go-logr/logr"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -63,11 +64,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		}
 		log.Error(err, "Getting ReplicatedVolume")
 		return reconcile.Result{}, err
-	}
-
-	if !v1alpha1.HasControllerFinalizer(rv) {
-		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
-		return reconcile.Result{}, nil
 	}
 
 	// Skip if RV is being deleted (and no foreign finalizers) - this case will be handled by another controller
@@ -141,10 +137,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// 2. Node has NO Diskful (can't access data locally)
 	// 3. Node has NO TieBreaker (other controller will convert it to access)
 	// 4. Node has NO Access RVR yet (avoid duplicates)
-	desiredAttachTo := []string(nil)
-	if rv.Status != nil {
-		desiredAttachTo = rv.Status.DesiredAttachTo
-	}
+	desiredAttachTo := rv.Status.DesiredAttachTo
 	nodesNeedingAccess := make([]string, 0)
 	for _, nodeName := range desiredAttachTo {
 		_, hasDiskfulOrTieBreaker := nodesWithDiskfulOrTieBreaker[nodeName]
@@ -152,6 +145,21 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 		if !hasDiskfulOrTieBreaker && !hasAccess {
 			nodesNeedingAccess = append(nodesNeedingAccess, nodeName)
+		}
+	}
+
+	// Preserve old behavior: without RV controller finalizer do not perform any actions,
+	// unless we need to create Access replicas (then we add the finalizer first).
+	if !v1alpha1.HasControllerFinalizer(rv) {
+		if len(nodesNeedingAccess) == 0 {
+			log.Info("ReplicatedVolume does not have controller finalizer and no replicas to create, skipping")
+			return reconcile.Result{}, nil
+		}
+		if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
+			if apierrors.IsConflict(err) {
+				return reconcile.Result{Requeue: true}, nil
+			}
+			return reconcile.Result{}, err
 		}
 	}
 
@@ -167,10 +175,8 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	attachedToSet := make(map[string]struct{})
-	if rv.Status != nil {
-		for _, nodeName := range rv.Status.ActuallyAttachedTo {
-			attachedToSet[nodeName] = struct{}{}
-		}
+	for _, nodeName := range rv.Status.ActuallyAttachedTo {
+		attachedToSet[nodeName] = struct{}{}
 	}
 
 	// Find Access RVRs to delete: exists but not in attachTo AND not in attachedTo
@@ -200,6 +206,19 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	log.Info("Reconcile completed", "created", len(nodesNeedingAccess), "deleted", len(accessRVRsToDelete))
 	return reconcile.Result{}, nil
+}
+
+func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1alpha1.ReplicatedVolume) error {
+	if rv == nil {
+		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
+	}
+	if v1alpha1.HasControllerFinalizer(rv) {
+		return nil
+	}
+
+	original := rv.DeepCopy()
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
 func (r *Reconciler) createAccessRVR(

@@ -99,7 +99,7 @@ var _ = Describe("Reconciler", func() {
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions:          []metav1.Condition{},
 					DiskfulReplicaCount: "3/3",
 				},
@@ -153,13 +153,10 @@ var _ = Describe("Reconciler", func() {
 					})).NotTo(Requeue())
 				})
 			},
-			Entry("because Status is nil", func() {
-				rv.Status = nil
+			Entry("because Status is empty", func() {
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{}
 			}),
 			Entry("because Conditions is nil", func() {
-				if rv.Status == nil {
-					rv.Status = &v1alpha1.ReplicatedVolumeStatus{}
-				}
 				rv.Status.Conditions = nil
 			}),
 			Entry("because Conditions is empty", func() {

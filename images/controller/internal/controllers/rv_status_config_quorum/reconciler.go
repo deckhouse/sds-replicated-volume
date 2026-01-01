@@ -77,11 +77,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, nil
 	}
 
-	if rv.Status == nil {
-		log.V(1).Info("No status. Skipping")
-		return reconcile.Result{}, nil
-	}
-	if !isRvReady(rv.Status, log) {
+	if !isRvReady(&rv.Status, log) {
 		log.V(1).Info("not ready for quorum calculations")
 		log.V(2).Info("status is", "status", rv.Status)
 		return reconcile.Result{}, nil
@@ -134,7 +130,7 @@ func (r *Reconciler) Reconcile(
 
 	// updating replicated volume
 	from := client.MergeFrom(rv.DeepCopy())
-	if updateReplicatedVolumeIfNeeded(rv.Status, diskfulCount, len(rvrList.Items), rsc.Spec.Replication) {
+	if updateReplicatedVolumeIfNeeded(&rv.Status, diskfulCount, len(rvrList.Items), rsc.Spec.Replication) {
 		log.V(1).Info("Updating quorum")
 		if err := r.cl.Status().Patch(ctx, &rv, from); err != nil {
 			log.Error(err, "patching ReplicatedVolume status")

@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -38,7 +40,7 @@ type ReplicatedVolume struct {
 
 	Spec ReplicatedVolumeSpec `json:"spec"`
 	// +patchStrategy=merge
-	Status *ReplicatedVolumeStatus `json:"status,omitempty" patchStrategy:"merge"`
+	Status ReplicatedVolumeStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
 // +kubebuilder:object:generate=true
@@ -64,6 +66,12 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
 
+	// DeviceMinor is a unique DRBD device minor number assigned to this ReplicatedVolume.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1048575
+	// +optional
+	DeviceMinor *uint32 `json:"deviceMinor,omitempty"`
+
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional
@@ -82,10 +90,6 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
-	// +patchStrategy=merge
-	// +optional
-	Errors *ReplicatedVolumeStatusErrors `json:"errors,omitempty"`
-
 	// DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
 	// Example: "2/3" means 2 current diskful replicas out of 3 desired
 	// +optional
@@ -102,12 +106,53 @@ type ReplicatedVolumeStatus struct {
 	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
 }
 
-// +kubebuilder:object:generate=true
-type ReplicatedVolumeStatusErrors struct {
-	// +patchStrategy=merge
-	DeviceMinor *MessageError `json:"deviceMinor,omitempty" patchStrategy:"merge"`
+func (s *ReplicatedVolumeStatus) HasDeviceMinor() bool {
+	return s != nil && s.DeviceMinor != nil
 }
 
+func (s *ReplicatedVolumeStatus) GetDeviceMinor() (uint32, bool) {
+	if s == nil || s.DeviceMinor == nil {
+		return 0, false
+	}
+	return *s.DeviceMinor, true
+}
+
+func (s *ReplicatedVolumeStatus) SetDeviceMinor(v uint32) (changed bool) {
+	// Keep validation in sync with kubebuilder tags on the field:
+	// Minimum=0, Maximum=1048575.
+	if v < RVMinDeviceMinor || v > RVMaxDeviceMinor {
+		panic(fmt.Sprintf("ReplicatedVolumeStatus.DeviceMinor=%d is out of allowed range [%d..%d]", v, RVMinDeviceMinor, RVMaxDeviceMinor))
+	}
+
+	if s.DeviceMinor != nil && *s.DeviceMinor == v {
+		return false
+	}
+	s.DeviceMinor = &v
+	return true
+}
+
+func (s *ReplicatedVolumeStatus) SetDeviceMinorPtr(deviceMinor *uint32) (changed bool) {
+	if deviceMinor == nil {
+		return s.ClearDeviceMinor()
+	}
+	return s.SetDeviceMinor(*deviceMinor)
+}
+
+func (s *ReplicatedVolumeStatus) DeviceMinorEquals(deviceMinor *uint32) bool {
+	current, ok := s.GetDeviceMinor()
+	return deviceMinor == nil && !ok || deviceMinor != nil && ok && current == *deviceMinor
+}
+
+func (s *ReplicatedVolumeStatus) ClearDeviceMinor() (changed bool) {
+	if s == nil || s.DeviceMinor == nil {
+		return false
+	}
+	s.DeviceMinor = nil
+	return true
+}
+
+// GetConditions/SetConditions are kept for compatibility with upstream helper interfaces
+// (e.g. sigs.k8s.io/cluster-api/util/conditions.Getter/Setter).
 func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
 	return s.Conditions
 }
@@ -152,8 +197,4 @@ type DRBDResourceConfig struct {
 
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
-
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1048575
-	DeviceMinor *uint `json:"deviceMinor,omitempty"`
 }

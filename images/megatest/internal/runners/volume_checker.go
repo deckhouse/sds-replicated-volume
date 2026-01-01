@@ -160,9 +160,14 @@ func (v *VolumeChecker) checkInitialState(ctx context.Context) {
 
 // processRVUpdate checks for condition changes and logs them
 func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.ReplicatedVolume) {
-	// Handle nil Status (can happen during deletion or if RV was just created)
-	if rv == nil || rv.Status == nil {
-		v.log.Debug("RV or Status is nil, skipping condition check")
+	if rv == nil {
+		v.log.Debug("RV is nil, skipping condition check")
+		return
+	}
+
+	// Status is a struct in the API, but Conditions can be empty (e.g. just created / during deletion).
+	if len(rv.Status.Conditions) == 0 {
+		v.log.Debug("RV has no conditions yet, skipping condition check")
 		return
 	}
 
@@ -267,10 +272,7 @@ func (v *VolumeChecker) logConditionDetails(ctx context.Context, condType, reaso
 }
 
 // hasAnyFalseCondition checks if RVR has at least one condition with False status
-func hasAnyFalseCondition(status *v1alpha1.ReplicatedVolumeReplicaStatus) bool {
-	if status == nil {
-		return false
-	}
+func hasAnyFalseCondition(status v1alpha1.ReplicatedVolumeReplicaStatus) bool {
 	for _, cond := range status.Conditions {
 		if cond.Status == metav1.ConditionFalse {
 			return true
@@ -300,8 +302,8 @@ func buildRVRConditionsTable(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	sb.WriteString(string(rvr.Spec.Type))
 	sb.WriteString(")\n")
 
-	if rvr.Status == nil {
-		sb.WriteString("      (no status available)\n")
+	if len(rvr.Status.Conditions) == 0 {
+		sb.WriteString("      (no status conditions available)\n")
 		return sb.String()
 	}
 
