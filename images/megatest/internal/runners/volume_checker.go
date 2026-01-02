@@ -171,8 +171,8 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 		return
 	}
 
-	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
+	newIOReadyStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.RVCondIOReadyType)
+	newQuorumStatus := getConditionStatus(rv.Status.Conditions, v1alpha1.RVCondQuorumType)
 
 	// Check IOReady transition.
 	// v.state stores previous status (default: True = expected healthy state).
@@ -183,14 +183,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 		v.state.ioReadyStatus = newIOReadyStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha1.ConditionTypeRVIOReady,
+			"condition", v1alpha1.RVCondIOReadyType,
 			"transition", string(oldStatus)+"->"+string(newIOReadyStatus))
 
 		// On False: log failed RVRs for debugging
 		if newIOReadyStatus == metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVIOReady)
-			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVIOReady, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.RVCondIOReadyType)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.RVCondIOReadyType)
+			v.logConditionDetails(ctx, v1alpha1.RVCondIOReadyType, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 
@@ -201,14 +201,14 @@ func (v *VolumeChecker) processRVUpdate(ctx context.Context, rv *v1alpha1.Replic
 		v.state.quorumStatus = newQuorumStatus // Update saved state
 
 		v.log.Warn("condition changed",
-			"condition", v1alpha1.ConditionTypeRVQuorum,
+			"condition", v1alpha1.RVCondQuorumType,
 			"transition", string(oldStatus)+"->"+string(newQuorumStatus))
 
 		// Log RVRs only if IOReady didn't just log them (avoid duplicate output)
 		if newQuorumStatus == metav1.ConditionFalse && v.state.ioReadyStatus != metav1.ConditionFalse {
-			reason := getConditionReason(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
-			message := getConditionMessage(rv.Status.Conditions, v1alpha1.ConditionTypeRVQuorum)
-			v.logConditionDetails(ctx, v1alpha1.ConditionTypeRVQuorum, reason, message)
+			reason := getConditionReason(rv.Status.Conditions, v1alpha1.RVCondQuorumType)
+			message := getConditionMessage(rv.Status.Conditions, v1alpha1.RVCondQuorumType)
+			v.logConditionDetails(ctx, v1alpha1.RVCondQuorumType, reason, message)
 		} // FYI: we can make here else block, if we need some details then conditions going from Fase to True
 	}
 }

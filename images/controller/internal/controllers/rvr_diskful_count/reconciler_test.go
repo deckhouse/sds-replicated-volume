@@ -67,7 +67,7 @@ func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedV
 		rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha1.ConditionTypeDataInitialized,
+					Type:   v1alpha1.RVRCondDataInitializedType,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -590,7 +590,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvr.Spec.ReplicatedVolumeName).To(Equal(rv.Name))
 				Expect(rvr.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 
-				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
+				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.RVRCondDataInitializedType)
 				if readyCond != nil {
 					Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 				}
@@ -609,7 +609,7 @@ var _ = Describe("Reconciler", func() {
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha1.ConditionTypeDataInitialized,
+						Type:   v1alpha1.RVRCondDataInitializedType,
 						Status: metav1.ConditionTrue,
 						Reason: "DataInitialized",
 					},

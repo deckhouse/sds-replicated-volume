@@ -591,7 +591,7 @@ type EntryConfig struct {
 func setRVInitializedCondition(rv *v1alpha1.ReplicatedVolume, status metav1.ConditionStatus) {
 	rv.Status = v1alpha1.ReplicatedVolumeStatus{
 		Conditions: []metav1.Condition{{
-			Type:               v1alpha1.ConditionTypeRVInitialized,
+			Type:               v1alpha1.RVCondInitializedType,
 			Status:             status,
 			LastTransitionTime: metav1.Now(),
 			Reason:             "test",

@@ -174,7 +174,7 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Name == deletingRVRName {
 			continue
 		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeOnline) {
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondOnlineType) {
 			onlineReplicaCount++
 		}
 	}
@@ -223,7 +223,7 @@ func hasEnoughDiskfulReplicasForReplication(
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeIOReady) {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondIOReadyType) {
 			continue
 		}
 

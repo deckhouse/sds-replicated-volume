@@ -57,10 +57,10 @@ func Requeue() OmegaMatcher {
 }
 
 func expectDeviceMinorAssignedTrue(g Gomega, rv *v1alpha1.ReplicatedVolume) {
-	cond := apimeta.FindStatusCondition(rv.Status.Conditions, v1alpha1.ConditionTypeDeviceMinorAssigned)
+	cond := apimeta.FindStatusCondition(rv.Status.Conditions, v1alpha1.RVCondDeviceMinorAssignedType)
 	g.Expect(cond).NotTo(BeNil(), "DeviceMinorAssigned condition must exist")
 	g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-	g.Expect(cond.Reason).To(Equal(v1alpha1.ReasonDeviceMinorAssigned))
+	g.Expect(cond.Reason).To(Equal(v1alpha1.RVCondDeviceMinorAssignedReasonAssigned))
 }
 
 func InterceptGet[T client.Object](intercept func(T) error) interceptor.Funcs {

@@ -165,7 +165,7 @@ var _ = Describe("Reconciler", func() {
 			Entry("because Configured is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.ConditionTypeConfigured,
+						Type:   v1alpha1.RVCondConfiguredType,
 						Status: metav1.ConditionFalse,
 					},
 				}
@@ -183,7 +183,7 @@ var _ = Describe("Reconciler", func() {
 				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.ConditionTypeConfigured,
+						Type:   v1alpha1.RVCondConfiguredType,
 						Status: metav1.ConditionTrue,
 					},
 				}

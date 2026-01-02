@@ -321,7 +321,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DesiredAttachTo: tc.AttachTo,
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.ConditionTypeRVIOReady,
+					Type:   v1alpha1.RVCondIOReadyType,
 					Status: metav1.ConditionTrue,
 				}},
 			},
@@ -426,7 +426,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				unscheduledDiskful = append(unscheduledDiskful, updated.Name)
 				// Check condition on unscheduled replica
 				if tc.Expected.UnscheduledReason != "" {
-					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 					Expect(cond).ToNot(BeNil(), "Unscheduled replica %s should have Scheduled condition", updated.Name)
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse), "Unscheduled replica %s should have Scheduled=False", updated.Name)
 					Expect(cond.Reason).To(Equal(tc.Expected.UnscheduledReason), "Unscheduled replica %s has wrong reason", updated.Name)
@@ -479,7 +479,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				unscheduledTieBreaker = append(unscheduledTieBreaker, updated.Name)
 				// Check condition on unscheduled TieBreaker replica
 				if tc.Expected.UnscheduledTieBreakerReason != "" {
-					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 					Expect(cond).ToNot(BeNil(), "Unscheduled TieBreaker replica %s should have Scheduled condition", updated.Name)
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse), "Unscheduled TieBreaker replica %s should have Scheduled=False", updated.Name)
 					Expect(cond.Reason).To(Equal(tc.Expected.UnscheduledTieBreakerReason), "Unscheduled TieBreaker replica %s has wrong reason", updated.Name)
@@ -584,7 +584,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{
 					ScheduledDiskfulCount:   intPtr(0),
 					UnscheduledDiskfulCount: intPtr(1),
-					UnscheduledReason:       v1alpha1.ReasonSchedulingTopologyConflict,
+					UnscheduledReason:       v1alpha1.RVRCondScheduledReasonTopologyConstraintsFailed,
 				},
 			},
 			{
@@ -618,7 +618,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{
 					ScheduledTieBreakerCount:    intPtr(0),
 					UnscheduledTieBreakerCount:  intPtr(1),
-					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+					UnscheduledTieBreakerReason: v1alpha1.RVRCondScheduledReasonNoAvailableNodes,
 				},
 			},
 			{
@@ -631,7 +631,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{
 					ScheduledTieBreakerCount:    intPtr(0),
 					UnscheduledTieBreakerCount:  intPtr(1),
-					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+					UnscheduledTieBreakerReason: v1alpha1.RVRCondScheduledReasonNoAvailableNodes,
 				},
 			},
 			{
@@ -769,7 +769,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{
 					ScheduledTieBreakerCount:    intPtr(0),
 					UnscheduledTieBreakerCount:  intPtr(1),
-					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+					UnscheduledTieBreakerReason: v1alpha1.RVRCondScheduledReasonNoAvailableNodes,
 				},
 			},
 			{
@@ -873,7 +873,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				Expected: ExpectedResult{
 					ScheduledTieBreakerCount:    intPtr(0),
 					UnscheduledTieBreakerCount:  intPtr(1),
-					UnscheduledTieBreakerReason: v1alpha1.ReasonSchedulingNoCandidateNodes,
+					UnscheduledTieBreakerReason: v1alpha1.RVRCondScheduledReasonNoAvailableNodes,
 				},
 			},
 			{
@@ -960,7 +960,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -997,10 +997,10 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 			updated := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-diskful-1"}, updated)).To(Succeed())
 			Expect(updated.Spec.NodeName).To(BeEmpty(), "Replica should not be scheduled when no space")
-			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+			cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 			Expect(cond).ToNot(BeNil())
 			Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond.Reason).To(Equal(v1alpha1.ReasonSchedulingNoCandidateNodes))
+			Expect(cond.Reason).To(Equal(v1alpha1.RVRCondScheduledReasonNoAvailableNodes))
 		})
 
 		It("filters nodes where extender doesn't return LVG", func(ctx SpecContext) {
@@ -1046,7 +1046,7 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1145,7 +1145,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				DesiredAttachTo: []string{"node-a", "node-b"},
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.ConditionTypeRVIOReady,
+					Type:   v1alpha1.RVCondIOReadyType,
 					Status: metav1.ConditionTrue,
 				}},
 			},
@@ -1330,19 +1330,19 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 			// Check already-scheduled replica gets condition fixed
 			updatedScheduled := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-scheduled"}, updatedScheduled)).To(Succeed())
-			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+			condScheduled := meta.FindStatusCondition(updatedScheduled.Status.Conditions, v1alpha1.RVRCondScheduledType)
 			Expect(condScheduled).ToNot(BeNil())
 			Expect(condScheduled.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condScheduled.Reason).To(Equal(v1alpha1.ReasonSchedulingReplicaScheduled))
+			Expect(condScheduled.Reason).To(Equal(v1alpha1.RVRCondScheduledReasonReplicaScheduled))
 
 			// Check newly-scheduled replica gets NodeName and Scheduled condition
 			updatedNewlyScheduled := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKey{Name: "rvr-to-schedule"}, updatedNewlyScheduled)).To(Succeed())
 			Expect(updatedNewlyScheduled.Spec.NodeName).To(Equal("node-b"))
-			condNewlyScheduled := meta.FindStatusCondition(updatedNewlyScheduled.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+			condNewlyScheduled := meta.FindStatusCondition(updatedNewlyScheduled.Status.Conditions, v1alpha1.RVRCondScheduledType)
 			Expect(condNewlyScheduled).ToNot(BeNil())
 			Expect(condNewlyScheduled.Status).To(Equal(metav1.ConditionTrue))
-			Expect(condNewlyScheduled.Reason).To(Equal(v1alpha1.ReasonSchedulingReplicaScheduled))
+			Expect(condNewlyScheduled.Reason).To(Equal(v1alpha1.RVRCondScheduledReasonReplicaScheduled))
 		})
 	})
 })
@@ -1400,7 +1400,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1459,16 +1459,16 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				if updated.Spec.NodeName != "" {
 					scheduledCount++
 					// Check Scheduled=True for scheduled replicas
-					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 					Expect(cond).ToNot(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 				} else {
 					unscheduledCount++
 					// Check Scheduled=False for unscheduled replicas with appropriate reason
-					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 					Expect(cond).ToNot(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(v1alpha1.ReasonSchedulingNoCandidateNodes))
+					Expect(cond.Reason).To(Equal(v1alpha1.RVRCondScheduledReasonNoAvailableNodes))
 				}
 			}
 
@@ -1517,7 +1517,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1612,7 +1612,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1702,7 +1702,7 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				},
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{{
-						Type:   v1alpha1.ConditionTypeRVIOReady,
+						Type:   v1alpha1.RVCondIOReadyType,
 						Status: metav1.ConditionTrue,
 					}},
 				},
@@ -1751,13 +1751,13 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 
 				if updated.Spec.NodeName == "" {
 					// Unscheduled replica should have Scheduled=False
-					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.ConditionTypeScheduled)
+					cond := meta.FindStatusCondition(updated.Status.Conditions, v1alpha1.RVRCondScheduledType)
 					Expect(cond).ToNot(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 					// Reason should indicate why scheduling failed
 					Expect(cond.Reason).To(Or(
-						Equal(v1alpha1.ReasonSchedulingNoCandidateNodes),
-						Equal(v1alpha1.ReasonSchedulingTopologyConflict),
+						Equal(v1alpha1.RVRCondScheduledReasonNoAvailableNodes),
+						Equal(v1alpha1.RVRCondScheduledReasonTopologyConstraintsFailed),
 					))
 				}
 			}

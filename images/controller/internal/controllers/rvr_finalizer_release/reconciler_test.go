@@ -154,11 +154,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeOnline,
+							Type:   v1alpha1.RVRCondOnlineType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.ConditionTypeIOReady,
+							Type:   v1alpha1.RVRCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -233,11 +233,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeOnline,
+							Type:   v1alpha1.RVRCondOnlineType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.ConditionTypeIOReady,
+							Type:   v1alpha1.RVRCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},

@@ -152,7 +152,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, request reconcile.Request) (
 			if changed := r.setCondition(
 				&rvr,
 				metav1.ConditionFalse,
-				v1alpha1.ReasonNoFreePortAvailable,
+				v1alpha1.RVRCondAddressConfiguredReasonNoFreePortAvailable,
 				"No free port available",
 			); changed {
 				if err := r.cl.Status().Patch(ctx, &rvr, patch); err != nil {
@@ -193,7 +193,7 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplic
 	conditionChanged := r.setCondition(
 		rvr,
 		metav1.ConditionTrue,
-		v1alpha1.ReasonAddressConfigurationSucceeded,
+		v1alpha1.RVRCondAddressConfiguredReasonAddressConfigurationSucceeded,
 		"Address configured",
 	)
 
@@ -203,7 +203,7 @@ func (r *Reconciler) setAddressAndCondition(rvr *v1alpha1.ReplicatedVolumeReplic
 func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status metav1.ConditionStatus, reason, message string) bool {
 	// Check if condition is already set correctly
 	if rvr.Status.Conditions != nil {
-		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeAddressConfigured)
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.RVRCondAddressConfiguredType)
 		if cond != nil &&
 			cond.Status == status &&
 			cond.Reason == reason &&
@@ -217,7 +217,7 @@ func (r *Reconciler) setCondition(rvr *v1alpha1.ReplicatedVolumeReplica, status 
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:    v1alpha1.ConditionTypeAddressConfigured,
+			Type:    v1alpha1.RVRCondAddressConfiguredType,
 			Status:  status,
 			Reason:  reason,
 			Message: message,

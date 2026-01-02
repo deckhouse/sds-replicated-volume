@@ -129,7 +129,7 @@ func (r *Reconciler) getReplicatedVolume(
 }
 
 func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
-	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized) {
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.RVCondInitializedType) {
 		log.Info("ReplicatedVolume is not initialized yet")
 		return true
 	}

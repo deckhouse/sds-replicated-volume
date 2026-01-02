@@ -217,7 +217,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
 			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
 
-		rvAlreadyInitialized := meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.ConditionTypeRVInitialized)
+		rvAlreadyInitialized := meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.RVCondInitializedType)
 
 		if noDiskfulPeers && !upToDate && !rvAlreadyInitialized {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {

@@ -255,7 +255,7 @@ func WaitForReplicatedVolumeReady(
 			return attemptCounter, fmt.Errorf("failed to create ReplicatedVolume %s, reason: ReplicatedVolume is being deleted", name)
 		}
 
-		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.ConditionTypeRVIOReady)
+		readyCond := meta.FindStatusCondition(rv.Status.Conditions, srv.RVCondIOReadyType)
 		if readyCond != nil && readyCond.Status == metav1.ConditionTrue {
 			log.Info(fmt.Sprintf("[WaitForReplicatedVolumeReady][traceID:%s][volumeID:%s] ReplicatedVolume is IOReady", traceID, name))
 			return attemptCounter, nil
@@ -580,8 +580,8 @@ func WaitForRVAReady(
 			return fmt.Errorf("get ReplicatedVolumeAttachment %s: %w", rvaName, err)
 		}
 
-		readyCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeReady)
-		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVAConditionTypeAttached)
+		readyCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVACondReadyType)
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, srv.RVACondAttachedType)
 
 		if attachedCond != nil {
 			attachedCopy := *attachedCond
@@ -622,7 +622,7 @@ func WaitForRVAReady(
 		// Waiting here only burns time and hides the real cause from CSI callers.
 		if lastAttachedCond != nil &&
 			lastAttachedCond.Status == metav1.ConditionFalse &&
-			(lastAttachedCond.Reason == srv.RVAAttachedReasonLocalityNotSatisfied || lastAttachedCond.Reason == srv.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
+			(lastAttachedCond.Reason == srv.RVACondAttachedReasonLocalityNotSatisfied || lastAttachedCond.Reason == srv.RVACondAttachedReasonUnableToProvideLocalVolumeAccess) {
 			return &RVAWaitError{
 				VolumeName:            volumeName,
 				NodeName:              nodeName,

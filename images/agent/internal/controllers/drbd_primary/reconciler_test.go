@@ -119,7 +119,7 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeRVIOReady,
+							Type:   v1alpha1.RVCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},

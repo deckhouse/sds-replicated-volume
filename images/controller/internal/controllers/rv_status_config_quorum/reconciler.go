@@ -229,5 +229,5 @@ func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool 
 		return false
 	}
 
-	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ConditionTypeConfigured)
+	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.RVCondConfiguredType)
 }

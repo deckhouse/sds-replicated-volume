@@ -258,7 +258,7 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha1.ReplicatedVo
 // isRvrReady checks if the ReplicatedVolumeReplica has DataInitialized condition set to True.
 // Returns false if DataInitialized condition is not found, or its status is not True.
 func isRvrReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ConditionTypeDataInitialized)
+	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondDataInitializedType)
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.

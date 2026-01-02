@@ -155,14 +155,14 @@ func (r *Reconciler) handlePhaseError(
 
 // schedulingErrorToReason converts a scheduling error to rvrNotReadyReason.
 func schedulingErrorToReason(err error) *rvrNotReadyReason {
-	reason := v1alpha1.ReasonSchedulingFailed
+	reason := v1alpha1.RVRCondScheduledReasonSchedulingFailed
 	switch {
 	case errors.Is(err, errSchedulingTopologyConflict):
-		reason = v1alpha1.ReasonSchedulingTopologyConflict
+		reason = v1alpha1.RVRCondScheduledReasonTopologyConstraintsFailed
 	case errors.Is(err, errSchedulingNoCandidateNodes):
-		reason = v1alpha1.ReasonSchedulingNoCandidateNodes
+		reason = v1alpha1.RVRCondScheduledReasonNoAvailableNodes
 	case errors.Is(err, errSchedulingPending):
-		reason = v1alpha1.ReasonSchedulingPending
+		reason = v1alpha1.RVRCondScheduledReasonSchedulingPending
 	}
 	return &rvrNotReadyReason{
 		reason:  reason,
@@ -207,7 +207,7 @@ func (r *Reconciler) patchScheduledReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
+			v1alpha1.RVRCondScheduledReasonReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on RVR %s: %w", rvr.Name, err)
@@ -247,7 +247,7 @@ func (r *Reconciler) ensureScheduledConditionOnExistingReplicas(
 			ctx,
 			rvr,
 			metav1.ConditionTrue,
-			v1alpha1.ReasonSchedulingReplicaScheduled,
+			v1alpha1.RVRCondScheduledReasonReplicaScheduled,
 			"",
 		); err != nil {
 			return fmt.Errorf("failed to set Scheduled condition on existing RVR %s: %w", rvr.Name, err)
@@ -887,7 +887,7 @@ func (r *Reconciler) setScheduledConditionOnRVR(
 	changed := meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:               v1alpha1.ConditionTypeScheduled,
+			Type:               v1alpha1.RVRCondScheduledType,
 			Status:             status,
 			Reason:             reason,
 			Message:            message,

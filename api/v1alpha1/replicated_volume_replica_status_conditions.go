@@ -36,16 +36,16 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:               ConditionTypeDataInitialized,
+				Type:               RVRCondDataInitializedType,
 				Status:             v1.ConditionFalse,
-				Reason:             ReasonNotApplicableToDiskless,
+				Reason:             RVRCondDataInitializedReasonNotApplicableToDiskless,
 				ObservedGeneration: rvr.Generation,
 			},
 		)
 		return nil
 	}
 
-	alreadyTrue := meta.IsStatusConditionTrue(rvr.Status.Conditions, ConditionTypeDataInitialized)
+	alreadyTrue := meta.IsStatusConditionTrue(rvr.Status.Conditions, RVRCondDataInitializedType)
 	if alreadyTrue {
 		return nil
 	}
@@ -56,9 +56,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:    ConditionTypeDataInitialized,
+				Type:    RVRCondDataInitializedType,
 				Status:  v1.ConditionUnknown,
-				Reason:  ReasonDataInitializedUnknownDiskState,
+				Reason:  RVRCondDataInitializedReasonUnknownDiskState,
 				Message: "No devices reported by DRBD",
 			},
 		)
@@ -70,9 +70,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:               ConditionTypeDataInitialized,
+				Type:               RVRCondDataInitializedType,
 				Status:             v1.ConditionTrue,
-				Reason:             ReasonDiskHasBeenSeenInUpToDateState,
+				Reason:             RVRCondDataInitializedReasonDiskHasBeenSeenInUpToDateState,
 				ObservedGeneration: rvr.Generation,
 			},
 		)
@@ -82,9 +82,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionDataInitialized() error
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		v1.Condition{
-			Type:               ConditionTypeDataInitialized,
+			Type:               RVRCondDataInitializedType,
 			Status:             v1.ConditionFalse,
-			Reason:             ReasonDiskNeverWasInUpToDateState,
+			Reason:             RVRCondDataInitializedReasonDiskNeverWasInUpToDateState,
 			ObservedGeneration: rvr.Generation,
 		},
 	)
@@ -102,38 +102,38 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInQuorum() error {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:    ConditionTypeInQuorum,
+				Type:    RVRCondInQuorumType,
 				Status:  v1.ConditionUnknown,
-				Reason:  ReasonUnknownDiskState,
+				Reason:  RVRCondInQuorumReasonUnknownDiskState,
 				Message: "No devices reported by DRBD",
 			},
 		)
 		return nil
 	}
 
-	newCond := v1.Condition{Type: ConditionTypeInQuorum}
+	newCond := v1.Condition{Type: RVRCondInQuorumType}
 	newCond.ObservedGeneration = rvr.Generation
 
 	inQuorum := devices[0].Quorum
 
-	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, ConditionTypeInQuorum)
+	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, RVRCondInQuorumType)
 	if oldCond == nil || oldCond.Status == v1.ConditionUnknown {
 		// initial setup - simpler message
 		if inQuorum {
-			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInQuorumInQuorum
+			newCond.Status, newCond.Reason = v1.ConditionTrue, RVRCondInQuorumReasonInQuorum
 		} else {
-			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
+			newCond.Status, newCond.Reason = v1.ConditionFalse, RVRCondInQuorumReasonQuorumLost
 		}
 	} else {
 		switch {
 		case inQuorum && oldCond.Status != v1.ConditionTrue:
 			// switch to true
-			newCond.Status, newCond.Reason = v1.ConditionTrue, ReasonInQuorumInQuorum
+			newCond.Status, newCond.Reason = v1.ConditionTrue, RVRCondInQuorumReasonInQuorum
 			newCond.Message = fmt.Sprintf("Quorum achieved after being lost for %v", time.Since(oldCond.LastTransitionTime.Time))
 
 		case !inQuorum && oldCond.Status != v1.ConditionFalse:
 			// switch to false
-			newCond.Status, newCond.Reason = v1.ConditionFalse, ReasonInQuorumQuorumLost
+			newCond.Status, newCond.Reason = v1.ConditionFalse, RVRCondInQuorumReasonQuorumLost
 			newCond.Message = fmt.Sprintf("Quorum lost after being achieved for %v", time.Since(oldCond.LastTransitionTime.Time))
 		default:
 			// no change - keep old values
@@ -156,9 +156,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:    ConditionTypeInSync,
+				Type:    RVRCondInSyncType,
 				Status:  v1.ConditionUnknown,
-				Reason:  ReasonUnknownDiskState,
+				Reason:  RVRCondInSyncReasonUnknownDiskState,
 				Message: "No devices reported by DRBD",
 			},
 		)
@@ -170,9 +170,9 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 		meta.SetStatusCondition(
 			&rvr.Status.Conditions,
 			v1.Condition{
-				Type:    ConditionTypeInSync,
+				Type:    RVRCondInSyncType,
 				Status:  v1.ConditionUnknown,
-				Reason:  ReasonInSyncReplicaNotInitialized,
+				Reason:  RVRCondInSyncReasonReplicaNotInitialized,
 				Message: "Replica's actual type is not yet initialized",
 			},
 		)
@@ -188,10 +188,10 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionInSync() error {
 		inSync = device.DiskState == DiskStateDiskless
 	}
 
-	newCond := v1.Condition{Type: ConditionTypeInSync}
+	newCond := v1.Condition{Type: RVRCondInSyncType}
 	newCond.ObservedGeneration = rvr.Generation
 
-	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, ConditionTypeInSync)
+	oldCond := meta.FindStatusCondition(rvr.Status.Conditions, RVRCondInSyncType)
 
 	if oldCond == nil || oldCond.Status == v1.ConditionUnknown {
 		// initial setup - simpler message
@@ -233,10 +233,10 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 	}
 
 	cond := v1.Condition{
-		Type:               ConditionTypeConfigured,
+		Type:               RVRCondConfiguredType,
 		ObservedGeneration: rvr.Generation,
 		Status:             v1.ConditionTrue,
-		Reason:             ReasonConfigured,
+		Reason:             RVRCondConfiguredReasonConfigured,
 		Message:            "Configuration has been successfully applied",
 	}
 
@@ -244,11 +244,11 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 		switch {
 		case rvr.Status.DRBD.Errors.FileSystemOperationError != nil:
 			cond.Status = v1.ConditionFalse
-			cond.Reason = ReasonFileSystemOperationFailed
+			cond.Reason = RVRCondConfiguredReasonFileSystemOperationFailed
 			cond.Message = rvr.Status.DRBD.Errors.FileSystemOperationError.Message
 		case rvr.Status.DRBD.Errors.ConfigurationCommandError != nil:
 			cond.Status = v1.ConditionFalse
-			cond.Reason = ReasonConfigurationCommandFailed
+			cond.Reason = RVRCondConfiguredReasonConfigurationCommandFailed
 			cond.Message = fmt.Sprintf(
 				"Command %s exited with code %d",
 				rvr.Status.DRBD.Errors.ConfigurationCommandError.Command,
@@ -256,14 +256,14 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 			)
 		case rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError != nil:
 			cond.Status = v1.ConditionFalse
-			cond.Reason = ReasonSharedSecretAlgSelectionFailed
+			cond.Reason = RVRCondConfiguredReasonSharedSecretAlgSelectionFailed
 			cond.Message = fmt.Sprintf(
 				"Algorithm %s is not supported by node kernel",
 				rvr.Status.DRBD.Errors.SharedSecretAlgSelectionError.UnsupportedAlg,
 			)
 		case rvr.Status.DRBD.Errors.LastPrimaryError != nil:
 			cond.Status = v1.ConditionFalse
-			cond.Reason = ReasonPromoteFailed
+			cond.Reason = RVRCondConfiguredReasonPromoteFailed
 			cond.Message = fmt.Sprintf(
 				"Command %s exited with code %d",
 				rvr.Status.DRBD.Errors.LastPrimaryError.Command,
@@ -271,7 +271,7 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 			)
 		case rvr.Status.DRBD.Errors.LastSecondaryError != nil:
 			cond.Status = v1.ConditionFalse
-			cond.Reason = ReasonDemoteFailed
+			cond.Reason = RVRCondConfiguredReasonDemoteFailed
 			cond.Message = fmt.Sprintf(
 				"Command %s exited with code %d",
 				rvr.Status.DRBD.Errors.LastSecondaryError.Command,
@@ -288,33 +288,33 @@ func (rvr *ReplicatedVolumeReplica) UpdateStatusConditionConfigured() error {
 func (rvr *ReplicatedVolumeReplica) ComputeStatusConditionAttached(shouldBePrimary bool) (v1.Condition, error) {
 	if rvr.Spec.Type != ReplicaTypeAccess && rvr.Spec.Type != ReplicaTypeDiskful {
 		return v1.Condition{
-			Type:   ConditionTypeAttached,
+			Type:   RVRCondAttachedType,
 			Status: v1.ConditionFalse,
-			Reason: ReasonAttachingNotApplicable,
+			Reason: RVRCondAttachedReasonAttachingNotApplicable,
 		}, nil
 	}
 
 	if rvr.Spec.NodeName == "" || rvr.Status.DRBD == nil || rvr.Status.DRBD.Status == nil {
 		return v1.Condition{
-			Type:   ConditionTypeAttached,
+			Type:   RVRCondAttachedType,
 			Status: v1.ConditionUnknown,
-			Reason: ReasonAttachingNotInitialized,
+			Reason: RVRCondAttachedReasonAttachingNotInitialized,
 		}, nil
 	}
 
 	isPrimary := rvr.Status.DRBD.Status.Role == "Primary"
 
-	cond := v1.Condition{Type: ConditionTypeAttached}
+	cond := v1.Condition{Type: RVRCondAttachedType}
 
 	if isPrimary {
 		cond.Status = v1.ConditionTrue
-		cond.Reason = ReasonAttached
+		cond.Reason = RVRCondAttachedReasonAttached
 	} else {
 		cond.Status = v1.ConditionFalse
 		if shouldBePrimary {
-			cond.Reason = ReasonAttachPending
+			cond.Reason = RVRCondAttachedReasonAttachPending
 		} else {
-			cond.Reason = ReasonDetached
+			cond.Reason = RVRCondAttachedReasonDetached
 		}
 	}
 
@@ -350,29 +350,29 @@ func (rvr *ReplicatedVolumeReplica) validateStatusDRBDStatusNotNil() error {
 
 func reasonForStatusTrue(diskful bool) string {
 	if diskful {
-		return ReasonInSync
+		return RVRCondInSyncReasonInSync
 	}
-	return ReasonDiskless
+	return RVRCondInSyncReasonDiskless
 }
 
 func reasonForStatusFalseFromDiskState(diskState DiskState) string {
 	switch diskState {
 	case DiskStateDiskless:
-		return ReasonDiskLost
+		return RVRCondInSyncReasonDiskLost
 	case DiskStateAttaching:
-		return ReasonAttaching
+		return RVRCondInSyncReasonAttaching
 	case DiskStateDetaching:
-		return ReasonDetaching
+		return RVRCondInSyncReasonDetaching
 	case DiskStateFailed:
-		return ReasonFailed
+		return RVRCondInSyncReasonFailed
 	case DiskStateNegotiating:
-		return ReasonNegotiating
+		return RVRCondInSyncReasonNegotiating
 	case DiskStateInconsistent:
-		return ReasonInconsistent
+		return RVRCondInSyncReasonInconsistent
 	case DiskStateOutdated:
-		return ReasonOutdated
+		return RVRCondInSyncReasonOutdated
 	default:
-		return ReasonUnknownDiskState
+		return RVRCondInSyncReasonUnknownDiskState
 	}
 }
 

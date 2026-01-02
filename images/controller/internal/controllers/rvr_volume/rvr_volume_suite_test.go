@@ -144,7 +144,7 @@ func HaveBackingVolumeCreatedCondition(status metav1.ConditionStatus, reason str
 			return false, nil
 		}
 		for _, cond := range rvr.Status.Conditions {
-			if cond.Type == v1alpha1.ConditionTypeBackingVolumeCreated {
+			if cond.Type == v1alpha1.RVRCondBackingVolumeCreatedType {
 				return cond.Status == status && cond.Reason == reason, nil
 			}
 		}
@@ -153,31 +153,31 @@ func HaveBackingVolumeCreatedCondition(status metav1.ConditionStatus, reason str
 }
 
 // HaveBackingVolumeCreatedConditionReady is a convenience matcher that checks if
-// the BackingVolumeCreated condition is True with ReasonBackingVolumeReady.
+// the BackingVolumeCreated condition is True with RVRCondBackingVolumeCreatedReasonBackingVolumeReady.
 func HaveBackingVolumeCreatedConditionReady() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeReady)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady)
 }
 
 // HaveBackingVolumeCreatedConditionNotReady is a convenience matcher that checks if
-// the BackingVolumeCreated condition is False with ReasonBackingVolumeNotReady.
+// the BackingVolumeCreated condition is False with RVRCondBackingVolumeCreatedReasonBackingVolumeNotReady.
 func HaveBackingVolumeCreatedConditionNotReady() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeNotReady)
 }
 
 // HaveBackingVolumeCreatedConditionNotApplicable is a convenience matcher that checks if
-// the BackingVolumeCreated condition is False with ReasonNotApplicable.
+// the BackingVolumeCreated condition is False with RVRCondBackingVolumeCreatedReasonNotApplicable.
 func HaveBackingVolumeCreatedConditionNotApplicable() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonNotApplicable)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.RVRCondBackingVolumeCreatedReasonNotApplicable)
 }
 
 // HaveBackingVolumeCreatedConditionCreationFailed is a convenience matcher that checks if
-// the BackingVolumeCreated condition is False with ReasonBackingVolumeCreationFailed.
+// the BackingVolumeCreated condition is False with RVRCondBackingVolumeCreatedReasonBackingVolumeCreationFailed.
 func HaveBackingVolumeCreatedConditionCreationFailed() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeCreationFailed)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionFalse, v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeCreationFailed)
 }
 
 // HaveBackingVolumeCreatedConditionDeletionFailed is a convenience matcher that checks if
-// the BackingVolumeCreated condition is True with ReasonBackingVolumeDeletionFailed.
+// the BackingVolumeCreated condition is True with RVRCondBackingVolumeCreatedReasonBackingVolumeDeletionFailed.
 func HaveBackingVolumeCreatedConditionDeletionFailed() gomegatypes.GomegaMatcher {
-	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeDeletionFailed)
+	return HaveBackingVolumeCreatedCondition(metav1.ConditionTrue, v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeDeletionFailed)
 }

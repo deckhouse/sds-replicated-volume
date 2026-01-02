@@ -67,11 +67,11 @@ func IsConditionPresentAndSpecAwareEqual(conditions []metav1.Condition, expected
 // =============================================================================
 
 const (
-	// [ConditionTypeOnline] indicates whether replica is online (Scheduled AND Initialized AND InQuorum)
-	ConditionTypeOnline = "Online"
+	// [RVRCondOnlineType] indicates whether replica is online (Scheduled AND Initialized AND InQuorum)
+	RVRCondOnlineType = "Online"
 
-	// [ConditionTypeIOReady] indicates whether replica is ready for I/O operations (Online AND InSync)
-	ConditionTypeIOReady = "IOReady"
+	// [RVRCondIOReadyType] indicates whether replica is ready for I/O operations (Online AND InSync)
+	RVRCondIOReadyType = "IOReady"
 )
 
 // =============================================================================
@@ -79,26 +79,26 @@ const (
 // =============================================================================
 
 const (
-	// [ConditionTypeRVScheduled] indicates whether all RVRs have been scheduled
-	ConditionTypeRVScheduled = "Scheduled"
+	// [RVCondScheduledType] indicates whether all RVRs have been scheduled
+	RVCondScheduledType = "Scheduled"
 
-	// [ConditionTypeRVBackingVolumeCreated] indicates whether all diskful RVRs have backing volumes created
-	ConditionTypeRVBackingVolumeCreated = "BackingVolumeCreated"
+	// [RVCondBackingVolumeCreatedType] indicates whether all diskful RVRs have backing volumes created
+	RVCondBackingVolumeCreatedType = "BackingVolumeCreated"
 
-	// [ConditionTypeRVConfigured] indicates whether all RVRs are configured
-	ConditionTypeRVConfigured = "Configured"
+	// [RVCondConfiguredType] indicates whether all RVRs are configured
+	RVCondConfiguredType = "Configured"
 
-	// [ConditionTypeRVInitialized] indicates whether enough RVRs are initialized
-	ConditionTypeRVInitialized = "Initialized"
+	// [RVCondInitializedType] indicates whether enough RVRs are initialized
+	RVCondInitializedType = "Initialized"
 
-	// [ConditionTypeRVQuorum] indicates whether RV has quorum
-	ConditionTypeRVQuorum = "Quorum"
+	// [RVCondQuorumType] indicates whether RV has quorum
+	RVCondQuorumType = "Quorum"
 
-	// [ConditionTypeRVDataQuorum] indicates whether RV has data quorum (diskful replicas)
-	ConditionTypeRVDataQuorum = "DataQuorum"
+	// [RVCondDataQuorumType] indicates whether RV has data quorum (diskful replicas)
+	RVCondDataQuorumType = "DataQuorum"
 
-	// [ConditionTypeRVIOReady] indicates whether RV has enough IOReady replicas
-	ConditionTypeRVIOReady = "IOReady"
+	// [RVCondIOReadyType] indicates whether RV has enough IOReady replicas
+	RVCondIOReadyType = "IOReady"
 )
 
 // =============================================================================
@@ -106,11 +106,11 @@ const (
 // =============================================================================
 
 const (
-	// [ConditionTypeConfigurationAdjusted] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigurationAdjusted = "ConfigurationAdjusted"
+	// [RVRCondConfigurationAdjustedType] indicates whether replica configuration has been applied successfully
+	RVRCondConfigurationAdjustedType = "ConfigurationAdjusted"
 
-	// [ConditionTypeDeviceMinorAssigned] indicates whether deviceMinor has been assigned to ReplicatedVolume.
-	ConditionTypeDeviceMinorAssigned = "DeviceMinorAssigned"
+	// [RVCondDeviceMinorAssignedType] indicates whether deviceMinor has been assigned to ReplicatedVolume.
+	RVCondDeviceMinorAssignedType = "DeviceMinorAssigned"
 )
 
 // =============================================================================
@@ -118,56 +118,45 @@ const (
 // =============================================================================
 
 const (
-	// [ConditionTypeScheduled] indicates whether replica has been scheduled to a node
-	ConditionTypeScheduled = "Scheduled"
+	// [RVRCondScheduledType] indicates whether replica has been scheduled to a node
+	RVRCondScheduledType = "Scheduled"
 
-	// [ConditionTypeDataInitialized] indicates whether replica has been initialized.
+	// [RVRCondDataInitializedType] indicates whether replica has been initialized.
 	// Does not reset after True, unless replica type has changed.
-	ConditionTypeDataInitialized = "DataInitialized"
+	RVRCondDataInitializedType = "DataInitialized"
 
-	// [ConditionTypeInQuorum] indicates whether replica is in quorum
-	ConditionTypeInQuorum = "InQuorum"
+	// [RVRCondInQuorumType] indicates whether replica is in quorum
+	RVRCondInQuorumType = "InQuorum"
 
-	// [ConditionTypeInSync] indicates whether replica data is synchronized
-	ConditionTypeInSync = "InSync"
+	// [RVRCondInSyncType] indicates whether replica data is synchronized
+	RVRCondInSyncType = "InSync"
 )
 
 // =============================================================================
 // Condition types read by rv_status_conditions controller (managed by other RVR controllers)
 // =============================================================================
 
-const (
-	// [ConditionTypeRVRBackingVolumeCreated] indicates whether the backing volume for RVR is created
-	ConditionTypeRVRBackingVolumeCreated = "BackingVolumeCreated"
-)
+// NOTE: BackingVolumeCreated is represented by [RVRCondBackingVolumeCreatedType].
 
 // =============================================================================
 // Condition types for RVR controllers
 // =============================================================================
 
 const (
-	// [ConditionTypeReady] indicates whether the replica is ready and operational
-	ConditionTypeReady = "Ready"
+	// [RVRCondReadyType] indicates whether the replica is ready and operational
+	RVRCondReadyType = "Ready"
 
-	// [RVRConditionTypeReady] is an alias for [ConditionTypeReady].
-	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
-	RVRConditionTypeReady = ConditionTypeReady
+	// [RVRCondConfiguredType] indicates whether replica configuration has been applied successfully
+	RVRCondConfiguredType = "Configured"
 
-	// [ConditionTypeConfigured] indicates whether replica configuration has been applied successfully
-	ConditionTypeConfigured = "Configured"
+	// [RVRCondAddressConfiguredType] indicates whether replica address has been configured
+	RVRCondAddressConfiguredType = "AddressConfigured"
 
-	// [ConditionTypeAddressConfigured] indicates whether replica address has been configured
-	ConditionTypeAddressConfigured = "AddressConfigured"
+	// [RVRCondBackingVolumeCreatedType] indicates whether the backing volume (LVMLogicalVolume) has been created
+	RVRCondBackingVolumeCreatedType = "BackingVolumeCreated"
 
-	// [ConditionTypeBackingVolumeCreated] indicates whether the backing volume (LVMLogicalVolume) has been created
-	ConditionTypeBackingVolumeCreated = "BackingVolumeCreated"
-
-	// [ConditionTypeAttached] indicates whether the replica has been attached
-	ConditionTypeAttached = "Attached"
-
-	// [RVRConditionTypeAttached] is an alias for [ConditionTypeAttached].
-	// It exists to explicitly scope the condition type to ReplicatedVolumeReplica.
-	RVRConditionTypeAttached = ConditionTypeAttached
+	// [RVRCondAttachedType] indicates whether the replica has been attached
+	RVRCondAttachedType = "Attached"
 )
 
 // =============================================================================
@@ -175,44 +164,44 @@ const (
 // =============================================================================
 
 const (
-	// [RVAConditionTypeReady] indicates whether the attachment is ready for use:
+	// [RVACondReadyType] indicates whether the attachment is ready for use:
 	// Attached=True AND ReplicaIOReady=True.
-	RVAConditionTypeReady = "Ready"
+	RVACondReadyType = "Ready"
 
-	// [RVAConditionTypeAttached] indicates whether the volume is attached to the requested node.
+	// [RVACondAttachedType] indicates whether the volume is attached to the requested node.
 	// This condition is the former RVA "Ready" condition and contains detailed attach progress reasons.
-	RVAConditionTypeAttached = "Attached"
+	RVACondAttachedType = "Attached"
 
-	// [RVAConditionTypeReplicaIOReady] indicates whether the replica on the requested node is IOReady.
+	// [RVACondReplicaIOReadyType] indicates whether the replica on the requested node is IOReady.
 	// It mirrors ReplicatedVolumeReplica condition IOReady (Status/Reason/Message) for the replica on rva.spec.nodeName.
-	RVAConditionTypeReplicaIOReady = "ReplicaIOReady"
+	RVACondReplicaIOReadyType = "ReplicaIOReady"
 )
 
 const (
-	// RVA Ready condition reasons reported via [RVAConditionTypeReady] (aggregate).
-	RVAReadyReasonReady             = "Ready"
-	RVAReadyReasonNotAttached       = "NotAttached"
-	RVAReadyReasonReplicaNotIOReady = "ReplicaNotIOReady"
+	// RVA Ready condition reasons reported via [RVACondReadyType] (aggregate).
+	RVACondReadyReasonReady             = "Ready"
+	RVACondReadyReasonNotAttached       = "NotAttached"
+	RVACondReadyReasonReplicaNotIOReady = "ReplicaNotIOReady"
 )
 
 const (
-	// RVA Attached condition reasons reported via [RVAConditionTypeAttached].
-	RVAAttachedReasonWaitingForActiveAttachmentsToDetach = "WaitingForActiveAttachmentsToDetach"
-	RVAAttachedReasonWaitingForReplicatedVolume          = "WaitingForReplicatedVolume"
-	RVAAttachedReasonWaitingForReplicatedVolumeIOReady   = "WaitingForReplicatedVolumeIOReady"
-	RVAAttachedReasonWaitingForReplica                   = "WaitingForReplica"
-	RVAAttachedReasonConvertingTieBreakerToAccess        = "ConvertingTieBreakerToAccess"
-	RVAAttachedReasonUnableToProvideLocalVolumeAccess    = "UnableToProvideLocalVolumeAccess"
-	RVAAttachedReasonLocalityNotSatisfied                = "LocalityNotSatisfied"
-	RVAAttachedReasonSettingPrimary                      = "SettingPrimary"
-	RVAAttachedReasonAttached                            = "Attached"
+	// RVA Attached condition reasons reported via [RVACondAttachedType].
+	RVACondAttachedReasonWaitingForActiveAttachmentsToDetach = "WaitingForActiveAttachmentsToDetach"
+	RVACondAttachedReasonWaitingForReplicatedVolume          = "WaitingForReplicatedVolume"
+	RVACondAttachedReasonWaitingForReplicatedVolumeIOReady   = "WaitingForReplicatedVolumeIOReady"
+	RVACondAttachedReasonWaitingForReplica                   = "WaitingForReplica"
+	RVACondAttachedReasonConvertingTieBreakerToAccess        = "ConvertingTieBreakerToAccess"
+	RVACondAttachedReasonUnableToProvideLocalVolumeAccess    = "UnableToProvideLocalVolumeAccess"
+	RVACondAttachedReasonLocalityNotSatisfied                = "LocalityNotSatisfied"
+	RVACondAttachedReasonSettingPrimary                      = "SettingPrimary"
+	RVACondAttachedReasonAttached                            = "Attached"
 )
 
 const (
-	// RVA ReplicaIOReady condition reasons reported via [RVAConditionTypeReplicaIOReady].
+	// RVA ReplicaIOReady condition reasons reported via [RVACondReplicaIOReadyType].
 	// Most of the time this condition mirrors the replica's IOReady condition reason;
 	// this reason is used only when replica/condition is not yet observable.
-	RVAReplicaIOReadyReasonWaitingForReplica = "WaitingForReplica"
+	RVACondReplicaIOReadyReasonWaitingForReplica = "WaitingForReplica"
 )
 
 // Replication values for [ReplicatedStorageClass] spec
@@ -226,177 +215,184 @@ const (
 // Condition reasons used by rvr_status_conditions controller
 // =============================================================================
 
-// Condition reasons for [ConditionTypeOnline] condition
+// Condition reasons for [RVRCondOnlineType] condition
 const (
-	ReasonOnline             = "Online"
-	ReasonUnscheduled        = "Unscheduled"
-	ReasonUninitialized      = "Uninitialized"
-	ReasonQuorumLost         = "QuorumLost"
-	ReasonNodeNotReady       = "NodeNotReady"
-	ReasonAgentNotReady      = "AgentNotReady"
-	ReasonAgentPodMissing    = "AgentPodMissing"    // No agent pod found on node
-	ReasonAgentStatusUnknown = "AgentStatusUnknown" // Can't determine status (API error)
+	RVRCondOnlineReasonOnline             = "Online"
+	RVRCondOnlineReasonUnscheduled        = "Unscheduled"
+	RVRCondOnlineReasonUninitialized      = "Uninitialized"
+	RVRCondOnlineReasonQuorumLost         = "QuorumLost"
+	RVRCondOnlineReasonNodeNotReady       = "NodeNotReady"
+	RVRCondOnlineReasonAgentNotReady      = "AgentNotReady"
+	RVRCondOnlineReasonAgentPodMissing    = "AgentPodMissing"    // No agent pod found on node
+	RVRCondOnlineReasonAgentStatusUnknown = "AgentStatusUnknown" // Can't determine status (API error)
 )
 
-// Condition reasons for [ConditionTypeIOReady] condition
+// Condition reasons for [RVRCondIOReadyType] condition
 const (
-	ReasonIOReady   = "IOReady"
-	ReasonOffline   = "Offline"
-	ReasonOutOfSync = "OutOfSync"
-	// ReasonNodeNotReady and ReasonAgentNotReady are also used for IOReady
+	RVRCondIOReadyReasonIOReady     = "IOReady"
+	RVRCondIOReadyReasonOffline     = "Offline"
+	RVRCondIOReadyReasonOutOfSync   = "OutOfSync"
+	RVRCondIOReadyReasonUnscheduled = "Unscheduled"
+
+	// Unavailability reasons also used for IOReady
+	RVRCondIOReadyReasonNodeNotReady       = "NodeNotReady"
+	RVRCondIOReadyReasonAgentNotReady      = "AgentNotReady"
+	RVRCondIOReadyReasonAgentPodMissing    = "AgentPodMissing"
+	RVRCondIOReadyReasonAgentStatusUnknown = "AgentStatusUnknown"
 )
 
 // =============================================================================
 // Condition reasons used by rv_status_conditions controller
 // =============================================================================
 
-// Condition reasons for [ConditionTypeRVScheduled] condition
+// Condition reasons for [RVCondScheduledType] condition
 const (
-	ReasonAllReplicasScheduled = "AllReplicasScheduled"
-	ReasonReplicasNotScheduled = "ReplicasNotScheduled"
-	ReasonSchedulingInProgress = "SchedulingInProgress"
+	RVCondScheduledReasonAllReplicasScheduled = "AllReplicasScheduled"
+	RVCondScheduledReasonReplicasNotScheduled = "ReplicasNotScheduled"
+	RVCondScheduledReasonSchedulingInProgress = "SchedulingInProgress"
 )
 
-// Condition reasons for [ConditionTypeRVBackingVolumeCreated] condition
+// Condition reasons for [RVCondBackingVolumeCreatedType] condition
 const (
-	ReasonAllBackingVolumesReady   = "AllBackingVolumesReady"
-	ReasonBackingVolumesNotReady   = "BackingVolumesNotReady"
-	ReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
+	RVCondBackingVolumeCreatedReasonAllBackingVolumesReady   = "AllBackingVolumesReady"
+	RVCondBackingVolumeCreatedReasonBackingVolumesNotReady   = "BackingVolumesNotReady"
+	RVCondBackingVolumeCreatedReasonWaitingForBackingVolumes = "WaitingForBackingVolumes"
 )
 
-// Condition reasons for [ConditionTypeRVConfigured] condition
+// Condition reasons for [RVCondConfiguredType] condition
 const (
-	ReasonAllReplicasConfigured   = "AllReplicasConfigured"
-	ReasonReplicasNotConfigured   = "ReplicasNotConfigured"
-	ReasonConfigurationInProgress = "ConfigurationInProgress"
+	RVCondConfiguredReasonAllReplicasConfigured   = "AllReplicasConfigured"
+	RVCondConfiguredReasonReplicasNotConfigured   = "ReplicasNotConfigured"
+	RVCondConfiguredReasonConfigurationInProgress = "ConfigurationInProgress"
 )
 
-// Condition reasons for [ConditionTypeRVInitialized] condition
+// Condition reasons for [RVCondInitializedType] condition
 const (
-	ReasonInitialized              = "Initialized"
-	ReasonInitializationInProgress = "InitializationInProgress"
-	ReasonWaitingForReplicas       = "WaitingForReplicas"
+	RVCondInitializedReasonInitialized              = "Initialized"
+	RVCondInitializedReasonInitializationInProgress = "InitializationInProgress"
+	RVCondInitializedReasonWaitingForReplicas       = "WaitingForReplicas"
 )
 
-// Condition reasons for [ConditionTypeRVQuorum] condition
+// Condition reasons for [RVCondQuorumType] condition
 const (
-	ReasonQuorumReached  = "QuorumReached"
-	ReasonQuorumDegraded = "QuorumDegraded"
-	// ReasonQuorumLost is also used (defined above)
+	RVCondQuorumReasonQuorumReached  = "QuorumReached"
+	RVCondQuorumReasonQuorumDegraded = "QuorumDegraded"
+	RVCondQuorumReasonQuorumLost     = "QuorumLost"
 )
 
-// Condition reasons for [ConditionTypeRVDataQuorum] condition
+// Condition reasons for [RVCondDataQuorumType] condition
 const (
-	ReasonDataQuorumReached  = "DataQuorumReached"
-	ReasonDataQuorumDegraded = "DataQuorumDegraded"
-	ReasonDataQuorumLost     = "DataQuorumLost"
+	RVCondDataQuorumReasonDataQuorumReached  = "DataQuorumReached"
+	RVCondDataQuorumReasonDataQuorumDegraded = "DataQuorumDegraded"
+	RVCondDataQuorumReasonDataQuorumLost     = "DataQuorumLost"
 )
 
-// Condition reasons for [ConditionTypeRVIOReady] condition
+// Condition reasons for [RVCondIOReadyType] condition
 const (
-	ReasonRVIOReady                   = "IOReady"
-	ReasonNoIOReadyReplicas           = "NoIOReadyReplicas"
-	ReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas"
+	RVCondIOReadyReasonIOReady                     = "IOReady"
+	RVCondIOReadyReasonNoIOReadyReplicas           = "NoIOReadyReplicas"
+	RVCondIOReadyReasonInsufficientIOReadyReplicas = "InsufficientIOReadyReplicas"
 )
 
 // =============================================================================
 // Condition reasons reserved for other controllers (not used yet)
 // =============================================================================
 
-// Condition reasons for [ConditionTypeConfigured] condition
+// Condition reasons for [RVRCondConfiguredType] condition
 const (
-	ReasonConfigurationFailed              = "ConfigurationFailed"
-	ReasonConfigurationAdjustmentSucceeded = "ConfigurationAdjustmentSucceeded"
+	RVRCondConfiguredReasonConfigurationFailed              = "ConfigurationFailed"
+	RVRCondConfiguredReasonConfigurationAdjustmentSucceeded = "ConfigurationAdjustmentSucceeded"
 )
 
-// Condition reasons for [ConditionTypeDeviceMinorAssigned] condition
+// Condition reasons for [RVCondDeviceMinorAssignedType] condition
 const (
 	// status=True
-	ReasonDeviceMinorAssigned = "Assigned"
+	RVCondDeviceMinorAssignedReasonAssigned = "Assigned"
 	// status=False
-	ReasonDeviceMinorAssignmentFailed = "AssignmentFailed"
-	ReasonDeviceMinorDuplicate        = "Duplicate"
+	RVCondDeviceMinorAssignedReasonAssignmentFailed = "AssignmentFailed"
+	RVCondDeviceMinorAssignedReasonDuplicate        = "Duplicate"
 )
 
-// Condition reasons for [ConditionTypeScheduled] condition
+// Condition reasons for [RVRCondScheduledType] condition
 const (
-	ReasonSchedulingReplicaScheduled = "ReplicaScheduled"
-	ReasonSchedulingPending          = "SchedulingPending"
-	ReasonSchedulingFailed           = "SchedulingFailed"
-	ReasonSchedulingTopologyConflict = "TopologyConstraintsFailed"
-	ReasonSchedulingNoCandidateNodes = "NoAvailableNodes"
+	RVRCondScheduledReasonReplicaScheduled          = "ReplicaScheduled"
+	RVRCondScheduledReasonSchedulingPending         = "SchedulingPending"
+	RVRCondScheduledReasonSchedulingFailed          = "SchedulingFailed"
+	RVRCondScheduledReasonTopologyConstraintsFailed = "TopologyConstraintsFailed"
+	RVRCondScheduledReasonNoAvailableNodes          = "NoAvailableNodes"
 )
 
-// Condition reasons for [ConditionTypeAddressConfigured] condition
+// Condition reasons for [RVRCondAddressConfiguredType] condition
 const (
-	ReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
-	ReasonNoFreePortAvailable           = "NoFreePortAvailable"
+	RVRCondAddressConfiguredReasonAddressConfigurationSucceeded = "AddressConfigurationSucceeded"
+	RVRCondAddressConfiguredReasonNoFreePortAvailable           = "NoFreePortAvailable"
 )
 
-// Condition reasons for [ConditionTypeBackingVolumeCreated] condition
+// Condition reasons for [RVRCondBackingVolumeCreatedType] condition
 const (
-	ReasonNotApplicable               = "NotApplicable"
-	ReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed"
-	ReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
-	ReasonBackingVolumeReady          = "BackingVolumeReady"
-	ReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
+	RVRCondBackingVolumeCreatedReasonNotApplicable               = "NotApplicable"
+	RVRCondBackingVolumeCreatedReasonBackingVolumeDeletionFailed = "BackingVolumeDeletionFailed"
+	RVRCondBackingVolumeCreatedReasonBackingVolumeCreationFailed = "BackingVolumeCreationFailed"
+	RVRCondBackingVolumeCreatedReasonBackingVolumeReady          = "BackingVolumeReady"
+	RVRCondBackingVolumeCreatedReasonBackingVolumeNotReady       = "BackingVolumeNotReady"
 )
 
-// Condition reasons for [ConditionTypeDataInitialized] condition
+// Condition reasons for [RVRCondDataInitializedType] condition
 const (
 	// status=Unknown
-	ReasonDataInitializedUnknownDiskState = "UnknownDiskState"
+	RVRCondDataInitializedReasonUnknownDiskState = "UnknownDiskState"
 	// status=False
-	ReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
-	ReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
+	RVRCondDataInitializedReasonNotApplicableToDiskless     = "NotApplicableToDiskless"
+	RVRCondDataInitializedReasonDiskNeverWasInUpToDateState = "DiskNeverWasInUpToDateState"
 	// status=True
-	ReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
+	RVRCondDataInitializedReasonDiskHasBeenSeenInUpToDateState = "DiskHasBeenSeenInUpToDateState"
 )
 
-// Condition reasons for [ConditionTypeInQuorum] condition
+// Condition reasons for [RVRCondInQuorumType] condition
 const (
-	ReasonInQuorumInQuorum   = "InQuorum"
-	ReasonInQuorumQuorumLost = "QuorumLost"
+	RVRCondInQuorumReasonInQuorum         = "InQuorum"
+	RVRCondInQuorumReasonQuorumLost       = "QuorumLost"
+	RVRCondInQuorumReasonUnknownDiskState = "UnknownDiskState"
 )
 
-// Condition reasons for [ConditionTypeInSync] condition
+// Condition reasons for [RVRCondInSyncType] condition
 const (
 	// status=True
-	ReasonInSync   = "InSync"
-	ReasonDiskless = "Diskless"
+	RVRCondInSyncReasonInSync   = "InSync"
+	RVRCondInSyncReasonDiskless = "Diskless"
 
 	// status=False
-	ReasonDiskLost                    = "DiskLost"
-	ReasonAttaching                   = "Attaching"
-	ReasonDetaching                   = "Detaching"
-	ReasonFailed                      = "Failed"
-	ReasonNegotiating                 = "Negotiating"
-	ReasonInconsistent                = "Inconsistent"
-	ReasonOutdated                    = "Outdated"
-	ReasonUnknownDiskState            = "UnknownDiskState"
-	ReasonInSyncReplicaNotInitialized = "ReplicaNotInitialized"
+	RVRCondInSyncReasonDiskLost              = "DiskLost"
+	RVRCondInSyncReasonAttaching             = "Attaching"
+	RVRCondInSyncReasonDetaching             = "Detaching"
+	RVRCondInSyncReasonFailed                = "Failed"
+	RVRCondInSyncReasonNegotiating           = "Negotiating"
+	RVRCondInSyncReasonInconsistent          = "Inconsistent"
+	RVRCondInSyncReasonOutdated              = "Outdated"
+	RVRCondInSyncReasonUnknownDiskState      = "UnknownDiskState"
+	RVRCondInSyncReasonReplicaNotInitialized = "ReplicaNotInitialized"
 )
 
-// Condition reasons for [ConditionTypeConfigured] condition
+// Condition reasons for [RVRCondConfiguredType] condition
 const (
 	// status=True
-	ReasonConfigured = "Configured"
+	RVRCondConfiguredReasonConfigured = "Configured"
 	// status=False
-	ReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
-	ReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
-	ReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
-	ReasonPromoteFailed                  = "PromoteFailed"
-	ReasonDemoteFailed                   = "DemoteFailed"
+	RVRCondConfiguredReasonFileSystemOperationFailed      = "FileSystemOperationFailed"
+	RVRCondConfiguredReasonConfigurationCommandFailed     = "ConfigurationCommandFailed"
+	RVRCondConfiguredReasonSharedSecretAlgSelectionFailed = "SharedSecretAlgSelectionFailed"
+	RVRCondConfiguredReasonPromoteFailed                  = "PromoteFailed"
+	RVRCondConfiguredReasonDemoteFailed                   = "DemoteFailed"
 )
 
-// Condition reasons for [ConditionTypeAttached] condition (reserved, not used yet)
+// Condition reasons for [RVRCondAttachedType] condition (reserved, not used yet)
 const (
 	// status=True
-	ReasonAttached = "Attached"
+	RVRCondAttachedReasonAttached = "Attached"
 	// status=False
-	ReasonDetached               = "Detached"
-	ReasonAttachPending          = "AttachPending"
-	ReasonAttachingNotApplicable = "AttachingNotApplicable"
+	RVRCondAttachedReasonDetached               = "Detached"
+	RVRCondAttachedReasonAttachPending          = "AttachPending"
+	RVRCondAttachedReasonAttachingNotApplicable = "AttachingNotApplicable"
 	// status=Unknown
-	ReasonAttachingNotInitialized = "AttachingNotInitialized"
+	RVRCondAttachedReasonAttachingNotInitialized = "AttachingNotInitialized"
 )
