@@ -22,6 +22,17 @@ import (
 	"sync"
 )
 
+// Identifier is a constraint for ID types used with IDPool.
+//
+// Requirements:
+// - underlying type is uint32 (for safe internal offset math)
+// - provides a stable inclusive range via Min()/Max()
+type Identifier interface {
+	~uint32
+	Min() uint32
+	Max() uint32
+}
+
 // IDPool provides name->id allocation with minimal free id preference.
 // All public methods are concurrency-safe.
 //
@@ -33,7 +44,7 @@ import (
 //
 // The pool uses a bitset to track used IDs and a low-watermark pointer to start scanning
 // for the next minimal free id. Memory for the bitset is O(range/8) bytes.
-type IDPool struct {
+type IDPool[T Identifier] struct {
 	mu sync.Mutex
 
 	// External range: [min..max], inclusive.
@@ -51,19 +62,22 @@ type IDPool struct {
 	lowestFree uint32   // internal offset hint where to start searching for a free id
 }
 
-type IDNamePair struct {
+type IDNamePair[T Identifier] struct {
 	Name string
-	ID   uint32
+	ID   T
 }
 
-func NewIDPool(minID, maxID uint32) *IDPool {
-	if maxID < minID {
+func NewIDPool[T Identifier]() *IDPool[T] {
+	var zero T
+	minID := zero.Min()
+	maxID := zero.Max()
+	if maxID <= minID {
 		panic(fmt.Sprintf("idpool: invalid range [%d..%d]", minID, maxID))
 	}
 
 	maxOffset := maxID - minID
 	lastWord := int(maxOffset >> 6) // /64
-	return &IDPool{
+	return &IDPool[T]{
 		min:        minID,
 		max:        maxID,
 		maxOffset:  maxOffset,
@@ -75,28 +89,28 @@ func NewIDPool(minID, maxID uint32) *IDPool {
 }
 
 // Min returns the inclusive minimum external id of this pool.
-func (p *IDPool) Min() uint32 {
+func (p *IDPool[T]) Min() uint32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.min
 }
 
 // Max returns the inclusive maximum external id of this pool.
-func (p *IDPool) Max() uint32 {
+func (p *IDPool[T]) Max() uint32 {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.max
 }
 
 // Len returns the number of currently allocated names.
-func (p *IDPool) Len() int {
+func (p *IDPool[T]) Len() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.byName)
 }
 
 // GetOrCreate returns an already assigned id for name, or allocates a new minimal free id.
-func (p *IDPool) GetOrCreate(name string) (uint32, error) {
+func (p *IDPool[T]) GetOrCreate(name string) (T, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.getOrCreateLocked(name)
@@ -108,8 +122,8 @@ func (p *IDPool) GetOrCreate(name string) (uint32, error) {
 // If id is free, it becomes owned by name.
 // If id is owned by a different name, returns DuplicateIDError containing the owner name.
 // If name is already mapped to a different id, returns NameConflictError.
-// If id is outside the allowed range, returns OutOfRangeError.
-func (p *IDPool) GetOrCreateWithID(name string, id uint32) error {
+// If id is outside the allowed range, panics (developer error: the ID type is responsible for validation).
+func (p *IDPool[T]) GetOrCreateWithID(name string, id T) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.addWithIDLocked(name, id)
@@ -118,7 +132,7 @@ func (p *IDPool) GetOrCreateWithID(name string, id uint32) error {
 // BulkAdd processes pairs in-order under a single lock.
 // It returns a slice of errors aligned with the input order:
 // errs[i] corresponds to pairs[i] (nil means success).
-func (p *IDPool) BulkAdd(pairs []IDNamePair) []error {
+func (p *IDPool[T]) BulkAdd(pairs []IDNamePair[T]) []error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -135,7 +149,7 @@ func (p *IDPool) BulkAdd(pairs []IDNamePair) []error {
 
 // Release frees an allocation for name.
 // If name is not found, this is a no-op.
-func (p *IDPool) Release(name string) {
+func (p *IDPool[T]) Release(name string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -155,7 +169,7 @@ func (p *IDPool) Release(name string) {
 	}
 }
 
-func (p *IDPool) getOrCreateLocked(name string) (uint32, error) {
+func (p *IDPool[T]) getOrCreateLocked(name string) (T, error) {
 	if offset, ok := p.byName[name]; ok {
 		return p.externalID(offset), nil
 	}
@@ -172,17 +186,18 @@ func (p *IDPool) getOrCreateLocked(name string) (uint32, error) {
 	return p.externalID(offset), nil
 }
 
-func (p *IDPool) addWithIDLocked(name string, id uint32) error {
-	offset, ok := p.toOffset(id)
+func (p *IDPool[T]) addWithIDLocked(name string, id T) error {
+	idU32 := uint32(id)
+	offset, ok := p.toOffset(idU32)
 	if !ok {
-		return OutOfRangeError{Min: p.min, Max: p.max, Requested: id}
+		panic(fmt.Sprintf("idpool: identifier %d is outside allowed range [%d..%d]", idU32, p.min, p.max))
 	}
 
 	if existingID, ok := p.byName[name]; ok {
 		if existingID == offset {
 			return nil
 		}
-		return NameConflictError{Name: name, ExistingID: p.externalID(existingID), RequestedID: id}
+		return NameConflictError{Name: name, ExistingID: uint32(p.externalID(existingID)), RequestedID: idU32}
 	}
 
 	if existingName, ok := p.byID[offset]; ok {
@@ -193,7 +208,7 @@ func (p *IDPool) addWithIDLocked(name string, id uint32) error {
 			p.advanceLowestFreeAfterAlloc(offset)
 			return nil
 		}
-		return DuplicateIDError{ID: id, ConflictingName: existingName}
+		return DuplicateIDError{ID: idU32, ConflictingName: existingName}
 	}
 
 	// Register new mapping.
@@ -204,7 +219,7 @@ func (p *IDPool) addWithIDLocked(name string, id uint32) error {
 	return nil
 }
 
-func (p *IDPool) advanceLowestFreeAfterAlloc(allocated uint32) {
+func (p *IDPool[T]) advanceLowestFreeAfterAlloc(allocated uint32) {
 	// If we didn't allocate the current lowest free, it remains minimal.
 	if allocated != p.lowestFree {
 		return
@@ -222,7 +237,7 @@ func (p *IDPool) advanceLowestFreeAfterAlloc(allocated uint32) {
 	p.lowestFree = p.maxOffset
 }
 
-func (p *IDPool) findFreeFrom(start uint32) (uint32, bool) {
+func (p *IDPool[T]) findFreeFrom(start uint32) (uint32, bool) {
 	if start > p.maxOffset {
 		return 0, false
 	}
@@ -260,27 +275,27 @@ func (p *IDPool) findFreeFrom(start uint32) (uint32, bool) {
 	return 0, false
 }
 
-func (p *IDPool) markUsed(offset uint32) {
+func (p *IDPool[T]) markUsed(offset uint32) {
 	word := offset >> 6
 	bit := offset & 63
 	p.used[word] |= uint64(1) << bit
 }
 
-func (p *IDPool) clearUsed(offset uint32) {
+func (p *IDPool[T]) clearUsed(offset uint32) {
 	word := offset >> 6
 	bit := offset & 63
 	p.used[word] &^= uint64(1) << bit
 }
 
-func (p *IDPool) toOffset(external uint32) (uint32, bool) {
+func (p *IDPool[T]) toOffset(external uint32) (uint32, bool) {
 	if external < p.min || external > p.max {
 		return 0, false
 	}
 	return external - p.min, true
 }
 
-func (p *IDPool) externalID(offset uint32) uint32 {
-	return p.min + offset
+func (p *IDPool[T]) externalID(offset uint32) T {
+	return T(p.min + offset)
 }
 
 // PoolExhaustedError is returned when there are no ids left in the pool.
@@ -291,17 +306,6 @@ type PoolExhaustedError struct {
 
 func (e PoolExhaustedError) Error() string {
 	return fmt.Sprintf("IDPool: pool exhausted (range=[%d..%d])", e.Min, e.Max)
-}
-
-// OutOfRangeError is returned when the requested id is outside the allowed range.
-type OutOfRangeError struct {
-	Min       uint32
-	Max       uint32
-	Requested uint32
-}
-
-func (e OutOfRangeError) Error() string {
-	return fmt.Sprintf("IDPool: identifier %d is outside allowed range [%d..%d]", e.Requested, e.Min, e.Max)
 }
 
 // DuplicateIDError is returned when an id is already owned by another name.
@@ -324,5 +328,3 @@ type NameConflictError struct {
 func (e NameConflictError) Error() string {
 	return fmt.Sprintf("IDPool: name %q is already mapped to id %d (requested %d)", e.Name, e.ExistingID, e.RequestedID)
 }
-
-// (no Release mismatch error: Release is name-only)

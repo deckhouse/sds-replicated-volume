@@ -76,10 +76,8 @@ type ReplicatedVolumeStatus struct {
 	DRBD *DRBDResource `json:"drbd,omitempty" patchStrategy:"merge"`
 
 	// DeviceMinor is a unique DRBD device minor number assigned to this ReplicatedVolume.
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1048575
 	// +optional
-	DeviceMinor *uint32 `json:"deviceMinor,omitempty"`
+	DeviceMinor *DeviceMinor `json:"deviceMinor,omitempty"`
 
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
@@ -115,6 +113,44 @@ type ReplicatedVolumeStatus struct {
 	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
 }
 
+// DeviceMinor is a DRBD device minor number.
+//
+// This is a named type (uint32-based) to keep RV status type-safe while preserving
+// JSON/YAML encoding as a plain integer.
+// +kubebuilder:validation:Minimum=0
+// +kubebuilder:validation:Maximum=1048575
+type DeviceMinor uint32
+
+const (
+	deviceMinorMin uint32 = 0
+	// 1048575 = 2^20 - 1: maximum minor number supported by modern Linux kernels.
+	deviceMinorMax uint32 = 1048575
+)
+
+func (DeviceMinor) Min() uint32 { return deviceMinorMin }
+
+func (DeviceMinor) Max() uint32 { return deviceMinorMax }
+
+func (d DeviceMinor) Validate() error {
+	v := uint32(d)
+	if v < d.Min() || v > d.Max() {
+		return DeviceMinorOutOfRangeError{Min: d.Min(), Max: d.Max(), Requested: v}
+	}
+	return nil
+}
+
+// DeviceMinorOutOfRangeError reports that a uint32 value is outside the allowed DeviceMinor range.
+// +kubebuilder:object:generate=false
+type DeviceMinorOutOfRangeError struct {
+	Min       uint32
+	Max       uint32
+	Requested uint32
+}
+
+func (e DeviceMinorOutOfRangeError) Error() string {
+	return fmt.Sprintf("DeviceMinor: value %d is outside allowed range [%d..%d]", e.Requested, e.Min, e.Max)
+}
+
 // GetConditions/SetConditions are kept for compatibility with upstream helper interfaces
 // (e.g. sigs.k8s.io/cluster-api/util/conditions.Getter/Setter).
 func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
@@ -129,20 +165,14 @@ func (s *ReplicatedVolumeStatus) HasDeviceMinor() bool {
 	return s != nil && s.DeviceMinor != nil
 }
 
-func (s *ReplicatedVolumeStatus) GetDeviceMinor() (uint32, bool) {
+func (s *ReplicatedVolumeStatus) GetDeviceMinor() (DeviceMinor, bool) {
 	if s == nil || s.DeviceMinor == nil {
 		return 0, false
 	}
 	return *s.DeviceMinor, true
 }
 
-func (s *ReplicatedVolumeStatus) SetDeviceMinor(v uint32) (changed bool) {
-	// Keep validation in sync with kubebuilder tags on the field:
-	// Minimum=0, Maximum=1048575.
-	if v < RVMinDeviceMinor || v > RVMaxDeviceMinor {
-		panic(fmt.Sprintf("ReplicatedVolumeStatus.DeviceMinor=%d is out of allowed range [%d..%d]", v, RVMinDeviceMinor, RVMaxDeviceMinor))
-	}
-
+func (s *ReplicatedVolumeStatus) SetDeviceMinor(v DeviceMinor) (changed bool) {
 	if s.DeviceMinor != nil && *s.DeviceMinor == v {
 		return false
 	}
@@ -150,14 +180,14 @@ func (s *ReplicatedVolumeStatus) SetDeviceMinor(v uint32) (changed bool) {
 	return true
 }
 
-func (s *ReplicatedVolumeStatus) SetDeviceMinorPtr(deviceMinor *uint32) (changed bool) {
+func (s *ReplicatedVolumeStatus) SetDeviceMinorPtr(deviceMinor *DeviceMinor) (changed bool) {
 	if deviceMinor == nil {
 		return s.ClearDeviceMinor()
 	}
 	return s.SetDeviceMinor(*deviceMinor)
 }
 
-func (s *ReplicatedVolumeStatus) DeviceMinorEquals(deviceMinor *uint32) bool {
+func (s *ReplicatedVolumeStatus) DeviceMinorEquals(deviceMinor *DeviceMinor) bool {
 	current, ok := s.GetDeviceMinor()
 	return deviceMinor == nil && !ok || deviceMinor != nil && ok && current == *deviceMinor
 }
@@ -198,17 +228,6 @@ type DRBDResourceConfig struct {
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
 }
-
-// DRBD device minor number constants for ReplicatedVolume
-const (
-	// RVMinDeviceMinor is the minimum valid device minor number for DRBD devices in ReplicatedVolume
-	RVMinDeviceMinor = uint32(0)
-	// RVMaxDeviceMinor is the maximum valid device minor number for DRBD devices in ReplicatedVolume
-	// This value (1048575 = 2^20 - 1) corresponds to the maximum minor number
-	// supported by modern Linux kernels (2.6+). DRBD devices are named as /dev/drbd<minor>,
-	// and this range allows for up to 1,048,576 unique DRBD devices per major number.
-	RVMaxDeviceMinor = uint32(1048575)
-)
 
 // DRBD quorum configuration constants for ReplicatedVolume
 const (

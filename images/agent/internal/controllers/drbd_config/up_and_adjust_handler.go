@@ -351,7 +351,7 @@ func (h *UpAndAdjustHandler) populateResourceForNode(
 
 	vol := &v9.Volume{
 		Number:   u.Ptr(0),
-		Device:   u.Ptr(v9.DeviceMinorNumber(*h.rv.Status.DeviceMinor)),
+		Device:   u.Ptr(v9.DeviceMinorNumber(uint32(*h.rv.Status.DeviceMinor))),
 		MetaDisk: &v9.VolumeMetaDiskInternal{},
 	}
 

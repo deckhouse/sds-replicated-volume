@@ -863,7 +863,7 @@ func (in *ReplicatedVolumeStatus) DeepCopyInto(out *ReplicatedVolumeStatus) {
 	}
 	if in.DeviceMinor != nil {
 		in, out := &in.DeviceMinor, &out.DeviceMinor
-		*out = new(uint32)
+		*out = new(DeviceMinor)
 		**out = **in
 	}
 	if in.ActuallyAttachedTo != nil {

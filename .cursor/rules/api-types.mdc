@@ -143,3 +143,11 @@ If any of these are present, the code belongs in `*_custom_logic_that_should_not
 - **Non-trivial control flow**:
   - Complex `if/switch` trees, multi-branch logic tied to domain semantics.
   - Loops that encode placement/selection/scheduling decisions.
+
+## Kubebuilder generation hygiene for non-API types (MUST)
+
+- **Non-Kubernetes API types** (MUST):
+  - Avoid placing non-API types (e.g. `error` implementations, internal helper structs) in `api/` packages.
+  - If a non-API type must live in `api/` (for locality/type-safety), it MUST be explicitly excluded from kubebuilder object/deepcopy generation:
+    - Add `// +kubebuilder:object:generate=false` on the type.
+  - Rationale: `controller-gen object` may generate DeepCopy methods for any struct type in the API package, which pollutes `zz_generated.deepcopy.go` with irrelevant helpers/errors.

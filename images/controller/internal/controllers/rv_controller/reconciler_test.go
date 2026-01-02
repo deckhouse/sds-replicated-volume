@@ -97,34 +97,34 @@ func InterceptGet[T client.Object](intercept func(T) error) interceptor.Funcs {
 // testPoolSource is a simple test implementation of DeviceMinorPoolSource
 // that returns a pre-initialized pool immediately without blocking.
 type testPoolSource struct {
-	pool *idpool.IDPool
+	pool *idpool.IDPool[v1alpha1.DeviceMinor]
 }
 
-func newTestPoolSource(pool *idpool.IDPool) *testPoolSource {
+func newTestPoolSource(pool *idpool.IDPool[v1alpha1.DeviceMinor]) *testPoolSource {
 	return &testPoolSource{pool: pool}
 }
 
-func (s *testPoolSource) DeviceMinorPool(_ context.Context) (*idpool.IDPool, error) {
+func (s *testPoolSource) DeviceMinorPool(_ context.Context) (*idpool.IDPool[v1alpha1.DeviceMinor], error) {
 	return s.pool, nil
 }
 
-func (s *testPoolSource) DeviceMinorPoolOrNil() *idpool.IDPool {
+func (s *testPoolSource) DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMinor] {
 	return s.pool
 }
 
 // initReconcilerFromClient creates a new reconciler with pool initialized from existing volumes in the client.
 // This simulates the production behavior where pool is initialized at controller startup.
 func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Logger) *rvcontroller.Reconciler {
-	pool := idpool.NewIDPool(v1alpha1.RVMinDeviceMinor, v1alpha1.RVMaxDeviceMinor)
+	pool := idpool.NewIDPool[v1alpha1.DeviceMinor]()
 
 	rvList := &v1alpha1.ReplicatedVolumeList{}
 	ExpectWithOffset(1, cl.List(ctx, rvList)).To(Succeed(), "should list ReplicatedVolumes")
 
-	pairs := make([]idpool.IDNamePair, 0, len(rvList.Items))
+	pairs := make([]idpool.IDNamePair[v1alpha1.DeviceMinor], 0, len(rvList.Items))
 	for i := range rvList.Items {
 		rv := &rvList.Items[i]
 		if rv.Status.DeviceMinor != nil {
-			pairs = append(pairs, idpool.IDNamePair{
+			pairs = append(pairs, idpool.IDNamePair[v1alpha1.DeviceMinor]{
 				Name: rv.Name,
 				ID:   *rv.Status.DeviceMinor,
 			})
@@ -141,7 +141,7 @@ func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Lo
 
 var _ = Describe("Reconciler", func() {
 	// Note: Some edge cases are not tested:
-	// 1. Invalid deviceMinor (outside RVMinDeviceMinor-RVMaxDeviceMinor range):
+	// 1. Invalid deviceMinor (outside DeviceMinor.Min()-DeviceMinor.Max() range):
 	//    - Not needed: API validates values, invalid deviceMinor never reaches controller
 	//    - System limits ensure only valid values exist in real system
 	// 2. All deviceMinors used (1,048,576 objects):
@@ -175,7 +175,7 @@ var _ = Describe("Reconciler", func() {
 		rec = rvcontroller.NewReconciler(
 			cl,
 			GinkgoLogr,
-			newTestPoolSource(idpool.NewIDPool(v1alpha1.RVMinDeviceMinor, v1alpha1.RVMaxDeviceMinor)),
+			newTestPoolSource(idpool.NewIDPool[v1alpha1.DeviceMinor]()),
 		)
 	})
 
@@ -198,7 +198,7 @@ var _ = Describe("Reconciler", func() {
 				localRec := rvcontroller.NewReconciler(
 					localCl,
 					GinkgoLogr,
-					newTestPoolSource(idpool.NewIDPool(v1alpha1.RVMinDeviceMinor, v1alpha1.RVMaxDeviceMinor)),
+					newTestPoolSource(idpool.NewIDPool[v1alpha1.DeviceMinor]()),
 				)
 
 				_, err := localRec.Reconcile(ctx, reconcile.Request{NamespacedName: client.ObjectKey{Name: tt.reqName}})
@@ -312,7 +312,7 @@ var _ = Describe("Reconciler", func() {
 					By("Verifying deviceMinor was assigned")
 					updatedRV := &v1alpha1.ReplicatedVolume{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
-					Expect(updatedRV).To(HaveField("Status.DeviceMinor", PointTo(BeNumerically("==", v1alpha1.RVMinDeviceMinor))), "first volume should get deviceMinor RVMinDeviceMinor")
+					Expect(updatedRV).To(HaveField("Status.DeviceMinor", PointTo(BeNumerically("==", v1alpha1.DeviceMinor(0).Min()))), "first volume should get minimal deviceMinor")
 					expectDeviceMinorAssignedTrue(Default, updatedRV)
 				})
 			},
@@ -336,7 +336,7 @@ var _ = Describe("Reconciler", func() {
 								Name: fmt.Sprintf("volume-seq-%d", i+1),
 							},
 							Status: v1alpha1.ReplicatedVolumeStatus{
-								DeviceMinor: u.Ptr(uint32(i)),
+								DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(i)),
 							},
 						}
 					}
@@ -351,7 +351,7 @@ var _ = Describe("Reconciler", func() {
 							Name: "volume-gap-1",
 						},
 						Status: v1alpha1.ReplicatedVolumeStatus{
-							DeviceMinor: u.Ptr(uint32(6)),
+							DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(6)),
 						},
 					}
 					rvGap2 := &v1alpha1.ReplicatedVolume{
@@ -359,7 +359,7 @@ var _ = Describe("Reconciler", func() {
 							Name: "volume-gap-2",
 						},
 						Status: v1alpha1.ReplicatedVolumeStatus{
-							DeviceMinor: u.Ptr(uint32(8)),
+							DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(8)),
 						},
 					}
 					rvGap3 := &v1alpha1.ReplicatedVolume{
@@ -367,7 +367,7 @@ var _ = Describe("Reconciler", func() {
 							Name: "volume-gap-3",
 						},
 						Status: v1alpha1.ReplicatedVolumeStatus{
-							DeviceMinor: u.Ptr(uint32(9)),
+							DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(9)),
 						},
 					}
 					rvGap4 = &v1alpha1.ReplicatedVolume{
@@ -417,7 +417,7 @@ var _ = Describe("Reconciler", func() {
 				rv = &v1alpha1.ReplicatedVolume{
 					ObjectMeta: metav1.ObjectMeta{Name: "volume-1"},
 					Status: v1alpha1.ReplicatedVolumeStatus{
-						DeviceMinor: u.Ptr(uint32(42)),
+						DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(42)),
 					},
 				}
 			})
@@ -446,11 +446,11 @@ var _ = Describe("Reconciler", func() {
 		)
 
 		BeforeEach(func() {
-			// Existing volume that already uses deviceMinor = RVMinDeviceMinor (0)
+			// Existing volume that already uses deviceMinor = DeviceMinor.Min() (0)
 			rvExisting = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{Name: "volume-zero-used"},
 				Status: v1alpha1.ReplicatedVolumeStatus{
-					DeviceMinor: u.Ptr(v1alpha1.RVMinDeviceMinor), // 0
+					DeviceMinor: u.Ptr(v1alpha1.DeviceMinor(v1alpha1.DeviceMinor(0).Min())), // 0
 				},
 			}
 
@@ -487,12 +487,12 @@ var _ = Describe("Reconciler", func() {
 			Expect(err).NotTo(HaveOccurred(), "reconciliation should succeed")
 			Expect(result).ToNot(Requeue(), "should not requeue after successful assignment")
 
-			By("Verifying next free deviceMinor was assigned (RVMinDeviceMinor + 1)")
+			By("Verifying next free deviceMinor was assigned (DeviceMinor.Min() + 1)")
 			updated := &v1alpha1.ReplicatedVolume{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvNew), updated)).To(Succeed(), "should get updated ReplicatedVolume")
 
 			Expect(updated).To(HaveField("Status.DeviceMinor",
-				PointTo(BeNumerically("==", v1alpha1.RVMinDeviceMinor+1))),
+				PointTo(BeNumerically("==", v1alpha1.DeviceMinor(0).Min()+1))),
 				"new volume should get the next free deviceMinor, since 0 is already used",
 			)
 			expectDeviceMinorAssignedTrue(Default, updated)
@@ -577,7 +577,7 @@ var _ = Describe("Reconciler", func() {
 				updatedRV := &v1alpha1.ReplicatedVolume{}
 				g.Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), updatedRV)).To(Succeed(), "should get updated ReplicatedVolume")
 				return updatedRV
-			}).Should(HaveField("Status.DeviceMinor", PointTo(BeNumerically(">=", v1alpha1.RVMinDeviceMinor))), "deviceMinor should be assigned after retry")
+			}).Should(HaveField("Status.DeviceMinor", PointTo(BeNumerically(">=", v1alpha1.DeviceMinor(0).Min()))), "deviceMinor should be assigned after retry")
 		})
 	})
 })

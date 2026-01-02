@@ -18,7 +18,6 @@ package rvcontroller
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 
@@ -38,11 +37,11 @@ import (
 type DeviceMinorPoolSource interface {
 	// DeviceMinorPool blocks until the pool is initialized and returns it.
 	// Returns an error if initialization failed or context was cancelled.
-	DeviceMinorPool(ctx context.Context) (*idpool.IDPool, error)
+	DeviceMinorPool(ctx context.Context) (*idpool.IDPool[v1alpha1.DeviceMinor], error)
 
 	// DeviceMinorPoolOrNil returns the pool if it's ready, or nil if not yet initialized.
 	// This is useful for non-blocking access, e.g., in predicates.
-	DeviceMinorPoolOrNil() *idpool.IDPool
+	DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMinor]
 }
 
 // DeviceMinorPoolInitializer is a manager.Runnable that initializes the device minor idpool
@@ -56,7 +55,7 @@ type DeviceMinorPoolInitializer struct {
 	// readyCh is closed when initialization is complete
 	readyCh chan struct{}
 	// pool is set after successful initialization
-	pool *idpool.IDPool
+	pool *idpool.IDPool[v1alpha1.DeviceMinor]
 	// initErr is set if initialization failed
 	initErr error
 }
@@ -122,7 +121,7 @@ func (c *DeviceMinorPoolInitializer) Start(ctx context.Context) error {
 
 // DeviceMinorPool blocks until the pool is initialized and returns it.
 // Returns an error if initialization failed or context was cancelled.
-func (c *DeviceMinorPoolInitializer) DeviceMinorPool(ctx context.Context) (*idpool.IDPool, error) {
+func (c *DeviceMinorPoolInitializer) DeviceMinorPool(ctx context.Context) (*idpool.IDPool[v1alpha1.DeviceMinor], error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -136,7 +135,7 @@ func (c *DeviceMinorPoolInitializer) DeviceMinorPool(ctx context.Context) (*idpo
 
 // DeviceMinorPoolOrNil returns the pool if it's ready, or nil if not yet initialized.
 // This is useful for non-blocking access, e.g., in predicates.
-func (c *DeviceMinorPoolInitializer) DeviceMinorPoolOrNil() *idpool.IDPool {
+func (c *DeviceMinorPoolInitializer) DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMinor] {
 	select {
 	case <-c.readyCh:
 		if c.initErr != nil {
@@ -156,19 +155,23 @@ func (c *DeviceMinorPoolInitializer) DeviceMinorPoolOrNil() *idpool.IDPool {
 // RVs are processed in the following order:
 // - first: RVs with DeviceMinorAssigned condition == True
 // - then: all others (no condition or condition != True)
-func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.IDPool, error) {
-	pool := idpool.NewIDPool(v1alpha1.RVMinDeviceMinor, v1alpha1.RVMaxDeviceMinor)
+func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.IDPool[v1alpha1.DeviceMinor], error) {
+	pool := idpool.NewIDPool[v1alpha1.DeviceMinor]()
 
 	rvList := &v1alpha1.ReplicatedVolumeList{}
 	if err := c.cl.List(ctx, rvList); err != nil {
 		return nil, fmt.Errorf("listing rvs: %w", err)
 	}
 
-	// Filter only RVs with deviceMinor set.
+	// Filter only RVs with deviceMinor set and valid.
 	rvs := make([]*v1alpha1.ReplicatedVolume, 0, len(rvList.Items))
 	for i := range rvList.Items {
 		rv := &rvList.Items[i]
 		if !rv.Status.HasDeviceMinor() {
+			continue
+		}
+		if err := rv.Status.DeviceMinor.Validate(); err != nil {
+			c.log.Error(err, "deviceMinor is invalid", "rv", rv.Name, "deviceMinor", *rv.Status.DeviceMinor)
 			continue
 		}
 		rvs = append(rvs, rv)
@@ -190,61 +193,21 @@ func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.
 	})
 
 	// Bulk-register all (rvName, deviceMinor) pairs.
-	pairs := make([]idpool.IDNamePair, 0, len(rvs))
+	pairs := make([]idpool.IDNamePair[v1alpha1.DeviceMinor], 0, len(rvs))
 	for _, rv := range rvs {
-		pairs = append(pairs, idpool.IDNamePair{
+		pairs = append(pairs, idpool.IDNamePair[v1alpha1.DeviceMinor]{
 			Name: rv.Name,
 			ID:   *rv.Status.DeviceMinor,
 		})
 	}
 	bulkErrs := pool.BulkAdd(pairs)
 
-	// Sequentially patch every RV status via patchRVStatus, passing the corresponding pool error (nil => assigned/true).
-	var outErr error
+	// Report errors.
 	for i, rv := range rvs {
 		if bulkErrs[i] != nil {
 			c.log.Error(bulkErrs[i], "deviceMinor pool reservation failed", "rv", rv.Name, "deviceMinor", *rv.Status.DeviceMinor)
 		}
-
-		if err := c.patchRVStatus(ctx, rv, bulkErrs[i]); err != nil {
-			c.log.Error(err, "failed to patch ReplicatedVolume status", "rv", rv.Name)
-			outErr = errors.Join(outErr, err)
-		}
-	}
-
-	if outErr != nil {
-		return nil, outErr
 	}
 
 	return pool, nil
-}
-
-// patchRVStatus updates DeviceMinorAssigned condition on a single RV based on an IDPool error.
-// It patches the API using optimistic locking and avoids useless status patches.
-//
-// Semantics:
-// - poolErr == nil => condition True/Assigned
-// - DuplicateIDError => condition False/Duplicate with err message
-// - any other error => condition False/AssignmentFailed with err message
-func (c *DeviceMinorPoolInitializer) patchRVStatus(ctx context.Context, rv *v1alpha1.ReplicatedVolume, poolErr error) error {
-	if rv == nil {
-		return nil
-	}
-
-	desired := computeRVDeviceMinorAssignedCondition(poolErr)
-
-	if !v1alpha1.IsConditionPresentAndSpecAgnosticEqual(rv.Status.Conditions, desired) {
-		return nil
-	}
-
-	original := rv.DeepCopy()
-
-	meta.SetStatusCondition(&rv.Status.Conditions, desired)
-
-	if err := c.cl.Status().Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{})); err != nil {
-		c.log.Error(err, "patching ReplicatedVolume status failed", "rv", rv.Name)
-		return fmt.Errorf("patching rv %q status: %w", rv.Name, err)
-	}
-
-	return nil
 }

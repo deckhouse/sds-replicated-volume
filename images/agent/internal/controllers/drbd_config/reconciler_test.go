@@ -500,7 +500,7 @@ func writeCryptoFile(t *testing.T, algs ...string) {
 }
 
 //nolint:unparam // keep secret configurable for future scenarios
-func readyRVWithConfig(secret, alg string, deviceMinor uint32, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
+func readyRVWithConfig(secret, alg string, deviceMinor v1alpha1.DeviceMinor, allowTwoPrimaries bool) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: v1.ObjectMeta{
 			Name:       testRVName,

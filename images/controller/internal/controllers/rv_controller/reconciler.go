@@ -99,12 +99,12 @@ func (r *Reconciler) reconcileRV(ctx context.Context, _ logr.Logger, rv *v1alpha
 	return nil
 }
 
-func (r *Reconciler) reconcileRVStatus(ctx context.Context, _ logr.Logger, rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool) error {
-	desiredDeviceMinor, poolErr := computeRVDeviceMinor(rv, pool)
-	desiredDeviceMinorAssignedCondition := computeRVDeviceMinorAssignedCondition(poolErr)
+func (r *Reconciler) reconcileRVStatus(ctx context.Context, _ logr.Logger, rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) error {
+	desiredDeviceMinor, desiredDeviceMinorComputeErr := computeDeviceMinor(rv, pool)
+	desiredDeviceMinorAssignedCondition := computeDeviceMinorAssignedCondition(desiredDeviceMinorComputeErr)
 
 	if rv.Status.DeviceMinorEquals(desiredDeviceMinor) && v1alpha1.IsConditionPresentAndSpecAgnosticEqual(rv.Status.Conditions, desiredDeviceMinorAssignedCondition) {
-		return nil
+		return desiredDeviceMinorComputeErr
 	}
 
 	original := rv.DeepCopy()
@@ -126,42 +126,58 @@ func (r *Reconciler) reconcileRVStatus(ctx context.Context, _ logr.Logger, rv *v
 	//	// TODO: log INFO about
 	// }
 
-	return nil
+	return desiredDeviceMinorComputeErr
 }
 
-func computeRVDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool) (*uint32, error) {
-	current, ok := rv.Status.GetDeviceMinor()
+func computeDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) (*v1alpha1.DeviceMinor, error) {
+	dm, has := rv.Status.GetDeviceMinor()
 
-	if !ok {
-		current, err := pool.GetOrCreate(rv.Name)
+	// Assign a new device minor
+	if !has {
+		dm, err := pool.GetOrCreate(rv.Name)
 		if err != nil {
+			// Failed to assign a new device minor, return nil
 			return nil, err
 		}
 
-		return &current, nil
+		// Successfully assigned a new device minor, return it
+		return &dm, nil
 	}
 
-	return &current, pool.GetOrCreateWithID(rv.Name, current)
+	// Validate previously assigned device minor
+	if err := dm.Validate(); err != nil {
+		// Device minor is invalid, it's safe to return nil (wich will unset status.deviceMinor in RV) because
+		// even if RV has replicas with this device minor, they will fail to start.
+		return nil, err
+	}
+
+	// Check if the device minor belongs to our RV
+	if err := pool.GetOrCreateWithID(rv.Name, dm); err != nil {
+		return &dm, err
+	}
+
+	// Successfully assigned the device minor, return it
+	return &dm, nil
 }
 
-func computeRVDeviceMinorAssignedCondition(poolErr error) metav1.Condition {
-	desired := metav1.Condition{
+func computeDeviceMinorAssignedCondition(err error) metav1.Condition {
+	cond := metav1.Condition{
 		Type: v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType,
 	}
 
-	if poolErr == nil {
-		desired.Status = metav1.ConditionTrue
-		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned
-		return desired
+	if err == nil {
+		cond.Status = metav1.ConditionTrue
+		cond.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned
+		return cond
 	}
 
-	if idpool.IsDuplicateID(poolErr) {
-		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate
+	cond.Status = metav1.ConditionFalse
+	if idpool.IsDuplicateID(err) {
+		cond.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate
 	} else {
-		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed
+		cond.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed
 	}
-	desired.Status = metav1.ConditionFalse
-	desired.Message = poolErr.Error()
+	cond.Message = err.Error()
 
-	return desired
+	return cond
 }
