@@ -1,0 +1,9 @@
+---
+description: Go rules
+globs:
+  - "**/*.go"
+alwaysApply: true
+---
+
+- Formatting (MUST):
+  - After making changes to Go code, run `gofmt` (or `go fmt`) on the modified files before finalizing the change.

@@ -1,0 +1,16 @@
+---
+description: API codegen rules (kubebuilder/controller-gen)
+globs:
+  - "api/**/*.go"
+  - "!api/linstor/**/*.go"
+alwaysApply: true
+---
+
+- Kubebuilder markers & API changes (MUST):
+  - If I add a new API object/type or modify an existing one in `api/` (especially changes to `// +kubebuilder:*` markers, validation markers, printcolumns, subresources, etc.), I MUST run code generation and include the regenerated outputs in the same change.
+  - In this repo, run generation from the repository root:
+    - `bash hack/generate_code.sh`
+
+- Generated files (MUST NOT edit by hand):
+  - Do NOT edit `zz_generated*` files (e.g. `api/v1alpha1/zz_generated.deepcopy.go`) manually.
+  - If a generated file needs to change, update the source types/markers and re-run generation instead.
