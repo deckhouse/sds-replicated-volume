@@ -242,9 +242,9 @@ var _ = Describe("Reconciler", func() {
 
 				By("verifying condition was set")
 				Expect(rvr).To(HaveField("Status.Conditions", ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha1.RVRCondAddressConfiguredType)),
+					HaveField("Type", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType)),
 					HaveField("Status", Equal(metav1.ConditionTrue)),
-					HaveField("Reason", Equal(v1alpha1.RVRCondAddressConfiguredReasonAddressConfigurationSucceeded)),
+					HaveField("Reason", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonAddressConfigurationSucceeded)),
 				))))
 			})
 
@@ -336,9 +336,9 @@ var _ = Describe("Reconciler", func() {
 				By("verifying second RVR has error condition")
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(&rvrList[1]), &rvrList[1])).To(Succeed())
 				Expect(rvrList[1].Status.Conditions).To(ContainElement(SatisfyAll(
-					HaveField("Type", Equal(v1alpha1.RVRCondAddressConfiguredType)),
+					HaveField("Type", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredType)),
 					HaveField("Status", Equal(metav1.ConditionFalse)),
-					HaveField("Reason", Equal(v1alpha1.RVRCondAddressConfiguredReasonNoFreePortAvailable)),
+					HaveField("Reason", Equal(v1alpha1.ReplicatedVolumeReplicaCondAddressConfiguredReasonNoFreePortAvailable)),
 				)))
 			})
 		})

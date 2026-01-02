@@ -174,7 +174,7 @@ func isThisReplicaCountEnoughForQuorum(
 		if rvr.Name == deletingRVRName {
 			continue
 		}
-		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondOnlineType) {
+		if meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondOnlineType) {
 			onlineReplicaCount++
 		}
 	}
@@ -223,7 +223,7 @@ func hasEnoughDiskfulReplicasForReplication(
 			continue
 		}
 
-		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondIOReadyType) {
+		if !meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType) {
 			continue
 		}
 
@@ -252,7 +252,7 @@ func (r *Reconciler) removeControllerFinalizer(
 	}
 
 	oldFinalizersLen := len(current.Finalizers)
-	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha1.ControllerAppFinalizer })
+	current.Finalizers = slices.DeleteFunc(current.Finalizers, func(f string) bool { return f == v1alpha1.ControllerFinalizer })
 
 	if oldFinalizersLen == len(current.Finalizers) {
 		return nil
@@ -287,6 +287,6 @@ func removeRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	}
 
 	original := rv.DeepCopy()
-	rv.Finalizers = slices.DeleteFunc(rv.Finalizers, func(f string) bool { return f == v1alpha1.ControllerAppFinalizer })
+	rv.Finalizers = slices.DeleteFunc(rv.Finalizers, func(f string) bool { return f == v1alpha1.ControllerFinalizer })
 	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }

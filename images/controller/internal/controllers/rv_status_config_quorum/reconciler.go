@@ -147,7 +147,7 @@ func updateReplicatedVolumeIfNeeded(
 	rvStatus *v1alpha1.ReplicatedVolumeStatus,
 	diskfulCount,
 	all int,
-	replication string,
+	replication v1alpha1.ReplicatedStorageClassReplication,
 ) (changed bool) {
 	quorum, qmr := CalculateQuorum(diskfulCount, all, replication)
 	if rvStatus.DRBD == nil {
@@ -171,7 +171,7 @@ func updateReplicatedVolumeIfNeeded(
 // QMR is set to:
 // - QuorumMinimumRedundancyDefault (1) for None and Availability modes
 // - max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1) for ConsistencyAndAvailability mode
-func CalculateQuorum(diskfulCount, all int, replication string) (quorum, qmr byte) {
+func CalculateQuorum(diskfulCount, all int, replication v1alpha1.ReplicatedStorageClassReplication) (quorum, qmr byte) {
 	if diskfulCount > 1 {
 		quorum = byte(max(v1alpha1.QuorumMinValue, all/2+1))
 	}
@@ -229,5 +229,5 @@ func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool 
 		return false
 	}
 
-	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.RVCondConfiguredType)
+	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ReplicatedVolumeCondConfiguredType)
 }

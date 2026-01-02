@@ -70,7 +70,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "some-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{"app": "other"},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -83,7 +83,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 			},
@@ -100,7 +100,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},
@@ -126,7 +126,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			inputObj: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "agent-pod",
-					Namespace: v1alpha1.ModuleNamespace,
+					Namespace: agentNamespaceDefault,
 					Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 				},
 				Spec: corev1.PodSpec{NodeName: "node-1"},

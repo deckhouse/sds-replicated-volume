@@ -67,7 +67,7 @@ func createReplicatedVolumeReplicaWithType(nodeID uint, rv *v1alpha1.ReplicatedV
 		rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 			Conditions: []metav1.Condition{
 				{
-					Type:   v1alpha1.RVRCondDataInitializedType,
+					Type:   v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType,
 					Status: metav1.ConditionTrue,
 				},
 			},
@@ -140,7 +140,7 @@ var _ = Describe("Reconciler", func() {
 			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: rsc.Name,
@@ -168,7 +168,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("has only controller finalizer", func() {
 				BeforeEach(func() {
-					rv.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
+					rv.Finalizers = []string{v1alpha1.ControllerFinalizer}
 				})
 
 				JustBeforeEach(func(ctx SpecContext) {
@@ -182,7 +182,7 @@ var _ = Describe("Reconciler", func() {
 					)
 
 					Expect(rv).To(SatisfyAll(
-						HaveField("Finalizers", ContainElement(v1alpha1.ControllerAppFinalizer)),
+						HaveField("Finalizers", ContainElement(v1alpha1.ControllerFinalizer)),
 						HaveField("DeletionTimestamp", Not(BeNil())),
 					))
 				})
@@ -194,7 +194,7 @@ var _ = Describe("Reconciler", func() {
 
 			When("has external finalizer in addition to controller finalizer", func() {
 				BeforeEach(func() {
-					rv.Finalizers = []string{v1alpha1.ControllerAppFinalizer, externalFinalizer}
+					rv.Finalizers = []string{v1alpha1.ControllerFinalizer, externalFinalizer}
 					// ensure replication is defined so reconcile path can proceed
 					rsc.Spec.Replication = v1alpha1.ReplicationNone
 				})
@@ -235,7 +235,7 @@ var _ = Describe("Reconciler", func() {
 						if _, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok {
 							currentRV := &v1alpha1.ReplicatedVolume{}
 							Expect(c.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
-							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 						}
 						return c.Create(ctx, obj, opts...)
 					},
@@ -247,7 +247,7 @@ var _ = Describe("Reconciler", func() {
 
 				gotRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
-				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 
 				gotRVRs := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, gotRVRs)).To(Succeed())
@@ -590,7 +590,7 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvr.Spec.ReplicatedVolumeName).To(Equal(rv.Name))
 				Expect(rvr.Spec.Type).To(Equal(v1alpha1.ReplicaTypeDiskful))
 
-				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.RVRCondDataInitializedType)
+				readyCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType)
 				if readyCond != nil {
 					Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
 				}
@@ -609,7 +609,7 @@ var _ = Describe("Reconciler", func() {
 				meta.SetStatusCondition(
 					&rvr.Status.Conditions,
 					metav1.Condition{
-						Type:   v1alpha1.RVRCondDataInitializedType,
+						Type:   v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType,
 						Status: metav1.ConditionTrue,
 						Reason: "DataInitialized",
 					},

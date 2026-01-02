@@ -57,8 +57,8 @@ func replicatedVolumePredicate() predicate.Predicate {
 			}
 
 			// IOReady condition gates attachments; it is status-managed by another controller.
-			oldIOReady := meta.IsStatusConditionTrue(oldRV.Status.Conditions, v1alpha1.RVCondIOReadyType)
-			newIOReady := meta.IsStatusConditionTrue(newRV.Status.Conditions, v1alpha1.RVCondIOReadyType)
+			oldIOReady := meta.IsStatusConditionTrue(oldRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
+			newIOReady := meta.IsStatusConditionTrue(newRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType)
 			return oldIOReady != newIOReady
 		},
 	}
@@ -113,8 +113,8 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 
 			// RVA ReplicaIOReady mirrors replica condition IOReady, so changes must trigger reconcile.
 			// Compare (status, reason, message) to keep mirroring accurate even when status doesn't change.
-			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.RVRCondIOReadyType)
-			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.RVRCondIOReadyType)
+			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
+			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
 			return !v1alpha1.ConditionSpecAgnosticEqual(oldCond, newCond)
 		},
 	}

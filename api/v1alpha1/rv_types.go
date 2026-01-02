@@ -44,6 +44,15 @@ type ReplicatedVolume struct {
 }
 
 // +kubebuilder:object:generate=true
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
+type ReplicatedVolumeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []ReplicatedVolume `json:"items"`
+}
+
+// +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	Size resource.Quantity `json:"size"`
@@ -106,6 +115,16 @@ type ReplicatedVolumeStatus struct {
 	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
 }
 
+// GetConditions/SetConditions are kept for compatibility with upstream helper interfaces
+// (e.g. sigs.k8s.io/cluster-api/util/conditions.Getter/Setter).
+func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
+	return s.Conditions
+}
+
+func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
+	s.Conditions = conditions
+}
+
 func (s *ReplicatedVolumeStatus) HasDeviceMinor() bool {
 	return s != nil && s.DeviceMinor != nil
 }
@@ -151,30 +170,11 @@ func (s *ReplicatedVolumeStatus) ClearDeviceMinor() (changed bool) {
 	return true
 }
 
-// GetConditions/SetConditions are kept for compatibility with upstream helper interfaces
-// (e.g. sigs.k8s.io/cluster-api/util/conditions.Getter/Setter).
-func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
-	return s.Conditions
-}
-
-func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
-	s.Conditions = conditions
-}
-
 // +kubebuilder:object:generate=true
 type DRBDResource struct {
 	// +patchStrategy=merge
 	// +optional
 	Config *DRBDResourceConfig `json:"config,omitempty" patchStrategy:"merge"`
-}
-
-// +kubebuilder:object:generate=true
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Cluster
-type ReplicatedVolumeList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata"`
-	Items           []ReplicatedVolume `json:"items"`
 }
 
 // +kubebuilder:object:generate=true
@@ -197,4 +197,58 @@ type DRBDResourceConfig struct {
 
 	// +kubebuilder:default=false
 	AllowTwoPrimaries bool `json:"allowTwoPrimaries,omitempty"`
+}
+
+// DRBD device minor number constants for ReplicatedVolume
+const (
+	// RVMinDeviceMinor is the minimum valid device minor number for DRBD devices in ReplicatedVolume
+	RVMinDeviceMinor = uint32(0)
+	// RVMaxDeviceMinor is the maximum valid device minor number for DRBD devices in ReplicatedVolume
+	// This value (1048575 = 2^20 - 1) corresponds to the maximum minor number
+	// supported by modern Linux kernels (2.6+). DRBD devices are named as /dev/drbd<minor>,
+	// and this range allows for up to 1,048,576 unique DRBD devices per major number.
+	RVMaxDeviceMinor = uint32(1048575)
+)
+
+// DRBD quorum configuration constants for ReplicatedVolume
+const (
+	// QuorumMinValue is the minimum quorum value when diskfulCount > 1.
+	// Quorum formula: max(QuorumMinValue, allReplicas/2+1)
+	QuorumMinValue = 2
+
+	// QuorumMinimumRedundancyDefault is the default minimum number of UpToDate
+	// replicas required for quorum. Used for None and Availability replication modes.
+	// This ensures at least one UpToDate replica is required for quorum.
+	QuorumMinimumRedundancyDefault = 1
+
+	// QuorumMinimumRedundancyMinForConsistency is the minimum QMR value
+	// for ConsistencyAndAvailability replication mode when calculating majority-based QMR.
+	// QMR formula for C&A: max(QuorumMinimumRedundancyMinForConsistency, diskfulCount/2+1)
+	QuorumMinimumRedundancyMinForConsistency = 2
+)
+
+type SharedSecretAlg string
+
+// Shared secret hashing algorithms
+const (
+	// SharedSecretAlgSHA256 is the SHA256 hashing algorithm for shared secrets
+	SharedSecretAlgSHA256 = "SHA256"
+	// SharedSecretAlgSHA1 is the SHA1 hashing algorithm for shared secrets
+	SharedSecretAlgSHA1         = "SHA1"
+	SharedSecretAlgDummyForTest = "DummyForTest"
+)
+
+func (a SharedSecretAlg) String() string {
+	return string(a)
+}
+
+// SharedSecretAlgorithms returns the ordered list of supported shared secret algorithms.
+// The order matters: algorithms are tried sequentially when one fails on any replica.
+func SharedSecretAlgorithms() []SharedSecretAlg {
+	return []SharedSecretAlg{
+		// TODO: remove after testing
+		SharedSecretAlgDummyForTest,
+		SharedSecretAlgSHA256,
+		SharedSecretAlgSHA1,
+	}
 }

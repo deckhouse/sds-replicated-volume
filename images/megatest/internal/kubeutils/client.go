@@ -419,8 +419,8 @@ func (c *Client) IsRVReady(rv *v1alpha1.ReplicatedVolume) bool {
 	if rv == nil {
 		return false
 	}
-	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.RVCondIOReadyType) &&
-		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.RVCondQuorumType)
+	return meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType) &&
+		meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType)
 }
 
 // PatchRV patches a ReplicatedVolume using merge patch strategy
@@ -525,15 +525,15 @@ func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) e
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
-		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVACondReadyType)
+		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 		if cond != nil && cond.Status == metav1.ConditionTrue {
 			return nil
 		}
 		// Early exit for permanent attach failures: these are reported via Attached condition reason.
-		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVACondAttachedType)
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		if attachedCond != nil &&
 			attachedCond.Status == metav1.ConditionFalse &&
-			(attachedCond.Reason == v1alpha1.RVACondAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.RVACondAttachedReasonUnableToProvideLocalVolumeAccess) {
+			(attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonUnableToProvideLocalVolumeAccess) {
 			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
 				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
 		}

@@ -146,19 +146,19 @@ func computeRVDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool) (*
 
 func computeRVDeviceMinorAssignedCondition(poolErr error) metav1.Condition {
 	desired := metav1.Condition{
-		Type: v1alpha1.RVCondDeviceMinorAssignedType,
+		Type: v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType,
 	}
 
 	if poolErr == nil {
 		desired.Status = metav1.ConditionTrue
-		desired.Reason = v1alpha1.RVCondDeviceMinorAssignedReasonAssigned
+		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned
 		return desired
 	}
 
 	if idpool.IsDuplicateID(poolErr) {
-		desired.Reason = v1alpha1.RVCondDeviceMinorAssignedReasonDuplicate
+		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonDuplicate
 	} else {
-		desired.Reason = v1alpha1.RVCondDeviceMinorAssignedReasonAssignmentFailed
+		desired.Reason = v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssignmentFailed
 	}
 	desired.Status = metav1.ConditionFalse
 	desired.Message = poolErr.Error()

@@ -111,7 +111,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-storage-class",
@@ -119,7 +119,7 @@ var _ = Describe("Reconciler", func() {
 				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -328,11 +328,11 @@ var _ = Describe("Reconciler", func() {
 						if rvr.Status.DRBD.Errors == nil {
 							rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 						}
-						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
+						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.DRBDCmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
-						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
+						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.DRBDCmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
@@ -398,7 +398,7 @@ var _ = Describe("Reconciler", func() {
 					if rvr.Status.DRBD.Errors == nil {
 						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
+					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.DRBDCmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}
@@ -458,7 +458,7 @@ var _ = Describe("Reconciler", func() {
 					if rvr.Status.DRBD.Errors == nil {
 						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
+					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.DRBDCmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}

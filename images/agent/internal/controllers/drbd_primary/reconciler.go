@@ -179,7 +179,8 @@ func (r *Reconciler) updateErrorStatus(
 			output = output[:1024]
 		}
 
-		errorField := &v1alpha1.CmdError{
+		errorField := &v1alpha1.DRBDCmdError{
+			Command:  "",
 			Output:   output,
 			ExitCode: exitCode,
 		}

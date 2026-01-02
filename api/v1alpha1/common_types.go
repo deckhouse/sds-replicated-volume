@@ -15,5 +15,3 @@ limitations under the License.
 */
 
 package v1alpha1
-
-const ModuleNamespace = "d8-sds-replicated-volume"

@@ -181,8 +181,8 @@ func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.
 
 	// Sort RVs so that those with DeviceMinorAssigned status condition == True go first.
 	sort.SliceStable(rvs, func(i, j int) bool {
-		ai := meta.IsStatusConditionTrue(rvs[i].Status.Conditions, v1alpha1.RVCondDeviceMinorAssignedType)
-		aj := meta.IsStatusConditionTrue(rvs[j].Status.Conditions, v1alpha1.RVCondDeviceMinorAssignedType)
+		ai := meta.IsStatusConditionTrue(rvs[i].Status.Conditions, v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType)
+		aj := meta.IsStatusConditionTrue(rvs[j].Status.Conditions, v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType)
 		if ai == aj {
 			return false
 		}

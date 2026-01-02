@@ -110,7 +110,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -197,7 +197,7 @@ var _ = Describe("Reconciler", func() {
 						if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
 							currentRV := &v1alpha1.ReplicatedVolume{}
 							Expect(c.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
-							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 						}
 						return c.Create(ctx, obj, opts...)
 					},
@@ -209,7 +209,7 @@ var _ = Describe("Reconciler", func() {
 
 				gotRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
-				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 
 				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
 				Expect(cl.List(ctx, rvrList)).To(Succeed())
@@ -447,7 +447,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -492,7 +492,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -539,7 +539,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -591,7 +591,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",

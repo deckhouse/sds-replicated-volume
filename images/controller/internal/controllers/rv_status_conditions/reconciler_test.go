@@ -69,7 +69,7 @@ type conditionTestCase struct {
 	// RV configuration
 	rvName                 string
 	replicatedStorageClass string
-	replication            string
+	replication            v1alpha1.ReplicatedStorageClassReplication
 
 	// RVRs configuration (list of RVR specs)
 	rvrs []testRVR
@@ -184,31 +184,31 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady},
-					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondConfiguredReasonConfigurationAdjustmentSucceeded},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady},
+					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationAdjustmentSucceeded},
 					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
-					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondIOReadyReasonIOReady},
+					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady},
-					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondConfiguredReasonConfigurationAdjustmentSucceeded},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady},
+					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationAdjustmentSucceeded},
 					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
-					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondIOReadyReasonIOReady},
+					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady},
 				},
 			},
-			wantScheduled:             &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondScheduledReasonAllReplicasScheduled},
-			wantBackingVolumeCreated:  &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondBackingVolumeCreatedReasonAllBackingVolumesReady},
-			wantConfigured:            &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondConfiguredReasonAllReplicasConfigured},
-			wantInitialized:           &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondInitializedReasonInitialized},
-			wantQuorum:                &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondQuorumReasonQuorumReached},
-			wantDataQuorum:            &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondDataQuorumReasonDataQuorumReached},
-			wantIOReady:               &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondIOReadyReasonIOReady},
+			wantScheduled:             &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondScheduledReasonAllReplicasScheduled},
+			wantBackingVolumeCreated:  &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonAllBackingVolumesReady},
+			wantConfigured:            &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured},
+			wantInitialized:           &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondInitializedReasonInitialized},
+			wantQuorum:                &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumReached},
+			wantDataQuorum:            &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondDataQuorumReasonDataQuorumReached},
+			wantIOReady:               &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondIOReadyReasonIOReady},
 			wantDiskfulReplicaCount:   "2/2",
 			wantDiskfulReplicasInSync: "2/2",
 		},
@@ -221,12 +221,12 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady},
-					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondConfiguredReasonConfigurationAdjustmentSucceeded},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady},
+					configured:           &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationAdjustmentSucceeded},
 					dataInitialized:      &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 					inQuorum:             &testCondition{status: metav1.ConditionTrue, reason: "InQuorum"},
 					inSync:               &testCondition{status: metav1.ConditionTrue, reason: "InSync"},
-					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondIOReadyReasonIOReady},
+					ioReady:              &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady},
 				},
 				{
 					name: "rvr-2", nodeName: "", rvrType: v1alpha1.ReplicaTypeDiskful,
@@ -234,7 +234,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				},
 			},
 			// Now we use RV-level reasons, not RVR reasons
-			wantScheduled: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondScheduledReasonReplicasNotScheduled, message: "1/2"},
+			wantScheduled: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled, message: "1/2"},
 		},
 		{
 			name:                   "two RVRs not scheduled",
@@ -252,7 +252,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				},
 			},
 			// Simple RV-level reason, not aggregated RVR reasons
-			wantScheduled: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondScheduledReasonReplicasNotScheduled, message: "0/2"},
+			wantScheduled: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled, message: "0/2"},
 		},
 		{
 			name:                     "no RVRs",
@@ -260,10 +260,10 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			replicatedStorageClass:   "test-rsc",
 			replication:              v1alpha1.ReplicationAvailability,
 			rvrs:                     []testRVR{},
-			wantScheduled:            &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondScheduledReasonSchedulingInProgress},
-			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondBackingVolumeCreatedReasonWaitingForBackingVolumes},
-			wantConfigured:           &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondConfiguredReasonConfigurationInProgress},
-			wantInitialized:          &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondInitializedReasonWaitingForReplicas},
+			wantScheduled:            &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondScheduledReasonSchedulingInProgress},
+			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonWaitingForBackingVolumes},
+			wantConfigured:           &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondConfiguredReasonConfigurationInProgress},
+			wantInitialized:          &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondInitializedReasonWaitingForReplicas},
 		},
 		{
 			name:                   "backing volume not created on one diskful RVR",
@@ -274,17 +274,17 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeCreationFailed, message: "LVM error"},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeCreationFailed, message: "LVM error"},
 				},
 			},
-			wantScheduled: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondScheduledReasonAllReplicasScheduled},
+			wantScheduled: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondScheduledReasonAllReplicasScheduled},
 			// Now we use RV-level reason
-			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondBackingVolumeCreatedReasonBackingVolumesNotReady, message: "1/2"},
+			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonBackingVolumesNotReady, message: "1/2"},
 		},
 		{
 			name:                   "quorum degraded - 2 of 3 in quorum",
@@ -308,7 +308,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					inQuorum:  &testCondition{status: metav1.ConditionFalse, reason: "QuorumLost", message: "node offline"},
 				},
 			},
-			wantQuorum: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondQuorumReasonQuorumDegraded, message: "2/3"},
+			wantQuorum: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumDegraded, message: "2/3"},
 		},
 		{
 			name:                   "quorum lost - 1 of 3 in quorum",
@@ -332,7 +332,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					inQuorum:  &testCondition{status: metav1.ConditionFalse, reason: "QuorumLost"},
 				},
 			},
-			wantQuorum: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondQuorumReasonQuorumLost, message: "1/3"},
+			wantQuorum: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost, message: "1/3"},
 		},
 		{
 			name:                   "initialized with None replication (threshold=1)",
@@ -346,7 +346,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					dataInitialized: &testCondition{status: metav1.ConditionTrue, reason: "Initialized"},
 				},
 			},
-			wantInitialized: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondInitializedReasonInitialized, message: "1/1"},
+			wantInitialized: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondInitializedReasonInitialized, message: "1/1"},
 		},
 		{
 			name:                   "not initialized with Availability replication (need 2, have 1)",
@@ -366,7 +366,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				},
 			},
 			// Now we use RV-level reason
-			wantInitialized: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondInitializedReasonInitializationInProgress, message: "1/2"},
+			wantInitialized: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondInitializedReasonInitializationInProgress, message: "1/2"},
 		},
 		{
 			name:                   "IOReady insufficient - 1 of 2 needed",
@@ -377,16 +377,16 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled: &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					ioReady:   &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondIOReadyReasonIOReady},
+					ioReady:   &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled: &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVRCondIOReadyReasonOffline, message: "device degraded"},
+					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline, message: "device degraded"},
 				},
 			},
 			// Now we use RV-level reason
-			wantIOReady: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondIOReadyReasonInsufficientIOReadyReplicas, message: "1/2"},
+			wantIOReady: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondIOReadyReasonInsufficientIOReadyReplicas, message: "1/2"},
 		},
 		{
 			name:                   "IOReady none - 0 of 2 needed",
@@ -397,15 +397,15 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled: &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVRCondIOReadyReasonOffline},
+					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled: &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVRCondIOReadyReasonOffline},
+					ioReady:   &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline},
 				},
 			},
-			wantIOReady: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondIOReadyReasonNoIOReadyReplicas},
+			wantIOReady: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondIOReadyReasonNoIOReadyReplicas},
 		},
 		{
 			name:                   "Access replica does not affect backing volume condition",
@@ -416,7 +416,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:            &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondBackingVolumeCreatedReasonBackingVolumeReady},
+					backingVolumeCreated: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeAccess,
@@ -424,7 +424,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 					// Access replica has no backing volume
 				},
 			},
-			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVCondBackingVolumeCreatedReasonAllBackingVolumesReady},
+			wantBackingVolumeCreated: &expectedCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonAllBackingVolumesReady},
 		},
 		{
 			name:                   "configured - some not configured",
@@ -435,15 +435,15 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 				{
 					name: "rvr-1", nodeName: "node-1", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:  &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					configured: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.RVRCondConfiguredReasonConfigurationAdjustmentSucceeded},
+					configured: &testCondition{status: metav1.ConditionTrue, reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationAdjustmentSucceeded},
 				},
 				{
 					name: "rvr-2", nodeName: "node-2", rvrType: v1alpha1.ReplicaTypeDiskful,
 					scheduled:  &testCondition{status: metav1.ConditionTrue, reason: "Scheduled"},
-					configured: &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVRCondConfiguredReasonConfigurationFailed},
+					configured: &testCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeReplicaCondConfiguredReasonConfigurationFailed},
 				},
 			},
-			wantConfigured: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.RVCondConfiguredReasonReplicasNotConfigured, message: "1/2"},
+			wantConfigured: &expectedCondition{status: metav1.ConditionFalse, reason: v1alpha1.ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured, message: "1/2"},
 		},
 	}
 
@@ -523,13 +523,13 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Check conditions
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondScheduledType, tc.wantScheduled)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondBackingVolumeCreatedType, tc.wantBackingVolumeCreated)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondConfiguredType, tc.wantConfigured)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondInitializedType, tc.wantInitialized)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondQuorumType, tc.wantQuorum)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondDataQuorumType, tc.wantDataQuorum)
-	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.RVCondIOReadyType, tc.wantIOReady)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondScheduledType, tc.wantScheduled)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedType, tc.wantBackingVolumeCreated)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondConfiguredType, tc.wantConfigured)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondInitializedType, tc.wantInitialized)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondQuorumType, tc.wantQuorum)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondDataQuorumType, tc.wantDataQuorum)
+	checkCondition(t, updatedRV.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType, tc.wantIOReady)
 
 	// Check counters
 	if tc.wantDiskfulReplicaCount != "" {
@@ -564,13 +564,13 @@ func buildTestRVR(rvName string, spec testRVR) *v1alpha1.ReplicatedVolumeReplica
 		},
 	}
 
-	addConditionIfSet(rvr, v1alpha1.RVRCondScheduledType, spec.scheduled)
-	addConditionIfSet(rvr, v1alpha1.RVRCondBackingVolumeCreatedType, spec.backingVolumeCreated)
-	addConditionIfSet(rvr, v1alpha1.RVRCondConfigurationAdjustedType, spec.configured)
-	addConditionIfSet(rvr, v1alpha1.RVRCondDataInitializedType, spec.dataInitialized)
-	addConditionIfSet(rvr, v1alpha1.RVRCondInQuorumType, spec.inQuorum)
-	addConditionIfSet(rvr, v1alpha1.RVRCondInSyncType, spec.inSync)
-	addConditionIfSet(rvr, v1alpha1.RVRCondIOReadyType, spec.ioReady)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondScheduledType, spec.scheduled)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedType, spec.backingVolumeCreated)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondConfigurationAdjustedType, spec.configured)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType, spec.dataInitialized)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondInQuorumType, spec.inQuorum)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondInSyncType, spec.inSync)
+	addConditionIfSet(rvr, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType, spec.ioReady)
 
 	return rvr
 }

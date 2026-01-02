@@ -129,7 +129,7 @@ func (r *Reconciler) getReplicatedVolume(
 }
 
 func shouldSkipRV(rv *v1alpha1.ReplicatedVolume, log logr.Logger) bool {
-	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.RVCondInitializedType) {
+	if !meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondInitializedType) {
 		log.Info("ReplicatedVolume is not initialized yet")
 		return true
 	}
@@ -150,7 +150,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	}
 
 	original := rv.DeepCopy()
-	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerFinalizer)
 	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
@@ -348,7 +348,7 @@ func (r *Reconciler) syncTieBreakers(
 		// creating
 		rvr := &v1alpha1.ReplicatedVolumeReplica{
 			ObjectMeta: metav1.ObjectMeta{
-				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 				ReplicatedVolumeName: rv.Name,

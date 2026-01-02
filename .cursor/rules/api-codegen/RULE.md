@@ -10,6 +10,9 @@ alwaysApply: true
   - If I add a new API object/type or modify an existing one in `api/` (especially changes to `// +kubebuilder:*` markers, validation markers, printcolumns, subresources, etc.), I MUST run code generation and include the regenerated outputs in the same change.
   - In this repo, run generation from the repository root:
     - `bash hack/generate_code.sh`
+  - If I am intentionally doing an **API-only refactor stage** where changes outside `api/` are temporarily forbidden/undesired (e.g. the rest of the repo is not yet refactored and will not compile), then:
+    - It is acceptable to **defer CRD regeneration** (outputs under `crds/`) until the stage when cross-repo refactor is allowed.
+    - I MUST still keep `api/v1alpha1` internally consistent and compilable; prefer running **object/deepcopy generation only** when possible, instead of editing generated files by hand.
 
 - Generated files (MUST NOT edit by hand):
   - Do NOT edit `zz_generated*` files (e.g. `api/v1alpha1/zz_generated.deepcopy.go`) manually.

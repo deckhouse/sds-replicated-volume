@@ -165,7 +165,7 @@ var _ = Describe("Reconciler", func() {
 			Entry("because Configured is false", func() {
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.RVCondConfiguredType,
+						Type:   v1alpha1.ReplicatedVolumeCondConfiguredType,
 						Status: metav1.ConditionFalse,
 					},
 				}
@@ -180,10 +180,10 @@ var _ = Describe("Reconciler", func() {
 
 		When("ReplicatedVolume is ready", func() {
 			BeforeEach(func() {
-				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerAppFinalizer}
+				rv.ObjectMeta.Finalizers = []string{v1alpha1.ControllerFinalizer}
 				rv.Status.Conditions = []metav1.Condition{
 					{
-						Type:   v1alpha1.RVCondConfiguredType,
+						Type:   v1alpha1.ReplicatedVolumeCondConfiguredType,
 						Status: metav1.ConditionTrue,
 					},
 				}

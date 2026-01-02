@@ -306,7 +306,7 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 // - DiskState (e.g. "Outdated") when not syncing but not in sync
 func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbdsetup.Resource) string {
 	// Check InSync condition first
-	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.RVRCondInSyncType)
+	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondInSyncType)
 	if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
 		return "True"
 	}

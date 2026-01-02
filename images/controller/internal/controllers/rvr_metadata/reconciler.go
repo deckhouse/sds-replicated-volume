@@ -104,7 +104,7 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 	if rvr.Spec.ReplicatedVolumeName != "" {
 		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
 			rvr.Labels,
-			v1alpha1.LabelReplicatedVolume,
+			v1alpha1.ReplicatedVolumeLabelKey,
 			rvr.Spec.ReplicatedVolumeName,
 		)
 		if labelChanged {
@@ -118,7 +118,7 @@ func (r *Reconciler) processLabels(log logr.Logger, rvr *v1alpha1.ReplicatedVolu
 	if rv.Spec.ReplicatedStorageClassName != "" {
 		rvr.Labels, labelChanged = v1alpha1.EnsureLabel(
 			rvr.Labels,
-			v1alpha1.LabelReplicatedStorageClass,
+			v1alpha1.ReplicatedStorageClassLabelKey,
 			rv.Spec.ReplicatedStorageClassName,
 		)
 		if labelChanged {

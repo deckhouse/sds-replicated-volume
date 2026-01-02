@@ -217,7 +217,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	}
 
 	original := rv.DeepCopy()
-	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerFinalizer)
 	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
@@ -230,7 +230,7 @@ func (r *Reconciler) createAccessRVR(
 ) error {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
-			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,

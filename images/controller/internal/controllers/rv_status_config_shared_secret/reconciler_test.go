@@ -108,7 +108,7 @@ var _ = Describe("Reconciler", func() {
 			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 			}
 		})

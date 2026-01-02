@@ -147,6 +147,8 @@ spec:
                 - type
                 x-kubernetes-list-type: map
               phase:
+                description: ReplicatedVolumeAttachmentPhase enumerates possible values
+                  for ReplicatedVolumeAttachment status.phase field.
                 enum:
                 - Pending
                 - Attaching

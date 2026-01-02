@@ -147,31 +147,31 @@ func (r *Reconciler) calculateScheduled(rv *v1alpha1.ReplicatedVolume, rvrs []v1
 	total := len(rvrs)
 	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondScheduledType,
+			Type:               v1alpha1.ReplicatedVolumeCondScheduledType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondScheduledReasonSchedulingInProgress,
+			Reason:             v1alpha1.ReplicatedVolumeCondScheduledReasonSchedulingInProgress,
 			Message:            messageNoReplicasFound,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
-	scheduledCount := countRVRCondition(rvrs, v1alpha1.RVRCondScheduledType)
+	scheduledCount := countRVRCondition(rvrs, v1alpha1.ReplicatedVolumeReplicaCondScheduledType)
 
 	if scheduledCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondScheduledType,
+			Type:               v1alpha1.ReplicatedVolumeCondScheduledType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVCondScheduledReasonAllReplicasScheduled,
+			Reason:             v1alpha1.ReplicatedVolumeCondScheduledReasonAllReplicasScheduled,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondScheduledType,
+		Type:               v1alpha1.ReplicatedVolumeCondScheduledType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondScheduledReasonReplicasNotScheduled,
+		Reason:             v1alpha1.ReplicatedVolumeCondScheduledReasonReplicasNotScheduled,
 		Message:            strconv.Itoa(scheduledCount) + "/" + strconv.Itoa(total) + " replicas scheduled",
 		ObservedGeneration: rv.Generation,
 	})
@@ -185,31 +185,31 @@ func (r *Reconciler) calculateBackingVolumeCreated(rv *v1alpha1.ReplicatedVolume
 
 	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondBackingVolumeCreatedType,
+			Type:               v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondBackingVolumeCreatedReasonWaitingForBackingVolumes,
+			Reason:             v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonWaitingForBackingVolumes,
 			Message:            messageNoDiskfulReplicasFound,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
-	readyCount := countRVRCondition(diskfulRVRs, v1alpha1.RVRCondBackingVolumeCreatedType)
+	readyCount := countRVRCondition(diskfulRVRs, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedType)
 
 	if readyCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondBackingVolumeCreatedType,
+			Type:               v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVCondBackingVolumeCreatedReasonAllBackingVolumesReady,
+			Reason:             v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonAllBackingVolumesReady,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondBackingVolumeCreatedType,
+		Type:               v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondBackingVolumeCreatedReasonBackingVolumesNotReady,
+		Reason:             v1alpha1.ReplicatedVolumeCondBackingVolumeCreatedReasonBackingVolumesNotReady,
 		Message:            strconv.Itoa(readyCount) + "/" + strconv.Itoa(total) + " backing volumes ready",
 		ObservedGeneration: rv.Generation,
 	})
@@ -221,31 +221,31 @@ func (r *Reconciler) calculateConfigured(rv *v1alpha1.ReplicatedVolume, rvrs []v
 	total := len(rvrs)
 	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondConfiguredType,
+			Type:               v1alpha1.ReplicatedVolumeCondConfiguredType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondConfiguredReasonConfigurationInProgress,
+			Reason:             v1alpha1.ReplicatedVolumeCondConfiguredReasonConfigurationInProgress,
 			Message:            messageNoReplicasFound,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
-	configuredCount := countRVRCondition(rvrs, v1alpha1.RVRCondConfigurationAdjustedType)
+	configuredCount := countRVRCondition(rvrs, v1alpha1.ReplicatedVolumeReplicaCondConfigurationAdjustedType)
 
 	if configuredCount == total {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondConfiguredType,
+			Type:               v1alpha1.ReplicatedVolumeCondConfiguredType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVCondConfiguredReasonAllReplicasConfigured,
+			Reason:             v1alpha1.ReplicatedVolumeCondConfiguredReasonAllReplicasConfigured,
 			ObservedGeneration: rv.Generation,
 		})
 		return
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondConfiguredType,
+		Type:               v1alpha1.ReplicatedVolumeCondConfiguredType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondConfiguredReasonReplicasNotConfigured,
+		Reason:             v1alpha1.ReplicatedVolumeCondConfiguredReasonReplicasNotConfigured,
 		Message:            strconv.Itoa(configuredCount) + "/" + strconv.Itoa(total) + " replicas configured",
 		ObservedGeneration: rv.Generation,
 	})
@@ -274,19 +274,19 @@ func (r *Reconciler) getInitializedThreshold(rsc *v1alpha1.ReplicatedStorageClas
 // This protects against accidental primary --force on new replicas when RV was already initialized.
 func (r *Reconciler) calculateInitialized(rv *v1alpha1.ReplicatedVolume, rvrs []v1alpha1.ReplicatedVolumeReplica, rsc *v1alpha1.ReplicatedStorageClass) {
 	// Once True, never reset to False - this is intentional per spec
-	alreadyTrue := meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.RVCondInitializedType)
+	alreadyTrue := meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondInitializedType)
 	if alreadyTrue {
 		return
 	}
 
 	threshold := r.getInitializedThreshold(rsc)
-	initializedCount := countRVRCondition(rvrs, v1alpha1.RVRCondDataInitializedType)
+	initializedCount := countRVRCondition(rvrs, v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType)
 
 	if initializedCount >= threshold {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondInitializedType,
+			Type:               v1alpha1.ReplicatedVolumeCondInitializedType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVCondInitializedReasonInitialized,
+			Reason:             v1alpha1.ReplicatedVolumeCondInitializedReasonInitialized,
 			Message:            strconv.Itoa(initializedCount) + "/" + strconv.Itoa(threshold) + " replicas initialized",
 			ObservedGeneration: rv.Generation,
 		})
@@ -294,13 +294,13 @@ func (r *Reconciler) calculateInitialized(rv *v1alpha1.ReplicatedVolume, rvrs []
 	}
 
 	// Determine reason: WaitingForReplicas if no replicas, InitializationInProgress if some progress
-	reason := v1alpha1.RVCondInitializedReasonInitializationInProgress
+	reason := v1alpha1.ReplicatedVolumeCondInitializedReasonInitializationInProgress
 	if len(rvrs) == 0 {
-		reason = v1alpha1.RVCondInitializedReasonWaitingForReplicas
+		reason = v1alpha1.ReplicatedVolumeCondInitializedReasonWaitingForReplicas
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondInitializedType,
+		Type:               v1alpha1.ReplicatedVolumeCondInitializedType,
 		Status:             metav1.ConditionFalse,
 		Reason:             reason,
 		Message:            strconv.Itoa(initializedCount) + "/" + strconv.Itoa(threshold) + " replicas initialized",
@@ -314,9 +314,9 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v1alp
 	total := len(rvrs)
 	if total == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondQuorumType,
+			Type:               v1alpha1.ReplicatedVolumeCondQuorumType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondQuorumReasonQuorumLost,
+			Reason:             v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost,
 			Message:            messageNoReplicasFound,
 			ObservedGeneration: rv.Generation,
 		})
@@ -332,16 +332,16 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v1alp
 	}
 
 	// Read RVR.InQuorum condition per spec
-	inQuorumCount := countRVRCondition(rvrs, v1alpha1.RVRCondInQuorumType)
+	inQuorumCount := countRVRCondition(rvrs, v1alpha1.ReplicatedVolumeReplicaCondInQuorumType)
 
 	if inQuorumCount >= quorumNeeded {
-		reason := v1alpha1.RVCondQuorumReasonQuorumReached
+		reason := v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumReached
 		if inQuorumCount < total {
 			// Quorum achieved but some replicas are out - degraded state
-			reason = v1alpha1.RVCondQuorumReasonQuorumDegraded
+			reason = v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumDegraded
 		}
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondQuorumType,
+			Type:               v1alpha1.ReplicatedVolumeCondQuorumType,
 			Status:             metav1.ConditionTrue,
 			Reason:             reason,
 			Message:            strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " replicas in quorum",
@@ -351,9 +351,9 @@ func (r *Reconciler) calculateQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v1alp
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondQuorumType,
+		Type:               v1alpha1.ReplicatedVolumeCondQuorumType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondQuorumReasonQuorumLost,
+		Reason:             v1alpha1.ReplicatedVolumeCondQuorumReasonQuorumLost,
 		Message:            strconv.Itoa(inQuorumCount) + "/" + strconv.Itoa(total) + " replicas in quorum",
 		ObservedGeneration: rv.Generation,
 	})
@@ -368,9 +368,9 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v
 
 	if totalDiskful == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondDataQuorumType,
+			Type:               v1alpha1.ReplicatedVolumeCondDataQuorumType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondDataQuorumReasonDataQuorumLost,
+			Reason:             v1alpha1.ReplicatedVolumeCondDataQuorumReasonDataQuorumLost,
 			Message:            messageNoDiskfulReplicasFound,
 			ObservedGeneration: rv.Generation,
 		})
@@ -387,15 +387,15 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v
 	}
 
 	// Read RVR.InQuorum condition per spec
-	inDataQuorumCount := countRVRCondition(diskfulRVRs, v1alpha1.RVRCondInSyncType)
+	inDataQuorumCount := countRVRCondition(diskfulRVRs, v1alpha1.ReplicatedVolumeReplicaCondInSyncType)
 
 	if inDataQuorumCount >= qmr {
-		reason := v1alpha1.RVCondDataQuorumReasonDataQuorumReached
+		reason := v1alpha1.ReplicatedVolumeCondDataQuorumReasonDataQuorumReached
 		if inDataQuorumCount < totalDiskful {
-			reason = v1alpha1.RVCondDataQuorumReasonDataQuorumDegraded
+			reason = v1alpha1.ReplicatedVolumeCondDataQuorumReasonDataQuorumDegraded
 		}
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondDataQuorumType,
+			Type:               v1alpha1.ReplicatedVolumeCondDataQuorumType,
 			Status:             metav1.ConditionTrue,
 			Reason:             reason,
 			Message:            strconv.Itoa(inDataQuorumCount) + "/" + strconv.Itoa(totalDiskful) + " diskful replicas in quorum (QMR=" + strconv.Itoa(qmr) + ")",
@@ -405,9 +405,9 @@ func (r *Reconciler) calculateDataQuorum(rv *v1alpha1.ReplicatedVolume, rvrs []v
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondDataQuorumType,
+		Type:               v1alpha1.ReplicatedVolumeCondDataQuorumType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondDataQuorumReasonDataQuorumLost,
+		Reason:             v1alpha1.ReplicatedVolumeCondDataQuorumReasonDataQuorumLost,
 		Message:            strconv.Itoa(inDataQuorumCount) + "/" + strconv.Itoa(totalDiskful) + " diskful replicas in quorum (QMR=" + strconv.Itoa(qmr) + ")",
 		ObservedGeneration: rv.Generation,
 	})
@@ -421,13 +421,13 @@ func (r *Reconciler) calculateIOReady(rv *v1alpha1.ReplicatedVolume, rvrs []v1al
 	threshold := r.getInitializedThreshold(rsc)
 	diskfulRVRs := filterDiskfulRVRs(rvrs)
 	totalDiskful := len(diskfulRVRs)
-	ioReadyCount := countRVRCondition(diskfulRVRs, v1alpha1.RVRCondIOReadyType)
+	ioReadyCount := countRVRCondition(diskfulRVRs, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
 
 	if ioReadyCount >= threshold {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondIOReadyType,
+			Type:               v1alpha1.ReplicatedVolumeCondIOReadyType,
 			Status:             metav1.ConditionTrue,
-			Reason:             v1alpha1.RVCondIOReadyReasonIOReady,
+			Reason:             v1alpha1.ReplicatedVolumeCondIOReadyReasonIOReady,
 			Message:            strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(totalDiskful) + " replicas IOReady",
 			ObservedGeneration: rv.Generation,
 		})
@@ -437,9 +437,9 @@ func (r *Reconciler) calculateIOReady(rv *v1alpha1.ReplicatedVolume, rvrs []v1al
 	// No IOReady replicas is more severe than partial
 	if ioReadyCount == 0 {
 		meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-			Type:               v1alpha1.RVCondIOReadyType,
+			Type:               v1alpha1.ReplicatedVolumeCondIOReadyType,
 			Status:             metav1.ConditionFalse,
-			Reason:             v1alpha1.RVCondIOReadyReasonNoIOReadyReplicas,
+			Reason:             v1alpha1.ReplicatedVolumeCondIOReadyReasonNoIOReadyReplicas,
 			Message:            messageNoIOReadyReplicas,
 			ObservedGeneration: rv.Generation,
 		})
@@ -447,9 +447,9 @@ func (r *Reconciler) calculateIOReady(rv *v1alpha1.ReplicatedVolume, rvrs []v1al
 	}
 
 	meta.SetStatusCondition(&rv.Status.Conditions, metav1.Condition{
-		Type:               v1alpha1.RVCondIOReadyType,
+		Type:               v1alpha1.ReplicatedVolumeCondIOReadyType,
 		Status:             metav1.ConditionFalse,
-		Reason:             v1alpha1.RVCondIOReadyReasonInsufficientIOReadyReplicas,
+		Reason:             v1alpha1.ReplicatedVolumeCondIOReadyReasonInsufficientIOReadyReplicas,
 		Message:            strconv.Itoa(ioReadyCount) + "/" + strconv.Itoa(totalDiskful) + " replicas IOReady (need " + strconv.Itoa(threshold) + ")",
 		ObservedGeneration: rv.Generation,
 	})
@@ -472,12 +472,12 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 	for _, rvr := range rvrs {
 		if rvr.Spec.Type == v1alpha1.ReplicaTypeDiskful {
 			diskfulTotal++
-			cond := getRVRCondition(&rvr, v1alpha1.RVRCondBackingVolumeCreatedType)
+			cond := getRVRCondition(&rvr, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedType)
 			if cond != nil && cond.Status == metav1.ConditionTrue {
 				diskfulCurrent++
 			}
 			// Use InSync condition per spec
-			inSyncCond := getRVRCondition(&rvr, v1alpha1.RVRCondInSyncType)
+			inSyncCond := getRVRCondition(&rvr, v1alpha1.ReplicatedVolumeReplicaCondInSyncType)
 			if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
 				diskfulInSync++
 			}
@@ -485,7 +485,7 @@ func (r *Reconciler) calculateCounters(patchedRV *v1alpha1.ReplicatedVolume, rv 
 
 		if _, attached := attachedSet[rvr.Spec.NodeName]; attached {
 			// Use IOReady condition per spec
-			ioReadyCond := getRVRCondition(&rvr, v1alpha1.RVRCondIOReadyType)
+			ioReadyCond := getRVRCondition(&rvr, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
 			if ioReadyCond != nil && ioReadyCond.Status == metav1.ConditionTrue {
 				attachedAndIOReady++
 			}

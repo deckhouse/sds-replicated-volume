@@ -143,7 +143,7 @@ var _ = Describe("Reconcile", func() {
 			rvr = &v1alpha1.ReplicatedVolumeReplica{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rvr-deleting",
-					Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{"other-finalizer", v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 					ReplicatedVolumeName: rv.Name,
@@ -154,11 +154,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVRCondOnlineType,
+							Type:   v1alpha1.ReplicatedVolumeReplicaCondOnlineType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.RVRCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -180,7 +180,7 @@ var _ = Describe("Reconcile", func() {
 
 			got := &v1alpha1.ReplicatedVolumeReplica{}
 			Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-			Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+			Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 		})
 
 		When("deleting RVR is the last replica and RV is deleting", func() {
@@ -189,7 +189,7 @@ var _ = Describe("Reconcile", func() {
 				// so fake client won't delete the object immediately.
 				currentRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
-				currentRV.Finalizers = []string{"keep-me", v1alpha1.ControllerAppFinalizer}
+				currentRV.Finalizers = []string{"keep-me", v1alpha1.ControllerFinalizer}
 				currentRV.Status.ActuallyAttachedTo = []string{}
 				Expect(cl.Update(ctx, currentRV)).To(Succeed())
 
@@ -213,12 +213,12 @@ var _ = Describe("Reconcile", func() {
 
 				gotRVR := &v1alpha1.ReplicatedVolumeReplica{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), gotRVR)).To(Succeed())
-				Expect(gotRVR.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotRVR.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 
 				gotRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
 				Expect(gotRV.Finalizers).To(ContainElement("keep-me"))
-				Expect(gotRV.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotRV.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 			})
 		})
 
@@ -233,11 +233,11 @@ var _ = Describe("Reconcile", func() {
 					ActualType: v1alpha1.ReplicaTypeDiskful,
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVRCondOnlineType,
+							Type:   v1alpha1.ReplicatedVolumeReplicaCondOnlineType,
 							Status: metav1.ConditionTrue,
 						},
 						{
-							Type:   v1alpha1.RVRCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -246,7 +246,7 @@ var _ = Describe("Reconcile", func() {
 				rvr2 = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:       "rvr-2",
-						Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
+						Finalizers: []string{"other-finalizer", v1alpha1.ControllerFinalizer},
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
@@ -259,7 +259,7 @@ var _ = Describe("Reconcile", func() {
 				rvr3 = &v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:       "rvr-3",
-						Finalizers: []string{"other-finalizer", v1alpha1.ControllerAppFinalizer},
+						Finalizers: []string{"other-finalizer", v1alpha1.ControllerFinalizer},
 					},
 					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 						ReplicatedVolumeName: rv.Name,
@@ -288,7 +288,7 @@ var _ = Describe("Reconcile", func() {
 
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 				})
 			})
 
@@ -310,7 +310,7 @@ var _ = Describe("Reconcile", func() {
 
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), got)).To(Succeed())
-					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(got.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 				})
 			})
 
@@ -335,7 +335,7 @@ var _ = Describe("Reconcile", func() {
 					currentRvr3 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr3), currentRvr3)).To(Succeed())
 
-					Expect(currentRsc.Spec.Replication).To(Equal("Availability"))
+					Expect(currentRsc.Spec.Replication).To(Equal(v1alpha1.ReplicationAvailability))
 					Expect(currentRvr.DeletionTimestamp).To(BeNil())
 					Expect(currentRvr2.DeletionTimestamp).To(BeNil())
 					Expect(currentRvr3.DeletionTimestamp).To(BeNil())
@@ -347,13 +347,13 @@ var _ = Describe("Reconcile", func() {
 					Expect(currentRvr.DeletionTimestamp).NotTo(BeNil())
 					Expect(currentRvr.Finalizers).To(HaveLen(2))
 					Expect(currentRvr.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(currentRvr.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(currentRvr.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 					Expect(currentRvr2.Finalizers).To(HaveLen(2))
 					Expect(currentRvr2.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(currentRvr2.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(currentRvr2.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 					Expect(currentRvr3.Finalizers).To(HaveLen(2))
 					Expect(currentRvr3.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(currentRvr3.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(currentRvr3.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 
 					// cl = builder.Build()
 					// rec = rvrfinalizerrelease.NewReconciler(cl, logr.New(log.NullLogSink{}), scheme)
@@ -367,19 +367,19 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), deletedRvr)).To(Succeed())
 					Expect(deletedRvr.Finalizers).To(HaveLen(1))
 					Expect(deletedRvr.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(deletedRvr.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(deletedRvr.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 
 					notDeletedRvr2 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr2), notDeletedRvr2)).To(Succeed())
 					Expect(notDeletedRvr2.Finalizers).To(HaveLen(2))
 					Expect(notDeletedRvr2.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(notDeletedRvr2.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(notDeletedRvr2.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 
 					notDeletedRvr3 := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr3), notDeletedRvr3)).To(Succeed())
 					Expect(notDeletedRvr3.Finalizers).To(HaveLen(2))
 					Expect(notDeletedRvr3.Finalizers).To(ContainElement("other-finalizer"))
-					Expect(notDeletedRvr3.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+					Expect(notDeletedRvr3.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 				})
 			})
 		})

@@ -116,7 +116,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -128,7 +128,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "other-rv",
 					UID:        "other-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),

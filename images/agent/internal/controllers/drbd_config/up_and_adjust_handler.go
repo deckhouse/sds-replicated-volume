@@ -94,11 +94,11 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 
 func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.rvr.DeepCopy())
-	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.AgentAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.AgentFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.AgentFinalizer)
 	}
-	if !slices.Contains(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer) {
-		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.ControllerAppFinalizer)
+	if !slices.Contains(h.rvr.Finalizers, v1alpha1.ControllerFinalizer) {
+		h.rvr.Finalizers = append(h.rvr.Finalizers, v1alpha1.ControllerFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.rvr, patch); err != nil {
 		return fmt.Errorf("patching rvr finalizers: %w", err)
@@ -108,8 +108,8 @@ func (h *UpAndAdjustHandler) ensureRVRFinalizers(ctx context.Context) error {
 
 func (h *UpAndAdjustHandler) ensureLLVFinalizers(ctx context.Context) error {
 	patch := client.MergeFrom(h.llv.DeepCopy())
-	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentAppFinalizer) {
-		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha1.AgentAppFinalizer)
+	if !slices.Contains(h.llv.Finalizers, v1alpha1.AgentFinalizer) {
+		h.llv.Finalizers = append(h.llv.Finalizers, v1alpha1.AgentFinalizer)
 	}
 	if err := h.cl.Patch(ctx, h.llv, patch); err != nil {
 		return fmt.Errorf("patching llv finalizers: %w", err)
@@ -217,7 +217,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 			len(h.rvr.Status.DRBD.Status.Devices) > 0 &&
 			h.rvr.Status.DRBD.Status.Devices[0].DiskState == "UpToDate"
 
-		rvAlreadyInitialized := meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.RVCondInitializedType)
+		rvAlreadyInitialized := meta.IsStatusConditionTrue(h.rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondInitializedType)
 
 		if noDiskfulPeers && !upToDate && !rvAlreadyInitialized {
 			if err := drbdadm.ExecutePrimaryForce(ctx, rvName); err != nil {

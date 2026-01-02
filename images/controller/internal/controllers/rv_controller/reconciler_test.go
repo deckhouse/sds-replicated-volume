@@ -57,10 +57,10 @@ func Requeue() OmegaMatcher {
 }
 
 func expectDeviceMinorAssignedTrue(g Gomega, rv *v1alpha1.ReplicatedVolume) {
-	cond := apimeta.FindStatusCondition(rv.Status.Conditions, v1alpha1.RVCondDeviceMinorAssignedType)
+	cond := apimeta.FindStatusCondition(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType)
 	g.Expect(cond).NotTo(BeNil(), "DeviceMinorAssigned condition must exist")
 	g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-	g.Expect(cond.Reason).To(Equal(v1alpha1.RVCondDeviceMinorAssignedReasonAssigned))
+	g.Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedReasonAssigned))
 }
 
 func InterceptGet[T client.Object](intercept func(T) error) interceptor.Funcs {
@@ -221,7 +221,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				reqName: "rv-with-rsc",
 				wantLabels: map[string]string{
-					v1alpha1.LabelReplicatedStorageClass: "my-storage-class",
+					v1alpha1.ReplicatedStorageClassLabelKey: "my-storage-class",
 				},
 			}),
 			Entry("does not change label if already set correctly", tc{
@@ -232,7 +232,7 @@ var _ = Describe("Reconciler", func() {
 							Name:            "rv-with-label",
 							ResourceVersion: "1",
 							Labels: map[string]string{
-								v1alpha1.LabelReplicatedStorageClass: "existing-class",
+								v1alpha1.ReplicatedStorageClassLabelKey: "existing-class",
 							},
 						},
 						Spec: v1alpha1.ReplicatedVolumeSpec{
@@ -242,7 +242,7 @@ var _ = Describe("Reconciler", func() {
 				},
 				reqName: "rv-with-label",
 				wantLabels: map[string]string{
-					v1alpha1.LabelReplicatedStorageClass: "existing-class",
+					v1alpha1.ReplicatedStorageClassLabelKey: "existing-class",
 				},
 			}),
 		)

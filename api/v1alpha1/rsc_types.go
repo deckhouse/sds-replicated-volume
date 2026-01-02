@@ -60,7 +60,7 @@ type ReplicatedStorageClassSpec struct {
 	// - Retain (If the Persistent Volume Claim is deleted, remains the Persistent Volume and its associated storage)
 	// +kubebuilder:validation:Enum=Delete;Retain
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	ReclaimPolicy string `json:"reclaimPolicy"`
+	ReclaimPolicy ReplicatedStorageClassReclaimPolicy `json:"reclaimPolicy"`
 	// The Storage class's replication mode. Might be:
 	// - None — In this mode the Storage class's 'placementCount' and 'AutoEvictMinReplicaCount' params equal '1'.
 	// - Availability — In this mode the volume remains readable and writable even if one of the replica nodes becomes unavailable. Data is stored in two copies on different nodes. This corresponds to `placementCount = 2` and `AutoEvictMinReplicaCount = 2`. **Important:** this mode does not guarantee data consistency and may lead to split brain and data loss in case of network connectivity issues between nodes. Recommended only for non-critical data and applications that do not require high reliability and data integrity.
@@ -70,7 +70,7 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Enum=None;Availability;ConsistencyAndAvailability
 	// +kubebuilder:default:=ConsistencyAndAvailability
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	Replication string `json:"replication,omitempty"`
+	Replication ReplicatedStorageClassReplication `json:"replication,omitempty"`
 	// The Storage class's access mode. Might be:
 	// - Local (in this mode the Storage class's 'allowRemoteVolumeAccess' param equals 'false'
 	// and Volume Binding mode equals 'WaitForFirstConsumer')
@@ -89,7 +89,7 @@ type ReplicatedStorageClassSpec struct {
 	// +kubebuilder:validation:Enum=Local;EventuallyLocal;PreferablyLocal;Any
 	// +kubebuilder:default:=PreferablyLocal
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	VolumeAccess string `json:"volumeAccess,omitempty"`
+	VolumeAccess ReplicatedStorageClassVolumeAccess `json:"volumeAccess,omitempty"`
 	// The topology settings for the volumes in the created Storage class. Might be:
 	// - TransZonal - replicas of the volumes will be created in different zones (one replica per zone).
 	// To use this topology, the available zones must be specified in the 'zones' param, and the cluster nodes must have the topology.kubernetes.io/zone=<zone name> label.
@@ -102,7 +102,7 @@ type ReplicatedStorageClassSpec struct {
 	// > For the system to operate correctly, either every cluster node must be labeled with 'topology.kubernetes.io/zone', or none of them should have this label.
 	// +kubebuilder:validation:Enum=TransZonal;Zonal;Ignored
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
-	Topology string `json:"topology"`
+	Topology ReplicatedStorageClassTopology `json:"topology"`
 	// Array of zones the Storage class's volumes should be replicated in. The controller will put a label with
 	// the Storage class's name on the nodes which be actual used by the Storage class.
 	//
@@ -110,6 +110,74 @@ type ReplicatedStorageClassSpec struct {
 	// exactly 1 or 3 zones.
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="Value is immutable."
 	Zones []string `json:"zones,omitempty"`
+}
+
+// ReplicatedStorageClassReclaimPolicy enumerates possible values for ReplicatedStorageClass spec.reclaimPolicy field.
+type ReplicatedStorageClassReclaimPolicy string
+
+// ReclaimPolicy values for [ReplicatedStorageClass] spec.reclaimPolicy field.
+const (
+	// RSCReclaimPolicyDelete means the PV is deleted when the PVC is deleted.
+	RSCReclaimPolicyDelete ReplicatedStorageClassReclaimPolicy = "Delete"
+	// RSCReclaimPolicyRetain means the PV is retained when the PVC is deleted.
+	RSCReclaimPolicyRetain ReplicatedStorageClassReclaimPolicy = "Retain"
+)
+
+func (p ReplicatedStorageClassReclaimPolicy) String() string {
+	return string(p)
+}
+
+// ReplicatedStorageClassReplication enumerates possible values for ReplicatedStorageClass spec.replication field.
+type ReplicatedStorageClassReplication string
+
+// Replication values for [ReplicatedStorageClass] spec.replication field.
+const (
+	// ReplicationNone means no replication (single replica).
+	ReplicationNone ReplicatedStorageClassReplication = "None"
+	// ReplicationAvailability means 2 replicas; can lose 1 node, but may lose consistency in network partitions.
+	ReplicationAvailability ReplicatedStorageClassReplication = "Availability"
+	// ReplicationConsistencyAndAvailability means 3 replicas; can lose 1 node and keeps consistency.
+	ReplicationConsistencyAndAvailability ReplicatedStorageClassReplication = "ConsistencyAndAvailability"
+)
+
+func (r ReplicatedStorageClassReplication) String() string {
+	return string(r)
+}
+
+// ReplicatedStorageClassVolumeAccess enumerates possible values for ReplicatedStorageClass spec.volumeAccess field.
+type ReplicatedStorageClassVolumeAccess string
+
+// VolumeAccess values for [ReplicatedStorageClass] spec.volumeAccess field.
+const (
+	// VolumeAccessLocal requires data to be accessed only from nodes with Diskful replicas
+	VolumeAccessLocal ReplicatedStorageClassVolumeAccess = "Local"
+	// VolumeAccessPreferablyLocal prefers local access but allows remote if needed
+	VolumeAccessPreferablyLocal ReplicatedStorageClassVolumeAccess = "PreferablyLocal"
+	// VolumeAccessEventuallyLocal will eventually migrate to local access
+	VolumeAccessEventuallyLocal ReplicatedStorageClassVolumeAccess = "EventuallyLocal"
+	// VolumeAccessAny allows access from any node
+	VolumeAccessAny ReplicatedStorageClassVolumeAccess = "Any"
+)
+
+func (a ReplicatedStorageClassVolumeAccess) String() string {
+	return string(a)
+}
+
+// ReplicatedStorageClassTopology enumerates possible values for ReplicatedStorageClass spec.topology field.
+type ReplicatedStorageClassTopology string
+
+// Topology values for [ReplicatedStorageClass] spec.topology field.
+const (
+	// RSCTopologyTransZonal means replicas should be placed across zones.
+	RSCTopologyTransZonal ReplicatedStorageClassTopology = "TransZonal"
+	// RSCTopologyZonal means replicas should be placed in a single zone.
+	RSCTopologyZonal ReplicatedStorageClassTopology = "Zonal"
+	// RSCTopologyIgnored means topology information is not used for placement.
+	RSCTopologyIgnored ReplicatedStorageClassTopology = "Ignored"
+)
+
+func (t ReplicatedStorageClassTopology) String() string {
+	return string(t)
 }
 
 // Displays current information about the Storage Class.
@@ -126,7 +194,22 @@ type ReplicatedStorageClassStatus struct {
 	// - Failed (if the controller received incorrect resource configuration or some errors occurred during the operation)
 	// - Create (if everything went fine)
 	// +kubebuilder:validation:Enum=Failed;Created
-	Phase string `json:"phase,omitempty"`
+	Phase ReplicatedStorageClassPhase `json:"phase,omitempty"`
 	// Additional information about the current state of the Storage Class.
 	Reason string `json:"reason,omitempty"`
+}
+
+// ReplicatedStorageClassPhase enumerates possible values for ReplicatedStorageClass status.phase field.
+type ReplicatedStorageClassPhase string
+
+// Phase values for [ReplicatedStorageClass] status.phase field.
+const (
+	// RSCPhaseFailed means the controller detected an invalid configuration or an operation error.
+	RSCPhaseFailed ReplicatedStorageClassPhase = "Failed"
+	// RSCPhaseCreated means the replicated storage class has been reconciled successfully.
+	RSCPhaseCreated ReplicatedStorageClassPhase = "Created"
+)
+
+func (p ReplicatedStorageClassPhase) String() string {
+	return string(p)
 }

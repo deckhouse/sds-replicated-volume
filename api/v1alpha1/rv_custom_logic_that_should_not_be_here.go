@@ -22,7 +22,7 @@ package v1alpha1
 // If spec.replicatedStorageClassName is empty, the label is expected to be absent.
 func (rv *ReplicatedVolume) IsStorageClassLabelInSync() bool {
 	expected := rv.Spec.ReplicatedStorageClassName
-	actual, ok := rv.Labels[LabelReplicatedStorageClass]
+	actual, ok := rv.Labels[ReplicatedStorageClassLabelKey]
 
 	if expected == "" {
 		return !ok
@@ -37,9 +37,9 @@ func (rv *ReplicatedVolume) EnsureStorageClassLabel() {
 		if rv.Labels == nil {
 			rv.Labels = make(map[string]string)
 		}
-		rv.Labels[LabelReplicatedStorageClass] = rv.Spec.ReplicatedStorageClassName
+		rv.Labels[ReplicatedStorageClassLabelKey] = rv.Spec.ReplicatedStorageClassName
 		return
 	}
 
-	delete(rv.Labels, LabelReplicatedStorageClass)
+	delete(rv.Labels, ReplicatedStorageClassLabelKey)
 }

@@ -78,9 +78,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionTrue,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonOnline,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonOnline,
 			wantIOReadyStatus: metav1.ConditionTrue,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonIOReady,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
 		},
 
 		// === Scheduled=False ===
@@ -97,7 +97,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			wantOnlineStatus:  metav1.ConditionFalse,
 			wantOnlineReason:  "WaitingForNode", // copied from source
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 
 		// === Initialized=False ===
@@ -114,7 +114,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			wantOnlineStatus:  metav1.ConditionFalse,
 			wantOnlineReason:  "WaitingForSync", // copied from source
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 
 		// === InQuorum=False ===
@@ -131,7 +131,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			wantOnlineStatus:  metav1.ConditionFalse,
 			wantOnlineReason:  "NoQuorum", // copied from source
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 
 		// === InSync=False (Online but not IOReady) ===
@@ -146,7 +146,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionTrue,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonOnline,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonOnline,
 			wantIOReadyStatus: metav1.ConditionFalse,
 			wantIOReadyReason: "Synchronizing", // copied from source
 		},
@@ -162,9 +162,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonAgentPodMissing,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonAgentPodMissing,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonAgentPodMissing,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonAgentPodMissing,
 		},
 		{
 			name:              "Node not ready → Online=False (NodeNotReady), IOReady=False (NodeNotReady)",
@@ -176,9 +176,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         false,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonNodeNotReady,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonNodeNotReady,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonNodeNotReady,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonNodeNotReady,
 		},
 		{
 			name:              "Node does not exist → Online=False (NodeNotReady), IOReady=False (NodeNotReady)",
@@ -190,9 +190,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         false,
 			nodeExists:        false,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonNodeNotReady,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonNodeNotReady,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonNodeNotReady,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonNodeNotReady,
 		},
 
 		// === Missing conditions (nil) ===
@@ -206,9 +206,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonUnscheduled,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonUnscheduled,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 		{
 			name:              "Initialized missing → Online=False (Uninitialized), IOReady=False (Offline)",
@@ -220,9 +220,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonUninitialized,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonUninitialized,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 		{
 			name:              "InQuorum missing → Online=False (QuorumLost), IOReady=False (Offline)",
@@ -234,9 +234,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionFalse,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonQuorumLost,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonQuorumLost,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 		{
 			name:              "InSync missing → Online=True, IOReady=False (OutOfSync)",
@@ -248,9 +248,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:         true,
 			nodeExists:        true,
 			wantOnlineStatus:  metav1.ConditionTrue,
-			wantOnlineReason:  v1alpha1.RVRCondOnlineReasonOnline,
+			wantOnlineReason:  v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonOnline,
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOutOfSync,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOutOfSync,
 		},
 
 		// === Multiple conditions false (priority check) ===
@@ -268,7 +268,7 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			wantOnlineStatus:  metav1.ConditionFalse,
 			wantOnlineReason:  "NotScheduled", // Scheduled checked first
 			wantIOReadyStatus: metav1.ConditionFalse,
-			wantIOReadyReason: v1alpha1.RVRCondIOReadyReasonOffline,
+			wantIOReadyReason: v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOffline,
 		},
 
 		// === DeletionTimestamp (still updates conditions for finalizer controllers) ===
@@ -283,9 +283,9 @@ func TestReconciler_ConditionCombinations(t *testing.T) {
 			nodeReady:            true,
 			nodeExists:           true,
 			wantOnlineStatus:     metav1.ConditionTrue,
-			wantOnlineReason:     v1alpha1.RVRCondOnlineReasonOnline,
+			wantOnlineReason:     v1alpha1.ReplicatedVolumeReplicaCondOnlineReasonOnline,
 			wantIOReadyStatus:    metav1.ConditionTrue,
-			wantIOReadyReason:    v1alpha1.RVRCondIOReadyReasonIOReady,
+			wantIOReadyReason:    v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
 		},
 	}
 
@@ -356,7 +356,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 		agentPod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "agent-" + nodeName,
-				Namespace: v1alpha1.ModuleNamespace,
+				Namespace: agentNamespaceDefault,
 				Labels:    map[string]string{AgentPodLabel: AgentPodValue},
 			},
 			Spec: corev1.PodSpec{NodeName: nodeName},
@@ -395,7 +395,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Assert Online condition
-	onlineCond := meta.FindStatusCondition(updatedRVR.Status.Conditions, v1alpha1.RVRCondOnlineType)
+	onlineCond := meta.FindStatusCondition(updatedRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondOnlineType)
 	if onlineCond == nil {
 		t.Error("Online condition not found")
 	} else {
@@ -408,7 +408,7 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Assert IOReady condition
-	ioReadyCond := meta.FindStatusCondition(updatedRVR.Status.Conditions, v1alpha1.RVRCondIOReadyType)
+	ioReadyCond := meta.FindStatusCondition(updatedRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
 	if ioReadyCond == nil {
 		t.Error("IOReady condition not found")
 	} else {
@@ -434,7 +434,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "Scheduled"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha1.RVRCondScheduledType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondScheduledType,
 			Status: status,
 			Reason: reason,
 		})
@@ -450,7 +450,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "Initialized"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha1.RVRCondDataInitializedType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType,
 			Status: status,
 			Reason: reason,
 		})
@@ -466,7 +466,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "InQuorum"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha1.RVRCondInQuorumType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondInQuorumType,
 			Status: status,
 			Reason: reason,
 		})
@@ -482,7 +482,7 @@ func buildConditions(tc conditionTestCase) []metav1.Condition {
 			reason = "InSync"
 		}
 		conditions = append(conditions, metav1.Condition{
-			Type:   v1alpha1.RVRCondInSyncType,
+			Type:   v1alpha1.ReplicatedVolumeReplicaCondInSyncType,
 			Status: status,
 			Reason: reason,
 		})

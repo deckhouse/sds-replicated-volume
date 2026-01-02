@@ -195,7 +195,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	}
 
 	original := rv.DeepCopy()
-	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerAppFinalizer)
+	rv.Finalizers = append(rv.Finalizers, v1alpha1.ControllerFinalizer)
 	return cl.Patch(ctx, rv, client.MergeFromWithOptions(original, client.MergeFromWithOptimisticLock{}))
 }
 
@@ -258,7 +258,7 @@ func splitReplicasByDeletionStatus(totalRvrMap map[string]*v1alpha1.ReplicatedVo
 // isRvrReady checks if the ReplicatedVolumeReplica has DataInitialized condition set to True.
 // Returns false if DataInitialized condition is not found, or its status is not True.
 func isRvrReady(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.RVRCondDataInitializedType)
+	return meta.IsStatusConditionTrue(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondDataInitializedType)
 }
 
 // createReplicatedVolumeReplica creates a ReplicatedVolumeReplica for the given ReplicatedVolume with ownerReference to RV.
@@ -272,7 +272,7 @@ func createReplicatedVolumeReplica(
 ) error {
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
-			Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+			Finalizers: []string{v1alpha1.ControllerFinalizer},
 		},
 		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
 			ReplicatedVolumeName: rv.Name,

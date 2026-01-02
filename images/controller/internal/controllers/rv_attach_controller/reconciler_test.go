@@ -102,14 +102,14 @@ var _ = Describe("Reconcile", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-noop",
-				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				ReplicatedStorageClassName: "rsc1",
 			},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.RVCondIOReadyType,
+					Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 					Status: metav1.ConditionTrue,
 				}},
 				DesiredAttachTo:    []string{},
@@ -163,7 +163,7 @@ var _ = Describe("Reconcile", func() {
 				Name:              "rva-missing-rv",
 				DeletionTimestamp: &now,
 				Finalizers: []string{
-					v1alpha1.ControllerAppFinalizer,
+					v1alpha1.ControllerFinalizer,
 				},
 			},
 			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
@@ -190,12 +190,12 @@ var _ = Describe("Reconcile", func() {
 		}
 		Expect(err).NotTo(HaveOccurred())
 		// When RV is missing, deleting RVA finalizer must be released.
-		Expect(got.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+		Expect(got.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 		Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForReplicatedVolume))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume))
 	})
 
 	It("sets RVA Pending/Ready=False with WaitingForReplicatedVolume when ReplicatedVolume was deleted", func(ctx SpecContext) {
@@ -227,10 +227,10 @@ var _ = Describe("Reconcile", func() {
 		got := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), got)).To(Succeed())
 		Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+		cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		Expect(cond).NotTo(BeNil())
 		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-		Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForReplicatedVolume))
+		Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume))
 	})
 
 	It("does not error when ReplicatedVolume is missing but replicas exist", func(ctx SpecContext) {
@@ -264,14 +264,14 @@ var _ = Describe("Reconcile", func() {
 		rv := &v1alpha1.ReplicatedVolume{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:       "rv-detach-only",
-				Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+				Finalizers: []string{v1alpha1.ControllerFinalizer},
 			},
 			Spec: v1alpha1.ReplicatedVolumeSpec{
 				ReplicatedStorageClassName: "rsc1",
 			},
 			Status: v1alpha1.ReplicatedVolumeStatus{
 				Conditions: []metav1.Condition{{
-					Type:   v1alpha1.RVCondIOReadyType,
+					Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 					Status: metav1.ConditionFalse,
 				}},
 				ActuallyAttachedTo: []string{"node-1"},
@@ -293,7 +293,7 @@ var _ = Describe("Reconcile", func() {
 				Name:              "rva-node-2",
 				DeletionTimestamp: &now,
 				Finalizers: []string{
-					v1alpha1.ControllerAppFinalizer,
+					v1alpha1.ControllerFinalizer,
 				},
 			},
 			Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
@@ -361,10 +361,10 @@ var _ = Describe("Reconcile", func() {
 		// rva1: attached node must stay Attached/Ready=True and should have finalizer added.
 		gotRVA1 := &v1alpha1.ReplicatedVolumeAttachment{}
 		Expect(localCl.Get(ctx, client.ObjectKeyFromObject(rva1), gotRVA1)).To(Succeed())
-		Expect(gotRVA1.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+		Expect(gotRVA1.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 		Expect(gotRVA1.Status).NotTo(BeNil())
 		Expect(gotRVA1.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-		cond1 := meta.FindStatusCondition(gotRVA1.Status.Conditions, v1alpha1.RVACondAttachedType)
+		cond1 := meta.FindStatusCondition(gotRVA1.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 		Expect(cond1).NotTo(BeNil())
 		Expect(cond1.Status).To(Equal(metav1.ConditionTrue))
 
@@ -373,13 +373,13 @@ var _ = Describe("Reconcile", func() {
 		err := localCl.Get(ctx, client.ObjectKeyFromObject(rva2), gotRVA2)
 		if client.IgnoreNotFound(err) != nil {
 			Expect(err).NotTo(HaveOccurred())
-			Expect(gotRVA2.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+			Expect(gotRVA2.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 			Expect(gotRVA2.Status).NotTo(BeNil())
 			Expect(gotRVA2.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-			cond2 := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.RVACondAttachedType)
+			cond2 := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 			Expect(cond2).NotTo(BeNil())
 			Expect(cond2.Status).To(Equal(metav1.ConditionFalse))
-			Expect(cond2.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForReplicatedVolumeIOReady))
+			Expect(cond2.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolumeIOReady))
 		}
 
 		// rvr-node-2 should be demoted
@@ -399,7 +399,7 @@ var _ = Describe("Reconcile", func() {
 			rv = v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "rv1",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "rsc1",
@@ -426,7 +426,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionFalse,
 						},
 					},
@@ -546,17 +546,17 @@ var _ = Describe("Reconcile", func() {
 				rsc          v1alpha1.ReplicatedStorageClass
 				rvrList      v1alpha1.ReplicatedVolumeReplicaList
 				attachTo     []string
-				volumeAccess string
+				volumeAccess v1alpha1.ReplicatedStorageClassVolumeAccess
 			)
 
 			BeforeEach(func() {
-				volumeAccess = "Local"
+				volumeAccess = v1alpha1.VolumeAccessLocal
 				attachTo = []string{"node-1", "node-2"}
 
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -626,7 +626,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("volumeAccess is not Local", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
@@ -644,7 +644,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("ReplicatedStorageClass switches from Remote to Local", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
@@ -695,10 +695,10 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 					Expect(gotRVA.Status).NotTo(BeNil())
 					Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-					cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+					cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 				})
 
 				When("node was actually attached before the switch", func() {
@@ -734,10 +734,10 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA1)).To(Succeed())
 						Expect(gotRVA1.Status).NotTo(BeNil())
 						Expect(gotRVA1.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-						cond1 := meta.FindStatusCondition(gotRVA1.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond1 := meta.FindStatusCondition(gotRVA1.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond1).NotTo(BeNil())
 						Expect(cond1.Status).To(Equal(metav1.ConditionTrue))
-						Expect(cond1.Reason).To(Equal(v1alpha1.RVACondAttachedReasonAttached))
+						Expect(cond1.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
 						// Switch storage class to Local.
 						gotRSC := &v1alpha1.ReplicatedStorageClass{}
@@ -753,17 +753,17 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA2)).To(Succeed())
 						Expect(gotRVA2.Status).NotTo(BeNil())
 						Expect(gotRVA2.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-						cond2 := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond2 := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond2).NotTo(BeNil())
 						Expect(cond2.Status).To(Equal(metav1.ConditionTrue))
-						Expect(cond2.Reason).To(Equal(v1alpha1.RVACondAttachedReasonAttached))
+						Expect(cond2.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 					})
 				})
 			})
 
 			When("Local access and replica violates Locality", func() {
 				BeforeEach(func() {
-					volumeAccess = "Local"
+					volumeAccess = v1alpha1.VolumeAccessLocal
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
@@ -803,17 +803,17 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 						Expect(gotRVA.Status).NotTo(BeNil())
 						Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond).NotTo(BeNil())
 						Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-						Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+						Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 					})
 				})
 			})
 
 			When("Local access and Diskful replicas exist on all attachTo nodes", func() {
 				BeforeEach(func() {
-					volumeAccess = "Local"
+					volumeAccess = v1alpha1.VolumeAccessLocal
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
@@ -832,7 +832,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("Local access but Diskful replica is missing on one of attachTo nodes", func() {
 				BeforeEach(func() {
-					volumeAccess = "Local"
+					volumeAccess = v1alpha1.VolumeAccessLocal
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// remove Diskful replica for node-2
@@ -851,16 +851,16 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 					Expect(gotRVA.Status).NotTo(BeNil())
 					Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-					cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+					cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-					Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 				})
 			})
 
 			When("allowTwoPrimaries is configured and actual flag not yet applied on replicas", func() {
 				BeforeEach(func() {
-					volumeAccess = "Local"
+					volumeAccess = v1alpha1.VolumeAccessLocal
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// request two primaries (via RVA set; attachTo is also used for initial desired preference)
@@ -944,7 +944,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("allowTwoPrimaries becomes applied after being not applied", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					attachTo = []string{"node-1", "node-2"}
@@ -1019,7 +1019,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("allowTwoPrimaries applied on all replicas", func() {
 				BeforeEach(func() {
-					volumeAccess = "Local"
+					volumeAccess = v1alpha1.VolumeAccessLocal
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					attachTo = []string{"node-1", "node-2"}
@@ -1082,7 +1082,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("a deleting replica exists without actual.allowTwoPrimaries", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					attachTo = []string{"node-1", "node-2"}
@@ -1149,7 +1149,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("an unscheduled replica exists (spec.nodeName is empty)", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 				})
 
@@ -1169,16 +1169,16 @@ var _ = Describe("Reconcile", func() {
 					got := &v1alpha1.ReplicatedVolumeReplica{}
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvrUnscheduled), got)).To(Succeed())
 					Expect(got.Status).NotTo(BeNil())
-					cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVRCondAttachedType)
+					cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondAttachedType)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionUnknown))
-					Expect(cond.Reason).To(Equal(v1alpha1.RVRCondAttachedReasonAttachingNotInitialized))
+					Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondAttachedReasonAttachingNotInitialized))
 				})
 			})
 
 			When("volumeAccess is not Local and TieBreaker replica should become primary", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					attachTo = []string{"node-1"}
@@ -1249,7 +1249,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("replica on node outside attachTo does not become primary", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					attachTo = []string{"node-1"}
@@ -1346,7 +1346,7 @@ var _ = Describe("Reconcile", func() {
 
 			When("switching Primary node in single-primary mode", func() {
 				BeforeEach(func() {
-					volumeAccess = "Remote"
+					volumeAccess = v1alpha1.VolumeAccessAny
 					rsc.Spec.VolumeAccess = volumeAccess
 
 					// Only node-2 is desired now (RVA set), but node-1 is still Primary at the moment.
@@ -1561,10 +1561,10 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 						Expect(gotRVA.Status).NotTo(BeNil())
 						Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond).NotTo(BeNil())
 						Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-						Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+						Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 					})
 				})
 
@@ -1588,10 +1588,10 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 						Expect(gotRVA.Status).NotTo(BeNil())
 						Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond).NotTo(BeNil())
 						Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-						Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+						Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 					})
 				})
 			})
@@ -1620,10 +1620,10 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 						Expect(gotRVA.Status).NotTo(BeNil())
 						Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond).NotTo(BeNil())
 						Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-						Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+						Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 					})
 				})
 
@@ -1647,10 +1647,10 @@ var _ = Describe("Reconcile", func() {
 						Expect(cl.Get(ctx, client.ObjectKey{Name: "rva-1-node-2"}, gotRVA)).To(Succeed())
 						Expect(gotRVA.Status).NotTo(BeNil())
 						Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+						cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 						Expect(cond).NotTo(BeNil())
 						Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-						Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonLocalityNotSatisfied))
+						Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonLocalityNotSatisfied))
 					})
 				})
 			})
@@ -1736,7 +1736,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -1762,7 +1762,7 @@ var _ = Describe("Reconcile", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "rva-detaching",
 						DeletionTimestamp: &now,
-						Finalizers:        []string{v1alpha1.ControllerAppFinalizer},
+						Finalizers:        []string{v1alpha1.ControllerFinalizer},
 					},
 					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 						ReplicatedVolumeName: rv.Name,
@@ -1809,10 +1809,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(localCl.Get(ctx, client.ObjectKeyFromObject(rva), got)).To(Succeed())
 				Expect(got.Status).NotTo(BeNil())
 				Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseDetaching))
-				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonAttached))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 			})
 
 			It("sets Attaching + SettingPrimary when attachment is allowed and controller is ready to request Primary", func(ctx SpecContext) {
@@ -1851,10 +1851,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), got)).To(Succeed())
 				Expect(got.Status).NotTo(BeNil())
 				Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching))
-				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonSettingPrimary))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonSettingPrimary))
 			})
 
 			It("does not extend desiredAttachTo from RVA set when RV has no controller finalizer", func(ctx SpecContext) {
@@ -1900,10 +1900,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva2), gotRVA2)).To(Succeed())
 				Expect(gotRVA2.Status).NotTo(BeNil())
 				Expect(gotRVA2.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-				cond := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForActiveAttachmentsToDetach))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForActiveAttachmentsToDetach))
 			})
 
 			It("does not add a node into desiredAttachTo when its replica is deleting", func(ctx SpecContext) {
@@ -1975,10 +1975,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(localCl.Get(ctx, client.ObjectKeyFromObject(rva2), gotRVA2)).To(Succeed())
 				Expect(gotRVA2.Status).NotTo(BeNil())
 				Expect(gotRVA2.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-				cond := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA2.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForActiveAttachmentsToDetach))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForActiveAttachmentsToDetach))
 			})
 
 			It("derives desiredAttachTo FIFO from active RVAs, unique per node, ignoring deleting RVAs", func(ctx SpecContext) {
@@ -1989,7 +1989,7 @@ var _ = Describe("Reconcile", func() {
 						Name:              "rva-del-old",
 						CreationTimestamp: metav1.NewTime(now.Add(-10 * time.Second)),
 						DeletionTimestamp: &delNow,
-						Finalizers:        []string{v1alpha1.ControllerAppFinalizer},
+						Finalizers:        []string{v1alpha1.ControllerFinalizer},
 					},
 					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 						ReplicatedVolumeName: rv.Name,
@@ -2098,10 +2098,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva3), gotRVA3)).To(Succeed())
 				Expect(gotRVA3.Status).NotTo(BeNil())
 				Expect(gotRVA3.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-				cond := meta.FindStatusCondition(gotRVA3.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA3.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForActiveAttachmentsToDetach))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForActiveAttachmentsToDetach))
 			})
 
 			It("keeps nodes already present in rv.status.desiredAttachTo first (if such RVAs exist), then fills remaining slots", func(ctx SpecContext) {
@@ -2175,10 +2175,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), gotRVA)).To(Succeed())
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching))
-				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForReplica))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplica))
 			})
 
 			It("sets Attaching + ConvertingTieBreakerToAccess when active RVA targets a TieBreaker replica", func(ctx SpecContext) {
@@ -2210,10 +2210,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), gotRVA)).To(Succeed())
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttaching))
-				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonConvertingTieBreakerToAccess))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonConvertingTieBreakerToAccess))
 			})
 
 			It("sets Attached=True when RV reports the node in status.actuallyAttachedTo", func(ctx SpecContext) {
@@ -2253,7 +2253,7 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), gotRVA)).To(Succeed())
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 			})
@@ -2286,9 +2286,9 @@ var _ = Describe("Reconcile", func() {
 							},
 						},
 						Conditions: []metav1.Condition{{
-							Type:    v1alpha1.RVRCondIOReadyType,
+							Type:    v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
 							Status:  metav1.ConditionTrue,
-							Reason:  v1alpha1.RVRCondIOReadyReasonIOReady,
+							Reason:  v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady,
 							Message: "replica is io ready",
 						}},
 					},
@@ -2303,20 +2303,20 @@ var _ = Describe("Reconcile", func() {
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
 
-				attachedCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondAttachedType)
+				attachedCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(attachedCond).NotTo(BeNil())
 				Expect(attachedCond.Status).To(Equal(metav1.ConditionTrue))
-				Expect(attachedCond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonAttached))
+				Expect(attachedCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonAttached))
 
-				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondReplicaIOReadyType)
+				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType)
 				Expect(replicaIOReadyCond).NotTo(BeNil())
 				Expect(replicaIOReadyCond.Status).To(Equal(metav1.ConditionTrue))
-				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.RVRCondIOReadyReasonIOReady))
+				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonIOReady))
 
-				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondReadyType)
+				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 				Expect(readyCond).NotTo(BeNil())
 				Expect(readyCond.Status).To(Equal(metav1.ConditionTrue))
-				Expect(readyCond.Reason).To(Equal(v1alpha1.RVACondReadyReasonReady))
+				Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReady))
 			})
 
 			It("sets Ready=False/ReplicaNotIOReady when Attached=True but replica IOReady=False", func(ctx SpecContext) {
@@ -2347,9 +2347,9 @@ var _ = Describe("Reconcile", func() {
 							},
 						},
 						Conditions: []metav1.Condition{{
-							Type:    v1alpha1.RVRCondIOReadyType,
+							Type:    v1alpha1.ReplicatedVolumeReplicaCondIOReadyType,
 							Status:  metav1.ConditionFalse,
-							Reason:  v1alpha1.RVRCondIOReadyReasonOutOfSync,
+							Reason:  v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOutOfSync,
 							Message: "replica is not in sync",
 						}},
 					},
@@ -2364,15 +2364,15 @@ var _ = Describe("Reconcile", func() {
 				Expect(gotRVA.Status).NotTo(BeNil())
 				Expect(gotRVA.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
 
-				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondReplicaIOReadyType)
+				replicaIOReadyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReplicaIOReadyType)
 				Expect(replicaIOReadyCond).NotTo(BeNil())
 				Expect(replicaIOReadyCond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.RVRCondIOReadyReasonOutOfSync))
+				Expect(replicaIOReadyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeReplicaCondIOReadyReasonOutOfSync))
 
-				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.RVACondReadyType)
+				readyCond := meta.FindStatusCondition(gotRVA.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 				Expect(readyCond).NotTo(BeNil())
 				Expect(readyCond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(readyCond.Reason).To(Equal(v1alpha1.RVACondReadyReasonReplicaNotIOReady))
+				Expect(readyCond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondReadyReasonReplicaNotIOReady))
 			})
 
 			It("marks all RVAs for the same attached node as successful (Attached=True)", func(ctx SpecContext) {
@@ -2436,7 +2436,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(obj), got)).To(Succeed())
 					Expect(got.Status).NotTo(BeNil())
 					Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-					cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+					cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 					Expect(cond).NotTo(BeNil())
 					Expect(cond.Status).To(Equal(metav1.ConditionTrue))
 				}
@@ -2457,7 +2457,7 @@ var _ = Describe("Reconcile", func() {
 					ObjectMeta: metav1.ObjectMeta{
 						Name:              "rva-deleting",
 						DeletionTimestamp: &now,
-						Finalizers:        []string{v1alpha1.ControllerAppFinalizer},
+						Finalizers:        []string{v1alpha1.ControllerFinalizer},
 					},
 					Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
 						ReplicatedVolumeName: rv.Name,
@@ -2493,10 +2493,10 @@ var _ = Describe("Reconcile", func() {
 
 				gotAlive := &v1alpha1.ReplicatedVolumeAttachment{}
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvaAlive), gotAlive)).To(Succeed())
-				Expect(gotAlive.Finalizers).To(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotAlive.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
 				Expect(gotAlive.Status).NotTo(BeNil())
 				Expect(gotAlive.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-				condAlive := meta.FindStatusCondition(gotAlive.Status.Conditions, v1alpha1.RVACondAttachedType)
+				condAlive := meta.FindStatusCondition(gotAlive.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(condAlive).NotTo(BeNil())
 				Expect(condAlive.Status).To(Equal(metav1.ConditionTrue))
 
@@ -2507,10 +2507,10 @@ var _ = Describe("Reconcile", func() {
 					return
 				}
 				Expect(err).NotTo(HaveOccurred())
-				Expect(gotDel.Finalizers).NotTo(ContainElement(v1alpha1.ControllerAppFinalizer))
+				Expect(gotDel.Finalizers).NotTo(ContainElement(v1alpha1.ControllerFinalizer))
 				Expect(gotDel.Status).NotTo(BeNil())
 				Expect(gotDel.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhaseAttached))
-				condDel := meta.FindStatusCondition(gotDel.Status.Conditions, v1alpha1.RVACondAttachedType)
+				condDel := meta.FindStatusCondition(gotDel.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(condDel).NotTo(BeNil())
 				Expect(condDel.Status).To(Equal(metav1.ConditionTrue))
 			})
@@ -2523,7 +2523,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -2603,7 +2603,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -2645,10 +2645,10 @@ var _ = Describe("Reconcile", func() {
 				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rva), got)).To(Succeed())
 				Expect(got.Status).NotTo(BeNil())
 				Expect(got.Status.Phase).To(Equal(v1alpha1.ReplicatedVolumeAttachmentPhasePending))
-				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.RVACondAttachedType)
+				cond := meta.FindStatusCondition(got.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondAttachedType)
 				Expect(cond).NotTo(BeNil())
 				Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				Expect(cond.Reason).To(Equal(v1alpha1.RVACondAttachedReasonWaitingForReplicatedVolume))
+				Expect(cond.Reason).To(Equal(v1alpha1.ReplicatedVolumeAttachmentCondAttachedReasonWaitingForReplicatedVolume))
 			})
 		})
 
@@ -2657,7 +2657,7 @@ var _ = Describe("Reconcile", func() {
 				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.RVCondIOReadyType,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},

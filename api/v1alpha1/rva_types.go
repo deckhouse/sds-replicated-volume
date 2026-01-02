@@ -18,15 +18,6 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-// ReplicatedVolumeAttachment status.phase possible values.
-// Keep these in sync with `ReplicatedVolumeAttachmentStatus.Phase` validation enum.
-const (
-	ReplicatedVolumeAttachmentPhasePending   = "Pending"
-	ReplicatedVolumeAttachmentPhaseAttaching = "Attaching"
-	ReplicatedVolumeAttachmentPhaseAttached  = "Attached"
-	ReplicatedVolumeAttachmentPhaseDetaching = "Detaching"
-)
-
 // ReplicatedVolumeAttachment is a Kubernetes Custom Resource that represents an attachment intent/state
 // of a ReplicatedVolume to a specific node.
 // +kubebuilder:object:generate=true
@@ -54,6 +45,16 @@ type ReplicatedVolumeAttachment struct {
 	Status ReplicatedVolumeAttachmentStatus `json:"status,omitempty" patchStrategy:"merge"`
 }
 
+// ReplicatedVolumeAttachmentList contains a list of ReplicatedVolumeAttachment
+// +kubebuilder:object:generate=true
+// +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
+type ReplicatedVolumeAttachmentList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+	Items           []ReplicatedVolumeAttachment `json:"items"`
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentSpec struct {
 	// +kubebuilder:validation:Required
@@ -74,7 +75,7 @@ type ReplicatedVolumeAttachmentSpec struct {
 type ReplicatedVolumeAttachmentStatus struct {
 	// +kubebuilder:validation:Enum=Pending;Attaching;Attached;Detaching
 	// +optional
-	Phase string `json:"phase,omitempty"`
+	Phase ReplicatedVolumeAttachmentPhase `json:"phase,omitempty"`
 
 	// +patchMergeKey=type
 	// +patchStrategy=merge
@@ -84,12 +85,22 @@ type ReplicatedVolumeAttachmentStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
-// ReplicatedVolumeAttachmentList contains a list of ReplicatedVolumeAttachment
-// +kubebuilder:object:generate=true
-// +kubebuilder:object:root=true
-// +kubebuilder:resource:scope=Cluster
-type ReplicatedVolumeAttachmentList struct {
-	metav1.TypeMeta `json:",inline"`
-	metav1.ListMeta `json:"metadata"`
-	Items           []ReplicatedVolumeAttachment `json:"items"`
+// ReplicatedVolumeAttachmentPhase enumerates possible values for ReplicatedVolumeAttachment status.phase field.
+type ReplicatedVolumeAttachmentPhase string
+
+// ReplicatedVolumeAttachment status.phase possible values.
+// Keep these in sync with `ReplicatedVolumeAttachmentStatus.Phase` validation enum.
+const (
+	// ReplicatedVolumeAttachmentPhasePending means the attachment is not started yet.
+	ReplicatedVolumeAttachmentPhasePending ReplicatedVolumeAttachmentPhase = "Pending"
+	// ReplicatedVolumeAttachmentPhaseAttaching means the system is attaching the volume.
+	ReplicatedVolumeAttachmentPhaseAttaching ReplicatedVolumeAttachmentPhase = "Attaching"
+	// ReplicatedVolumeAttachmentPhaseAttached means the volume is attached.
+	ReplicatedVolumeAttachmentPhaseAttached ReplicatedVolumeAttachmentPhase = "Attached"
+	// ReplicatedVolumeAttachmentPhaseDetaching means the system is detaching the volume.
+	ReplicatedVolumeAttachmentPhaseDetaching ReplicatedVolumeAttachmentPhase = "Detaching"
+)
+
+func (p ReplicatedVolumeAttachmentPhase) String() string {
+	return string(p)
 }

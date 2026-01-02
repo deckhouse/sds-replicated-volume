@@ -58,10 +58,8 @@ func AgentPodToRVRMapper(cl client.Client, log logr.Logger) handler.MapFunc {
 			return nil
 		}
 
-		// Only process agent pods
-		// AgentNamespace is taken from v1alpha1.ModuleNamespace
-		// Agent pods run in the same namespace as controller
-		if pod.Namespace != v1alpha1.ModuleNamespace {
+		// Only process agent pods (they run in the module namespace).
+		if pod.Namespace != agentNamespace() {
 			return nil
 		}
 		if pod.Labels[AgentPodLabel] != AgentPodValue {
