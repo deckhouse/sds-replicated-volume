@@ -28,6 +28,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -69,7 +70,7 @@ func (r *Reconciler) Reconcile(
 	case rvr.DeletionTimestamp != nil:
 		log.Info("deletionTimestamp on rvr, check finalizers")
 
-		if v1alpha1.HasExternalFinalizers(rvr) {
+		if obju.HasFinalizersOtherThan(rvr, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer) {
 			log.Info("non-agent finalizer found, ignore")
 			return reconcile.Result{}, nil
 		}
@@ -115,7 +116,7 @@ func (r *Reconciler) selectRVR(
 		return nil, nil, u.LogError(log, fmt.Errorf("getting rv: %w", err))
 	}
 
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		log.Info("no controller finalizer on rv, skipping")
 		return rv, nil, nil
 	}

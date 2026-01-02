@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -76,7 +77,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, err
 	}
 
-	if rv.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(rv) {
+	if rv.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(rv, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer) {
 		log.Info("ReplicatedVolume is being deleted, ignoring reconcile request")
 		return reconcile.Result{}, nil
 	}
@@ -121,7 +122,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	switch {
 	case len(nonDeletedRvrMap) == 0:
 		log.Info("No non-deleted ReplicatedVolumeReplicas found for ReplicatedVolume, creating one")
-		if !v1alpha1.HasControllerFinalizer(rv) {
+		if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 			if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
 				if apierrors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
@@ -163,7 +164,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	if creatingNumberOfReplicas > 0 {
 		log.Info("Creating replicas", "creatingNumberOfReplicas", creatingNumberOfReplicas)
-		if !v1alpha1.HasControllerFinalizer(rv) {
+		if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 			if err := ensureRVControllerFinalizer(ctx, r.cl, rv); err != nil {
 				if apierrors.IsConflict(err) {
 					return reconcile.Result{Requeue: true}, nil
@@ -190,7 +191,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	if rv == nil {
 		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
 	}
-	if v1alpha1.HasControllerFinalizer(rv) {
+	if obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		return nil
 	}
 

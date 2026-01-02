@@ -24,6 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -52,7 +53,7 @@ func replicatedVolumePredicate() predicate.Predicate {
 			}
 
 			// Controller finalizer gate affects whether attachments are allowed.
-			if v1alpha1.HasControllerFinalizer(oldRV) != v1alpha1.HasControllerFinalizer(newRV) {
+			if obju.HasFinalizer(oldRV, v1alpha1.ControllerFinalizer) != obju.HasFinalizer(newRV, v1alpha1.ControllerFinalizer) {
 				return true
 			}
 
@@ -115,7 +116,7 @@ func replicatedVolumeReplicaPredicate() predicate.Predicate {
 			// Compare (status, reason, message) to keep mirroring accurate even when status doesn't change.
 			oldCond := meta.FindStatusCondition(oldRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
 			newCond := meta.FindStatusCondition(newRVR.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondIOReadyType)
-			return !v1alpha1.ConditionSpecAgnosticEqual(oldCond, newCond)
+			return !obju.ConditionSemanticallyEqual(oldCond, newCond)
 		},
 	}
 }

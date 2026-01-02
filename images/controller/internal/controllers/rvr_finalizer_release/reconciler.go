@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -282,7 +283,7 @@ func removeRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	if rv == nil {
 		panic("removeRVControllerFinalizer: nil rv (programmer error)")
 	}
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		return nil
 	}
 

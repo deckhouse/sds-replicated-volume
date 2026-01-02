@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -67,7 +68,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// Skip if RV is being deleted (and no foreign finalizers) - this case will be handled by another controller
-	if rv.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(rv) {
+	if rv.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(rv, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer) {
 		log.Info("ReplicatedVolume is being deleted, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -150,7 +151,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// Preserve old behavior: without RV controller finalizer do not perform any actions,
 	// unless we need to create Access replicas (then we add the finalizer first).
-	if !v1alpha1.HasControllerFinalizer(rv) {
+	if !obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		if len(nodesNeedingAccess) == 0 {
 			log.Info("ReplicatedVolume does not have controller finalizer and no replicas to create, skipping")
 			return reconcile.Result{}, nil
@@ -212,7 +213,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	if rv == nil {
 		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
 	}
-	if v1alpha1.HasControllerFinalizer(rv) {
+	if obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		return nil
 	}
 

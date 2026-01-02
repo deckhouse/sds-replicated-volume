@@ -55,6 +55,18 @@ type ReplicatedVolumeAttachmentList struct {
 	Items           []ReplicatedVolumeAttachment `json:"items"`
 }
 
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (o *ReplicatedVolumeAttachment) GetStatusConditions() []metav1.Condition {
+	return o.Status.Conditions
+}
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (o *ReplicatedVolumeAttachment) SetStatusConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeAttachmentSpec struct {
 	// +kubebuilder:validation:Required

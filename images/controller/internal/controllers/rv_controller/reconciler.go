@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller/idpool"
 )
@@ -102,8 +103,9 @@ func (r *Reconciler) reconcileRV(ctx context.Context, _ logr.Logger, rv *v1alpha
 func (r *Reconciler) reconcileRVStatus(ctx context.Context, _ logr.Logger, rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) error {
 	desiredDeviceMinor, desiredDeviceMinorComputeErr := computeDeviceMinor(rv, pool)
 	desiredDeviceMinorAssignedCondition := computeDeviceMinorAssignedCondition(desiredDeviceMinorComputeErr)
+	desiredDeviceMinorAssignedCondition.ObservedGeneration = rv.Generation
 
-	if rv.Status.DeviceMinorEquals(desiredDeviceMinor) && v1alpha1.IsConditionPresentAndSpecAgnosticEqual(rv.Status.Conditions, desiredDeviceMinorAssignedCondition) {
+	if rv.Status.DeviceMinorEquals(desiredDeviceMinor) && obju.IsStatusConditionPresentAndSemanticallyEqual(rv, desiredDeviceMinorAssignedCondition) {
 		return desiredDeviceMinorComputeErr
 	}
 
@@ -146,7 +148,7 @@ func computeDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alp
 
 	// Validate previously assigned device minor
 	if err := dm.Validate(); err != nil {
-		// Device minor is invalid, it's safe to return nil (wich will unset status.deviceMinor in RV) because
+		// Device minor is invalid, it's safe to return nil (which will unset status.deviceMinor in RV) because
 		// even if RV has replicas with this device minor, they will fail to start.
 		return nil, err
 	}

@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -64,7 +65,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(&rv) {
+	if !obju.HasFinalizer(&rv, v1alpha1.ControllerFinalizer) {
 		log.Info("ReplicatedVolume does not have controller finalizer, skipping")
 		return reconcile.Result{}, nil
 	}

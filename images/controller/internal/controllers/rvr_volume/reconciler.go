@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -264,13 +265,14 @@ func ensureLVGLabel(ctx context.Context, cl client.Client, log logr.Logger, rvr 
 		return nil
 	}
 
-	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LVMVolumeGroupLabelKey, lvgName)
+	original := rvr.DeepCopy()
+
+	changed := obju.SetLabel(rvr, v1alpha1.LVMVolumeGroupLabelKey, lvgName)
 	if !changed {
 		return nil
 	}
 
-	patch := client.MergeFrom(rvr.DeepCopy())
-	rvr.Labels = labels
+	patch := client.MergeFrom(original)
 	if err := cl.Patch(ctx, rvr, patch); err != nil {
 		return err
 	}

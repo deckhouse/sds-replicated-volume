@@ -43,6 +43,16 @@ type ReplicatedStorageClassList struct {
 	Items           []ReplicatedStorageClass `json:"items"`
 }
 
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (o *ReplicatedStorageClass) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (o *ReplicatedStorageClass) SetStatusConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // +kubebuilder:validation:XValidation:rule="(has(self.replication) && self.replication == \"None\") || ((!has(self.replication) || self.replication == \"Availability\" || self.replication == \"ConsistencyAndAvailability\") && (!has(self.zones) || size(self.zones) == 0 || size(self.zones) == 1 || size(self.zones) == 3))",message="When replication is not set or is set to Availability or ConsistencyAndAvailability (default value), zones must be either not specified, or must contain exactly three zones."
 // +kubebuilder:validation:XValidation:rule="(has(self.zones) && has(oldSelf.zones)) || (!has(self.zones) && !has(oldSelf.zones))",message="zones field cannot be deleted or added"
 // +kubebuilder:validation:XValidation:rule="(has(self.replication) && has(oldSelf.replication)) || (!has(self.replication) && !has(oldSelf.replication))",message="replication filed cannot be deleted or added"

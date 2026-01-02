@@ -52,6 +52,16 @@ type ReplicatedVolumeList struct {
 	Items           []ReplicatedVolume `json:"items"`
 }
 
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (o *ReplicatedVolume) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (o *ReplicatedVolume) SetStatusConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // +kubebuilder:object:generate=true
 type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
@@ -149,16 +159,6 @@ type DeviceMinorOutOfRangeError struct {
 
 func (e DeviceMinorOutOfRangeError) Error() string {
 	return fmt.Sprintf("DeviceMinor: value %d is outside allowed range [%d..%d]", e.Requested, e.Min, e.Max)
-}
-
-// GetConditions/SetConditions are kept for compatibility with upstream helper interfaces
-// (e.g. sigs.k8s.io/cluster-api/util/conditions.Getter/Setter).
-func (s *ReplicatedVolumeStatus) GetConditions() []metav1.Condition {
-	return s.Conditions
-}
-
-func (s *ReplicatedVolumeStatus) SetConditions(conditions []metav1.Condition) {
-	s.Conditions = conditions
 }
 
 func (s *ReplicatedVolumeStatus) HasDeviceMinor() bool {

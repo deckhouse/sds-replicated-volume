@@ -33,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	interrors "github.com/deckhouse/sds-replicated-volume/images/controller/internal/errors"
 )
@@ -145,7 +146,7 @@ func ensureRVControllerFinalizer(ctx context.Context, cl client.Client, rv *v1al
 	if rv == nil {
 		panic("ensureRVControllerFinalizer: nil rv (programmer error)")
 	}
-	if v1alpha1.HasControllerFinalizer(rv) {
+	if obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) {
 		return nil
 	}
 

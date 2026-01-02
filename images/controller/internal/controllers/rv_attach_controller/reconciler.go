@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -263,7 +264,7 @@ func computeDesiredAttachTo(
 	attachEnabled :=
 		rv != nil &&
 			rv.DeletionTimestamp.IsZero() &&
-			v1alpha1.HasControllerFinalizer(rv) &&
+			obju.HasFinalizer(rv, v1alpha1.ControllerFinalizer) &&
 			meta.IsStatusConditionTrue(rv.Status.Conditions, v1alpha1.ReplicatedVolumeCondIOReadyType) &&
 			sc != nil
 
@@ -659,9 +660,9 @@ func (r *Reconciler) ensureRVAStatus(
 	currentReady := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.ReplicatedVolumeAttachmentCondReadyType)
 
 	phaseEqual := currentPhase == desiredPhase
-	attachedEqual := v1alpha1.ConditionSpecAwareEqual(currentAttached, &desiredAttachedCondition)
-	replicaIOReadyEqual := v1alpha1.ConditionSpecAwareEqual(currentReplicaIOReady, &desiredReplicaIOReadyCondition)
-	readyEqual := v1alpha1.ConditionSpecAwareEqual(currentReady, &desiredReadyCondition)
+	attachedEqual := obju.ConditionSemanticallyEqual(currentAttached, &desiredAttachedCondition)
+	replicaIOReadyEqual := obju.ConditionSemanticallyEqual(currentReplicaIOReady, &desiredReplicaIOReadyCondition)
+	readyEqual := obju.ConditionSemanticallyEqual(currentReady, &desiredReadyCondition)
 	if phaseEqual && attachedEqual && replicaIOReadyEqual && readyEqual {
 		return nil
 	}
@@ -943,7 +944,7 @@ func (r *Reconciler) ensureRVRStatus(
 	desiredAttachedCondition.ObservedGeneration = rvr.Generation
 
 	if primary == desiredPrimary &&
-		v1alpha1.ConditionSpecAwareEqual(attachedCond, &desiredAttachedCondition) {
+		obju.ConditionSemanticallyEqual(attachedCond, &desiredAttachedCondition) {
 		return nil
 	}
 

@@ -80,6 +80,9 @@ alwaysApply: true
       - `// +optional`
       - JSON tag: ``json:"conditions,omitempty"`` and patch tags consistent with the above.
     - Condition Type/Reason constants are defined in `<objprefix>_conditions.go` only when they become standardized/used (see `conditions_rules.mdc`).
+  - Every API **root object** that exposes `.status.conditions` MUST provide adapter methods to satisfy `api/objutilv1.StatusConditionObject`:
+    - `GetStatusConditions() []metav1.Condition` (returns `o.Status.Conditions`)
+    - `SetStatusConditions([]metav1.Condition)` (sets `o.Status.Conditions`)
 
 - Type naming (MUST):
   - This section applies to ALL API types (including enums).

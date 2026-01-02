@@ -45,6 +45,16 @@ type ReplicatedStoragePoolList struct {
 	Items           []ReplicatedStoragePool `json:"items"`
 }
 
+// GetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It returns the root object's `.status.conditions`.
+func (o *ReplicatedStoragePool) GetStatusConditions() []metav1.Condition { return o.Status.Conditions }
+
+// SetStatusConditions is an adapter method to satisfy objutilv1.StatusConditionObject.
+// It sets the root object's `.status.conditions`.
+func (o *ReplicatedStoragePool) SetStatusConditions(conditions []metav1.Condition) {
+	o.Status.Conditions = conditions
+}
+
 // Defines desired rules for Linstor's Storage-pools.
 // +kubebuilder:object:generate=true
 type ReplicatedStoragePoolSpec struct {

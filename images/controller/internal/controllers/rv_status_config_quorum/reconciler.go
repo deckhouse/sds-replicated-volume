@@ -24,12 +24,13 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"sigs.k8s.io/cluster-api/util/conditions"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
@@ -72,7 +73,7 @@ func (r *Reconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
-	if !v1alpha1.HasControllerFinalizer(&rv) {
+	if !obju.HasFinalizer(&rv, v1alpha1.ControllerFinalizer) {
 		log.V(1).Info("no controller finalizer on ReplicatedVolume, skipping")
 		return reconcile.Result{}, nil
 	}
@@ -101,7 +102,7 @@ func (r *Reconciler) Reconcile(
 	rvrList.Items = slices.DeleteFunc(
 		rvrList.Items,
 		func(rvr v1alpha1.ReplicatedVolumeReplica) bool {
-			return rvr.DeletionTimestamp != nil && !v1alpha1.HasExternalFinalizers(&rvr)
+			return rvr.DeletionTimestamp != nil && !obju.HasFinalizersOtherThan(&rvr, v1alpha1.ControllerFinalizer, v1alpha1.AgentFinalizer)
 		},
 	)
 
@@ -229,5 +230,7 @@ func isRvReady(rvStatus *v1alpha1.ReplicatedVolumeStatus, log logr.Logger) bool 
 		return false
 	}
 
-	return current >= desired && current > 0 && conditions.IsTrue(rvStatus, v1alpha1.ReplicatedVolumeCondConfiguredType)
+	return current >= desired &&
+		current > 0 &&
+		meta.IsStatusConditionTrue(rvStatus.Conditions, v1alpha1.ReplicatedVolumeCondConfiguredType)
 }
