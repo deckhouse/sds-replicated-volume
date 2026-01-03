@@ -34,6 +34,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 func TestReconciler(t *testing.T) {
@@ -62,16 +63,29 @@ var _ = Describe("Reconciler", func() {
 	secondAlg := func() string { return string(algs()[1]) }
 	lastAlg := func() string { return string(algs()[len(algs())-1]) }
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		// Ensure test assumptions are met
 		Expect(len(algs())).To(BeNumerically(">=", 2),
 			"tests require at least 2 algorithms to test switching logic")
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
-			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}))
 		cl = nil
 		rec = nil
 	})
@@ -94,7 +108,7 @@ var _ = Describe("Reconciler", func() {
 			rv = &v1alpha1.ReplicatedVolume{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 			}
 		})
@@ -127,7 +141,7 @@ var _ = Describe("Reconciler", func() {
 						ReplicatedVolumeName: "test-rv",
 						NodeName:             "node-1",
 					},
-					Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+					Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 						DRBD: &v1alpha1.DRBD{},
 					},
 				}
@@ -152,7 +166,7 @@ var _ = Describe("Reconciler", func() {
 
 		When("shared secret already set", func() {
 			BeforeEach(func() {
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					DRBD: &v1alpha1.DRBDResource{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",
@@ -198,7 +212,7 @@ var _ = Describe("Reconciler", func() {
 							ReplicatedVolumeName: "test-rv",
 							NodeName:             "node-1",
 						},
-						Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+						Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 							DRBD: &v1alpha1.DRBD{
 								Errors: &v1alpha1.DRBDErrors{},
 							},
@@ -251,7 +265,7 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2",
 							},
-							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
 									Errors: &v1alpha1.DRBDErrors{},
 								},
@@ -270,7 +284,7 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "other-rv",
 								NodeName:             "node-3",
 							},
-							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
 									Errors: &v1alpha1.DRBDErrors{},
 								},
@@ -311,7 +325,7 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-2",
 							},
-							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
 									Errors: &v1alpha1.DRBDErrors{},
 								},
@@ -330,7 +344,7 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-3",
 							},
-							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
 									Errors: &v1alpha1.DRBDErrors{},
 								},
@@ -350,7 +364,7 @@ var _ = Describe("Reconciler", func() {
 								ReplicatedVolumeName: "test-rv",
 								NodeName:             "node-4",
 							},
-							Status: &v1alpha1.ReplicatedVolumeReplicaStatus{
+							Status: v1alpha1.ReplicatedVolumeReplicaStatus{
 								DRBD: &v1alpha1.DRBD{
 									Errors: &v1alpha1.DRBDErrors{},
 								},
@@ -426,7 +440,7 @@ var _ = Describe("Reconciler", func() {
 			listError := errors.New("failed to list replicas")
 			BeforeEach(func() {
 				// Set sharedSecret so controller will check RVRs (reconcileSwitchAlgorithm)
-				rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+				rv.Status = v1alpha1.ReplicatedVolumeStatus{
 					DRBD: &v1alpha1.DRBDResource{
 						Config: &v1alpha1.DRBDResourceConfig{
 							SharedSecret:    "test-secret",

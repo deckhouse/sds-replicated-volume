@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
+	obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
@@ -93,7 +94,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}
 
 	// RVR is not diskful, so we need to delete the LLV if it exists and the actual type is the same as the spec type.
-	if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful && rvr.Status != nil && rvr.Status.ActualType == rvr.Spec.Type {
+	if rvr.Spec.Type != v1alpha1.ReplicaTypeDiskful && rvr.Status.ActualType == rvr.Spec.Type {
 		return reconcile.Result{}, wrapReconcileLLVDeletion(ctx, r.cl, log, rvr)
 	}
 
@@ -105,13 +106,13 @@ func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Lo
 	if err := reconcileLLVDeletion(ctx, cl, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeDeletionFailed, "Backing volume deletion failed: "+reconcileErr.Error()); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeDeletionFailed, "Backing volume deletion failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
 	}
 
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonNotApplicable, "Replica is not diskful"); err != nil {
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonNotApplicable, "Replica is not diskful"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
@@ -124,7 +125,7 @@ func wrapReconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Lo
 func reconcileLLVDeletion(ctx context.Context, cl client.Client, log logr.Logger, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	log = log.WithName("ReconcileLLVDeletion")
 
-	if rvr.Status == nil || rvr.Status.LVMLogicalVolumeName == "" {
+	if rvr.Status.LVMLogicalVolumeName == "" {
 		log.V(4).Info("No LVMLogicalVolumeName in status, skipping deletion")
 		return nil
 	}
@@ -154,7 +155,7 @@ func wrapReconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runti
 	if err := reconcileLLVNormal(ctx, cl, scheme, log, rvr); err != nil {
 		reconcileErr := err
 		// TODO: Can record the reconcile error in the message to the condition
-		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeCreationFailed, "Backing volume creation failed: "+reconcileErr.Error()); conditionErr != nil {
+		if conditionErr := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeCreationFailed, "Backing volume creation failed: "+reconcileErr.Error()); conditionErr != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w; reconcile error: %w", conditionErr, reconcileErr)
 		}
 		return reconcileErr
@@ -180,7 +181,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 			return fmt.Errorf("creating LVMLogicalVolume: %w", err)
 		}
 
-		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
+		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 		}
 
@@ -190,7 +191,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 
 	log.Info("LVMLogicalVolume found, checking if it is ready", "llvName", llv.Name)
 	if !isLLVPhaseCreated(llv) {
-		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
+		if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionFalse, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeNotReady, "Backing volume is not ready"); err != nil {
 			return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 		}
 		log.Info("LVMLogicalVolume is not ready, returning nil to wait for next reconcile event", "llvName", llv.Name)
@@ -219,7 +220,7 @@ func reconcileLLVNormal(ctx context.Context, cl client.Client, scheme *runtime.S
 	//     }
 	// }
 
-	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReasonBackingVolumeReady, "Backing volume is ready"); err != nil {
+	if err := updateBackingVolumeCreatedCondition(ctx, cl, log, rvr, metav1.ConditionTrue, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedReasonBackingVolumeReady, "Backing volume is ready"); err != nil {
 		return fmt.Errorf("updating BackingVolumeCreated condition: %w", err)
 	}
 
@@ -239,7 +240,7 @@ func getLLVByName(ctx context.Context, cl client.Client, llvName string) (*snc.L
 
 func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha1.ReplicatedVolumeReplica) (*snc.LVMLogicalVolume, error) {
 	// If status already points to a specific LLV name, trust it (supports legacy names too).
-	if rvr.Status != nil && rvr.Status.LVMLogicalVolumeName != "" {
+	if rvr.Status.LVMLogicalVolumeName != "" {
 		return getLLVByName(ctx, cl, rvr.Status.LVMLogicalVolumeName)
 	}
 
@@ -250,13 +251,10 @@ func getLLVByRVR(ctx context.Context, cl client.Client, rvr *v1alpha1.Replicated
 // ensureLVMLogicalVolumeNameInStatus sets or clears the LVMLogicalVolumeName field in RVR status if needed.
 // If llvName is empty string, the field is cleared. Otherwise, it is set to the provided value.
 func ensureLVMLogicalVolumeNameInStatus(ctx context.Context, cl client.Client, rvr *v1alpha1.ReplicatedVolumeReplica, llvName string) error {
-	if rvr.Status != nil && rvr.Status.LVMLogicalVolumeName == llvName {
+	if rvr.Status.LVMLogicalVolumeName == llvName {
 		return nil
 	}
 	patch := client.MergeFrom(rvr.DeepCopy())
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
 	rvr.Status.LVMLogicalVolumeName = llvName
 	return cl.Status().Patch(ctx, rvr, patch)
 }
@@ -267,13 +265,14 @@ func ensureLVGLabel(ctx context.Context, cl client.Client, log logr.Logger, rvr 
 		return nil
 	}
 
-	labels, changed := v1alpha1.EnsureLabel(rvr.Labels, v1alpha1.LabelLVMVolumeGroup, lvgName)
+	original := rvr.DeepCopy()
+
+	changed := obju.SetLabel(rvr, v1alpha1.LVMVolumeGroupLabelKey, lvgName)
 	if !changed {
 		return nil
 	}
 
-	patch := client.MergeFrom(rvr.DeepCopy())
-	rvr.Labels = labels
+	patch := client.MergeFrom(original)
 	if err := cl.Patch(ctx, rvr, patch); err != nil {
 		return err
 	}
@@ -411,14 +410,9 @@ func updateBackingVolumeCreatedCondition(
 	reason,
 	message string,
 ) error {
-	// Initialize status if needed
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-
 	// Check if condition is already set correctly
 	if rvr.Status.Conditions != nil {
-		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeBackingVolumeCreated)
+		cond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedType)
 		if cond != nil &&
 			cond.Status == conditionStatus &&
 			cond.Reason == reason &&
@@ -437,7 +431,7 @@ func updateBackingVolumeCreatedCondition(
 	meta.SetStatusCondition(
 		&rvr.Status.Conditions,
 		metav1.Condition{
-			Type:    v1alpha1.ConditionTypeBackingVolumeCreated,
+			Type:    v1alpha1.ReplicatedVolumeReplicaCondBackingVolumeCreatedType,
 			Status:  conditionStatus,
 			Reason:  reason,
 			Message: message,

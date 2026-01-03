@@ -299,7 +299,7 @@ RVA — это ресурс «намерения публикации» тома
 - `rv.metadata.name`
 - `rv.status.drbd.config.sharedSecret`
 - `rv.status.drbd.config.sharedSecretAlg`
-- `rv.status.drbd.config.deviceMinor`
+- `rv.status.deviceMinor`
 - `rvr.status.drbd.config.nodeId`
 - `rvr.status.drbd.config.address`
 - `rvr.status.drbd.config.peers`
@@ -569,15 +569,15 @@ Cм. существующую реализацию `drbdadm primary` и `drbdadm
 
 ### Цель
 
-Инициализировать свойство `rv.status.drbd.config.deviceMinor` минимальным свободным значением среди всех RV.
+Инициализировать свойство `rv.status.deviceMinor` минимальным свободным значением среди всех RV.
 
-По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.drbd.config.deviceMinor`.
+По завершению работы контроллера у каждой RV должен быть свой уникальный `rv.status.deviceMinor`.
 
 ### Триггер
-  - `CREATE/UPDATE(RV, rv.status.drbd.config.deviceMinor != nil)`
+  - `CREATE/UPDATE(RV, rv.status.deviceMinor != nil)`
 
 ### Вывод
-  - `rv.status.drbd.config.deviceMinor`
+  - `rv.status.deviceMinor`
 
 ## `rvr-tie-breaker-count-controller`
 

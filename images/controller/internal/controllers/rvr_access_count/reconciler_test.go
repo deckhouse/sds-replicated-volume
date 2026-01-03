@@ -32,6 +32,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -42,18 +43,31 @@ var _ = Describe("Reconciler", func() {
 		rec           *rvraccesscount.Reconciler
 	)
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			// WithStatusSubresource makes fake client mimic real API server behavior:
 			// - Create() ignores status field
 			// - Update() ignores status field
 			// - Status().Update() updates only status
 			// This means tests must use Status().Update() to set status after Create().
-			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{})
+			WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{}))
 	})
 
 	JustBeforeEach(func() {
@@ -96,12 +110,12 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{},
+				Status: v1alpha1.ReplicatedVolumeStatus{},
 			}
 			rsc = &v1alpha1.ReplicatedStorageClass{
 				ObjectMeta: metav1.ObjectMeta{
@@ -170,6 +184,37 @@ var _ = Describe("Reconciler", func() {
 				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess), "should be Access type")
 				Expect(rvrList.Items[0].Spec.NodeName).To(Equal("node-1"), "should be on node-1")
 				Expect(rvrList.Items[0].Spec.ReplicatedVolumeName).To(Equal("test-volume"), "should reference the RV")
+			})
+		})
+
+		When("attachTo has node without replicas and RV has no controller finalizer", func() {
+			BeforeEach(func() {
+				rv.Finalizers = nil
+				rv.Status.DesiredAttachTo = []string{"node-1"}
+
+				clientBuilder = clientBuilder.WithInterceptorFuncs(interceptor.Funcs{
+					Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+						if rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica); ok && rvr.Spec.Type == v1alpha1.ReplicaTypeAccess {
+							currentRV := &v1alpha1.ReplicatedVolume{}
+							Expect(c.Get(ctx, client.ObjectKeyFromObject(rv), currentRV)).To(Succeed())
+							Expect(currentRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
+						}
+						return c.Create(ctx, obj, opts...)
+					},
+				})
+			})
+
+			It("adds controller finalizer and creates Access RVR", func(ctx SpecContext) {
+				Expect(rec.Reconcile(ctx, RequestFor(rv))).ToNot(Requeue())
+
+				gotRV := &v1alpha1.ReplicatedVolume{}
+				Expect(cl.Get(ctx, client.ObjectKeyFromObject(rv), gotRV)).To(Succeed())
+				Expect(gotRV.Finalizers).To(ContainElement(v1alpha1.ControllerFinalizer))
+
+				rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
+				Expect(cl.List(ctx, rvrList)).To(Succeed())
+				Expect(rvrList.Items).To(HaveLen(1))
+				Expect(rvrList.Items[0].Spec.Type).To(Equal(v1alpha1.ReplicaTypeAccess))
 			})
 		})
 
@@ -402,7 +447,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -447,7 +492,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -494,7 +539,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
@@ -523,7 +568,7 @@ var _ = Describe("Reconciler", func() {
 		It("should return error", func(ctx SpecContext) {
 			Expect(cl.Create(ctx, rsc)).To(Succeed(), "should create RSC")
 			Expect(cl.Create(ctx, rv)).To(Succeed(), "should create RV")
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
+			rv.Status = v1alpha1.ReplicatedVolumeStatus{
 				DesiredAttachTo: []string{"node-1"},
 			}
 			Expect(cl.Status().Update(ctx, rv)).To(Succeed(), "should update RV status")
@@ -546,7 +591,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-volume",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-rsc",
