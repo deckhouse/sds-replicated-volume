@@ -49,11 +49,28 @@ for dir in $test_dirs; do
     if [ ! -d "$dir" ]; then
         continue
     fi
-    
+
     print_status $YELLOW "Testing $dir"
     total_packages=$((total_packages + 1))
-    
-    if (cd "$dir" && go test -v); then
+
+    # Some test directories live in nested Go modules that are NOT part of the root go.work.
+    # For such modules, we must disable workspace mode (GOWORK=off) so `go test` uses the nearest go.mod.
+    #
+    # For modules that ARE in go.work, we must keep workspace mode enabled, otherwise those modules may fail
+    # due to incomplete go.sum (they rely on go.work wiring).
+    #
+    # Keep this list in sync with go.work "use (...)".
+    test_cmd=(go test -v)
+    case "$dir" in
+        ./api/*|./images/controller/*|./internal/*|./lib/go/common/*)
+            test_cmd=(go test -v)
+            ;;
+        *)
+            test_cmd=(env GOWORK=off go test -v)
+            ;;
+    esac
+
+    if (cd "$dir" && "${test_cmd[@]}"); then
         print_status $GREEN "✓ PASSED: $dir"
         passed_packages=$((passed_packages + 1))
     else

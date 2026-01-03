@@ -16,30 +16,28 @@ limitations under the License.
 
 package v1alpha1
 
+import obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"
+
 // IsStorageClassLabelInSync returns true if the replicated-storage-class label value matches
 // spec.replicatedStorageClassName.
 //
 // If spec.replicatedStorageClassName is empty, the label is expected to be absent.
 func (rv *ReplicatedVolume) IsStorageClassLabelInSync() bool {
 	expected := rv.Spec.ReplicatedStorageClassName
-	actual, ok := rv.Labels[ReplicatedStorageClassLabelKey]
 
 	if expected == "" {
-		return !ok
+		return !obju.HasLabel(rv, ReplicatedStorageClassLabelKey)
 	}
-	return ok && actual == expected
+	return obju.HasLabelValue(rv, ReplicatedStorageClassLabelKey, expected)
 }
 
 // EnsureStorageClassLabel ensures that the replicated-storage-class label is in sync with
 // spec.replicatedStorageClassName.
 func (rv *ReplicatedVolume) EnsureStorageClassLabel() {
 	if rv.Spec.ReplicatedStorageClassName != "" {
-		if rv.Labels == nil {
-			rv.Labels = make(map[string]string)
-		}
-		rv.Labels[ReplicatedStorageClassLabelKey] = rv.Spec.ReplicatedStorageClassName
+		_ = obju.SetLabel(rv, ReplicatedStorageClassLabelKey, rv.Spec.ReplicatedStorageClassName)
 		return
 	}
 
-	delete(rv.Labels, ReplicatedStorageClassLabelKey)
+	_ = obju.RemoveLabel(rv, ReplicatedStorageClassLabelKey)
 }

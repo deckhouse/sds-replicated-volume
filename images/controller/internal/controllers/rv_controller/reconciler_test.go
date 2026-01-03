@@ -23,7 +23,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/go-logr/logr"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	. "github.com/onsi/gomega/gstruct"
@@ -114,7 +113,7 @@ func (s *testPoolSource) DeviceMinorPoolOrNil() *idpool.IDPool[v1alpha1.DeviceMi
 
 // initReconcilerFromClient creates a new reconciler with pool initialized from existing volumes in the client.
 // This simulates the production behavior where pool is initialized at controller startup.
-func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Logger) *rvcontroller.Reconciler {
+func initReconcilerFromClient(ctx context.Context, cl client.Client) *rvcontroller.Reconciler {
 	pool := idpool.NewIDPool[v1alpha1.DeviceMinor]()
 
 	rvList := &v1alpha1.ReplicatedVolumeList{}
@@ -136,7 +135,7 @@ func initReconcilerFromClient(ctx context.Context, cl client.Client, log logr.Lo
 		ExpectWithOffset(1, err).To(Succeed(), "should initialize pool from existing rv deviceMinor values (pair index=%d)", i)
 	}
 
-	return rvcontroller.NewReconciler(cl, log, newTestPoolSource(pool))
+	return rvcontroller.NewReconciler(cl, newTestPoolSource(pool))
 }
 
 var _ = Describe("Reconciler", func() {
@@ -174,7 +173,6 @@ var _ = Describe("Reconciler", func() {
 		// Use a test pool source that returns an empty pool immediately.
 		rec = rvcontroller.NewReconciler(
 			cl,
-			GinkgoLogr,
 			newTestPoolSource(idpool.NewIDPool[v1alpha1.DeviceMinor]()),
 		)
 	})
@@ -197,7 +195,6 @@ var _ = Describe("Reconciler", func() {
 					Build()
 				localRec := rvcontroller.NewReconciler(
 					localCl,
-					GinkgoLogr,
 					newTestPoolSource(idpool.NewIDPool[v1alpha1.DeviceMinor]()),
 				)
 
@@ -387,7 +384,7 @@ var _ = Describe("Reconciler", func() {
 						Expect(cl.Create(ctx, rv)).To(Succeed(), "should create ReplicatedVolume")
 					}
 					// Reinitialize reconciler with cache populated from existing volumes
-					rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
+					rec = initReconcilerFromClient(ctx, cl)
 				})
 
 				It("assigns deviceMinor sequentially and fills gaps", func(ctx SpecContext) {
@@ -424,7 +421,7 @@ var _ = Describe("Reconciler", func() {
 
 			It("does not reassign deviceMinor and is idempotent", func(ctx SpecContext) {
 				// Reinitialize reconciler with cache populated from existing volumes
-				rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
+				rec = initReconcilerFromClient(ctx, cl)
 				By("Reconciling multiple times and verifying deviceMinor remains unchanged")
 				Eventually(func(g Gomega) *v1alpha1.ReplicatedVolume {
 					for i := 0; i < 3; i++ {
@@ -478,7 +475,7 @@ var _ = Describe("Reconciler", func() {
 			Expect(cl.Create(ctx, rvExisting)).To(Succeed(), "should create existing ReplicatedVolume")
 			Expect(cl.Create(ctx, rvNew)).To(Succeed(), "should create new ReplicatedVolume")
 			// Reinitialize reconciler with cache populated from existing volumes
-			rec = initReconcilerFromClient(ctx, cl, GinkgoLogr)
+			rec = initReconcilerFromClient(ctx, cl)
 		})
 
 		It("treats zero-value deviceMinor as unassigned and picks next free value", func(ctx SpecContext) {

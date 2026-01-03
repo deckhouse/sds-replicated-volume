@@ -19,14 +19,12 @@ package rvcontroller
 import (
 	"fmt"
 
-	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
@@ -38,8 +36,6 @@ const (
 
 func BuildController(mgr manager.Manager) error {
 	cl := mgr.GetClient()
-	log := mgr.GetLogger().WithName(RVControllerName)
-	reconcilerLog := log.WithName("Reconciler")
 
 	// Initialize deviceMinor idpool after leader election (used for deviceMinor assignment).
 	poolSource := NewDeviceMinorPoolInitializer(mgr)
@@ -49,7 +45,6 @@ func BuildController(mgr manager.Manager) error {
 
 	rec := NewReconciler(
 		cl,
-		reconcilerLog,
 		poolSource,
 	)
 
@@ -77,14 +72,6 @@ func BuildController(mgr manager.Manager) error {
 				},
 			),
 		).
-		WithOptions(controller.Options{
-			MaxConcurrentReconciles: 10,
-			LogConstructor: func(req *reconcile.Request) logr.Logger {
-				if req == nil {
-					return reconcilerLog
-				}
-				return reconcilerLog.WithValues("req", *req)
-			},
-		}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
 		Complete(rec)
 }
