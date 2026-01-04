@@ -20,10 +20,13 @@ alwaysApply: true
   - Do NOT implement a move as "create new file + delete old file".
 
 - Git commit messages (MUST):
+  - When the user asks you to generate a commit message, ALWAYS remind about sign-off as plain text AFTER the commit message (do NOT put the reminder inside the commit message body). Prefer: `Don't forget to sign off` and suggest `git commit -s`.
   - Use English for commit messages.
-  - Include a `Signed-off-by: Name <email>` line in every commit (prefer `git commit -s`).
   - Prefer prefixing the subject with a component in square brackets, e.g. `[controller] Fix ...`, `[api] Add ...`.
   - If the change is non-trivial, add a short body listing the key changes; for small changes, the subject alone is enough.
   - When generating a commit message, consider the full diff (don’t skimp on context), including:
     - Staged/cached changes (index)
     - Contents of deleted files
+
+- When making a commit (MUST):
+  - ALWAYS sign off (prefer `git commit -s`).

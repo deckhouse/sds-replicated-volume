@@ -5,10 +5,35 @@ globs:
 alwaysApply: true
 ---
 
+- TL;DR:
+  - `controller.go` = wiring-only entrypoint.
+  - Entrypoint = `BuildController(mgr manager.Manager) error`.
+  - Builder chain = single fluent chain, ends with `.Complete(rec)`.
+  - Predicates = mechanical change detection (no I/O, no domain decisions).
+  - All domain/reconciliation logic = `reconciler.go`.
+
 - `controller.go` purpose (MUST):
   - `controller.go` is the wiring-only entrypoint of a controller package.
   - It owns controller-runtime builder configuration, sources/runnables registration and reconciler construction.
   - It MUST NOT contain reconciliation business logic (that belongs to `reconciler.go`).
+
+- ALLOW (in `controller.go`):
+  - controller-runtime builder wiring:
+    - `.ControllerManagedBy(mgr).Named(...)`
+    - `.For(...)`, `.Owns(...)`, `.Watches(...)`
+    - `.WithOptions(...)`, `.Complete(...)`
+  - predicates/filters (lightweight, mechanical change detection).
+  - manager dependencies (wiring-only):
+    - `mgr.GetClient()`, `mgr.GetScheme()`, `mgr.GetCache()`, `mgr.GetEventRecorderFor(...)`
+  - registering runnables/sources on manager (wiring-only), e.g. `mgr.Add(...)`, indexes, sources.
+
+- DENY (in `controller.go`):
+  - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
+  - reading/modifying `.Spec` / `.Status`:
+    - allowed only inside predicates and only for **field comparisons** (no multi-step logic; no mutations).
+    - direct `.Status.Conditions` access is forbidden in predicates — use `obju` only.
+  - any multi-step decisions (state machines, placement, scheduling, condition computation).
+  - any Kubernetes API I/O beyond manager wiring (`Get/List/Create/Update/Patch/Delete`).
 
 - `controller.go` layout (MUST):
   - `const <ControllerName> = "<name>"` (stable controller name).
@@ -80,8 +105,8 @@ alwaysApply: true
   - Predicates MUST NOT contain business logic — only detect changes in fields.
     - Example of business logic (forbidden in predicates): “check presence/validity of required labels”.
   - If reconciliation uses `.status.conditions` (or any condition-driven logic), predicate MUST react to `metadata.generation` changes.
-    - Note: when `generation` changes, there is no point in additionally checking spec/labels/metadata deltas for the primary object:
-      - changes to spec, labels, ownerRefs, finalizers, etc. will change `generation` anyway.
+    - Note: if you only need to react to **spec changes**, filtering by `generation` is usually sufficient (for CRDs, `generation` is  bumped on spec changes).
+    - Important: **metadata-only changes** (labels/annotations/finalizers/ownerRefs) may **NOT** bump `generation`. If your controller must react to them, compare them explicitly (e.g. `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`).
   - Do not generate noop handlers:
     - if a predicate handler (`CreateFunc`/`UpdateFunc`/`DeleteFunc`/`GenericFunc`) would only `return true`, omit it.
     - do NOT block `GenericFunc` unless there is a very explicit reason (prefer allowing reconcile).
@@ -94,21 +119,44 @@ alwaysApply: true
 
 
   - Object access in predicates (MUST):
+    - Priority order:
+      - `client.Object` getters
+      - `obju` for conditions
+      - API mechanical helpers
+      - direct fields (last resort)
     - If a field is available via `client.Object` methods, you MUST use those methods.
-      - Examples: `GetGeneration()`, `GetName()`, `GetNamespace()`, `GetLabels()`, `GetAnnotations()`.
+      - Examples: `GetGeneration()`, `GetName()`, `GetNamespace()`, `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`.
 
       Example: use `client.Object` methods (no cast) — react to `generation` (inline style)
+      (requires Go 1.21+ for `maps`/`slices`; and `k8s.io/apimachinery/pkg/api/equality` for `apiequality`)
       ```go
       builder.WithPredicates(
           predicate.Funcs{
               UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
                   // If reconciliation uses status.conditions (or any generation-driven logic),
-                  // react to generation changes and do NOT duplicate checks for spec/labels/metadata.
+                  // react to generation changes for spec-driven updates; if you also need to react
+                  // to metadata-only changes (labels/annotations/finalizers/ownerRefs), compare them explicitly.
                   if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
                       return true
                   }
 
-                  // Otherwise ignore pure status updates to avoid reconcile loops.
+                  // If your reconciliation uses labels, reconcile on label changes (metadata-only updates don't bump generation).
+                  if !maps.Equal(e.ObjectNew.GetLabels(), e.ObjectOld.GetLabels()) {
+                      return true
+                  }
+
+                  // If your reconciliation uses finalizers, reconcile on finalizer changes (metadata-only updates don't bump generation).
+                  if !slices.Equal(e.ObjectNew.GetFinalizers(), e.ObjectOld.GetFinalizers()) {
+                      return true
+                  }
+
+                  // If your reconciliation uses ownerRefs, reconcile on ownerRef changes (metadata-only updates don't bump generation).
+                  // Note: this is order-sensitive; if order changes, we reconcile (safe/conservative).
+                  if !apiequality.Semantic.DeepEqual(e.ObjectNew.GetOwnerReferences(), e.ObjectOld.GetOwnerReferences()) {
+                      return true
+                  }
+
+                  // Ignore pure status updates to avoid reconcile loops.
                   return false
               },
               // No CreateFunc/DeleteFunc/GenericFunc: omit handlers that would only "return true".
@@ -156,8 +204,8 @@ alwaysApply: true
       }
       ```
 
-    - Otherwise, use `Get*`/`Has*`/`Equals*` helpers from the API type of the object.
-      - If the object is from this repo API and such mechanical helpers are missing, prefer adding them to the API (still no business logic) and ask the user before introducing ad-hoc direct field access in the controller.
+    - If `client.Object` methods are not enough for the fields you need, use `Get*`/`Has*`/`Equals*` helpers from the API type of the object.
+      - If the object is from this repo API and such mechanical helpers are missing, prefer adding them to the API (still no business logic) and document the decision in code (short comment) before introducing ad-hoc direct field access in the controller.
 
       Example: use API helpers when `client.Object` methods are not enough (cast only to call helpers, inline style)
       ```go
@@ -186,7 +234,7 @@ alwaysApply: true
       ```
 
 
-    - Otherwise, read object fields directly.
+    - If there are no `client.Object` methods and no API helpers, read object fields directly.
 
       Example: direct field access when there are no `client.Object` methods and no API helpers (inline style)
       ```go
@@ -266,7 +314,9 @@ alwaysApply: true
   - Watch child objects either:
     - by owner reference (when this controller is the owner/controller of the child objects), or
     - by an explicit field/index (when children may be created by others: another controller or a user).
-  - If it is not obvious which model applies for a given child object, ask the user before choosing the watch strategy.
+  - If it is not obvious which model applies for a given child object:
+    - default to the safest *correctness* choice (prefer being conservative and reconciling more over missing important events), and
+    - add a short comment explaining why this watch strategy was chosen (and what would justify switching to the alternative).
 
   Example: watch child objects by owner reference (controller is the owner)
   ```go
