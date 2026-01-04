@@ -162,3 +162,132 @@ func TestRemoveStatusCondition(t *testing.T) {
 		t.Fatalf("expected condition to be removed")
 	}
 }
+
+func TestConditionEqualByStatus(t *testing.T) {
+	a := &metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "A", Message: "a"}
+	b := &metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "B", Message: "b"}
+
+	if !objutilv1.ConditionEqualByStatus(a, b) {
+		t.Fatalf("expected equal when Type and Status match")
+	}
+
+	b.Type = "Other"
+	if objutilv1.ConditionEqualByStatus(a, b) {
+		t.Fatalf("expected not equal when Type differs")
+	}
+
+	b.Type = "Ready"
+	b.Status = metav1.ConditionFalse
+	if objutilv1.ConditionEqualByStatus(a, b) {
+		t.Fatalf("expected not equal when Status differs")
+	}
+
+	if !objutilv1.ConditionEqualByStatus((*metav1.Condition)(nil), (*metav1.Condition)(nil)) {
+		t.Fatalf("expected nil==nil to be equal")
+	}
+	if objutilv1.ConditionEqualByStatus(a, (*metav1.Condition)(nil)) {
+		t.Fatalf("expected non-nil != nil")
+	}
+}
+
+func TestAreConditionsSemanticallyEqual_SelectedTypes(t *testing.T) {
+	a := &testConditionedObject{}
+	b := &testConditionedObject{}
+
+	a.SetGeneration(1)
+	b.SetGeneration(1)
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	// Both missing -> equal for that type.
+	if !objutilv1.AreConditionsSemanticallyEqual(a, b, "Missing") {
+		t.Fatalf("expected equal when selected condition type is missing on both objects")
+	}
+
+	// Present on both and semantically equal -> equal.
+	if !objutilv1.AreConditionsSemanticallyEqual(a, b, "Ready") {
+		t.Fatalf("expected equal for semantically equal condition on both objects")
+	}
+
+	// Missing on one -> not equal.
+	_ = objutilv1.RemoveStatusCondition(b, "Ready")
+	if objutilv1.AreConditionsSemanticallyEqual(a, b, "Ready") {
+		t.Fatalf("expected not equal when condition is missing on exactly one object")
+	}
+}
+
+func TestAreConditionsSemanticallyEqual_AllTypesWhenEmpty(t *testing.T) {
+	a := &testConditionedObject{}
+	b := &testConditionedObject{}
+
+	a.SetGeneration(1)
+	b.SetGeneration(1)
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "OK"})
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Online", Status: metav1.ConditionTrue})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Online", Status: metav1.ConditionTrue})
+
+	if !objutilv1.AreConditionsSemanticallyEqual(a, b) {
+		t.Fatalf("expected equal when all condition types are semantically equal")
+	}
+
+	// Change meaning for one condition type.
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Online", Status: metav1.ConditionFalse, Reason: "Down"})
+	if objutilv1.AreConditionsSemanticallyEqual(a, b) {
+		t.Fatalf("expected not equal when any condition meaning differs")
+	}
+}
+
+func TestAreConditionsEqualByStatus_SelectedTypes(t *testing.T) {
+	a := &testConditionedObject{}
+	b := &testConditionedObject{}
+
+	a.SetGeneration(1)
+	b.SetGeneration(1)
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "A"})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "B"})
+
+	// StatusEqual ignores Reason/Message/ObservedGeneration differences.
+	if !objutilv1.AreConditionsEqualByStatus(a, b, "Ready") {
+		t.Fatalf("expected equal when Type and Status match")
+	}
+
+	// Both missing -> equal for that type.
+	if !objutilv1.AreConditionsEqualByStatus(a, b, "Missing") {
+		t.Fatalf("expected equal when selected condition type is missing on both objects")
+	}
+
+	// Missing on one -> not equal.
+	_ = objutilv1.RemoveStatusCondition(b, "Ready")
+	if objutilv1.AreConditionsEqualByStatus(a, b, "Ready") {
+		t.Fatalf("expected not equal when condition is missing on exactly one object")
+	}
+}
+
+func TestAreConditionsEqualByStatus_AllTypesWhenEmpty(t *testing.T) {
+	a := &testConditionedObject{}
+	b := &testConditionedObject{}
+
+	a.SetGeneration(1)
+	b.SetGeneration(1)
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "A"})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue, Reason: "B"})
+
+	_ = objutilv1.SetStatusCondition(a, metav1.Condition{Type: "Online", Status: metav1.ConditionTrue})
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Online", Status: metav1.ConditionTrue})
+
+	if !objutilv1.AreConditionsEqualByStatus(a, b) {
+		t.Fatalf("expected equal when all condition types have equal Type+Status")
+	}
+
+	// Status differs for one condition type -> not equal.
+	_ = objutilv1.SetStatusCondition(b, metav1.Condition{Type: "Online", Status: metav1.ConditionFalse, Reason: "Down"})
+	if objutilv1.AreConditionsEqualByStatus(a, b) {
+		t.Fatalf("expected not equal when any condition Status differs")
+	}
+}

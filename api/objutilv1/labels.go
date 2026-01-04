@@ -18,6 +18,7 @@ package objutilv1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+// HasLabel reports whether the object has the given label key.
 func HasLabel(obj metav1.Object, key string) bool {
 	labels := obj.GetLabels()
 	if labels == nil {
@@ -28,6 +29,7 @@ func HasLabel(obj metav1.Object, key string) bool {
 	return ok
 }
 
+// HasLabelValue reports whether the object has the given label key set to the provided value.
 func HasLabelValue(obj metav1.Object, key, value string) bool {
 	labels := obj.GetLabels()
 	if labels == nil {
@@ -37,6 +39,8 @@ func HasLabelValue(obj metav1.Object, key, value string) bool {
 	return labels[key] == value
 }
 
+// SetLabel ensures the object has the given label key set to the provided value.
+// It returns whether the labels were changed.
 func SetLabel(obj metav1.Object, key, value string) (changed bool) {
 	labels := obj.GetLabels()
 	if labels == nil {
@@ -52,6 +56,8 @@ func SetLabel(obj metav1.Object, key, value string) (changed bool) {
 	return true
 }
 
+// RemoveLabel removes the given label key from the object.
+// It returns whether the labels were changed.
 func RemoveLabel(obj metav1.Object, key string) (changed bool) {
 	labels := obj.GetLabels()
 	if labels == nil {

@@ -22,10 +22,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// HasFinalizer reports whether the object has the given finalizer.
 func HasFinalizer(obj metav1.Object, finalizer string) bool {
 	return slices.Contains(obj.GetFinalizers(), finalizer)
 }
 
+// AddFinalizer ensures the given finalizer is present on the object.
+// It returns whether the finalizers were changed.
 func AddFinalizer(obj metav1.Object, finalizer string) (changed bool) {
 	finalizers := obj.GetFinalizers()
 	if slices.Contains(finalizers, finalizer) {
@@ -36,6 +39,8 @@ func AddFinalizer(obj metav1.Object, finalizer string) (changed bool) {
 	return true
 }
 
+// RemoveFinalizer removes the given finalizer from the object.
+// It returns whether the finalizers were changed.
 func RemoveFinalizer(obj metav1.Object, finalizer string) (changed bool) {
 	finalizers := obj.GetFinalizers()
 
@@ -48,6 +53,7 @@ func RemoveFinalizer(obj metav1.Object, finalizer string) (changed bool) {
 	return true
 }
 
+// HasFinalizersOtherThan reports whether the object has any finalizers not in the allowed list.
 func HasFinalizersOtherThan(obj metav1.Object, allowedFinalizers ...string) bool {
 	finalizers := obj.GetFinalizers()
 

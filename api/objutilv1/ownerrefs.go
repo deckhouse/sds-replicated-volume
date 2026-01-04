@@ -22,6 +22,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// HasMatchingOwnerRef reports whether the object has an owner reference matching the given owner.
 func HasMatchingOwnerRef(obj metav1.Object, owner MetaRuntimeObject, controller bool) bool {
 	desired := mustDesiredOwnerRef(owner, controller)
 
@@ -34,6 +35,8 @@ func HasMatchingOwnerRef(obj metav1.Object, owner MetaRuntimeObject, controller 
 	return false
 }
 
+// SetOwnerRef ensures the object has an owner reference for the given owner.
+// It returns whether the ownerReferences were changed.
 func SetOwnerRef(obj metav1.Object, owner MetaRuntimeObject, controller bool) (changed bool) {
 	desired := mustDesiredOwnerRef(owner, controller)
 

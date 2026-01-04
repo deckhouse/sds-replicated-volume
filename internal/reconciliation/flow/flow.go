@@ -28,31 +28,31 @@ func Wrapf(err error, format string, args ...any) error {
 
 // Outcome bundles a reconcile return decision and an optional error.
 //
-// If Return is nil, the caller should continue executing the current reconciliation flow
+// If result is nil, the caller should continue executing the current reconciliation flow
 // (i.e. do not return from Reconcile yet).
 type Outcome struct {
-	Return *ctrl.Result
-	Err    error
+	result *ctrl.Result
+	err    error
 }
 
 // ShouldReturn reports whether the Outcome indicates an early return from Reconcile.
-func (o Outcome) ShouldReturn() bool { return o.Return != nil }
+func (o Outcome) ShouldReturn() bool { return o.result != nil }
 
 // ToCtrl unwraps Outcome into the controller-runtime Reconcile return values.
 //
-// If Return is nil, it returns an empty ctrl.Result and o.Err.
+// If result is nil, it returns an empty ctrl.Result and o.err.
 func (o Outcome) ToCtrl() (ctrl.Result, error) {
-	if o.Return == nil {
-		return ctrl.Result{}, o.Err
+	if o.result == nil {
+		return ctrl.Result{}, o.err
 	}
-	return *o.Return, o.Err
+	return *o.result, o.err
 }
 
 func (o Outcome) MustToCtrl() (ctrl.Result, error) {
-	if o.Return == nil {
-		panic("flow.Outcome: MustToCtrl called with nil Return")
+	if o.result == nil {
+		panic("flow.Outcome: MustToCtrl called with nil result")
 	}
-	return *o.Return, o.Err
+	return *o.result, o.err
 }
 
 // -----------------------------------------------------------------------------
@@ -95,7 +95,7 @@ func ContinueErr(e error) Outcome {
 	if e == nil {
 		return Continue()
 	}
-	return Outcome{Err: e}
+	return Outcome{err: e}
 }
 
 // ContinueErrf is like ContinueErr, but wraps err using Wrapf(format, args...).
@@ -104,7 +104,7 @@ func ContinueErrf(err error, format string, args ...any) Outcome {
 }
 
 // Done indicates that the caller should stop and return (do not requeue).
-func Done() Outcome { return Outcome{Return: &ctrl.Result{}} }
+func Done() Outcome { return Outcome{result: &ctrl.Result{}} }
 
 // Fail indicates that the caller should stop and return an error.
 //
@@ -113,7 +113,7 @@ func Fail(e error) Outcome {
 	if e == nil {
 		panic("flow.Fail: nil error")
 	}
-	return Outcome{Return: &ctrl.Result{}, Err: e}
+	return Outcome{result: &ctrl.Result{}, err: e}
 }
 
 // Failf is like Fail, but wraps err using Wrapf(format, args...).
@@ -126,7 +126,7 @@ func RequeueAfter(dur time.Duration) Outcome {
 	if dur <= 0 {
 		panic("flow.RequeueAfter: duration must be > 0")
 	}
-	return Outcome{Return: &ctrl.Result{RequeueAfter: dur}}
+	return Outcome{result: &ctrl.Result{RequeueAfter: dur}}
 }
 
 // Merge combines one or more Outcome values into a single Outcome.
@@ -151,23 +151,23 @@ func Merge(results ...Outcome) Outcome {
 	)
 
 	for _, r := range results {
-		if r.Err != nil {
-			errs = append(errs, r.Err)
+		if r.err != nil {
+			errs = append(errs, r.err)
 		}
 
-		if r.Return == nil {
+		if r.result == nil {
 			continue
 		}
 		hasReconcileResult = true
 
-		if r.Return.Requeue {
+		if r.result.Requeue {
 			panic("flow.Merge: Requeue=true is not supported")
 		}
 
-		if r.Return.RequeueAfter > 0 {
-			if !shouldRequeueAfter || r.Return.RequeueAfter < requeueAfter {
+		if r.result.RequeueAfter > 0 {
+			if !shouldRequeueAfter || r.result.RequeueAfter < requeueAfter {
 				shouldRequeueAfter = true
-				requeueAfter = r.Return.RequeueAfter
+				requeueAfter = r.result.RequeueAfter
 			}
 		}
 	}

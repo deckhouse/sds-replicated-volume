@@ -68,62 +68,62 @@ func TestRequeueAfter_NegativePanics(t *testing.T) {
 
 func TestRequeueAfter_Positive(t *testing.T) {
 	out := RequeueAfter(1 * time.Second)
-	if out.Return == nil {
-		t.Fatalf("expected Return to be non-nil")
+	if out.result == nil {
+		t.Fatalf("expected result to be non-nil")
 	}
-	if out.Return.RequeueAfter != 1*time.Second {
-		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, out.Return.RequeueAfter)
+	if out.result.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, out.result.RequeueAfter)
 	}
 }
 
 func TestMerge_DoneWinsOverContinue(t *testing.T) {
 	out := Merge(Done(), Continue())
-	if out.Return == nil {
-		t.Fatalf("expected Return to be non-nil")
+	if out.result == nil {
+		t.Fatalf("expected result to be non-nil")
 	}
-	if out.Err != nil {
-		t.Fatalf("expected Err to be nil, got %v", out.Err)
+	if out.err != nil {
+		t.Fatalf("expected err to be nil, got %v", out.err)
 	}
 }
 
 func TestMerge_RequeueAfterChoosesSmallest(t *testing.T) {
 	out := Merge(RequeueAfter(5*time.Second), RequeueAfter(1*time.Second))
-	if out.Return == nil {
-		t.Fatalf("expected Return to be non-nil")
+	if out.result == nil {
+		t.Fatalf("expected result to be non-nil")
 	}
-	if out.Return.RequeueAfter != 1*time.Second {
-		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, out.Return.RequeueAfter)
+	if out.result.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be %v, got %v", 1*time.Second, out.result.RequeueAfter)
 	}
-	if out.Err != nil {
-		t.Fatalf("expected Err to be nil, got %v", out.Err)
+	if out.err != nil {
+		t.Fatalf("expected err to be nil, got %v", out.err)
 	}
 }
 
 func TestMerge_ContinueErrAndDoneBecomesFail(t *testing.T) {
 	e := errors.New("e")
 	out := Merge(ContinueErr(e), Done())
-	if out.Return == nil {
-		t.Fatalf("expected Return to be non-nil")
+	if out.result == nil {
+		t.Fatalf("expected result to be non-nil")
 	}
-	if out.Err == nil {
-		t.Fatalf("expected Err to be non-nil")
+	if out.err == nil {
+		t.Fatalf("expected err to be non-nil")
 	}
-	if !errors.Is(out.Err, e) {
-		t.Fatalf("expected errors.Is(out.Err, e) == true; out.Err=%v", out.Err)
+	if !errors.Is(out.err, e) {
+		t.Fatalf("expected errors.Is(out.err, e) == true; out.err=%v", out.err)
 	}
 }
 
 func TestMerge_ContinueErrOnlyStaysContinueErr(t *testing.T) {
 	e := errors.New("e")
 	out := Merge(ContinueErr(e))
-	if out.Return != nil {
-		t.Fatalf("expected Return to be nil")
+	if out.result != nil {
+		t.Fatalf("expected result to be nil")
 	}
-	if out.Err == nil {
-		t.Fatalf("expected Err to be non-nil")
+	if out.err == nil {
+		t.Fatalf("expected err to be non-nil")
 	}
-	if !errors.Is(out.Err, e) {
-		t.Fatalf("expected errors.Is(out.Err, e) == true; out.Err=%v", out.Err)
+	if !errors.Is(out.err, e) {
+		t.Fatalf("expected errors.Is(out.err, e) == true; out.err=%v", out.err)
 	}
 }
 

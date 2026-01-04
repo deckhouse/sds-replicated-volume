@@ -1,0 +1,36 @@
+---
+description: Controller file structure and conventions (sds-replicated-volume)
+globs:
+  - "images/controller/internal/controllers/rv_controller/**/*.go"
+alwaysApply: true
+---
+
+- Controller package structure (MUST):
+  - Each controller package MUST have these files:
+    - `controller.go`
+    - `reconciler.go`
+    - `reconciler_test.go`
+
+- `controller.go` (MUST): wiring-only entrypoint (builder/options/predicates/runnables), no reconciliation business logic.
+  - See: `controller-controller.mdc`.
+
+- `reconciler.go` (MUST): all reconciliation business logic for this controller.
+  - Detailed rules for phases, I/O boundaries, patch domains and patterns: `controller-reconciliation.mdc`.
+
+- `reconciler_test.go` (MUST): tests for reconciliation behavior and edge cases.
+
+- Additional wiring/infra components (MAY): manager runnables/sources (not reconcilers, not pure helpers).
+  - Allowed example:
+    - `manager.Runnable`/`manager.LeaderElectionRunnable` initializers/sources that prepare or maintain in-memory state and expose it via a small interface (blocking + non-blocking access).
+  - Notes:
+    - These components MAY perform Kubernetes API I/O as part of initialization/maintenance.
+    - Their registration/wiring belongs to `controller.go` (`mgr.Add(...)`, indexes, sources, etc.); reconciliation business logic still belongs to `reconciler.go`.
+
+- Additional components (MAY): extracted helpers for heavy computations or caching.
+  - Allowed examples:
+    - “world view” / “planner” / “topology scorer” components that build an in-memory model for convenient calculations.
+    - unique ID pool components (e.g., device minor / ordinal allocators) used for deterministic assignments.
+    - caching components to avoid repeated expensive computation (explicitly owned by the reconciler and easy to invalidate).
+  - Constraints (MUST):
+    - computation components MUST be pure: no Kubernetes API calls, no patches, no `DeepCopy`, no time/random/env I/O.
+    - caching components MUST NOT hide Kubernetes API I/O inside themselves; I/O stays in `reconciler.go` or other runnables/sources.
