@@ -1,0 +1,168 @@
+---
+description: Controller reconciliation helpers — DeleteReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# DeleteReconcileHelper
+
+This document defines naming and contracts for **DeleteReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: define TL;DR for DeleteReconcileHelper.
+
+---
+
+## Definition (MUST)
+
+A **DeleteReconcileHelper** (“delete helper”) is a **ReconcileHelper** that is:
+
+- **allowed to perform I/O**, and
+- deletes exactly **one** Kubernetes object via the API (or ensures it is absent), and
+- returns the delete outcome (and optionally an error).
+
+Typical delete helpers encapsulate the mechanical delete call (including “already gone” handling) for child resources, while Reconcile methods decide ordering relative to other actions.
+
+---
+
+## Naming (MUST)
+
+- A **DeleteReconcileHelper** name **MUST** start with `delete` / `Delete`.
+- DeleteReconcileHelpers for Kubernetes objects **MUST** use the form:
+  - `delete<Kind>` / `Delete<Kind>`.
+
+Guidance (SHOULD):
+- `<Kind>` MUST correspond to the Kubernetes object kind being deleted.
+- A short kind name is allowed, if it is already established in the codebase.
+- Examples:
+  - `deleteCM(...)` (or `deleteConfigMap(...)`)
+  - `deleteSVC(...)` (or `deleteService(...)`)
+  - `deleteSKN(...)` (or `deleteSomeKindName(...)`)
+- Avoid names that imply orchestration or multi-step cleanup (`reconcileDelete`, `deleteAll`, `deleteAndWait`) — ordering and lifecycle policy belong to Reconcile methods.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and a single-API-call scope.
+
+### Simple delete (SHOULD)
+```go
+func (r *Reconciler) deleteSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+) flow.Outcome
+```
+
+Or, if `flow.Outcome` is intentionally not used:
+```go
+func (r *Reconciler) deleteSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+) error
+```
+
+---
+
+## Receivers (MUST)
+
+- DeleteReconcileHelpers **MUST** be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
+
+---
+
+## I/O boundaries (MUST)
+
+DeleteReconcileHelpers **MAY** do the following:
+
+- controller-runtime client usage to execute exactly **one** Kubernetes API call: `Delete(...)`.
+
+DeleteReconcileHelpers **MUST NOT** do any of the following:
+
+- Kubernetes API calls other than that single `Delete(...)` (no `Get/List/Create/Update/Patch`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- performing any other I/O besides the single Kubernetes API request they own.
+
+DeleteReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind **other than** the single Kubernetes API request they own.
+
+> Rationale: delete helpers are mechanical wrappers around exactly one delete operation; ordering and lifecycle policy remain explicit in Reconcile methods.
+
+---
+
+## Determinism contract (MUST)
+
+A DeleteReconcileHelper **MUST** be deterministic in everything it controls.
+
+In particular:
+- It **MUST** issue a single, mechanical delete operation with behavior determined only by explicit inputs.
+- It **MUST NOT** introduce “hidden I/O” (time, random, env, extra network calls) beyond the single Kubernetes API `Delete(...)` request they own.
+- It **MUST NOT** contain business-logic branching that depends on nondeterministic inputs.
+- See the common determinism contract in `controller-reconcile-helper.mdc` (ordering stability, no map iteration order reliance).
+
+> Practical reason: delete should be a predictable mechanical operation; nondeterminism leads to flaky cleanup paths.
+
+---
+
+## Read-only contract (MUST)
+
+`delete<Kind>` / `Delete<Kind>` **MUST** treat inputs as read-only:
+
+- it **MUST NOT** mutate input objects (including the object being deleted);
+- it **MUST NOT** perform in-place modifications through aliases.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation (MUST)
+
+- A DeleteReconcileHelper **MUST** perform exactly one API write: `Delete(...)`.
+- It **MUST NOT** modify either patch domain (main or status) as part of deletion:
+  - no “prepare for delete” patches (e.g., finalizer removal);
+  - no status updates/patches.
+- If deletion requires preliminary changes (e.g., removing a finalizer), those changes **MUST** be performed by Reconcile methods via separate ensure/apply + patch steps **before** calling the delete helper.
+
+## Composition (MUST)
+
+- A DeleteReconcileHelper **MUST** perform exactly one API write (`Delete(...)`) for exactly one object.
+- Any prerequisite mutations (e.g., removing finalizers) **MUST** be composed in Reconcile methods (ensure/apply + patch) and **MUST NOT** be hidden inside the delete helper.
+- If multiple objects must be deleted (loops, groups, fan-out), that orchestration **MUST** live in Reconcile methods; delete helpers must remain single-object.
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- DeleteReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
+- If a DeleteReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+
+---
+
+## Error handling (SHOULD)
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+  - If a DeleteReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define ALLOW / DENY cheat sheet for DeleteReconcileHelper.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+TODO: define common anti-patterns for DeleteReconcileHelper.

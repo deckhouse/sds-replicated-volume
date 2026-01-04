@@ -16,6 +16,24 @@ alwaysApply: true
 
 - `reconciler.go` (MUST): all reconciliation business logic for this controller.
   - Detailed rules for phases, I/O boundaries, patch domains and patterns: `controller-reconciliation.mdc`.
+  - `reconciler.go` MUST contain these categories of code:
+    - 1. **Reconcile** functions/methods.
+      - MUST comply with: `controller-reconcile.mdc`.
+      - Definition (MUST):
+        - the controller-runtime `Reconcile(...)` method, and
+        - any other function/method whose name starts with `reconcile*` / `Reconcile*`.
+    - 2. **ReconcileHelper** functions/methods: helpers used by `Reconcile` functions/methods.
+      - MUST comply with: `controller-reconcile-helper.mdc`.
+      - Definition (MUST): any function/method whose name matches one of these helper naming categories/patterns:
+        - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`)
+        - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`)
+        - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`)
+        - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`)
+        - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`)
+        - **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`)
+        - **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`)
+    - 3. **Other supporting code**: auxiliary functions/methods/types that do not fit either category above.
+      - SHOULD be rare; if a helper matches the ReconcileHelper naming or contracts, prefer making it a **ReconcileHelper**.
 
 - `reconciler_test.go` (MUST): tests for reconciliation behavior and edge cases.
 

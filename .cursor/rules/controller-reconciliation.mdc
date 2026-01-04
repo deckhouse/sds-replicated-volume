@@ -1,10 +1,6 @@
 ---
-description: Controller reconciliation rules (phases + I/O boundaries + patch domains + patterns + contracts + utilities)
-globs:
-  - "images/controller/internal/controllers/rv_controller/**/*.go"
-alwaysApply: true
+alwaysApply: false
 ---
-
 ## Terminology (MUST)
 
 - **Main resource**: `metadata` + `spec` (and any non-status fields).

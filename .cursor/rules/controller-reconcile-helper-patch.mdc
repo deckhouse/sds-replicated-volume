@@ -1,0 +1,199 @@
+---
+description: Controller reconciliation helpers — PatchReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# PatchReconcileHelper
+
+This document defines naming and contracts for **PatchReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: define TL;DR for PatchReconcileHelper.
+
+---
+
+## Definition (MUST)
+
+A **PatchReconcileHelper** (“patch helper”) is a **ReconcileHelper** that is:
+
+- **allowed to perform I/O**, and
+- executes exactly **one** Kubernetes patch request for exactly **one patch domain** (main resource patch **or** status subresource patch), and
+- returns the patch an error (if any).
+
+Typical patch helpers encapsulate the mechanical “patch this domain now” operation (including optimistic-lock semantics) and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while Reconcile methods still own patch ordering decisions across multiple patches.
+
+---
+
+## Naming (MUST)
+
+- A **PatchReconcileHelper** name **MUST** start with `patch` / `Patch`.
+- PatchReconcileHelpers **MUST** use the form:
+  - `patch<Kind>` / `Patch<Kind>`.
+
+Guidance (SHOULD):
+- `<Kind>` MUST correspond to the Kubernetes object kind being patched.
+- A short kind name is allowed, if it is already established in the codebase.
+- Examples:
+  - `patchCM(...)` (or `patchConfigMap(...)`)
+  - `patchSVC(...)` (or `patchService(...)`)
+  - `patchSKN(...)` (or `patchSomeKindName(...)`)
+- Avoid names that hide strategy or ordering (`patchOptimistically`, `patchAll`, `patchWithOrdering`) — patch helpers execute exactly one patch; ordering and strategy decisions live in Reconcile methods.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and a single-patch scope.
+
+### Simple patch (SHOULD)
+Pass `base` explicitly (created in the Reconcile methods immediately before the patch)
+and an explicit optimistic-lock flag:
+```go
+func (r *Reconciler) patchSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+    base *v1alpha1.SomeKindName,
+    optimisticLock bool,
+) flow.Outcome
+```
+
+Or, if `flow.Outcome` is intentionally not used:
+```go
+func (r *Reconciler) patchSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+    base *v1alpha1.SomeKindName,
+    optimisticLock bool,
+) error
+```
+
+### Status-subresource patch variant (SHOULD)
+```go
+func (r *Reconciler) patchSKNStatus(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+    base *v1alpha1.SomeKindName,
+    optimisticLock bool,
+) flow.Outcome
+```
+
+Or, if `flow.Outcome` is intentionally not used:
+```go
+func (r *Reconciler) patchSKNStatus(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+    base *v1alpha1.SomeKindName,
+    optimisticLock bool,
+) error
+```
+
+---
+
+## Receivers (MUST)
+
+- PatchReconcileHelpers **MUST** be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
+
+---
+
+## I/O boundaries (MUST)
+
+PatchReconcileHelpers **MAY** do the following:
+
+- controller-runtime client usage to execute exactly **one** Kubernetes patch call for exactly **one** patch domain:
+  - `Patch(...)` (main resource), or
+  - `Status().Patch(...)` (status subresource),
+  using the optimistic-locking mode provided by the caller (e.g., derived from `flow.Outcome`).
+
+PatchReconcileHelpers **MUST NOT** do any of the following:
+
+- Kubernetes API calls other than that single patch call (no `Get/List/Create/Update/Delete`, no second patch);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- making any patch ordering decisions across multiple patch requests;
+- performing any other I/O besides the single Kubernetes API request they own.
+
+PatchReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind **other than** the single Kubernetes API request they own.
+
+> Rationale: patch helpers are mechanical “execute exactly one patch” operations; ordering and multi-step reconciliation policy remain explicit and reviewable in Reconcile methods.
+
+---
+
+## Determinism contract (MUST)
+
+A PatchReconcileHelper **MUST** be deterministic in everything it controls.
+
+In particular:
+- It **MUST** execute a single patch request whose parameters are determined only by explicit inputs (`obj`, `base`, `optimisticLock`, domain).
+- See the common determinism contract in `controller-reconcile-helper.mdc` (ordering stability, no map iteration order reliance).
+- It **MUST NOT** introduce “hidden I/O” (time, random, env, extra network calls) beyond the single patch request they own.
+
+> Practical reason: nondeterminism produces patch churn and makes conflicts hard to reason about.
+
+---
+
+## Read-only contract (MUST)
+
+`patch<Kind>` / `Patch<Kind>` **MUST** treat inputs as read-only.
+
+In particular, it **MUST** treat `base` as read-only (it is the patch base / diff reference):
+
+- it **MUST NOT** mutate `base` (it is the patch base / diff reference);
+- it **MUST NOT** mutate any other inputs;
+- it MAY observe `obj` being updated as a result of the patch call (e.g., `resourceVersion`, defaults), but **MUST NOT** perform additional in-memory business mutations inside the patch helper.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation (MUST)
+
+- A PatchReconcileHelper **MUST** execute exactly **one** patch request for exactly **one** patch domain:
+  - main resource patch domain: `Patch(...)`, **or**
+  - status subresource patch domain: `Status().Patch(...)`.
+- A PatchReconcileHelper **MUST NOT** patch both domains in one helper.
+- If both domains need patching, Reconcile methods **MUST** issue two separate patch operations (typically via two patch helpers), each with its own `base` and request.
+
+## Composition (MUST)
+
+- A PatchReconcileHelper **MUST** execute exactly one patch request for exactly one patch domain.
+- A PatchReconcileHelper **MAY** be preceded by pure helpers that prepared the in-memory `obj` (compute/apply/ensure), but the patch helper itself **MUST NOT** perform any business-logic composition beyond executing the single patch request.
+- If multiple patch requests are needed (multiple domains or multiple sequential patches), they **MUST** be composed in Reconcile methods as multiple explicit patch operations (each with its own `base` taken immediately before that patch).
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- PatchReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
+- If a PatchReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+
+---
+
+## Error handling (SHOULD)
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+  - If a PatchReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define ALLOW / DENY cheat sheet for PatchReconcileHelper.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+TODO: define common anti-patterns for PatchReconcileHelper.

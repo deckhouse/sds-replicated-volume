@@ -67,6 +67,18 @@ func (o Outcome) OptimisticLockRequired() bool {
 // Error returns the error carried by the outcome, if any.
 func (o Outcome) Error() error { return o.err }
 
+// Errorf returns a copy of Outcome with its error updated by formatted context.
+//
+// If Outcome already carries an error, Errorf wraps it (like Wrapf).
+// If Outcome has no error, Errorf is a no-op and keeps the error nil.
+func (o Outcome) Errorf(format string, args ...any) Outcome {
+	if o.err == nil {
+		return o
+	}
+	o.err = Wrapf(o.err, format, args...)
+	return o
+}
+
 // ReportChanged returns a copy of Outcome that records a change to the target object.
 // It does not alter the reconcile return decision (continue/done/requeue) or the error.
 func (o Outcome) ReportChanged() Outcome {

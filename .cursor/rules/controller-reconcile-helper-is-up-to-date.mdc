@@ -1,0 +1,172 @@
+---
+description: Controller reconciliation helpers — IsUpToDateReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# IsUpToDateReconcileHelper
+
+This document defines naming and contracts for **IsUpToDateReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: define TL;DR for IsUpToDateReconcileHelper.
+
+---
+
+## Definition (MUST)
+
+An **IsUpToDateReconcileHelper** (“up-to-date helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- checks whether the current object state is **already equal to the desired state** for **exactly one patch domain** (main resource **or** status subresource), and
+- returns a boolean result (and optionally an error).
+
+Typical up-to-date helpers gate patch execution by answering “do we need to patch this domain?” for a single desired input.
+
+---
+
+## Naming (MUST)
+
+- An **IsUpToDateReconcileHelper** name **MUST** start with `is` / `Is` and **MUST** contain `UpToDate`.
+- The required forms are:
+  - `is*UpToDate` / `Is*UpToDate`
+  - `is*StatusUpToDate` / `Is*StatusUpToDate` (for status-domain checks)
+
+Guidance (SHOULD):
+- Name the “thing” being checked for drift:
+  - `isLabelsUpToDate(obj, desiredLabels)`
+  - `isSpecFooUpToDate(obj, desiredFoo)`
+  - `isStatusUpToDate(obj, desiredStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
+  - `isConditionsUpToDate(obj, desiredConditions)`
+- Avoid generic names (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the domain + artifact being compared.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and purity.
+
+### Simple check (no flow, no logging) (SHOULD)
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool
+```
+
+---
+
+## Receivers (MUST)
+
+- IsUpToDateReconcileHelpers **MUST** be plain functions (no `Reconciler` receiver).
+
+---
+
+## I/O boundaries (MUST)
+
+IsUpToDateReconcileHelpers **MUST NOT** do any of the following:
+
+- controller-runtime client usage (`client.Client`, `r.client`, etc.);
+- Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- creating/updating Kubernetes objects in the API server in any form.
+
+IsUpToDateReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind.
+
+> Rationale: up-to-date helpers should be deterministic and unit-testable; all observable side effects belong to Reconcile methods.
+
+---
+
+## Determinism contract (MUST)
+
+An IsUpToDateReconcileHelper **MUST** be deterministic given its explicit inputs and read-only dependencies.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+In particular, avoid producing “equivalent but different” intermediate representations across runs (e.g., unstable ordering that flips the boolean result depending on traversal).
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+---
+
+## Read-only contract (MUST)
+
+`is*UpToDate` / `Is*UpToDate` **MUST** treat all inputs as read-only:
+
+- it **MUST NOT** mutate any input values (including `obj`, `desired`, and any other args);
+- it **MUST NOT** perform in-place modifications through aliases.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation (MUST)
+
+- `is*UpToDate` / `Is*UpToDate` **MUST** check **exactly one** patch domain:
+  - main resource (**metadata + spec + non-status fields**), **or**
+  - status subresource (`.status`).
+- If you need to check both domains, you **MUST** use **two** separate helpers (one per domain), and combine the results in Reconcile methods.
+
+✅ Main-only / status-only (GOOD)
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFooMain) bool
+func isFooStatusUpToDate(obj *v1alpha1.Foo, desired DesiredFooStatus) bool
+```
+
+❌ Mixed domains in one helper (BAD)
+```go
+func isFooUpToDate(
+    obj *v1alpha1.Foo,
+    desiredMain DesiredFooMain,
+    desiredStatus DesiredFooStatus,
+) bool
+```
+
+---
+
+## Composition (MUST)
+
+- An IsUpToDateReconcileHelper **MUST** stay a single, simple check: it returns exactly one boolean for one desired input.
+- If multiple “pieces” must be checked together for the same domain, they **SHOULD** be bundled into a single `desired` value (small struct) and checked in one helper.
+- An IsUpToDateReconcileHelper **MAY** call other `is*UpToDate` helpers for reuse (pure composition).
+  - It **SHOULD NOT** use such calls to compose independent checks; independent checks should be composed in Reconcile methods.
+- If checks are meaningfully independent and will be used separately, they **SHOULD** be split into separate `is*UpToDate` helpers and composed in Reconcile methods (not inside the helper).
+
+---
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- IsUpToDateReconcileHelpers **MUST NOT** create a `reconcile/flow` phase (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- IsUpToDateReconcileHelpers **MUST NOT** return `flow.Outcome` (they are pure checks).
+  - If you need flow control (requeue, done, fail), keep it in the caller and/or use other helper categories (e.g., compute/ensure/patch).
+
+---
+
+## Error handling (SHOULD)
+
+- IsUpToDateReconcileHelpers should be designed to be non-failing (pure checks).
+  - If an error is realistically possible, prefer handling it in a ComputeReconcileHelper (or in the caller) and pass only validated/normalized inputs to `is*UpToDate`.
+- Do **not** log and also return a “failure signal” for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define ALLOW / DENY cheat sheet for IsUpToDateReconcileHelper.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+TODO: define common anti-patterns for IsUpToDateReconcileHelper.

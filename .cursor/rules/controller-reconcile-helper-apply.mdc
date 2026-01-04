@@ -1,0 +1,176 @@
+---
+description: Controller reconciliation helpers — ApplyReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# ApplyReconcileHelper
+
+This document defines naming and contracts for **ApplyReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: define TL;DR for ApplyReconcileHelper.
+
+---
+
+## Definition (MUST)
+
+An **ApplyReconcileHelper** (“apply helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- applies a previously computed **desired value** to the in-memory object, and
+- mutates **exactly one patch domain** in place (main resource **or** status subresource), without executing any patch request.
+
+Typical apply helpers perform the “mechanical write” step right after Reconcile methods create a patch base and right before they patch that domain.
+
+---
+
+## Naming (MUST)
+
+- An **ApplyReconcileHelper** name **MUST** start with `apply` / `Apply`.
+- ApplyReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible:
+  - `applyMain*` / `ApplyMain*` (main resource)
+  - `applyStatus*` / `ApplyStatus*` (status subresource)
+- For main-domain ApplyReconcileHelpers, the name **MUST** also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
+
+Guidance (SHOULD):
+- Name the desired artifact being applied:
+  - `applyDesiredLabels(obj, desiredLabels)`
+  - `applyDesiredSpecFoo(obj, desiredFoo)`
+  - `applyDesiredStatus(obj, desired)`
+  - `applyDesiredConditions(obj, desiredConditions)`
+- Avoid names that sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and purity.
+
+### Simple apply (SHOULD)
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo)
+```
+
+Or, if an error is realistically possible:
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) error
+```
+
+---
+
+## Receivers (MUST)
+
+- ApplyReconcileHelpers **MUST** be plain functions (no `Reconciler` receiver).
+
+---
+
+## I/O boundaries (MUST)
+
+ApplyReconcileHelpers **MUST NOT** do any of the following:
+
+- controller-runtime client usage (`client.Client`, `r.client`, etc.);
+- Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- creating/updating Kubernetes objects in the API server in any form.
+
+ApplyReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads) (except setting `metav1.Condition.LastTransitionTime`, typically indirectly via `obju.SetStatusCondition`);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind.
+
+> Rationale: apply helpers should be deterministic “in-memory write” steps; all API interactions and patch execution belong to Reconcile methods.
+
+---
+
+## Determinism contract (MUST)
+
+An ApplyReconcileHelper **MUST** be deterministic given its explicit inputs and intended mutation domain.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+---
+
+## Read-only contract (MUST)
+
+`apply*` / `Apply*` **MUST** treat all inputs except the target mutation on `obj` as read-only:
+
+- it **MUST NOT** mutate inputs other than `obj` (e.g., `desired`, templates, computed structs);
+- it **MUST** mutate only the intended patch domain on `obj` (main resource **or** status subresource), treating the other domain as read-only;
+- it **MUST NOT** perform in-place modifications through aliases to non-`obj` data.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation (MUST)
+
+- `apply*` / `Apply*` **MUST** mutate `obj` in-place for **exactly one** patch domain:
+  - main resource (**metadata + spec + non-status fields**), **or**
+  - status subresource (`.status`).
+- An ApplyReconcileHelper **MUST NOT** mutate both domains in the same function.
+- If you need to apply desired values to both domains, you **MUST** implement **two** apply helpers and call them separately from Reconcile methods.
+
+✅ Separate apply helpers (GOOD)
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFooMain)
+func applyDesiredFooStatus(obj *v1alpha1.Foo, desired DesiredFooStatus)
+```
+
+❌ Mixed apply (BAD)
+```go
+func applyDesiredFoo(
+    obj *v1alpha1.Foo,
+    desiredMain DesiredFooMain,
+    desiredStatus DesiredFooStatus,
+) {
+    // mutates both spec/metadata and status in one helper
+}
+```
+
+---
+
+## Composition (MUST)
+
+- An ApplyReconcileHelper **MAY** apply multiple related fields in one pass **within a single patch domain**.
+- If applied fields represent one conceptual “desired state”, they **SHOULD** be passed as one `desired` value (small struct) rather than a long parameter list.
+- If applied changes are distinguishable and used independently, they **SHOULD** be split into separate `apply*` helpers and composed in Reconcile methods (not by making apply helpers depend on each other).
+
+---
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- ApplyReconcileHelpers **MUST NOT** create a `reconcile/flow` phase (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- ApplyReconcileHelpers **MUST NOT** return `flow.Outcome` (they are “in-memory write” steps).
+  - If a failure is possible, return `error` and let the caller convert it into `flow.Fail(err)` (or equivalent flow handling).
+
+---
+
+## Error handling (SHOULD)
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define ALLOW / DENY cheat sheet for ApplyReconcileHelper.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+TODO: define common anti-patterns for ApplyReconcileHelper.

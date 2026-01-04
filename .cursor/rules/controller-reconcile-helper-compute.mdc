@@ -1,0 +1,327 @@
+---
+description: Controller reconciliation helpers — ComputeReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# ComputeReconcileHelper
+
+This document defines naming and contracts for **ComputeReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+- `compute*` helpers are **pure, deterministic, non-I/O** computations.
+- They treat `obj` as **read-only** and **MUST NOT** mutate it (including via aliasing of maps/slices).
+- They compute **desired** and/or **actual (derived)** values (and/or derived intermediate values) and return them (or write into explicit `out` args).
+- They **MUST NOT** talk to Kubernetes API, execute patches, or perform any I/O-like work.
+
+---
+
+## Definition (MUST)
+
+A **ComputeReconcileHelper** (“compute helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- performs **computations** from inputs and the current object state, and
+- returns computed results (and optionally an error).
+
+Typical compute helpers compute:
+- **desired state** (`computeDesired*`) and/or
+- **actual (derived) state** (`computeActual*`) and/or
+- intermediate derived values used by later steps.
+
+---
+
+## Naming (MUST)
+
+- A **ComputeReconcileHelper** name **MUST** start with `compute` (unexported) or `Compute` (exported).
+- ComputeReconcileHelpers for desired-state computations **MUST** use the form:
+  - `computeDesired*` / `ComputeDesired*`.
+- ComputeReconcileHelpers for actual-state computations **MUST** use the form:
+  - `computeActual*` / `ComputeActual*`.
+
+Guidance (SHOULD):
+- Use names that communicate the computed artifact:
+  - `computeActualStatus(...)` (ok when actual status is small; otherwise prefer artifact-specific)
+  - `computeActualLabels(...)`
+  - `computeActualSpecFoo(...)`
+  - `computeDesiredStatus(...)`
+  - `computeDesiredLabels(...)`
+  - `computeDesiredSpecFoo(...)`
+  - `computeDesiredChildObjects(...)`
+- Avoid “vague” names (`computeStuff`, `computeAll`, `computeData`) — Cursor/code review should understand the intent from the name.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and purity.
+
+### Simple computation (no flow, no logging) (SHOULD)
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) (DesiredFoo, error)
+```
+
+Or, if no error is realistically possible:
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo
+```
+
+Or, for actual-state computations:
+```go
+func computeActualFoo(obj *v1alpha1.Foo) (ActualFoo, error)
+```
+
+Or, if no error is realistically possible:
+```go
+func computeActualFoo(obj *v1alpha1.Foo) ActualFoo
+```
+
+Or, if a compute helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeDesiredFoo(obj *v1alpha1.Foo) (DesiredFoo, error)
+```
+
+Or, if no error is realistically possible:
+```go
+func (r *Reconciler) computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo
+```
+
+Or, for actual-state computations when the helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeActualFoo(obj *v1alpha1.Foo) (ActualFoo, error)
+```
+
+Or, if no error is realistically possible:
+```go
+func (r *Reconciler) computeActualFoo(obj *v1alpha1.Foo) ActualFoo
+```
+
+### Complex compute with flow control (SHOULD)
+Prefer returning `flow.Outcome` and writing to `out`:
+```go
+func computeDesiredFoo(ctx context.Context, obj *v1alpha1.Foo, out *DesiredFoo) flow.Outcome
+```
+
+Or, if a compute helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeDesiredFoo(ctx context.Context, obj *v1alpha1.Foo, out *DesiredFoo) flow.Outcome
+```
+
+Or, for actual-state computations:
+```go
+func computeActualFoo(ctx context.Context, obj *v1alpha1.Foo, out *ActualFoo) flow.Outcome
+```
+
+Or, for actual-state computations when the helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeActualFoo(ctx context.Context, obj *v1alpha1.Foo, out *ActualFoo) flow.Outcome
+```
+
+> This keeps the call site clean and avoids `(flow.Outcome, DesiredFoo, error)` tuples.
+
+### Dependent compute (MUST)
+If a compute helper depends on previous compute output, the dependency **MUST** be explicit and come **after `obj`**:
+```go
+func computeDesiredBar(obj *v1alpha1.Foo, desiredFoo DesiredFoo) (DesiredBar, error)
+```
+
+Or, for actual-state computations:
+```go
+func computeActualBar(obj *v1alpha1.Foo, actualFoo ActualFoo) (ActualBar, error)
+```
+
+Or, if a compute helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeDesiredBar(obj *v1alpha1.Foo, desiredFoo DesiredFoo) (DesiredBar, error)
+```
+
+Or, for actual-state computations when the helper needs data from `Reconciler`:
+```go
+func (r *Reconciler) computeActualBar(obj *v1alpha1.Foo, actualFoo ActualFoo) (ActualBar, error)
+```
+
+---
+
+## Receivers (MUST)
+
+- ComputeReconcileHelpers **SHOULD** be plain functions when they do not need any data from `Reconciler`.
+- If a ComputeReconcileHelper needs data from `Reconciler`, it **MUST** be a method on `Reconciler`.
+
+---
+
+## I/O boundaries (MUST)
+
+ComputeReconcileHelpers **MUST NOT** do any of the following:
+
+- controller-runtime client usage (`client.Client`, `r.client`, etc.);
+- Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- creating/updating Kubernetes objects in the API server in any form.
+
+ComputeReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind.
+
+> Rationale: compute helpers should be deterministic and unit-testable; all observable side effects belong to Apply/Patch/Ensure/etc.
+
+---
+
+## Determinism contract (MUST)
+
+A ComputeReconcileHelper **MUST** be deterministic given its explicit inputs and read-only dependencies.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+In particular, avoid producing “equivalent but different” outputs across runs (e.g., unstable ordering).
+- ComputeReconcileHelpers **MAY** use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, unique ID pools, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
+  - Note: cache population or allocating an ID from a pool is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result **MUST** be the same.
+- If a ComputeReconcileHelper returns `flow.Outcome`, its outcome flags/signals **MUST** be stable for the same inputs and object state.
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+---
+
+## Read-only contract (MUST)
+
+`computeDesired*` / `ComputeDesired*` and `computeActual*` / `ComputeActual*` **MUST** treat all inputs as read-only:
+
+- it **MUST NOT** mutate any input values (including `obj` and any computed dependencies passed after `obj`);
+- it **MUST NOT** perform in-place modifications through aliases.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- If a ComputeReconcileHelper has complex logic, produces many logs, or calls other helpers, it **SHOULD** create a `reconcile/flow` phase to keep execution/logging structured.
+  - If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
+- If a ComputeReconcileHelper returns `flow.Outcome`, it **MUST** use helpers from `internal/reconciliation/flow`:
+  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+
+### Returning results when using `flow.Outcome` (MAY)
+
+If a ComputeReconcileHelper returns `flow.Outcome`, it **MAY** write its computed result into an explicit output argument passed by pointer (e.g. `*DesiredState` / `*ActualState`) instead of returning that result as an additional return value.
+
+- It **MUST NOT** write the result into `obj`.
+
+Example pattern (illustrative):
+```go
+func (r *Reconciler) computeDesiredX(ctx context.Context, obj *v1alpha1.X, out *DesiredX) flow.Outcome {
+    if out == nil {
+        return flow.Fail(fmt.Errorf("out is nil"))
+    }
+
+    // compute into *out (pure)
+    *out = DesiredX{ /* ... */ }
+
+    return flow.Continue()
+}
+```
+
+---
+
+## Patch-domain separation (MUST)
+
+- `computeDesired*` / `ComputeDesired*` and `computeActual*` / `ComputeActual*` **MAY** analyze **both** patch domains (main and status).
+- If a `computeDesired*` helper derives **desired** values for **both** domains (main + status), and those desired values will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (main + status), not a single “mixed” struct.
+- If a `computeActual*` helper derives actual (derived) values that are used only as intermediate inputs for other compute helpers, it **MAY** return them in any shape that is convenient for that internal composition (including a single struct).
+
+✅ Separate desired values (GOOD)
+```go
+func (r *Reconciler) computeDesiredX(obj *v1alpha1.X) (desiredMain DesiredLabels, desiredStatus DesiredXStatus, err error)
+```
+
+❌ Mixed (BAD)
+```go
+func (r *Reconciler) computeDesiredX(obj *v1alpha1.X) (desired MixedDesiredX, err error) // main+status intermingled
+```
+
+Notes (SHOULD):
+- “Main” typically includes metadata/spec of the root object and/or child objects (desired or actual, depending on the helper).
+- “Status” typically includes conditions, observed generation, and other status-only values (desired or actual, depending on the helper).
+
+---
+
+## Composition (MUST)
+
+- A ComputeReconcileHelper **MAY** compute multiple related outputs (desired and/or actual) in one pass.
+  - If these outputs are **not distinguishable for external code** (they represent one conceptual “state”), it **SHOULD** return them as **one object** (small struct, anonymous struct, slice/map).
+  - If these outputs **are distinguishable for external code** (they are meaningfully different and will be used independently), it **SHOULD** return them as **separate objects**.
+- A `computeDesired*` / `ComputeDesired*` helper **MAY** call other `computeDesired*` and `computeActual*` helpers (pure composition).
+- A `computeActual*` / `ComputeActual*` helper **MAY** call other `computeActual*` helpers only (pure composition).
+- A ComputeReconcileHelper **MAY** depend on outputs of previous compute helpers:
+  - the dependency **MUST** be explicit in the signature as additional args **after `obj`**.
+
+---
+
+## Error handling (SHOULD)
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+  - If a ComputeReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- reading any fields from `obj` (spec/status/metadata) **as read-only input**;
+- building desired/actual values **from scratch** (new structs, new slices/maps);
+- calling other compute helpers (pure composition);
+- calling small pure utilities (string formatting, sorting, validating inputs);
+- allocating and returning data structures needed by later reconcile steps.
+
+**DENY (MUST NOT):**
+- mutating `obj` (spec/status/metadata; labels/annotations/finalizers/conditions);
+- mutating any `map`/`slice` that aliases memory from `obj`;
+- returning pointers/references to internal fields of `obj` that callers might later mutate;
+- any k8s API I/O (directly or indirectly);
+- patch execution or patch strategy decisions.
+
+**ALLOW (MAY):**
+- using extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, unique ID pools, caches), as described in `controller-file-structure.mdc` (“Additional components”).
+  - Such components **MUST** remain pure (no Kubernetes API calls, no patches, no `DeepCopy`, no time/random/env I/O) and **MUST NOT** hide I/O inside themselves.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+❌ Doing any API I/O in compute:
+```go
+func (r *Reconciler) computeDesiredFoo(ctx context.Context, obj *v1alpha1.Foo) (DesiredFoo, error) {
+    var cm corev1.ConfigMap
+    _ = r.client.Get(ctx, nn, &cm) // forbidden: I/O in compute
+    // ...
+}
+```
+
+❌ Mutating `obj`:
+```go
+func (r *Reconciler) computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    obj.Spec.Replicas = 3 // forbidden: compute must not mutate obj
+    return DesiredFoo{}
+}
+```
+
+❌ Using `DeepCopy` as a shortcut:
+```go
+desired := obj.DeepCopy() // forbidden in compute helpers
+```
+
+❌ Nondeterministic output:
+```go
+id := uuid.NewString() // forbidden: nondeterministic
+ts := time.Now()       // forbidden: nondeterministic
+```

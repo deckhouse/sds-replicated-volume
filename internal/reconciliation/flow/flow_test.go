@@ -183,6 +183,39 @@ func TestOutcome_Error(t *testing.T) {
 	}
 }
 
+func TestOutcome_Errorf_IsNoOpWhenNil(t *testing.T) {
+	out := flow.Continue().Errorf("hello %s %d", "a", 1)
+	if out.Error() != nil {
+		t.Fatalf("expected Error() to stay nil, got %v", out.Error())
+	}
+}
+
+func TestOutcome_Errorf_WrapsExistingError(t *testing.T) {
+	base := errors.New("base")
+
+	out := flow.ContinueErr(base).Errorf("ctx %s", "x")
+	if out.Error() == nil {
+		t.Fatalf("expected Error() to be non-nil")
+	}
+	if !errors.Is(out.Error(), base) {
+		t.Fatalf("expected errors.Is(out.Error(), base) == true; err=%v", out.Error())
+	}
+	if got := out.Error().Error(); !strings.Contains(got, "ctx x") {
+		t.Fatalf("expected wrapped error to contain formatted prefix; got %q", got)
+	}
+}
+
+func TestOutcome_Errorf_DoesNotAlterReturnDecision(t *testing.T) {
+	out := flow.RequeueAfter(1 * time.Second).Errorf("x")
+	if !out.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
+	}
+	res, _ := out.MustToCtrl()
+	if res.RequeueAfter != 1*time.Second {
+		t.Fatalf("expected RequeueAfter to be preserved, got %v", res.RequeueAfter)
+	}
+}
+
 func TestOutcome_RequireOptimisticLock_PanicsWithoutChangeReported(t *testing.T) {
 	mustPanic(t, func() { _ = flow.Continue().RequireOptimisticLock() })
 }

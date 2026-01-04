@@ -1,0 +1,169 @@
+---
+description: Controller reconciliation helpers — CreateReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# CreateReconcileHelper
+
+This document defines naming and contracts for **CreateReconcileHelper** functions/methods.
+
+Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: define TL;DR for CreateReconcileHelper.
+
+---
+
+## Definition (MUST)
+
+A **CreateReconcileHelper** (“create helper”) is a **ReconcileHelper** that is:
+
+- **allowed to perform I/O**, and
+- creates exactly **one** Kubernetes object via the API, and
+- returns the created object in its final state (and optionally an error).
+
+Typical create helpers are used for child resources to encapsulate the mechanical create call and ensure the caller-visible object instance reflects server-assigned fields (e.g., `resourceVersion`, defaults).
+
+---
+
+## Naming (MUST)
+
+- A **CreateReconcileHelper** name **MUST** start with `create` / `Create`.
+- CreateReconcileHelpers for Kubernetes objects **MUST** use the form:
+  - `create<Kind>` / `Create<Kind>`.
+
+Guidance (SHOULD):
+- `<Kind>` MUST correspond to the Kubernetes object kind being created.
+- A short kind name is allowed, if it is already established in the codebase.
+- Examples:
+  - `createCM(...)` (or `createConfigMap(...)`)
+  - `createSVC(...)` (or `createService(...)`)
+  - `createSKN(...)` (or `createSomeKindName(...)`)
+- Avoid names that imply orchestration or existence checks (`ensureCreated`, `reconcileCreate`, `createIfNeeded`) — branching and policy belong to Reconcile methods.
+
+---
+
+## Preferred signatures (SHOULD)
+
+Choose the simplest signature that preserves explicit dependencies and a single-API-call scope.
+
+### Simple create (SHOULD)
+```go
+func (r *Reconciler) createSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+) flow.Outcome
+```
+
+Or, if `flow.Outcome` is intentionally not used:
+```go
+func (r *Reconciler) createSKN(
+    ctx context.Context,
+    obj *v1alpha1.SomeKindName,
+) error
+```
+
+---
+
+## Receivers (MUST)
+
+- CreateReconcileHelpers **MUST** be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
+
+---
+
+## I/O boundaries (MUST)
+
+CreateReconcileHelpers **MAY** do the following:
+
+- controller-runtime client usage to execute exactly **one** Kubernetes API call: `Create(...)`.
+
+CreateReconcileHelpers **MUST NOT** do any of the following:
+
+- Kubernetes API calls other than that single `Create(...)` (no `Get/List/Update/Patch/Delete`);
+- `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
+- executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
+- performing any other I/O besides the single Kubernetes API request they own.
+
+CreateReconcileHelpers **MUST NOT** do “hidden I/O” either:
+
+- `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
+- random number generation (`rand.*`);
+- environment reads (`os.Getenv`, reading files);
+- network calls of any kind **other than** the single Kubernetes API request they own.
+
+> Rationale: create helpers are mechanical wrappers around exactly one create operation; ordering, retries, and higher-level policy remain explicit in Reconcile methods.
+
+---
+
+## Determinism contract (MUST)
+
+A CreateReconcileHelper **MUST** be deterministic in everything it controls.
+
+In particular:
+- The request payload it sends **MUST** be deterministic given explicit inputs (no random names, UUIDs, timestamps, or unstable ordering).
+- See the common determinism contract in `controller-reconcile-helper.mdc` (ordering stability, no map iteration order reliance).
+- CreateReconcileHelpers **MUST NOT** introduce “hidden I/O” (time, random, env, extra network calls) beyond the single Kubernetes API `Create(...)` request they own.
+
+> Practical reason: nondeterminism creates hard-to-debug drift and flaky tests; create should be a mechanical operation.
+
+---
+
+## Read-only contract (MUST)
+
+`create<Kind>` / `Create<Kind>` **MUST** treat all inputs except the created object as read-only:
+
+- it **MUST NOT** mutate any input objects other than the object being created;
+- it **MUST NOT** mutate shared templates/defaults through aliasing (clone before editing);
+- it **MUST NOT** perform in-place modifications through aliases to non-created-object data.
+
+See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
+
+---
+
+## Patch-domain separation (MUST)
+
+- A CreateReconcileHelper **MUST** perform exactly one API write: `Create(...)` for the **main resource**.
+- It **MUST NOT** write the status subresource as part of creation:
+  - it **MUST NOT** issue `Status().Patch(...)` / `Status().Update(...)`;
+  - it **MUST NOT** rely on setting `.status` in the create request.
+- If initial status must be set, it **MUST** be done by Reconcile methods as a **separate** status write (separate request).
+
+## Composition (MUST)
+
+- A CreateReconcileHelper **MUST** perform exactly one API write (`Create(...)`) for exactly one object.
+- A CreateReconcileHelper **MAY** rely on pure helpers (compute/apply/ensure) to prepare the object **in-memory** before calling `Create(...)`, but it **MUST NOT** perform any additional API calls.
+- If creating an object requires multiple API writes (e.g., create main resource and then write status), those writes **MUST** be composed in Reconcile methods as separate operations, not hidden inside the create helper.
+- If multiple objects must be created (loops, groups, fan-out), that orchestration **MUST** live in Reconcile methods; create helpers must remain single-object.
+
+## Flow phases and `flow.Outcome` (MUST)
+
+- CreateReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
+- If a CreateReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+  - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+
+---
+
+## Error handling (SHOULD)
+
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
+  - If a CreateReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define ALLOW / DENY cheat sheet for CreateReconcileHelper.
+
+---
+
+## Common anti-patterns (MUST NOT)
+
+TODO: define common anti-patterns for CreateReconcileHelper.

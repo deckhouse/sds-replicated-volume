@@ -1,0 +1,147 @@
+---
+description: Controller reconciliation helpers — common rules
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
+---
+
+# ReconcileHelper functions/methods
+
+This document defines naming and contracts for **ReconcileHelper** functions/methods.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
+## TL;DR (MUST)
+
+TODO: add common TL;DR for ReconcileHelper categories.
+
+---
+
+## Terminology (MUST)
+
+- **Reconcile methods**: the controller-runtime `Reconcile(...)` method and any other function/method whose name matches `reconcile*` / `Reconcile*` (see `controller-file-structure.mdc`).
+- **ReconcileHelper functions/methods**: any helper function/method used by **Reconcile methods**, implemented in `reconciler.go`, whose name matches one of the **ReconcileHelper categories** below.
+  - When referring to *any* helper from these categories, use **ReconcileHelper**.
+  - When referring to a *specific kind* of helper, use the corresponding category name below.
+
+### ReconcileHelper categories (MUST)
+
+These categories are naming categories/patterns (see also `controller-file-structure.mdc`):
+
+- **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`).
+- **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`).
+- **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`).
+- **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`).
+- **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`).
+- **DeleteReconcileHelper**: `delete*` / `Delete*` (see `controller-reconcile-helper-delete.mdc`).
+- **PatchReconcileHelper**: `patch*` / `Patch*` (see `controller-reconcile-helper-patch.mdc`).
+
+---
+
+## Scope (MUST)
+
+This document defines **common** conventions for all ReconcileHelper categories.
+
+Category-specific conventions are defined in dedicated documents referenced in **“ReconcileHelper categories (MUST)”** above.
+
+---
+
+## Any ReconcileHelper
+
+### Signatures (MUST)
+
+- If a ReconcileHelper creates a reconcile/flow phase or writes logs, it **MUST** accept `ctx context.Context`.
+- A function operating on a Kubernetes object **MUST** take a pointer to the root object as:
+  - the **first argument** if the function does not accept `ctx`;
+  - the **first argument after `ctx`** if the function accepts `ctx`.
+  (root object = the full API object (`*<Kind>`), not `Spec`/`Status` or other sub-structs)
+- Additional inputs (computed flags, outputs of previous compute steps) **MUST** appear **after `obj`** to keep dependencies explicit.
+- If a ReconcileHelper returns `flow.Outcome`, it **MUST** be the **first return value**.
+  - It **SHOULD** be the only return value for convenience, unless additional return values are clearly justified.
+
+### Visibility and receivers (SHOULD)
+
+- ReconcileHelpers **SHOULD** be unexported (private) by default. Export a ReconcileHelper only with an explicit, documented reason.
+- ReconcileHelpers **SHOULD** be plain functions when they do not need any data from `Reconciler`.
+  - If a ReconcileHelper needs data from `Reconciler`, it **SHOULD** be a method on `Reconciler`.
+
+### Naming (MUST)
+
+- If a ReconcileHelper name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`), `<Kind>` **MAY** be either:
+  - a short, codebase-established name (preferred in examples), or
+  - the full kind name.
+- If a short kind name is used, it **MUST** be an established name in this codebase (do not invent new abbreviations ad-hoc).
+  - Examples: `createSKN(...)` (or `createSomeKindName(...)`), `patchSKN(...)` (or `patchSomeKindName(...)`).
+
+### Determinism contract (MUST)
+
+Any ReconcileHelper **MUST** be deterministic given its explicit inputs and allowed mutations / I/O boundaries.
+
+In particular:
+- Never rely on map iteration order: if output order matters, **MUST** sort it.
+- If you build ordered slices from maps/sets (finalizers/ownerRefs/conditions/etc.), **MUST** make ordering stable (`slices.Sort`, sort by key, etc.).
+- Avoid producing “equivalent but different” object states or intermediate representations across runs (e.g., writing the same elements in different order).
+
+> Practical reason: nondeterminism creates patch churn and flaky tests.
+
+### Read-only contract (MUST)
+
+Any ReconcileHelper **MUST** treat all inputs except explicitly allowed mutation targets as read-only.
+
+In particular:
+- It **MUST NOT** mutate inputs other than the allowed mutation target(s).
+- It **MUST NOT** perform in-place modifications through aliases to read-only inputs.
+
+**Important Go aliasing rule (MUST):**
+- `map` / `[]T` values are reference-like. If you copy them from a read-only input and then mutate them, you may be mutating the original input through aliasing.
+- Therefore, if you need to modify a map/slice derived from a read-only input, you **MUST** clone/copy it first.
+
+Examples (illustrative):
+
+✅ GOOD: clone before normalizing/editing (derived from `obj`)
+```go
+labels := maps.Clone(obj.GetLabels())
+labels["some/ephemeral"] = "" // edit on a clone
+```
+
+❌ BAD: mutates input through alias
+```go
+labels := obj.GetLabels()
+labels["some/ephemeral"] = "" // mutates obj
+```
+
+✅ GOOD: clone slice before editing
+```go
+in := obj.Spec.SomeSlice
+out := slices.Clone(in) // or append([]T(nil), in...)
+out = append(out, "new")
+```
+
+✅ GOOD: clone desired map before setting on `obj`
+```go
+labels := maps.Clone(desired.Labels)
+obj.SetLabels(labels)
+```
+
+❌ BAD: shares map with desired (and future edits may mutate desired)
+```go
+obj.SetLabels(desired.Labels) // aliasing
+```
+
+Note: the same cloning rule applies to any other read-only inputs (e.g., shared templates/dependencies or patch bases).
+
+### Error handling (SHOULD)
+
+- Prefer returning domain-specific errors with enough context to debug:
+  - include object key when relevant (`namespace/name`), and
+  - include the problematic field or constraint.
+- Do **not** log and also return an error for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+TODO: define common ALLOW / DENY cheat sheet for ReconcileHelpers.
+
