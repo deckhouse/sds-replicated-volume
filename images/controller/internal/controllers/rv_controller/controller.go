@@ -55,18 +55,34 @@ func BuildController(mgr manager.Manager) error {
 			builder.WithPredicates(
 				predicate.Funcs{
 					UpdateFunc: func(e event.TypedUpdateEvent[client.Object]) bool {
-						oldRV, okOld := e.ObjectOld.(*v1alpha1.ReplicatedVolume)
-						newRV, okNew := e.ObjectNew.(*v1alpha1.ReplicatedVolume)
-						if !okOld || !okNew || oldRV == nil || newRV == nil {
-							// Be conservative: if we can't type-assert, allow reconcile.
+						if e.ObjectNew == nil || e.ObjectOld == nil {
 							return true
 						}
 
-						// Trigger reconcile if storage class label is not in sync.
-						if !newRV.IsStorageClassLabelInSync() {
+						// If reconciliation uses status.conditions (or any generation-driven logic),
+						// react to generation changes for spec-driven updates.
+						if e.ObjectNew.GetGeneration() != e.ObjectOld.GetGeneration() {
 							return true
 						}
 
+						// If RV deletion started, reconcile to execute finalization paths (metadata-only updates don't bump generation).
+						oldDT := e.ObjectOld.GetDeletionTimestamp()
+						newDT := e.ObjectNew.GetDeletionTimestamp()
+						if (oldDT == nil) != (newDT == nil) {
+							return true
+						}
+
+						// The controller enforces this label to match spec.replicatedStorageClassName.
+						// Metadata-only updates don't bump generation, so react to changes of this single label key.
+						oldLabels := e.ObjectOld.GetLabels()
+						newLabels := e.ObjectNew.GetLabels()
+						oldV, oldOK := oldLabels[v1alpha1.ReplicatedStorageClassLabelKey]
+						newV, newOK := newLabels[v1alpha1.ReplicatedStorageClassLabelKey]
+						if oldOK != newOK || oldV != newV {
+							return true
+						}
+
+						// Ignore pure status updates to avoid reconcile loops.
 						return false
 					},
 				},
