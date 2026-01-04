@@ -20,6 +20,7 @@ alwaysApply: true
   - Do NOT implement a move as "create new file + delete old file".
 
 - Git commit messages (MUST):
+  - When the user asks you to generate a commit message, ALWAYS output the commit message in a copy-friendly code block.
   - When the user asks you to generate a commit message, ALWAYS remind about sign-off as plain text AFTER the commit message (do NOT put the reminder inside the commit message body). Prefer: `Don't forget to sign off` and suggest `git commit -s`.
   - Use English for commit messages.
   - Prefer prefixing the subject with a component in square brackets, e.g. `[controller] Fix ...`, `[api] Add ...`.
