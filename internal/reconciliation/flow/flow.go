@@ -28,11 +28,77 @@ func Wrapf(err error, format string, args ...any) error {
 
 // Outcome bundles a reconcile return decision and an optional error.
 //
-// If result is nil, the caller should continue executing the current reconciliation flow
-// (i.e. do not return from Reconcile yet).
+// If the outcome does not request a controller-runtime return decision, the caller should continue
+// executing the current reconciliation flow (i.e. do not return from Reconcile yet).
+//
+// Outcome may also carry metadata about whether function modified the target object and whether
+// the save operation (if any) should use optimistic lock semantics (e.g. Patch/Update with a
+// resourceVersion precondition).
 type Outcome struct {
-	result *ctrl.Result
-	err    error
+	result      *ctrl.Result
+	err         error
+	changeState changeState
+
+	// changeReported is a developer-safety flag used to validate correct Outcome usage.
+	// It is not a semantic part of the reconcile result; it exists only to enforce the contract
+	// between helpers (RequireOptimisticLock must be used only after ReportChanged/ReportChangedIf).
+	changeReported bool
+}
+
+// changeState is an internal encoding for Outcome change tracking.
+// Values are ordered by "strength": unchanged < changed < changed+optimistic-lock.
+type changeState uint8
+
+const (
+	unchangedState changeState = iota
+	changedState
+	changedAndOptimisticLockRequiredState
+)
+
+// DidChange reports whether function modified the target object.
+func (o Outcome) DidChange() bool { return o.changeState >= changedState }
+
+// OptimisticLockRequired reports whether saving the reported change must use optimistic lock semantics
+// (e.g. Patch/Update with a resourceVersion precondition).
+func (o Outcome) OptimisticLockRequired() bool {
+	return o.changeState >= changedAndOptimisticLockRequiredState
+}
+
+// Error returns the error carried by the outcome, if any.
+func (o Outcome) Error() error { return o.err }
+
+// ReportChanged returns a copy of Outcome that records a change to the target object.
+// It does not alter the reconcile return decision (continue/done/requeue) or the error.
+func (o Outcome) ReportChanged() Outcome {
+	o.changeReported = true
+	if o.changeState == unchangedState {
+		o.changeState = changedState
+	}
+	return o
+}
+
+// ReportChangedIf is like ReportChanged, but it records a change only when cond is true.
+// It does not alter the reconcile return decision (continue/done/requeue) or the error.
+func (o Outcome) ReportChangedIf(cond bool) Outcome {
+	o.changeReported = true
+	if cond && o.changeState == unchangedState {
+		o.changeState = changedState
+	}
+	return o
+}
+
+// RequireOptimisticLock returns a copy of Outcome upgraded to require optimistic locking for patching.
+//
+// Contract: it must be called only after a change has been reported via ReportChanged/ReportChangedIf;
+// otherwise it panics (developer error).
+func (o Outcome) RequireOptimisticLock() Outcome {
+	if !o.changeReported {
+		panic("flow.Outcome: RequireOptimisticLock called before ReportChanged/ReportChangedIf")
+	}
+	if o.changeState == changedState {
+		o.changeState = changedAndOptimisticLockRequiredState
+	}
+	return o
 }
 
 // ShouldReturn reports whether the Outcome indicates an early return from Reconcile.
@@ -133,6 +199,9 @@ func RequeueAfter(dur time.Duration) Outcome {
 //
 // Rules:
 //   - Errors are joined via errors.Join (nil values are ignored).
+//   - Change tracking is aggregated by taking the "strongest" state:
+//     if any input reports a change, the merged outcome reports a change too;
+//     if any input reports a change and requires an optimistic lock, the merged outcome requires it as well.
 //   - The decision is chosen by priority:
 //     1) Fail: if there are errors and at least one non-nil Return.
 //     2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter (the smallest wins).
@@ -148,11 +217,19 @@ func Merge(results ...Outcome) Outcome {
 		shouldRequeueAfter bool
 		requeueAfter       time.Duration
 		errs               []error
+		maxChangeState     changeState
+		anyChangeReported  bool
 	)
 
 	for _, r := range results {
 		if r.err != nil {
 			errs = append(errs, r.err)
+		}
+
+		anyChangeReported = anyChangeReported || r.changeReported
+
+		if r.changeState > maxChangeState {
+			maxChangeState = r.changeState
 		}
 
 		if r.result == nil {
@@ -176,24 +253,39 @@ func Merge(results ...Outcome) Outcome {
 
 	// 1) Fail: if there are errors and at least one non-nil Return.
 	if combinedErr != nil && hasReconcileResult {
-		return Fail(combinedErr)
+		out := Fail(combinedErr)
+		out.changeState = maxChangeState
+		out.changeReported = anyChangeReported
+		return out
 	}
 
 	// 2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter.
 	if combinedErr == nil && shouldRequeueAfter {
-		return RequeueAfter(requeueAfter)
+		out := RequeueAfter(requeueAfter)
+		out.changeState = maxChangeState
+		out.changeReported = anyChangeReported
+		return out
 	}
 
 	// 3) Done: if there are no errors, no RequeueAfter requests, and at least one non-nil Return.
 	if combinedErr == nil && hasReconcileResult {
-		return Done()
+		out := Done()
+		out.changeState = maxChangeState
+		out.changeReported = anyChangeReported
+		return out
 	}
 
 	// 4) Continue: otherwise. If errors were present, Err may be non-nil.
 	if combinedErr != nil {
-		return ContinueErr(combinedErr)
+		out := ContinueErr(combinedErr)
+		out.changeState = maxChangeState
+		out.changeReported = anyChangeReported
+		return out
 	}
-	return Continue()
+	out := Continue()
+	out.changeState = maxChangeState
+	out.changeReported = anyChangeReported
+	return out
 }
 
 // mustBeValidPhaseName validates phaseName for logger WithName usage and panics on invalid input.
