@@ -119,6 +119,15 @@ Category-specific conventions are defined in dedicated documents referenced in *
 - If a ReconcileHelper returns `flow.Outcome`, it **MUST** be the **first return value**.
   - It **SHOULD** be the only return value for convenience, unless additional return values are clearly justified.
 
+### Flow phases and `flow.Outcome` (MUST)
+
+- Phase usage (`flow.BeginPhase` / `flow.EndPhase`) is **strictly limited**:
+  - **Large `ensure*`**: **MUST** create a phase.
+    - “Large” includes: many sub-steps, loops over items, and/or non-trivial error handling.
+  - **Large `compute*`**: **MAY** create a phase **only when it improves structure or diagnostics**.
+  - **All other helper categories** (`apply*`, `is*UpToDate*`, `create*`, `delete*`, `patch*`) **MUST NOT** create phases.
+- If a helper uses phases, it **MUST** follow `internal/reconciliation/flow` rules (one phase per function; phase on first line; no phases inside loops).
+
 ### Visibility and receivers (SHOULD)
 
 - ReconcileHelpers **SHOULD** be unexported (private) by default. Export a ReconcileHelper only with an explicit, documented reason.

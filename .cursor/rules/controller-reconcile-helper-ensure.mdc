@@ -245,8 +245,14 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
 
 ## Flow phases and `flow.Outcome` (MUST)
 
-- If an EnsureReconcileHelper has complex logic, produces many logs, or calls other helpers, it **SHOULD** create a `reconcile/flow` phase to keep execution/logging structured.
-  - If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
+- A **large** EnsureReconcileHelper **MUST** create a `reconcile/flow` phase (`flow.BeginPhase` / `flow.EndPhase`).
+  - “Large” includes any EnsureReconcileHelper that:
+    - has many sub-steps, or
+    - **loops over items**, or
+    - handles errors (non-trivial error handling / many failure branches).
+  - The phase MUST cover the whole function (one phase per function); phases MUST NOT be started inside loops. Follow `internal/reconciliation/flow` phase placement rules.
+- A **small** EnsureReconcileHelper **MUST NOT** create a `reconcile/flow` phase (keep it small and mechanical; let the caller add error boundaries via `OnErrorf`).
+- If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
 - EnsureReconcileHelpers **MUST** return `flow.Outcome` using helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
   - Use outcome reporting (e.g., “changed” / optimistic-lock intent) via the `flow.Outcome` API.

@@ -8,7 +8,7 @@ alwaysApply: true
 # Controller reconciliation orchestration (Reconcile methods)
 
 This document complements `controller-reconcile-helper*.mdc` and defines rules that are **owned by Reconcile methods**
-(orchestration layer) rather than by individual ReconcileHelper categories.
+(the orchestration layer), not by helper categories and not by `internal/reconciliation/flow` usage.
 
 Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
@@ -16,7 +16,8 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## Terminology (MUST)
 
-> Terms like “main resource”, “status subresource”, and patch-domain boundaries are defined in `controller-reconcile-helper*.mdc`.
+> Terms like “main resource”, “status subresource”, and patch-domain boundaries are defined in
+> `controller-reconcile-helper*.mdc`.
 > This document defines only orchestration-specific terminology.
 
 - **Reconcile method**: any function/method named `Reconcile*` / `reconcile*` that orchestrates reconciliation
@@ -47,15 +48,18 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
   Example (required format):
   - `// Reconcile pattern: Conditional desired evaluation`
 
-### Patch sequencing decisions live in Reconcile methods (MUST)
+---
+
+## Patch sequencing policy (MUST)
 
 Reconcile methods **MUST** be the only place that decides:
+
 - whether a patch request is needed;
 - the order of multiple patch requests (including main vs status sequencing);
-- how to aggregate outcomes/errors across multiple sub-steps;
-- where to place child reconciliation calls relative to patching.
+- how outcomes/errors from multiple sub-steps are aggregated;
+- where child reconciliation calls are placed relative to patching.
 
-(Actual single-call API writes may be delegated to single-call I/O helpers; the sequencing policy still lives here.)
+Single-call API writes may be delegated to helpers, but **the sequencing policy lives here**.
 
 ---
 
@@ -63,24 +67,28 @@ Reconcile methods **MUST** be the only place that decides:
 
 ### DeepCopy is per patch request (MUST)
 
-- For every patch request, the Reconcile method **MUST** create **exactly one** patch base via `obj.DeepCopy()`
-  **immediately before** that patch request.
+- For every patch request, the Reconcile method **MUST** create **exactly one**
+  patch base via `obj.DeepCopy()` **immediately before** that patch request.
 - The patch base variable name **MUST** be `base`.
 
 If a Reconcile method performs multiple patch requests:
+
 - it **MUST** create multiple `base` objects (one per patch request);
 - each `base` **MUST** be taken from the object state **immediately before** that specific patch;
 - after patch #1 updates the object, patch #2 **MUST** take `base` from the updated object
   to preserve correct diff and `resourceVersion`.
 
 Go note (no extra lexical scopes required):
-- declare once and reassign right before each patch:
-  - `var base *ObjT`
-  - `base = obj.DeepCopy()` (immediately before each patch)
+
+```go
+var base *ObjT
+base = obj.DeepCopy() // immediately before each patch
+```
 
 ### `base` is a read-only diff reference (MUST)
 
-- Reconcile methods **MUST NOT** mutate `base` (directly or through map/slice aliasing).
+- Reconcile methods **MUST NOT** mutate `base`
+  (directly or through map/slice aliasing).
 
 ---
 
@@ -88,78 +96,26 @@ Go note (no extra lexical scopes required):
 
 ### Lists MUST be reconciled via pointers to list items (MUST)
 
-When reconciling objects from a `List`, you **MUST** take pointers to the actual list elements:
+When reconciling objects from a `List`, you **MUST** take pointers to the actual list elements.
 
 GOOD:
+```go
 for i := range list.Items {
     obj := &list.Items[i]
 }
+```
 
 BAD:
+```go
 for _, obj := range list.Items {
 }
+```
 
 ### Local slices after Create/Patch (MUST)
 
 If a Reconcile method creates objects and keeps a local slice/list for subsequent logic,
 it **MUST** append/insert the created objects in their final in-memory state
-(including updated `resourceVersion`, defaults, generated fields).
-
----
-
-## Phases (`internal/reconciliation/flow`) (MUST)
-
-### Root phase (MUST)
-
-- Every top-level controller-runtime `Reconcile(...)` **MUST** start with `flow.Begin(ctx)`
-  and then use the logger carried in the returned context.
-
-### Every non-root Reconcile method starts a phase (MUST)
-
-- Any Reconcile method other than the top-level `Reconcile(...)` entrypoint
-  **MUST** begin with `flow.BeginPhase(...)`.
-
-### Sub-steps and phase boundaries (MUST/SHOULD)
-
-- Most Reconcile methods **SHOULD** use a single phase.
-- If decomposed into multiple sub-steps, each sub-step **MUST** start with
-  `flow.BeginPhase(ctx, "<phaseName>", ...)` and use the returned `ctx`.
-
-### Phase naming (MUST)
-
-`phaseName` **MUST**:
-- be non-empty;
-- contain no spaces or control characters;
-- optionally use `/` for nesting (no empty segments, no trailing slash);
-- use only ASCII letters, digits, `.`, `_`, `-`.
-
-### Return style & aggregation (MUST)
-
-- Sub-steps **SHOULD** return `flow.Outcome`:
-  - `flow.Continue()`
-  - `flow.ContinueErr(err)` / `flow.ContinueErrf(err, ...)`
-  - `flow.Done()`
-  - `flow.Fail(err)` / `flow.Failf(err, ...)`
-  - `flow.RequeueAfter(d)`
-- Aggregation **MUST** use `flow.Merge(...)`:
-  - errors joined via `errors.Join`;
-  - minimum delay chosen from multiple `RequeueAfter`.
-- Top-level `Reconcile(...)` **MUST** return `outcome.ToCtrl()`.
-
----
-
-## Logger & context passing conventions (MUST)
-
-- Logger **MUST** be carried in `ctx`.
-- Functions that log **MUST** accept `ctx context.Context`.
-- Do **NOT** pass a logger separately.
-- Logger variable name **MUST** be `l`.
-- Standard extraction:
-  - `l := log.FromContext(ctx)`
-- If a phase is started, use the returned `ctx`.
-
-- `ctx` argument position:
-  - if present, it **MUST** be the first argument.
+(including updated `resourceVersion`, defaults, and generated fields).
 
 ---
 
@@ -193,10 +149,12 @@ Default declarative style; avoids `DeepCopy` when no patch is needed.
 ## Mixing patterns (FORBIDDEN) (MUST)
 
 Forbidden within one Reconcile method:
+
 - main uses Pattern 3, status uses Pattern 1;
 - main uses Pattern 2, status uses Pattern 3.
 
 Allowed:
+
 - same pattern for all domains;
 - split into multiple Reconcile methods, each with its own pattern.
 
@@ -216,43 +174,37 @@ Allowed:
 ## Business logic failures & requeue policy (MUST)
 
 - Business-logic blocking conditions **MUST** return an error.
-- Exception: if unblocked by watched resources, `flow.Done()` is acceptable.
+- Exception: if unblocked by watched resources, returning “done / no-op” is acceptable.
 - If unblocked by **unwatched** events:
   - return an error, or
-  - use `flow.RequeueAfter(d)` only with clear justification and status.
+  - requeue only with clear justification and visible status signal.
 
 ---
 
 ## Error wrapping & context (MUST)
 
 - Errors propagated upward **MUST** be wrapped with context.
-- Prefer `flow.Failf` / `flow.ContinueErrf`.
-- Include action (and, when helpful, the orchestration step / phase).
-- Do NOT include the primary reconcile object's identity (`name`/`namespace`) or controller identity in the error string:
-  - controller-runtime logger already carries `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace` (when namespaced), and `reconcileID`.
-  - duplicating them in errors is redundant noise.
-- Context-free errors are forbidden.
+- Errors **MUST** describe:
+  - what action failed,
+  - at what orchestration step / responsibility boundary.
 
-### Error context layering (MUST)
+### Error identity rules (MUST)
 
-- Reconcile methods are responsible for enriching errors for the “outside world”:
-  - include **what we were doing** (action),
-  - include **where** we were in orchestration (phase / sub-step).
-  - do **not** repeat controller-runtime logger identity fields in the error string:
-    - `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace` (when namespaced), `reconcileID`.
-- If you need to mention identity, mention only identities that are **not** present in the logger context (e.g., names of secondary/child objects, external IDs), and only when it materially improves debuggability.
-- If reconciliation work (or a failing API call) targets **secondary/child/additional resources**, you MUST include that resource identity in the error (e.g., `namespace/name`, or `name` for cluster-scoped resources).
-  - Rationale: controller-runtime logger identity fields refer to the **primary** reconcile object only; secondary/child identities are not present unless you add them.
-- Reconcile methods MUST treat helper errors as **internal building blocks**:
-  - wrap them at the boundary (Reconcile method) when returning them upward,
-  - do not require helpers to be “globally understandable”.
+- Do **NOT** include the primary reconcile object identity (`name` / `namespace`)
+  or controller identity in the error string:
+  - controller-runtime logger already carries:
+    `controller`, `controllerGroup`, `controllerKind`,
+    `name`, `namespace` (when namespaced), `reconcileID`.
+- Duplicating them in error strings is forbidden noise.
 
-### Example (illustrative)
+### Secondary / child identities (MUST)
 
-❌ BAD: baking primary reconcile identity into error strings (already present in controller-runtime logger fields)
-```go
-return fmt.Errorf("reconcile %s/%s: computeDesiredFoo: %w", obj.GetNamespace(), obj.GetName(), err)
-```
+- If reconciliation targets **secondary / child resources**,
+  you **MUST** include that resource identity in the error
+  (`namespace/name` or `name` for cluster-scoped resources).
+
+Rationale:
+- controller-runtime logger identity refers only to the **primary** reconcile object.
 
 ---
 
@@ -267,6 +219,7 @@ return fmt.Errorf("reconcile %s/%s: computeDesiredFoo: %w", obj.GetNamespace(), 
 ## objutilv1 usage (MUST)
 
 All work with:
+
 - labels,
 - annotations,
 - finalizers,
@@ -276,16 +229,3 @@ All work with:
 **MUST** go through `objutilv1`, imported as `obju`.
 
 Manual manipulation is forbidden unless `objutilv1` is extended.
-
----
-
-## Review checklist (MUST)
-
-- Each Reconcile method documents its pattern.
-- No pattern mixing within one Reconcile method.
-- Exactly one `DeepCopy()` per patch request, named `base`.
-- Phases started correctly and `ctx` propagated.
-- List iteration uses pointers.
-- Business-logic blocks return errors unless unblocked by watched events.
-- Errors carry context.
-- Standard metadata only via `objutilv1`.

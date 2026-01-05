@@ -247,7 +247,9 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ## Flow phases and `flow.Outcome` (MUST)
 
-- If a ComputeReconcileHelper has complex logic, produces many logs, or calls other helpers, it **SHOULD** create a `reconcile/flow` phase to keep execution/logging structured.
+- A ComputeReconcileHelper **MUST NOT** create a `reconcile/flow` phase by default.
+- A **large** ComputeReconcileHelper **MAY** create a `reconcile/flow` phase (`flow.BeginPhase` / `flow.EndPhase`) **only when it improves structure or diagnostics**.
+  - Otherwise (small/straightforward compute), it **MUST NOT** create a phase.
   - If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
 - If a ComputeReconcileHelper returns `flow.Outcome`, it **MUST** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
