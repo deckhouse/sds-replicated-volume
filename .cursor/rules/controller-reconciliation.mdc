@@ -1,387 +1,267 @@
 ---
-alwaysApply: false
+description: Controller reconciliation orchestration (Reconcile methods)
+globs:
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+alwaysApply: true
 ---
+
+# Controller reconciliation orchestration (Reconcile methods)
+
+This document complements `controller-reconcile-helper*.mdc` and defines rules that are **owned by Reconcile methods**
+(orchestration layer) rather than by individual ReconcileHelper categories.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+
+---
+
 ## Terminology (MUST)
 
-- **Main resource**: `metadata` + `spec` (and any non-status fields).
-- **Status subresource**: `.status`.
-- **Patch domain**: one independently patchable part of an object:
-  - main resource patch domain (regular `Patch(...)`);
-  - status subresource patch domain (`Status().Patch(...)`).
-- **Reconciliation orchestrator**: a function (or method) where I/O is allowed (controller-runtime client usage, Kubernetes API calls, `DeepCopy`, patch execution, patch ordering decisions).
-  - The top-level (root) `Reconcile(...)` entrypoint is a reconciliation orchestrator.
-  - Child/group/per-object reconciliation orchestrators are also reconciliation orchestrators.
-- **Reconciliation orchestrator naming**:
-  - Any reconciliation orchestrator function/method name MUST start with `Reconcile` (exported) or `reconcile` (unexported).
-  - Examples:
-    - `Reconcile` (top-level controller-runtime entrypoint)
-    - `reconcileGroup`
-    - `reconcileReplica`
-    - `reconcileMain`
-    - `reconcileStatus`
-  - Non-examples:
-    - `SyncReplicas` (should be `ReconcileReplicas` / `reconcileReplicas`)
-    - `EnsureStatus` (this name implies a pure helper; orchestrators must not be named `Ensure*`)
-- **Reconciliation business-logic locality**:
-  - All reconciliation business logic for a controller (all reconciliation orchestrators + all helper functions they use) MUST live in a single Go file (typically `reconciler.go`).
-  - Other files in the controller package SHOULD contain only wiring/infra (setup, predicates, indexes, small interfaces, constants), not reconciliation business logic.
-  - Exception: very heavy computations MAY be extracted, but only as a dedicated type with methods (a “class-like” struct), and it MUST remain pure (no Kubernetes API calls, no client usage, no patches, no `DeepCopy`, no time/random/env I/O).
-    - Examples: `type PlacementPlanner struct { ... }`, `type TopologyScorer struct { ... }`.
-- **Reconciliation helper (pure helper)**: a helper function/method that participates in reconciliation logic but is strictly non-I/O and follows the contracts below.
-  - Naming: it MUST start with one of: `Compute*`, `Compare*`, `IsUpToDate*`, `Apply*`, `Ensure*`.
-  - Non-examples: `Reconcile*` / `reconcile*` (those names are reserved for reconciliation orchestrators).
+> Terms like “main resource”, “status subresource”, and patch-domain boundaries are defined in `controller-reconcile-helper*.mdc`.
+> This document defines only orchestration-specific terminology.
 
-## Core invariants (MUST)
+- **Reconcile method**: any function/method named `Reconcile*` / `reconcile*` that orchestrates reconciliation
+  (root entrypoint, group reconciler, per-object reconciler, etc.).
+- **Patch request**: one API write that persists drift for a single patch domain
+  (typically executed by a `patch*` / `patch*Status` helper).
+- **Patch base (`base`)**: the `DeepCopy()` snapshot used as a diff reference for **one** patch request.
 
-- **Reconciliation orchestrator is an I/O orchestrator**:
-  - All Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`) MUST happen in reconciliation orchestrators.
-  - Reconciliation orchestrators MUST be the only place that decides patch ordering and patch types (plain vs optimistic lock).
+---
 
-- **Main resource and status subresource are independent patch domains**:
-  - They MUST be patched via separate requests.
-  - A single helper function MUST NOT mutate both domains at the same time (see “Helper function contracts”).
+## Core invariants for Reconcile methods (MUST)
 
-- **One reconciliation orchestrator = one reconciliation pattern**:
-  - A single reconciliation orchestrator MUST NOT mix different reconciliation patterns for the same object.
-  - A single reconciliation orchestrator MUST choose exactly one of the patterns from “Reconciliation patterns” and use it consistently for all changes it performs (main + status).
-  - Notes:
-    - The top-level (root) `Reconcile(...)` entrypoint is a reconciliation orchestrator too; it follows the same rule.
-    - Child resources MAY use their own patterns, but they MUST be reconciled by separate reconciliation orchestrators (see “Child resources and reconciliation orchestrator decomposition”).
+### One Reconcile method = one reconciliation pattern (MUST)
 
-- **DeepCopy is per-patch**:
-  - For every patch request, the reconciliation orchestrator MUST create exactly one patch base via `obj.DeepCopy()` immediately before that patch.
-  - The variable name for patch base MUST be `base`.
-  - If a reconciliation orchestrator performs multiple patch requests, it MUST create multiple `base` objects:
-    - each `base` MUST be taken from the object state immediately before that specific patch;
-    - after patch #1 updates the object, patch #2 MUST DeepCopy from the updated object to preserve correct diff and `resourceVersion`.
-  - Go note (no extra lexical scopes):
-    - declare `var base *ObjT` (or `base := obj.DeepCopy()` once) and then reassign it immediately before each patch: `base = obj.DeepCopy()`;
-    - the invariant is semantic: exactly one `DeepCopy()` per patch request, taken right before that patch.
+- A single Reconcile method **MUST** choose exactly **one** pattern from **“Reconciliation patterns”** below
+  and apply it consistently for all changes it performs (across any domains it touches).
+- A single Reconcile method **MUST NOT** mix patterns within itself.
+- If different parts of reconciliation naturally need different patterns, split the logic into **multiple**
+  Reconcile methods (e.g., `reconcileMain(...)` and `reconcileStatus(...)`), each with its own pattern.
 
-## Object identity & in-place updates (MUST)
+### Pattern documentation is mandatory (MUST)
 
-- **If reconciliation changes an object, the caller-visible object MUST become changed**:
-  - If a reconciliation orchestrator patches/updates/creates an object, the *same* object instance held by the caller MUST reflect those changes after the function returns (especially `resourceVersion`, generated fields, defaults, etc.).
-  - Do NOT patch a temporary copy and then drop it.
+- The selected pattern **MUST** be documented in the GoDoc comment of the Reconcile method entrypoint using
+  a single stable style with exact key and order:
 
-- **Lists MUST be reconciled via pointers to list items**:
-  - When reconciling objects from a `List`, you MUST take pointers to the actual list elements:
-    - ✅ `for i := range list.Items { obj := &list.Items[i]; ... }`
-    - ❌ `for _, obj := range list.Items { ... }` (this iterates over copies and updates will not be reflected in `list.Items`)
-  - If a reconciliation orchestrator adds/creates new objects and you keep a local slice/list for subsequent logic, you MUST append/insert the created objects into that slice in their final state (including updated `resourceVersion`).
+  - `Reconcile pattern:` `<PatternName>`
+
+  Example (required format):
+  - `// Reconcile pattern: Conditional desired evaluation`
+
+### Patch sequencing decisions live in Reconcile methods (MUST)
+
+Reconcile methods **MUST** be the only place that decides:
+- whether a patch request is needed;
+- the order of multiple patch requests (including main vs status sequencing);
+- how to aggregate outcomes/errors across multiple sub-steps;
+- where to place child reconciliation calls relative to patching.
+
+(Actual single-call API writes may be delegated to single-call I/O helpers; the sequencing policy still lives here.)
+
+---
+
+## DeepCopy & patch-base rules (MUST)
+
+### DeepCopy is per patch request (MUST)
+
+- For every patch request, the Reconcile method **MUST** create **exactly one** patch base via `obj.DeepCopy()`
+  **immediately before** that patch request.
+- The patch base variable name **MUST** be `base`.
+
+If a Reconcile method performs multiple patch requests:
+- it **MUST** create multiple `base` objects (one per patch request);
+- each `base` **MUST** be taken from the object state **immediately before** that specific patch;
+- after patch #1 updates the object, patch #2 **MUST** take `base` from the updated object
+  to preserve correct diff and `resourceVersion`.
+
+Go note (no extra lexical scopes required):
+- declare once and reassign right before each patch:
+  - `var base *ObjT`
+  - `base = obj.DeepCopy()` (immediately before each patch)
+
+### `base` is a read-only diff reference (MUST)
+
+- Reconcile methods **MUST NOT** mutate `base` (directly or through map/slice aliasing).
+
+---
+
+## Object identity & list reconciliation (MUST)
+
+### Lists MUST be reconciled via pointers to list items (MUST)
+
+When reconciling objects from a `List`, you **MUST** take pointers to the actual list elements:
+
+GOOD:
+for i := range list.Items {
+    obj := &list.Items[i]
+}
+
+BAD:
+for _, obj := range list.Items {
+}
+
+### Local slices after Create/Patch (MUST)
+
+If a Reconcile method creates objects and keeps a local slice/list for subsequent logic,
+it **MUST** append/insert the created objects in their final in-memory state
+(including updated `resourceVersion`, defaults, generated fields).
+
+---
 
 ## Phases (`internal/reconciliation/flow`) (MUST)
 
-- **Root phase**:
-  - Every top-level `Reconcile(...)` MUST start with `flow.Begin(ctx)` and then use the logger carried in the returned context.
+### Root phase (MUST)
 
-- **Every non-root reconciliation orchestrator starts a phase**:
-  - Any reconciliation orchestrator other than the top-level `Reconcile(...)` entrypoint (including child/group/per-object reconciliation orchestrators) MUST begin with `flow.BeginPhase(...)`.
+- Every top-level controller-runtime `Reconcile(...)` **MUST** start with `flow.Begin(ctx)`
+  and then use the logger carried in the returned context.
 
-- **Sub-steps and phase boundaries**:
-  - Most reconciliation orchestrators SHOULD use a single phase (one `flow.BeginPhase(...)` per reconciliation orchestrator).
-  - If a reconciliation orchestrator is decomposed into multiple sub-steps, then each sub-step MUST start with `flow.BeginPhase(ctx, "<phaseName>", ...)`, and the returned `ctx` MUST be used for all work inside that sub-step.
+### Every non-root Reconcile method starts a phase (MUST)
 
-- **Phase naming**:
-  - `phaseName` MUST be valid and follow `flow.BeginPhase` restrictions:
-    - non-empty;
-    - no spaces/control characters;
-    - may use `'/'` for nesting (no empty segments, no trailing slash);
-    - segments use only ASCII letters/digits and `._-`.
+- Any Reconcile method other than the top-level `Reconcile(...)` entrypoint
+  **MUST** begin with `flow.BeginPhase(...)`.
 
-- **Return style**:
-  - Sub-steps SHOULD return `flow.Outcome` and use standard constructors:
-    - `flow.Continue()` to keep executing the flow.
-    - `flow.ContinueErr(err)` / `flow.ContinueErrf(err, ...)` to continue but carry an error upward.
-    - `flow.Done()` to stop (no requeue).
-    - `flow.Fail(err)` / `flow.Failf(err, ...)` to stop with an error (controller-runtime typically requeues).
-    - `flow.RequeueAfter(d)` to stop and requeue after a delay.
-  - If multiple sub-steps must be aggregated, the reconciliation orchestrator MUST use `flow.Merge(...)`:
-    - errors are combined via `errors.Join`;
-    - from multiple `RequeueAfter(...)` outcomes, the minimum delay is selected.
-  - At the top level of `Reconcile(...)`, the final `flow.Outcome` MUST be converted via `ToCtrl()` and returned as `(ctrl.Result, error)`.
+### Sub-steps and phase boundaries (MUST/SHOULD)
 
-## I/O boundaries (MUST)
+- Most Reconcile methods **SHOULD** use a single phase.
+- If decomposed into multiple sub-steps, each sub-step **MUST** start with
+  `flow.BeginPhase(ctx, "<phaseName>", ...)` and use the returned `ctx`.
 
-- Allowed ONLY in reconciliation orchestrators:
-  - controller-runtime client usage;
-  - Kubernetes API calls;
-  - `DeepCopy`;
-  - patch execution (`Patch` / `Status().Patch`), including optimistic lock decisions;
-  - any ordering decisions across multiple patch requests.
+### Phase naming (MUST)
 
-- Forbidden outside reconciliation orchestrators (reconciliation helpers: compute/compare/is-up-to-date/apply/ensure):
-  - controller-runtime client usage;
-  - API calls;
-  - `DeepCopy`;
-  - executing patches;
-  - “smearing” I/O across business logic.
-  - Note: the strict ban on patch execution outside orchestrators is intentional — it keeps patch ordering and patch domain boundaries explicit and reviewable.
+`phaseName` **MUST**:
+- be non-empty;
+- contain no spaces or control characters;
+- optionally use `/` for nesting (no empty segments, no trailing slash);
+- use only ASCII letters, digits, `.`, `_`, `-`.
+
+### Return style & aggregation (MUST)
+
+- Sub-steps **SHOULD** return `flow.Outcome`:
+  - `flow.Continue()`
+  - `flow.ContinueErr(err)` / `flow.ContinueErrf(err, ...)`
+  - `flow.Done()`
+  - `flow.Fail(err)` / `flow.Failf(err, ...)`
+  - `flow.RequeueAfter(d)`
+- Aggregation **MUST** use `flow.Merge(...)`:
+  - errors joined via `errors.Join`;
+  - minimum delay chosen from multiple `RequeueAfter`.
+- Top-level `Reconcile(...)` **MUST** return `outcome.ToCtrl()`.
+
+---
 
 ## Logger & context passing conventions (MUST)
 
-- **Logger is carried in `ctx`**:
-  - If a function needs logging, it MUST accept `ctx context.Context` and derive the logger from it.
-  - Do NOT pass a logger as a separate argument.
-  - The logger variable MUST be named `l` to avoid confusion with the controller-runtime `log` package.
-  - In this repo, the standard way to get the logger is via controller-runtime:
-    - `l := log.FromContext(ctx)` (from `sigs.k8s.io/controller-runtime/pkg/log`)
-  - If you start a phase via `flow.Begin(...)` / `flow.BeginPhase(...)`, prefer using the returned `ctx` for all work, and either:
-    - use the returned `logr.Logger` value, or
-    - call `log.FromContext(ctx)` again (it will return the phase logger, because `flow.BeginPhase` stores it with `log.IntoContext`).
+- Logger **MUST** be carried in `ctx`.
+- Functions that log **MUST** accept `ctx context.Context`.
+- Do **NOT** pass a logger separately.
+- Logger variable name **MUST** be `l`.
+- Standard extraction:
+  - `l := log.FromContext(ctx)`
+- If a phase is started, use the returned `ctx`.
 
-- **`ctx` argument position**:
-  - If a function accepts `ctx`, it MUST be the first argument.
-    - Example: `func ReconcileGroup(ctx context.Context, ...) ...`
+- `ctx` argument position:
+  - if present, it **MUST** be the first argument.
 
-- **Starting phases inside functions**:
-  - Any function that starts its own phase boundary MUST accept `ctx context.Context` (per rules above) and MUST use the returned `ctx` from `flow.BeginPhase(...)` for all work within that phase.
-
-## Helper function contracts (MUST)
-
-### Signature conventions (MUST)
-
-- A function operating on a Kubernetes object MUST take a pointer to the root object as:
-  - the first argument if the function does not accept `ctx`;
-  - the first argument after `ctx` if the function accepts `ctx`.
-  - Examples:
-    - `func ensureX(obj *ObjT) ...`
-    - `func ensureX(ctx context.Context, obj *ObjT, ...) ...`
-- Additional inputs (computed flags, results of previous compute steps) MUST appear after `obj` to make dependencies explicit.
-
-### Domain separation: main vs status (MUST)
-
-- `Ensure*` and `Apply*` functions:
-  - MUST be **either** main resource-only **or** status subresource-only.
-  - MUST NOT mutate both main resource and status subresource in the same function.
-
-- `IsUpToDate*` functions:
-  - MUST compare exactly one patch domain (main-only or status-only).
-  - MUST take exactly one desired input that corresponds to that domain.
-  - MUST NOT compare main + status simultaneously in one function.
-  - NOTE: `IsUpToDate*` MAY be used with any reconciliation pattern (including in-place reconciliation).
-
-- `ComputeDesired*` functions:
-  - MAY analyze both patch domains.
-  - If a compute step derives desired changes for both domains, it MUST return two separate desired objects (main + status), not one mixed struct.
-  - MUST treat `obj` as read-only: MUST NOT mutate `obj` (including `metadata`, `spec`, `status`, labels/annotations/finalizers/conditions).
-
-- `IsUpToDate*` / `Compare*` functions:
-  - MUST treat `obj` as read-only: MUST NOT mutate `obj`.
-  - MUST be safe to call multiple times without changing `obj` (idempotent read-only behavior).
-
-### API helpers vs business logic (MUST)
-
-- If controller code needs simple, reusable object helpers (e.g. `Get/Set/Has` accessors, small parsing/formatting helpers, convenience getters/setters for commonly used fields), they MUST be added to the API types, not implemented ad-hoc in controllers.
-- Such helpers MUST remain “mechanical” (no business decisions), e.g.:
-  - `getFoo()`, `setFoo(v)`, `hasFoo()`, `deleteFoo()`, `getObservedGeneration()`, etc.
-- Business logic MUST remain in reconciliation helpers (`ComputeDesired*`, `Ensure*`, etc.), not embedded into API helpers.
-
-### objutilv1 usage for standard metadata (MUST)
-
-- All work with:
-  - labels/annotations,
-  - finalizers,
-  - owner references,
-  - conditions,
-  MUST be done via `objutilv1`.
-- When importing `objutilv1`, it MUST be locally aliased as `obju`.
-  - Example: `import obju "github.com/deckhouse/sds-replicated-volume/api/objutilv1"`
-- Direct “manual” manipulations (e.g., open-coded label map merges, finalizer slice edits, ownerRef crafting, raw condition upserts) are forbidden unless `objutilv1` does not support the operation and the gap is fixed by extending `objutilv1`.
+---
 
 ## Reconciliation patterns (MUST)
 
 ### Pattern selection rule (MUST)
 
-- For each reconciliation orchestrator, you MUST choose exactly one of the patterns below and follow it consistently.
-- The chosen pattern MUST be documented in the GoDoc comment of that reconciliation orchestrator entrypoint (see “Documentation style for pattern selection”).
-- If the best pattern is unclear during implementation/review, you SHOULD explicitly propose the pattern options and ask for a decision (see “Pattern selection guidance”).
+- Each Reconcile method **MUST** choose exactly one pattern.
+- The choice **MUST** be documented in GoDoc.
 
-### Documentation style for pattern selection (MUST)
+### Pattern 1: In-place reconciliation
 
-- The selected reconciliation pattern MUST be documented in the GoDoc comment of the reconciliation orchestrator entrypoint (for the top-level orchestrator, this is the `Reconcile(...)` method/function), not in an ad-hoc inline comment.
-- The documentation MUST use a single stable style with exact keys and order:
-  - `Reconcile pattern:` `<PatternName>`
-- Example (required format):
-  - `// Reconcile pattern: Conditional desired evaluation`
+Ensure/Mutate → Detect → Patch
 
-### Pattern 1: In-place reconciliation (Ensure/Mutate → Detect → Patch)
+Use when reconciliation is naturally step-by-step and imperative.
 
-- Use when the reconciliation orchestrator is complex and naturally expressed as a sequence of in-place “make it more correct” steps.
-- Typical structure (main-only example):
-  - `base := obj.DeepCopy()`
-  - `changed := ensureX(obj)` (or `changed, err := ensureX(ctx, obj, ...)`)
-  - detect changes (prefer `changed`, fallback to diff when needed)
-  - patch diff relative to `base`
+### Pattern 2: Desired-state driven
 
-- Change detection options (pick one and keep it consistent):
-  - Preferred: return `changed bool` from `Ensure*`.
-  - Fallback: compare `base` vs `obj` (diff-based) only when returning a reliable `changed` flag would make the code significantly less readable/maintainable.
+computeDesired → isUpToDate → apply → patch
 
-- Ensure rules:
-  - `Ensure*` MUST follow domain separation (main-only or status-only).
-  - Recommended signatures:
-    - `func ensureX(obj *ObjT) (changed bool, err error)`
-    - `func ensureX(ctx context.Context, obj *ObjT, ...) (changed bool, err error)`
-    - `func ensureX(obj *ObjT) (changed bool)`
+Use when desired state is compact and comparison is trivial.
 
-### Pattern 2: Desired-state driven (computeDesired → isUpToDate → apply → patch)
+### Pattern 3 (default): Conditional desired evaluation
 
-- Use when:
-  - `DeepCopy` is expensive (large objects);
-  - desired state is compact;
-  - comparison is trivial and explicit.
+computeDesiredIfNeeded → apply → patch
 
-- Rules:
-  - `computeDesired*` is a pure computation step (no I/O).
-  - `IsUpToDate*` MUST compare exactly one domain (see “Helper function contracts”).
-  - `Apply*` MUST be domain-separated and business-logic-free (apply the desired state, do not decide it).
+Default declarative style; avoids `DeepCopy` when no patch is needed.
 
-- Recommended signatures:
-  - main-only:
-    - `computeDesiredX(obj *ObjT) (desired X, err error)`
-    - `isXUpToDate(obj *ObjT, desired X) bool`
-    - `applyX(obj *ObjT, desired X)`
-  - status-only:
-    - `computeDesiredX(obj *ObjT) (desired XStatus, err error)`
-    - `isXStatusUpToDate(obj *ObjT, desired XStatus) bool`
-    - `applyXStatus(obj *ObjT, desired XStatus)`
-  - main + status:
-    - `computeDesiredX(obj *ObjT) (desiredMain X, desiredStatus XStatus, err error)`
-    - comparisons and applies remain separate per domain.
+---
 
-### Pattern 3 (default): Conditional desired evaluation (computeDesiredIfNeeded → apply → patch)
+## Mixing patterns (FORBIDDEN) (MUST)
 
-- Default choice when you want a declarative style and want to avoid `DeepCopy` unless a patch is needed.
+Forbidden within one Reconcile method:
+- main uses Pattern 3, status uses Pattern 1;
+- main uses Pattern 2, status uses Pattern 3.
 
-- Rules:
-  - `computeDesiredXIfNeeded` MUST return:
-    - “no-op” (e.g. `nil`) when no patch is needed for that domain;
-    - desired value when a patch is needed.
-  - If conditional compute can affect both domains, it MUST return two pointers (each may be `nil`):
-    - `computeDesiredIfNeeded(obj *ObjT) (desiredMain *X, desiredStatus *XStatus, err error)`
-  - `Apply*` remains domain-separated.
+Allowed:
+- same pattern for all domains;
+- split into multiple Reconcile methods, each with its own pattern.
 
-- Recommended signatures:
-  - main-only:
-    - `computeDesiredXIfNeeded(obj *ObjT) (*X, error)`
-    - `applyX(obj *ObjT, desired X)`
-  - status-only:
-    - `computeDesiredXStatusIfNeeded(obj *ObjT) (*XStatus, error)`
-    - `applyXStatus(obj *ObjT, desired XStatus)`
-  - main + status:
-    - `computeDesiredIfNeeded(obj *ObjT) (desiredMain *X, desiredStatus *XStatus, error)`
+---
 
-## Composition rules for compute steps (MUST)
+## Child resources and decomposition (MUST)
 
-- A compute step MAY compute multiple related desired values in one pass (e.g., multiple conditions, or a status field + a related condition).
-  - In that case it SHOULD return one small “desired struct” that groups those outputs for a single domain.
-  - That desired struct is then used by `IsUpToDate*` and `Apply*` for that domain.
+- Child resources **SHOULD** be reconciled in separate Reconcile methods:
+  - group reconciler (list + ordering);
+  - per-object reconciler.
+- Prefer passing already loaded objects.
+- Always pass pointers from list iteration.
+- Caller owns ordering relative to patching.
 
-- A compute step MAY depend on outputs of previous compute steps:
-  - The dependency MUST be explicit in the signature as additional args after `obj`.
-
-## Child resources and reconciliation orchestrator decomposition (MUST)
-
-- Child resources SHOULD be reconciled in separate functions:
-  - A “group reconciliation orchestrator” orchestrates listing/ordering/error aggregation for a group of objects.
-  - A “per-object reconciliation orchestrator” reconciles exactly one object instance.
-
-- When calling child reconciliation orchestrators:
-  - Prefer passing already loaded objects instead of making the child reconciliation orchestrator perform its own `Get`.
-  - When iterating over `List` results, you MUST pass pointers to actual list items (see “Object identity & in-place updates”).
-
-- A child reconciliation orchestrator may be invoked before/after/between compute/ensure/apply steps and patches; the reconciliation orchestrator owns ordering based on correctness and consistency needs.
-
-## Reconciler methods vs free functions (MUST/SHOULD)
-
-- Use a **Reconciler receiver method** (`func (r *Reconciler) ...`) when:
-  - the function needs access to reconciler-owned dependencies/config (schemes, recorders, templates, feature flags, clocks, metrics, etc.);
-  - the function is logically part of this reconciler’s implementation surface and benefits from sharing private fields.
-
-- Use a **free function** (`func ...`) when:
-  - the function is pure (compute/compare/apply/ensure) and does not need reconciler fields;
-  - you want explicit dependencies in the signature for testability;
-  - the helper is reusable across multiple reconcilers/packages (place it in an appropriate internal pkg).
-
-- Regardless of receiver vs free function:
-  - I/O boundaries still apply: no client calls outside reconciliation orchestrators.
+---
 
 ## Business logic failures & requeue policy (MUST)
 
-- If reconciliation cannot proceed due to **business logic** (not only API errors), you MUST return an error to the controller (use `flow.Failf`, `flow.ContinueErrf`, `flow.Wrapf`, etc.):
-  - examples: missing required dependent resource, invalid cross-resource state, unsupported configuration, invariant violations.
-  - Rationale: controller-runtime backoff will requeue and retry.
+- Business-logic blocking conditions **MUST** return an error.
+- Exception: if unblocked by watched resources, `flow.Done()` is acceptable.
+- If unblocked by **unwatched** events:
+  - return an error, or
+  - use `flow.RequeueAfter(d)` only with clear justification and status.
 
-- Exception: if the blocking condition is expected to be resolved by changes in a resource that the controller **is subscribed to (watches)**:
-  - it is acceptable to stop without error (e.g. `flow.Done()`), after writing appropriate status/conditions,
-  - because a future event will trigger the reconciliation again.
-- If the controller is **NOT subscribed** to the resource/event that would unblock reconciliation:
-  - you MUST return an error to force retry via backoff (do not silently stop).
-  - It is acceptable to use `flow.RequeueAfter(d)` instead of an error only when:
-    - the controller is waiting for an external asynchronous process/event that is not watched;
-    - returning an error would create noisy backoff logs without adding useful signal;
-    - the reconciliation orchestrator writes enough status/conditions to explain the waiting state.
+---
 
 ## Error wrapping & context (MUST)
 
-- When returning errors “up” one level (sub-step → reconciliation orchestrator, child reconciliation orchestrator → group reconciliation orchestrator, etc.), it is strongly recommended (and in practice MUST for non-trivial codepaths) to wrap them with context:
-  - Prefer `flow.Failf/flow.ContinueErrf` (or `flow.Wrapf` if available) to add action/resource context.
-  - Include *what* failed and *which resource* (name/namespace/kind) where possible.
-- Do not drop error context; errors without actionable information are forbidden.
+- Errors propagated upward **MUST** be wrapped with context.
+- Prefer `flow.Failf` / `flow.ContinueErrf`.
+- Include action + resource identity.
+- Context-free errors are forbidden.
 
-## Pattern selection guidance (SHOULD)
+---
 
-- When writing or reviewing a reconciliation orchestrator, explicitly think about the best-fitting pattern:
-  - **Pattern 1 (In-place)**: best when changes are naturally step-by-step and involve many intertwined fields.
-  - **Pattern 2 (Desired-state)**: best when desired is compact and comparison is simple; avoids unnecessary DeepCopy.
-  - **Pattern 3 (Conditional desired, default)**: best general-purpose declarative style; avoids DeepCopy when no patch needed.
-- If choice is ambiguous, you SHOULD propose the best candidate(s) and ask for a decision before expanding the reconciliation orchestrator further.
-- The selected pattern MUST be recorded in a comment near the reconciliation orchestrator entrypoint (see “Pattern selection rule”).
+## API helpers vs controller business logic (MUST)
+
+- Mechanical helpers (`Get/Set/Has`) **MUST** live on API types.
+- No business decisions in API helpers.
+- Business logic stays in Reconcile methods and ReconcileHelpers.
+
+---
+
+## objutilv1 usage (MUST)
+
+All work with:
+- labels,
+- annotations,
+- finalizers,
+- owner references,
+- conditions
+
+**MUST** go through `objutilv1`, imported as `obju`.
+
+Manual manipulation is forbidden unless `objutilv1` is extended.
+
+---
 
 ## Review checklist (MUST)
 
-- Any Kubernetes API call exists ONLY in reconciliation orchestrators.
-- Reconciliation orchestrator function/method names start with `Reconcile` / `reconcile`.
-- Reconciliation helpers are clearly separated from reconciliation orchestrators:
-  - reconciliation helpers are named `Compute*` / `Compare*` / `IsUpToDate*` / `Apply*` / `Ensure*`;
-  - reconciliation helpers do NOT execute I/O: no client/API calls, no `DeepCopy`, no patch execution.
-- Reconciliation business logic is localized in a single file (typically `reconciler.go`), except for extracted heavy pure computation types.
-
-- Phases:
-  - top-level `Reconcile(...)` starts with `flow.Begin(ctx)`;
-  - every non-root reconciliation orchestrator begins with `flow.BeginPhase(...)` and uses the returned `ctx`;
-  - if an orchestrator has multiple sub-steps, each sub-step starts with `flow.BeginPhase(...)` and uses the returned `ctx`.
-
-- Reconciliation patterns:
-  - each reconciliation orchestrator chooses exactly one pattern and does NOT mix patterns within that orchestrator;
-  - the chosen pattern is documented in the GoDoc comment of that reconciliation orchestrator entrypoint using `Reconcile pattern: <PatternName>`.
-
-- Patch domains:
-  - main resource and status subresource are patched via separate requests.
-  - helpers (`Ensure*` / `Apply*` / `IsUpToDate*`) touch exactly one patch domain (main-only or status-only).
-
-- DeepCopy & patching:
-  - for every patch request, the orchestrator creates exactly one patch base via `obj.DeepCopy()` immediately before that patch (`base` variable name).
-  - if an orchestrator performs multiple patches, it creates multiple `base` objects (one per patch), taken from the latest object state.
-
-- Object identity:
-  - if an orchestrator patches/updates/creates an object, the caller-visible object instance becomes changed (no patching dropped temporary copies).
-  - list reconciliation iterates by index and uses pointers to list items (`for i := range list.Items { obj := &list.Items[i] ... }`).
-
-- Standard metadata:
-  - labels/finalizers/ownerRefs/conditions are manipulated ONLY via `objutilv1` imported as `obju`.
-
-- Errors & requeue policy:
-  - business-logic “blocked” states return errors unless unblocked by watched events.
-  - errors are wrapped with context when moving up levels (prefer `flow.Failf` / `flow.ContinueErrf` / `flow.Wrapf`).
-
-## Mixing patterns (FORBIDDEN) — examples (MUST)
-
-- What counts as mixing patterns:
-  - main domain uses Pattern 3 (conditional desired evaluation), while status domain uses Pattern 1 (in-place ensure/detect) in the same reconciliation orchestrator.
-  - main domain uses Pattern 2 (desired-state driven), while status domain uses Pattern 3 in the same reconciliation orchestrator.
-- Allowed alternatives (choose one pattern and stick to it within a single reconciliation orchestrator):
-  - Pattern 3 for both domains: `computeDesiredMainIfNeeded` + `applyMain` + patch, then `computeDesiredStatusIfNeeded` + `applyStatus` + status patch.
-  - Pattern 1 for both domains: `ensureMain` + patch, then `ensureStatus` + status patch (separate patch requests, separate `base` per patch).
-  - Split into two reconciliation orchestrators, each with its own pattern: the “no mixing patterns” rule applies within a single reconciliation orchestrator; different reconciliation orchestrators MAY use different patterns.
+- Each Reconcile method documents its pattern.
+- No pattern mixing within one Reconcile method.
+- Exactly one `DeepCopy()` per patch request, named `base`.
+- Phases started correctly and `ctx` propagated.
+- List iteration uses pointers.
+- Business-logic blocks return errors unless unblocked by watched events.
+- Errors carry context.
+- Standard metadata only via `objutilv1`.
