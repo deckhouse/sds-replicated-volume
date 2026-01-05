@@ -201,6 +201,10 @@ func applyDesiredFoo(
 ## Error handling (SHOULD)
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
+- ApplyReconcileHelpers (`apply*`) SHOULD be non-failing.
+  - If an ApplyReconcileHelper returns `error`, it MUST be only for **local validation** failures (e.g., nil pointers, impossible desired shape).
+  - It MUST NOT wrap/enrich errors (external errors should not exist in `apply*`), and MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
+  - Any action/object identity context belongs to the calling Reconcile method.
 
 ---
 

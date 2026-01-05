@@ -192,8 +192,55 @@ Note: the same cloning rule applies to any other read-only inputs (e.g., shared 
 
 ### Error handling (SHOULD)
 
-- Prefer returning domain-specific errors with enough context to debug:
-  - include object key when relevant (`namespace/name`), and
-  - include the problematic field or constraint.
+- **Helpers should generally return errors as-is**. Do not enrich errors “for the outside world” in helpers.
+- **Hard ban (MUST NOT)**: a ReconcileHelper error MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
+  - Rationale: object identity and action-level context belong to the calling Reconcile method, which owns orchestration and phases.
+- If a helper creates its own local validation error, it MAY include the **problematic field/constraint** (purely local, non-identity) to keep the error actionable.
+- If additional context is needed to disambiguate multiple *different* error sources within the same Reconcile method, this is allowed only where the category doc explicitly permits it (notably `compute*` / `ensure*`), and the added context MUST remain local and non-identifying.
 - Do **not** log and also return an error for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
 
+---
+
+## When to create helpers (SHOULD/MUST NOT)
+
+This section is **not** about what helpers are *allowed* to do (see the category docs). This section is about **when extracting a helper is worth it** vs when it is unnecessary indirection.
+
+### General guidance
+
+- Prefer **locality**: keep logic close to its only call site unless extraction clearly improves reuse or readability.
+- Prefer **category purity** over “nice structure”: do not create helpers that *almost* fit a category. If it needs orchestration or mixes domains, keep it in a Reconcile method (or split into multiple helpers in correct categories).
+- Extract when it helps you enforce **determinism** or **domain separation** (main vs status), especially when doing it inline would be error-prone.
+
+### CreateReconcileHelper (`create*`) / PatchReconcileHelper (`patch*`) / DeleteReconcileHelper (`delete*`) (I/O helpers)
+
+- **SHOULD** create these helpers **only when they have 2+ call sites** (within the same controller package).
+- **SHOULD NOT** create them “for symmetry” if the helper would only hide a one-off, standard I/O action (even when that action is usually written as a small boilerplate block in Reconcile methods).
+
+### ApplyReconcileHelper (`apply*`) / IsUpToDateReconcileHelper (`is*UpToDate*`) (small pure helpers)
+
+- **SHOULD** create these helpers only when the logic cannot be expressed as **one obvious action** at the call site.
+  - Examples of “one obvious action” (inline instead of helper): a single `obju.*` call; a single simple assignment; a single `meta` / `metav1` helper call.
+- **SHOULD** create these helpers when:
+  - the call site would otherwise contain multiple coordinated field writes/comparisons for the same patch domain;
+  - the logic requires deterministic normalization (sorting/canonicalization) that you want to keep consistent between “compute“, “check” and “apply”.
+
+### ComputeReconcileHelper (`compute*`) / EnsureReconcileHelper (`ensure*`) (core of reconciliation logic)
+
+- If reconciliation needs to derive a target/desired state (or a derived “actual” view), there **SHOULD** be at least one explicit step that performs this work as either:
+  - a ComputeReconcileHelper (`computeDesired*` / `computeActual*`), or
+  - an EnsureReconcileHelper (`ensure*`) that both derives and applies corrections in-place.
+  The intent is to keep Reconcile methods focused on orchestration and to make “where decisions live” reviewable.
+
+#### Splitting / nesting guidelines
+
+- **SHOULD NOT** split trivial logic into ComputeReconcileHelper (`compute*`) + EnsureReconcileHelper (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
+- **MAY** create an EnsureReconcileHelper (`ensure*`) that is only an orchestrator for ComputeReconcileHelper (`compute*`) → IsUpToDateReconcileHelper (`is*UpToDate*`) → ApplyReconcileHelper (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a Reconcile method.
+  - In general, the purpose of EnsureReconcileHelper (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single patch domain), not to wrap a desired-driven pipeline.
+- If an EnsureReconcileHelper (`ensure*`) is small and readable, keep it monolithic:
+  - **SHOULD NOT** extract a separate ComputeReconcileHelper (`compute*`) just to compute a couple of booleans or a tiny struct.
+- If an EnsureReconcileHelper (`ensure*`) becomes complex:
+  - **MAY** split it into multiple sub-EnsureReconcileHelper (`ensure*`) helpers (same domain; explicit dependencies after `obj`).
+  - **MAY** extract sub-ComputeReconcileHelper (`compute*`) helpers for non-trivial derived values used by ensure, keeping them pure and deterministic.
+- If a ComputeReconcileHelper (`compute*`) becomes complex:
+  - **MAY** split it into smaller ComputeReconcileHelper (`compute*`) helpers (pure composition) with explicit data flow via parameters/return values.
+  - **SHOULD** keep each compute focused on a single artifact (desired labels, desired spec fragment, desired status fragment, etc.), rather than a “compute everything” blob.

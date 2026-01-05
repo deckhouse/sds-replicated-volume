@@ -66,7 +66,7 @@ An **IsUpToDateReconcileHelper** (“up-to-date helper”) is a **ReconcileHelpe
 
 - **strictly non-I/O**, and
 - checks whether the current object state is **already equal to the desired state** for **exactly one patch domain** (main resource **or** status subresource), and
-- returns a boolean result (and optionally an error).
+- returns a boolean result.
 
 Typical up-to-date helpers gate patch execution by answering “do we need to patch this domain?” for a single desired input.
 
@@ -195,8 +195,10 @@ func isFooUpToDate(
 
 ## Error handling (SHOULD)
 
+- See the common error handling rules in `controller-reconcile-helper.mdc`.
 - IsUpToDateReconcileHelpers should be designed to be non-failing (pure checks).
   - If an error is realistically possible, prefer handling it in a ComputeReconcileHelper (or in the caller) and pass only validated/normalized inputs to `is*UpToDate`.
+- IsUpToDateReconcileHelpers MUST NOT create/wrap/enrich errors, and MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
 - Do **not** log and also return a “failure signal” for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
 
 ---

@@ -19,7 +19,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 - `compute*` helpers are **pure, deterministic, strictly non-I/O** computations (no hidden I/O: no time/random/env/network).
 - They compute **desired** (`computeDesired*`) and/or **actual (derived)** (`computeActual*`) values (and/or intermediate derived values), and return them (or write into explicit `out` args).
-- They treat `obj` **and all other inputs** as **read-only** and **MUST NOT** mutate them (including via aliasing of maps/slices; clone before modifying derived maps/slices).
+- They treat `obj` and all caller-provided inputs as **read-only** and **MUST NOT** mutate them (including via aliasing of maps/slices; clone before modifying derived maps/slices).
 - They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, execute patches, or make any patch ordering / patch type decisions.
 - If `computeDesired*` derives desired values for **both** main and status domains that will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (main + status), not a mixed struct.
 - If a compute helper depends on previous compute output, the dependency **MUST** be explicit in the signature as args **after `obj`**.
@@ -234,6 +234,9 @@ In particular, avoid producing “equivalent but different” outputs across run
 - it **MUST NOT** mutate any input values (including `obj` and any computed dependencies passed after `obj`);
 - it **MUST NOT** perform in-place modifications through aliases.
 
+Note: reconciler-owned deterministic components (e.g. caches, `idpool`) are allowed mutation targets in `compute*` helpers **only** under the constraints defined above (non-I/O, explicit dependency, deterministic relative to the component state).
+If a `compute*` helper mutates such a component, its GoDoc comment **MUST** explicitly state that this helper mutates reconciler-owned deterministic state (e.g. `idpool` allocation) and why this is acceptable (rare-case exception).
+
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
 ---
@@ -304,7 +307,16 @@ Notes (SHOULD):
 ## Error handling (SHOULD)
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
+- ComputeReconcileHelpers SHOULD generally return errors as-is.
   - If a ComputeReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+
+  **Allowed (rare)**: when propagating a **non-local** error (e.g., from parsing/validation libs or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling Reconcile method, a ComputeReconcileHelper MAY wrap with small, local context:
+  - prefer `fmt.Errorf("<local-action>: %w", err)`
+  - keep `<local-action>` specific to the helper responsibility (e.g., `parseDesiredTopology`, `computeDesiredLabels`, `normalizeReplicaSet`)
+
+  **Forbidden (MUST NOT)**:
+  - do not add reconcile object identity (e.g. `namespace/name`, UID, object key)
+  - do not add generic “outside world” context (that belongs to the Reconcile method)
 
 ---
 

@@ -188,7 +188,10 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 ## Error handling (SHOULD)
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-  - If a DeleteReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+- A DeleteReconcileHelper SHOULD be mechanically thin: if the single `Delete(...)` call fails, return the error **without wrapping** (or treat NotFound per the chosen deterministic policy).
+  - If returning `flow.Outcome`, use `flow.Fail(err)` (or equivalent) with the original `err`.
+- A DeleteReconcileHelper MUST NOT enrich errors with additional context (including reconcile object identity such as `namespace/name`, UID, object key).
+  - Error enrichment (action + object identity + phase) is the calling Reconcile method’s responsibility.
 
 ---
 

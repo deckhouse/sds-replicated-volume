@@ -198,6 +198,9 @@ In particular:
 - it **MUST** mutate only the intended patch domain on `obj` (main resource **or** status subresource), treating the other domain as read-only;
 - it **MUST NOT** perform in-place modifications through aliases to non-`obj` data.
 
+Note: reconciler-owned deterministic components (e.g. caches, `idpool`) are allowed mutation targets in `ensure*` helpers **only** under the constraints defined above (non-I/O, explicit dependency, deterministic relative to the component state).
+If an `ensure*` helper mutates such a component, its GoDoc comment **MUST** explicitly state that this helper mutates reconciler-owned deterministic state (e.g. `idpool` allocation) and why this is acceptable (rare-case exception).
+
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
 ---
@@ -250,7 +253,15 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
 ## Error handling (SHOULD)
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-  - Errors should typically be returned via `flow.Fail(err)`.
+- EnsureReconcileHelpers SHOULD generally return errors as-is (e.g., via `flow.Fail(err)`).
+
+  **Allowed (rare)**: when propagating a **non-local** error (e.g., from validation utilities or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling Reconcile method, an EnsureReconcileHelper MAY wrap with small, local context:
+  - prefer `flow.Failf(err, "<local-action>")`
+  - keep `<local-action>` specific to the helper responsibility (e.g., `ensureOwnerRefs`, `ensureStatusConditions`, `normalizeSpec`)
+
+  **Forbidden (MUST NOT)**:
+  - do not add reconcile object identity (e.g. `namespace/name`, UID, object key)
+  - do not add generic “outside world” context (that belongs to the Reconcile method)
 
 ---
 

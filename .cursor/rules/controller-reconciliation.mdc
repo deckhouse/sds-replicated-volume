@@ -227,8 +227,32 @@ Allowed:
 
 - Errors propagated upward **MUST** be wrapped with context.
 - Prefer `flow.Failf` / `flow.ContinueErrf`.
-- Include action + resource identity.
+- Include action (and, when helpful, the orchestration step / phase).
+- Do NOT include the primary reconcile object's identity (`name`/`namespace`) or controller identity in the error string:
+  - controller-runtime logger already carries `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace` (when namespaced), and `reconcileID`.
+  - duplicating them in errors is redundant noise.
 - Context-free errors are forbidden.
+
+### Error context layering (MUST)
+
+- Reconcile methods are responsible for enriching errors for the “outside world”:
+  - include **what we were doing** (action),
+  - include **where** we were in orchestration (phase / sub-step).
+  - do **not** repeat controller-runtime logger identity fields in the error string:
+    - `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace` (when namespaced), `reconcileID`.
+- If you need to mention identity, mention only identities that are **not** present in the logger context (e.g., names of secondary/child objects, external IDs), and only when it materially improves debuggability.
+- If reconciliation work (or a failing API call) targets **secondary/child/additional resources**, you MUST include that resource identity in the error (e.g., `namespace/name`, or `name` for cluster-scoped resources).
+  - Rationale: controller-runtime logger identity fields refer to the **primary** reconcile object only; secondary/child identities are not present unless you add them.
+- Reconcile methods MUST treat helper errors as **internal building blocks**:
+  - wrap them at the boundary (Reconcile method) when returning them upward,
+  - do not require helpers to be “globally understandable”.
+
+### Example (illustrative)
+
+❌ BAD: baking primary reconcile identity into error strings (already present in controller-runtime logger fields)
+```go
+return fmt.Errorf("reconcile %s/%s: computeDesiredFoo: %w", obj.GetNamespace(), obj.GetName(), err)
+```
 
 ---
 
