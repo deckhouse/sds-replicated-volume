@@ -72,12 +72,12 @@ func TestRequeueAfter_NegativePanics(t *testing.T) {
 }
 
 func TestRequeueAfter_Positive(t *testing.T) {
-	out := flow.RequeueAfter(1 * time.Second)
-	if !out.ShouldReturn() {
+	outcome := flow.RequeueAfter(1 * time.Second)
+	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
 
-	res, err := out.ToCtrl()
+	res, err := outcome.ToCtrl()
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
@@ -87,21 +87,21 @@ func TestRequeueAfter_Positive(t *testing.T) {
 }
 
 func TestMerge_DoneWinsOverContinue(t *testing.T) {
-	out := flow.Merge(flow.Done(), flow.Continue())
-	if !out.ShouldReturn() {
+	outcome := flow.Merge(flow.Done(), flow.Continue())
+	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
-	if out.Error() != nil {
-		t.Fatalf("expected Error() == nil, got %v", out.Error())
+	if outcome.Error() != nil {
+		t.Fatalf("expected Error() == nil, got %v", outcome.Error())
 	}
 }
 
 func TestMerge_RequeueAfterChoosesSmallest(t *testing.T) {
-	out := flow.Merge(flow.RequeueAfter(5*time.Second), flow.RequeueAfter(1*time.Second))
-	if !out.ShouldReturn() {
+	outcome := flow.Merge(flow.RequeueAfter(5*time.Second), flow.RequeueAfter(1*time.Second))
+	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
-	res, err := out.ToCtrl()
+	res, err := outcome.ToCtrl()
 	if err != nil {
 		t.Fatalf("expected err to be nil, got %v", err)
 	}
@@ -112,12 +112,12 @@ func TestMerge_RequeueAfterChoosesSmallest(t *testing.T) {
 
 func TestMerge_ContinueErrAndDoneBecomesFail(t *testing.T) {
 	e := errors.New("e")
-	out := flow.Merge(flow.ContinueErr(e), flow.Done())
-	if !out.ShouldReturn() {
+	outcome := flow.Merge(flow.ContinueErr(e), flow.Done())
+	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
 
-	_, err := out.ToCtrl()
+	_, err := outcome.ToCtrl()
 	if err == nil {
 		t.Fatalf("expected err to be non-nil")
 	}
@@ -128,12 +128,12 @@ func TestMerge_ContinueErrAndDoneBecomesFail(t *testing.T) {
 
 func TestMerge_ContinueErrOnlyStaysContinueErr(t *testing.T) {
 	e := errors.New("e")
-	out := flow.Merge(flow.ContinueErr(e))
-	if out.ShouldReturn() {
+	outcome := flow.Merge(flow.ContinueErr(e))
+	if outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == false")
 	}
 
-	res, err := out.ToCtrl()
+	res, err := outcome.ToCtrl()
 	if err == nil {
 		t.Fatalf("expected err to be non-nil")
 	}
@@ -166,8 +166,8 @@ func TestOutcome_OptimisticLockRequired(t *testing.T) {
 		t.Fatalf("expected OptimisticLockRequired() == false after ReportChanged()")
 	}
 
-	out := flow.Continue().ReportChanged().RequireOptimisticLock()
-	if !out.OptimisticLockRequired() {
+	outcome := flow.Continue().ReportChanged().RequireOptimisticLock()
+	if !outcome.OptimisticLockRequired() {
 		t.Fatalf("expected OptimisticLockRequired() == true after ReportChanged().RequireOptimisticLock()")
 	}
 }
@@ -183,34 +183,34 @@ func TestOutcome_Error(t *testing.T) {
 	}
 }
 
-func TestOutcome_Errorf_IsNoOpWhenNil(t *testing.T) {
-	out := flow.Continue().Errorf("hello %s %d", "a", 1)
-	if out.Error() != nil {
-		t.Fatalf("expected Error() to stay nil, got %v", out.Error())
+func TestOutcome_Wrapf_IsNoOpWhenNil(t *testing.T) {
+	outcome := flow.Continue().Wrapf("hello %s %d", "a", 1)
+	if outcome.Error() != nil {
+		t.Fatalf("expected Error() to stay nil, got %v", outcome.Error())
 	}
 }
 
-func TestOutcome_Errorf_WrapsExistingError(t *testing.T) {
+func TestOutcome_Wrapf_WrapsExistingError(t *testing.T) {
 	base := errors.New("base")
 
-	out := flow.ContinueErr(base).Errorf("ctx %s", "x")
-	if out.Error() == nil {
+	outcome := flow.ContinueErr(base).Wrapf("ctx %s", "x")
+	if outcome.Error() == nil {
 		t.Fatalf("expected Error() to be non-nil")
 	}
-	if !errors.Is(out.Error(), base) {
-		t.Fatalf("expected errors.Is(out.Error(), base) == true; err=%v", out.Error())
+	if !errors.Is(outcome.Error(), base) {
+		t.Fatalf("expected errors.Is(outcome.Error(), base) == true; err=%v", outcome.Error())
 	}
-	if got := out.Error().Error(); !strings.Contains(got, "ctx x") {
+	if got := outcome.Error().Error(); !strings.Contains(got, "ctx x") {
 		t.Fatalf("expected wrapped error to contain formatted prefix; got %q", got)
 	}
 }
 
-func TestOutcome_Errorf_DoesNotAlterReturnDecision(t *testing.T) {
-	out := flow.RequeueAfter(1 * time.Second).Errorf("x")
-	if !out.ShouldReturn() {
+func TestOutcome_Wrapf_DoesNotAlterReturnDecision(t *testing.T) {
+	outcome := flow.RequeueAfter(1 * time.Second).Wrapf("x")
+	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
-	res, _ := out.MustToCtrl()
+	res, _ := outcome.MustToCtrl()
 	if res.RequeueAfter != 1*time.Second {
 		t.Fatalf("expected RequeueAfter to be preserved, got %v", res.RequeueAfter)
 	}
@@ -223,51 +223,51 @@ func TestOutcome_RequireOptimisticLock_PanicsWithoutChangeReported(t *testing.T)
 func TestOutcome_RequireOptimisticLock_DoesNotPanicAfterReportChangedIfFalse(t *testing.T) {
 	mustNotPanic(t, func() { _ = flow.Continue().ReportChangedIf(false).RequireOptimisticLock() })
 
-	out := flow.Continue().ReportChangedIf(false).RequireOptimisticLock()
-	if out.OptimisticLockRequired() {
+	outcome := flow.Continue().ReportChangedIf(false).RequireOptimisticLock()
+	if outcome.OptimisticLockRequired() {
 		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
 	}
-	if out.DidChange() {
+	if outcome.DidChange() {
 		t.Fatalf("expected DidChange() == false when no change was reported")
 	}
 }
 
 func TestMerge_ChangeTracking_DidChange(t *testing.T) {
-	out := flow.Merge(flow.Continue(), flow.Continue().ReportChanged())
-	if !out.DidChange() {
+	outcome := flow.Merge(flow.Continue(), flow.Continue().ReportChanged())
+	if !outcome.DidChange() {
 		t.Fatalf("expected merged outcome to report DidChange() == true")
 	}
-	if out.OptimisticLockRequired() {
+	if outcome.OptimisticLockRequired() {
 		t.Fatalf("expected merged outcome to not require optimistic lock")
 	}
 }
 
 func TestMerge_ChangeTracking_OptimisticLockRequired(t *testing.T) {
-	out := flow.Merge(
+	outcome := flow.Merge(
 		flow.Continue().ReportChanged(),
 		flow.Continue().ReportChanged().RequireOptimisticLock(),
 	)
-	if !out.DidChange() {
+	if !outcome.DidChange() {
 		t.Fatalf("expected merged outcome to report DidChange() == true")
 	}
-	if !out.OptimisticLockRequired() {
+	if !outcome.OptimisticLockRequired() {
 		t.Fatalf("expected merged outcome to require optimistic lock")
 	}
 }
 
 func TestMerge_ChangeTracking_ChangeReportedOr(t *testing.T) {
-	merged := flow.Merge(flow.Continue(), flow.Continue().ReportChangedIf(false))
+	outcome := flow.Merge(flow.Continue(), flow.Continue().ReportChangedIf(false))
 
 	// ReportChangedIf(false) does not report a semantic change, but it does report that change tracking was used.
-	if merged.DidChange() {
+	if outcome.DidChange() {
 		t.Fatalf("expected merged outcome DidChange() == false")
 	}
 
 	// This call should not panic because Merge ORs the changeReported flag, even if no semantic change happened.
-	mustNotPanic(t, func() { _ = merged.RequireOptimisticLock() })
+	mustNotPanic(t, func() { _ = outcome.RequireOptimisticLock() })
 
-	out := merged.RequireOptimisticLock()
-	if out.OptimisticLockRequired() {
+	outcome = outcome.RequireOptimisticLock()
+	if outcome.OptimisticLockRequired() {
 		t.Fatalf("expected OptimisticLockRequired() == false when no change was reported")
 	}
 }

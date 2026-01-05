@@ -45,6 +45,83 @@ type Outcome struct {
 	changeReported bool
 }
 
+// OnErrorf enriches the Outcome error with local context, logs it, and then wraps it with phase metadata (if any).
+//
+// Behavior:
+//  1. If the Outcome has no error, OnErrorf is a no-op.
+//  2. It first wraps the existing error with local context (format, args...).
+//     - It then logs that local error via log.FromContext(ctx):
+//     - Error(..., "reconcile failed") if o.ShouldReturn() is true;
+//     - Info("reconcile step error; continuing", "error", err) otherwise.
+//  3. Finally, if ctx contains phase metadata (see BeginPhase), it wraps the error again so the phase
+//     context is the outermost layer in the returned error chain.
+//
+// Note: the phase wrapper is intentionally applied after logging to avoid duplicating phase context
+// both in the log entry and in the returned error chain.
+func (outcome Outcome) OnErrorf(ctx context.Context, format string, args ...any) Outcome {
+	if outcome.err == nil {
+		return outcome
+	}
+
+	// 1) Add local context.
+	outcome = outcome.Wrapf(format, args...)
+
+	// 2) Log the local error (without the phase wrapper).
+	l := log.FromContext(ctx)
+	if outcome.ShouldReturn() {
+		l.Error(outcome.err, "reconcile failed")
+	} else {
+		l.Info("reconcile step error; continuing", "error", outcome.err)
+	}
+
+	// 3) Add the phase wrapper as the outermost context.
+	if v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue); ok && v.name != "" {
+		if len(v.kv) == 0 {
+			outcome.err = Wrapf(outcome.err, "phase %s", v.name)
+		} else {
+			outcome.err = Wrapf(outcome.err, "phase %s %s", v.name, formatKV(v.kv))
+		}
+	}
+
+	return outcome
+}
+
+// -----------------------------------------------------------------------------
+// Phase context
+// -----------------------------------------------------------------------------
+
+type phaseContextKey struct{}
+
+type phaseContextValue struct {
+	name  string
+	kv    []any
+	start time.Time
+}
+
+func formatKV(kv []any) string {
+	if len(kv) == 0 {
+		return ""
+	}
+
+	// Format as "k1=v1 k2=v2 ...", falling back to "%v" formatting for non-string keys and odd tails.
+	out := ""
+	for i := 0; i < len(kv); i += 2 {
+		if i > 0 {
+			out += " "
+		}
+
+		key := kv[i]
+		if i+1 >= len(kv) {
+			out += fmt.Sprintf("%v", key)
+			break
+		}
+
+		val := kv[i+1]
+		out += fmt.Sprintf("%v=%v", key, val)
+	}
+	return out
+}
+
 // changeState is an internal encoding for Outcome change tracking.
 // Values are ordered by "strength": unchanged < changed < changed+optimistic-lock.
 type changeState uint8
@@ -56,81 +133,88 @@ const (
 )
 
 // DidChange reports whether function modified the target object.
-func (o Outcome) DidChange() bool { return o.changeState >= changedState }
+func (outcome Outcome) DidChange() bool { return outcome.changeState >= changedState }
 
 // OptimisticLockRequired reports whether saving the reported change must use optimistic lock semantics
 // (e.g. Patch/Update with a resourceVersion precondition).
-func (o Outcome) OptimisticLockRequired() bool {
-	return o.changeState >= changedAndOptimisticLockRequiredState
+func (outcome Outcome) OptimisticLockRequired() bool {
+	return outcome.changeState >= changedAndOptimisticLockRequiredState
 }
 
 // Error returns the error carried by the outcome, if any.
-func (o Outcome) Error() error { return o.err }
+func (outcome Outcome) Error() error { return outcome.err }
 
-// Errorf returns a copy of Outcome with its error updated by formatted context.
+// Wrapf returns a copy of Outcome with its error updated by formatted context.
 //
-// If Outcome already carries an error, Errorf wraps it (like Wrapf).
-// If Outcome has no error, Errorf is a no-op and keeps the error nil.
-func (o Outcome) Errorf(format string, args ...any) Outcome {
-	if o.err == nil {
-		return o
+// If Outcome already carries an error, Wrapf wraps it (like Wrapf for errors).
+// If Outcome has no error, Wrapf is a no-op and keeps the error nil.
+func (outcome Outcome) Wrapf(format string, args ...any) Outcome {
+	if outcome.err == nil {
+		return outcome
 	}
-	o.err = Wrapf(o.err, format, args...)
-	return o
+	outcome.err = Wrapf(outcome.err, format, args...)
+	return outcome
 }
 
 // ReportChanged returns a copy of Outcome that records a change to the target object.
 // It does not alter the reconcile return decision (continue/done/requeue) or the error.
-func (o Outcome) ReportChanged() Outcome {
-	o.changeReported = true
-	if o.changeState == unchangedState {
-		o.changeState = changedState
+func (outcome Outcome) ReportChanged() Outcome {
+	outcome.changeReported = true
+	if outcome.changeState == unchangedState {
+		outcome.changeState = changedState
 	}
-	return o
+	return outcome
 }
 
 // ReportChangedIf is like ReportChanged, but it records a change only when cond is true.
 // It does not alter the reconcile return decision (continue/done/requeue) or the error.
-func (o Outcome) ReportChangedIf(cond bool) Outcome {
-	o.changeReported = true
-	if cond && o.changeState == unchangedState {
-		o.changeState = changedState
+func (outcome Outcome) ReportChangedIf(cond bool) Outcome {
+	outcome.changeReported = true
+	if cond && outcome.changeState == unchangedState {
+		outcome.changeState = changedState
 	}
-	return o
+	return outcome
 }
 
 // RequireOptimisticLock returns a copy of Outcome upgraded to require optimistic locking for patching.
 //
 // Contract: it must be called only after a change has been reported via ReportChanged/ReportChangedIf;
 // otherwise it panics (developer error).
-func (o Outcome) RequireOptimisticLock() Outcome {
-	if !o.changeReported {
+func (outcome Outcome) RequireOptimisticLock() Outcome {
+	if !outcome.changeReported {
 		panic("flow.Outcome: RequireOptimisticLock called before ReportChanged/ReportChangedIf")
 	}
-	if o.changeState == changedState {
-		o.changeState = changedAndOptimisticLockRequiredState
+	if outcome.changeState == changedState {
+		outcome.changeState = changedAndOptimisticLockRequiredState
 	}
-	return o
+	return outcome
 }
 
 // ShouldReturn reports whether the Outcome indicates an early return from Reconcile.
-func (o Outcome) ShouldReturn() bool { return o.result != nil }
+func (outcome Outcome) ShouldReturn() bool { return outcome.result != nil }
 
 // ToCtrl unwraps Outcome into the controller-runtime Reconcile return values.
 //
 // If result is nil, it returns an empty ctrl.Result and o.err.
-func (o Outcome) ToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
-		return ctrl.Result{}, o.err
+func (outcome Outcome) ToCtrl() (ctrl.Result, error) {
+	if outcome.result == nil {
+		return ctrl.Result{}, outcome.err
 	}
-	return *o.result, o.err
+	return *outcome.result, outcome.err
 }
 
-func (o Outcome) MustToCtrl() (ctrl.Result, error) {
-	if o.result == nil {
+func (outcome Outcome) MustToCtrl() (ctrl.Result, error) {
+	if outcome.result == nil {
 		panic("flow.Outcome: MustToCtrl called with nil result")
 	}
-	return *o.result, o.err
+	return *outcome.result, outcome.err
+}
+
+// Merge combines this Outcome with one or more additional Outcome values.
+//
+// It is a convenience wrapper around the package-level Merge(o, ...).
+func (outcome Outcome) Merge(outcomes ...Outcome) Outcome {
+	return Merge(append([]Outcome{outcome}, outcomes...)...)
 }
 
 // -----------------------------------------------------------------------------
@@ -152,14 +236,124 @@ func Begin(ctx context.Context) (context.Context, logr.Logger) {
 // It returns ctx updated with the phase logger, and the same logger value.
 //
 // phaseName is validated and this function panics on invalid values (developer error).
-func BeginPhase(ctx context.Context, phaseName string, keysAndValues ...any) (context.Context, logr.Logger) {
+func BeginPhase(ctx context.Context, phaseName string, kv ...any) (context.Context, logr.Logger) {
 	mustBeValidPhaseName(phaseName)
 	l := log.FromContext(ctx).WithName(phaseName)
-	if len(keysAndValues) > 0 {
-		l = l.WithValues(keysAndValues...)
+	if len(kv) > 0 {
+		l = l.WithValues(kv...)
 	}
+
+	// V(1) begin log (logger is already phase-scoped: name + values).
+	l.V(1).Info("phase start")
+
 	ctx = log.IntoContext(ctx, l)
+
+	// Save phase metadata for downstream consumers (e.g., tests/diagnostics, error wrapping).
+	ctx = context.WithValue(ctx, phaseContextKey{}, phaseContextValue{
+		name:  phaseName,
+		kv:    append([]any(nil), kv...),
+		start: time.Now(),
+	})
 	return ctx, l
+}
+
+// EndPhase logs V(1) "phase end" with a short, structured summary of the phase outcome.
+//
+// Intended usage is via defer right after BeginPhase:
+//
+//	ctx, _ := flow.BeginPhase(ctx, "somePhase", "key", "value")
+//	var outcome flow.Outcome
+//	defer flow.EndPhase(ctx, &outcome)
+//
+// Contract:
+//   - outcome must be non-nil (developer error);
+//   - ctx should come from BeginPhase (or otherwise carry phase metadata), otherwise EndPhase is a no-op.
+//
+// Notes:
+//   - EndPhase does not log the error itself; it logs only "hasError". Error details (when needed)
+//     should be logged at the point of creation via Outcome.OnErrorf.
+//   - If a panic happens before the deferred EndPhase runs, EndPhase logs it as an error (including
+//     phase metadata, when available) and then re-panics to preserve upstream handling.
+func EndPhase(ctx context.Context, outcome *Outcome) {
+	if r := recover(); r != nil {
+		err := panicToError(r)
+		if v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue); ok && v.name != "" {
+			if len(v.kv) == 0 {
+				err = Wrapf(err, "phase %s", v.name)
+			} else {
+				err = Wrapf(err, "phase %s %s", v.name, formatKV(v.kv))
+			}
+		}
+
+		log.FromContext(ctx).Error(err, "phase panic")
+		panic(r)
+	}
+
+	l := log.FromContext(ctx)
+
+	v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue)
+	if !ok || v.name == "" {
+		// Not in a phase: nothing to log.
+		return
+	}
+
+	if outcome == nil {
+		panic("flow.EndPhase: outcome is nil")
+	}
+
+	kind, requeueAfter := outcomeKind(outcome)
+
+	// NOTE: we intentionally do not log the error itself here and only log "hasError".
+	// If the error details are needed, they should be logged at the point of creation via Outcome.OnErrorf.
+	fields := []any{
+		"result", kind,
+		"changed", outcome.DidChange(),
+		"optimisticLock", outcome.OptimisticLockRequired(),
+		"hasError", outcome.Error() != nil,
+	}
+	if requeueAfter > 0 {
+		fields = append(fields, "requeueAfter", requeueAfter)
+	}
+	if !v.start.IsZero() {
+		fields = append(fields, "duration", time.Since(v.start))
+	}
+
+	l.V(1).Info("phase end", fields...)
+}
+
+func outcomeKind(outcome *Outcome) (kind string, requeueAfter time.Duration) {
+	if outcome == nil {
+		panic("flow.outcomeKind: outcome is nil")
+	}
+
+	if outcome.result == nil {
+		if outcome.err != nil {
+			return "continueErr", 0
+		}
+		return "continue", 0
+	}
+
+	if outcome.result.Requeue {
+		// This repo intentionally does not use ctrl.Result.Requeue=true.
+		return "requeue", 0
+	}
+
+	if outcome.result.RequeueAfter > 0 {
+		return "requeueAfter", outcome.result.RequeueAfter
+	}
+
+	if outcome.err != nil {
+		return "fail", 0
+	}
+
+	return "done", 0
+}
+
+func panicToError(r any) error {
+	if err, ok := r.(error); ok {
+		return Wrapf(err, "panic")
+	}
+	return fmt.Errorf("panic: %v", r)
 }
 
 // Continue indicates that the caller should keep executing the current reconciliation flow.
@@ -219,8 +413,8 @@ func RequeueAfter(dur time.Duration) Outcome {
 //     2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter (the smallest wins).
 //     3) Done: if there are no errors, no RequeueAfter requests, and at least one non-nil Return.
 //     4) Continue: otherwise (Return is nil). If errors were present, Err may be non-nil.
-func Merge(results ...Outcome) Outcome {
-	if len(results) == 0 {
+func Merge(outcomes ...Outcome) Outcome {
+	if len(outcomes) == 0 {
 		return Outcome{}
 	}
 
@@ -233,30 +427,30 @@ func Merge(results ...Outcome) Outcome {
 		anyChangeReported  bool
 	)
 
-	for _, r := range results {
-		if r.err != nil {
-			errs = append(errs, r.err)
+	for _, outcome := range outcomes {
+		if outcome.err != nil {
+			errs = append(errs, outcome.err)
 		}
 
-		anyChangeReported = anyChangeReported || r.changeReported
+		anyChangeReported = anyChangeReported || outcome.changeReported
 
-		if r.changeState > maxChangeState {
-			maxChangeState = r.changeState
+		if outcome.changeState > maxChangeState {
+			maxChangeState = outcome.changeState
 		}
 
-		if r.result == nil {
+		if outcome.result == nil {
 			continue
 		}
 		hasReconcileResult = true
 
-		if r.result.Requeue {
+		if outcome.result.Requeue {
 			panic("flow.Merge: Requeue=true is not supported")
 		}
 
-		if r.result.RequeueAfter > 0 {
-			if !shouldRequeueAfter || r.result.RequeueAfter < requeueAfter {
+		if outcome.result.RequeueAfter > 0 {
+			if !shouldRequeueAfter || outcome.result.RequeueAfter < requeueAfter {
 				shouldRequeueAfter = true
-				requeueAfter = r.result.RequeueAfter
+				requeueAfter = outcome.result.RequeueAfter
 			}
 		}
 	}
@@ -265,39 +459,39 @@ func Merge(results ...Outcome) Outcome {
 
 	// 1) Fail: if there are errors and at least one non-nil Return.
 	if combinedErr != nil && hasReconcileResult {
-		out := Fail(combinedErr)
-		out.changeState = maxChangeState
-		out.changeReported = anyChangeReported
-		return out
+		outcome := Fail(combinedErr)
+		outcome.changeState = maxChangeState
+		outcome.changeReported = anyChangeReported
+		return outcome
 	}
 
 	// 2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter.
 	if combinedErr == nil && shouldRequeueAfter {
-		out := RequeueAfter(requeueAfter)
-		out.changeState = maxChangeState
-		out.changeReported = anyChangeReported
-		return out
+		outcome := RequeueAfter(requeueAfter)
+		outcome.changeState = maxChangeState
+		outcome.changeReported = anyChangeReported
+		return outcome
 	}
 
 	// 3) Done: if there are no errors, no RequeueAfter requests, and at least one non-nil Return.
 	if combinedErr == nil && hasReconcileResult {
-		out := Done()
-		out.changeState = maxChangeState
-		out.changeReported = anyChangeReported
-		return out
+		outcome := Done()
+		outcome.changeState = maxChangeState
+		outcome.changeReported = anyChangeReported
+		return outcome
 	}
 
 	// 4) Continue: otherwise. If errors were present, Err may be non-nil.
 	if combinedErr != nil {
-		out := ContinueErr(combinedErr)
-		out.changeState = maxChangeState
-		out.changeReported = anyChangeReported
-		return out
+		outcome := ContinueErr(combinedErr)
+		outcome.changeState = maxChangeState
+		outcome.changeReported = anyChangeReported
+		return outcome
 	}
-	out := Continue()
-	out.changeState = maxChangeState
-	out.changeReported = anyChangeReported
-	return out
+	outcome := Continue()
+	outcome.changeState = maxChangeState
+	outcome.changeReported = anyChangeReported
+	return outcome
 }
 
 // mustBeValidPhaseName validates phaseName for logger WithName usage and panics on invalid input.
