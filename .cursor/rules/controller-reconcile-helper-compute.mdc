@@ -21,6 +21,8 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 - They compute **desired** (`computeDesired*`) and/or **actual (derived)** (`computeActual*`) values (and/or intermediate derived values), and return them (or write into explicit `out` args).
 - They treat `obj` and all caller-provided inputs as **read-only** and **MUST NOT** mutate them (including via aliasing of maps/slices; clone before modifying derived maps/slices).
 - They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, execute patches, or make any patch ordering / patch type decisions.
+- If a compute helper returns `flow.Outcome`, it **MUST** use it only for **flow control** (continue/done/requeue) and/or **errors**.
+- A compute helper **MUST NOT** use `flow.Outcome` change tracking (`ReportChanged`, `ReportChangedIf`) or optimistic-lock signaling (`RequireOptimisticLock`).
 - If `computeDesired*` derives desired values for **both** main and status domains that will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (main + status), not a mixed struct.
 - If a compute helper depends on previous compute output, the dependency **MUST** be explicit in the signature as args **after `obj`**.
 
@@ -38,6 +40,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 - Validate inputs / invariants and return `error` (or `flow.Outcome` if using flow style).
 - Call other `compute*` helpers (pure composition) and other pure utilities (formatting, parsing, deterministic math).
 - If using `flow.Outcome`, write computed results into explicit `out *T` (and/or return values) — **never into `obj`**.
+- If returning `flow.Outcome`, use it for **errors** (`flow.Fail`, `flow.ContinueErr`) and **reconcile return decisions** (`flow.Done`, `flow.RequeueAfter`) only.
 - If the helper needs logging/phase structure, accept `ctx` and create a phase via the normal flow mechanisms (still non-I/O).
 - Read reconciler-owned **pure** config/components (templates, planners, scorers, caches) **only if** they do not perform I/O and results remain deterministic for the same explicit inputs and the same internal state.
 
@@ -48,6 +51,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 - Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
 - `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
 - Executing patches / updates / creates / deletes, or making patch ordering / patch type decisions (plain vs optimistic lock, domain ordering, retries).
+- Using `flow.Outcome.ReportChanged`, `ReportChangedIf`, or `RequireOptimisticLock` (compute helpers do not mutate `obj`).
 - Hidden I/O / nondeterminism:
   - `time.Now()` / `time.Since(...)`,
   - `rand.*` / UUID generation,
@@ -221,7 +225,7 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 In particular, avoid producing “equivalent but different” outputs across runs (e.g., unstable ordering).
 - ComputeReconcileHelpers **MAY** use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, unique ID pools, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
   - Note: cache population or allocating an ID from a pool is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result **MUST** be the same.
-- If a ComputeReconcileHelper returns `flow.Outcome`, its outcome flags/signals **MUST** be stable for the same inputs and object state.
+- If a ComputeReconcileHelper returns `flow.Outcome`, its **flow decision** and **error** **MUST** be stable for the same inputs and object state.
 
 > Practical reason: nondeterminism creates patch churn and flaky tests.
 
@@ -247,6 +251,18 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
   - If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
 - If a ComputeReconcileHelper returns `flow.Outcome`, it **MUST** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
+
+### `flow.Outcome` change / optimistic-lock reporting (MUST NOT)
+
+Compute helpers **MUST NOT** report object changes or optimistic-lock requirements via `flow.Outcome`:
+- **MUST NOT** call `ReportChanged` / `ReportChangedIf`
+- **MUST NOT** call `RequireOptimisticLock`
+
+Rationale: `Outcome.DidChange()` / `Outcome.OptimisticLockRequired()` semantically mean
+“this helper already mutated the target object and the subsequent save of that mutation must use optimistic-lock semantics”.
+Compute helpers do not mutate `obj` by contract.
+
+---
 
 ### Returning results when using `flow.Outcome` (MAY)
 
@@ -425,4 +441,12 @@ func computeActualFoo(obj *v1alpha1.Foo) ActualFoo {
     obj.Status.ObservedGeneration = obj.Generation // forbidden: compute writes into obj
     return ActualFoo{}
 }
+
+❌ Using `flow.Outcome` change / optimistic-lock reporting in compute:
+```go
+func computeDesiredFoo(ctx context.Context, obj *v1alpha1.Foo, out *DesiredFoo) flow.Outcome {
+    *out = DesiredFoo{ /* ... */ }
+    return flow.Continue().ReportChanged().RequireOptimisticLock() // forbidden in compute
+}
+```
 ```

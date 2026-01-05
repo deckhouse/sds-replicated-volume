@@ -22,6 +22,8 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
   - whether `obj` was changed,
   - whether the subsequent save **requires optimistic locking**,
   - and whether an error occurred.
+- `ensure*` helpers are the **single source of truth** for change reporting and optimistic-lock requirement for their patch domain.
+- Reconcile methods **MUST** implement patch execution according to `flow.Outcome` (`DidChange` / `OptimisticLockRequired`) and **MUST NOT** override these decisions with ad-hoc logic.
 - They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, or execute patches / make patch ordering decisions.
 - If both main and status need changes, split into **two** ensure helpers (one per domain) and patch them separately in Reconcile methods.
 
@@ -43,6 +45,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 - Compose other pure helpers:
   - call other `ensure*` helpers for sub-steps,
   - depend on prior compute results by taking them as explicit args **after `obj`**.
+- Call `computeDesired*` / `computeActual*` helpers internally (pure composition) to derive desired/derived values, then apply them deterministically to `obj`.
 - If the logic is complex and needs logging/phase boundaries, accept `ctx context.Context` and start a phase; keep it non-I/O.
 - Read reconciler-owned **pure** config/components (templates, scorers, planners, caches) only if they do not perform I/O and results are deterministic for the same explicit inputs and the same internal state.
 
@@ -248,6 +251,35 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
   - Use outcome reporting (e.g., “changed” / optimistic-lock intent) via the `flow.Outcome` API.
 
+### Recommended pattern: change + optimistic-lock reporting (SHOULD)
+
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    changed := false
+    needLock := false
+
+    // ... deterministically mutate obj ...
+
+    outcome := flow.Continue().ReportChangedIf(changed)
+    if needLock {
+        outcome = outcome.RequireOptimisticLock()
+    }
+    return outcome
+}
+```
+
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    changed := false
+
+    // ... deterministically mutate obj ...
+
+    return flow.Continue().
+        ReportChangedIf(changed).
+        RequireOptimisticLock()
+}
+```
+
 ---
 
 ## Error handling (SHOULD)
@@ -329,8 +361,10 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
 ```go
 func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
     if rand.Int()%2 == 0 { // forbidden: nondeterministic
-        return flow.Continue().ReportOptimisticLock().ReportChanged()
+        obj.Spec.Replicas = 3
+        return flow.Continue().ReportChanged().RequireOptimisticLock()
     }
+    obj.Spec.Replicas = 3
     return flow.Continue().ReportChanged()
 }
 ```

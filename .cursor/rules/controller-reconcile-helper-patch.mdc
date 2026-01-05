@@ -73,7 +73,7 @@ A **PatchReconcileHelper** (“patch helper”) is a **ReconcileHelper** that is
 
 - **allowed to perform I/O**, and
 - executes exactly **one** Kubernetes patch request for exactly **one patch domain** (main resource patch **or** status subresource patch), and
-- returns the patch an error (if any).
+- returns the patch outcome (and optionally an error).
 
 Typical patch helpers encapsulate the mechanical “patch this domain now” operation (including optimistic-lock semantics) and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while Reconcile methods still own patch ordering decisions across multiple patches.
 
