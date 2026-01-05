@@ -17,7 +17,42 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for DeleteReconcileHelper.
+- `delete<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** Kubernetes API write — `Delete(...)` — for exactly one object (or treat NotFound as “already absent”, depending on policy).
+- They **MUST NOT** do any other API calls (`Get/List/Create/Update/Patch`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make patch ordering / patch type decisions.
+- They **MUST NOT** mutate the object as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by Reconcile methods via **separate** ensure/apply + patch steps **before** calling delete.
+- Everything they control **MUST** be deterministic (no time/random/env-driven behavior; consistent NotFound handling).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Execute exactly **one** Kubernetes API write: `r.client.Delete(ctx, obj)`.
+- Treat “already absent” deterministically:
+  - either propagate NotFound as an error, **or**
+  - deterministically treat NotFound as success (“already gone”) — whichever policy the codebase uses, but do it consistently.
+- Use the caller-provided object reference as the delete target (object key / UID are taken from `obj`).
+- Return `flow.Outcome` (or `error`) that reflects only the result of that single delete request.
+
+**DENY (MUST NOT):**
+- Any Kubernetes API calls other than the single `Delete(...)`:
+  - no `Get`, `List`, `Create`, `Update`, `Patch`,
+  - no `Status().Update/Patch`,
+  - no polling / “wait until gone”.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Executing patches or making patch ordering / patch type decisions (plain vs optimistic lock, sequencing across domains).
+- Mutating `obj` (or any other input) as part of deletion:
+  - no “marking deleting” fields,
+  - no finalizer edits,
+  - no status writes.
+  Any prerequisite mutations must be done by Reconcile methods via separate ensure/apply + patch steps **before** calling delete.
+- Deleting multiple objects in one helper (loops / fan-out / batch behavior).
+- Broad deletes (`DeleteAllOf`, selector-based mass deletion) — delete helpers operate on exactly one object instance.
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)`,
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls beyond the single Kubernetes API `Delete(...)` request.
 
 ---
 
@@ -157,12 +192,115 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for DeleteReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for DeleteReconcileHelper.
+❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) flow.Outcome {
+    // forbidden: extra API call
+    var existing v1alpha1.EON
+    if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err != nil {
+        return flow.Fail(err)
+    }
+
+    // forbidden: second API call in the same helper
+    if err := r.client.Delete(ctx, &existing); err != nil {
+        return flow.Fail(err)
+    }
+    return flow.Continue()
+}
+```
+
+❌ Performing more than one write (`Delete` + `Patch/Update/Create`, retries-as-extra-calls, fallback logic):
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    if err := r.client.Delete(ctx, obj); err != nil {
+        // forbidden: "fallback" write makes it >1 API call
+        return r.client.Patch(ctx, obj, client.MergeFrom(obj.DeepCopy()))
+    }
+    return nil
+}
+```
+
+❌ Mutating the object as part of deletion (“marking”, finalizer edits, status writes):
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    obj.Finalizers = nil          // forbidden: mutation belongs to ensure/apply + patch
+    obj.Status.Phase = "Deleting" // forbidden: status write belongs elsewhere
+    return r.client.Delete(ctx, obj)
+}
+```
+
+❌ Trying to “prepare for delete” inside the delete helper (remove finalizer + delete):
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    // forbidden: any patch/update belongs to Reconcile methods and is a separate patch domain write
+    base := obj.DeepCopy()      // also forbidden: DeepCopy in delete helper
+    obj.Finalizers = []string{} // forbidden: mutation
+    if err := r.client.Patch(ctx, obj, client.MergeFrom(base)); err != nil { // forbidden: extra write
+        return err
+    }
+    return r.client.Delete(ctx, obj)
+}
+```
+
+❌ Calling `DeepCopy` inside delete helpers:
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    return r.client.Delete(ctx, obj)
+}
+```
+
+❌ Deleting multiple objects in a single delete helper:
+```go
+func (r *Reconciler) deleteEONs(ctx context.Context, objs []*v1alpha1.EON) error {
+    for _, obj := range objs {
+        if err := r.client.Delete(ctx, obj); err != nil { // forbidden: multiple API calls
+            return err
+        }
+    }
+    return nil
+}
+```
+
+❌ Hidden I/O / nondeterminism (time/random/env/extra network calls):
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    if os.Getenv("DELETE_FAST") == "1" { // forbidden: env read in helper
+        // ...
+    }
+    _ = time.Now() // forbidden
+    return r.client.Delete(ctx, obj)
+}
+```
+
+❌ Using `DeleteAllOf` or broad deletes from a delete helper:
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    // forbidden: not “exactly one object delete”
+    return r.client.DeleteAllOf(ctx, &v1alpha1.EON{}, client.InNamespace(obj.Namespace))
+}
+```
+
+❌ Doing “wait until gone” polling inside the delete helper:
+```go
+func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
+    if err := r.client.Delete(ctx, obj); err != nil {
+        return err
+    }
+
+    // forbidden: extra API calls / orchestration belongs to Reconcile methods
+    for {
+        var cur v1alpha1.EON
+        err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &cur)
+        if apierrors.IsNotFound(err) {
+            return nil
+        }
+        if err != nil {
+            return err
+        }
+        time.Sleep(100 * time.Millisecond) // forbidden: time-based hidden I/O
+    }
+}
+```

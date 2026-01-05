@@ -17,7 +17,53 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for PatchReconcileHelper.
+- `patch<Kind>` helpers are **single-call I/O helpers**: they execute exactly **one** patch request for exactly **one** patch domain (`Patch(...)` main **or** `Status().Patch(...)` status).
+- They take `base` explicitly (created by Reconcile methods immediately before the patch) and an explicit `optimisticLock` flag, and **MUST NOT** decide patch ordering or patch strategy beyond that flag.
+- They **MUST** patch using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with API-server-updated fields (e.g., `resourceVersion`, managed fields, defaults).
+- They **MUST NOT** do any other API calls (`Get/List/Create/Update/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** patch both domains in one helper.
+- They **MUST** treat `base` as **read-only** and stay deterministic in everything they control (no hidden I/O: no time/random/env/network beyond the single patch request).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Execute **exactly one** Kubernetes patch request for **exactly one** patch domain:
+  - main: `r.client.Patch(ctx, obj, ...)`, or
+  - status: `r.client.Status().Patch(ctx, obj, ...)`.
+- Use the **caller-provided** `base` as the diff reference (e.g. `client.MergeFrom(base)` or the codebase’s standard patch constructor).
+- Respect the **caller-provided** `optimisticLock` flag by selecting the corresponding patch option/mode **without changing the decision**.
+- Return `flow.Outcome` (or `error`, if the category intentionally uses errors) that reflects only:
+  - success/failure of the single patch call,
+  - and any retry/requeue decision that is purely mechanical for this call (if your codebase does that inside patch helpers).
+- Observe that **the API server mutates `obj`** as a result of the patch call (e.g., `resourceVersion`, managed fields, defaults), i.e. it’s expected that **`obj` is updated in-place by the client call**.
+- Treat `base` and all other non-`obj` inputs as **read-only** (including maps/slices inside `base`).
+
+**DENY (MUST NOT):**
+- Any Kubernetes API calls other than the single patch call:
+  - no `Get`, no `List`, no `Create`, no `Update`, no `Delete`,
+  - no second patch call,
+  - no status patch plus main patch in the same helper.
+- Patching **both** patch domains in one helper (must be exactly one domain per helper).
+- Calling `DeepCopy` (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.) — the caller creates `base`.
+- Mutating `base` (directly or through aliasing of maps/slices); `base` is **read-only diff reference**.
+- Performing **business-logic** mutations on `obj` inside the patch helper:
+  - no “ensure/apply” logic,
+  - no setting fields “just before patch”,
+  - no normalization that changes intent.
+- Making patch ordering / orchestration decisions:
+  - no “patch main then status”,
+  - no “if X then patch status first”,
+  - no “retry loops that perform extra API calls”.
+- Overriding or re-deciding the optimistic-locking choice:
+  - must not flip `optimisticLock`,
+  - must not infer/decide it from object state inside the helper.
+- Hidden I/O / nondeterminism beyond the single patch request:
+  - no `time.Now()` / `time.Since(...)`,
+  - no `rand.*` / UUID generation,
+  - no `os.Getenv` / filesystem reads,
+  - no network calls other than the single Kubernetes API patch request.
+- Patching multiple objects in one helper (loops/fan-out belong to Reconcile methods).
 
 ---
 
@@ -188,12 +234,112 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for PatchReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for PatchReconcileHelper.
+❌ Doing any Kubernetes API calls other than the single patch request (`Get/List/Create/Update/Delete`, or a second patch):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    // forbidden: extra API call
+    var cur v1alpha1.EON
+    if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &cur); err != nil {
+        return err
+    }
+
+    // forbidden: patch after an extra call (still >1 API call in helper)
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Calling `DeepCopy` inside patch helpers (the caller creates `base`):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Patching a temporary copy and dropping it (caller-owned `obj` stays stale):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    tmp := obj.DeepCopy() // also forbidden: DeepCopy in patch helper
+    if err := r.client.Patch(ctx, tmp, client.MergeFrom(base)); err != nil {
+        return err
+    }
+    // forbidden: obj is not updated with new resourceVersion/defaults
+    return nil
+}
+```
+
+❌ Patching both patch domains in one helper:
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    // forbidden: two requests / two domains
+    if err := r.client.Patch(ctx, obj, client.MergeFrom(base)); err != nil { // main
+        return err
+    }
+    return r.client.Status().Patch(ctx, obj, client.MergeFrom(base)) // status
+}
+```
+
+❌ Making patch ordering decisions (patch helpers execute exactly one patch, ordering lives in Reconcile methods):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    // forbidden: deciding to patch status first / mixing ordering policy into the helper
+    if needsStatus(obj) {
+        if err := r.client.Status().Patch(ctx, obj, client.MergeFrom(base)); err != nil {
+            return err
+        }
+    }
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Overriding the caller’s optimistic-locking decision:
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    optimisticLock = true // forbidden: helper must not change the decision
+    // ...
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Performing business-logic mutations inside the patch helper (beyond the patch call itself):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    // forbidden: business mutations belong to compute/apply/ensure before calling patch
+    obj.Spec.Replicas = 3
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Mutating `base` (it is read-only diff reference):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    labels := base.GetLabels()
+    labels["x"] = "y" // forbidden: mutates base via alias
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Hidden I/O / nondeterminism (time/random/env/extra network calls):
+```go
+func (r *Reconciler) patchEON(ctx context.Context, obj, base *v1alpha1.EON, optimisticLock bool) error {
+    if os.Getenv("PATCH_FAST") == "1" { // forbidden: env read in helper
+        // ...
+    }
+    _ = time.Now() // forbidden
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Using broad patch helpers that patch multiple objects (must patch exactly one object instance):
+```go
+func (r *Reconciler) patchEONs(ctx context.Context, objs []*v1alpha1.EON, base *v1alpha1.EON, optimisticLock bool) error {
+    for _, obj := range objs {
+        if err := r.client.Patch(ctx, obj, client.MergeFrom(base)); err != nil { // forbidden: multiple API calls
+            return err
+        }
+    }
+    return nil
+}
+```

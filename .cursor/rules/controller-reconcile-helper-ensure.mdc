@@ -17,7 +17,51 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for EnsureReconcileHelper.
+- `ensure*` helpers are **pure, deterministic, strictly non-I/O** in-place mutation steps for **exactly one patch domain** (main **or** status).
+- They mutate the caller-owned `obj` and return a `flow.Outcome` that encodes:
+  - whether `obj` was changed,
+  - whether the subsequent save **requires optimistic locking**,
+  - and whether an error occurred.
+- They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, or execute patches / make patch ordering decisions.
+- If both main and status need changes, split into **two** ensure helpers (one per domain) and patch them separately in Reconcile methods.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Mutate the caller-owned `obj` **in place** to “make it more correct” for **exactly one** patch domain:
+  - main resource (metadata/spec/non-status), **or**
+  - status subresource (`.status`).
+- Make step-by-step, imperative corrections (set/clear fields, normalize formats, add/remove elements) as long as they are deterministic.
+- Use `objutilv1` (imported as `obju`) for labels/annotations/finalizers/ownerRefs/conditions operations where required by the codebase.
+- If you need stable ordering (finalizers, ownerRefs, conditions, slices derived from maps/sets), **sort/canonicalize** before writing to `obj`.
+- Return `flow.Outcome` that encodes (via the `flow.Outcome` API):
+  - “changed” when and only when `obj` was actually mutated,
+  - “requires optimistic locking” when and only when the subsequent save must use optimistic locking,
+  - error state when something prevents correct reconciliation.
+- Compose other pure helpers:
+  - call other `ensure*` helpers for sub-steps,
+  - depend on prior compute results by taking them as explicit args **after `obj`**.
+- If the logic is complex and needs logging/phase boundaries, accept `ctx context.Context` and start a phase; keep it non-I/O.
+- Read reconciler-owned **pure** config/components (templates, scorers, planners, caches) only if they do not perform I/O and results are deterministic for the same explicit inputs and the same internal state.
+
+**DENY (MUST NOT):**
+- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Executing patches (`Patch` / `Status().Patch`) or making patch ordering / patch type decisions.
+- Mutating both patch domains in the same helper (main + status together).
+- Mutating any inputs other than `obj` (desired structs, templates/defaults, previously computed values), including via aliasing of maps/slices.
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)` (except condition timestamps set indirectly via `obju` helpers where unavoidable),
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls of any kind.
+- Depending on map iteration order when producing ordered output (must sort before writing).
+- Returning an outcome that contradicts reality:
+  - reporting “changed” without a mutation,
+  - mutating `obj` without reporting “changed”,
+  - setting optimistic-lock requirement nondeterministically or without a clear, deterministic reason.
 
 ---
 
@@ -210,12 +254,118 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for EnsureReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for EnsureReconcileHelper.
+❌ Doing any Kubernetes API I/O (directly or indirectly):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.Outcome {
+    // forbidden: I/O in ensure
+    var cm corev1.ConfigMap
+    if err := r.client.Get(ctx, nn, &cm); err != nil {
+        return flow.Fail(err)
+    }
+    return flow.Continue()
+}
+```
+
+❌ Executing patches / updates / deletes (or hiding them behind helpers):
+```go
+func ensureFoo(ctx context.Context, obj *v1alpha1.Foo) flow.Outcome {
+    // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
+    base := obj.DeepCopy() // also forbidden: DeepCopy in ensure
+    obj.Spec.Replicas = 3
+    _ = r.client.Patch(ctx, obj, client.MergeFrom(base))
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Calling `DeepCopy` inside ensure helpers:
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    return flow.Continue()
+}
+```
+
+❌ Mutating both patch domains (main + status) in one ensure helper:
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    obj.Spec.Replicas = 3            // main domain
+    obj.Status.Phase = "Reconciling" // status domain
+    // forbidden: ensure must touch exactly one patch domain
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Returning “changed” inconsistently (mutated object but outcome does not report it):
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    obj.Spec.Replicas = 3
+    // forbidden: mutation happened, but outcome does not report change
+    return flow.Continue()
+}
+```
+
+❌ Reporting “changed” without actually changing the object:
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    // forbidden: reports change but did not mutate anything
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Requesting optimistic locking “sometimes” without determinism (same inputs -> different outcome):
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    if rand.Int()%2 == 0 { // forbidden: nondeterministic
+        return flow.Continue().ReportOptimisticLock().ReportChanged()
+    }
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Hidden I/O / nondeterminism (time/random/env/network):
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    _ = time.Now()        // forbidden (except condition timestamps via obju)
+    _ = rand.Int()        // forbidden
+    _ = os.Getenv("FLAG") // forbidden
+    return flow.Continue()
+}
+```
+
+❌ Depending on map iteration order when building ordered slices (patch churn):
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    out := make([]string, 0, len(obj.Spec.Flags))
+    for k := range obj.Spec.Flags { // map iteration order is random
+        out = append(out, k)
+    }
+    // missing sort => nondeterministic object state
+    obj.Spec.FlagKeys = out
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Mutating shared templates/defaults through aliasing:
+```go
+func ensureFoo(obj *v1alpha1.Foo, template *v1alpha1.Foo) flow.Outcome {
+    // forbidden: template labels map is shared; mutating it mutates the template
+    labels := template.GetLabels()
+    labels["owned"] = "true"
+    obj.SetLabels(labels)
+    return flow.Continue().ReportChanged()
+}
+```
+
+❌ Manual metadata/conditions manipulation when `objutilv1` (`obju`) must be used:
+```go
+func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
+    // forbidden in this codebase: do not open-code label/finalizer/condition edits
+    if obj.Labels == nil {
+        obj.Labels = map[string]string{}
+    }
+    obj.Labels["a"] = "b"
+    return flow.Continue().ReportChanged()
+}
+```

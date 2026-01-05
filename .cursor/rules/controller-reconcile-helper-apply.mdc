@@ -17,7 +17,46 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for ApplyReconcileHelper.
+- `apply*` helpers are **pure, deterministic, strictly non-I/O** “in-memory write” steps.
+- They take a **previously computed desired value** and **mutate `obj` in place** for **exactly one patch domain** (main **or** status).
+- They **MUST NOT** talk to the Kubernetes API, use controller-runtime client, call `DeepCopy`, or execute patches / make patch ordering or patch type decisions.
+- They **MUST** treat `desired` (and any other inputs) as **read-only** and **MUST NOT** mutate it (including via aliasing); when copying maps/slices from `desired` into `obj`, **clone** to avoid sharing.
+- If both main and status need changes, use **two** apply helpers (one per domain) and compose them in Reconcile methods.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Mutate the caller-owned `obj` **in place** for **exactly one** patch domain:
+  - main resource (metadata/spec/non-status), **or**
+  - status subresource (`.status`).
+- Mechanically “write desired into obj” (copy fields, set labels/annotations/finalizers/conditions) with no business decisions.
+- Treat `desired` and all other inputs as read-only; if you need to transform/normalize before applying, do it on **local clones**.
+- Clone maps/slices from `desired` before setting them on `obj` to avoid aliasing:
+  - `maps.Clone(desired.Labels)`, `slices.Clone(desired.Items)`, `append([]T(nil), desired.Items...)`.
+- Ensure deterministic object state:
+  - if you build ordered slices from sets/maps, **sort** before setting;
+  - write fields in a stable, canonical form.
+- Use `objutilv1` (imported as `obju`) for labels/annotations/finalizers/ownerRefs/conditions operations where required by the codebase.
+- Return `error` only for truly exceptional local validation failures (nil desired pointers, impossible desired shape, etc.).
+
+**DENY (MUST NOT):**
+- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Executing patches (`Patch` / `Status().Patch`) or making patch ordering / patch type decisions.
+- Flow control responsibilities:
+  - no `flow.BeginPhase`, no logging, no `ctx` argument,
+  - no returning `flow.Outcome`.
+- Mutating more than one patch domain in the same helper (main + status together).
+- Mutating `desired` or any other non-`obj` inputs (including via aliasing of maps/slices).
+- Sharing reference-like data from `desired` into `obj` (aliasing), e.g. `obj.SetLabels(desired.Labels)` without cloning.
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)` (except timestamps set indirectly via `obju` condition helpers where unavoidable),
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls of any kind.
+- Embedding business logic (deciding desired state) inside apply helpers; decisions belong to compute/ensure/Reconcile methods.
 
 ---
 
@@ -165,12 +204,108 @@ func applyDesiredFoo(
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for ApplyReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for ApplyReconcileHelper.
+❌ Doing any Kubernetes API I/O (client usage / API calls in apply):
+```go
+func applyDesiredFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, desired DesiredFoo) error {
+    // forbidden: apply helpers are non-I/O
+    return c.Update(ctx, obj)
+}
+```
+
+❌ Executing patches or making patch decisions inside apply:
+```go
+func applyDesiredFoo(ctx context.Context, c client.Client, obj, base *v1alpha1.Foo, desired DesiredFoo) error {
+    // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
+    obj.Spec = desired.Spec
+    return c.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Calling `DeepCopy` inside apply:
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    obj.Spec = desired.Spec
+}
+```
+
+❌ Returning `flow.Outcome` / doing flow control inside apply:
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) flow.Outcome {
+    obj.Spec = desired.Spec
+    return flow.Continue() // forbidden: apply helpers do not return flow control
+}
+```
+
+❌ Adding logging/phases to apply helpers (they must stay tiny and have no `ctx`):
+```go
+func applyDesiredFoo(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) error {
+    l := log.FromContext(ctx)
+    l.Info("applying desired foo") // forbidden: apply helpers do not log / do not accept ctx
+    obj.Spec = desired.Spec
+    return nil
+}
+```
+
+❌ Mutating both patch domains in one apply helper:
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desiredMain DesiredFooMain, desiredStatus DesiredFooStatus) {
+    obj.Spec = desiredMain.Spec      // main domain
+    obj.Status = desiredStatus.State // status domain
+    // forbidden: apply must touch exactly one patch domain
+}
+```
+
+❌ Implementing business logic inside apply (deciding desired state while applying it):
+```go
+func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) {
+    // forbidden: decisions belong to compute/ensure; apply is mechanical
+    if obj.Spec.Mode == "special" {
+        desired.Replicas = 5 // also mutates desired (see below)
+    }
+    obj.Spec.Replicas = desired.Replicas
+}
+```
+
+❌ Mutating `desired` (or any other non-`obj` input):
+```go
+func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
+    desired.Labels["x"] = "y" // forbidden: desired is read-only
+    obju.SetLabels(obj, desired.Labels)
+}
+```
+
+❌ Sharing maps/slices from `desired` into `obj` (aliasing):
+```go
+func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
+    obj.SetLabels(desired.Labels) // forbidden: shares map backing storage
+
+    // later mutation now also mutates `desired.Labels` through aliasing
+    obj.GetLabels()["owned"] = "true"
+}
+```
+
+❌ Writing nondeterministic ordered fields (map iteration order leaks into slices):
+```go
+func applyDesiredFinalizers(obj *v1alpha1.Foo, desired DesiredFinalizers) {
+    finals := make([]string, 0, len(desired.Set))
+    for f := range desired.Set { // map iteration order is random
+        finals = append(finals, f)
+    }
+    // missing sort => nondeterministic object state => patch churn
+    obj.SetFinalizers(finals)
+}
+```
+
+❌ Manual metadata/conditions manipulation when `objutilv1` must be used:
+```go
+func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
+    // forbidden in this codebase: do not open-code label map edits
+    if obj.Labels == nil {
+        obj.Labels = map[string]string{}
+    }
+    obj.Labels["a"] = "b"
+}
+```

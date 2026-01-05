@@ -17,7 +17,42 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for CreateReconcileHelper.
+- `create<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** Kubernetes API write — `Create(...)` — for exactly one object.
+- They **MUST** create using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with API-server-assigned fields/defaults (e.g. `uid`, `resourceVersion`, defaulted fields).
+- They **MUST NOT** do any other API calls (`Get/List/Update/Patch/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make patch ordering / patch type decisions.
+- They **MUST NOT** write the status subresource as part of create (no `Status().Patch/Update`); any status write is a **separate request** done by Reconcile methods.
+- Everything they control (the create request payload) **MUST** be deterministic (no time/random/env-driven values; stable ordering where relevant).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Execute exactly **one** Kubernetes API write: `r.client.Create(ctx, obj)`.
+- Use the **caller-owned** `obj` as the request object; on success, rely on the API call to update **that same instance** with server-assigned fields/defaults (UID, `resourceVersion`, defaulted fields, managed fields, etc.).
+- Perform minimal, mechanical request preparation on `obj` **before** the single `Create(...)` call (labels/annotations/ownerRefs/finalizers/spec fields), preferably by composing pure helpers (compute/apply/ensure) **outside** or **immediately before** the create call.
+- Treat all other inputs (templates, desired structs, shared defaults) as read-only; **clone** maps/slices from them before setting on `obj` to avoid aliasing.
+- Stay deterministic in the payload you send:
+  - stable ordering where it affects serialized output,
+  - no time/random/env-derived values,
+  - canonical forms for fields that are order-sensitive.
+- Return `flow.Outcome` (or `error`) that reflects only the result of the single create request (success / failure).
+
+**DENY (MUST NOT):**
+- Any Kubernetes API calls other than the single `Create(...)`:
+  - no `Get`, `List`, `Update`, `Patch`, `Delete`,
+  - no `Status().Update/Patch`,
+  - no “fallback” second write on create error.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Executing patches or making patch ordering / patch type decisions (plain vs optimistic lock, sequencing across domains).
+- Creating multiple objects in one helper (loops / fan-out / batch behavior).
+- Writing the status subresource as part of create (status is a separate request owned by Reconcile methods).
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)`,
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls beyond the single Kubernetes API `Create(...)` request.
+- Using a temporary object for the create call and then dropping it (must use and update the caller-owned `obj`).
 
 ---
 
@@ -158,12 +193,126 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for CreateReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for CreateReconcileHelper.
+❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) flow.Outcome {
+    // forbidden: extra API call
+    var existing v1alpha1.EON
+    if err := r.client.Get(ctx, client.ObjectKeyFromObject(obj), &existing); err == nil {
+        return flow.Continue() // "already exists" decision belongs to Reconcile methods
+    }
+
+    // forbidden: second API call in the same helper if create proceeds
+    if err := r.client.Create(ctx, obj); err != nil {
+        return flow.Fail(err)
+    }
+    return flow.Continue()
+}
+```
+
+❌ Performing more than one write (`Create` + `Update/Patch/Delete`, retries-as-extra-calls, fallback logic):
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    if err := r.client.Create(ctx, obj); err != nil {
+        // forbidden: "fallback" write makes it >1 API call
+        return r.client.Update(ctx, obj)
+    }
+    return nil
+}
+```
+
+❌ Creating on a temporary object and dropping it (caller-owned `obj` is not updated with UID/RV/defaults):
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    tmp := &v1alpha1.EON{
+        ObjectMeta: metav1.ObjectMeta{
+            Namespace: obj.Namespace,
+            Name:      obj.Name,
+        },
+        Spec: obj.Spec,
+    }
+    if err := r.client.Create(ctx, tmp); err != nil {
+        return err
+    }
+
+    // obj is still stale: uid/resourceVersion/defaults are on tmp, not on obj
+    return nil
+}
+```
+
+❌ Using `DeepCopy` in create helpers:
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    base := obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods, not create helpers
+    _ = base
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Writing status as part of create (or “relying on status in the create request”):
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    obj.Status.Phase = "Ready" // forbidden: do not rely on status during create
+    if err := r.client.Create(ctx, obj); err != nil {
+        return err
+    }
+    // forbidden: second write and status subresource write inside create helper
+    return r.client.Status().Update(ctx, obj)
+}
+```
+
+❌ Executing patches inside create helpers:
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON, base *v1alpha1.EON) error {
+    // forbidden: patch execution belongs to PatchReconcileHelpers / Reconcile methods
+    if err := r.client.Create(ctx, obj); err != nil {
+        return err
+    }
+    return r.client.Patch(ctx, obj, client.MergeFrom(base))
+}
+```
+
+❌ Creating multiple objects in a single create helper:
+```go
+func (r *Reconciler) createEONs(ctx context.Context, objs []*v1alpha1.EON) error {
+    for _, obj := range objs {
+        if err := r.client.Create(ctx, obj); err != nil { // forbidden: multiple API calls
+            return err
+        }
+    }
+    return nil
+}
+```
+
+❌ Hidden I/O / nondeterministic request payload (time/random/env, nondeterministic ordering):
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    obj.Annotations["createdAt"] = time.Now().Format(time.RFC3339) // forbidden
+    obj.Labels["nonce"] = uuid.NewString()                         // forbidden
+    obj.Spec.Seed = rand.Int()                                     // forbidden
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Using `GenerateName` / random naming for resources that must be stable in reconciliation:
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
+    obj.Name = ""
+    obj.GenerateName = "eon-" // anti-pattern: server adds a random suffix => nondeterministic identity
+    return r.client.Create(ctx, obj)
+}
+```
+
+❌ Mutating shared templates/defaults through aliasing while preparing `obj`:
+```go
+func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON, template *v1alpha1.EON) error {
+    // forbidden: template labels map is shared; mutating it mutates the template
+    labels := template.GetLabels()
+    labels["app"] = "eon"
+    obj.SetLabels(labels)
+
+    return r.client.Create(ctx, obj)
+}
+```

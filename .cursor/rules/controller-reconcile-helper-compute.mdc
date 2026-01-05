@@ -17,10 +17,44 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-- `compute*` helpers are **pure, deterministic, non-I/O** computations.
-- They treat `obj` as **read-only** and **MUST NOT** mutate it (including via aliasing of maps/slices).
-- They compute **desired** and/or **actual (derived)** values (and/or derived intermediate values) and return them (or write into explicit `out` args).
-- They **MUST NOT** talk to Kubernetes API, execute patches, or perform any I/O-like work.
+- `compute*` helpers are **pure, deterministic, strictly non-I/O** computations (no hidden I/O: no time/random/env/network).
+- They compute **desired** (`computeDesired*`) and/or **actual (derived)** (`computeActual*`) values (and/or intermediate derived values), and return them (or write into explicit `out` args).
+- They treat `obj` **and all other inputs** as **read-only** and **MUST NOT** mutate them (including via aliasing of maps/slices; clone before modifying derived maps/slices).
+- They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, execute patches, or make any patch ordering / patch type decisions.
+- If `computeDesired*` derives desired values for **both** main and status domains that will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (main + status), not a mixed struct.
+- If a compute helper depends on previous compute output, the dependency **MUST** be explicit in the signature as args **after `obj`**.
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Read any fields from `obj` (metadata/spec/status/etc.) **as read-only input**.
+- Build desired/actual outputs **from scratch** (new structs, new slices/maps).
+- Clone maps/slices from inputs before normalizing/editing:
+  - `maps.Clone(...)`, `slices.Clone(...)`, `append([]T(nil), in...)`, manual copies.
+- Normalize deterministically (stable ordering):
+  - sort slices (`slices.Sort`, sort by key), canonicalize representations before returning/comparing.
+- Validate inputs / invariants and return `error` (or `flow.Outcome` if using flow style).
+- Call other `compute*` helpers (pure composition) and other pure utilities (formatting, parsing, deterministic math).
+- If using `flow.Outcome`, write computed results into explicit `out *T` (and/or return values) — **never into `obj`**.
+- If the helper needs logging/phase structure, accept `ctx` and create a phase via the normal flow mechanisms (still non-I/O).
+- Read reconciler-owned **pure** config/components (templates, planners, scorers, caches) **only if** they do not perform I/O and results remain deterministic for the same explicit inputs and the same internal state.
+
+**DENY (MUST NOT):**
+- Mutate `obj` in any way (metadata/spec/status/labels/annotations/finalizers/conditions), including via map/slice aliasing.
+- Mutate any other inputs (`desired`, `actual`, templates/defaults, previously computed values), including via aliasing.
+- Return values that alias `obj` internals (e.g., `obj.GetLabels()` map, `obj.Spec.SomeSlice` slice) where callers could mutate later.
+- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Executing patches / updates / creates / deletes, or making patch ordering / patch type decisions (plain vs optimistic lock, domain ordering, retries).
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)`,
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls of any kind.
+- Relying on map iteration order (must sort when output order matters).
+- Smuggling implicit dependencies (globals, package-level mutable state) instead of explicit arguments / reconciler fields.
 
 ---
 
@@ -274,54 +308,109 @@ Notes (SHOULD):
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- reading any fields from `obj` (spec/status/metadata) **as read-only input**;
-- building desired/actual values **from scratch** (new structs, new slices/maps);
-- calling other compute helpers (pure composition);
-- calling small pure utilities (string formatting, sorting, validating inputs);
-- allocating and returning data structures needed by later reconcile steps.
-
-**DENY (MUST NOT):**
-- mutating `obj` (spec/status/metadata; labels/annotations/finalizers/conditions);
-- mutating any `map`/`slice` that aliases memory from `obj`;
-- returning pointers/references to internal fields of `obj` that callers might later mutate;
-- any k8s API I/O (directly or indirectly);
-- patch execution or patch strategy decisions.
-
-**ALLOW (MAY):**
-- using extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, unique ID pools, caches), as described in `controller-file-structure.mdc` (“Additional components”).
-  - Such components **MUST** remain pure (no Kubernetes API calls, no patches, no `DeepCopy`, no time/random/env I/O) and **MUST NOT** hide I/O inside themselves.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-❌ Doing any API I/O in compute:
+❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
 func (r *Reconciler) computeDesiredFoo(ctx context.Context, obj *v1alpha1.Foo) (DesiredFoo, error) {
     var cm corev1.ConfigMap
-    _ = r.client.Get(ctx, nn, &cm) // forbidden: I/O in compute
-    // ...
+    if err := r.client.Get(ctx, nn, &cm); err != nil { // forbidden: I/O in compute
+        return DesiredFoo{}, err
+    }
+    return DesiredFoo{}, nil
 }
 ```
 
-❌ Mutating `obj`:
+❌ Executing a patch / update / delete (or hiding it behind helpers):
 ```go
-func (r *Reconciler) computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+func computeActualFoo(ctx context.Context, obj *v1alpha1.Foo) (ActualFoo, error) {
+    _ = patchFoo(ctx, obj) // forbidden: patch execution in compute
+    return ActualFoo{}, nil
+}
+```
+
+❌ Calling `DeepCopy` as a shortcut (or to “avoid aliasing”):
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    _ = obj.DeepCopy() // forbidden in compute helpers
+    return DesiredFoo{}
+}
+```
+
+❌ Mutating `obj` (including “harmless” metadata/spec/status writes):
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
     obj.Spec.Replicas = 3 // forbidden: compute must not mutate obj
     return DesiredFoo{}
 }
 ```
 
-❌ Using `DeepCopy` as a shortcut:
+❌ Mutating `obj` through aliasing of maps/slices:
 ```go
-desired := obj.DeepCopy() // forbidden in compute helpers
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    labels := obj.GetLabels()
+    labels["my-controller/owned"] = "true" // forbidden: mutates obj via alias
+    return DesiredFoo{}
+}
 ```
 
-❌ Nondeterministic output:
+❌ Returning references that alias `obj` internals (callers may mutate later):
 ```go
-id := uuid.NewString() // forbidden: nondeterministic
-ts := time.Now()       // forbidden: nondeterministic
+func computeActualFoo(obj *v1alpha1.Foo) ActualFoo {
+    return ActualFoo{
+        Labels: obj.GetLabels(), // forbidden: exposes obj map alias
+    }
+}
+```
+
+❌ Hidden I/O / nondeterminism (time, random, env, filesystem, extra network):
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    _ = time.Now()     // forbidden
+    _ = rand.Int()     // forbidden
+    _ = os.Getenv("X") // forbidden
+    // net/http calls, reading files, etc. are also forbidden
+    return DesiredFoo{}
+}
+```
+
+❌ Depending on map iteration order (unstable output → patch churn):
+```go
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    out := make([]string, 0, len(obj.Spec.Flags))
+    for k := range obj.Spec.Flags { // map iteration order is random
+        out = append(out, k)
+    }
+    // missing sort => nondeterministic output
+    return DesiredFoo{Keys: out}
+}
+```
+
+❌ Mixing desired main + desired status into one “mixed” desired value used by Apply/IsUpToDate:
+```go
+type MixedDesiredFoo struct {
+    Labels map[string]string
+    Status v1alpha1.FooStatus
+}
+
+func computeDesiredFoo(obj *v1alpha1.Foo) (MixedDesiredFoo, error) { // forbidden shape
+    return MixedDesiredFoo{}, nil
+}
+```
+
+❌ Smuggling implicit dependencies instead of explicit arguments:
+```go
+var globalDefault DesiredFoo // forbidden: implicit dependency
+
+func computeDesiredFoo(obj *v1alpha1.Foo) DesiredFoo {
+    return globalDefault // hidden dependency: not explicit in signature
+}
+```
+
+❌ Writing results into `obj` instead of returning them / writing into an explicit `out` arg:
+```go
+func computeActualFoo(obj *v1alpha1.Foo) ActualFoo {
+    obj.Status.ObservedGeneration = obj.Generation // forbidden: compute writes into obj
+    return ActualFoo{}
+}
 ```

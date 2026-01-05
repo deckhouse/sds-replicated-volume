@@ -17,7 +17,46 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ## TL;DR (MUST)
 
-TODO: define TL;DR for IsUpToDateReconcileHelper.
+- `is*UpToDate` helpers are **tiny, pure, deterministic, strictly non-I/O** boolean checks.
+- They compare the current `obj` state to a **single desired input** for **exactly one patch domain** (main **or** status) and return `true/false`.
+- They **SHOULD NOT** return errors, **MUST NOT** do flow control, and **MUST NOT** log.
+- They treat `obj` and `desired` as **read-only** (no mutations, including via map/slice aliasing; clone before any normalization).
+
+---
+
+## ALLOW / DENY cheat sheet
+
+**ALLOW (MAY):**
+- Read the current state from `obj` **as read-only input**.
+- Read the desired state from the single `desired` argument **as read-only input**.
+- Perform a tiny, pure comparison for **exactly one** patch domain and return `true/false`.
+- Use deterministic normalization **on local clones only** if needed for comparison:
+  - clone slices/maps from `obj` / `desired`,
+  - sort/canonicalize the clones,
+  - compare canonical forms.
+- Call small pure helpers used purely for comparison (string normalization, sorting clones, equality helpers).
+- Bundle multiple fields for the same domain into one `desired` struct and compare it as a unit.
+
+**DENY (MUST NOT):**
+- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
+- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
+- Any flow control:
+  - no `flow.Outcome` returns,
+  - no phases,
+  - no logging,
+  - no `ctx` argument.
+- Returning `error` (signature must be `... bool`).
+- Mutating anything:
+  - must not mutate `obj`,
+  - must not mutate `desired`,
+  - must not mutate through aliasing (e.g., sorting `obj.Spec.Slice` in place, editing `obj.GetLabels()` map).
+- Checking both patch domains in one helper (main + status together).
+- Hidden I/O / nondeterminism:
+  - `time.Now()` / `time.Since(...)`,
+  - `rand.*` / UUID generation,
+  - `os.Getenv`, reading files,
+  - network calls.
+- Relying on map iteration order or any unstable traversal that can flip the boolean result (must sort when order matters).
 
 ---
 
@@ -150,6 +189,7 @@ func isFooUpToDate(
 - IsUpToDateReconcileHelpers **MUST NOT** create a `reconcile/flow` phase (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
 - IsUpToDateReconcileHelpers **MUST NOT** return `flow.Outcome` (they are pure checks).
   - If you need flow control (requeue, done, fail), keep it in the caller and/or use other helper categories (e.g., compute/ensure/patch).
+- IsUpToDateReconcileHelpers **MUST NOT** log.
 
 ---
 
@@ -161,12 +201,93 @@ func isFooUpToDate(
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-TODO: define ALLOW / DENY cheat sheet for IsUpToDateReconcileHelper.
-
----
-
 ## Common anti-patterns (MUST NOT)
 
-TODO: define common anti-patterns for IsUpToDateReconcileHelper.
+❌ Doing any Kubernetes API I/O (directly or indirectly):
+```go
+func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    // forbidden: I/O in IsUpToDate helper
+    var cm corev1.ConfigMap
+    _ = r.client.Get(ctx, nn, &cm)
+    return true
+}
+```
+
+❌ Returning `error` as part of the signature when it is avoidable:
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) (bool, error) { // avoid
+    return true, nil
+}
+```
+
+❌ Doing flow control / returning `flow.Outcome`:
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) flow.Outcome { // forbidden
+    return flow.Continue()
+}
+```
+
+❌ Logging or creating phases (no `ctx`, no logs):
+```go
+func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) bool { // forbidden shape
+    l := log.FromContext(ctx)
+    l.Info("checking up-to-date") // forbidden: no logging
+    return true
+}
+```
+
+❌ Calling `DeepCopy`:
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    _ = obj.DeepCopy() // forbidden
+    return true
+}
+```
+
+❌ Mutating `obj` (even “harmless” changes):
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    obj.Spec.Replicas = desired.Replicas // forbidden: IsUpToDate is read-only
+    return false
+}
+```
+
+❌ Mutating `desired`:
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    desired.Replicas = 3 // forbidden: desired is read-only
+    return obj.Spec.Replicas == desired.Replicas
+}
+```
+
+❌ Mutating through aliasing (maps/slices from inputs):
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    ids := obj.Spec.IDs
+    slices.Sort(ids) // forbidden: sorts in place and mutates obj
+    return true
+}
+```
+
+❌ Depending on map iteration order (nondeterministic boolean):
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    // obj.Spec.Flags is a map[string]bool
+    got := make([]string, 0, len(obj.Spec.Flags))
+    for k := range obj.Spec.Flags { // map iteration order is random
+        got = append(got, k)
+    }
+    // comparing to desired.Keys without sorting => nondeterministic result
+    return reflect.DeepEqual(got, desired.Keys)
+}
+```
+
+❌ Checking both patch domains in one helper:
+```go
+func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+    // forbidden: mixes main + status checks
+    mainOK := obj.Spec.Replicas == desired.Replicas
+    statusOK := obj.Status.Phase == desired.Phase
+    return mainOK && statusOK
+}
+```
