@@ -58,17 +58,24 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 	v.log.Info("started")
 	defer v.log.Info("finished")
 
+	// Helper function to check context and cleanup before return
+	checkAndCleanup := func(err error) error {
+		if ctx.Err() != nil {
+			v.cleanup(ctx, ctx.Err())
+		}
+		return err
+	}
+
 	for {
 		if err := waitRandomWithContext(ctx, v.cfg.Period); err != nil {
-			v.cleanup(ctx, err)
-			return nil
+			return checkAndCleanup(nil)
 		}
 
 		// Determine current desired attachments from RVA set (max 2 active attachments supported).
 		rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
 		if err != nil {
 			v.log.Error("failed to list RVAs", "error", err)
-			return err
+			return checkAndCleanup(err)
 		}
 		desiredNodes := make([]string, 0, len(rvas))
 		for _, rva := range rvas {
@@ -82,7 +89,7 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 		nodes, err := v.client.GetRandomNodes(ctx, 1)
 		if err != nil {
 			v.log.Error("failed to get random node", "error", err)
-			return err
+			return checkAndCleanup(err)
 		}
 		nodeName := nodes[0].Name
 		log := v.log.With("node_name", nodeName)
@@ -93,12 +100,12 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 			if v.isAPublishCycle() {
 				if err := v.attachCycle(ctx, nodeName); err != nil {
 					log.Error("failed to attachCycle", "error", err, "case", 0)
-					return err
+					return checkAndCleanup(err)
 				}
 			} else {
 				if err := v.attachAndDetachCycle(ctx, nodeName); err != nil {
 					log.Error("failed to attachAndDetachCycle", "error", err, "case", 0)
-					return err
+					return checkAndCleanup(err)
 				}
 			}
 		case 1:
@@ -106,12 +113,12 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 			if otherNodeName == nodeName {
 				if err := v.detachCycle(ctx, nodeName); err != nil {
 					log.Error("failed to detachCycle", "error", err, "case", 1)
-					return err
+					return checkAndCleanup(err)
 				}
 			} else {
 				if err := v.migrationCycle(ctx, otherNodeName, nodeName); err != nil {
 					log.Error("failed to migrationCycle", "error", err, "case", 1)
-					return err
+					return checkAndCleanup(err)
 				}
 			}
 		case 2:
@@ -120,12 +127,12 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 			}
 			if err := v.detachCycle(ctx, nodeName); err != nil {
 				log.Error("failed to detachCycle", "error", err, "case", 2)
-				return err
+				return checkAndCleanup(err)
 			}
 		default:
 			err := fmt.Errorf("unexpected number of active attachments (RVA): %d", len(desiredNodes))
 			log.Error("error", "error", err)
-			return err
+			return checkAndCleanup(err)
 		}
 	}
 }
