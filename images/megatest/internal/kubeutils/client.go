@@ -456,7 +456,7 @@ func buildRVAName(rvName, nodeName string) string {
 	return "rva-" + rvPart + "-" + nodePart + "-" + hash
 }
 
-// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName,nodeName) if it does not exist.
+// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName, nodeName) if it does not exist.
 func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
 	rvaName := buildRVAName(rvName, nodeName)
 	existing := &v1alpha1.ReplicatedVolumeAttachment{}
@@ -481,7 +481,7 @@ func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alp
 	return rva, nil
 }
 
-// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName,nodeName). It is idempotent.
+// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
 func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
 	rvaName := buildRVAName(rvName, nodeName)
 	rva := &v1alpha1.ReplicatedVolumeAttachment{}
