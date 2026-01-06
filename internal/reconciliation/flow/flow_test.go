@@ -304,3 +304,22 @@ func TestMustBeValidPhaseName_Invalid(t *testing.T) {
 		})
 	}
 }
+
+func TestBeginPhase_KVOddLengthPanics(t *testing.T) {
+	mustPanic(t, func() { _, _ = flow.BeginPhase(context.Background(), "p", "k") })
+}
+
+func TestBeginPhase_NestedKVInheritsAndOverrides(t *testing.T) {
+	ctx, _ := flow.BeginPhase(context.Background(), "parent", "a", "1", "b", "2")
+	ctx, _ = flow.BeginPhase(ctx, "child", "b", "3", "c", "4")
+
+	outcome := flow.ContinueErr(errors.New("e")).OnErrorf(ctx, "step")
+	if outcome.Error() == nil {
+		t.Fatalf("expected error to be non-nil")
+	}
+
+	s := outcome.Error().Error()
+	if !strings.Contains(s, "phase child [b=3 c=4]") {
+		t.Fatalf("expected merged phase kv in error; got %q", s)
+	}
+}

@@ -79,7 +79,7 @@ func (outcome Outcome) OnErrorf(ctx context.Context, format string, args ...any)
 		if len(v.kv) == 0 {
 			outcome.err = Wrapf(outcome.err, "phase %s", v.name)
 		} else {
-			outcome.err = Wrapf(outcome.err, "phase %s %s", v.name, formatKV(v.kv))
+			outcome.err = Wrapf(outcome.err, "phase %s [%s]", v.name, formatKV(v.kv))
 		}
 	}
 
@@ -94,30 +94,22 @@ type phaseContextKey struct{}
 
 type phaseContextValue struct {
 	name  string
-	kv    []any
+	kv    []string
 	start time.Time
 }
 
-func formatKV(kv []any) string {
+func formatKV(kv []string) string {
 	if len(kv) == 0 {
 		return ""
 	}
 
-	// Format as "k1=v1 k2=v2 ...", falling back to "%v" formatting for non-string keys and odd tails.
+	// Format as "k1=v1 k2=v2 ..." in the original order.
 	out := ""
 	for i := 0; i < len(kv); i += 2 {
 		if i > 0 {
 			out += " "
 		}
-
-		key := kv[i]
-		if i+1 >= len(kv) {
-			out += fmt.Sprintf("%v", key)
-			break
-		}
-
-		val := kv[i+1]
-		out += fmt.Sprintf("%v=%v", key, val)
+		out += fmt.Sprintf("%s=%s", kv[i], kv[i+1])
 	}
 	return out
 }
@@ -236,11 +228,19 @@ func Begin(ctx context.Context) (context.Context, logr.Logger) {
 // It returns ctx updated with the phase logger, and the same logger value.
 //
 // phaseName is validated and this function panics on invalid values (developer error).
-func BeginPhase(ctx context.Context, phaseName string, kv ...any) (context.Context, logr.Logger) {
+func BeginPhase(ctx context.Context, phaseName string, kv ...string) (context.Context, logr.Logger) {
 	mustBeValidPhaseName(phaseName)
+	if len(kv)%2 != 0 {
+		panic("flow.BeginPhase: kv must contain even number of elements (key/value pairs)")
+	}
+
 	l := log.FromContext(ctx).WithName(phaseName)
 	if len(kv) > 0 {
-		l = l.WithValues(kv...)
+		anyKV := make([]any, 0, len(kv))
+		for _, v := range kv {
+			anyKV = append(anyKV, v)
+		}
+		l = l.WithValues(anyKV...)
 	}
 
 	// V(1) begin log (logger is already phase-scoped: name + values).
@@ -249,11 +249,21 @@ func BeginPhase(ctx context.Context, phaseName string, kv ...any) (context.Conte
 	ctx = log.IntoContext(ctx, l)
 
 	// Save phase metadata for downstream consumers (e.g., tests/diagnostics, error wrapping).
+	//
+	// Important: we intentionally do NOT inherit phase name nor kv from the parent phase.
+	// Rationale:
+	//  1) For logging: we already log via the phase-scoped logger `l` (name + WithValues), so all
+	//     necessary phase identity/keys are present in the log entry without duplicating parent data.
+	//  2) For error propagation: when this phase returns an error to the parent, the parent already has
+	//     its own phase context, so there is no need to copy parent phase metadata into the child and
+	//     then re-wrap it back when bubbling up.
+	kvCopy := append([]string(nil), kv...)
 	ctx = context.WithValue(ctx, phaseContextKey{}, phaseContextValue{
 		name:  phaseName,
-		kv:    append([]any(nil), kv...),
+		kv:    kvCopy,
 		start: time.Now(),
 	})
+
 	return ctx, l
 }
 
@@ -281,7 +291,7 @@ func EndPhase(ctx context.Context, outcome *Outcome) {
 			if len(v.kv) == 0 {
 				err = Wrapf(err, "phase %s", v.name)
 			} else {
-				err = Wrapf(err, "phase %s %s", v.name, formatKV(v.kv))
+				err = Wrapf(err, "phase %s [%s]", v.name, formatKV(v.kv))
 			}
 		}
 
