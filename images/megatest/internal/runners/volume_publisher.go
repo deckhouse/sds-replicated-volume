@@ -97,7 +97,7 @@ func (v *VolumeAttacher) Run(ctx context.Context) error {
 		// TODO: maybe it's necessary to collect time statistics by cycles?
 		switch len(desiredNodes) {
 		case 0:
-			if v.isAPublishCycle() {
+			if v.isAttachCycle() {
 				if err := v.attachCycle(ctx, nodeName); err != nil {
 					log.Error("failed to attachCycle", "error", err, "case", 0)
 					return checkAndCleanup(err)
@@ -342,7 +342,7 @@ func (v *VolumeAttacher) doUnattach(ctx context.Context, nodeName string) error 
 	return nil
 }
 
-func (v *VolumeAttacher) isAPublishCycle() bool {
+func (v *VolumeAttacher) isAttachCycle() bool {
 	//nolint:gosec // G404: math/rand is fine for non-security-critical random selection
 	r := rand.Float64()
 	return r < attachCycleProbability
