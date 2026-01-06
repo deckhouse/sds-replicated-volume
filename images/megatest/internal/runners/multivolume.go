@@ -116,11 +116,9 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 
 	// Main volume creation loop
 	for {
-		select {
-		case <-ctx.Done():
-			m.cleanup(ctx.Err())
+		if err := ctx.Err(); err != nil {
+			m.cleanup(err)
 			return nil
-		default:
 		}
 
 		// Check if we can create more volumes

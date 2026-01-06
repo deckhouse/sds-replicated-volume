@@ -218,10 +218,8 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		rv, err := v.client.GetRV(ctx, v.rvName)
@@ -287,10 +285,8 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		rv, err := v.client.GetRV(ctx, v.rvName)

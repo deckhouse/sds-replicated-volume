@@ -314,10 +314,8 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) 
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
-		select {
-		case <-ctx.Done():
-			return time.Since(startTime), ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return time.Since(startTime), err
 		}
 
 		rv, err := v.client.GetRV(ctx, v.rvName)
@@ -341,10 +339,8 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 	for {
 		log.Debug("waiting for RV to be deleted")
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 
 		_, err := v.client.GetRV(ctx, v.rvName)
