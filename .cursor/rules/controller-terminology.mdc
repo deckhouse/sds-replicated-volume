@@ -2,13 +2,14 @@
 description: Common controller terminology (shared definitions referenced by all controller rules)
 globs:
   - "images/controller/internal/controllers/rv_controller/reconciler.go"
+  - ".cursor/rules/controller*.mdc"
 alwaysApply: true
 ---
 
 # Controller terminology
 
-This document defines **shared terminology** used across controller rule files in this repository.
-All other controller `.mdc` documents SHOULD reference this file instead of re-defining the same terms.
+This document defines shared terminology used across controller rule files in this repository.
+All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
 
 Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** (see below).
 
@@ -26,54 +27,55 @@ The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** are to 
 
 ## Codebase structure terms
 
-### Controller package
+### **controller package**
 A **controller package** is a Go package under `images/controller/internal/controllers/<name>/...` that defines one controller-runtime controller, and contains:
 
-- `controller.go` (wiring-only entrypoint)
-- `reconciler.go` (reconciliation logic)
-- `reconciler_test.go` (tests)
+- **`controller.go`** (**Wiring-only** setup)
+- **`reconciler.go`** (**Reconciliation business logic**)
+- **`reconciler_test.go`** (tests) and/or other `*_test.go` files
 
-### controller.go
-`controller.go` is the **wiring-only entrypoint** file of a controller package.
+### **`controller.go`**
+**`controller.go`** is the **Wiring-only** setup file of a **controller package**.
 
-- It owns controller-runtime **builder** configuration (watch sources, options, predicates).
-- It constructs the **reconciler** and registers **runnables/sources/indexes** on the manager.
+- It owns controller-runtime builder configuration (**watches**, options, **predicates**).
+- It constructs the reconciler, registers **runnables** on the **manager** (`mgr.Add(...)`),
+  configures **watches** via the **builder chain**, and registers field indexes via the **manager**’s field indexer.
 
-### reconciler.go
-`reconciler.go` is the file that owns **all reconciliation business logic** for the controller package, including:
+### **`reconciler.go`**
+**`reconciler.go`** is the file that owns all **Reconciliation business logic** for the **controller package**, including:
 
 - the controller-runtime `Reconcile(...)` method, and
 - other internal **Reconcile methods** and **ReconcileHelpers**.
 
-### reconciler_test.go
-`reconciler_test.go` contains tests for reconciliation behavior and edge cases.
+### **`reconciler_test.go`**
+**`reconciler_test.go`** contains tests for reconciliation behavior and edge cases.
 
 ---
 
 ## controller-runtime wiring terms
 
-### Entrypoint
-The **controller package entrypoint** is the function:
+### **Entrypoint**
+The **Entrypoint** of a **controller package** is the function:
 
-- `BuildController(mgr manager.Manager) error`
+- **`BuildController(mgr manager.Manager) error`**
 
-It is the only wiring entrypoint that registers the controller with the manager.
+It is the only wiring entrypoint that registers the controller with the **manager**.
 
-### Controller name
+### **controller name**
 A **controller name** is the stable string used in `.Named(...)` for controller-runtime builder.
 In this codebase it is defined as a package-level `const <XControllerName> = "<name>"`.
 
-### Manager
-The **manager** is the controller-runtime `manager.Manager` instance.
+### **manager**
+The **manager** is the controller-runtime **`manager.Manager`** instance.
 
-**Manager-owned dependencies** are things obtained from the manager for wiring and dependency injection, e.g.:
+**Manager-owned dependencies** are things obtained from the **manager** for wiring and dependency injection, e.g.:
 
 - `mgr.GetClient()`
 - `mgr.GetScheme()`
 - `mgr.GetCache()`
 - `mgr.GetEventRecorderFor(...)`
 
-### Builder chain
+### **builder chain**
 A **builder chain** is the fluent controller-runtime builder sequence that starts with:
 
 - `builder.ControllerManagedBy(mgr)`
@@ -82,80 +84,82 @@ and ends with:
 
 - `.Complete(rec)`
 
-In this codebase, “builder chain” implies a **single** fluent chain (not multiple partial builders).
+In this codebase, the **builder chain** implies a single fluent chain (not multiple partial builders).
 
-### Runnable
-A **runnable** is a component registered on the manager via `mgr.Add(...)` that runs in the manager lifecycle.
+### **runnable**
+A **runnable** is a component registered on the **manager** via `mgr.Add(...)` that runs in the **manager** lifecycle.
 Common interfaces:
 
-- `manager.Runnable`
-- `manager.LeaderElectionRunnable`
+- **`manager.Runnable`**
+- **`manager.LeaderElectionRunnable`**
 
-Runnables/sources are **wiring/infra components**, not reconcilers and not ReconcileHelpers.
+**runnables** and **sources** are wiring/infra components; they are not reconcilers and not **ReconcileHelpers**.
 
-### Source / Watch
-A **watch** is a controller-runtime configuration that causes reconcile requests to be enqueued on events.
+### **source** / **watch**
+A **watch** is a controller-runtime configuration that causes **reconcile requests** to be enqueued on events.
 
-Common watch styles:
+A **source** is the event source feeding a **watch** (e.g., a **`source.Source`** or **`source.Kind(...)`**), but in this codebase “**watch**” is the preferred term at the builder configuration level.
 
-- **OwnerRef-based watch**: watch child objects owned by the primary object (`Owns(...)`).
-- **Index/field-based watch**: watch objects and map them to reconcile requests via a mapping function (`Watches(..., handler.EnqueueRequestsFromMapFunc(...))`), often supported by a field index.
+Common **watch** styles:
 
-### Predicate / Filter
-A **predicate** (filter) is a controller-runtime predicate used to decide whether an event should enqueue a reconcile request.
+- **OwnerRef-based watch**: **watch** **child resources** owned by the **primary resource** (`Owns(...)`).
+- **Index/field-based watch**: **watch** **objects** and map them to **reconcile requests** via a mapping function (`Watches(..., handler.EnqueueRequestsFromMapFunc(...))`), often supported by a field index.
 
-In this codebase, predicates are intended for **mechanical change detection** (see below).
+### **predicate** / **filter**
+A **predicate** (a.k.a. **filter**) is a controller-runtime **predicate** used to decide whether an event should enqueue a **reconcile request**.
+
+In this codebase, **predicates** are intended for **mechanical** change detection (see: “Kubernetes metadata terminology used by **predicates**”).
 
 ---
 
 ## Reconciliation layering terms
 
-### Wiring-only vs reconciliation business logic
-- **Wiring-only**: configuration/registration code (builder/watches/options/runnables/predicates construction). No Kubernetes API reads/writes beyond manager wiring.
-- **Reconciliation business logic** (a.k.a. **domain logic**): any logic that computes/ensures/applies desired state, performs orchestration, decides patch sequencing, or writes to the API server. Lives in `reconciler.go`.
+### **Wiring-only** vs **Reconciliation business logic**
+- **Wiring-only**: configuration/registration code (builder/**watches**/options/**runnables**/**predicates** construction). No Kubernetes API reads/writes beyond **manager** wiring.
+- **Reconciliation business logic** (a.k.a. **domain/business** logic): any logic that computes/ensures/applies **desired state**, performs orchestration, decides patch sequencing, or writes to the API server. Lives in **`reconciler.go`**.
 
-### Mechanical (vs domain/business)
-A step is **mechanical** when it is a straightforward technical operation that does not encode domain policy (e.g., “compare generation”, “copy desired labels into obj”, “execute one Patch call”).
+### **mechanical** vs **domain/business**
+A step is **mechanical** when it is a straightforward technical operation that does not encode **domain/business** policy (e.g., “compare **Generation**”, “copy desired labels into obj”, “execute one Patch call”).
 
-A step is **domain/business** when it contains policy decisions (state machines, placement/scheduling decisions, validation of domain rules, condition reasoning beyond simple comparisons).
+A step is **domain/business** when it contains policy decisions (state machines, placement/scheduling decisions, validation of domain rules, **condition** reasoning beyond simple comparisons).
 
-### Reconcile loop
+### **reconcile loop**
 The **reconcile loop** is the overall process where events cause controller-runtime to call `Reconcile(ctx, req)` for a reconcile request.
 
 A **reconcile request** is `ctrl.Request` (or `reconcile.Request`) carrying `NamespacedName`.
 
 ---
 
-## Reconcile method terms
+## **Reconcile method** terms
 
-### Reconcile method
+### **Reconcile method**
 A **Reconcile method** is any function/method whose name matches:
 
 - `Reconcile(...)` (controller-runtime interface method), or
 - `reconcile*` / `Reconcile*` (internal orchestration methods)
 
-Reconcile methods own orchestration: sequencing, retries/requeues, patch ordering, error context, and child-resource ordering.
+**Reconcile methods** own orchestration: sequencing, retries/requeues, **Patch ordering**, error context, and **child resource** ordering.
 
-### Root Reconcile
+### **root Reconcile**
 The **root Reconcile** is the controller-runtime method:
 
 - `func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error)`
 
-### Non-root Reconcile method
+### **non-root Reconcile method**
 Any other `reconcile*` / `Reconcile*` method called by the root Reconcile.
 These are used to split orchestration into readable sub-steps (root, main, status, child groups, per-child, etc.).
 
 ---
 
-## ReconcileHelper terms
+## **ReconcileHelper** terms
 
-### ReconcileHelper
-A **ReconcileHelper** is a helper function/method used by Reconcile methods whose **name matches a recognized helper category** (below).
+### **ReconcileHelper**
+A **ReconcileHelper** is a helper function/method used by **Reconcile methods** whose name matches one of the **Helper categories** (below).
 
-ReconcileHelpers exist to make behavior reviewable by name: the prefix implies allowed I/O and mutation.
+**ReconcileHelpers** exist to make behavior reviewable by name: the prefix implies allowed **I/O** and mutation.
 
-### Helper categories
-Helper categories are defined by name prefix/pattern:
+### **Helper categories**
+**Helper categories** are defined by name prefix/pattern:
 
 - **ComputeReconcileHelper**: `compute*` / `Compute*`
 - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*`
@@ -165,131 +169,134 @@ Helper categories are defined by name prefix/pattern:
 - **DeleteReconcileHelper**: `delete*` / `Delete*`
 - **PatchReconcileHelper**: `patch*` / `Patch*` (including `patch*Status` variants)
 
-### Pure (non-I/O) helper categories
-A helper is **pure / non-I/O** when it performs no Kubernetes API calls and no other external I/O.
-In this codebase, these categories are **non-I/O** by definition:
+### **Non-I/O helper categories**
+A helper is **non-I/O** when it performs no Kubernetes API calls and no other external I/O.
+Note: **non-I/O** helpers may still mutate their allowed **mutation target** (e.g., **ApplyReconcileHelpers** / **EnsureReconcileHelpers**).
+In this codebase, these **Helper categories** are **non-I/O** by definition:
 
-- compute*
-- is*UpToDate*
-- apply*
-- ensure*
+- **ComputeReconcileHelper**
+- **IsUpToDateReconcileHelper**
+- **ApplyReconcileHelper**
+- **EnsureReconcileHelper**
 
-### Single-call I/O helper categories
+### **Single-call I/O helper categories**
 A helper is a **single-call I/O helper** when it performs **exactly one** Kubernetes API write request.
-In this codebase, these categories are single-call I/O helpers by definition:
+In this codebase, these **Helper categories** are single-call **I/O** helpers by definition:
 
-- create*  → exactly one `Create(...)`
-- delete*  → exactly one `Delete(...)`
-- patch*   → exactly one patch request (`Patch(...)` OR `Status().Patch(...)`)
+- **CreateReconcileHelper** → exactly one `Create(...)`
+- **DeleteReconcileHelper** → exactly one `Delete(...)`
+- **PatchReconcileHelper** → exactly one **patch request** (`Patch(...)` OR `Status().Patch(...)`)
 
 ---
 
 ## Desired/actual terminology
 
-### Desired state / desired value
-A **desired value** (or **desired state**) is the target representation computed by reconciliation logic that will be applied/ensured/compared against the object(s).
+### **desired state** / **desired value**
+A **desired value** (or **desired state**) is the target representation computed by reconciliation logic that will be applied/ensured/compared against the **resources**/**objects**.
 
 Conventions:
-- `computeDesired*` computes desired values.
-- Desired values are treated as **read-only inputs** by apply/isUpToDate logic.
+- `computeDesired*` computes **desired values**.
+- **Desired values** are treated as **read-only inputs** by apply/isUpToDate logic.
 
-### Actual (derived) state
-An **actual value** (or **derived actual state**) is a representation computed from the current in-memory object(s) that is useful for comparisons or further computations.
+### **actual value** / **derived actual state**
+An **actual value** (or **derived actual state**) is a representation computed from the current in-memory **resources**/**objects** that are useful for comparisons or further computations.
 
 Conventions:
-- `computeActual*` computes derived actual values.
+- `computeActual*` computes derived **actual values**.
 
-### Desired main vs desired status
-When desired values are used for later `is*UpToDate` and/or `apply*`, desired MUST be separated by **patch domain**:
+### **desired main** vs **desired status**
+When **desired values** are used for later `is*UpToDate` and/or `apply*`, desired MUST be separated by **patch domain**:
 
-- **desired main**: desired values for the **main patch domain** (metadata/spec/non-status)
-- **desired status**: desired values for the **status patch domain** (`.status`)
+- **desired main**: **desired values** for the **main patch domain** (metadata/spec/non-status)
+- **desired status**: **desired values** for the **status patch domain** (`.status`)
 
-A “mixed desired” that intermingles main + status into one desired value is considered an invalid shape for desired-driven apply/isUpToDate flows in this codebase.
+A “mixed desired” that intermingles **main patch domain** + **status patch domain** into one **desired value** is considered an invalid shape for desired-driven apply/isUpToDate flows in this codebase.
 
 ---
 
 ## Patch and persistence terminology
 
-### Patch domain
-A **patch domain** is the part of a Kubernetes object that is persisted by one patch request.
+### **patch domain**
+A **patch domain** is the part of a Kubernetes **resource**/**object** that is persisted by one **patch request**.
 
-This codebase defines exactly two patch domains for the primary object:
+In this codebase, patching is treated as two **patch domains** for a **resource**/**object** (when both are applicable).
+Other subresources are out of scope for these rules.
 
-1. **Main patch domain** (a.k.a. **main resource domain**):
+1. **main patch domain**:
    - metadata (except status-only fields),
    - spec,
-   - any non-status fields of the primary object
+   - any non-status fields of the **resource**/**object**
 
-2. **Status patch domain** (a.k.a. **status subresource domain**):
-   - `.status` (including `.status.conditions`, `.status.observedGeneration`, etc.)
+2. **status patch domain**:
+   - `.status` (including **`.status.conditions`**, etc.)
 
-### Patch request
-A **patch request** is a single Kubernetes API write that persists drift for **one** patch domain, typically:
+### **patch request**
+A **patch request** is a single Kubernetes API write that persists drift for one **patch domain**, typically:
 
-- main domain: `client.Patch(ctx, obj, ...)`
-- status domain: `client.Status().Patch(ctx, obj, ...)`
+- **main patch domain**: `client.Patch(ctx, obj, ...)`
+- **status patch domain**: `client.Status().Patch(ctx, obj, ...)`
 
-### Patch base (`base`)
-A **patch base** (variable name: `base`) is the `DeepCopy()` snapshot used as the **diff reference** for one patch request.
+### **patch base** (**`base`**)
+A **patch base** (variable name: **`base`**) is the `DeepCopy()` snapshot used as the diff reference for one **patch request**.
 
 Properties:
-- `base` is taken **immediately before** the corresponding patch request.
-- `base` is treated as **read-only** diff reference.
+- **`base`** is taken immediately before mutating the **resource**/**object** for that **patch domain**,
+  and used as the diff reference for the subsequent **patch request**.
+- **`base`** is treated as a read-only diff reference.
 
-### DeepCopy
-**DeepCopy** refers to calling the generated Kubernetes API `DeepCopy()` (or equivalent deep clone) on an API object.
+### **DeepCopy**
+**DeepCopy** refers to calling the generated Kubernetes API `DeepCopy()` (or equivalent deep clone) on an API **resource**/**object**.
 
 In this codebase:
-- DeepCopy is used primarily to produce `base` for patch diffing.
-- DeepCopy is forbidden inside most non-orchestration helpers (category-specific rules apply).
+- **DeepCopy** is used primarily to produce **`base`** for patch diffing.
+- **DeepCopy** is forbidden inside most non-orchestration **ReconcileHelpers** (category-specific rules apply).
 
-### Patch ordering
+### **Patch ordering**
 **Patch ordering** is the decision of:
 - whether to patch at all,
-- and if multiple patch requests exist, in what sequence they are executed (main vs status, child objects ordering, etc.).
+- and if multiple **patch requests** exist, in what sequence they are executed (**main patch domain** vs **status patch domain**, **child resources** ordering, etc.).
 
-Patch ordering is owned by **Reconcile methods**, not helpers.
+**Patch ordering** is owned by **Reconcile methods**, not **ReconcileHelpers**.
 
-### Patch strategy / patch type decision
+### **patch strategy** / **patch type decision**
 A **patch strategy** (or **patch type decision**) is a choice about how the patch should be executed (e.g., “plain merge patch” vs “merge patch with optimistic lock”).
 
 In this codebase:
-- Patch helpers do not decide the strategy; they accept an explicit `optimisticLock` input and execute accordingly.
+- **PatchReconcileHelpers** do not decide the **patch strategy**; they accept an explicit `optimisticLock` input and execute accordingly.
 
-### Optimistic locking (optimistic lock)
+### **Optimistic locking** (**optimistic lock**)
 **Optimistic locking** is the patch mode that causes the API write to fail on concurrent modification conflicts (i.e., it requires the object’s version to match).
 
-### Optimistic lock requirement
-An **optimistic lock requirement** is a decision that the subsequent save of a changed object **must** use optimistic-lock semantics.
+### **optimistic lock requirement**
+An **optimistic lock requirement** is a decision that the subsequent save of a changed **resource**/**object** MUST use **Optimistic locking** semantics.
 
 In this codebase:
-- Ensure helpers are the primary source of “optimistic lock required” signaling via `flow.Outcome`.
+- **EnsureReconcileHelpers** are the primary source of “optimistic lock required” signaling via **`flow.Outcome`**.
 
 ---
 
 ## Determinism / purity terminology
 
-### Deterministic
+### **deterministic**
 A function/step is **deterministic** when, for the same explicit inputs (and same allowed internal deterministic state), it produces:
 
 - the same outputs, and/or
 - the same in-memory mutations, and/or
-- the same patch payload (for I/O helpers)
+- the same patch payload (for **I/O** helpers)
 
-Determinism requires stable ordering when order affects the serialized object state.
+Determinism requires **stable ordering** when order affects the serialized **resource**/**object** state.
 
-### Stable ordering / canonical form
-- **Stable ordering**: any ordered output derived from an unordered source (maps/sets) must be sorted.
-- **Canonical form**: a normalized representation (sorted slices, normalized strings, consistent defaults) that avoids “equivalent but different” states.
+### **stable ordering** / **canonical form**
+- **stable ordering**: any ordered output derived from an unordered source (maps/sets) must be sorted.
+- **canonical form**: a normalized representation (sorted slices, normalized strings, consistent defaults) that avoids “equivalent but different” states.
 
-### Patch churn
-**Patch churn** is repeated, unnecessary patching caused by:
-- nondeterministic ordering,
+### **patch churn**
+**patch churn** is repeated, unnecessary patching caused by:
+- **nondeterminism** in ordering,
 - equivalent-but-different representations,
 - or avoidable drift that flips back and forth.
 
-### I/O
+### **I/O**
 **I/O** is any interaction with systems outside of pure in-memory computation, including (but not limited to):
 - Kubernetes API calls via controller-runtime client,
 - filesystem,
@@ -297,49 +304,50 @@ Determinism requires stable ordering when order affects the serialized object st
 - environment reads,
 - time/random sources.
 
-### Kubernetes API I/O
-**Kubernetes API I/O** is any call made through controller-runtime client that hits the API server, e.g.:
+### **Kubernetes API I/O**
+**Kubernetes API I/O** is any call made through controller-runtime client that interacts with Kubernetes state
+(cache and/or API server), e.g.:
 `Get/List/Create/Update/Patch/Delete`, `Status().Patch/Update`, `DeleteAllOf`.
 
-### Hidden I/O / nondeterminism
-**Hidden I/O** is any I/O that is not explicit in the helper category contract (e.g., `time.Now()`, `rand.*`, `os.Getenv`, extra network calls).
-Hidden I/O is treated as a determinism violation for categories that require purity.
+### **Hidden I/O** / **nondeterminism**
+**Hidden I/O** is any **I/O** that is not explicit in the **Helper categories** contract (e.g., `time.Now()`, `rand.*`, `os.Getenv`, extra network calls).
+**Hidden I/O** is treated as a determinism violation for categories that require purity.
 
 ---
 
 ## Read-only / mutation terminology
 
-### Mutation target
-A helper’s **mutation target** is the only value it is allowed to mutate (if any), based on its category contract.
+### **mutation target**
+A helper’s **mutation target** is the only value it is allowed to mutate (if any), based on its **Helper categories** contract.
 
 Examples:
-- apply/ensure helpers: mutate `obj` in place (one patch domain).
-- create/patch helpers: mutate `obj` only as a result of API server updates from the call (resourceVersion/defaults).
-- patch base (`base`): never a mutation target (read-only).
+- **ApplyReconcileHelpers** / **EnsureReconcileHelpers**: mutate `obj` in place (one **patch domain**).
+- **CreateReconcileHelpers** / **PatchReconcileHelpers**: mutate `obj` only as a result of API server updates from the call (resourceVersion/defaults).
+- **patch base** (**`base`**): never a **mutation target** (**read-only inputs**).
 
-### Read-only inputs
-All inputs other than the mutation target are **read-only** and must not be mutated.
+### **read-only inputs**
+All inputs other than the **mutation target** are **read-only inputs** and MUST NOT be mutated.
 
-### Aliasing (Go maps/slices)
+### **Aliasing** (Go maps/slices)
 **Aliasing** is accidental sharing of reference-like backing storage (especially `map` and `[]T`) between:
 - `obj` and `desired`,
 - `obj` and shared templates/defaults,
-- `base` and anything else.
+- **`base`** and anything else.
 
-Aliasing is dangerous because mutating the “copy” mutates the original.
+**Aliasing** is dangerous because mutating the “copy” mutates the original.
 
-### Clone / copy
+### **Clone** / **Copy**
 - **Clone**: create a new map/slice with its own backing storage (`maps.Clone`, `slices.Clone`, `append([]T(nil), ...)`, manual copy).
 - **Copy**: general term for producing an independent value; for maps/slices it implies cloning.
 
 ---
 
-## flow terminology
+## **flow** terminology
 
-### flow
-`flow` refers to `internal/reconciliation/flow`, the internal package used to structure reconciliation and return values.
+### **flow**
+**`flow`** refers to `internal/reconciliation/flow`, the internal package used to structure reconciliation and return values.
 
-### Phase
+### **phase**
 A **phase** is a structured execution scope created by:
 
 - `flow.BeginPhase(ctx, "<phaseName>", ...)`
@@ -348,79 +356,85 @@ and closed by:
 
 - `defer flow.EndPhase(ctx, &outcome)`
 
-Phases are used to structure logs and attach context/metadata.
+**phases** are used to structure logs and attach context/metadata.
 
-### Outcome
-An **Outcome** is a value of type `flow.Outcome` that represents the result of a step (continue/done/requeue/error) plus metadata (changed, optimistic lock required, etc.).
+### **Outcome**
+An **Outcome** is a value of type **`flow.Outcome`** that represents the result of a step (continue/done/requeue/error) plus metadata (changed, **optimistic lock requirement**, etc.).
 
 Naming conventions:
-- single outcome variable: `outcome`
-- slice of outcomes: `outcomes`
+- single **Outcome** variable: `outcome`
+- slice of **Outcomes**: `outcomes`
 
-### Outcome change reporting
-**Change reporting** means signaling that an in-memory object was mutated and needs persistence, typically via:
+### **Change reporting**
+**Change reporting** means signaling that an in-memory **resource**/**object** was mutated and needs persistence, typically via:
 
 - `ReportChanged()` / `ReportChangedIf(...)`
 
 The canonical “was changed?” flag is read via `Outcome.DidChange()`.
 
-### Outcome optimistic-lock signaling
-**Optimistic-lock signaling** means encoding that the save must use optimistic-lock semantics, typically via:
+### **Optimistic-lock signaling**
+**Optimistic-lock signaling** means encoding that the save MUST use **Optimistic locking** semantics, typically via:
 
 - `RequireOptimisticLock()`
 
 The canonical flag is read via `Outcome.OptimisticLockRequired()`.
 
-### Outcome control flow
+### **Outcome control flow**
 - `Outcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
 - `Outcome.ToCtrl()` converts an outcome into `(ctrl.Result, error)` for controller-runtime.
 
-### Outcome error boundary
+### **Outcome error boundary**
 `Outcome.OnErrorf(ctx, "...")` is the standard boundary helper used to:
 - add local context,
 - log once,
 - and propagate the error.
 
-### Merging outcomes
-**Merging outcomes** means combining multiple independent step outcomes into one using `Outcome.Merge(...)` or `flow.Merge(...)`.
+### **Merging outcomes**
+**Merging outcomes** means combining multiple independent step **Outcomes** into one using `Outcome.Merge(...)` or `flow.Merge(...)`.
 
 ---
 
-## Object identity terminology
+## **object identity** terminology
 
-### Primary reconcile object
-The **primary reconcile object** is the object named by the reconcile request (`req.NamespacedName`) that the controller is responsible for.
+### **resource** (**object**)
+A **resource** (or **object**) is any Kubernetes API **object** that participates in reconciliation.
+It may be read as input, computed against, and/or persisted as part of the controller’s behavior.
 
-### Secondary / child resource
-A **secondary resource** (or **child resource**) is any Kubernetes object that is not the primary reconcile object but is created/managed/reconciled as part of the controller’s behavior.
+A resource is either:
+- the **primary resource**, or
+- a **secondary resource** (child resource).
 
-Examples: owned child objects, referenced objects, dependent objects.
+### **primary resource**
+The **primary resource** is the **resource**/**object** named by the **reconcile request** (`req.NamespacedName`) that the controller is responsible for.
 
-### Identity in error strings
-In this codebase, “object identity” means:
-- namespaced identity: `<namespace>/<name>` for namespaced resources
-- cluster identity: `<name>` for cluster-scoped resources
+### **secondary resource** (**child resource**)
+A **secondary resource** (or **child resource**) is any Kubernetes **resource**/**object** other than the **primary resource** that is created/managed/reconciled as part of the controller’s behavior.
 
-Primary object identity is assumed to be present in controller-runtime logs already; child identities must be included when an error is about a child/secondary resource.
+Examples: owned **child resources**, referenced **objects**, dependent **objects**.
+
+### **object identity** in error strings
+In this codebase, **object identity** means:
+- **namespaced identity**: `<namespace>/<name>` for namespaced resources
+- **cluster identity**: `<name>` for cluster-scoped resources
 
 ---
 
-## Conditions and objutilv1 terminology
+## **conditions** and **objutilv1** terminology
 
-### objutilv1 (`obju`)
-`objutilv1` (import alias: `obju`) is the project’s object utility package.
+### **objutilv1** (**`obju`**)
+**objutilv1** (import alias: **`obju`**) is the project’s **object** utility package.
 
-In this codebase, **all** manipulations of:
+In this codebase, all manipulations of:
 - labels,
 - annotations,
 - finalizers,
 - owner references,
-- conditions
+- **conditions**
 
-are expected to go through `obju` rather than open-coded field edits.
+are expected to go through **`obju`** rather than open-coded field edits.
 
-### Condition
-A **condition** is a `metav1.Condition` stored on `.status.conditions`.
+### **condition**
+A **condition** is a `metav1.Condition` stored on **`.status.conditions`**.
 
 Key fields commonly referenced:
 - `Type`
@@ -430,29 +444,150 @@ Key fields commonly referenced:
 - `ObservedGeneration`
 - `LastTransitionTime`
 
-### StatusConditionObject
-A **StatusConditionObject** is an object that exposes conditions in the shape expected by `obju` condition helpers (e.g., an interface used for condition comparisons/updates).
+### **StatusConditionObject**
+A **StatusConditionObject** is an **object** that exposes **conditions** in the shape expected by **`obju`** **condition** helpers (e.g., an interface used for **condition** comparisons/updates).
 
-### Condition semantic equality
-**Condition semantic equality** means equality by meaning (Type/Status/Reason/Message/ObservedGeneration), as defined by the `obju` comparison helpers.
+### **Condition semantic equality**
+**Condition semantic equality** means equality by meaning (Type/Status/Reason/Message/ObservedGeneration), as defined by the **`obju`** comparison helpers.
 
-### Condition equality by status
-**Condition equality by status** means equality only by `Type` + `Status`, ignoring other fields, as defined by `obju` helpers.
+### **Condition equality by status**
+**Condition equality by status** means equality only by `Type` + `Status`, ignoring other fields, as defined by **`obju`** helpers.
 
 ---
 
-## Kubernetes metadata terminology used by predicates
+## Kubernetes metadata terminology used by **predicates**
 
-### metadata.generation (Generation)
-**Generation** (`metadata.generation`) is the Kubernetes counter typically incremented by the API server on spec changes for custom resources.
+### **`metadata.generation`** (**Generation**)
+**Generation** (**`metadata.generation`**) is the Kubernetes counter typically incremented by the API server on spec changes for custom resources.
 
-### Metadata-only changes
-**Metadata-only changes** are changes that may not bump `generation`, such as:
+### **Metadata-only changes**
+**Metadata-only changes** are changes that may not bump **Generation**, such as:
 - labels,
 - annotations,
 - finalizers,
 - owner references.
 
-Predicates sometimes compare these fields directly because generation may not change.
+**predicates** sometimes compare these fields directly because **Generation** may not change.
 
 ---
+
+## Rules for controller rules
+
+### Scope
+
+This section applies to **.mdc** rules that describe how to write controllers in this repository.
+
+### Common requirements
+
+- All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
+
+### Normative keywords
+
+- The normative keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** in controller rules **MUST** always be bold (i.e., `**MUST**`, `**SHOULD**`, etc.).
+- If any of these keywords appears with normative meaning, it **MUST** be spelled exactly as above and **MUST** be bold.
+
+### Term usage and bolding
+
+- Terms defined in **Controller terminology** **MUST** be used consistently with their definitions and **MUST** always be bold on every mention.
+- Terms defined in the current rules document (within a specific **.mdc** file) **MUST** be used consistently with their definitions and **MUST** always be bold on every mention.
+- If a concept matches an existing term from **Controller terminology**, you **SHOULD** reuse the existing term (and spelling) instead of introducing a new synonym.
+
+### List of terms that must be bold
+
+Below is the list of terms (without definitions) that in controller rules **MUST** always be bold whenever mentioned:
+
+- **controller package**
+- **`controller.go`**
+- **`reconciler.go`**
+- **`reconciler_test.go`**
+- **Entrypoint**
+- **controller name**
+- **manager**
+- **Manager-owned dependencies**
+- **builder chain**
+- **runnable**
+- **source**
+- **watch**
+- **OwnerRef-based watch**
+- **Index/field-based watch**
+- **predicate**
+- **filter**
+- **Wiring-only**
+- **Reconciliation business logic**
+- **mechanical**
+- **domain/business**
+- **reconcile loop**
+- **reconcile request**
+- **Reconcile method**
+- **root Reconcile**
+- **non-root Reconcile method**
+- **ReconcileHelper**
+- **Helper categories**
+- **ComputeReconcileHelper**
+- **IsUpToDateReconcileHelper**
+- **ApplyReconcileHelper**
+- **EnsureReconcileHelper**
+- **CreateReconcileHelper**
+- **DeleteReconcileHelper**
+- **PatchReconcileHelper**
+- **Non-I/O helper categories**
+- **Single-call I/O helper categories**
+- **non-I/O**
+- **single-call I/O helper**
+- **desired value**
+- **desired state**
+- **actual value**
+- **derived actual state**
+- **desired main**
+- **desired status**
+- **patch domain**
+- **main patch domain**
+- **status patch domain**
+- **patch request**
+- **patch base**
+- **`base`**
+- **DeepCopy**
+- **Patch ordering**
+- **patch strategy**
+- **patch type decision**
+- **Optimistic locking**
+- **optimistic lock**
+- **optimistic lock requirement**
+- **deterministic**
+- **stable ordering**
+- **canonical form**
+- **patch churn**
+- **I/O**
+- **Kubernetes API I/O**
+- **Hidden I/O**
+- **nondeterminism**
+- **mutation target**
+- **read-only inputs**
+- **Aliasing**
+- **Clone**
+- **Copy**
+- **flow**
+- **phase**
+- **Outcome**
+- **Change reporting**
+- **Optimistic-lock signaling**
+- **Outcome control flow**
+- **Outcome error boundary**
+- **Merging outcomes**
+- **resource**
+- **object**
+- **primary resource**
+- **secondary resource**
+- **child resource**
+- **object identity**
+- **namespaced identity**
+- **cluster identity**
+- **objutilv1**
+- **`obju`**
+- **condition**
+- **StatusConditionObject**
+- **Condition semantic equality**
+- **Condition equality by status**
+- **Generation**
+- **`metadata.generation`**
+- **Metadata-only changes**

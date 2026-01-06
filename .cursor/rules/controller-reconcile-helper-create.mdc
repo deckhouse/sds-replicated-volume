@@ -9,54 +9,25 @@ alwaysApply: true
 
 This document defines naming and contracts for **CreateReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
 
-- `create<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** Kubernetes API write — `Create(...)` — for exactly one object.
-- They **MUST** create using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with API-server-assigned fields/defaults (e.g. `uid`, `resourceVersion`, defaulted fields).
-- They **MUST NOT** do any other API calls (`Get/List/Update/Patch/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make patch ordering / patch type decisions.
-- They **MUST NOT** write the status subresource as part of create (no `Status().Patch/Update`); any status write is a **separate request** done by Reconcile methods.
+Summary only; if anything differs, follow normative sections below.
+
+- `create<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API** write — `Create(...)` — for exactly one object.
+- They **MUST** create using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with **API-server-assigned fields/defaults** (e.g. `uid`, `resourceVersion`, defaulted fields).
+- They **MUST NOT** do any other **Kubernetes API** calls (`Get/List/Update/Patch/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision**.
+- They **MUST NOT** write the **status subresource** as part of create (no `Status().Patch/Update`); any status write is a **separate request** done by **Reconcile methods**.
 - Everything they control (the create request payload) **MUST** be deterministic (no time/random/env-driven values; stable ordering where relevant).
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Execute exactly **one** Kubernetes API write: `r.client.Create(ctx, obj)`.
-- Use the **caller-owned** `obj` as the request object; on success, rely on the API call to update **that same instance** with server-assigned fields/defaults (UID, `resourceVersion`, defaulted fields, managed fields, etc.).
-- Perform minimal, mechanical request preparation on `obj` **before** the single `Create(...)` call (labels/annotations/ownerRefs/finalizers/spec fields), preferably by composing pure helpers (compute/apply/ensure) **outside** or **immediately before** the create call.
-- Treat all other inputs (templates, desired structs, shared defaults) as read-only; **clone** maps/slices from them before setting on `obj` to avoid aliasing.
-- Stay deterministic in the payload you send:
-  - stable ordering where it affects serialized output,
-  - no time/random/env-derived values,
-  - canonical forms for fields that are order-sensitive.
-- Return `flow.Outcome` (or `error`) that reflects only the result of the single create request (success / failure).
-
-**DENY (MUST NOT):**
-- Any Kubernetes API calls other than the single `Create(...)`:
-  - no `Get`, `List`, `Update`, `Patch`, `Delete`,
-  - no `Status().Update/Patch`,
-  - no “fallback” second write on create error.
-- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
-- Executing patches or making patch ordering / patch type decisions (plain vs optimistic lock, sequencing across domains).
-- Creating multiple objects in one helper (loops / fan-out / batch behavior).
-- Writing the status subresource as part of create (status is a separate request owned by Reconcile methods).
-- Hidden I/O / nondeterminism:
-  - `time.Now()` / `time.Since(...)`,
-  - `rand.*` / UUID generation,
-  - `os.Getenv`, reading files,
-  - network calls beyond the single Kubernetes API `Create(...)` request.
-- Using a temporary object for the create call and then dropping it (must use and update the caller-owned `obj`).
-
----
-
-## Definition (MUST)
+## Definition
 
 A **CreateReconcileHelper** (“create helper”) is a **ReconcileHelper** that is:
 
@@ -68,20 +39,14 @@ Typical create helpers are used for child resources to encapsulate the mechanica
 
 ---
 
-## Naming (MUST)
+## Naming
 
 - A **CreateReconcileHelper** name **MUST** start with `create` / `Create`.
-- CreateReconcileHelpers for Kubernetes objects **MUST** use the form:
-  - `create<Kind>` / `Create<Kind>`.
-
-Guidance (SHOULD):
-- `<Kind>` MUST correspond to the Kubernetes object kind being created.
-- A short kind name is allowed, if it is already established in the codebase.
-- Examples:
+- CreateReconcileHelpers for Kubernetes objects **MUST** use the form: `create<Kind>` / `Create<Kind>`. `<Kind>` **MUST** either correspond to the Kubernetes object kind being created OR be a short kind name that is already established in the codebase Examples:
   - `createCM(...)` (or `createConfigMap(...)`)
   - `createSVC(...)` (or `createService(...)`)
   - `createSKN(...)` (or `createSomeKindName(...)`)
-- Avoid names that imply orchestration or existence checks (`ensureCreated`, `reconcileCreate`, `createIfNeeded`) — branching and policy belong to Reconcile methods.
+- CreateReconcileHelper names **MUST NOT** imply orchestration or existence checks (`ensureCreated`, `reconcileCreate`, `createIfNeeded`) — branching and policy belong to Reconcile methods.
 
 ---
 

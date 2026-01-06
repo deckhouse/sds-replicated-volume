@@ -9,84 +9,51 @@ alwaysApply: true
 
 This document defines naming and contracts for **ApplyReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
-
----
-
-## TL;DR (MUST)
-
-- `apply*` helpers are **pure, deterministic, strictly non-I/O** “in-memory write” steps.
-- They take a **previously computed desired value** and **mutate `obj` in place** for **exactly one patch domain** (main **or** status).
-- They **MUST NOT** talk to the Kubernetes API, use controller-runtime client, call `DeepCopy`, or execute patches / make patch ordering or patch type decisions.
-- They **MUST** treat `desired` (and any other inputs) as **read-only** and **MUST NOT** mutate it (including via aliasing); when copying maps/slices from `desired` into `obj`, **clone** to avoid sharing.
-- If both main and status need changes, use **two** apply helpers (one per domain) and compose them in Reconcile methods.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## ALLOW / DENY cheat sheet
+## TL;DR
 
-**ALLOW (MAY):**
-- Mutate the caller-owned `obj` **in place** for **exactly one** patch domain:
-  - main resource (metadata/spec/non-status), **or**
-  - status subresource (`.status`).
-- Mechanically “write desired into obj” (copy fields, set labels/annotations/finalizers/conditions) with no business decisions.
-- Treat `desired` and all other inputs as read-only; if you need to transform/normalize before applying, do it on **local clones**.
-- Clone maps/slices from `desired` before setting them on `obj` to avoid aliasing:
-  - `maps.Clone(desired.Labels)`, `slices.Clone(desired.Items)`, `append([]T(nil), desired.Items...)`.
-- Ensure deterministic object state:
-  - if you build ordered slices from sets/maps, **sort** before setting;
-  - write fields in a stable, canonical form.
-- Use `objutilv1` (imported as `obju`) for labels/annotations/finalizers/ownerRefs/conditions operations where required by the codebase.
-- Return `error` only for truly exceptional local validation failures (nil desired pointers, impossible desired shape, etc.).
+Summary only; if anything differs, follow normative sections below.
 
-**DENY (MUST NOT):**
-- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
-- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
-- Executing patches (`Patch` / `Status().Patch`) or making patch ordering / patch type decisions.
-- Flow control responsibilities:
-  - no `flow.BeginPhase`, no logging, no `ctx` argument,
-  - no returning `flow.Outcome`.
-- Mutating more than one patch domain in the same helper (main + status together).
-- Mutating `desired` or any other non-`obj` inputs (including via aliasing of maps/slices).
-- Sharing reference-like data from `desired` into `obj` (aliasing), e.g. `obj.SetLabels(desired.Labels)` without cloning.
-- Hidden I/O / nondeterminism:
-  - `time.Now()` / `time.Since(...)` (except timestamps set indirectly via `obju` condition helpers where unavoidable),
-  - `rand.*` / UUID generation,
-  - `os.Getenv`, reading files,
-  - network calls of any kind.
-- Embedding business logic (deciding desired state) inside apply helpers; decisions belong to compute/ensure/Reconcile methods.
+- **`apply*`** helpers are **pure, deterministic, strictly non-I/O** “in-memory write” steps.
+- They take a **previously computed desired value** and **mutate `obj` in place** for **exactly one patch domain** (**main** or **status**).
+- They **MUST NOT** talk to the **Kubernetes API**, use **controller-runtime client**, call **`DeepCopy`**, or execute patches / make patch ordering or patch type decisions.
+- They **MUST** treat **`desired`** (and any other inputs) as **read-only** and **MUST NOT** mutate it (including via **aliasing**); when copying maps/slices from **`desired`** into `obj`, **clone** to avoid sharing.
+- If both **main** and **status** need changes, use **two** apply helpers (one per domain) and compose them in **Reconcile methods**.
 
 ---
 
-## Definition (MUST)
+## Definition
 
 An **ApplyReconcileHelper** (“apply helper”) is a **ReconcileHelper** that is:
 
 - **strictly non-I/O**, and
 - applies a previously computed **desired value** to the in-memory object, and
-- mutates **exactly one patch domain** in place (main resource **or** status subresource), without executing any patch request.
+- mutates **exactly one patch domain** in place (**main resource** or **status subresource**), without executing any **patch request**.
 
-Typical apply helpers perform the “mechanical write” step right after Reconcile methods create a patch base and right before they patch that domain.
+Typical apply helpers perform the “mechanical write” step right after **Reconcile methods** create a **patch base** and right before they patch that domain.
 
 ---
 
-## Naming (MUST)
+## Naming
 
 - An **ApplyReconcileHelper** name **MUST** start with `apply` / `Apply`.
-- ApplyReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible:
-  - `applyMain*` / `ApplyMain*` (main resource)
-  - `applyStatus*` / `ApplyStatus*` (status subresource)
+- ApplyReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the applied artifact name refers to a field/group that exists in both `.spec` and `.status` of the same object):
+  - `applyMain*` / `ApplyMain*` (**main patch domain**)
+  - `applyStatus*` / `ApplyStatus*` (**status patch domain**)
+- ApplyReconcileHelpers **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
 - For main-domain ApplyReconcileHelpers, the name **MUST** also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
-
-Guidance (SHOULD):
-- Name the desired artifact being applied:
-  - `applyDesiredLabels(obj, desiredLabels)`
-  - `applyDesiredSpecFoo(obj, desiredFoo)`
-  - `applyDesiredStatus(obj, desired)`
-  - `applyDesiredConditions(obj, desiredConditions)`
-- Avoid names that sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
+- ApplyReconcileHelper names **MUST NOT** sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
+- ApplyReconcileHelper names **MUST NOT** include `Desired` / `Actual` unless the applied “thing” name includes `Desired` / `Actual`.
+- ApplyReconcileHelper names **SHOULD** name the “thing” being applied:
+  - `applyLabels(obj, desiredLabels)`
+  - `applySpecFoo(obj, desiredFoo)`
+  - `applyStatus(obj, desired)`
+  - `applyConditions(obj, desiredConditions)`
 
 ---
 

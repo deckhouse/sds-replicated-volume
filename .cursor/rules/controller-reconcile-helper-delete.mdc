@@ -9,54 +9,24 @@ alwaysApply: true
 
 This document defines naming and contracts for **DeleteReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
 
-- `delete<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** Kubernetes API write — `Delete(...)` — for exactly one object (or treat NotFound as “already absent”, depending on policy).
-- They **MUST NOT** do any other API calls (`Get/List/Create/Update/Patch`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make patch ordering / patch type decisions.
-- They **MUST NOT** mutate the object as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by Reconcile methods via **separate** ensure/apply + patch steps **before** calling delete.
+Summary only; if anything differs, follow normative sections below.
+
+- `delete<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API** write — `Delete(...)` — for exactly one object (or treat NotFound as “already absent”, depending on policy).
+- They **MUST NOT** do any other **Kubernetes API** calls (`Get/List/Create/Update/Patch`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision**.
+- They **MUST NOT** mutate the object as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via **separate** ensure/apply + patch steps **before** calling delete.
 - Everything they control **MUST** be deterministic (no time/random/env-driven behavior; consistent NotFound handling).
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Execute exactly **one** Kubernetes API write: `r.client.Delete(ctx, obj)`.
-- Treat “already absent” deterministically:
-  - either propagate NotFound as an error, **or**
-  - deterministically treat NotFound as success (“already gone”) — whichever policy the codebase uses, but do it consistently.
-- Use the caller-provided object reference as the delete target (object key / UID are taken from `obj`).
-- Return `flow.Outcome` (or `error`) that reflects only the result of that single delete request.
-
-**DENY (MUST NOT):**
-- Any Kubernetes API calls other than the single `Delete(...)`:
-  - no `Get`, `List`, `Create`, `Update`, `Patch`,
-  - no `Status().Update/Patch`,
-  - no polling / “wait until gone”.
-- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
-- Executing patches or making patch ordering / patch type decisions (plain vs optimistic lock, sequencing across domains).
-- Mutating `obj` (or any other input) as part of deletion:
-  - no “marking deleting” fields,
-  - no finalizer edits,
-  - no status writes.
-  Any prerequisite mutations must be done by Reconcile methods via separate ensure/apply + patch steps **before** calling delete.
-- Deleting multiple objects in one helper (loops / fan-out / batch behavior).
-- Broad deletes (`DeleteAllOf`, selector-based mass deletion) — delete helpers operate on exactly one object instance.
-- Hidden I/O / nondeterminism:
-  - `time.Now()` / `time.Since(...)`,
-  - `rand.*` / UUID generation,
-  - `os.Getenv`, reading files,
-  - network calls beyond the single Kubernetes API `Delete(...)` request.
-
----
-
-## Definition (MUST)
+## Definition
 
 A **DeleteReconcileHelper** (“delete helper”) is a **ReconcileHelper** that is:
 
@@ -64,24 +34,18 @@ A **DeleteReconcileHelper** (“delete helper”) is a **ReconcileHelper** that 
 - deletes exactly **one** Kubernetes object via the API (or ensures it is absent), and
 - returns the delete outcome (and optionally an error).
 
-Typical delete helpers encapsulate the mechanical delete call (including “already gone” handling) for child resources, while Reconcile methods decide ordering relative to other actions.
+Typical delete helpers encapsulate the mechanical delete call (including “already gone” handling) for child resources, while **Reconcile methods** decide ordering relative to other actions.
 
 ---
 
-## Naming (MUST)
+## Naming
 
 - A **DeleteReconcileHelper** name **MUST** start with `delete` / `Delete`.
-- DeleteReconcileHelpers for Kubernetes objects **MUST** use the form:
-  - `delete<Kind>` / `Delete<Kind>`.
-
-Guidance (SHOULD):
-- `<Kind>` MUST correspond to the Kubernetes object kind being deleted.
-- A short kind name is allowed, if it is already established in the codebase.
-- Examples:
+- DeleteReconcileHelpers for Kubernetes objects **MUST** use the form: `delete<Kind>` / `Delete<Kind>`. `<Kind>` **MUST** either correspond to the Kubernetes object kind being deleted OR be a short kind name that is already established in the codebase Examples:
   - `deleteCM(...)` (or `deleteConfigMap(...)`)
   - `deleteSVC(...)` (or `deleteService(...)`)
   - `deleteSKN(...)` (or `deleteSomeKindName(...)`)
-- Avoid names that imply orchestration or multi-step cleanup (`reconcileDelete`, `deleteAll`, `deleteAndWait`) — ordering and lifecycle policy belong to Reconcile methods.
+- DeleteReconcileHelper names **MUST NOT** imply orchestration or multi-step cleanup (`reconcileDelete`, `deleteAll`, `deleteAndWait`) — ordering and lifecycle policy belong to **Reconcile methods**.
 
 ---
 

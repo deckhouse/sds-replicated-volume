@@ -9,18 +9,20 @@ alwaysApply: true
 
 This document defines naming and contracts for **ComputeReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
 
 - `compute*` helpers are **pure, deterministic, strictly non-I/O** computations (no hidden I/O: no time/random/env/network).
 - They compute **desired** (`computeDesired*`) and/or **actual (derived)** (`computeActual*`) values (and/or intermediate derived values), and return them (or write into explicit `out` args).
-- They treat `obj` and all caller-provided inputs as **read-only** and **MUST NOT** mutate them (including via aliasing of maps/slices; clone before modifying derived maps/slices).
-- They **MUST NOT** use controller-runtime client, talk to the Kubernetes API, call `DeepCopy`, execute patches, or make any patch ordering / patch type decisions.
+- They treat `obj` and all caller-provided inputs as **read-only** and **MUST NOT** mutate them (including via **aliasing** of maps/slices; **clone** before modifying derived maps/slices).
+- They **MUST NOT** use **controller-runtime client**, talk to the **Kubernetes API**, call **`DeepCopy`**, execute patches, or make any **patch ordering** / **patch type decision**.
 - If a compute helper returns `flow.Outcome`, it **MUST** use it only for **flow control** (continue/done/requeue) and/or **errors**.
 - A compute helper **MUST NOT** use `flow.Outcome` change tracking (`ReportChanged`, `ReportChangedIf`) or optimistic-lock signaling (`RequireOptimisticLock`).
 - If `computeDesired*` derives desired values for **both** main and status domains that will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (main + status), not a mixed struct.
@@ -28,41 +30,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Read any fields from `obj` (metadata/spec/status/etc.) **as read-only input**.
-- Build desired/actual outputs **from scratch** (new structs, new slices/maps).
-- Clone maps/slices from inputs before normalizing/editing:
-  - `maps.Clone(...)`, `slices.Clone(...)`, `append([]T(nil), in...)`, manual copies.
-- Normalize deterministically (stable ordering):
-  - sort slices (`slices.Sort`, sort by key), canonicalize representations before returning/comparing.
-- Validate inputs / invariants and return `error` (or `flow.Outcome` if using flow style).
-- Call other `compute*` helpers (pure composition) and other pure utilities (formatting, parsing, deterministic math).
-- If using `flow.Outcome`, write computed results into explicit `out *T` (and/or return values) — **never into `obj`**.
-- If returning `flow.Outcome`, use it for **errors** (`flow.Fail`, `flow.ContinueErr`) and **reconcile return decisions** (`flow.Done`, `flow.RequeueAfter`) only.
-- If the helper needs logging/phase structure, accept `ctx` and create a phase via the normal flow mechanisms (still non-I/O).
-- Read reconciler-owned **pure** config/components (templates, planners, scorers, caches) **only if** they do not perform I/O and results remain deterministic for the same explicit inputs and the same internal state.
-
-**DENY (MUST NOT):**
-- Mutate `obj` in any way (metadata/spec/status/labels/annotations/finalizers/conditions), including via map/slice aliasing.
-- Mutate any other inputs (`desired`, `actual`, templates/defaults, previously computed values), including via aliasing.
-- Return values that alias `obj` internals (e.g., `obj.GetLabels()` map, `obj.Spec.SomeSlice` slice) where callers could mutate later.
-- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
-- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
-- Executing patches / updates / creates / deletes, or making patch ordering / patch type decisions (plain vs optimistic lock, domain ordering, retries).
-- Using `flow.Outcome.ReportChanged`, `ReportChangedIf`, or `RequireOptimisticLock` (compute helpers do not mutate `obj`).
-- Hidden I/O / nondeterminism:
-  - `time.Now()` / `time.Since(...)`,
-  - `rand.*` / UUID generation,
-  - `os.Getenv`, reading files,
-  - network calls of any kind.
-- Relying on map iteration order (must sort when output order matters).
-- Smuggling implicit dependencies (globals, package-level mutable state) instead of explicit arguments / reconciler fields.
-
----
-
-## Definition (MUST)
+## Definition
 
 A **ComputeReconcileHelper** (“compute helper”) is a **ReconcileHelper** that is:
 
@@ -77,16 +45,16 @@ Typical compute helpers compute:
 
 ---
 
-## Naming (MUST)
+## Naming
 
-- A **ComputeReconcileHelper** name **MUST** start with `compute` (unexported) or `Compute` (exported).
+- A **ComputeReconcileHelper** name **MUST** start with `compute` / `Compute`.
 - ComputeReconcileHelpers for desired-state computations **MUST** use the form:
   - `computeDesired*` / `ComputeDesired*`.
 - ComputeReconcileHelpers for actual-state computations **MUST** use the form:
   - `computeActual*` / `ComputeActual*`.
-
-Guidance (SHOULD):
-- Use names that communicate the computed artifact:
+- ComputeReconcileHelpers that compute values for exactly one **patch domain** **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the computed “thing” name refers to a field/group that exists in both **`.spec`** and **`.status`** of the same object).
+- If a ComputeReconcileHelper computes values spanning both patch domains, it **MAY** omit `Main` / `Status`.
+- ComputeReconcileHelper names SHOULD name the computed “thing”:
   - `computeActualStatus(...)` (ok when actual status is small; otherwise prefer artifact-specific)
   - `computeActualLabels(...)`
   - `computeActualSpecFoo(...)`
@@ -94,7 +62,7 @@ Guidance (SHOULD):
   - `computeDesiredLabels(...)`
   - `computeDesiredSpecFoo(...)`
   - `computeDesiredChildObjects(...)`
-- Avoid “vague” names (`computeStuff`, `computeAll`, `computeData`) — Cursor/code review should understand the intent from the name.
+- ComputeReconcileHelper names SHOULD NOT be “vague” (`computeStuff`, `computeAll`, `computeData`) — the intent should be obvious from the name.
 
 ---
 

@@ -9,83 +9,49 @@ alwaysApply: true
 
 This document defines naming and contracts for **IsUpToDateReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
 
 - `is*UpToDate` helpers are **tiny, pure, deterministic, strictly non-I/O** boolean checks.
-- They compare the current `obj` state to a **single desired input** for **exactly one patch domain** (main **or** status) and return `true/false`.
-- They **SHOULD NOT** return errors, **MUST NOT** do flow control, and **MUST NOT** log.
-- They treat `obj` and `desired` as **read-only** (no mutations, including via map/slice aliasing; clone before any normalization).
+- They compare the current `obj` state to a **single desired input** for **exactly one patch domain** (**main** or **status**) and return `true/false`.
+- They **SHOULD NOT** return errors, **MUST NOT** do **flow control**, and **MUST NOT** log.
+- They treat `obj` and `desired` as **read-only** (no mutations, including via map/slice **aliasing**; **clone** before any normalization).
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Read the current state from `obj` **as read-only input**.
-- Read the desired state from the single `desired` argument **as read-only input**.
-- Perform a tiny, pure comparison for **exactly one** patch domain and return `true/false`.
-- Use deterministic normalization **on local clones only** if needed for comparison:
-  - clone slices/maps from `obj` / `desired`,
-  - sort/canonicalize the clones,
-  - compare canonical forms.
-- Call small pure helpers used purely for comparison (string normalization, sorting clones, equality helpers).
-- Bundle multiple fields for the same domain into one `desired` struct and compare it as a unit.
-
-**DENY (MUST NOT):**
-- Any controller-runtime client usage or Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`), directly or indirectly.
-- `DeepCopy` in any form (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.).
-- Any flow control:
-  - no `flow.Outcome` returns,
-  - no phases,
-  - no logging,
-  - no `ctx` argument.
-- Returning `error` (signature must be `... bool`).
-- Mutating anything:
-  - must not mutate `obj`,
-  - must not mutate `desired`,
-  - must not mutate through aliasing (e.g., sorting `obj.Spec.Slice` in place, editing `obj.GetLabels()` map).
-- Checking both patch domains in one helper (main + status together).
-- Hidden I/O / nondeterminism:
-  - `time.Now()` / `time.Since(...)`,
-  - `rand.*` / UUID generation,
-  - `os.Getenv`, reading files,
-  - network calls.
-- Relying on map iteration order or any unstable traversal that can flip the boolean result (must sort when order matters).
-
----
-
-## Definition (MUST)
+## Definition
 
 An **IsUpToDateReconcileHelper** (“up-to-date helper”) is a **ReconcileHelper** that is:
 
 - **strictly non-I/O**, and
-- checks whether the current object state is **already equal to the desired state** for **exactly one patch domain** (main resource **or** status subresource), and
+- checks whether the current object state is **already equal to the desired state** for **exactly one patch domain** (**main resource** or **status subresource**), and
 - returns a boolean result.
 
 Typical up-to-date helpers gate patch execution by answering “do we need to patch this domain?” for a single desired input.
 
 ---
 
-## Naming (MUST)
+## Naming
 
 - An **IsUpToDateReconcileHelper** name **MUST** start with `is` / `Is` and **MUST** contain `UpToDate`.
-- The required forms are:
-  - `is*UpToDate` / `Is*UpToDate`
-  - `is*StatusUpToDate` / `Is*StatusUpToDate` (for status-domain checks)
-
-Guidance (SHOULD):
-- Name the “thing” being checked for drift:
+- IsUpToDateReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the checked “thing” name refers to a field/group that exists in both `.spec` and `.status` of the same object):
+  - `isMain*UpToDate` / `IsMain*UpToDate` / `is*MainUpToDate` / `Is*MainUpToDate`
+  - `isStatus*UpToDate` / `IsStatus*UpToDate` / `is*StatusUpToDate` / `Is*StatusUpToDate`
+- IsUpToDateReconcileHelpers **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
+- IsUpToDateReconcileHelper names **MUST NOT** include `Desired` / `Actual` unless the checked “thing” name includes `Desired` / `Actual`.
+- IsUpToDateReconcileHelper names **SHOULD** name the “thing” being checked for drift:
   - `isLabelsUpToDate(obj, desiredLabels)`
   - `isSpecFooUpToDate(obj, desiredFoo)`
   - `isStatusUpToDate(obj, desiredStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
   - `isConditionsUpToDate(obj, desiredConditions)`
-- Avoid generic names (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the domain + artifact being compared.
+- IsUpToDateReconcileHelper names **SHOULD NOT** be generic (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the domain + artifact being compared.
 
 ---
 

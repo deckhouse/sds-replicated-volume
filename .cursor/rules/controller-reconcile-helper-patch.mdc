@@ -9,90 +9,50 @@ alwaysApply: true
 
 This document defines naming and contracts for **PatchReconcileHelper** functions/methods.
 
-Common terminology and rules for any ReconcileHelper live in `controller-reconcile-helper.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
-
----
-
-## TL;DR (MUST)
-
-- `patch<Kind>` helpers are **single-call I/O helpers**: they execute exactly **one** patch request for exactly **one** patch domain (`Patch(...)` main **or** `Status().Patch(...)` status).
-- They take `base` explicitly (created by Reconcile methods immediately before the patch) and an explicit `optimisticLock` flag, and **MUST NOT** decide patch ordering or patch strategy beyond that flag.
-- They **MUST** patch using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with API-server-updated fields (e.g., `resourceVersion`, managed fields, defaults).
-- They **MUST NOT** do any other API calls (`Get/List/Create/Update/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** patch both domains in one helper.
-- They **MUST** treat `base` as **read-only** and stay deterministic in everything they control (no hidden I/O: no time/random/env/network beyond the single patch request).
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## ALLOW / DENY cheat sheet
+## TL;DR
 
-**ALLOW (MAY):**
-- Execute **exactly one** Kubernetes patch request for **exactly one** patch domain:
-  - main: `r.client.Patch(ctx, obj, ...)`, or
-  - status: `r.client.Status().Patch(ctx, obj, ...)`.
-- Use the **caller-provided** `base` as the diff reference (e.g. `client.MergeFrom(base)` or the codebase’s standard patch constructor).
-- Respect the **caller-provided** `optimisticLock` flag by selecting the corresponding patch option/mode **without changing the decision**.
-- Return `flow.Outcome` (or `error`, if the category intentionally uses errors) that reflects only:
-  - success/failure of the single patch call,
-  - and any retry/requeue decision that is purely mechanical for this call (if your codebase does that inside patch helpers).
-- Observe that **the API server mutates `obj`** as a result of the patch call (e.g., `resourceVersion`, managed fields, defaults), i.e. it’s expected that **`obj` is updated in-place by the client call**.
-- Treat `base` and all other non-`obj` inputs as **read-only** (including maps/slices inside `base`).
+Summary only; if anything differs, follow normative sections below.
 
-**DENY (MUST NOT):**
-- Any Kubernetes API calls other than the single patch call:
-  - no `Get`, no `List`, no `Create`, no `Update`, no `Delete`,
-  - no second patch call,
-  - no status patch plus main patch in the same helper.
-- Patching **both** patch domains in one helper (must be exactly one domain per helper).
-- Calling `DeepCopy` (`obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.) — the caller creates `base`.
-- Mutating `base` (directly or through aliasing of maps/slices); `base` is **read-only diff reference**.
-- Performing **business-logic** mutations on `obj` inside the patch helper:
-  - no “ensure/apply” logic,
-  - no setting fields “just before patch”,
-  - no normalization that changes intent.
-- Making patch ordering / orchestration decisions:
-  - no “patch main then status”,
-  - no “if X then patch status first”,
-  - no “retry loops that perform extra API calls”.
-- Overriding or re-deciding the optimistic-locking choice:
-  - must not flip `optimisticLock`,
-  - must not infer/decide it from object state inside the helper.
-- Hidden I/O / nondeterminism beyond the single patch request:
-  - no `time.Now()` / `time.Since(...)`,
-  - no `rand.*` / UUID generation,
-  - no `os.Getenv` / filesystem reads,
-  - no network calls other than the single Kubernetes API patch request.
-- Patching multiple objects in one helper (loops/fan-out belong to Reconcile methods).
+- `patch<Kind>` helpers are **single-call I/O helpers**: they execute exactly **one** **patch request** for exactly **one** **patch domain** (`Patch(...)` **main** or `Status().Patch(...)` **status**).
+- They take `base` explicitly (created by **Reconcile methods** immediately before the patch) and an explicit `optimisticLock` flag, and **MUST NOT** decide **patch ordering** or **patch strategy** beyond that flag.
+- They **MUST** patch using the **caller-owned object instance** (`obj`) and, on success, the **same instance MUST be updated** with **API-server-updated fields** (e.g., `resourceVersion`, managed fields, defaults).
+- They **MUST NOT** do any other **Kubernetes API** calls (`Get/List/Create/Update/Delete`), **MUST NOT** call `DeepCopy`, and **MUST NOT** patch both **patch domains** in one helper.
+- They **MUST** treat `base` as **read-only** and stay deterministic in everything they control (no **hidden I/O**: no time/random/env/network beyond the single **patch request**).
 
 ---
 
-## Definition (MUST)
+## Definition
 
 A **PatchReconcileHelper** (“patch helper”) is a **ReconcileHelper** that is:
 
 - **allowed to perform I/O**, and
-- executes exactly **one** Kubernetes patch request for exactly **one patch domain** (main resource patch **or** status subresource patch), and
+- executes exactly **one** **Kubernetes patch request** for exactly **one patch domain** (**main resource patch** or **status subresource patch**), and
 - returns the patch outcome (and optionally an error).
 
-Typical patch helpers encapsulate the mechanical “patch this domain now” operation (including optimistic-lock semantics) and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while Reconcile methods still own patch ordering decisions across multiple patches.
+Typical patch helpers encapsulate the mechanical “patch this domain now” operation (including optimistic-lock semantics) and ensure the caller-visible in-memory object reflects server-assigned fields after the patch (e.g., `resourceVersion`, defaults), while **Reconcile methods** still own **patch ordering** decisions across multiple patches.
 
 ---
 
-## Naming (MUST)
+## Naming
 
 - A **PatchReconcileHelper** name **MUST** start with `patch` / `Patch`.
 - PatchReconcileHelpers **MUST** use the form:
-  - `patch<Kind>` / `Patch<Kind>`.
-
-Guidance (SHOULD):
-- `<Kind>` MUST correspond to the Kubernetes object kind being patched.
-- A short kind name is allowed, if it is already established in the codebase.
-- Examples:
+  - `patch<Kind>` / `Patch<Kind>` (main patch domain), or
+  - `patch<Kind>Status` / `Patch<Kind>Status` (status patch domain).
+  `<Kind>` **MUST** either correspond to the Kubernetes object kind being patched OR be a short kind name that is already established in the codebase. Examples:
   - `patchCM(...)` (or `patchConfigMap(...)`)
+  - `patchCMStatus(...)` (or `patchConfigMapStatus(...)`)
   - `patchSVC(...)` (or `patchService(...)`)
+  - `patchSVCStatus(...)` (or `patchServiceStatus(...)`)
   - `patchSKN(...)` (or `patchSomeKindName(...)`)
-- Avoid names that hide strategy or ordering (`patchOptimistically`, `patchAll`, `patchWithOrdering`) — patch helpers execute exactly one patch; ordering and strategy decisions live in Reconcile methods.
+  - `patchSKNStatus(...)` (or `patchSomeKindNameStatus(...)`)
+- PatchReconcileHelper names **MUST NOT** hide strategy or ordering (`patchOptimistically`, `patchAll`, `patchWithOrdering`) — patch helpers execute exactly one patch; ordering and strategy decisions live in **Reconcile methods**.
 
 ---
 

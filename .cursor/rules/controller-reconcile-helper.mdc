@@ -13,7 +13,9 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
 
 - **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
 - All ReconcileHelpers follow strict **naming-by-category** (`compute*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*`) to make intent and allowed behavior reviewable.
@@ -26,65 +28,14 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ---
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Use **Reconcile methods** (`reconcile*` / `Reconcile*`) to orchestrate reconciliation steps, sequencing, retries, and multi-step policies.
-- Implement helpers that match one of the **ReconcileHelper categories** and follow that category’s I/O and mutation rules:
-  - `compute*` / `Compute*`: pure computation.
-  - `is*UpToDate*` / `Is*UpToDate*`: tiny pure boolean checks.
-  - `apply*` / `Apply*`: mechanical in-memory writes to `obj` (one patch domain).
-  - `ensure*` / `Ensure*`: in-memory “make it more correct” mutations to `obj` (one patch domain) + `flow.Outcome`.
-  - `create<Kind>` / `Create<Kind>`: exactly one `Create(...)` call for one object.
-  - `delete<Kind>` / `Delete<Kind>`: exactly one `Delete(...)` call for one object.
-  - `patch<Kind>` / `Patch<Kind>`: exactly one patch call for one domain (`Patch` or `Status().Patch`) for one object.
-- Keep dependencies **explicit** in signatures:
-  - `ctx` first (only when phases/logging are allowed by the category),
-  - then `obj *<Kind>` as the first arg after `ctx`,
-  - then everything else **after `obj`**.
-- Maintain determinism:
-  - sort when order matters,
-  - stabilize outputs derived from maps/sets,
-  - avoid “equivalent but different” states that cause patch churn.
-- Treat inputs as read-only unless the category explicitly allows mutation:
-  - clone maps/slices before editing,
-  - avoid sharing map/slice backing storage between `desired`/templates and `obj`,
-  - treat patch bases as read-only diff references.
-- Use `flow.Outcome` only in categories that allow it (notably `ensure*` and optionally I/O helpers like `create*`/`delete*`/`patch*` when the codebase chooses to encode outcomes there).
-
-**DENY (MUST NOT):**
-- **Category violations** (the most important rule):
-  - Any Kubernetes API I/O from non-I/O categories (`compute*`, `is*UpToDate*`, `apply*`, `ensure*`).
-  - More than **one** API write in a single I/O helper (`create*`, `delete*`, `patch*`).
-  - Mixing patch domains in helpers that must be single-domain (notably `apply*`, `ensure*`, `patch*`, `is*UpToDate*`).
-- Hidden / implicit dependencies:
-  - reading `time.Now()`, random, env/filesystem, or extra network calls where not explicitly allowed by the category;
-  - using global variables/singletons instead of explicit arguments (unless the category doc explicitly allows a reconciler-owned deterministic component).
-- Input mutation outside allowed targets:
-  - mutating “read-only” inputs (including `desired`, templates, computed deps),
-  - mutating through aliasing (maps/slices) instead of cloning,
-  - mutating patch base objects (`base`) used for diffs.
-- Unstable behavior:
-  - relying on map iteration order for ordered outputs,
-  - producing nondeterministic ordering in fields that affect patch diffs.
-- Ambiguous / non-reviewable naming:
-  - helpers that don’t match a category prefix/pattern,
-  - inventing new kind abbreviations that aren’t established in the codebase.
-- Putting orchestration into helpers:
-  - retries/loops that cause multiple API calls inside one helper,
-  - “patch main then status” inside a single helper,
-  - “create then patch status” hidden inside `create*`, etc.
-
----
-
-## Terminology (MUST)
+## Terminology
 
 - **Reconcile methods**: the controller-runtime `Reconcile(...)` method and any other function/method whose name matches `reconcile*` / `Reconcile*` (see `controller-file-structure.mdc`).
 - **ReconcileHelper functions/methods**: any helper function/method used by **Reconcile methods**, implemented in `reconciler.go`, whose name matches one of the **ReconcileHelper categories** below.
   - When referring to *any* helper from these categories, use **ReconcileHelper**.
   - When referring to a *specific kind* of helper, use the corresponding category name below.
 
-### ReconcileHelper categories (MUST)
+### ReconcileHelper categories
 
 These categories are naming categories/patterns (see also `controller-file-structure.mdc`):
 
@@ -98,7 +49,7 @@ These categories are naming categories/patterns (see also `controller-file-struc
 
 ---
 
-## Scope (MUST)
+## Scope
 
 This document defines **common** conventions for all ReconcileHelper categories.
 
