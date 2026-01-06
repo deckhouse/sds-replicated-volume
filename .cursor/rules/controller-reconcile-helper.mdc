@@ -70,14 +70,14 @@ Category-specific conventions are defined in dedicated documents referenced in *
 - If a ReconcileHelper returns `flow.Outcome`, it **MUST** be the **first return value**.
   - It **SHOULD** be the only return value for convenience, unless additional return values are clearly justified.
 
-### Flow phases and `flow.Outcome` (MUST)
+### Flow **phases** and **Outcome**
 
-- Phase usage (`flow.BeginPhase` / `flow.EndPhase`) is **strictly limited**:
-  - **Large `ensure*`**: **MUST** create a phase.
+- **Phase** usage (`flow.BeginPhase` / `flow.EndPhase`) is **strictly limited**:
+  - **Large `ensure*`**: **MUST** create a **phase**.
     - “Large” includes: many sub-steps, loops over items, and/or non-trivial error handling.
-  - **Large `compute*`**: **MAY** create a phase **only when it improves structure or diagnostics**.
-  - **All other helper categories** (`apply*`, `is*UpToDate*`, `create*`, `delete*`, `patch*`) **MUST NOT** create phases.
-- If a helper uses phases, it **MUST** follow `internal/reconciliation/flow` rules (one phase per function; phase on first line; no phases inside loops).
+  - **Large `compute*`**: **MAY** create a **phase** **only when it improves structure or diagnostics**.
+  - **All other Helper categories** (`apply*`, `is*UpToDate*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
+- If a helper uses **phases**, it **MUST** follow `internal/reconciliation/flow` rules (one **phase** per function; **phase** on first line; no **phases** inside loops).
 
 ### Visibility and receivers (SHOULD)
 
@@ -150,13 +150,13 @@ obj.SetLabels(desired.Labels) // aliasing
 
 Note: the same cloning rule applies to any other read-only inputs (e.g., shared templates/dependencies or patch bases).
 
-### Error handling (SHOULD)
+### Error handling
 
-- **Helpers should generally return errors as-is**. Do not enrich errors “for the outside world” in helpers.
-- **Hard ban (MUST NOT)**: a ReconcileHelper error MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
-  - Rationale: object identity and action-level context belong to the calling Reconcile method, which owns orchestration and phases.
-- If a helper creates its own local validation error, it MAY include the **problematic field/constraint** (purely local, non-identity) to keep the error actionable.
-- If additional context is needed to disambiguate multiple *different* error sources within the same Reconcile method, this is allowed only where the category doc explicitly permits it (notably `compute*` / `ensure*`), and the added context MUST remain local and non-identifying.
+- **ReconcileHelpers** **SHOULD** generally return errors as-is. Do not enrich errors “for the outside world” in helpers.
+- **Hard ban (MUST NOT)**: a **ReconcileHelper** error **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key).
+  - Rationale: **object identity** and action-level context belong to the calling **Reconcile method**, which owns orchestration and **phases**.
+- If a **ReconcileHelper** creates its own local validation error, it **MAY** include the **problematic field/constraint** (purely local, non-identity) to keep the error actionable.
+- If additional context is needed to disambiguate multiple *different* error sources within the same **Reconcile method**, this is allowed only where the category doc explicitly permits it (notably `compute*` / `ensure*`), and the added context **MUST** remain local and non-identifying.
 - Do **not** log and also return an error for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
 
 ---

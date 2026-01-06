@@ -150,21 +150,21 @@ func isFooUpToDate(
 
 ---
 
-## Flow phases and `flow.Outcome` (MUST)
+## Flow phases and **Outcome**
 
-- IsUpToDateReconcileHelpers **MUST NOT** create a `reconcile/flow` phase (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
-- IsUpToDateReconcileHelpers **MUST NOT** return `flow.Outcome` (they are pure checks).
+- **IsUpToDateReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **IsUpToDateReconcileHelpers** **MUST NOT** return **Outcome** (in code: `flow.Outcome`) (they are pure checks).
   - If you need flow control (requeue, done, fail), keep it in the caller and/or use other helper categories (e.g., compute/ensure/patch).
-- IsUpToDateReconcileHelpers **MUST NOT** log.
+- **IsUpToDateReconcileHelpers** **MUST NOT** log.
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- IsUpToDateReconcileHelpers should be designed to be non-failing (pure checks).
-  - If an error is realistically possible, prefer handling it in a ComputeReconcileHelper (or in the caller) and pass only validated/normalized inputs to `is*UpToDate`.
-- IsUpToDateReconcileHelpers MUST NOT create/wrap/enrich errors, and MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
+- **IsUpToDateReconcileHelpers** **SHOULD** be designed to be non-failing (pure checks).
+  - If an error is realistically possible, prefer handling it in a **ComputeReconcileHelper** (or in the caller) and pass only validated/normalized inputs to `is*UpToDate`.
+- **IsUpToDateReconcileHelpers** **MUST NOT** create/wrap/enrich errors, and **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key).
 - Do **not** log and also return a “failure signal” for the same condition unless the surrounding reconcile style explicitly requires it (avoid duplicate logs).
 
 ---

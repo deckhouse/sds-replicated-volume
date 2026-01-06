@@ -172,28 +172,32 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - A PatchReconcileHelper **MUST NOT** patch both domains in one helper.
 - If both domains need patching, Reconcile methods **MUST** issue two separate patch operations (typically via two patch helpers), each with its own `base` and request.
 
+---
+
 ## Composition (MUST)
 
 - A PatchReconcileHelper **MUST** execute exactly one patch request for exactly one patch domain.
 - A PatchReconcileHelper **MAY** be preceded by pure helpers that prepared the in-memory `obj` (compute/apply/ensure), but the patch helper itself **MUST NOT** perform any business-logic composition beyond executing the single patch request.
 - If multiple patch requests are needed (multiple domains or multiple sequential patches), they **MUST** be composed in Reconcile methods as multiple explicit patch operations (each with its own `base` taken immediately before that patch).
 
-## Flow phases and `flow.Outcome` (MUST)
+---
 
-- PatchReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
-- If a PatchReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+## Flow phases and **Outcome**
+
+- **PatchReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** — they should stay mechanical and short.
+- If a **PatchReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **SHOULD** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- A PatchReconcileHelper SHOULD be mechanically thin: if the single patch call fails, return the error **without wrapping**.
-  - If returning `flow.Outcome`, use `flow.Fail(err)` (or equivalent) with the original `err`.
-- A PatchReconcileHelper MUST NOT enrich errors with additional context (including reconcile object identity such as `namespace/name`, UID, object key).
-  - Error enrichment (action + object identity + phase) is the calling Reconcile method’s responsibility.
+- A **PatchReconcileHelper** **SHOULD** be mechanically thin: if the single patch call fails, return the error **without wrapping**.
+  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
+- A **PatchReconcileHelper** **MUST NOT** enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
+  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
 ---
 

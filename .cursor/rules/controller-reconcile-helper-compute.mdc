@@ -213,30 +213,30 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Flow phases and `flow.Outcome` (MUST)
+## Flow phases and **Outcome**
 
-- A ComputeReconcileHelper **MUST NOT** create a `reconcile/flow` phase by default.
-- A **large** ComputeReconcileHelper **MAY** create a `reconcile/flow` phase (`flow.BeginPhase` / `flow.EndPhase`) **only when it improves structure or diagnostics**.
-  - Otherwise (small/straightforward compute), it **MUST NOT** create a phase.
-  - If it creates a phase (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
-- If a ComputeReconcileHelper returns `flow.Outcome`, it **MUST** use helpers from `internal/reconciliation/flow`:
+- A **ComputeReconcileHelper** **MUST NOT** create a `reconcile/flow` **phase** by default.
+- A **large** **ComputeReconcileHelper** **MAY** create a `reconcile/flow` **phase** (`flow.BeginPhase` / `flow.EndPhase`) **only when it improves structure or diagnostics**.
+  - Otherwise (small/straightforward compute), it **MUST NOT** create a **phase**.
+  - If it creates a **phase** (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
+- If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **MUST** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
 
-### `flow.Outcome` change / optimistic-lock reporting (MUST NOT)
+### **Outcome** change / optimistic-lock reporting
 
-Compute helpers **MUST NOT** report object changes or optimistic-lock requirements via `flow.Outcome`:
+**ComputeReconcileHelpers** **MUST NOT** report object changes or optimistic-lock requirements via **Outcome** (in code: `flow.Outcome`):
 - **MUST NOT** call `ReportChanged` / `ReportChangedIf`
 - **MUST NOT** call `RequireOptimisticLock`
 
 Rationale: `Outcome.DidChange()` / `Outcome.OptimisticLockRequired()` semantically mean
-“this helper already mutated the target object and the subsequent save of that mutation must use optimistic-lock semantics”.
-Compute helpers do not mutate `obj` by contract.
+“this helper already mutated the target object and the subsequent save of that mutation must use **Optimistic locking** semantics”.
+**ComputeReconcileHelpers** do not mutate `obj` by contract.
 
 ---
 
-### Returning results when using `flow.Outcome` (MAY)
+### Returning results when using **Outcome**
 
-If a ComputeReconcileHelper returns `flow.Outcome`, it **MAY** write its computed result into an explicit output argument passed by pointer (e.g. `*DesiredState` / `*ActualState`) instead of returning that result as an additional return value.
+If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **MAY** write its computed result into an explicit output argument passed by pointer (e.g. `*DesiredState` / `*ActualState`) instead of returning that result as an additional return value.
 
 - It **MUST NOT** write the result into `obj`.
 
@@ -290,19 +290,19 @@ Notes (SHOULD):
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- ComputeReconcileHelpers SHOULD generally return errors as-is.
-  - If a ComputeReconcileHelper returns `flow.Outcome`, use `flow.Fail(err)` for errors.
+- **ComputeReconcileHelpers** **SHOULD** generally return errors as-is.
+  - If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` for errors.
 
-  **Allowed (rare)**: when propagating a **non-local** error (e.g., from parsing/validation libs or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling Reconcile method, a ComputeReconcileHelper MAY wrap with small, local context:
+  **Allowed (rare)**: when propagating a **non-local** error (e.g., from parsing/validation libs or injected pure components) and additional context is necessary to **disambiguate multiple different error sources** within the same calling **Reconcile method**, a **ComputeReconcileHelper** **MAY** wrap with small, local context:
   - prefer `fmt.Errorf("<local-action>: %w", err)`
   - keep `<local-action>` specific to the helper responsibility (e.g., `parseDesiredTopology`, `computeDesiredLabels`, `normalizeReplicaSet`)
 
   **Forbidden (MUST NOT)**:
-  - do not add reconcile object identity (e.g. `namespace/name`, UID, object key)
-  - do not add generic “outside world” context (that belongs to the Reconcile method)
+  - do not add **object identity** (e.g. `namespace/name`, UID, object key)
+  - do not add generic “outside world” context (that belongs to the **Reconcile method**)
 
 ---
 

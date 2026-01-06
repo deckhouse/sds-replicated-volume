@@ -1,6 +1,8 @@
 package flow
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -22,4 +24,17 @@ func TestMerge_RequeueTruePanics_InternalGuard(t *testing.T) {
 	mustPanicInternal(t, func() {
 		_ = Merge(Outcome{result: &ctrl.Result{Requeue: true}})
 	})
+}
+
+func TestOutcome_ErrWithoutResult_IsClassifiedAsInvalidKind(t *testing.T) {
+	kind, _ := outcomeKind(&Outcome{err: errors.New("e")})
+	if kind != "invalid" {
+		t.Fatalf("expected kind=invalid, got %q", kind)
+	}
+}
+
+func TestEndPhase_ErrWithoutResult_DoesNotPanic(t *testing.T) {
+	ctx, _ := BeginPhase(context.Background(), "p")
+	o := Outcome{err: errors.New("e")}
+	EndPhase(ctx, &o)
 }

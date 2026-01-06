@@ -85,7 +85,7 @@ func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedV
 		if client.IgnoreNotFound(err) == nil {
 			return flow.Continue()
 		}
-		return flow.ContinueErrf(err, "failed to patch ReplicatedVolume %s main resource", rv.Name)
+		return flow.Failf(err, "failed to patch ReplicatedVolume %s main resource", rv.Name)
 	}
 
 	return flow.Continue()
@@ -99,7 +99,10 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 	desiredDeviceMinorAssignedCondition.ObservedGeneration = rv.Generation
 
 	if rv.Status.DeviceMinorEquals(desiredDeviceMinor) && obju.IsStatusConditionPresentAndSemanticallyEqual(rv, desiredDeviceMinorAssignedCondition) {
-		return flow.ContinueErr(desiredDeviceMinorComputeErr)
+		if desiredDeviceMinorComputeErr != nil {
+			return flow.Fail(desiredDeviceMinorComputeErr)
+		}
+		return flow.Continue()
 	}
 
 	base := rv.DeepCopy()
@@ -111,9 +114,12 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 		if client.IgnoreNotFound(err) == nil {
 			// RV disappeared between Get and Status().Patch: release any reserved ID.
 			pool.Release(rv.Name)
-			return flow.ContinueErr(desiredDeviceMinorComputeErr)
+			if desiredDeviceMinorComputeErr != nil {
+				return flow.Fail(desiredDeviceMinorComputeErr)
+			}
+			return flow.Continue()
 		}
-		return flow.ContinueErr(errors.Join(
+		return flow.Fail(errors.Join(
 			flow.Wrapf(err, "failed to patch ReplicatedVolume %s status subresource", rv.Name),
 			desiredDeviceMinorComputeErr,
 		))
@@ -129,7 +135,10 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 	//	// TODO: log INFO about
 	// }
 
-	return flow.ContinueErr(desiredDeviceMinorComputeErr)
+	if desiredDeviceMinorComputeErr != nil {
+		return flow.Fail(desiredDeviceMinorComputeErr)
+	}
+	return flow.Continue()
 }
 
 func computeDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) (*v1alpha1.DeviceMinor, error) {

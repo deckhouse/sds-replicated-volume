@@ -135,6 +135,8 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
   - it **MUST NOT** rely on setting `.status` in the create request.
 - If initial status must be set, it **MUST** be done by Reconcile methods as a **separate** status write (separate request).
 
+---
+
 ## Composition (MUST)
 
 - A CreateReconcileHelper **MUST** perform exactly one API write (`Create(...)`) for exactly one object.
@@ -142,22 +144,24 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - If creating an object requires multiple API writes (e.g., create main resource and then write status), those writes **MUST** be composed in Reconcile methods as separate operations, not hidden inside the create helper.
 - If multiple objects must be created (loops, groups, fan-out), that orchestration **MUST** live in Reconcile methods; create helpers must remain single-object.
 
-## Flow phases and `flow.Outcome` (MUST)
+---
 
-- CreateReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
-- If a CreateReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+## Flow phases and **Outcome**
+
+- **CreateReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** — they should stay mechanical and short.
+- If a **CreateReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **SHOULD** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- A CreateReconcileHelper SHOULD be mechanically thin: if the single `Create(...)` call fails, return the error **without wrapping**.
-  - If returning `flow.Outcome`, use `flow.Fail(err)` (or equivalent) with the original `err`.
-- A CreateReconcileHelper MUST NOT enrich errors with additional context (including reconcile object identity such as `namespace/name`, UID, object key).
-  - Error enrichment (action + object identity + phase) is the calling Reconcile method’s responsibility.
+- A **CreateReconcileHelper** **SHOULD** be mechanically thin: if the single `Create(...)` call fails, return the error **without wrapping**.
+  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
+- A **CreateReconcileHelper** **MUST NOT** enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
+  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
 ---
 

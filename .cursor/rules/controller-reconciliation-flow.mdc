@@ -5,131 +5,42 @@ globs:
 alwaysApply: true
 ---
 
-# flow usage patterns (phases + outcomes)
+# Using flow (`internal/reconciliation/flow`)
 
 This document defines the **usage contract** for `internal/reconciliation/flow` in controller reconciliation code:
-how to structure work into **phases** and how to compose/propagate `flow.Outcome` (including error boundaries via
-`OnErrorf`) without duplicate logging.
+how to structure work into **phases** and how to compose/propagate/enrich **Outcome**.
 
-It complements `controller-reconciliation.mdc` (orchestration rules) and `controller-reconcile-helper*.mdc`
-(helper-category contracts). Scope: **flow mechanics only** — phase lifecycle rules, naming, and outcome composition
-patterns. This document intentionally does **NOT** define domain-specific reconciliation logic, reconciliation
-patterns, or helper I/O boundaries beyond what is necessary to apply `flow` correctly.
+Scope: any function that uses **flow** (calls any function from `internal/reconciliation/flow` and/or returns/accepts **Outcome**) **MUST** follow this document.
+In code, the type is `flow.Outcome`.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
-## TL;DR (MUST)
+## TL;DR
 
-- **0 or 1 phase per function**. If phased: **no** nested/sequential phases, **no** phases in loops.
-- Phased function = **2-line header**:
-  1) `ctx, log := flow.BeginPhase(...)` (first executable line)
-  2) `defer flow.EndPhase(ctx, &outcome)` (second line)
-  Nothing before/between.
-- Returns: named return **only** `outcome flow.Outcome`; `EndPhase(ctx, &outcome)` **only**; **no bare `return`**.
-- Context/logger: use **only derived `ctx`**, pass **unchanged**; if logging, use **only** `log` from `BeginPhase` (no `log.FromContext`, no mixed loggers).
-- Steps: `outcome = step(...).OnErrorf(ctx, "...")` then **immediately** `if outcome.ShouldReturn(){ return outcome }`. No reorder, no skipping the check, no double `OnErrorf`.
-- Composition: **sequential** if ordering/early-exit matters; `Merge` only if all steps must run; loops → collect `outcomes` then `flow.Merge(outcomes...)`.
-- Naming: `outcome`/`outcomes`; phase name = stable lowercase ASCII id (`a–z0–9` + `.`/`-`), **no** dynamic parts; variable context → `BeginPhase` metadata.
+Summary only; if anything differs, follow normative sections below.
 
----
+## TL;DR
 
-## ALLOW / DENY cheat sheet
-
-**ALLOW (MAY):**
-- Use **phases** (`flow.BeginPhase` / `flow.EndPhase`) **only in “phased” functions** (exactly one phase per function).
-- If a function is phased, it MAY:
-  - call `ctx, log := flow.BeginPhase(ctx, "phase-name", "k", v, ...)` on the **first executable line**,
-  - `defer flow.EndPhase(ctx, &outcome)` on the **second line**,
-  - use a **named return** `outcome flow.Outcome` and pass `&outcome` to `EndPhase`.
-- Use the **derived** `ctx` returned by `BeginPhase` for **all** work in the function and pass it **unchanged** to all helpers.
-- If the function logs anything, use **only** the logger returned by `BeginPhase`.
-  - Ignoring the logger (`_`) is allowed if the function does **no logging**.
-- Add **local error boundaries** at step call-sites using `OnErrorf(ctx, "...")`:
-  - `outcome = step(...).OnErrorf(ctx, "ensure foo")`
-  - immediately followed by: `if outcome.ShouldReturn() { return outcome }`
-- Compose steps explicitly and reviewably:
-  - **Sequential pattern** when ordering or early-stop matters.
-  - **Merge pattern** only when all steps must run regardless of others.
-  - Loop pattern: collect `outcomes := []flow.Outcome{...}` and then `outcome := flow.Merge(outcomes...)`.
-- Attach variable context via **phase metadata**, not via phase names:
-  - `flow.BeginPhase(ctx, "ensureChild", "child", child.Name)`
-- Use stable, identifier-like phase names suitable for `logr.WithName`:
-  - lowercase ASCII, characters `a–z0–9`, separators `.` and `-`.
-
-**DENY (MUST NOT):**
-- Start **more than one phase** in the same function (nested or sequential phases are forbidden).
-- Start a phase **inside a loop** in the same function.
-- Place **any statements** before `BeginPhase`, or **any statements** between `BeginPhase` and `defer EndPhase`
-  (including declarations, logging, conditionals).
-- Use any named return other than `outcome` in phased functions.
-- Pass anything other than `&outcome` into `flow.EndPhase`.
-- Use **bare `return`** (empty return), even with named return values.
-- Use the original/incoming `ctx` after `BeginPhase`.
-- Replace or mutate the derived phase context
-  (`ctx = context.WithValue(...)`, `ctx = otherCtx`, etc.).
-- Use `log.FromContext(ctx)` or any other logger inside a phased function.
-- Mix multiple loggers inside a phased function.
-- Log the same error more than once:
-  - MUST NOT log error details manually if `OnErrorf` is used at the call site.
-  - MUST NOT rely on `EndPhase` for error details (it logs only a summary).
-- Mis-order error boundary and decision logic:
-  - MUST NOT check `ShouldReturn()` **before** calling `OnErrorf`.
-  - MUST NOT call `OnErrorf` and then continue execution without a `ShouldReturn()` check.
-  - MUST NOT apply `OnErrorf` more than once for the same step/boundary.
-- Use unstable or invalid phase names:
-  - empty names,
-  - names with spaces or control characters,
-  - names containing dynamic values (IDs, resource names, loop indices).
-- Encode metadata into the phase name instead of structured metadata arguments.
-- Use `Merge` when early-stop or ordering semantics matter (merge does not short-circuit).
-
-**DISCOURAGED (SHOULD NOT):**
-- “Single-shot” mega-merge hiding intent and ordering:
-  - `flow.Merge(stepA(...), stepB(...), stepC(...))`
-- Inline `Wrapf` inside merge operands; prefer `OnErrorf` per step and apply outer context *after* merging.
-- Best-effort loops that ignore outcomes, unless explicitly justified with a comment explaining why it is safe.
-
----
-
-## Error handling & logging
-
-### Use `OnErrorf` as the boundary helper (SHOULD)
-
-```go
-outcome = r.ensureFoo(ctx, obj).OnErrorf(ctx, "ensure foo")
-if outcome.ShouldReturn() {
-    return outcome
-}
-```
-
-Rules:
-- `OnErrorf` logs exactly once
-- adds local context
-- wraps with phase metadata for upward propagation
-
-### Avoid duplicate error logs (MUST)
-
-- `OnErrorf` logs error details
-- `EndPhase` logs only summary (`hasError`, `result`, `duration`)
-- do not log the same error again
-
----
+- **Phases**: if used → **exactly one** per function (`BeginPhase` + `EndPhase`), no nesting/sequencing. In a phased function: `BeginPhase` is **1st line**, `defer EndPhase(ctx, &outcome)` is **2nd**; named return **MUST** be `outcome flow.Outcome`; no bare `return`. Use only derived `ctx` and (if logging) only the logger returned by `BeginPhase`.
+- **Phase name/metadata**: name is a stable `WithName` segment (non-empty, no spaces; **SHOULD** be lowercase ASCII); **MUST NOT** include dynamic values. Variable identity goes into `BeginPhase` key/values (required for loops/repeated calls; don’t duplicate request/parent metadata).
+- **root Reconcile**: **MUST** use `flow.Begin(ctx)` (no phases) and return via `outcome.ToCtrl()`; don’t manually log Outcome errors.
+- **Outcome**: build only with `flow.Continue/Done/RequeueAfter/Fail/Failf` (no struct/field edits). At each call-site: either check `ShouldReturn()` immediately, return immediately, or merge/accumulate then check/return. Best-effort overrides are rare: comment + log dropped errors. Enrich errors only via `Failf` / `Enrichf` (no re-wrapping from `outcome.Error()`).
 
 ## Phase usage
 
 A phase is a **scoped reconciliation block** started with `flow.BeginPhase` and **always** closed with `flow.EndPhase`. Phases define the logging, error attribution, and lifecycle boundaries for a reconciliation step.
 
-This section defines **strict rules** for using phases.
+Scope: any function that uses `flow.BeginPhase` or `flow.EndPhase` **MUST** follow the rules in this section.
 
 ---
 
-### Single-phase rule (MUST)
+### Single-phase rule
 
-- If a function uses a phase, it **MUST use exactly one phase**.
+- If a function uses a phase, it **MUST** **use exactly one phase**.
 - A function **MUST NOT** start more than one phase.
-- Nested or sequential phases inside the same function are **NOT allowed**.
+- Nested or sequential phases inside the same function **MUST NOT** be used.
 
 A function is either:
 - **phased** (exactly one `BeginPhase` / `EndPhase` pair), or
@@ -139,13 +50,12 @@ There is no intermediate or mixed mode.
 
 ---
 
-### Phase placement (MUST)
+### Phase placement
 
-If a function uses a phase:
-
+If a function is **phased**:
 - `flow.BeginPhase` **MUST** be called on the **first executable line** of the function.
 - `defer flow.EndPhase(...)` **MUST** be the **second line**.
-- No other statements (including variable declarations, logging, or conditionals) are allowed before `BeginPhase` or between `BeginPhase` and `defer EndPhase`.
+- A **phased** function **MUST NOT** have any other statements (including variable declarations, logging, or conditionals) before `BeginPhase` or between `BeginPhase` and `defer EndPhase`.
 
 This guarantees that:
 - the entire function body is covered by the phase,
@@ -154,12 +64,10 @@ This guarantees that:
 
 ---
 
-### Required return variable (MUST)
+### Required return variable
 
-- Any phased function **MUST**:
-  - use a **named return value** named `outcome`,
-  - pass **a pointer to that variable** into `flow.EndPhase`.
-- Bare `return` (empty return) is **forbidden** — always return explicitly:
+- Any **phased** function **MUST** use a named return value named `outcome` and **MUST** pass a pointer to that variable into `flow.EndPhase`.
+- Any **phased** function **MUST NOT** use bare `return` (empty return) — it **MUST** return explicitly:
   - `return outcome` (or `return outcome, value` for multi-return functions).
 
 ```go
@@ -174,59 +82,21 @@ Using a different variable name or passing a temporary value is **NOT allowed**.
 
 ---
 
-### Context and logger handling (MUST)
+### Context and logger handling
 
-- `flow.BeginPhase` returns **two values**:
-  1. a derived `context.Context`,
+`flow.BeginPhase` returns **two values**:
+  1. a **phase context** (`context.Context`),
   2. a **phase-scoped logger**.
-- If a function starts a phase, it **MUST**:
-  - use the returned `ctx` for **all** subsequent operations inside the function, and
-  - pass that `ctx` **unchanged** to all helper calls.
-- If the function performs **any logging**, it **MUST**:
-  - capture the returned logger, and
-  - use **only that logger** for all logs in the function.
 
-Rules:
+- Any **phased** function **MUST** use the **phase context** (`ctx`) as the base context for all subsequent operations in the function. It **MAY** derive child contexts (e.g., via `context.WithTimeout` / `context.WithCancel`) for specific operations.
+- Any **phased** function **MUST NOT** use the original (incoming) context after `BeginPhase`.
+- If a **phased** function performs any logging, it **MUST** capture the **phase-scoped logger** and **MUST** use only that logger for all logs in the function.
+- A **phased** function **MUST NOT** use `log.FromContext(ctx)` or any other logger.
+- A **phased** function **MUST NOT** mix multiple loggers.
+- A **phased** function **MAY** ignore the **phase-scoped logger** (`_`) only if it does not log anything.
+- Helper functions called from a **phased** function **MUST** receive the **phase context** (`ctx`), so that logs are attributed to the correct phase and cancellation/deadlines/values propagate consistently.
 
-- The original (incoming) context **MUST NOT** be used after `BeginPhase`.
-- Ignoring the logger (`_`) is allowed **only if the function does not log anything**.
-- Using `log.FromContext(ctx)` or any other logger inside a phased function is **NOT allowed**.
-- Mixing multiple loggers inside a phased function is **NOT allowed**.
-- Helper functions called from a phased function **MUST** receive the derived `ctx`, so that:
-  - logs are attributed to the correct phase,
-  - cancellation, deadlines, and values propagate consistently.
-
-
----
-
-### Canonical templates (MUST)
-
-#### Phased function without logging
-
-```go
-func doWork(ctx context.Context) (outcome flow.Outcome) {
-    ctx, _ = flow.BeginPhase(ctx, "do-work")
-    defer flow.EndPhase(ctx, &outcome)
-
-    outcome = flow.Continue()
-    return outcome
-}
-```
-
-#### Phased function with logging
-
-```go
-func doWork(ctx context.Context, input string) (outcome flow.Outcome) {
-    ctx, log := flow.BeginPhase(ctx, "do-work", "input", input)
-    defer flow.EndPhase(ctx, &outcome)
-
-    log.Info("phase doing smthg")
-
-    return flow.Continue()
-}
-```
-
----
+This keeps logs and errors consistently attributed to the correct **phase** and avoids mixing unrelated execution contexts. It also ensures cancellation, deadlines, and values propagate via the **phase context**.
 
 ### Phase name and metadata
 
@@ -236,9 +106,11 @@ The phase name is used as a **logger name segment** via:
 log.FromContext(ctx).WithName(phaseName)
 ```
 
+Internally, `flow.BeginPhase` derives the **phase-scoped logger** this way. User code **MUST** use the **phase-scoped logger** returned by `flow.BeginPhase`.
+
 Because of this, strict naming rules apply.
 
-#### Phase name rules (MUST)
+#### Phase name rules
 
 - The phase name **MUST NOT** be empty.
 - The phase name **MUST NOT** contain:
@@ -256,7 +128,7 @@ Recommended character set:
 - `a–z`, `0–9`
 - separators: `.` and `-`
 
-#### Structure and stability (SHOULD)
+#### Structure and stability
 
 - The phase name **MUST** be a logical step name.
 - The phase name **MUST NOT** include:
@@ -268,7 +140,7 @@ Reasoning:
 - `WithName` composes logger names hierarchically (joined by dots).
 - Dynamic or unstable names break log aggregation, filtering, and long-term diagnostics.
 
-#### Metadata vs name (MUST)
+#### Metadata vs name
 
 - Variable or contextual information **MUST NOT** be encoded in the phase name.
 - Such information **MUST** be passed as structured metadata to `BeginPhase`:
@@ -284,49 +156,203 @@ Rule of thumb:
 
 Violating this rule is considered a logging contract break.
 
----
+### **phase metadata**
 
-## Step composition with Outcome
+Definition: **phase metadata** is the optional key/value pairs passed to `flow.BeginPhase` to identify a **phase** instance in the **phase-scoped logger** and error context.
 
-This section defines how to compose reconciliation **steps** that return `flow.Outcome`. The goal is predictable control-flow, single error logging, and reviewable orchestration.
+The **phase metadata** **SHOULD** include only what is needed to uniquely identify the **phase** instance in its local call context.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
-
-### Core idea
-
-A step returns a `flow.Outcome`. Composition is built around three operations:
-
-- Add a **local error boundary**: `OnErrorf(ctx, "...")` (SHOULD)
-- Decide whether to **exit early**: `ShouldReturn()` (MUST)
-- Combine **independent** results: `Merge(...)` / `flow.Merge(...)` (MAY)
+- If a **phased** function is called once per parent **phase** or **root Reconcile**, the **phase name** is usually sufficient and **phase metadata** is usually unnecessary.
+- If a **phased** function can be called multiple times per parent **phase** or **root Reconcile** (including loops), distinguishing **phase metadata** **MUST** be passed to `flow.BeginPhase` (for example: the loop item identity).
+- A **phased** function **MUST NOT** repeat **phase metadata** already present in the parent **phase**.
+- A **phased** function **MUST NOT** repeat metadata that controller-runtime already adds to the logger for the **reconcile request** (for example: `controller`, `controllerGroup`, `controllerKind`, `name`, `namespace`, `reconcileID`).
 
 ---
 
-### Naming rules (MUST)
+## **root Reconcile** (flow special case)
 
-- Inside phased functions (those with `BeginPhase` / `EndPhase`), the named return value **MUST** be `outcome`.
-- When collecting multiple results, the slice variable **MUST** be `outcomes`.
-- In tiny local scopes (no phase), short name `o` **MAY** be used for a single `flow.Outcome`.
+Scope: any **root Reconcile** (the controller-runtime `Reconcile(...)` method) **MUST** follow the rules in this section.
+
+- The **root Reconcile** **MUST** call `flow.Begin(ctx)` and use the returned `ctx` and logger for all subsequent work.
+- The **root Reconcile** **MUST NOT** call `flow.BeginPhase` or `flow.EndPhase`.
+- The **root Reconcile** **MUST** return via `outcome.ToCtrl()` (or `flow.Continue().ToCtrl()`, `flow.Done().ToCtrl()`, `flow.RequeueAfter(...).ToCtrl()`, `flow.Fail(err).ToCtrl()`, `flow.Failf(err, "...").ToCtrl()`), and **MUST NOT** manually log errors carried via **Outcome** (enrich only via `Enrichf`).
+
+---
+
+## Working with **Outcome**
+
+**Outcome** is the return value used to drive control flow (continue/done/requeue/error) and to carry additional metadata (e.g., changed, optimistic-lock intent) across reconciliation steps.
+
+Scope: any function that returns **Outcome** or handles an **Outcome** returned by a call **MUST** follow the rules in this section.
+
+### Constructing **Outcome**
+- If a function returns **Outcome**, it **MUST** express its decision using `flow` constructors:
+  - `flow.Continue`, `flow.Done`, `flow.RequeueAfter`,
+  - `flow.Fail` / `flow.Failf`,
+- A function that returns **Outcome** **MAY** use additional helpers: `Merge`, `ReportChanged*`, `RequireOptimisticLock`, `Enrichf`.
+- A function that returns **Outcome** **MUST NOT** construct `flow.Outcome{...}` directly or mutate its internal fields.
+
+### Handling **Outcome**
+- In any function that handles an **Outcome**, a call that can influence **Outcome control flow** **MUST** be handled in one of the following ways:
+  - **Immediate check**: handle the returned **Outcome** immediately and then check `ShouldReturn()`.
+  - **Immediate return**: return the returned **Outcome** upward without checking it locally.
+  - **Accumulate and then handle**: accumulate returned **Outcome** values (using **Merging outcomes**) and then either check the aggregated **Outcome** immediately or return it upward.
+  - **Intentional override (best-effort; RARE)**: accumulate/merge outcomes, then intentionally return a different **Outcome** (e.g. `flow.Continue()`) instead of the merged one.
+    - This pattern **MUST** be explicitly justified with a comment.
+    - If the override drops an error/stop signal, it **MUST** be made visible (typically via a log in the current function).
+
+Accumulate patterns (**Merging outcomes**) (choose one):
+
+Note: `Outcome.Merge(...)` and `flow.Merge(...)` accept one or more **Outcome** values.
+
+```go
+outcome = step(...)
+// ...
+outcome = outcome.Merge(step2(...))
+// ...
+outcome = outcome.Merge(step3(...))
+// ...
+```
+
+```go
+var outcomes []flow.Outcome
+// ...
+outcomes = append(outcomes, step(...))
+// ...
+outcome := flow.Merge(outcomes...)
+```
+
+Reviewability:
+
+- Single-shot merge **SHOULD NOT** be used (harder to review/extend):
+  - `outcome := flow.Merge(stepA(...), stepB(...), stepC(...))`
+  - Prefer incremental `.Merge(...)` or collect+`flow.Merge(...)`.
+
+Examples:
+
+**Immediate check**:
+
+```go
+outcome = step(...)
+if outcome.ShouldReturn() {
+    return outcome
+}
+```
+
+**Immediate return**:
+
+```go
+// ...
+// ...
+return step(...)
+```
+
+**Accumulate and then handle** (accumulate, then **Immediate check**):
+
+```go
+outcome = step(...)
+// ...
+outcome = outcome.Merge(step2(...))
+// ...
+outcome = outcome.Merge(step3(...))
+if outcome.ShouldReturn() {
+    return outcome
+}
+```
+
+**Accumulate and then handle** (accumulate, then **Immediate return**):
+
+```go
+var outcomes []flow.Outcome
+// ...
+outcomes = append(outcomes, step(...))
+// ...
+return flow.Merge(outcomes...)
+```
+
+**Intentional override (best-effort; RARE)**:
+
+```go
+outcomes = append(outcomes, stepA(...))
+outcomes = append(outcomes, stepB(...))
+
+o := flow.Merge(outcomes...)
+
+if o.Error() != nil {
+    // MUST: explain why best-effort is acceptable here.
+    // MUST: make the dropped error visible (e.g., log it).
+    log.Info("best-effort had failures", "err", o.Error())
+}
+
+return flow.Continue()
+```
+
+
+### No manual error logging with **Outcome**
+
+- Errors carried via **Outcome** are logged automatically by **phases**, so reconciliation code **MUST NOT** log them manually (neither at the **Outcome** source nor at the **Outcome** boundary).
+- Exception: if you intentionally drop an error/stop signal carried via **Outcome** (best-effort override), you **MUST** make it visible (e.g. log it).
+- Reconciliation code **MAY** only enrich such errors using `Enrichf` (see: **Error enrichment**).
+
+Example:
+```go
+// GOOD: enrich error context without logging.
+return step(...).Enrichf("...")
+```
+
+### Error enrichment
+
+Error enrichment is adding **minimal, necessary context** to an error that is returned via **Outcome**, so it can be **understood and distinguished** in logs **without manual error logging**.
+
+Definition: a **sender** is the function that returns an **Outcome** (to its caller). A **receiver** is the function that handles an **Outcome** returned by another function.
+
+- If an error carried by **Outcome** needs to be enriched on the **sender side**, it **MUST** be enriched only by:
+  - creating the terminal outcome via `flow.Fail(...)` / `flow.Failf(...)`, **or**
+  - calling `Enrichf(...)` on an **Outcome** returned by another function **before returning it**.
+- If an error carried by **Outcome** needs to be on the **receiver side**, it **MUST** be enriched only by calling `Enrichf(...)` on the **Outcome** returned by the sender.
+
+- A function that handles an **Outcome** **SHOULD** add context **only when it is truly needed** to explain or distinguish the error, and **SHOULD NOT** add unnecessary context (do not add context “just in case”).
+
+- The error message **MUST NOT** duplicate what is already present in **Reconcile/phase** log context:
+  - reconcile request fields like `name/namespace/reconcileID/controller...`;
+  - the phase name and `kv` passed to `flow.BeginPhase(...)`.
+  - If you need to distinguish instances, prefer **phase metadata** (`kv`) over error text.
+
+- **Sender rules** (`Fail/Failf` and sender-side `Enrichf`):
+  - The sender **SHOULD** enrich the error itself (preferred).
+  - The sender **MUST** add:
+    - what identifies this error among similar ones within the sender (which operation/branch: `get child`, `patch child`, `update status`, ...);
+    - what explains the meaning of the error within the sender (what the step was trying to do).
+  - The sender **MUST NOT** return a “bare” error without context unless `err` is already self-explanatory.
+
+- **Receiver rules** (`Enrichf`):
+  - The receiver **SHOULD** enrich only when the sender **cannot know the necessary context**, especially when:
+    - the sender is **generic** and used from multiple call sites;
+    - the sender is called **in a loop** and cannot identify the iteration/call well enough on its own.
+  - Receiver `Enrichf` **MUST** add:
+    - what distinguishes this error from other received errors in this receiver (which step/receiver);
+    - what explains the meaning of the error within the receiver.
+  - The receiver **MUST NOT** rebuild an **Outcome** from the error (forbidden):
+    - **BAD:** `flow.Failf(outcome.Error(), "...")`
+    - **GOOD:** `outcome.Enrichf("...")`
+
+- **Phased functions note:**
+- If the sender is **phased** (has `BeginPhase/EndPhase`), the error is logged at `EndPhase` **inside the sender**, so enrichment **MUST** be done **before returning** (via `Failf` and/or `Enrichf` within the sender).
+
+
+### Naming variables that store **Outcome**
+
+- In any **phased** function, the named return value **MUST** be outcome (as defined in the phase rules).
+- In non-**phased** functions, the variable that stores an **Outcome** **SHOULD** be named outcome.
+- When collecting multiple **Outcome** values, the slice variable **SHOULD** be named outcomes.
+- In tiny local scopes (no **phase**), short name o **MAY** be used for a single **Outcome** (e.g., `if o := step(...); o.ShouldReturn() { return o }`).
 
 ---
 
-### Error boundary and early-exit (MUST / SHOULD)
+## Step composition examples
 
-- Each step that can fail / requeue / stop **SHOULD** be wrapped at the call site using:
-  - `OnErrorf(ctx, "...")` to log exactly once and attach local context.
-- After applying `OnErrorf`, callers **MUST** check:
-  - `if outcome.ShouldReturn() { return outcome }`
-  - Bare `return` (empty return) is **forbidden**, even with named return values.
-  - For multi-return functions: `if outcome.ShouldReturn() { return outcome, value }`
+This section defines how to compose reconciliation **steps** that return **Outcome**. The goal is predictable control-flow, single error logging, and reviewable orchestration.
 
-
-Logging rules:
-
-- `OnErrorf` logs the error details exactly once and adds local context.
-- `EndPhase` logs only a summary (`hasError`, `result`, `duration`).
-- Therefore you **MUST NOT** log the same error again elsewhere.
-
----
 
 ### Pattern A: Sequential steps (ordering matters)
 
@@ -340,52 +366,99 @@ Use when:
 Canonical form:
 
 ```go
-outcome := stepA(...).OnErrorf(ctx, "step A")
+outcome := stepA(...)
 if outcome.ShouldReturn() {
     return outcome
 }
 
 outcome, foo := stepB(...)
-outcome = outcome.OnErrorf(ctx, "step B")
 if outcome.ShouldReturn() {
     return outcome
 }
 
-outcome = stepC(foo, ...).OnErrorf(ctx, "step C")
+outcome = stepC(foo, ...)
+return outcome
+```
+
+Canonical form (**phased** function variant; named return **Outcome**):
+
+```go
+outcome = stepA(...)
+if outcome.ShouldReturn() {
+    return outcome
+}
+
+var foo any
+outcome, foo = stepB(...)
+if outcome.ShouldReturn() {
+    return outcome
+}
+
+outcome = stepC(foo, ...)
 return outcome
 ```
 
 Inline form (**MAY**, use sparingly):
 
 ```go
-if outcome := stepA(...).OnErrorf(ctx, "step A"); outcome.ShouldReturn() {
-    return outcome
+if o := stepA(...); o.ShouldReturn() {
+    return o
 }
 
-outcome, foo := stepB(...)
-outcome = outcome.OnErrorf(ctx, "step B")
+o, foo := stepB(...)
+if o.ShouldReturn() {
+    return o
+}
+
+return stepC(foo, ...)
+```
+
+Inline form (**phased** function variant; named return **Outcome**) (**MAY**, use sparingly):
+
+```go
+outcome = stepA(...)
 if outcome.ShouldReturn() {
     return outcome
 }
 
-return stepC(foo, ...).OnErrorf(ctx, "step C")
-```
+var foo any
+outcome, foo = stepB(...)
+if outcome.ShouldReturn() {
+    return outcome
+}
 
----
+return stepC(foo, ...)
+```
 
 ### Pattern B: Independent steps (merge; all steps must run)
 
 **MAY** be used only when every step must execute regardless of others.
 
 ```go
-outcome := stepA(...).OnErrorf(ctx, "step A")
+outcome := stepA(...)
 
 outcome = outcome.Merge(
-    stepB(...).OnErrorf(ctx, "step B"),
+    stepB(...),
 )
 
 outcome = outcome.Merge(
-    stepC(...).OnErrorf(ctx, "step C"),
+    stepC(...),
+)
+
+return outcome
+```
+
+**phased** function variant; named return **Outcome**:
+
+```go
+outcome = stepA(...)
+
+outcome = outcome.Merge(
+    stepB(...),
+)
+
+outcome = outcome.Merge(
+    stepC(...),
 )
 
 return outcome
@@ -396,8 +469,6 @@ Important:
 - If early-stop matters → you **MUST** use the sequential pattern.
 - `Merge` does **not** short-circuit execution; it only combines outcomes.
 
----
-
 ### Pattern C: Many objects (collect + merge)
 
 **SHOULD** be used for loops over items.
@@ -406,7 +477,7 @@ Important:
 outcomes := make([]flow.Outcome, 0, len(items))
 for i := range items {
     item := &items[i]
-    o := ensureOne(item).OnErrorf(ctx, "item %s", item.Name)
+    o := ensureOne(item)
     outcomes = append(outcomes, o)
 }
 
@@ -414,23 +485,39 @@ outcome := flow.Merge(outcomes...)
 return outcome
 ```
 
-Optional outer context (**MAY**):
+**phased** function variant; named return **Outcome**:
 
 ```go
-outcome := flow.Merge(outcomes...).Wrapf("ensure items")
+outcomes := make([]flow.Outcome, 0, len(items))
+for i := range items {
+    item := &items[i]
+    o := ensureOne(item)
+    outcomes = append(outcomes, o)
+}
+
+outcome = flow.Merge(outcomes...)
 return outcome
 ```
 
----
-
-### Pattern D: Best-effort loops (RARE)
+#### Pattern D: Best-effort loops (RARE)
 
 **MUST** be explicitly justified with a comment.
 
 ```go
+outcomes := make([]flow.Outcome, 0, len(items))
 for i := range items {
     item := &items[i]
-    _ = ensureOne(item).OnErrorf(ctx, "best-effort ensure %s", item.Name)
+    o := ensureOne(item)
+    outcomes = append(outcomes, o)
+}
+
+o := flow.Merge(outcomes...)
+
+if o.Error() != nil {
+    // Best-effort loop: we intentionally drop the merged Outcome error (we return Continue),
+    // so we MUST log it here to ensure the failure is visible.
+    // We log at Info (not Error) because we intentionally ignore this failure and continue.
+    log.Info("best-effort loop had failures", "err", o.Error())
 }
 
 // MUST: explain why best-effort is acceptable here.
@@ -441,21 +528,31 @@ return flow.Continue()
 
 ### Steps returning extra values
 
-When a function returns `(outcome, value)`, early-exit rules **MUST** still be followed.
+When a step returns `(outcome, value)`, early-exit rules **MUST** still be followed.
 
 ```go
-func (r *Reconciler) computeSomething(ctx context.Context) (outcome flow.Outcome, value string) {
-    ctx, _ = flow.BeginPhase(ctx, "computeSomething")
-    defer flow.EndPhase(ctx, &outcome)
-
-    outcome, value = doCompute(...)
-    outcome = outcome.OnErrorf(ctx, "do compute")
-    if outcome.ShouldReturn() {
-        return outcome, value
-    }
-
-    return flow.Continue(), value
+outcome, value := doCompute(...)
+if outcome.ShouldReturn() {
+  return outcome
 }
+
+// ...
+
+return outcome
+```
+
+**phased** function variant; named return **Outcome**:
+
+```go
+var value any
+outcome, value = doCompute(...)
+if outcome.ShouldReturn() {
+  return outcome
+}
+
+// ...
+
+return outcome
 ```
 
 ---
@@ -471,226 +568,12 @@ outcome := flow.Merge(stepA(...), stepB(...), stepC(...))
 return outcome
 ```
 
-- Inline `Wrapf` inside merge (BAD):
+- Inline `Enrichf` inside merge (BAD):
 
 ```go
 outcome := flow.Merge(
-    stepA(...).Wrapf("A"),
-    stepB(...).Wrapf("B"),
+    stepA(...).Enrichf("A"),
+    stepB(...).Enrichf("B"),
 )
 return outcome
 ```
-
-Prefer `OnErrorf` at step boundaries and apply any outer context *after* merging (e.g. `.Wrapf("ensure items")`).
-
-## Common anti-patterns (MUST NOT)
-
-❌ **Logging the same error twice** (manual log + `OnErrorf`):
-
-    func (r *Reconciler) ensureStuff(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.Outcome) {
-        ctx, log := flow.BeginPhase(ctx, "ensureStuff")
-        defer flow.EndPhase(ctx, &outcome)
-
-        outcome = r.ensureFoo(ctx, obj).OnErrorf(ctx, "ensure foo")
-        if outcome.ShouldReturn() {
-            // forbidden: OnErrorf already logged the error details
-            log.Error(fmt.Errorf("some error"), "ensure foo failed (duplicate)")
-            return outcome
-        }
-
-        return flow.Continue()
-    }
-
----
-
-❌ **Logging inside a step and again at the call-site boundary** (`OnErrorf`):
-
-    func (r *Reconciler) ensureFoo(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.Outcome) {
-        ctx, log := flow.BeginPhase(ctx, "ensureFoo")
-        defer flow.EndPhase(ctx, &outcome)
-
-        if err := r.doFoo(ctx, obj); err != nil {
-            // forbidden: step logs error details
-            log.Error(err, "do foo failed")
-            return flow.Error(err)
-        }
-
-        return flow.Continue()
-    }
-
-    func (r *Reconciler) ensureStuff(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.Outcome) {
-        ctx, _ = flow.BeginPhase(ctx, "ensureStuff")
-        defer flow.EndPhase(ctx, &outcome)
-
-        // forbidden: caller logs again via OnErrorf
-        outcome = r.ensureFoo(ctx, obj).OnErrorf(ctx, "ensure foo")
-        if outcome.ShouldReturn() {
-            return outcome
-        }
-
-        return flow.Continue()
-    }
-
----
-
-❌ **Calling `OnErrorf` without mandatory early-exit check**:
-
-    func (r *Reconciler) ensureStuff(ctx context.Context, obj *v1alpha1.Foo) (outcome flow.Outcome) {
-        ctx, _ = flow.BeginPhase(ctx, "ensureStuff")
-        defer flow.EndPhase(ctx, &outcome)
-
-        _ = r.ensureFoo(ctx, obj).OnErrorf(ctx, "ensure foo") // forbidden
-        _ = r.ensureBar(ctx, obj).OnErrorf(ctx, "ensure bar") // forbidden
-
-        return flow.Continue()
-    }
-
----
-
-❌ **Checking `ShouldReturn()` before applying `OnErrorf`**:
-
-    outcome = r.ensureFoo(ctx, obj)
-    if outcome.ShouldReturn() { // forbidden
-        return outcome
-    }
-
-    outcome = outcome.OnErrorf(ctx, "ensure foo")
-
----
-
-❌ **Applying `OnErrorf` more than once for the same step**:
-
-    outcome = r.ensureFoo(ctx, obj).OnErrorf(ctx, "ensure foo")
-    outcome = outcome.OnErrorf(ctx, "ensure foo again") // forbidden
-
----
-
-❌ **Starting more than one phase in the same function**:
-
-    func (r *Reconciler) ensureStuff(ctx context.Context) (outcome flow.Outcome) {
-        ctx, _ = flow.BeginPhase(ctx, "ensureStuff")
-        defer flow.EndPhase(ctx, &outcome)
-
-        ctx, _ = flow.BeginPhase(ctx, "ensureMoreStuff") // forbidden
-        defer flow.EndPhase(ctx, &outcome)
-
-        return flow.Continue()
-    }
-
----
-
-❌ **Starting phases inside a loop**:
-
-    for i := range items {
-        ctx, _ = flow.BeginPhase(ctx, "ensureOne") // forbidden
-        defer flow.EndPhase(ctx, &outcome)
-    }
-
----
-
-❌ **Violating phase placement rules**:
-
-    func (r *Reconciler) ensureFoo(ctx context.Context) (outcome flow.Outcome) {
-        if ctx == nil { // forbidden: code before BeginPhase
-            return flow.Error(fmt.Errorf("nil ctx"))
-        }
-
-        ctx, _ = flow.BeginPhase(ctx, "ensureFoo")
-        log.Info("started") // forbidden: code between BeginPhase and defer
-
-        defer flow.EndPhase(ctx, &outcome)
-        return flow.Continue()
-    }
-
----
-
-❌ **Not deferring `EndPhase`**:
-
-    ctx, _ = flow.BeginPhase(ctx, "ensureFoo")
-    // forbidden: EndPhase is not deferred
-    return flow.Continue()
-
----
-
-❌ **Using a named return other than `outcome`**:
-
-    func ensureFoo(ctx context.Context) (res flow.Outcome) { // forbidden
-        ctx, _ = flow.BeginPhase(ctx, "ensureFoo")
-        defer flow.EndPhase(ctx, &res)
-        return flow.Continue()
-    }
-
----
-
-❌ **Passing a wrong pointer to `EndPhase`**:
-
-    tmp := outcome
-    defer flow.EndPhase(ctx, &tmp) // forbidden
-
----
-
-❌ **Bare `return` in phased functions**:
-
-    if outcome.ShouldReturn() {
-        return // forbidden
-    }
-
----
-
-❌ **Using the original context after `BeginPhase`**:
-
-    incoming := ctx
-    ctx, _ = flow.BeginPhase(ctx, "ensureFoo")
-
-    _ = r.ensureBar(incoming) // forbidden
-
----
-
-❌ **Using `log.FromContext(ctx)` inside phased functions**:
-
-    log.FromContext(ctx).Info("hello") // forbidden
-
----
-
-❌ **Mixing multiple loggers in one phased function**:
-
-    ctx, log := flow.BeginPhase(ctx, "ensureFoo")
-    other := ctrl.Log.WithName("ensureFoo")
-    other.Info("oops") // forbidden
-
----
-
-❌ **Mutating the derived phase context**:
-
-    ctx = context.WithValue(ctx, "x", 1) // forbidden
-
----
-
-❌ **Invalid or unstable phase names**:
-
-    flow.BeginPhase(ctx, "ensure foo")                 // forbidden
-    flow.BeginPhase(ctx, fmt.Sprintf("ensure-%s", id)) // forbidden
-
----
-
-❌ **Encoding metadata into the phase name**:
-
-    flow.BeginPhase(ctx, "ensureChild."+child.Name) // forbidden
-
----
-
-❌ **Using `Merge` when early-stop or ordering matters**:
-
-    outcome = flow.Merge(
-        stepA(ctx).OnErrorf(ctx, "A"),
-        stepB(ctx).OnErrorf(ctx, "B"),
-    ) // forbidden
-
----
-
-❌ **Best-effort loop without explicit justification**:
-
-    for i := range items {
-        _ = ensureOne(ctx, &items[i]).OnErrorf(ctx, "best-effort")
-        // forbidden: missing comment explaining why best-effort is acceptable
-    }

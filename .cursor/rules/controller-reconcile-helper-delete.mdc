@@ -134,28 +134,32 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
   - no status updates/patches.
 - If deletion requires preliminary changes (e.g., removing a finalizer), those changes **MUST** be performed by Reconcile methods via separate ensure/apply + patch steps **before** calling the delete helper.
 
+---
+
 ## Composition (MUST)
 
 - A DeleteReconcileHelper **MUST** perform exactly one API write (`Delete(...)`) for exactly one object.
 - Any prerequisite mutations (e.g., removing finalizers) **MUST** be composed in Reconcile methods (ensure/apply + patch) and **MUST NOT** be hidden inside the delete helper.
 - If multiple objects must be deleted (loops, groups, fan-out), that orchestration **MUST** live in Reconcile methods; delete helpers must remain single-object.
 
-## Flow phases and `flow.Outcome` (MUST)
+---
 
-- DeleteReconcileHelpers **MUST NOT** create a `reconcile/flow` phase — they should stay mechanical and short.
-- If a DeleteReconcileHelper returns `flow.Outcome`, it **SHOULD** use helpers from `internal/reconciliation/flow`:
+## Flow phases and **Outcome**
+
+- **DeleteReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** — they should stay mechanical and short.
+- If a **DeleteReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **SHOULD** use helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.
-  - Prefer encoding retry/requeue policy explicitly in the returned outcome.
+  - Prefer encoding retry/requeue policy explicitly in the returned **Outcome**.
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- A DeleteReconcileHelper SHOULD be mechanically thin: if the single `Delete(...)` call fails, return the error **without wrapping** (or treat NotFound per the chosen deterministic policy).
-  - If returning `flow.Outcome`, use `flow.Fail(err)` (or equivalent) with the original `err`.
-- A DeleteReconcileHelper MUST NOT enrich errors with additional context (including reconcile object identity such as `namespace/name`, UID, object key).
-  - Error enrichment (action + object identity + phase) is the calling Reconcile method’s responsibility.
+- A **DeleteReconcileHelper** **SHOULD** be mechanically thin: if the single `Delete(...)` call fails, return the error **without wrapping** (or treat NotFound per the chosen deterministic policy).
+  - If returning **Outcome** (in code: `flow.Outcome`), use `flow.Fail(err)` (or equivalent) with the original `err`.
+- A **DeleteReconcileHelper** **MUST NOT** enrich errors with additional context (including **object identity** such as `namespace/name`, UID, object key).
+  - Error enrichment (action + **object identity** + **phase**) is the calling **Reconcile method**’s responsibility.
 
 ---
 

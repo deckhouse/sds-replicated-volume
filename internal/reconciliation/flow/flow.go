@@ -43,47 +43,10 @@ type Outcome struct {
 	// It is not a semantic part of the reconcile result; it exists only to enforce the contract
 	// between helpers (RequireOptimisticLock must be used only after ReportChanged/ReportChangedIf).
 	changeReported bool
-}
 
-// OnErrorf enriches the Outcome error with local context, logs it, and then wraps it with phase metadata (if any).
-//
-// Behavior:
-//  1. If the Outcome has no error, OnErrorf is a no-op.
-//  2. It first wraps the existing error with local context (format, args...).
-//     - It then logs that local error via log.FromContext(ctx):
-//     - Error(..., "reconcile failed") if o.ShouldReturn() is true;
-//     - Info("reconcile step error; continuing", "error", err) otherwise.
-//  3. Finally, if ctx contains phase metadata (see BeginPhase), it wraps the error again so the phase
-//     context is the outermost layer in the returned error chain.
-//
-// Note: the phase wrapper is intentionally applied after logging to avoid duplicating phase context
-// both in the log entry and in the returned error chain.
-func (outcome Outcome) OnErrorf(ctx context.Context, format string, args ...any) Outcome {
-	if outcome.err == nil {
-		return outcome
-	}
-
-	// 1) Add local context.
-	outcome = outcome.Wrapf(format, args...)
-
-	// 2) Log the local error (without the phase wrapper).
-	l := log.FromContext(ctx)
-	if outcome.ShouldReturn() {
-		l.Error(outcome.err, "reconcile failed")
-	} else {
-		l.Info("reconcile step error; continuing", "error", outcome.err)
-	}
-
-	// 3) Add the phase wrapper as the outermost context.
-	if v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue); ok && v.name != "" {
-		if len(v.kv) == 0 {
-			outcome.err = Wrapf(outcome.err, "phase %s", v.name)
-		} else {
-			outcome.err = Wrapf(outcome.err, "phase %s [%s]", v.name, formatKV(v.kv))
-		}
-	}
-
-	return outcome
+	// errorLogged indicates whether the error carried by this Outcome has already been logged.
+	// It is used to avoid duplicate logs when the same error bubbles up through multiple phases.
+	errorLogged bool
 }
 
 // -----------------------------------------------------------------------------
@@ -136,11 +99,14 @@ func (outcome Outcome) OptimisticLockRequired() bool {
 // Error returns the error carried by the outcome, if any.
 func (outcome Outcome) Error() error { return outcome.err }
 
-// Wrapf returns a copy of Outcome with its error updated by formatted context.
+// ErrorLogged reports whether the error carried by this Outcome has already been logged.
+func (outcome Outcome) ErrorLogged() bool { return outcome.errorLogged }
+
+// Enrichf returns a copy of Outcome with its error updated by formatted context.
 //
-// If Outcome already carries an error, Wrapf wraps it (like Wrapf for errors).
-// If Outcome has no error, Wrapf is a no-op and keeps the error nil.
-func (outcome Outcome) Wrapf(format string, args ...any) Outcome {
+// If Outcome already carries an error, Enrichf wraps it (like Wrapf for errors).
+// If Outcome has no error, Enrichf is a no-op and keeps the error nil.
+func (outcome Outcome) Enrichf(format string, args ...any) Outcome {
 	if outcome.err == nil {
 		return outcome
 	}
@@ -280,21 +246,13 @@ func BeginPhase(ctx context.Context, phaseName string, kv ...string) (context.Co
 //   - ctx should come from BeginPhase (or otherwise carry phase metadata), otherwise EndPhase is a no-op.
 //
 // Notes:
-//   - EndPhase does not log the error itself; it logs only "hasError". Error details (when needed)
-//     should be logged at the point of creation via Outcome.OnErrorf.
+//   - EndPhase logs the error exactly once (when present and not already logged), and marks the Outcome
+//     as logged to avoid duplicates when the error bubbles up through multiple phases.
 //   - If a panic happens before the deferred EndPhase runs, EndPhase logs it as an error (including
-//     phase metadata, when available) and then re-panics to preserve upstream handling.
+//     panic details) and then re-panics to preserve upstream handling.
 func EndPhase(ctx context.Context, outcome *Outcome) {
 	if r := recover(); r != nil {
 		err := panicToError(r)
-		if v, ok := ctx.Value(phaseContextKey{}).(phaseContextValue); ok && v.name != "" {
-			if len(v.kv) == 0 {
-				err = Wrapf(err, "phase %s", v.name)
-			} else {
-				err = Wrapf(err, "phase %s [%s]", v.name, formatKV(v.kv))
-			}
-		}
-
 		log.FromContext(ctx).Error(err, "phase panic")
 		panic(r)
 	}
@@ -313,8 +271,6 @@ func EndPhase(ctx context.Context, outcome *Outcome) {
 
 	kind, requeueAfter := outcomeKind(outcome)
 
-	// NOTE: we intentionally do not log the error itself here and only log "hasError".
-	// If the error details are needed, they should be logged at the point of creation via Outcome.OnErrorf.
 	fields := []any{
 		"result", kind,
 		"changed", outcome.DidChange(),
@@ -328,6 +284,19 @@ func EndPhase(ctx context.Context, outcome *Outcome) {
 		fields = append(fields, "duration", time.Since(v.start))
 	}
 
+	// Emit exactly one log record per phase end.
+	//
+	// Behavior:
+	//   - no error: log "phase end" only in V(1)
+	//   - error present and not yet logged: log "phase end" once (Error for Fail*)
+	//   - error present but already logged upstream: log "phase end" only in V(1) to keep error details single-shot
+	if outcome.err != nil && !outcome.errorLogged {
+		// Any error implies a terminal decision (Fail*). If we ever get here with an unexpected kind,
+		// still log the error once (defensive).
+		l.Error(outcome.err, "phase end", fields...)
+		outcome.errorLogged = true
+		return
+	}
 	l.V(1).Info("phase end", fields...)
 }
 
@@ -338,7 +307,8 @@ func outcomeKind(outcome *Outcome) (kind string, requeueAfter time.Duration) {
 
 	if outcome.result == nil {
 		if outcome.err != nil {
-			return "continueErr", 0
+			// Invalid by contract: continue-with-error is forbidden, but keep it visible in logs.
+			return "invalid", 0
 		}
 		return "continue", 0
 	}
@@ -368,22 +338,6 @@ func panicToError(r any) error {
 
 // Continue indicates that the caller should keep executing the current reconciliation flow.
 func Continue() Outcome { return Outcome{} }
-
-// ContinueErr indicates that the caller should keep executing the current reconciliation flow,
-// while still returning an error value from the current sub-step (without setting Return).
-//
-// Typical use: bubble an error to a higher-level handler without selecting a stop/requeue decision.
-func ContinueErr(e error) Outcome {
-	if e == nil {
-		return Continue()
-	}
-	return Outcome{err: e}
-}
-
-// ContinueErrf is like ContinueErr, but wraps err using Wrapf(format, args...).
-func ContinueErrf(err error, format string, args ...any) Outcome {
-	return ContinueErr(Wrapf(err, format, args...))
-}
 
 // Done indicates that the caller should stop and return (do not requeue).
 func Done() Outcome { return Outcome{result: &ctrl.Result{}} }
@@ -418,11 +372,13 @@ func RequeueAfter(dur time.Duration) Outcome {
 //   - Change tracking is aggregated by taking the "strongest" state:
 //     if any input reports a change, the merged outcome reports a change too;
 //     if any input reports a change and requires an optimistic lock, the merged outcome requires it as well.
+//   - "error already logged" signal is aggregated conservatively:
+//     it is true only if all merged errors were already logged by their respective boundaries.
 //   - The decision is chosen by priority:
-//     1) Fail: if there are errors and at least one non-nil Return.
+//     1) Fail: if there are errors.
 //     2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter (the smallest wins).
 //     3) Done: if there are no errors, no RequeueAfter requests, and at least one non-nil Return.
-//     4) Continue: otherwise (Return is nil). If errors were present, Err may be non-nil.
+//     4) Continue: otherwise (Return is nil).
 func Merge(outcomes ...Outcome) Outcome {
 	if len(outcomes) == 0 {
 		return Outcome{}
@@ -433,6 +389,7 @@ func Merge(outcomes ...Outcome) Outcome {
 		shouldRequeueAfter bool
 		requeueAfter       time.Duration
 		errs               []error
+		allErrorsLogged    = true
 		maxChangeState     changeState
 		anyChangeReported  bool
 	)
@@ -440,6 +397,7 @@ func Merge(outcomes ...Outcome) Outcome {
 	for _, outcome := range outcomes {
 		if outcome.err != nil {
 			errs = append(errs, outcome.err)
+			allErrorsLogged = allErrorsLogged && outcome.errorLogged
 		}
 
 		anyChangeReported = anyChangeReported || outcome.changeReported
@@ -467,16 +425,17 @@ func Merge(outcomes ...Outcome) Outcome {
 
 	combinedErr := errors.Join(errs...)
 
-	// 1) Fail: if there are errors and at least one non-nil Return.
-	if combinedErr != nil && hasReconcileResult {
+	// 1) Fail: if there are errors.
+	if combinedErr != nil {
 		outcome := Fail(combinedErr)
 		outcome.changeState = maxChangeState
 		outcome.changeReported = anyChangeReported
+		outcome.errorLogged = allErrorsLogged
 		return outcome
 	}
 
 	// 2) RequeueAfter: if there are no errors and at least one Outcome requests RequeueAfter.
-	if combinedErr == nil && shouldRequeueAfter {
+	if shouldRequeueAfter {
 		outcome := RequeueAfter(requeueAfter)
 		outcome.changeState = maxChangeState
 		outcome.changeReported = anyChangeReported
@@ -484,20 +443,14 @@ func Merge(outcomes ...Outcome) Outcome {
 	}
 
 	// 3) Done: if there are no errors, no RequeueAfter requests, and at least one non-nil Return.
-	if combinedErr == nil && hasReconcileResult {
+	if hasReconcileResult {
 		outcome := Done()
 		outcome.changeState = maxChangeState
 		outcome.changeReported = anyChangeReported
 		return outcome
 	}
 
-	// 4) Continue: otherwise. If errors were present, Err may be non-nil.
-	if combinedErr != nil {
-		outcome := ContinueErr(combinedErr)
-		outcome.changeState = maxChangeState
-		outcome.changeReported = anyChangeReported
-		return outcome
-	}
+	// 4) Continue: otherwise.
 	outcome := Continue()
 	outcome.changeState = maxChangeState
 	outcome.changeReported = anyChangeReported

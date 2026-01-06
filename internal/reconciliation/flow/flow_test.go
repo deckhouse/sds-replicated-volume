@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
-	ctrl "sigs.k8s.io/controller-runtime"
+	"github.com/go-logr/zapr"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/deckhouse/sds-replicated-volume/internal/reconciliation/flow"
 )
@@ -110,9 +114,9 @@ func TestMerge_RequeueAfterChoosesSmallest(t *testing.T) {
 	}
 }
 
-func TestMerge_ContinueErrAndDoneBecomesFail(t *testing.T) {
+func TestMerge_FailAndDoneBecomesFail(t *testing.T) {
 	e := errors.New("e")
-	outcome := flow.Merge(flow.ContinueErr(e), flow.Done())
+	outcome := flow.Merge(flow.Fail(e), flow.Done())
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -126,20 +130,14 @@ func TestMerge_ContinueErrAndDoneBecomesFail(t *testing.T) {
 	}
 }
 
-func TestMerge_ContinueErrOnlyStaysContinueErr(t *testing.T) {
+func TestMerge_FailOnlyStaysFail(t *testing.T) {
 	e := errors.New("e")
-	outcome := flow.Merge(flow.ContinueErr(e))
-	if outcome.ShouldReturn() {
-		t.Fatalf("expected ShouldReturn() == false")
+	outcome := flow.Merge(flow.Fail(e))
+	if !outcome.ShouldReturn() {
+		t.Fatalf("expected ShouldReturn() == true")
 	}
 
-	res, err := outcome.ToCtrl()
-	if err == nil {
-		t.Fatalf("expected err to be non-nil")
-	}
-	if res != (ctrl.Result{}) {
-		t.Fatalf("expected empty result, got %+v", res)
-	}
+	_, err := outcome.ToCtrl()
 	if !errors.Is(err, e) {
 		t.Fatalf("expected errors.Is(err, e) == true; err=%v", err)
 	}
@@ -178,22 +176,22 @@ func TestOutcome_Error(t *testing.T) {
 	}
 
 	e := errors.New("e")
-	if got := flow.ContinueErr(e).Error(); got == nil || !errors.Is(got, e) {
+	if got := flow.Fail(e).Error(); got == nil || !errors.Is(got, e) {
 		t.Fatalf("expected Error() to contain %v, got %v", e, got)
 	}
 }
 
-func TestOutcome_Wrapf_IsNoOpWhenNil(t *testing.T) {
-	outcome := flow.Continue().Wrapf("hello %s %d", "a", 1)
+func TestOutcome_Enrichf_IsNoOpWhenNil(t *testing.T) {
+	outcome := flow.Continue().Enrichf("hello %s %d", "a", 1)
 	if outcome.Error() != nil {
 		t.Fatalf("expected Error() to stay nil, got %v", outcome.Error())
 	}
 }
 
-func TestOutcome_Wrapf_WrapsExistingError(t *testing.T) {
+func TestOutcome_Enrichf_WrapsExistingError(t *testing.T) {
 	base := errors.New("base")
 
-	outcome := flow.ContinueErr(base).Wrapf("ctx %s", "x")
+	outcome := flow.Fail(base).Enrichf("ctx %s", "x")
 	if outcome.Error() == nil {
 		t.Fatalf("expected Error() to be non-nil")
 	}
@@ -205,8 +203,8 @@ func TestOutcome_Wrapf_WrapsExistingError(t *testing.T) {
 	}
 }
 
-func TestOutcome_Wrapf_DoesNotAlterReturnDecision(t *testing.T) {
-	outcome := flow.RequeueAfter(1 * time.Second).Wrapf("x")
+func TestOutcome_Enrichf_DoesNotAlterReturnDecision(t *testing.T) {
+	outcome := flow.RequeueAfter(1 * time.Second).Enrichf("x")
 	if !outcome.ShouldReturn() {
 		t.Fatalf("expected ShouldReturn() == true")
 	}
@@ -313,13 +311,87 @@ func TestBeginPhase_NestedKVInheritsAndOverrides(t *testing.T) {
 	ctx, _ := flow.BeginPhase(context.Background(), "parent", "a", "1", "b", "2")
 	ctx, _ = flow.BeginPhase(ctx, "child", "b", "3", "c", "4")
 
-	outcome := flow.ContinueErr(errors.New("e")).OnErrorf(ctx, "step")
+	outcome := flow.Failf(errors.New("e"), "step")
+	flow.EndPhase(ctx, &outcome)
+
 	if outcome.Error() == nil {
 		t.Fatalf("expected error to be non-nil")
 	}
 
 	s := outcome.Error().Error()
-	if !strings.Contains(s, "phase child [b=3 c=4]") {
-		t.Fatalf("expected merged phase kv in error; got %q", s)
+	if !strings.Contains(s, "step") {
+		t.Fatalf("expected error to contain local context; got %q", s)
+	}
+}
+
+func TestEndPhase_LogsFailAsError_OnceAndMarksLogged(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	ctx, _ = flow.BeginPhase(ctx, "p")
+
+	outcome := flow.Failf(errors.New("e"), "step")
+	flow.EndPhase(ctx, &outcome)
+
+	if !outcome.ErrorLogged() {
+		t.Fatalf("expected ErrorLogged() == true")
+	}
+
+	// Should log exactly one Error-level "phase end" record (Fail*), with summary fields.
+	var matches []observer.LoggedEntry
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			matches = append(matches, e)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 error 'phase end' log entry, got %d; entries=%v", len(matches), observed.All())
+	}
+
+	m := matches[0].ContextMap()
+	if got := m["result"]; got != "fail" {
+		t.Fatalf("expected result=fail, got %v", got)
+	}
+	if got := m["hasError"]; got != true {
+		t.Fatalf("expected hasError=true, got %v", got)
+	}
+	if _, ok := m["duration"]; !ok {
+		t.Fatalf("expected duration to be present; got %v", m)
+	}
+}
+
+func TestEndPhase_NestedPhases_DoNotDoubleLogSameError(t *testing.T) {
+	core, observed := observer.New(zapcore.DebugLevel)
+	zl := zap.New(core)
+	l := zapr.NewLogger(zl)
+
+	ctx := log.IntoContext(context.Background(), l)
+	parentCtx, _ := flow.BeginPhase(ctx, "parent")
+	childCtx, _ := flow.BeginPhase(parentCtx, "child")
+
+	outcome := flow.Failf(errors.New("e"), "step")
+	flow.EndPhase(childCtx, &outcome)
+	flow.EndPhase(parentCtx, &outcome)
+
+	// Only the first EndPhase should emit an Error-level "phase end" with error details.
+	count := 0
+	for _, e := range observed.All() {
+		if e.Message == "phase end" && e.Level == zapcore.ErrorLevel {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 error 'phase end' log entry, got %d; entries=%v", count, observed.All())
+	}
+
+	// Error chain should not be wrapped with phase context.
+	if outcome.Error() == nil {
+		t.Fatalf("expected error to be non-nil")
+	}
+	s := outcome.Error().Error()
+	if strings.Contains(s, "phase child") || strings.Contains(s, "phase parent") {
+		t.Fatalf("expected error to not contain phase wrappers; got %q", s)
 	}
 }

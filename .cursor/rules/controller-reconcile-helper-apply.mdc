@@ -157,21 +157,21 @@ func applyDesiredFoo(
 
 ---
 
-## Flow phases and `flow.Outcome` (MUST)
+## Flow phases and **Outcome**
 
-- ApplyReconcileHelpers **MUST NOT** create a `reconcile/flow` phase (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
-- ApplyReconcileHelpers **MUST NOT** return `flow.Outcome` (they are “in-memory write” steps).
-  - If a failure is possible, return `error` and let the caller convert it into `flow.Fail(err)` (or equivalent flow handling).
+- **ApplyReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase** (they do not accept `ctx context.Context`; see `controller-reconcile-helper.mdc`).
+- **ApplyReconcileHelpers** **MUST NOT** return **Outcome** (in code: `flow.Outcome`) (they are “in-memory write” steps).
+  - If a failure is possible, return `error` and let the calling function convert it into `flow.Fail(err)` (or equivalent **flow** handling).
 
 ---
 
-## Error handling (SHOULD)
+## Error handling
 
 - See the common error handling rules in `controller-reconcile-helper.mdc`.
-- ApplyReconcileHelpers (`apply*`) SHOULD be non-failing.
-  - If an ApplyReconcileHelper returns `error`, it MUST be only for **local validation** failures (e.g., nil pointers, impossible desired shape).
-  - It MUST NOT wrap/enrich errors (external errors should not exist in `apply*`), and MUST NOT include reconcile object identity (e.g. `namespace/name`, UID, object key).
-  - Any action/object identity context belongs to the calling Reconcile method.
+- ApplyReconcileHelpers (`apply*`) **SHOULD** be non-failing.
+  - If an **ApplyReconcileHelper** returns `error`, it **MUST** be only for **local validation** failures (e.g., nil pointers, impossible desired shape).
+  - It **MUST NOT** wrap/enrich errors (external errors should not exist in `apply*`), and **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key).
+  - Any action/**object identity** context belongs to the calling function.
 
 ---
 
