@@ -9,7 +9,7 @@ alwaysApply: true
 
 This document defines naming and contracts for **ReconcileHelper** functions/methods.
 
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 
@@ -18,13 +18,13 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
-- All ReconcileHelpers follow strict **naming-by-category** (`compute*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*`) to make intent and allowed behavior reviewable.
+- All **ReconcileHelpers** follow strict **naming-by-category** (`compute*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*`) to make intent and allowed behavior reviewable.
 - Every ReconcileHelper has explicit dependencies: if it takes `ctx`, it is first; if it operates on a Kubernetes object, `obj` is the first arg after `ctx`; all other inputs come **after `obj`**.
 - ReconcileHelpers are **deterministic**: never rely on map iteration order; sort when order matters; avoid “equivalent but different” outputs/states that cause patch churn.
 - ReconcileHelpers treat inputs as **read-only** except for the explicitly allowed mutation target(s); never mutate through map/slice aliasing — **clone before editing**.
-- I/O is **explicitly bounded by category**:
+- **I/O** is **explicitly bounded by category**:
   - **Compute / IsUpToDate / Apply / Ensure**: strictly **non-I/O**.
-  - **Create / Delete / Patch**: allowed I/O, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
+  - **Create / Delete / Patch**: allowed **I/O**, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
 
 ---
 
@@ -51,23 +51,23 @@ These categories are naming categories/patterns (see also `controller-file-struc
 
 ## Scope
 
-This document defines **common** conventions for all ReconcileHelper categories.
+This document defines **common** conventions for all **ReconcileHelper categories**.
 
-Category-specific conventions are defined in dedicated documents referenced in **“ReconcileHelper categories (MUST)”** above.
+Category-specific conventions are defined in dedicated documents referenced in **“ReconcileHelper categories”** above.
 
 ---
 
 ## Any ReconcileHelper
 
-### Signatures (MUST)
+### Signatures
 
-- If a ReconcileHelper creates a reconcile/flow phase or writes logs, it **MUST** accept `ctx context.Context`.
-- A function operating on a Kubernetes object **MUST** take a pointer to the root object as:
+- If a **ReconcileHelper** creates a **phase** or writes logs, it **MUST** accept `ctx context.Context`.
+- A function operating on an **object** **MUST** take a pointer to the root object as:
   - the **first argument** if the function does not accept `ctx`;
   - the **first argument after `ctx`** if the function accepts `ctx`.
   (root object = the full API object (`*<Kind>`), not `Spec`/`Status` or other sub-structs)
 - Additional inputs (computed flags, outputs of previous compute steps) **MUST** appear **after `obj`** to keep dependencies explicit.
-- If a ReconcileHelper returns `flow.Outcome`, it **MUST** be the **first return value**.
+- If a **ReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **MUST** be the **first return value**.
   - It **SHOULD** be the only return value for convenience, unless additional return values are clearly justified.
 
 ### Flow **phases** and **Outcome**
@@ -79,23 +79,23 @@ Category-specific conventions are defined in dedicated documents referenced in *
   - **All other Helper categories** (`apply*`, `is*UpToDate*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
 - If a helper uses **phases**, it **MUST** follow `internal/reconciliation/flow` rules (one **phase** per function; **phase** on first line; no **phases** inside loops).
 
-### Visibility and receivers (SHOULD)
+### Visibility and receivers
 
-- ReconcileHelpers **SHOULD** be unexported (private) by default. Export a ReconcileHelper only with an explicit, documented reason.
-- ReconcileHelpers **SHOULD** be plain functions when they do not need any data from `Reconciler`.
-  - If a ReconcileHelper needs data from `Reconciler`, it **SHOULD** be a method on `Reconciler`.
+ - **ReconcileHelpers** **SHOULD** be unexported (private) by default. Export a **ReconcileHelper** only with an explicit, documented reason.
+ - **ReconcileHelpers** **SHOULD** be plain functions when they do not need any data from `Reconciler`.
+  - If a **ReconcileHelper** needs data from `Reconciler`, it **SHOULD** be a method on `Reconciler`.
 
-### Naming (MUST)
+### Naming
 
-- If a ReconcileHelper name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`), `<Kind>` **MAY** be either:
+- If a **ReconcileHelper** name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`), `<Kind>` **MAY** be either:
   - a short, codebase-established name (preferred in examples), or
   - the full kind name.
 - If a short kind name is used, it **MUST** be an established name in this codebase (do not invent new abbreviations ad-hoc).
   - Examples: `createSKN(...)` (or `createSomeKindName(...)`), `patchSKN(...)` (or `patchSomeKindName(...)`).
 
-### Determinism contract (MUST)
+### Determinism contract
 
-Any ReconcileHelper **MUST** be deterministic given its explicit inputs and allowed mutations / I/O boundaries.
+Any **ReconcileHelper** **MUST** be **deterministic** given its explicit inputs and allowed **mutation target**s / **I/O** boundaries.
 
 In particular:
 - Never rely on map iteration order: if output order matters, **MUST** sort it.
@@ -104,13 +104,13 @@ In particular:
 
 > Practical reason: nondeterminism creates patch churn and flaky tests.
 
-### Read-only contract (MUST)
+### Read-only contract
 
-Any ReconcileHelper **MUST** treat all inputs except explicitly allowed mutation targets as read-only.
+Any **ReconcileHelper** **MUST** treat all **read-only inputs** except explicitly allowed **mutation target**s as read-only.
 
 In particular:
-- It **MUST NOT** mutate inputs other than the allowed mutation target(s).
-- It **MUST NOT** perform in-place modifications through aliases to read-only inputs.
+- It **MUST NOT** mutate inputs other than the allowed **mutation target**(s).
+- It **MUST NOT** perform in-place modifications through aliases to **read-only inputs**.
 
 **Important Go aliasing rule (MUST):**
 - `map` / `[]T` values are reference-like. If you copy them from a read-only input and then mutate them, you may be mutating the original input through aliasing.
@@ -193,14 +193,14 @@ This section is **not** about what helpers are *allowed* to do (see the category
 
 #### Splitting / nesting guidelines
 
-- **SHOULD NOT** split trivial logic into ComputeReconcileHelper (`compute*`) + EnsureReconcileHelper (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
-- **MAY** create an EnsureReconcileHelper (`ensure*`) that is only an orchestrator for ComputeReconcileHelper (`compute*`) → IsUpToDateReconcileHelper (`is*UpToDate*`) → ApplyReconcileHelper (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a Reconcile method.
-  - In general, the purpose of EnsureReconcileHelper (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single patch domain), not to wrap a desired-driven pipeline.
-- If an EnsureReconcileHelper (`ensure*`) is small and readable, keep it monolithic:
-  - **SHOULD NOT** extract a separate ComputeReconcileHelper (`compute*`) just to compute a couple of booleans or a tiny struct.
-- If an EnsureReconcileHelper (`ensure*`) becomes complex:
-  - **MAY** split it into multiple sub-EnsureReconcileHelper (`ensure*`) helpers (same domain; explicit dependencies after `obj`).
-  - **MAY** extract sub-ComputeReconcileHelper (`compute*`) helpers for non-trivial derived values used by ensure, keeping them pure and deterministic.
-- If a ComputeReconcileHelper (`compute*`) becomes complex:
-  - **MAY** split it into smaller ComputeReconcileHelper (`compute*`) helpers (pure composition) with explicit data flow via parameters/return values.
+- **SHOULD NOT** split trivial logic into **ComputeReconcileHelper** (`compute*`) + **EnsureReconcileHelper** (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
+- **MAY** create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsUpToDateReconcileHelper** (`is*UpToDate*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
+  - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **desired state** driven pipeline.
+- If an **EnsureReconcileHelper** (`ensure*`) is small and readable, keep it monolithic:
+  - **SHOULD NOT** extract a separate **ComputeReconcileHelper** (`compute*`) just to compute a couple of booleans or a tiny struct.
+- If an **EnsureReconcileHelper** (`ensure*`) becomes complex:
+  - **MAY** split it into multiple sub-**EnsureReconcileHelper** (`ensure*`) helpers (same domain; explicit dependencies after `obj`).
+  - **MAY** extract sub-**ComputeReconcileHelper** (`compute*`) helpers for non-trivial derived values used by **EnsureReconcileHelper**, keeping them pure and **deterministic**.
+- If a **ComputeReconcileHelper** (`compute*`) becomes complex:
+  - **MAY** split it into smaller **ComputeReconcileHelper** (`compute*`) helpers (pure composition) with explicit data flow via parameters/return values.
   - **SHOULD** keep each compute focused on a single artifact (desired labels, desired spec fragment, desired status fragment, etc.), rather than a “compute everything” blob.

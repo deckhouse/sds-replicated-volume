@@ -20,10 +20,11 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **`apply*`** helpers are **pure, deterministic, strictly non-I/O** “in-memory write” steps.
-- They take a **previously computed desired value** and **mutate `obj` in place** for **exactly one patch domain** (**main** or **status**).
-- They **MUST NOT** talk to the **Kubernetes API**, use **controller-runtime client**, call **`DeepCopy`**, or execute patches / make patch ordering or patch type decisions.
-- They **MUST** treat **`desired`** (and any other inputs) as **read-only** and **MUST NOT** mutate it (including via **aliasing**); when copying maps/slices from **`desired`** into `obj`, **clone** to avoid sharing.
-- If both **main** and **status** need changes, use **two** apply helpers (one per domain) and compose them in **Reconcile methods**.
+- **ApplyReconcileHelpers** (`apply*`) are **pure**, **deterministic**, strictly **non-I/O** “in-memory write” steps.
+- They take a previously computed **desired value** and mutate `obj` in place for **exactly one** **patch domain** (**main patch domain** or **status patch domain**).
+- They **MUST NOT** perform **Kubernetes API I/O**, use the controller-runtime client, call **DeepCopy**, or execute patches / make **patch ordering** or **patch type decision** decisions.
+- They **MUST** treat `desired` (and any other inputs) as **read-only inputs** and **MUST NOT** mutate it (including via **Aliasing**); when copying maps/slices from `desired` into `obj`, **Clone** to avoid sharing.
+- If both **main patch domain** and **status patch domain** need changes, use two **ApplyReconcileHelpers** (one per **patch domain**) and compose them in **Reconcile methods**.
 
 ---
 
@@ -42,14 +43,14 @@ Typical apply helpers perform the “mechanical write” step right after **Reco
 ## Naming
 
 - An **ApplyReconcileHelper** name **MUST** start with `apply` / `Apply`.
-- ApplyReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the applied artifact name refers to a field/group that exists in both `.spec` and `.status` of the same object):
+- **ApplyReconcileHelpers** **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the applied artifact name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
   - `applyMain*` / `ApplyMain*` (**main patch domain**)
   - `applyStatus*` / `ApplyStatus*` (**status patch domain**)
-- ApplyReconcileHelpers **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
-- For main-domain ApplyReconcileHelpers, the name **MUST** also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
-- ApplyReconcileHelper names **MUST NOT** sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
-- ApplyReconcileHelper names **MUST NOT** include `Desired` / `Actual` unless the applied “thing” name includes `Desired` / `Actual`.
-- ApplyReconcileHelper names **SHOULD** name the “thing” being applied:
+- **ApplyReconcileHelpers** **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
+- For main-domain **ApplyReconcileHelpers**, the name **MUST** also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
+- **ApplyReconcileHelpers** names **MUST NOT** sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
+- **ApplyReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` unless the applied “thing” name includes `Desired` / `Actual`.
+- **ApplyReconcileHelpers** names **SHOULD** name the “thing” being applied:
   - `applyLabels(obj, desiredLabels)`
   - `applySpecFoo(obj, desiredFoo)`
   - `applyStatus(obj, desired)`
@@ -57,11 +58,12 @@ Typical apply helpers perform the “mechanical write” step right after **Reco
 
 ---
 
-## Preferred signatures (SHOULD)
+## Preferred signatures
 
-Choose the simplest signature that preserves explicit dependencies and purity.
+- For **ApplyReconcileHelpers** (`apply*`), the simplest signature from the variants below that preserves explicit dependencies and purity **SHOULD** be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they **MAY** also be used.
 
-### Simple apply (SHOULD)
+### Simple apply
 ```go
 func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo)
 ```
@@ -73,15 +75,15 @@ func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) error
 
 ---
 
-## Receivers (MUST)
+## Receivers
 
-- ApplyReconcileHelpers **MUST** be plain functions (no `Reconciler` receiver).
+- **ApplyReconcileHelpers** **MUST** be plain functions (no `Reconciler` receiver).
 
 ---
 
-## I/O boundaries (MUST)
+## I/O boundaries
 
-ApplyReconcileHelpers **MUST NOT** do any of the following:
+**ApplyReconcileHelpers** **MUST NOT** do any of the following:
 
 - controller-runtime client usage (`client.Client`, `r.client`, etc.);
 - Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
@@ -89,20 +91,20 @@ ApplyReconcileHelpers **MUST NOT** do any of the following:
 - executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
 - creating/updating Kubernetes objects in the API server in any form.
 
-ApplyReconcileHelpers **MUST NOT** do “hidden I/O” either:
+**ApplyReconcileHelpers** **MUST NOT** do “hidden I/O” either:
 
 - `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads) (except setting `metav1.Condition.LastTransitionTime`, typically indirectly via `obju.SetStatusCondition`);
 - random number generation (`rand.*`);
 - environment reads (`os.Getenv`, reading files);
 - network calls of any kind.
 
-> Rationale: apply helpers should be deterministic “in-memory write” steps; all API interactions and patch execution belong to Reconcile methods.
+> Rationale: apply helpers should be **deterministic** “in-memory write” steps; all API interactions and patch execution belong to **Reconcile methods**.
 
 ---
 
-## Determinism contract (MUST)
+## Determinism contract
 
-An ApplyReconcileHelper **MUST** be deterministic given its explicit inputs and intended mutation domain.
+An **ApplyReconcileHelper** **MUST** be **deterministic** given its explicit inputs and intended mutation domain.
 
 See the common determinism contract in `controller-reconcile-helper.mdc`.
 
@@ -110,25 +112,25 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 
 ---
 
-## Read-only contract (MUST)
+## Read-only contract
 
 `apply*` / `Apply*` **MUST** treat all inputs except the target mutation on `obj` as read-only:
 
 - it **MUST NOT** mutate inputs other than `obj` (e.g., `desired`, templates, computed structs);
-- it **MUST** mutate only the intended patch domain on `obj` (main resource **or** status subresource), treating the other domain as read-only;
+- it **MUST** mutate only the intended **patch domain** on `obj` (**main resource** **or** **status subresource**), treating the other domain as read-only;
 - it **MUST NOT** perform in-place modifications through aliases to non-`obj` data.
 
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
 ---
 
-## Patch-domain separation (MUST)
+## Patch-domain separation
 
 - `apply*` / `Apply*` **MUST** mutate `obj` in-place for **exactly one** patch domain:
-  - main resource (**metadata + spec + non-status fields**), **or**
-  - status subresource (`.status`).
-- An ApplyReconcileHelper **MUST NOT** mutate both domains in the same function.
-- If you need to apply desired values to both domains, you **MUST** implement **two** apply helpers and call them separately from Reconcile methods.
+  - **main resource** (**metadata + spec + non-status fields**), **or**
+  - **status subresource** (`.status`).
+- An **ApplyReconcileHelper** **MUST NOT** mutate both domains in the same function.
+- If you need to apply **desired values** to both domains, you **MUST** implement **two** apply helpers and call them separately from **Reconcile methods**.
 
 ✅ Separate apply helpers (GOOD)
 ```go
@@ -149,11 +151,11 @@ func applyDesiredFoo(
 
 ---
 
-## Composition (MUST)
+## Composition
 
-- An ApplyReconcileHelper **MAY** apply multiple related fields in one pass **within a single patch domain**.
-- If applied fields represent one conceptual “desired state”, they **SHOULD** be passed as one `desired` value (small struct) rather than a long parameter list.
-- If applied changes are distinguishable and used independently, they **SHOULD** be split into separate `apply*` helpers and composed in Reconcile methods (not by making apply helpers depend on each other).
+- An **ApplyReconcileHelper** **MAY** apply multiple related fields in one pass **within a single** **patch domain**.
+- If applied fields represent one conceptual **desired state**, they **SHOULD** be passed as one `desired` value (small struct) rather than a long parameter list.
+- If applied changes are distinguishable and used independently, they **SHOULD** be split into separate `apply*` helpers and composed in **Reconcile methods** (not by making apply helpers depend on each other).
 
 ---
 
@@ -175,7 +177,7 @@ func applyDesiredFoo(
 
 ---
 
-## Common anti-patterns (MUST NOT)
+## Common anti-patterns (**MUST NOT**)
 
 ❌ Doing any Kubernetes API I/O (client usage / API calls in apply):
 ```go

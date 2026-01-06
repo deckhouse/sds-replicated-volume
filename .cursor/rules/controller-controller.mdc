@@ -6,45 +6,45 @@ alwaysApply: true
 ---
 
 - TL;DR:
-  - `controller.go` = wiring-only entrypoint.
-  - Entrypoint = `BuildController(mgr manager.Manager) error`.
-  - Builder chain = single fluent chain, ends with `.Complete(rec)`.
-  - Predicates = mechanical change detection (no I/O, no domain decisions).
-  - All domain/reconciliation logic = `reconciler.go`.
+  - **`controller.go`** = **Wiring-only** **Entrypoint**.
+  - **Entrypoint** = `BuildController(mgr manager.Manager) error`.
+  - **builder chain** = single fluent chain, ends with `.Complete(rec)`.
+  - **predicates** = **mechanical** change detection (no **I/O**, no **domain/business** decisions).
+  - All **Reconciliation business logic** = **`reconciler.go`**.
 
-- `controller.go` purpose (MUST):
-  - `controller.go` is the wiring-only entrypoint of a controller package.
-  - It owns controller-runtime builder configuration, sources/runnables registration and reconciler construction.
-  - It MUST NOT contain reconciliation business logic (that belongs to `reconciler.go`).
+- **`controller.go`** purpose (**MUST**):
+  - **`controller.go`** is the **Wiring-only** **Entrypoint** of a **controller package**.
+  - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
+  - It **MUST NOT** contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
 
-- ALLOW (in `controller.go`):
+- ALLOW (in **`controller.go`**):
   - controller-runtime builder wiring:
     - `.ControllerManagedBy(mgr).Named(...)`
     - `.For(...)`, `.Owns(...)`, `.Watches(...)`
     - `.WithOptions(...)`, `.Complete(...)`
-  - predicates/filters (lightweight, mechanical change detection).
-  - manager dependencies (wiring-only):
+  - **predicates**/**filters** (lightweight, **mechanical** change detection).
+  - **Manager-owned dependencies** (wiring-only) from the **manager**:
     - `mgr.GetClient()`, `mgr.GetScheme()`, `mgr.GetCache()`, `mgr.GetEventRecorderFor(...)`
-  - registering runnables/sources on manager (wiring-only), e.g. `mgr.Add(...)`, indexes, sources.
+  - registering **runnables**/**sources** on the **manager** (wiring-only), e.g. `mgr.Add(...)`, indexes, **sources**.
 
-- DENY (in `controller.go`):
+- DENY (in **`controller.go`**):
   - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
   - reading/modifying `.Spec` / `.Status`:
-    - allowed only inside predicates and only for **field comparisons** (no multi-step logic; no mutations).
+    - allowed only inside **predicates** and only for **field comparisons** (no multi-step logic; no mutations).
     - direct `.Status.Conditions` access is forbidden in predicates — use `obju` only.
   - any multi-step decisions (state machines, placement, scheduling, condition computation).
-  - any Kubernetes API I/O beyond manager wiring (`Get/List/Create/Update/Patch/Delete`).
+  - any **Kubernetes API I/O** beyond **manager** wiring (`Get/List/Create/Update/Patch/Delete`).
 
-- `controller.go` layout (MUST):
-  - `const <ControllerName> = "<name>"` (stable controller name).
-  - `BuildController(mgr manager.Manager) error` as the package entrypoint.
-  - Predicates/filters MUST be present to reduce reconcile noise.
+- **`controller.go`** layout (**MUST**):
+  - `const <ControllerName> = "<name>"` (stable **controller name**).
+  - **Entrypoint**: `BuildController(mgr manager.Manager) error`.
+  - **predicates**/**filters** **MUST** be present to reduce **reconcile loop** noise.
 
-- What belongs in `BuildController` (MUST):
-  - Take dependencies from manager:
+- What belongs in `BuildController` (**MUST**):
+  - Take **Manager-owned dependencies** from the **manager**:
     - `cl := mgr.GetClient()`
     - other manager-owned deps when needed (scheme, cache, recorder, etc.).
-  - Register required runnables/sources on manager (if any):
+  - Register required **runnables**/**sources** on the **manager** (if any):
     - example: idpool/cache initializers added via `mgr.Add(...)` (often after leader election).
   - Construct the reconciler (composition root for the package):
     - `rec := NewReconciler(cl, <otherDeps...>)`
@@ -99,26 +99,26 @@ alwaysApply: true
   }
   ```
 
-- Predicates/filters in `controller.go` (MUST):
-  - Keep them lightweight and mechanical (no I/O, no multi-step domain reasoning).
+- **predicates**/**filters** in **`controller.go`** (**MUST**):
+  - Keep them lightweight and **mechanical** (no **I/O**, no multi-step **domain/business** reasoning).
   - Prefer typed events (`event.TypedUpdateEvent[client.Object]`).
-  - Predicates MUST NOT contain business logic — only detect changes in fields.
+  - **predicates** **MUST NOT** contain **domain/business** logic — only detect changes in fields.
     - Example of business logic (forbidden in predicates): “check presence/validity of required labels”.
-  - If reconciliation uses `.status.conditions` (or any condition-driven logic), predicate MUST react to `metadata.generation` changes.
+  - If **Reconciliation business logic** uses `.status.conditions` (or any condition-driven logic), **predicate** **MUST** react to **`metadata.generation`** (**Generation**) changes.
     - Note: if you only need to react to **spec changes**, filtering by `generation` is usually sufficient (for CRDs, `generation` is  bumped on spec changes).
     - Important: **metadata-only changes** (labels/annotations/finalizers/ownerRefs) may **NOT** bump `generation`. If your controller must react to them, compare them explicitly (e.g. `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`).
-  - Do not generate noop handlers:
-    - if a predicate handler (`CreateFunc`/`UpdateFunc`/`DeleteFunc`/`GenericFunc`) would only `return true`, omit it.
-    - do NOT block `GenericFunc` unless there is a very explicit reason (prefer allowing reconcile).
-  - Performance (MUST):
-    - predicates are hot-path: minimize allocations and CPU (no DeepCopy, no reflection, avoid heavy comparisons).
-    - still ensure they filter enough so that reconcile runs only when needed (otherwise reconcile becomes the hotspot, which is worse).
+  - **MUST NOT** generate noop handlers:
+    - if a **predicate** handler (`CreateFunc`/`UpdateFunc`/`DeleteFunc`/`GenericFunc`) would only `return true`, omit it.
+    - **MUST NOT** block `GenericFunc` unless there is a very explicit reason (prefer allowing reconcile).
+  - Performance (**MUST**):
+    - **predicates** are hot-path: minimize allocations and CPU (no **DeepCopy**, no reflection, avoid heavy comparisons).
+    - still ensure they filter enough so that **reconcile loop** runs only when needed (otherwise the **reconcile loop** becomes the hotspot).
   - Typical use-cases:
     - reconcile only when a single field/label you own is out of sync and needs a quick correction;
     - reconcile on `generation` changes when status/conditions logic depends on spec changes.
 
 
-  - Object access in predicates (MUST):
+  - **object** access in **predicates** (**MUST**):
     - Priority order:
       - `client.Object` getters
       - `obju` for conditions
@@ -164,7 +164,7 @@ alwaysApply: true
       )
       ```
 
-    - If you need to compare conditions in predicates (MUST):
+    - If you need to compare **conditions** in **predicates** (**MUST**):
       - Use `objutilv1` imported as `obju` (do NOT open-code `.status.conditions` comparison).
       - Prefer:
         - `obju.AreConditionsSemanticallyEqual(...)` when you need the whole condition meaning (Type/Status/Reason/Message/ObservedGeneration).
@@ -262,7 +262,7 @@ alwaysApply: true
       )
       ```
 
-- Type assertions/casts in predicates (MUST):
+- Type assertions/casts in **predicates** (**MUST**):
   - If you do cast and can't safely classify the event (type-assert fails / nil), be conservative: return `true` (allow reconcile).
 
     Example: safe cast in predicates (inline style)
@@ -311,7 +311,7 @@ alwaysApply: true
   - If deviating from 10, document the reason near the options.
 
 - Watching child resources (MUST):
-  - Watch child objects either:
+  - Watch **child resources** either:
     - by owner reference (when this controller is the owner/controller of the child objects), or
     - by an explicit field/index (when children may be created by others: another controller or a user).
   - If it is not obvious which model applies for a given child object:

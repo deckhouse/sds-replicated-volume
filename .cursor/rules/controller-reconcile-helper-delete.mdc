@@ -19,9 +19,9 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 Summary only; if anything differs, follow normative sections below.
 
-- `delete<Kind>` helpers are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API** write — `Delete(...)` — for exactly one object (or treat NotFound as “already absent”, depending on policy).
-- They **MUST NOT** do any other **Kubernetes API** calls (`Get/List/Create/Update/Patch`), **MUST NOT** call `DeepCopy`, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision**.
-- They **MUST NOT** mutate the object as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via **separate** ensure/apply + patch steps **before** calling delete.
+- **DeleteReconcileHelpers** (`delete<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Delete(...)` — for exactly one **object** (or treat NotFound as “already absent”, depending on policy).
+- They **MUST NOT** perform any other **Kubernetes API I/O** calls (`Get/List/Create/Update/Patch`), **MUST NOT** call **DeepCopy**, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision** decisions.
+- They **MUST NOT** mutate the **object** as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via a **separate** ensure/apply + patch step **before** calling delete.
 - Everything they control **MUST** be deterministic (no time/random/env-driven behavior; consistent NotFound handling).
 
 ---
@@ -41,19 +41,20 @@ Typical delete helpers encapsulate the mechanical delete call (including “alre
 ## Naming
 
 - A **DeleteReconcileHelper** name **MUST** start with `delete` / `Delete`.
-- DeleteReconcileHelpers for Kubernetes objects **MUST** use the form: `delete<Kind>` / `Delete<Kind>`. `<Kind>` **MUST** either correspond to the Kubernetes object kind being deleted OR be a short kind name that is already established in the codebase Examples:
+- **DeleteReconcileHelpers** for Kubernetes **objects** **MUST** use the form: `delete<Kind>` / `Delete<Kind>`. `<Kind>` **MUST** either correspond to the Kubernetes **object** kind being deleted or be a short kind name that is already established in the codebase. Examples:
   - `deleteCM(...)` (or `deleteConfigMap(...)`)
   - `deleteSVC(...)` (or `deleteService(...)`)
   - `deleteSKN(...)` (or `deleteSomeKindName(...)`)
-- DeleteReconcileHelper names **MUST NOT** imply orchestration or multi-step cleanup (`reconcileDelete`, `deleteAll`, `deleteAndWait`) — ordering and lifecycle policy belong to **Reconcile methods**.
+- **DeleteReconcileHelpers** names **MUST NOT** imply orchestration or multi-step cleanup (`reconcileDelete`, `deleteAll`, `deleteAndWait`) — ordering and lifecycle policy belong to **Reconcile methods**.
 
 ---
 
-## Preferred signatures (SHOULD)
+## Preferred signatures
 
-Choose the simplest signature that preserves explicit dependencies and a single-API-call scope.
+- For **DeleteReconcileHelpers** (`delete*`), the simplest signature from the variants below that preserves explicit dependencies and a single-API-call scope **SHOULD** be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they **MAY** also be used.
 
-### Simple delete (SHOULD)
+### Simple delete
 ```go
 func (r *Reconciler) deleteSKN(
     ctx context.Context,
@@ -61,7 +62,7 @@ func (r *Reconciler) deleteSKN(
 ) flow.Outcome
 ```
 
-Or, if `flow.Outcome` is intentionally not used:
+Or, if **Outcome** (in code, the type is `flow.Outcome`) is intentionally not used:
 ```go
 func (r *Reconciler) deleteSKN(
     ctx context.Context,
@@ -71,39 +72,39 @@ func (r *Reconciler) deleteSKN(
 
 ---
 
-## Receivers (MUST)
+## Receivers
 
-- DeleteReconcileHelpers **MUST** be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
+- **DeleteReconcileHelpers** **MUST** be methods on `Reconciler` (they perform I/O via controller-runtime client owned by `Reconciler`).
 
 ---
 
-## I/O boundaries (MUST)
+## I/O boundaries
 
-DeleteReconcileHelpers **MAY** do the following:
+**DeleteReconcileHelpers** **MAY** do the following:
 
 - controller-runtime client usage to execute exactly **one** Kubernetes API call: `Delete(...)`.
 
-DeleteReconcileHelpers **MUST NOT** do any of the following:
+**DeleteReconcileHelpers** **MUST NOT** do any of the following:
 
 - Kubernetes API calls other than that single `Delete(...)` (no `Get/List/Create/Update/Patch`);
 - `DeepCopy` (including `obj.DeepCopy()`, `runtime.Object.DeepCopyObject()`, etc.);
 - executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
 - performing any other I/O besides the single Kubernetes API request they own.
 
-DeleteReconcileHelpers **MUST NOT** do “hidden I/O” either:
+**DeleteReconcileHelpers** **MUST NOT** do “hidden I/O” either:
 
 - `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
 - random number generation (`rand.*`);
 - environment reads (`os.Getenv`, reading files);
 - network calls of any kind **other than** the single Kubernetes API request they own.
 
-> Rationale: delete helpers are mechanical wrappers around exactly one delete operation; ordering and lifecycle policy remain explicit in Reconcile methods.
+> Rationale: delete helpers are mechanical wrappers around exactly one delete operation; ordering and lifecycle policy remain explicit in **Reconcile methods**.
 
 ---
 
-## Determinism contract (MUST)
+## Determinism contract
 
-A DeleteReconcileHelper **MUST** be deterministic in everything it controls.
+A **DeleteReconcileHelper** **MUST** be **deterministic** in everything it controls.
 
 In particular:
 - It **MUST** issue a single, mechanical delete operation with behavior determined only by explicit inputs.
@@ -115,7 +116,7 @@ In particular:
 
 ---
 
-## Read-only contract (MUST)
+## Read-only contract
 
 `delete<Kind>` / `Delete<Kind>` **MUST** treat inputs as read-only:
 
@@ -126,21 +127,21 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Patch-domain separation (MUST)
+## Patch-domain separation
 
-- A DeleteReconcileHelper **MUST** perform exactly one API write: `Delete(...)`.
+- A **DeleteReconcileHelper** **MUST** perform exactly one API write: `Delete(...)`.
 - It **MUST NOT** modify either patch domain (main or status) as part of deletion:
   - no “prepare for delete” patches (e.g., finalizer removal);
   - no status updates/patches.
-- If deletion requires preliminary changes (e.g., removing a finalizer), those changes **MUST** be performed by Reconcile methods via separate ensure/apply + patch steps **before** calling the delete helper.
+- If deletion requires preliminary changes (e.g., removing a finalizer), those changes **MUST** be performed by **Reconcile methods** via separate ensure/apply + patch steps **before** calling the delete helper.
 
 ---
 
-## Composition (MUST)
+## Composition
 
-- A DeleteReconcileHelper **MUST** perform exactly one API write (`Delete(...)`) for exactly one object.
-- Any prerequisite mutations (e.g., removing finalizers) **MUST** be composed in Reconcile methods (ensure/apply + patch) and **MUST NOT** be hidden inside the delete helper.
-- If multiple objects must be deleted (loops, groups, fan-out), that orchestration **MUST** live in Reconcile methods; delete helpers must remain single-object.
+- A **DeleteReconcileHelper** **MUST** perform exactly one API write (`Delete(...)`) for exactly one object.
+- Any prerequisite mutations (e.g., removing finalizers) **MUST** be composed in **Reconcile methods** (ensure/apply + patch) and **MUST NOT** be hidden inside the delete helper.
+- If multiple objects must be deleted (loops, groups, fan-out), that orchestration **MUST** live in **Reconcile methods**; delete helpers must remain single-object.
 
 ---
 
@@ -163,7 +164,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Common anti-patterns (MUST NOT)
+## Common anti-patterns (**MUST NOT**)
 
 ❌ Doing existence checks (`Get/List`) or any extra Kubernetes API calls:
 ```go

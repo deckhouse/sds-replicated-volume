@@ -19,10 +19,10 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 Summary only; if anything differs, follow normative sections below.
 
-- `is*UpToDate` helpers are **tiny, pure, deterministic, strictly non-I/O** boolean checks.
-- They compare the current `obj` state to a **single desired input** for **exactly one patch domain** (**main** or **status**) and return `true/false`.
-- They **SHOULD NOT** return errors, **MUST NOT** do **flow control**, and **MUST NOT** log.
-- They treat `obj` and `desired` as **read-only** (no mutations, including via map/slice **aliasing**; **clone** before any normalization).
+- **IsUpToDateReconcileHelpers** (`is*UpToDate`) are tiny, **pure**, **deterministic**, strictly **non-I/O** boolean checks.
+- They compare the current `obj` state to a single **desired value** for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) and return `true/false`.
+- They **SHOULD NOT** return errors, **MUST NOT** do **Outcome control flow**, and **MUST NOT** log.
+- They treat `obj` and `desired` as **read-only inputs** (no mutations, including via map/slice **Aliasing**; **Clone** before any normalization).
 
 ---
 
@@ -41,40 +41,41 @@ Typical up-to-date helpers gate patch execution by answering “do we need to pa
 ## Naming
 
 - An **IsUpToDateReconcileHelper** name **MUST** start with `is` / `Is` and **MUST** contain `UpToDate`.
-- IsUpToDateReconcileHelpers **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the checked “thing” name refers to a field/group that exists in both `.spec` and `.status` of the same object):
+- **IsUpToDateReconcileHelpers** **MUST** be domain-explicit in the name when ambiguity is possible (ambiguity is possible when the checked “thing” name refers to a field/group that exists in both `.spec` (**main patch domain**) and `.status` (**status patch domain**) of the same **object**):
   - `isMain*UpToDate` / `IsMain*UpToDate` / `is*MainUpToDate` / `Is*MainUpToDate`
   - `isStatus*UpToDate` / `IsStatus*UpToDate` / `is*StatusUpToDate` / `Is*StatusUpToDate`
-- IsUpToDateReconcileHelpers **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
-- IsUpToDateReconcileHelper names **MUST NOT** include `Desired` / `Actual` unless the checked “thing” name includes `Desired` / `Actual`.
-- IsUpToDateReconcileHelper names **SHOULD** name the “thing” being checked for drift:
+- **IsUpToDateReconcileHelpers** **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
+- **IsUpToDateReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` unless the checked “thing” name includes `Desired` / `Actual`.
+- **IsUpToDateReconcileHelpers** names **SHOULD** name the “thing” being checked for drift:
   - `isLabelsUpToDate(obj, desiredLabels)`
   - `isSpecFooUpToDate(obj, desiredFoo)`
   - `isStatusUpToDate(obj, desiredStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
   - `isConditionsUpToDate(obj, desiredConditions)`
-- IsUpToDateReconcileHelper names **SHOULD NOT** be generic (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the domain + artifact being compared.
+- **IsUpToDateReconcileHelpers** names **SHOULD NOT** be generic (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the **patch domain** + artifact being compared.
 
 ---
 
-## Preferred signatures (SHOULD)
+## Preferred signatures
 
-Choose the simplest signature that preserves explicit dependencies and purity.
+- For **IsUpToDateReconcileHelpers** (`is*UpToDate`), the simplest signature from the variants below that preserves explicit dependencies and purity **SHOULD** be chosen.
+- If additional signature variants are explicitly permitted elsewhere in this document, they **MAY** also be used.
 
-### Simple check (no flow, no logging) (SHOULD)
+### Simple check (no flow, no logging)
 ```go
 func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool
 ```
 
 ---
 
-## Receivers (MUST)
+## Receivers
 
-- IsUpToDateReconcileHelpers **MUST** be plain functions (no `Reconciler` receiver).
+- **IsUpToDateReconcileHelpers** **MUST** be plain functions (no `Reconciler` receiver).
 
 ---
 
-## I/O boundaries (MUST)
+## I/O boundaries
 
-IsUpToDateReconcileHelpers **MUST NOT** do any of the following:
+**IsUpToDateReconcileHelpers** **MUST NOT** do any of the following:
 
 - controller-runtime client usage (`client.Client`, `r.client`, etc.);
 - Kubernetes API calls (`Get/List/Create/Update/Patch/Delete`);
@@ -82,20 +83,20 @@ IsUpToDateReconcileHelpers **MUST NOT** do any of the following:
 - executing patches (`Patch` / `Status().Patch`) or making any patch ordering / patch type decisions;
 - creating/updating Kubernetes objects in the API server in any form.
 
-IsUpToDateReconcileHelpers **MUST NOT** do “hidden I/O” either:
+**IsUpToDateReconcileHelpers** **MUST NOT** do “hidden I/O” either:
 
 - `time.Now()` / `time.Since(...)` (nondeterministic wall-clock reads);
 - random number generation (`rand.*`);
 - environment reads (`os.Getenv`, reading files);
 - network calls of any kind.
 
-> Rationale: up-to-date helpers should be deterministic and unit-testable; all observable side effects belong to Reconcile methods.
+> Rationale: up-to-date helpers should be **deterministic** and unit-testable; all observable side effects belong to **Reconcile methods**.
 
 ---
 
-## Determinism contract (MUST)
+## Determinism contract
 
-An IsUpToDateReconcileHelper **MUST** be deterministic given its explicit inputs and read-only dependencies.
+An **IsUpToDateReconcileHelper** **MUST** be **deterministic** given its explicit inputs and read-only dependencies.
 
 See the common determinism contract in `controller-reconcile-helper.mdc`.
 
@@ -105,7 +106,7 @@ In particular, avoid producing “equivalent but different” intermediate repre
 
 ---
 
-## Read-only contract (MUST)
+## Read-only contract
 
 `is*UpToDate` / `Is*UpToDate` **MUST** treat all inputs as read-only:
 
@@ -116,12 +117,12 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ---
 
-## Patch-domain separation (MUST)
+## Patch-domain separation
 
 - `is*UpToDate` / `Is*UpToDate` **MUST** check **exactly one** patch domain:
-  - main resource (**metadata + spec + non-status fields**), **or**
-  - status subresource (`.status`).
-- If you need to check both domains, you **MUST** use **two** separate helpers (one per domain), and combine the results in Reconcile methods.
+  - **main resource** (**metadata + spec + non-status fields**), **or**
+  - **status subresource** (`.status`).
+- If you need to check both domains, you **MUST** use **two** separate helpers (one per **patch domain**), and combine the results in **Reconcile methods**.
 
 ✅ Main-only / status-only (GOOD)
 ```go
@@ -140,11 +141,11 @@ func isFooUpToDate(
 
 ---
 
-## Composition (MUST)
+## Composition
 
-- An IsUpToDateReconcileHelper **MUST** stay a single, simple check: it returns exactly one boolean for one desired input.
+- An **IsUpToDateReconcileHelper** **MUST** stay a single, simple check: it returns exactly one boolean for one desired input.
 - If multiple “pieces” must be checked together for the same domain, they **SHOULD** be bundled into a single `desired` value (small struct) and checked in one helper.
-- An IsUpToDateReconcileHelper **MAY** call other `is*UpToDate` helpers for reuse (pure composition).
+- An **IsUpToDateReconcileHelper** **MAY** call other `is*UpToDate` helpers for reuse (pure composition).
   - It **SHOULD NOT** use such calls to compose independent checks; independent checks should be composed in Reconcile methods.
 - If checks are meaningfully independent and will be used separately, they **SHOULD** be split into separate `is*UpToDate` helpers and composed in Reconcile methods (not inside the helper).
 
@@ -169,7 +170,7 @@ func isFooUpToDate(
 
 ---
 
-## Common anti-patterns (MUST NOT)
+## Common anti-patterns (**MUST NOT**)
 
 ❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
