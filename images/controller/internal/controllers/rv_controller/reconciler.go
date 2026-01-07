@@ -80,13 +80,24 @@ func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedV
 	ctx, _ = flow.BeginPhase(ctx, "main")
 	defer flow.EndPhase(ctx, &outcome)
 
-	if rv.IsStorageClassLabelInSync() {
-		return flow.Continue()
+	expectedRSC := rv.Spec.ReplicatedStorageClassName
+	if expectedRSC == "" {
+		if !obju.HasLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey) {
+			return flow.Continue()
+		}
+	} else {
+		if obju.HasLabelValue(rv, v1alpha1.ReplicatedStorageClassLabelKey, expectedRSC) {
+			return flow.Continue()
+		}
 	}
 
 	base := rv.DeepCopy()
 
-	rv.EnsureStorageClassLabel()
+	if expectedRSC != "" {
+		_ = obju.SetLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey, expectedRSC)
+	} else {
+		_ = obju.RemoveLabel(rv, v1alpha1.ReplicatedStorageClassLabelKey)
+	}
 
 	outcome = r.patchRV(ctx, rv, base, false)
 	if outcome.Error() != nil {
