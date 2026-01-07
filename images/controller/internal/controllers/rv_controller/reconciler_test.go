@@ -281,7 +281,9 @@ var _ = Describe("Reconciler", func() {
 			})
 
 			It("should fail if getting ReplicatedVolume failed with non-NotFound error", func(ctx SpecContext) {
-				Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(testError), "should return error when Get fails")
+				_, err := rec.Reconcile(ctx, RequestFor(rv))
+				Expect(err).To(HaveOccurred(), "should return error when Get fails")
+				Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original Get error")
 			})
 		})
 
@@ -524,7 +526,9 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		It("should fail if patching ReplicatedVolume status failed with non-NotFound error", func(ctx SpecContext) {
-			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(testError), "should return error when Patch fails")
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred(), "should return error when Patch fails")
+			Expect(errors.Is(err, testError)).To(BeTrue(), "returned error should wrap the original Patch error")
 		})
 	})
 
@@ -566,7 +570,9 @@ var _ = Describe("Reconciler", func() {
 
 		It("should return error on 409 Conflict and succeed on retry", func(ctx SpecContext) {
 			By("First reconcile: should fail with 409 Conflict")
-			Expect(rec.Reconcile(ctx, RequestFor(rv))).Error().To(MatchError(conflictError), "should return conflict error on first attempt")
+			_, err := rec.Reconcile(ctx, RequestFor(rv))
+			Expect(err).To(HaveOccurred(), "should return conflict error on first attempt")
+			Expect(kerrors.IsConflict(err)).To(BeTrue(), "should return 409 Conflict on first attempt")
 
 			By("Reconciling until deviceMinor is assigned after conflict resolved")
 			Eventually(func(g Gomega) *v1alpha1.ReplicatedVolume {

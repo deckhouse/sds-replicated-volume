@@ -218,7 +218,7 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
     - **loops over items**, or
     - handles errors (non-trivial error handling / many failure branches).
   - The **phase** **MUST** cover the whole function (one **phase** per function); **phases** **MUST NOT** be started inside loops. Follow `internal/reconciliation/flow` phase placement rules.
-- A **small** **EnsureReconcileHelper** **MUST NOT** create a `reconcile/flow` **phase** (keep it small and mechanical; let the caller add error boundaries via `OnErrorf`).
+- A **small** **EnsureReconcileHelper** **MUST NOT** create a `reconcile/flow` **phase** (keep it small and mechanical; let the caller add error boundaries via `Enrichf`).
 - If it creates a **phase** (or writes logs), it **MUST** accept `ctx context.Context` (see `controller-reconcile-helper.mdc`).
 - **EnsureReconcileHelpers** **MUST** return **Outcome** (in code: `flow.Outcome`) using helpers from `internal/reconciliation/flow`:
   - `flow.Continue()`, `flow.Done()`, `flow.Fail(err)`, `flow.RequeueAfter(dur)`.

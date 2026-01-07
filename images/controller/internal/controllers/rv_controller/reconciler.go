@@ -48,7 +48,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	// Wait for pool to be ready (blocks until initialized after leader election).
 	pool, err := r.deviceMinorPoolSource.DeviceMinorPool(ctx)
 	if err != nil {
-		return flow.Failf(err, "failed to get device minor idpool").ToCtrl()
+		return flow.Failf(err, "getting device minor idpool").ToCtrl()
 	}
 
 	// Get the ReplicatedVolume
@@ -59,19 +59,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 			pool.Release(req.Name)
 			return flow.Done().ToCtrl()
 		}
-		return flow.Failf(err, "failed to get ReplicatedVolume %s", req.Name).ToCtrl()
+		return flow.Failf(err, "getting ReplicatedVolume").ToCtrl()
 	}
 
-	out := flow.Merge(
-		r.reconcileMain(ctx, rv),
-		r.reconcileStatus(ctx, rv, pool),
-	)
+	outcome := r.reconcileMain(ctx, rv)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
 
-	return out.ToCtrl()
+	outcome = r.reconcileStatus(ctx, rv, pool)
+	if outcome.ShouldReturn() {
+		return outcome.ToCtrl()
+	}
+
+	return outcome.ToCtrl()
 }
 
-func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedVolume) flow.Outcome {
-	ctx, _ = flow.BeginPhase(ctx, "main", "replicatedVolume", rv.Name)
+// Reconcile pattern: Conditional desired evaluation
+func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedVolume) (outcome flow.Outcome) {
+	ctx, _ = flow.BeginPhase(ctx, "main")
+	defer flow.EndPhase(ctx, &outcome)
 
 	if rv.IsStorageClassLabelInSync() {
 		return flow.Continue()
@@ -81,24 +88,26 @@ func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedV
 
 	rv.EnsureStorageClassLabel()
 
-	if err := r.cl.Patch(ctx, rv, client.MergeFrom(base)); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+	outcome = r.patchRV(ctx, rv, base, false)
+	if outcome.Error() != nil {
+		if client.IgnoreNotFound(outcome.Error()) == nil {
 			return flow.Continue()
 		}
-		return flow.Failf(err, "failed to patch ReplicatedVolume %s main resource", rv.Name)
+		return outcome.Enrichf("patching ReplicatedVolume main")
 	}
 
 	return flow.Continue()
 }
 
-func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) flow.Outcome {
-	ctx, _ = flow.BeginPhase(ctx, "status", "replicatedVolume", rv.Name)
+// Reconcile pattern: Desired-state driven
+func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) (outcome flow.Outcome) {
+	ctx, _ = flow.BeginPhase(ctx, "status")
+	defer flow.EndPhase(ctx, &outcome)
 
-	desiredDeviceMinor, desiredDeviceMinorComputeErr := computeDeviceMinor(rv, pool)
-	desiredDeviceMinorAssignedCondition := computeDeviceMinorAssignedCondition(desiredDeviceMinorComputeErr)
-	desiredDeviceMinorAssignedCondition.ObservedGeneration = rv.Generation
+	desiredDeviceMinor, desiredDeviceMinorComputeErr := computeDesiredDeviceMinor(rv, pool)
+	desiredDeviceMinorAssignedCondition := computeDesiredDeviceMinorAssignedCondition(desiredDeviceMinorComputeErr, rv.Generation)
 
-	if rv.Status.DeviceMinorEquals(desiredDeviceMinor) && obju.IsStatusConditionPresentAndSemanticallyEqual(rv, desiredDeviceMinorAssignedCondition) {
+	if isStatusDeviceMinorUpToDate(rv, desiredDeviceMinor, desiredDeviceMinorAssignedCondition) {
 		if desiredDeviceMinorComputeErr != nil {
 			return flow.Fail(desiredDeviceMinorComputeErr)
 		}
@@ -107,11 +116,11 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 
 	base := rv.DeepCopy()
 
-	rv.Status.SetDeviceMinorPtr(desiredDeviceMinor)
-	_ = obju.SetStatusCondition(rv, desiredDeviceMinorAssignedCondition)
+	applyStatusDeviceMinor(rv, desiredDeviceMinor, desiredDeviceMinorAssignedCondition)
 
-	if err := r.cl.Status().Patch(ctx, rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
-		if client.IgnoreNotFound(err) == nil {
+	outcome = r.patchRVStatus(ctx, rv, base, true)
+	if outcome.Error() != nil {
+		if client.IgnoreNotFound(outcome.Error()) == nil {
 			// RV disappeared between Get and Status().Patch: release any reserved ID.
 			pool.Release(rv.Name)
 			if desiredDeviceMinorComputeErr != nil {
@@ -119,10 +128,11 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 			}
 			return flow.Continue()
 		}
-		return flow.Fail(errors.Join(
-			flow.Wrapf(err, "failed to patch ReplicatedVolume %s status subresource", rv.Name),
-			desiredDeviceMinorComputeErr,
-		))
+
+		// Preserve compute error visibility alongside patch errors.
+		return flow.Fail(
+			errors.Join(outcome.Error(), desiredDeviceMinorComputeErr),
+		).Enrichf("patching ReplicatedVolume status")
 	}
 
 	// Release the device minor back to the pool if it wasn't assigned.
@@ -131,17 +141,17 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rv *v1alpha1.Replicate
 		pool.Release(rv.Name)
 	}
 
-	// if !original.Status.DeviceMinorEquals(rv.Status.DeviceMinor) {
-	//	// TODO: log INFO about
-	// }
-
 	if desiredDeviceMinorComputeErr != nil {
 		return flow.Fail(desiredDeviceMinorComputeErr)
 	}
 	return flow.Continue()
 }
 
-func computeDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) (*v1alpha1.DeviceMinor, error) {
+// computeDesiredDeviceMinor computes the desired value for rv.status.deviceMinor.
+//
+// Note: this helper mutates the in-memory ID pool (a deterministic, reconciler-owned state) by
+// reserving the ID for this RV when possible.
+func computeDesiredDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alpha1.DeviceMinor]) (*v1alpha1.DeviceMinor, error) {
 	dm, has := rv.Status.GetDeviceMinor()
 
 	// Assign a new device minor
@@ -172,9 +182,10 @@ func computeDeviceMinor(rv *v1alpha1.ReplicatedVolume, pool *idpool.IDPool[v1alp
 	return &dm, nil
 }
 
-func computeDeviceMinorAssignedCondition(err error) metav1.Condition {
+func computeDesiredDeviceMinorAssignedCondition(err error, observedGeneration int64) metav1.Condition {
 	cond := metav1.Condition{
-		Type: v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType,
+		Type:               v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType,
+		ObservedGeneration: observedGeneration,
 	}
 
 	if err == nil {
@@ -192,4 +203,60 @@ func computeDeviceMinorAssignedCondition(err error) metav1.Condition {
 	cond.Message = err.Error()
 
 	return cond
+}
+
+func isStatusDeviceMinorUpToDate(
+	rv *v1alpha1.ReplicatedVolume,
+	desiredDeviceMinor *v1alpha1.DeviceMinor,
+	desiredDeviceMinorAssignedCondition metav1.Condition,
+) bool {
+	return rv.Status.DeviceMinorEquals(desiredDeviceMinor) &&
+		obju.IsStatusConditionPresentAndSemanticallyEqual(rv, desiredDeviceMinorAssignedCondition)
+}
+
+func applyStatusDeviceMinor(
+	rv *v1alpha1.ReplicatedVolume,
+	desiredDeviceMinor *v1alpha1.DeviceMinor,
+	desiredDeviceMinorAssignedCondition metav1.Condition,
+) {
+	rv.Status.SetDeviceMinorPtr(desiredDeviceMinor)
+	_ = obju.SetStatusCondition(rv, desiredDeviceMinorAssignedCondition)
+}
+
+func (r *Reconciler) patchRV(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	base *v1alpha1.ReplicatedVolume,
+	optimisticLock bool,
+) flow.Outcome {
+	if optimisticLock {
+		if err := r.cl.Patch(ctx, rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return flow.Fail(err)
+		}
+		return flow.Continue()
+	}
+
+	if err := r.cl.Patch(ctx, rv, client.MergeFrom(base)); err != nil {
+		return flow.Fail(err)
+	}
+	return flow.Continue()
+}
+
+func (r *Reconciler) patchRVStatus(
+	ctx context.Context,
+	rv *v1alpha1.ReplicatedVolume,
+	base *v1alpha1.ReplicatedVolume,
+	optimisticLock bool,
+) flow.Outcome {
+	if optimisticLock {
+		if err := r.cl.Status().Patch(ctx, rv, client.MergeFromWithOptions(base, client.MergeFromWithOptimisticLock{})); err != nil {
+			return flow.Fail(err)
+		}
+		return flow.Continue()
+	}
+
+	if err := r.cl.Status().Patch(ctx, rv, client.MergeFrom(base)); err != nil {
+		return flow.Fail(err)
+	}
+	return flow.Continue()
 }
