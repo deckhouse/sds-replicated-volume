@@ -41,7 +41,7 @@ func NewReconciler(cl client.Client, poolSource DeviceMinorPoolSource) *Reconcil
 	return &Reconciler{cl: cl, deviceMinorPoolSource: poolSource}
 }
 
-// Reconcile pattern: Orchestration
+// Reconcile pattern: Pure orchestration
 func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	ctx, _ = flow.Begin(ctx)
 
@@ -51,6 +51,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		if client.IgnoreNotFound(err) != nil {
 			return flow.Failf(err, "getting ReplicatedVolume").ToCtrl()
 		}
+
+		// NotFound: treat object as deleted so that reconciliation can run cleanup (e.g. release device minor).
+		rv = nil
 	}
 
 	// Reconcile main
@@ -92,7 +95,7 @@ func (r *Reconciler) reconcileMain(ctx context.Context, rv *v1alpha1.ReplicatedV
 	return flow.Continue()
 }
 
-// Reconcile pattern: Desired-state driven
+// Reconcile pattern: Target-state driven
 func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1alpha1.ReplicatedVolume) (outcome flow.Outcome) {
 	ctx, _ = flow.BeginPhase(ctx, "status")
 	defer flow.EndPhase(ctx, &outcome)
@@ -123,13 +126,13 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 	return outcome
 }
 
-func isDMInSync(rv *v1alpha1.ReplicatedVolume, targetdDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) bool {
-	return ptr.Equal(rv.Status.DeviceMinor, targetdDM) &&
+func isDMInSync(rv *v1alpha1.ReplicatedVolume, targetDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) bool {
+	return ptr.Equal(rv.Status.DeviceMinor, targetDM) &&
 		obju.IsStatusConditionPresentAndSemanticallyEqual(rv, targetDMCond)
 }
 
-func applyDM(rv *v1alpha1.ReplicatedVolume, targetdDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) {
-	rv.Status.DeviceMinor = targetdDM
+func applyDM(rv *v1alpha1.ReplicatedVolume, targetDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) {
+	rv.Status.DeviceMinor = targetDM
 	obju.SetStatusCondition(rv, targetDMCond)
 }
 
@@ -138,7 +141,7 @@ func (r *Reconciler) allocateDM(
 	rv *v1alpha1.ReplicatedVolume,
 	rvName string,
 ) (outcome flow.Outcome, targetDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) {
-	ctx, log := flow.BeginPhase(ctx, "deviceMinor")
+	ctx, log := flow.BeginPhase(ctx, "device-minor")
 	defer flow.EndPhase(ctx, &outcome)
 
 	// Wait for pool to be ready (blocks until initialized after leader election).
@@ -157,7 +160,7 @@ func (r *Reconciler) allocateDM(
 
 	// Allocate device minor and compute condition
 	targetDM, dmErr := pool.EnsureAllocated(rv.Name, rv.Status.DeviceMinor)
-	targetDMCond = newRVDeviceMinorAssignedCondition(dmErr)
+	targetDMCond = newDeviceMinorAssignedCondition(dmErr)
 
 	// If there is an error, the phase should fail, but only after patching status.
 	if dmErr != nil {
@@ -178,13 +181,13 @@ func (r *Reconciler) allocateDM(
 	return flow.Continue(), targetDM, targetDMCond
 }
 
-// newRVDeviceMinorAssignedCondition computes the condition value for
+// newDeviceMinorAssignedCondition computes the condition value for
 // ReplicatedVolumeCondDeviceMinorAssignedType based on the allocation/validation error (if any).
 //
 // - If err is nil: Status=True, Reason=Assigned.
 // - If err is a DuplicateIDError: Status=False, Reason=Duplicate, Message=err.Error().
 // - Otherwise: Status=False, Reason=AssignmentFailed, Message=err.Error().
-func newRVDeviceMinorAssignedCondition(err error) metav1.Condition {
+func newDeviceMinorAssignedCondition(err error) metav1.Condition {
 	cond := metav1.Condition{
 		Type: v1alpha1.ReplicatedVolumeCondDeviceMinorAssignedType,
 	}
