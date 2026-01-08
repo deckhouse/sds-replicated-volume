@@ -116,7 +116,7 @@ In this codebase, **predicates** are intended for **mechanical** change detectio
 
 ### **Wiring-only** vs **Reconciliation business logic**
 - **Wiring-only**: configuration/registration code (builder/**watches**/options/**runnables**/**predicates** construction). No Kubernetes API reads/writes beyond **manager** wiring.
-- **Reconciliation business logic** (a.k.a. **domain/business** logic): any logic that computes/ensures/applies **desired state**, performs orchestration, decides patch sequencing, or writes to the API server. Lives in **`reconciler.go`**.
+- **Reconciliation business logic** (a.k.a. **domain/business** logic): any logic that computes **intended**, observes **actual**, decides/applies **target**, computes **report** (and persists **controller-owned state** when needed), performs orchestration, decides patch sequencing, or writes to the API server. Lives in **`reconciler.go`**.
 
 ### **mechanical** vs **domain/business**
 A step is **mechanical** when it is a straightforward technical operation that does not encode **domain/business** policy (e.g., “compare **Generation**”, “copy desired labels into obj”, “execute one Patch call”).
@@ -162,6 +162,7 @@ A **ReconcileHelper** is a helper function/method used by **Reconcile methods** 
 **Helper categories** are defined by name prefix/pattern:
 
 - **ComputeReconcileHelper**: `compute*` / `Compute*`
+- **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*`
 - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*`
 - **ApplyReconcileHelper**: `apply*` / `Apply*`
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*`
@@ -175,6 +176,7 @@ Note: **non-I/O** helpers may still mutate their allowed **mutation target** (e.
 In this codebase, these **Helper categories** are **non-I/O** by definition:
 
 - **ComputeReconcileHelper**
+- **ConstructionReconcileHelper**
 - **IsUpToDateReconcileHelper**
 - **ApplyReconcileHelper**
 - **EnsureReconcileHelper**
@@ -189,28 +191,132 @@ In this codebase, these **Helper categories** are single-call **I/O** helpers by
 
 ---
 
-## Desired/actual terminology
+## State terminology: Kubernetes POV vs Controller POV
 
-### **desired state** / **desired value**
-A **desired value** (or **desired state**) is the target representation computed by reconciliation logic that will be applied/ensured/compared against the **resources**/**objects**.
+This section defines **state concepts** used in controller code and helper semantics.
+It separates terms by two perspectives: **Kubernetes POV** (standard API model) and **Controller POV** (internal reconciliation model).
 
-Conventions:
-- `computeDesired*` computes **desired values**.
-- **Desired values** are treated as **read-only inputs** by apply/isUpToDate logic.
+### Kubernetes POV (standard API model)
 
-### **actual value** / **derived actual state**
-An **actual value** (or **derived actual state**) is a representation computed from the current in-memory **resources**/**objects** that are useful for comparisons or further computations.
+**Kubernetes POV** describes state **as represented by a Kubernetes API object** and its subresources.
+This is the commonly accepted model used across built-in APIs and documentation.
 
-Conventions:
-- `computeActual*` computes derived **actual values**.
+- **desired state** (Kubernetes POV)
+  The declared intent stored in the object, conventionally in **`spec`**.
 
-### **desired main** vs **desired status**
-When **desired values** are used for later `is*UpToDate` and/or `apply*`, desired MUST be separated by **patch domain**:
+- **observed state** (Kubernetes POV)
+  The most recently observed / reported state, conventionally in **`status`** (typically written by controllers, not by users).
 
-- **desired main**: **desired values** for the **main patch domain** (metadata/spec/non-status)
-- **desired status**: **desired values** for the **status patch domain** (`.status`)
+- **current state** (Kubernetes POV)
+  The real state of the cluster/world “right now” that controllers observe and try to move closer to the **desired state**.
+  (This is not a field; it’s the external reality that **observed state** reports about.)
 
-A “mixed desired” that intermingles **main patch domain** + **status patch domain** into one **desired value** is considered an invalid shape for desired-driven apply/isUpToDate flows in this codebase.
+> **Important:** Kubernetes **observed state** means the object’s **`status`** field.
+> In **Controller POV** below, the controller also “observes” reality at runtime, but that runtime snapshot is called **actual**.
+
+---
+
+### Controller POV (internal reconciliation model)
+
+**Controller POV** describes state as data flowing through the controller while it reads inputs, observes reality,
+decides actions, and publishes results. These terms apply to variables, helper inputs/outputs, and helper semantics.
+
+#### Status roles (location vs role)
+
+Although Kubernetes stores controller output in **observed state** (`status`), **not everything in `status` plays the same role** for the controller.
+
+Within this codebase we distinguish two roles that may both live under `.status`:
+
+- **controller-owned state** (persisted decisions / memory)
+  Values **chosen by the controller** that must remain stable across reconciliations (e.g., allocated IDs, selected bindings,
+  chosen placements, step/phase markers, “locked-in” decisions).
+  These fields may be read back by the controller as *inputs* to keep behavior stable.
+
+- **report/observations** (published report)
+  Progress, conditions, messages, timestamps, and selected observed facts intended for users/other controllers.
+  These fields are **output-only** and should **not** be used as “intent inputs”.
+
+> Rule of thumb: **Only controller-owned state may be fed back** as commitment/intent inputs into **intended**/**target**.
+> **report/observations** **MAY** be read as observations/constraints (i.e., as **actual**) when deciding **target**, but they **MUST NOT** silently become a source of **desired state**.
+
+#### Terms
+
+- **intended** (effective desired / effective goal state)
+  The controller’s computed effective goal state to converge to (“where we need to end up”),
+  after interpreting inputs and applying stabilization (defaults, normalization, canonicalization).
+
+  **intended** is built from read inputs, which may include:
+  - the reconciled object’s **desired state** (`spec`),
+  - other Kubernetes objects the controller treats as **intent inputs**,
+  - controller-owned persisted decisions/memory (i.e., **controller-owned state**) stored in **observed state** (`status`) for stability/coordination.
+
+  **intended** answers: “What is our effective goal, given inputs + what we already committed to?”
+
+  **Do not confuse:** pulling arbitrary **observed state** (`status`) into **intended** is discouraged.
+  Only **controller-owned state** qualifies as a feedback input.
+
+- **actual** (controller observations snapshot)
+  What the controller observes/reads at runtime from Kubernetes and/or external systems “right now”
+  for decision making. This is a snapshot and may be partial/stale.
+
+  **actual** is **not** Kubernetes POV **observed state** (`status`).
+  **actual** answers: “What do we currently see?”
+
+- **target** (decision to enforce in this reconciliation step)
+  The controller’s chosen enforceable goal/decision for this reconciliation step:
+  what it will try to make true by performing actions (Kubernetes changes and/or external side effects).
+  Derived from **intended** + **actual**, possibly constrained by reality/capabilities/progress.
+
+  Some **target** decisions may be persisted as **controller-owned state** in **observed state** (`status`) for stability/coordination.
+
+- **report** (published controller report)
+  What the controller intends to publish back into Kubernetes as its latest progress snapshot,
+  typically written to the reconciled object’s **observed state** (`status`).
+
+  **report** is **not** the same as **actual**:
+  **actual** is what the controller reads; **report** is what the controller writes.
+
+- **computed value** (auxiliary derived value)
+  Any additional derived/intermediate value used by the controller that is not itself **intended**, **actual**, **target**, or **report**
+  (e.g., diffs/patches, hashes, intermediate graphs, scoring results, debug/trace data).
+
+#### Other objects: **intent inputs** vs **observations/constraints**
+
+Controllers often depend on multiple Kubernetes objects and/or external systems:
+
+- **intent inputs** → contribute to **intended**
+  Objects that represent desired configuration/policy (e.g., policy/config resources, “profile” objects, templates).
+
+- **observations/constraints** → contribute to **actual**
+  Existing resources, external system state, and other controllers’ **report** / **observed state**.
+
+> If an object is used “because it describes what the user wants” → treat it as an **intent input**.
+> If it is used “because it reflects what exists or what is allowed right now” → treat it as an **observation/constraint**.
+
+#### Reconciliation data flow (reference pipeline)
+
+A typical reconciliation step follows this conceptual flow:
+
+1) Read inputs (including the reconciled object **desired state** (`spec`), relevant **intent inputs**, and persisted **controller-owned state** in **observed state** (`status`)).
+2) Compute **intended**.
+3) Observe **actual**.
+4) Decide **target**.
+5) Execute actions / side effects (apply toward **target**).
+6) Compute **report**.
+7) Write **observed state** (`status`) (publish **report** and persist **controller-owned state** when needed).
+
+---
+
+### **target main** vs **target status**
+
+When **target** values are used for later `is*UpToDate` and/or `apply*`, **target** **MUST** be separated by **patch domain**:
+
+- **target main**: **target** values for the **main patch domain** (metadata/spec/non-status)
+- **target status**: **target** values for the **status patch domain** that represent **controller-owned state** to persist
+
+A “mixed target” that intermingles **main patch domain** + **status patch domain** into one value is considered an invalid shape for target-driven apply/isUpToDate flows in this codebase.
+
+**report** is computed separately (often also written under the **status patch domain**) and should not be mixed into **target status**.
 
 ---
 
@@ -383,12 +489,6 @@ The canonical flag is read via `Outcome.OptimisticLockRequired()`.
 - `Outcome.ShouldReturn()` indicates the caller should stop and return (done/requeue/error).
 - `Outcome.ToCtrl()` converts an outcome into `(ctrl.Result, error)` for controller-runtime.
 
-### **Outcome error boundary**
-`Outcome.OnErrorf(ctx, "...")` is the standard boundary helper used to:
-- add local context,
-- log once,
-- and propagate the error.
-
 ### **Merging outcomes**
 **Merging outcomes** means combining multiple independent step **Outcomes** into one using `Outcome.Merge(...)` or `flow.Merge(...)`.
 
@@ -524,6 +624,7 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 - **ReconcileHelper**
 - **Helper categories**
 - **ComputeReconcileHelper**
+- **ConstructionReconcileHelper**
 - **IsUpToDateReconcileHelper**
 - **ApplyReconcileHelper**
 - **EnsureReconcileHelper**
@@ -534,12 +635,20 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 - **Single-call I/O helper categories**
 - **non-I/O**
 - **single-call I/O helper**
-- **desired value**
 - **desired state**
-- **actual value**
-- **derived actual state**
-- **desired main**
-- **desired status**
+- **observed state**
+- **current state**
+- **controller-owned state**
+- **report/observations**
+- **intended**
+- **actual**
+- **target**
+- **report**
+- **computed value**
+- **intent inputs**
+- **observations/constraints**
+- **target main**
+- **target status**
 - **patch domain**
 - **main patch domain**
 - **status patch domain**
@@ -572,7 +681,6 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 - **Change reporting**
 - **Optimistic-lock signaling**
 - **Outcome control flow**
-- **Outcome error boundary**
 - **Merging outcomes**
 - **resource**
 - **object**

@@ -19,11 +19,11 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 Summary only; if anything differs, follow normative sections below.
 
-- **`apply*`** helpers are **pure, deterministic, strictly non-I/O** “in-memory write” steps.
 - **ApplyReconcileHelpers** (`apply*`) are **pure**, **deterministic**, strictly **non-I/O** “in-memory write” steps.
-- They take a previously computed **desired value** and mutate `obj` in place for **exactly one** **patch domain** (**main patch domain** or **status patch domain**).
+- They take a previously computed **target** (and/or **report**) and mutate `obj` in place for **exactly one** **patch domain** (**main patch domain** or **status patch domain**).
+- A status **report** **MAY** directly reuse selected **actual** observations (including being the same value/type as an **actual** snapshot); persisting such observations into `.status` is OK and they remain **report/observations** (output-only).
 - They **MUST NOT** perform **Kubernetes API I/O**, use the controller-runtime client, call **DeepCopy**, or execute patches / make **patch ordering** or **patch type decision** decisions.
-- They **MUST** treat `desired` (and any other inputs) as **read-only inputs** and **MUST NOT** mutate it (including via **Aliasing**); when copying maps/slices from `desired` into `obj`, **Clone** to avoid sharing.
+- They **MUST** treat `target` / `report` (and any other inputs) as **read-only inputs** and **MUST NOT** mutate them (including via **Aliasing**); when copying maps/slices from `target` / `report` into `obj`, **Clone** to avoid sharing.
 - If both **main patch domain** and **status patch domain** need changes, use two **ApplyReconcileHelpers** (one per **patch domain**) and compose them in **Reconcile methods**.
 
 ---
@@ -33,10 +33,17 @@ Summary only; if anything differs, follow normative sections below.
 An **ApplyReconcileHelper** (“apply helper”) is a **ReconcileHelper** that is:
 
 - **strictly non-I/O**, and
-- applies a previously computed **desired value** to the in-memory object, and
+- applies a previously computed **target** (and/or **report**) to the in-memory object, and
 - mutates **exactly one patch domain** in place (**main resource** or **status subresource**), without executing any **patch request**.
 
 Typical apply helpers perform the “mechanical write” step right after **Reconcile methods** create a **patch base** and right before they patch that domain.
+
+Notes on **status patch domain**:
+- Values in `.status` may include both **controller-owned state** (persisted decisions/memory) and **report/observations** (the published **report**).
+- The published **report** **MAY** include a direct projection of **actual** observations. In some cases the same value/type may be used for both **actual** and published output; once written to `.status` it is still **report/observations** (output-only).
+- Apply helpers that mutate `.status` **MUST** keep this distinction clear in naming and data flow:
+  - applying persisted decisions should be driven by **target** (often “**target status**” / controller-owned fields),
+  - applying published status output should be driven by **report** (often from a dedicated `compute*Report` helper, or returned alongside **target** from `computeTarget*` as a separate output).
 
 ---
 
@@ -49,12 +56,13 @@ Typical apply helpers perform the “mechanical write” step right after **Reco
 - **ApplyReconcileHelpers** **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
 - For main-domain **ApplyReconcileHelpers**, the name **MUST** also include the concrete artifact being applied (e.g. labels, annotations, or a specific spec field/group) — avoid names that imply “the whole main”.
 - **ApplyReconcileHelpers** names **MUST NOT** sound like persistence (`applyPatch`, `applyUpdate`, `applyToAPI`) — apply helpers only mutate in-memory state.
-- **ApplyReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` unless the applied “thing” name includes `Desired` / `Actual`.
+- **ApplyReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the applied “thing” name in the **object** API includes those words.
+  - Exception: helpers that apply published status artifacts **MAY** end with `Report` (e.g., `applyStatusReport`, `applyConditionsReport`) to make the `report`-driven write explicit.
 - **ApplyReconcileHelpers** names **SHOULD** name the “thing” being applied:
-  - `applyLabels(obj, desiredLabels)`
-  - `applySpecFoo(obj, desiredFoo)`
-  - `applyStatus(obj, desired)`
-  - `applyConditions(obj, desiredConditions)`
+  - `applyLabels(obj, targetLabels)`
+  - `applySpecFoo(obj, targetFoo)`
+  - `applyStatus(obj, targetStatus)` (when applying controller-owned state)
+  - `applyStatusReport(obj, report)` / `applyConditionsReport(obj, reportConditions)` (when applying published **report**)
 
 ---
 
@@ -65,12 +73,12 @@ Typical apply helpers perform the “mechanical write” step right after **Reco
 
 ### Simple apply
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo)
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo)
 ```
 
 Or, if an error is realistically possible:
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) error
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) error
 ```
 
 ---
@@ -116,7 +124,7 @@ See the common determinism contract in `controller-reconcile-helper.mdc`.
 
 `apply*` / `Apply*` **MUST** treat all inputs except the target mutation on `obj` as read-only:
 
-- it **MUST NOT** mutate inputs other than `obj` (e.g., `desired`, templates, computed structs);
+- it **MUST NOT** mutate inputs other than `obj` (e.g., `target`, `report`, templates, computed structs);
 - it **MUST** mutate only the intended **patch domain** on `obj` (**main resource** **or** **status subresource**), treating the other domain as read-only;
 - it **MUST NOT** perform in-place modifications through aliases to non-`obj` data.
 
@@ -130,20 +138,20 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
   - **main resource** (**metadata + spec + non-status fields**), **or**
   - **status subresource** (`.status`).
 - An **ApplyReconcileHelper** **MUST NOT** mutate both domains in the same function.
-- If you need to apply **desired values** to both domains, you **MUST** implement **two** apply helpers and call them separately from **Reconcile methods**.
+- If you need to apply **target**/**report** values to both domains, you **MUST** implement **two** apply helpers and call them separately from **Reconcile methods**.
 
 ✅ Separate apply helpers (GOOD)
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFooMain)
-func applyDesiredFooStatus(obj *v1alpha1.Foo, desired DesiredFooStatus)
+func applyFoo(obj *v1alpha1.Foo, target TargetFooMain)
+func applyFooStatusReport(obj *v1alpha1.Foo, report FooReport)
 ```
 
 ❌ Mixed apply (BAD)
 ```go
-func applyDesiredFoo(
+func applyFoo(
     obj *v1alpha1.Foo,
-    desiredMain DesiredFooMain,
-    desiredStatus DesiredFooStatus,
+    targetMain TargetFooMain,
+    report FooReport,
 ) {
     // mutates both spec/metadata and status in one helper
 }
@@ -154,8 +162,9 @@ func applyDesiredFoo(
 ## Composition
 
 - An **ApplyReconcileHelper** **MAY** apply multiple related fields in one pass **within a single** **patch domain**.
-- If applied fields represent one conceptual **desired state**, they **SHOULD** be passed as one `desired` value (small struct) rather than a long parameter list.
+- If applied fields represent one conceptual **target** (or one conceptual **report** artifact), they **SHOULD** be passed as one value (small struct) rather than a long parameter list.
 - If applied changes are distinguishable and used independently, they **SHOULD** be split into separate `apply*` helpers and composed in **Reconcile methods** (not by making apply helpers depend on each other).
+- An **ApplyReconcileHelper** **MAY** call **ConstructionReconcileHelpers** (`make*`, `compose*`, `new*`, `build*`) as pure in-memory building blocks, as long as it stays **non-I/O** and **deterministic**.
 
 ---
 
@@ -181,7 +190,7 @@ func applyDesiredFoo(
 
 ❌ Doing any Kubernetes API I/O (client usage / API calls in apply):
 ```go
-func applyDesiredFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, desired DesiredFoo) error {
+func applyFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, target TargetFoo) error {
     // forbidden: apply helpers are non-I/O
     return c.Update(ctx, obj)
 }
@@ -189,82 +198,83 @@ func applyDesiredFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo, de
 
 ❌ Executing patches or making patch decisions inside apply:
 ```go
-func applyDesiredFoo(ctx context.Context, c client.Client, obj, base *v1alpha1.Foo, desired DesiredFoo) error {
+func applyFoo(ctx context.Context, c client.Client, obj, base *v1alpha1.Foo, target TargetFoo) error {
     // forbidden: patch execution belongs to Reconcile methods / PatchReconcileHelpers
-    obj.Spec = desired.Spec
+    obj.Spec = target.Spec
     return c.Patch(ctx, obj, client.MergeFrom(base))
 }
 ```
 
 ❌ Calling `DeepCopy` inside apply:
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) {
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) {
     _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
-    obj.Spec = desired.Spec
+    obj.Spec = target.Spec
 }
 ```
 
 ❌ Returning `flow.Outcome` / doing flow control inside apply:
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) flow.Outcome {
-    obj.Spec = desired.Spec
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) flow.Outcome {
+    obj.Spec = target.Spec
     return flow.Continue() // forbidden: apply helpers do not return flow control
 }
 ```
 
 ❌ Adding logging/phases to apply helpers (they must stay tiny and have no `ctx`):
 ```go
-func applyDesiredFoo(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) error {
+func applyFoo(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) error {
     l := log.FromContext(ctx)
-    l.Info("applying desired foo") // forbidden: apply helpers do not log / do not accept ctx
-    obj.Spec = desired.Spec
+    l.Info("applying target foo") // forbidden: apply helpers do not log / do not accept ctx
+    obj.Spec = target.Spec
     return nil
 }
 ```
 
 ❌ Mutating both patch domains in one apply helper:
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desiredMain DesiredFooMain, desiredStatus DesiredFooStatus) {
-    obj.Spec = desiredMain.Spec      // main domain
-    obj.Status = desiredStatus.State // status domain
+func applyFoo(obj *v1alpha1.Foo, targetMain TargetFooMain, report FooReport) {
+    obj.Spec = targetMain.Spec // main domain
+    // publishing report belongs to status domain
+    obj.Status = report.Status
     // forbidden: apply must touch exactly one patch domain
 }
 ```
 
 ❌ Implementing business logic inside apply (deciding desired state while applying it):
 ```go
-func applyDesiredFoo(obj *v1alpha1.Foo, desired DesiredFoo) {
+func applyFoo(obj *v1alpha1.Foo, target TargetFoo) {
     // forbidden: decisions belong to compute/ensure; apply is mechanical
     if obj.Spec.Mode == "special" {
-        desired.Replicas = 5 // also mutates desired (see below)
+        target.Replicas = 5 // also mutates target (see below)
     }
-    obj.Spec.Replicas = desired.Replicas
+    obj.Spec.Replicas = target.Replicas
 }
 ```
 
-❌ Mutating `desired` (or any other non-`obj` input):
+❌ Mutating `target` / `report` (or any other non-`obj` input):
 ```go
-func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
-    desired.Labels["x"] = "y" // forbidden: desired is read-only
-    obju.SetLabels(obj, desired.Labels)
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
+    target.Labels["x"] = "y" // forbidden: target is read-only
+    obju.SetLabels(obj, target.Labels)
 }
 ```
 
-❌ Sharing maps/slices from `desired` into `obj` (aliasing):
+❌ Sharing maps/slices from `target` / `report` into `obj` (aliasing):
 ```go
-func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
-    obj.SetLabels(desired.Labels) // forbidden: shares map backing storage
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
+    obj.SetLabels(target.Labels) // forbidden: shares map backing storage
 
-    // later mutation now also mutates `desired.Labels` through aliasing
+    // later mutation now also mutates `target.Labels` through aliasing
     obj.GetLabels()["owned"] = "true"
 }
 ```
 
 ❌ Writing nondeterministic ordered fields (map iteration order leaks into slices):
 ```go
-func applyDesiredFinalizers(obj *v1alpha1.Foo, desired DesiredFinalizers) {
-    finals := make([]string, 0, len(desired.Set))
-    for f := range desired.Set { // map iteration order is random
+func applyFinalizers(obj *v1alpha1.Foo, target TargetFinalizers) {
+    finals := make([]string, 0, len(target.Set))
+    for f := range target.Set { // map iteration order is random
         finals = append(finals, f)
     }
     // missing sort => nondeterministic object state => patch churn
@@ -274,7 +284,7 @@ func applyDesiredFinalizers(obj *v1alpha1.Foo, desired DesiredFinalizers) {
 
 ❌ Manual metadata/conditions manipulation when `objutilv1` must be used:
 ```go
-func applyDesiredLabels(obj *v1alpha1.Foo, desired DesiredLabels) {
+func applyLabels(obj *v1alpha1.Foo, target TargetLabels) {
     // forbidden in this codebase: do not open-code label map edits
     if obj.Labels == nil {
         obj.Labels = map[string]string{}

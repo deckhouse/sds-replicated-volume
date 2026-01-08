@@ -15,6 +15,7 @@ alwaysApply: true
   - See: `controller-controller.mdc`.
 
 - **`reconciler.go`** (**MUST**): all **Reconciliation business logic** for this controller.
+  - This includes the Controller POV pipeline: compute **intended**, observe **actual**, decide/enforce **target**, and compute/publish **report** (including persisting **controller-owned state** and **report** into Kubernetes POV **observed state** (`.status`) via the appropriate **patch domain**).
   - Detailed rules for **phase** usage, **I/O** boundaries, **patch domains** and patterns: `controller-reconciliation.mdc`.
   - **`reconciler.go`** **MUST** contain these categories of code:
     - 1. **Reconcile method** functions/methods.
@@ -26,6 +27,8 @@ alwaysApply: true
       - **MUST** comply with: `controller-reconcile-helper.mdc`.
       - Definition (**MUST**): any function/method whose name matches one of these helper naming categories/patterns:
         - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`)
+          - Common sub-families: `computeIntended*`, `computeActual*`, `computeTarget*`, `compute*Report`.
+        - **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`)
         - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`)
         - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`)
         - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`)
@@ -46,8 +49,8 @@ alwaysApply: true
 
 - Additional components (MAY): extracted helpers for heavy computations or caching.
   - Allowed examples:
-    - “world view” / “planner” / “topology scorer” components that build an in-memory model for convenient calculations.
-    - unique ID pool components (e.g., device minor / ordinal allocators) used for deterministic assignments.
+    - “world view” / “planner” / “topology scorer” components that build an in-memory model for convenient calculations (often used to shape **actual**, decide **target**, and produce **report** artifacts).
+    - stateful allocators / ID pools (e.g., device minor / ordinal allocation) used for deterministic assignments (often producing **controller-owned state** that is persisted across reconciliations).
     - caching components to avoid repeated expensive computation (explicitly owned by the reconciler and easy to invalidate).
   - Constraints (MUST):
     - computation components **MUST** be pure: no **Kubernetes API I/O**, no patches, no **DeepCopy**, no time/random/env **I/O**.

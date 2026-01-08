@@ -1,0 +1,349 @@
+---
+description: Controller reconciliation helpers — ConstructionReconcileHelper
+globs:
+  - "images/controller/internal/controllers/rv_controller/**/*.go"
+alwaysApply: true
+---
+
+# ConstructionReconcileHelper
+
+This document defines naming and contracts for **ConstructionReconcileHelper** functions/methods:
+`new*`, `build*`, `make*`, `compose*`.
+
+Common controller terminology lives in `controller-terminology.mdc`.
+Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
+
+Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
+
+---
+
+## TL;DR
+
+Summary only; if anything differs, follow normative sections below.
+
+- **ConstructionReconcileHelpers** (`new*`/`build*`/`make*`/`compose*`) are **pure**, **deterministic**, strictly **non-I/O** helpers that construct in-memory values/objects (or groups of them) from **explicit inputs**.
+- Inputs are **read-only**:
+  - **MUST NOT** mutate inputs (including via Go **aliasing** of maps/slices).
+  - Clone maps/slices before editing; avoid returning references that alias caller-owned storage unless explicitly documented and safe.
+- **MUST NOT**:
+  - do Kubernetes API I/O, filesystem/network/env reads, or use time/random sources,
+  - log/print, accept `context.Context`, start `reconcile/flow` phases, or call `DeepCopy`,
+  - return `flow.Outcome` or make flow/patch orchestration decisions (patch ordering/strategy/execution).
+- **MUST** be plain functions (no `Reconciler` receiver) and may only call other **construction** helpers.
+- If the primary goal is a reconciliation pipeline artifact (**intended/actual/target/report**) or domain decision-making, prefer **ComputeReconcileHelper** (`compute*`) and use construction helpers only as sub-steps.
+
+Naming family selection (pick exactly one, by return shape + meaning):
+
+1) Returns **one logical domain whole** (root value) and owns invariants → `new*`
+2) Returns a **set of independently meaningful results** (`[]T`, `map[...]T`, tuples) → `build*`
+3) Returns **mechanical glue** (packing/formatting, minimal semantics) → `make*`
+4) Only **binds already-built parts** (no construction/invariants) → `compose*`
+
+---
+
+## Definition
+
+A **ConstructionReconcileHelper** (“construction helper”) is a **ReconcileHelper** that is:
+
+- **strictly non-I/O**, and
+- **deterministic**, and
+- constructs new in-memory values/objects (or groups of values/objects), and
+- treats all inputs as **read-only inputs** (no mutation, including via **Aliasing**), and
+- returns the constructed result(s) (and optionally an error).
+
+Typical construction helpers are pure “building blocks” used by reconciliation code and other helpers to assemble in-memory values/objects, without implying **intended**/**actual**/**target**/**report** pipeline semantics.
+
+Key distinction vs **ComputeReconcileHelper**:
+- **ConstructionReconcileHelper** focuses on *constructing* one object/value (or a set of objects/values) from explicitly provided inputs.
+- **ComputeReconcileHelper** focuses on *computing state* (typically one state artifact from another) in the reconciliation pipeline (for example, deriving **intended** from inputs, **target** from **intended** + **actual**, or building a **report**).
+  Computing state often includes construction steps, but construction is then a sub-step of the computation rather than the main purpose.
+
+Rule of thumb:
+- If the primary purpose is deterministic construction from clearly defined inputs → use **ConstructionReconcileHelper** (`new*`/`build*`/`make*`/`compose*`).
+- If the primary purpose is computing state (usually “state from state”) → use **ComputeReconcileHelper** (`compute*`).
+
+IMPORTANT!!! **MUST NOT** be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
+
+In this codebase, **ConstructionReconcileHelper** uses four naming families (`new*`, `build*`, `make*`, `compose*`), described below as separate sections.
+
+> Naming intent: `new*/build*/make*/compose*` communicates *what kind of thing was constructed*,
+> while `compute*` / `apply*` / `ensure*` communicate *reconciliation role and allowed side effects*.
+
+### `new*` — **Single domain whole**
+
+Choose `new*` when the result is **one logical domain whole**, even if multiple internal objects are created.
+
+When:
+- Result is a single logical unit; internal parts have no meaning independently.
+- The function owns the invariants of that composition.
+
+Signals:
+- One “root” return value (single type).
+- Callers treat the result as a whole.
+- If construction fails, domain meaning breaks (so returning `error` may be appropriate).
+
+Examples:
+```go
+func newVolumeLayout(cfg Config) VolumeLayout
+func newPodTemplate(cr *MyCR) (corev1.PodTemplateSpec, error)
+func newChildService(cr *MyCR) corev1.Service
+```
+
+> Note: do not use `new*` solely to allocate memory (`&T{}`); the name is about a **domain whole**, not a pointer.
+
+### `build*` — **Set of independent results**
+
+Choose `build*` when the function returns a **set of independently meaningful results**: `[]T`, `map[...]T`, `(A, B, C)`, etc.
+
+When:
+- Each result has its own lifecycle (no wrapper domain type).
+- The function aggregates steps/sources and returns multiple independent outputs.
+- Often used near reconciliation orchestration to prepare multiple objects.
+
+Examples:
+```go
+func buildStatusConditions(state State) []metav1.Condition
+func buildOwnedResources(cr *MyCR) []client.Object
+func buildLabelsAndAnnotations(cr *MyCR) (map[string]string, map[string]string)
+```
+
+### `make*` — **Mechanical glue**
+
+Choose `make*` for **mechanical glue**: simple assembling/packing/formatting of inputs with minimal logic and no domain semantics.
+
+Examples:
+```go
+func makeConditionSet(conds ...metav1.Condition) []metav1.Condition
+func makeOwnerRefs(owner metav1.Object) []metav1.OwnerReference
+func makeLabels(kv ...string) map[string]string
+```
+
+### `compose*` — **Bind already-built parts**
+
+Choose `compose*` when you want to make it explicit that the function does **not create** new meaning; it only **binds** already computed values.
+
+When:
+- Inputs are already computed “ready” objects/values.
+- No heavy computation or invariant ownership.
+- Only grouping/tying together.
+
+Examples:
+```go
+func composeOwnerRefsAndLabels(ownerRefs []metav1.OwnerReference, labels map[string]string) metav1.ObjectMeta
+func composeStatusWithConditions(base FooStatus, conds []metav1.Condition) FooStatus
+```
+
+---
+
+## Naming
+
+- A **ConstructionReconcileHelper** name **MUST** start with one of:
+  `new` / `New` / `build` / `Build` / `make` / `Make` / `compose` / `Compose`.
+- A **ConstructionReconcileHelper** **MUST** choose exactly one naming family by the *shape and meaning* of the return value:
+  - **`new*`**:
+    - **MUST** be used when the result is **one logical domain whole** (even if built from many internal parts).
+    - **MUST NOT** be used when the function returns a set of independently meaningful results (use `build*` instead).
+  - **`build*`**:
+    - **MUST** be used when the function returns a **set of independently meaningful results** (`[]T`, `map[...]T`, tuples).
+    - **MUST NOT** be used when the function returns one domain whole (use `new*` instead).
+  - **`make*`**:
+    - **MUST** be used for **mechanical glue**: simple assembly/packing/formatting of inputs with minimal/no domain semantics.
+  - **`compose*`**:
+    - **MUST** be used when the function only **binds already-built parts** (grouping/tying together) and does not create new meaning/invariants.
+    - **MUST NOT** be used for domain decisions or pipeline artifacts (use **ComputeReconcileHelper** for **intended**/**actual**/**target**/**report** computations).
+
+---
+
+## Preferred signatures
+
+- For **ConstructionReconcileHelpers**, the simplest signature that preserves determinism and read-only inputs **SHOULD** be chosen.
+- **ConstructionReconcileHelpers** **MUST NOT** accept `ctx context.Context`.
+  - If you need logging/phases/flow control, use **ComputeReconcileHelpers** / **EnsureReconcileHelpers** or keep it in the caller.
+- `new*` / `build*` helpers **MAY** return `(T, error)` when construction can fail.
+- `make*` / `compose*` helpers **SHOULD** be non-failing (prefer returning a value only).
+
+Examples:
+
+```go
+func newPodTemplate(cr *v1alpha1.Foo) (corev1.PodTemplateSpec, error)
+```
+
+```go
+func buildOwnedResources(cr *v1alpha1.Foo) []client.Object
+```
+
+```go
+func makeOwnerRefs(owner metav1.Object) []metav1.OwnerReference
+```
+
+```go
+func composeServiceSpecWithPorts(spec corev1.ServiceSpec, ports []corev1.ServicePort) corev1.ServiceSpec
+```
+
+---
+
+## Receivers
+
+- **ConstructionReconcileHelpers** **MUST** be plain functions (no `Reconciler` receiver).
+
+---
+
+## I/O boundaries
+
+**ConstructionReconcileHelpers** **MUST NOT** perform **I/O** of any kind:
+
+- **Kubernetes API I/O** (no client usage),
+- filesystem/network/env reads,
+- time/random sources,
+- logging/printing,
+- and **MUST NOT** call **DeepCopy**.
+
+---
+
+## Determinism contract
+
+**ConstructionReconcileHelpers** **MUST** be **deterministic** for the same explicit inputs:
+
+- stable ordering (sort when building ordered slices from maps/sets),
+- no map-iteration-order leakage.
+
+See the common determinism contract in `controller-reconcile-helper.mdc`.
+
+---
+
+## Read-only contract
+
+**ConstructionReconcileHelpers** **MUST** treat all inputs as **read-only inputs**:
+
+- no mutation of inputs (including through **Aliasing**),
+- clone maps/slices before editing,
+- avoid returning references that alias internal storage of inputs (unless explicitly documented and safe).
+
+See the common read-only contract in `controller-reconcile-helper.mdc`.
+
+---
+
+## Patch-domain separation
+
+- **ConstructionReconcileHelpers** **MUST NOT** execute patches, make **Patch ordering** decisions, or mutate a Kubernetes **patch domain** as part of their work.
+
+---
+
+## Composition
+
+- **ConstructionReconcileHelpers** are “building blocks”.
+- **ConstructionReconcileHelpers** are typically used inside **ComputeReconcileHelpers** and **EnsureReconcileHelpers**.
+- A **ConstructionReconcileHelper** **MAY** call other **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure sub-steps.
+- A **ConstructionReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other helper categories (`compute*`, `apply*`, `ensure*`, `patch*`, `create*`, `delete*`, `is*UpToDate`).
+  - If you need those semantics, move the orchestration to the caller (typically a compute/ensure helper or a Reconcile method).
+- If a function’s primary purpose is to produce **intended**/**actual**/**target**/**report** as part of reconciliation, you **SHOULD** prefer `compute*` naming and use **ConstructionReconcileHelpers** internally for sub-steps.
+
+Important distinctions:
+
+- `new*` constructs an in-memory object/value.
+  `create*` (**CreateReconcileHelper**) persists an object via Kubernetes API **I/O**.
+
+---
+
+## Flow phases and **Outcome**
+
+- **ConstructionReconcileHelpers** **MUST NOT** create a `reconcile/flow` **phase**.
+- **ConstructionReconcileHelpers** **MUST NOT** return **Outcome** (in code: `flow.Outcome`).
+- **ConstructionReconcileHelpers** **MUST NOT** log (they do not accept `ctx context.Context`).
+
+---
+
+## Error handling
+
+- Like any **ReconcileHelper**, an error from a **ConstructionReconcileHelper** **MUST NOT** include **object identity** (see `controller-reconcile-helper.mdc`).
+- Construction helpers **SHOULD** be non-failing where possible.
+- If a **ConstructionReconcileHelper** returns an `error`, it:
+  - **MUST NOT** include **object identity** (e.g. `namespace/name`, UID, object key),
+  - **MUST NOT** wrap/enrich errors with “outside world” context (that belongs to the caller),
+  - **SHOULD** be used only for local validation / impossible-shape failures / pure parsing failures.
+- **Allowed (rare):** when propagating a non-local pure error and additional context is necessary to disambiguate multiple error sources in the same caller, a helper **MAY** wrap with small, local action context:
+  - prefer `fmt.Errorf("<local-action>: %w", err)`
+  - keep `<local-action>` specific to the helper responsibility.
+
+---
+
+## Common anti-patterns (**MUST NOT**)
+
+❌ Doing any Kubernetes API I/O:
+
+```go
+func newFoo(ctx context.Context, c client.Client, obj *v1alpha1.Foo) (FooOut, error) {
+    // forbidden: I/O in ConstructionReconcileHelper
+    _ = c.Get(ctx, client.ObjectKeyFromObject(obj), &corev1.ConfigMap{})
+    return FooOut{}, nil
+}
+```
+
+❌ Accepting `ctx` / logging / creating phases:
+
+```go
+func buildFoo(ctx context.Context, obj *v1alpha1.Foo) FooOut {
+    l := log.FromContext(ctx)
+    l.Info("building foo") // forbidden: no logging/phases in construction helpers
+    flow.BeginPhase(ctx, "buildFoo") // forbidden
+    return FooOut{}
+}
+```
+
+❌ Returning `flow.Outcome` / doing flow control:
+
+```go
+func makeFoo(obj *v1alpha1.Foo) flow.Outcome {
+    return flow.Continue() // forbidden: construction helpers do not return Outcome
+}
+```
+
+❌ Hidden I/O / nondeterminism:
+
+```go
+func makeNonce() string {
+    // forbidden: time/random sources
+    return time.Now().Format(time.RFC3339)
+}
+```
+
+❌ Depending on map iteration order:
+
+```go
+func buildKeys(m map[string]struct{}) []string {
+    out := make([]string, 0, len(m))
+    for k := range m { // random order
+        out = append(out, k)
+    }
+    // missing sort => nondeterministic output
+    return out
+}
+```
+
+❌ Mutating inputs through aliasing:
+
+```go
+func makeLabels(in map[string]string) map[string]string {
+    // forbidden: mutates caller-owned map
+    in["x"] = "y"
+    return in
+}
+```
+
+❌ Calling other helper categories from construction helpers:
+
+```go
+func newFoo(obj *v1alpha1.Foo) (FooOut, error) {
+    _ = computeTargetFoo(obj) // forbidden: construction helpers only call other construction helpers
+    return FooOut{}, nil
+}
+```
+
+❌ Calling `DeepCopy` as a shortcut:
+
+```go
+func newFoo(obj *v1alpha1.Foo) FooOut {
+    _ = obj.DeepCopy() // forbidden: DeepCopy belongs to Reconcile methods
+    return FooOut{}
+}
+```

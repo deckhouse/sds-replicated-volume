@@ -25,6 +25,12 @@ Summary only; if anything differs, follow normative sections below.
 - They **MUST NOT** perform any other **Kubernetes API I/O** calls (`Get/List/Create/Update/Delete`), **MUST NOT** call **DeepCopy**, and **MUST NOT** patch both **patch domains** in one helper.
 - They **MUST** treat `base` as **read-only inputs** and stay **deterministic** in everything they control (no **Hidden I/O**: no time/random/env/network beyond the single **patch request**).
 
+Notes:
+- A status-domain patch (`Status().Patch(...)`) persists Kubernetes POV **observed state** (`.status`), which may include both:
+  - **controller-owned state** (persisted decisions/memory), and
+  - the published **report** (conditions/progress/selected observations).
+  Patch helpers stay agnostic; deciding *what* should be in `.status` (and keeping roles distinct) belongs to **Reconcile methods** + compute/apply helpers.
+
 ---
 
 ## Definition
@@ -180,6 +186,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - A **PatchReconcileHelper** **MUST** execute exactly one patch request for exactly one patch domain.
 - A **PatchReconcileHelper** **MAY** be preceded by pure helpers that prepared the in-memory `obj` (compute/apply/ensure), but the patch helper itself **MUST NOT** perform any business-logic composition beyond executing the single patch request.
 - If multiple patch requests are needed (multiple domains or multiple sequential patches), they **MUST** be composed in **Reconcile methods** as multiple explicit patch operations (each with its own `base` taken immediately before that patch).
+- A **PatchReconcileHelper** **MUST NOT** call other **ReconcileHelpers**.
 
 ---
 

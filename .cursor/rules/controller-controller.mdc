@@ -45,7 +45,7 @@ alwaysApply: true
     - `cl := mgr.GetClient()`
     - other manager-owned deps when needed (scheme, cache, recorder, etc.).
   - Register required **runnables**/**sources** on the **manager** (if any):
-    - example: idpool/cache initializers added via `mgr.Add(...)` (often after leader election).
+    - example: cache initializers added via `mgr.Add(...)` (often after leader election).
   - Construct the reconciler (composition root for the package):
     - `rec := NewReconciler(cl, <otherDeps...>)`
   - Wire controller-runtime builder in a single fluent chain:

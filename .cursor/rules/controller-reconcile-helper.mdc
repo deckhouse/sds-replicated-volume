@@ -18,12 +18,12 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
-- All **ReconcileHelpers** follow strict **naming-by-category** (`compute*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*`) to make intent and allowed behavior reviewable.
+- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
 - Every ReconcileHelper has explicit dependencies: if it takes `ctx`, it is first; if it operates on a Kubernetes object, `obj` is the first arg after `ctx`; all other inputs come **after `obj`**.
 - ReconcileHelpers are **deterministic**: never rely on map iteration order; sort when order matters; avoid “equivalent but different” outputs/states that cause patch churn.
 - ReconcileHelpers treat inputs as **read-only** except for the explicitly allowed mutation target(s); never mutate through map/slice aliasing — **clone before editing**.
 - **I/O** is **explicitly bounded by category**:
-  - **Compute / IsUpToDate / Apply / Ensure**: strictly **non-I/O**.
+  - **Compute / Construction / IsUpToDate / Apply / Ensure**: strictly **non-I/O**.
   - **Create / Delete / Patch**: allowed **I/O**, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
 
 ---
@@ -40,6 +40,7 @@ Summary only; if anything differs, follow normative sections below.
 These categories are naming categories/patterns (see also `controller-file-structure.mdc`):
 
 - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`).
+- **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`).
 - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`).
 - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`).
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`).
@@ -186,16 +187,18 @@ This section is **not** about what helpers are *allowed* to do (see the category
 
 ### ComputeReconcileHelper (`compute*`) / EnsureReconcileHelper (`ensure*`) (core of reconciliation logic)
 
-- If reconciliation needs to derive a target/desired state (or a derived “actual” view), there **SHOULD** be at least one explicit step that performs this work as either:
-  - a ComputeReconcileHelper (`computeDesired*` / `computeActual*`), or
-  - an EnsureReconcileHelper (`ensure*`) that both derives and applies corrections in-place.
-  The intent is to keep Reconcile methods focused on orchestration and to make “where decisions live” reviewable.
+- If reconciliation needs to compute **intended**, observe **actual**, decide **target**, and/or publish a **report**, there **SHOULD** be at least one explicit step that performs this work as either:
+  - a ComputeReconcileHelper (`computeIntended*`, `computeActual*`, `computeTarget*`, and/or `compute*Report`), or
+  - an EnsureReconcileHelper (`ensure*`) that derives and applies corrections in-place (for a single **patch domain**).
+  The intent is to keep **Reconcile methods** focused on orchestration and to make “where decisions live” reviewable.
+  - Cache-like deterministic components (memoization of derived values) **MAY** be used inside **ComputeReconcileHelper** / **EnsureReconcileHelper**, but stateful allocators / ID pools (e.g., device minor / ordinal allocation) **MUST NOT** be hidden inside them (keep the allocation decision explicit in **Reconcile methods** together with persistence as **controller-owned state**).
 
 #### Splitting / nesting guidelines
 
 - **SHOULD NOT** split trivial logic into **ComputeReconcileHelper** (`compute*`) + **EnsureReconcileHelper** (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
 - **MAY** create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsUpToDateReconcileHelper** (`is*UpToDate*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
   - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **desired state** driven pipeline.
+  - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **target**/**report**-driven pipeline.
 - If an **EnsureReconcileHelper** (`ensure*`) is small and readable, keep it monolithic:
   - **SHOULD NOT** extract a separate **ComputeReconcileHelper** (`compute*`) just to compute a couple of booleans or a tiny struct.
 - If an **EnsureReconcileHelper** (`ensure*`) becomes complex:
@@ -203,4 +206,12 @@ This section is **not** about what helpers are *allowed* to do (see the category
   - **MAY** extract sub-**ComputeReconcileHelper** (`compute*`) helpers for non-trivial derived values used by **EnsureReconcileHelper**, keeping them pure and **deterministic**.
 - If a **ComputeReconcileHelper** (`compute*`) becomes complex:
   - **MAY** split it into smaller **ComputeReconcileHelper** (`compute*`) helpers (pure composition) with explicit data flow via parameters/return values.
-  - **SHOULD** keep each compute focused on a single artifact (desired labels, desired spec fragment, desired status fragment, etc.), rather than a “compute everything” blob.
+  - **SHOULD** keep each compute focused on a single artifact (e.g., **intended** normalization, **actual** snapshot shaping, **target** decisions for one domain/artifact, **report** artifacts), rather than a “compute everything” blob.
+
+### ConstructionReconcileHelper (`new*` / `build*` / `make*` / `compose*`)
+
+- **SHOULD** use **ConstructionReconcileHelpers** to extract pure object/value construction that is:
+  - reused across multiple compute/apply/ensure steps, or
+  - non-trivial enough that inline construction would be error-prone (ordering/canonicalization/aliasing).
+- **SHOULD NOT** use **ConstructionReconcileHelpers** as a substitute for **ComputeReconcileHelpers** when the output is conceptually **intended**/**actual**/**target**/**report**.
+  Use the `compute*` family for reconciliation pipeline artifacts; use **ConstructionReconcileHelpers** for sub-artifacts and building blocks.

@@ -37,9 +37,8 @@ type Identifier interface {
 // All public methods are concurrency-safe.
 //
 // Semantics:
-// - GetOrCreate allocates the minimal available ID for a new name (or returns existing).
-// - GetOrCreateWithID registers the provided (name,id) pair; conflicts are errors.
-// - BulkAdd processes pairs in-order under a single lock and returns per-name errors.
+// - EnsureAllocated registers the provided (name,id) pair; conflicts are errors.
+// - Fill processes pairs in-order under a single lock and returns per-name errors.
 // - Release frees the id by name.
 //
 // The pool uses a bitset to track used IDs and a low-watermark pointer to start scanning
@@ -109,30 +108,45 @@ func (p *IDPool[T]) Len() int {
 	return len(p.byName)
 }
 
-// GetOrCreate returns an already assigned id for name, or allocates a new minimal free id.
-func (p *IDPool[T]) GetOrCreate(name string) (T, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.getOrCreateLocked(name)
-}
-
-// GetOrCreateWithID registers a specific (name,id) pair.
+// EnsureAllocated ensures that name has an allocated id and returns the effective assigned id.
 //
-// If id is already owned by the same name, this is a no-op.
-// If id is free, it becomes owned by name.
-// If id is owned by a different name, returns DuplicateIDError containing the owner name.
-// If name is already mapped to a different id, returns NameConflictError.
-// If id is outside the allowed range, panics (developer error: the ID type is responsible for validation).
-func (p *IDPool[T]) GetOrCreateWithID(name string, id T) error {
+// When id is nil:
+// - If name has no id yet, it allocates the minimal free id and returns it.
+// - If name already has an id, it returns the existing id.
+//
+// When id is provided:
+// - If (name,id) already exists, this is a no-op and the same id is returned.
+// - If id is free, it becomes owned by name and that id is returned.
+//
+// Errors / panics:
+// - If id is nil and there are no ids left, it returns PoolExhaustedError.
+// - If id is owned by a different name, it returns DuplicateIDError.
+// - If name is already mapped to a different id, it returns NameConflictError.
+// - If id is outside the allowed range, it returns OutOfRangeError.
+func (p *IDPool[T]) EnsureAllocated(name string, id *T) (*T, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.addWithIDLocked(name, id)
+
+	if id == nil {
+		out, err := p.getOrCreateLocked(name)
+		if err != nil {
+			return nil, err
+		}
+		return &out, nil
+	}
+
+	if err := p.addWithIDLocked(name, *id); err != nil {
+		return nil, err
+	}
+
+	out := *id
+	return &out, nil
 }
 
-// BulkAdd processes pairs in-order under a single lock.
+// Fill processes pairs in-order under a single lock.
 // It returns a slice of errors aligned with the input order:
 // errs[i] corresponds to pairs[i] (nil means success).
-func (p *IDPool[T]) BulkAdd(pairs []IDNamePair[T]) []error {
+func (p *IDPool[T]) Fill(pairs []IDNamePair[T]) []error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -190,7 +204,7 @@ func (p *IDPool[T]) addWithIDLocked(name string, id T) error {
 	idU32 := uint32(id)
 	offset, ok := p.toOffset(idU32)
 	if !ok {
-		panic(fmt.Sprintf("idpool: identifier %d is outside allowed range [%d..%d]", idU32, p.min, p.max))
+		return OutOfRangeError{ID: idU32, Min: p.min, Max: p.max}
 	}
 
 	if existingID, ok := p.byName[name]; ok {
@@ -306,6 +320,17 @@ type PoolExhaustedError struct {
 
 func (e PoolExhaustedError) Error() string {
 	return fmt.Sprintf("IDPool: pool exhausted (range=[%d..%d])", e.Min, e.Max)
+}
+
+// OutOfRangeError is returned when an explicit id is outside the pool range.
+type OutOfRangeError struct {
+	ID  uint32
+	Min uint32
+	Max uint32
+}
+
+func (e OutOfRangeError) Error() string {
+	return fmt.Sprintf("IDPool: id %d is outside allowed range [%d..%d]", e.ID, e.Min, e.Max)
 }
 
 // DuplicateIDError is returned when an id is already owned by another name.

@@ -58,52 +58,69 @@ func TestIDPool_GetOrCreate_MinimalReuse(t *testing.T) {
 	testIDPool[id0_7]{t, NewIDPool[id0_7]()}.
 		expectLen(0).
 		// allocate 0..7
-		getOrCreate("a", 0, "").
-		getOrCreate("b", 1, "").
-		getOrCreate("c", 2, "").
-		getOrCreate("d", 3, "").
-		getOrCreate("e", 4, "").
-		getOrCreate("f", 5, "").
-		getOrCreate("g", 6, "").
-		getOrCreate("h", 7, "").
+		getOrCreate("a", nil, 0, "").
+		getOrCreate("b", nil, 1, "").
+		getOrCreate("c", nil, 2, "").
+		getOrCreate("d", nil, 3, "").
+		getOrCreate("e", nil, 4, "").
+		getOrCreate("f", nil, 5, "").
+		getOrCreate("g", nil, 6, "").
+		getOrCreate("h", nil, 7, "").
 		expectLen(8).
 		// exhausted
-		getOrCreate("x", 0, "IDPool: pool exhausted (range=[0..7])").
+		getOrCreate("x", nil, 0, "IDPool: pool exhausted (range=[0..7])").
 		// release some, ensure minimal ids are reused
 		release("b").
 		release("d").
-		getOrCreate("x", 1, "").
-		getOrCreate("y", 3, "").
+		getOrCreate("x", nil, 1, "").
+		getOrCreate("y", nil, 3, "").
 		expectLen(8)
 }
 
-func TestIDPool_GetOrCreateWithID_Conflicts(t *testing.T) {
+func TestIDPool_GetOrCreate_WithID_Conflicts(t *testing.T) {
 	p := NewIDPool[id0_10]()
 
 	// register
-	if err := p.GetOrCreateWithID("a", id0_10(2)); err != nil {
-		t.Fatalf("expected GetOrCreateWithID to succeed, got %v", err)
+	{
+		id := id0_10(2)
+		if _, err := p.EnsureAllocated("a", &id); err != nil {
+			t.Fatalf("expected EnsureAllocated to succeed, got %v", err)
+		}
 	}
 	// idempotent
-	if err := p.GetOrCreateWithID("a", id0_10(2)); err != nil {
-		t.Fatalf("expected GetOrCreateWithID to be idempotent, got %v", err)
+	{
+		id := id0_10(2)
+		if _, err := p.EnsureAllocated("a", &id); err != nil {
+			t.Fatalf("expected EnsureAllocated to be idempotent, got %v", err)
+		}
 	}
 	// name conflict
-	if err := p.GetOrCreateWithID("a", id0_10(3)); err == nil || err.Error() != `IDPool: name "a" is already mapped to id 2 (requested 3)` {
-		t.Fatalf("expected NameConflictError, got %v", err)
+	{
+		id := id0_10(3)
+		if _, err := p.EnsureAllocated("a", &id); err == nil || err.Error() != `IDPool: name "a" is already mapped to id 2 (requested 3)` {
+			t.Fatalf("expected NameConflictError, got %v", err)
+		}
 	}
 	// duplicate id
-	if err := p.GetOrCreateWithID("b", id0_10(2)); err == nil || err.Error() != `IDPool: id 2 is already owned by "a"` {
-		t.Fatalf("expected DuplicateIDError, got %v", err)
+	{
+		id := id0_10(2)
+		if _, err := p.EnsureAllocated("b", &id); err == nil || err.Error() != `IDPool: id 2 is already owned by "a"` {
+			t.Fatalf("expected DuplicateIDError, got %v", err)
+		}
 	}
 	// max exceeded
-	assertPanics(t, func() { _ = p.GetOrCreateWithID("x", id0_10(11)) })
+	{
+		id := id0_10(11)
+		if _, err := p.EnsureAllocated("x", &id); err == nil || err.Error() != `IDPool: id 11 is outside allowed range [0..10]` {
+			t.Fatalf("expected OutOfRangeError, got %v", err)
+		}
+	}
 }
 
-func TestIDPool_BulkAdd_OrderAndErrors(t *testing.T) {
+func TestIDPool_Fill_OrderAndErrors(t *testing.T) {
 	p := NewIDPool[id0_3]()
 
-	errs := p.BulkAdd([]IDNamePair[id0_3]{
+	errs := p.Fill([]IDNamePair[id0_3]{
 		{ID: id0_3(0), Name: "a"}, // ok
 		{ID: id0_3(0), Name: "b"}, // dup id -> error (owned by a)
 		{ID: id0_3(1), Name: "b"}, // ok
@@ -121,25 +138,37 @@ func TestIDPool_BulkAdd_OrderAndErrors(t *testing.T) {
 	}
 
 	// Ensure successful ones are present.
-	if id, err := p.GetOrCreate("a"); err != nil || uint32(id) != 0 {
-		t.Fatalf("expected a=0, got id=%d err=%v", uint32(id), err)
+	if id, err := p.EnsureAllocated("a", nil); err != nil || id == nil || uint32(*id) != 0 {
+		var got uint32
+		if id != nil {
+			got = uint32(*id)
+		}
+		t.Fatalf("expected a=0, got id=%d err=%v", got, err)
 	}
-	if id, err := p.GetOrCreate("b"); err != nil || uint32(id) != 1 {
-		t.Fatalf("expected b=1, got id=%d err=%v", uint32(id), err)
+	if id, err := p.EnsureAllocated("b", nil); err != nil || id == nil || uint32(*id) != 1 {
+		var got uint32
+		if id != nil {
+			got = uint32(*id)
+		}
+		t.Fatalf("expected b=1, got id=%d err=%v", got, err)
 	}
 }
 
 func TestIDPool_Release_MinimalBecomesFreeAgain(t *testing.T) {
 	p := NewIDPool[id0_10]()
-	if _, err := p.GetOrCreate("a"); err != nil {
+	if _, err := p.EnsureAllocated("a", nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	p.Release("a")
 
 	// Now 0 should be minimal again.
-	if id, err := p.GetOrCreate("b"); err != nil || uint32(id) != 0 {
-		t.Fatalf("expected b=0, got id=%d err=%v", uint32(id), err)
+	if id, err := p.EnsureAllocated("b", nil); err != nil || id == nil || uint32(*id) != 0 {
+		var got uint32
+		if id != nil {
+			got = uint32(*id)
+		}
+		t.Fatalf("expected b=0, got id=%d err=%v", got, err)
 	}
 }
 
@@ -162,14 +191,15 @@ func TestIDPool_Bitmap_SparseReservationsAcrossRange(t *testing.T) {
 		2048: "r-2048",
 	}
 	for id, name := range reservedIDs {
-		if err := p.GetOrCreateWithID(name, id0_2048(id)); err != nil {
-			t.Fatalf("expected GetOrCreateWithID(%q,%d) to succeed, got %v", name, id, err)
+		idT := id0_2048(id)
+		if _, err := p.EnsureAllocated(name, &idT); err != nil {
+			t.Fatalf("expected EnsureAllocated(%q,&%d) to succeed, got %v", name, id, err)
 		}
 	}
 
 	allocated := map[uint32]struct{}{}
 	for {
-		id, err := p.GetOrCreate(fmt.Sprintf("free-%d", len(allocated)))
+		id, err := p.EnsureAllocated(fmt.Sprintf("free-%d", len(allocated)), nil)
 		if err != nil {
 			if err.Error() != "IDPool: pool exhausted (range=[0..2048])" {
 				t.Fatalf("expected max exceeded error, got %v", err)
@@ -177,7 +207,10 @@ func TestIDPool_Bitmap_SparseReservationsAcrossRange(t *testing.T) {
 			break
 		}
 
-		idU := uint32(id)
+		if id == nil {
+			t.Fatalf("expected non-nil id on success")
+		}
+		idU := uint32(*id)
 		if _, isReserved := reservedIDs[idU]; isReserved {
 			t.Fatalf("allocator returned reserved id %d", idU)
 		}
@@ -193,13 +226,14 @@ func TestIDPool_Bitmap_SparseReservationsAcrossRange(t *testing.T) {
 	}
 }
 
-func TestIDPool_BulkAdd_PanicsOnOutOfRange(t *testing.T) {
+func TestIDPool_Fill_ReturnsOutOfRangeError(t *testing.T) {
 	p := NewIDPool[id0_3]()
-	assertPanics(t, func() {
-		_ = p.BulkAdd([]IDNamePair[id0_3]{
-			{ID: id0_3(4), Name: "c"}, // exceeds -> panic
-		})
+	errs := p.Fill([]IDNamePair[id0_3]{
+		{ID: id0_3(4), Name: "c"}, // exceeds -> error
 	})
+	if len(errs) != 1 || errs[0] == nil || errs[0].Error() != `IDPool: id 4 is outside allowed range [0..3]` {
+		t.Fatalf("expected OutOfRangeError in errs[0], got %v", stringifyErrSlice(errs))
+	}
 }
 
 func TestIDPool_MinOffsetRepresentation(t *testing.T) {
@@ -212,17 +246,30 @@ func TestIDPool_MinOffsetRepresentation(t *testing.T) {
 		t.Fatalf("expected Max()=102, got %d", got)
 	}
 
-	id, err := p.GetOrCreate("a")
-	if err != nil || uint32(id) != 100 {
-		t.Fatalf("expected first allocation to be 100, got id=%d err=%v", uint32(id), err)
+	id, err := p.EnsureAllocated("a", nil)
+	if err != nil || id == nil || uint32(*id) != 100 {
+		var got uint32
+		if id != nil {
+			got = uint32(*id)
+		}
+		t.Fatalf("expected first allocation to be 100, got id=%d err=%v", got, err)
 	}
-	id, err = p.GetOrCreate("b")
-	if err != nil || uint32(id) != 101 {
-		t.Fatalf("expected second allocation to be 101, got id=%d err=%v", uint32(id), err)
+	id, err = p.EnsureAllocated("b", nil)
+	if err != nil || id == nil || uint32(*id) != 101 {
+		var got uint32
+		if id != nil {
+			got = uint32(*id)
+		}
+		t.Fatalf("expected second allocation to be 101, got id=%d err=%v", got, err)
 	}
 
 	// Out of range below min.
-	assertPanics(t, func() { _ = p.GetOrCreateWithID("x", id100_102(99)) })
+	{
+		x := id100_102(99)
+		if _, err := p.EnsureAllocated("x", &x); err == nil || err.Error() != `IDPool: id 99 is outside allowed range [100..102]` {
+			t.Fatalf("expected OutOfRangeError, got %v", err)
+		}
+	}
 }
 
 func TestIDPool_ErrorHelpers(t *testing.T) {
@@ -265,8 +312,20 @@ func TestIDPool_ErrorHelpers(t *testing.T) {
 	}
 
 	{
+		base := OutOfRangeError{ID: 99, Min: 100, Max: 102}
+		err := wrap(base)
+		if !IsOutOfRange(err) {
+			t.Fatalf("expected IsOutOfRange to be true for wrapped error, got false")
+		}
+		got, ok := AsOutOfRange(err)
+		if !ok || got.ID != base.ID || got.Min != base.Min || got.Max != base.Max {
+			t.Fatalf("unexpected AsOutOfRange result: ok=%v got=%v want=%v", ok, got, base)
+		}
+	}
+
+	{
 		err := wrap(fmt.Errorf("some other error"))
-		if IsDuplicateID(err) || IsPoolExhausted(err) || IsNameConflict(err) {
+		if IsDuplicateID(err) || IsPoolExhausted(err) || IsNameConflict(err) || IsOutOfRange(err) {
 			t.Fatalf("expected all Is* helpers to be false for non-idpool errors")
 		}
 	}
@@ -282,14 +341,20 @@ func assertPanics(t *testing.T, f func()) {
 	f()
 }
 
-func (tp testIDPool[T]) getOrCreate(name string, expectedID uint32, expectedErr string) testIDPool[T] {
+func (tp testIDPool[T]) getOrCreate(name string, id *T, expectedID uint32, expectedErr string) testIDPool[T] {
 	tp.Helper()
-	id, err := tp.GetOrCreate(name)
-	if uint32(id) != expectedID {
-		tp.Fatalf("expected GetOrCreate(%q) id %d, got %d", name, expectedID, uint32(id))
-	}
+	got, err := tp.EnsureAllocated(name, id)
 	if !errIsExpected(err, expectedErr) {
-		tp.Fatalf("expected GetOrCreate(%q) error %q, got %v", name, expectedErr, err)
+		tp.Fatalf("expected EnsureAllocated(%q, ...) error %q, got %v", name, expectedErr, err)
+	}
+
+	if expectedErr == "" {
+		if got == nil {
+			tp.Fatalf("expected EnsureAllocated(%q, ...) to return non-nil id", name)
+		}
+		if uint32(*got) != expectedID {
+			tp.Fatalf("expected EnsureAllocated(%q, ...) id %d, got %d", name, expectedID, uint32(*got))
+		}
 	}
 	return tp
 }

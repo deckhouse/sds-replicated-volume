@@ -142,6 +142,11 @@ func IsStatusConditionPresentAndFalse(obj StatusConditionObject, condType string
 
 // IsStatusConditionPresentAndSemanticallyEqual reports whether the condition with the same Type is present and semantically equal.
 func IsStatusConditionPresentAndSemanticallyEqual(obj StatusConditionObject, expected metav1.Condition) bool {
+	// This is consistent with SetStatusCondition, so we can use Generation from the object.
+	if expected.ObservedGeneration == 0 {
+		expected.ObservedGeneration = obj.GetGeneration()
+	}
+
 	actual := meta.FindStatusCondition(obj.GetStatusConditions(), expected.Type)
 	return actual != nil && ConditionSemanticallyEqual(actual, &expected)
 }

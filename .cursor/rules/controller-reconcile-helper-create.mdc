@@ -22,7 +22,7 @@ Summary only; if anything differs, follow normative sections below.
 - **CreateReconcileHelpers** (`create<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Create(...)` — for exactly one **object**.
 - They **MUST** create using the **caller-owned object instance** (`obj`) and, on success, the same instance **MUST** be updated with **API-server-assigned fields/defaults** (e.g. `uid`, `resourceVersion`, defaulted fields).
 - They **MUST NOT** perform any other **Kubernetes API I/O** calls (`Get/List/Update/Patch/Delete`), **MUST NOT** call **DeepCopy**, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision** decisions.
-- They **MUST NOT** write the **status subresource** as part of create (no `Status().Patch/Update`); any status write is a **separate request** done by **Reconcile methods**.
+- They **MUST NOT** write the **status subresource** as part of create (no `Status().Patch/Update`); any status write (publishing **report** and/or persisting **controller-owned state**) is a **separate request** done by **Reconcile methods**.
 - Everything they control (the create request payload) **MUST** be deterministic (no time/random/env-driven values; stable ordering where relevant).
 
 ---
@@ -134,14 +134,14 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - It **MUST NOT** write the status subresource as part of creation:
   - it **MUST NOT** issue `Status().Patch(...)` / `Status().Update(...)`;
   - it **MUST NOT** rely on setting `.status` in the create request.
-- If initial status must be set, it **MUST** be done by **Reconcile methods** as a **separate** status write (separate request).
+- If initial `.status` must be set (e.g., persisting **controller-owned state** and/or publishing an initial **report**), it **MUST** be done by **Reconcile methods** as a **separate** status write (separate request).
 
 ---
 
 ## Composition
 
 - A **CreateReconcileHelper** **MUST** perform exactly one API write (`Create(...)`) for exactly one object.
-- A **CreateReconcileHelper** **MAY** rely on pure helpers (compute/apply/ensure) to prepare the object **in-memory** before calling `Create(...)`, but it **MUST NOT** perform any additional API calls.
+- A **CreateReconcileHelper** **MAY** rely on pure helpers (**ComputeReconcileHelpers** / **ApplyReconcileHelpers** / **EnsureReconcileHelpers**) and/or **ConstructionReconcileHelpers** to prepare the object **in-memory** before calling `Create(...)`, but it **MUST NOT** perform any additional API calls.
 - If creating an object requires multiple API writes (e.g., create main resource and then write status), those writes **MUST** be composed in **Reconcile methods** as separate operations, not hidden inside the create helper.
 - If multiple objects must be created (loops, groups, fan-out), that orchestration **MUST** live in **Reconcile methods**; create helpers must remain single-object.
 
@@ -227,7 +227,7 @@ func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
 ❌ Writing status as part of create (or “relying on status in the create request”):
 ```go
 func (r *Reconciler) createEON(ctx context.Context, obj *v1alpha1.EON) error {
-    obj.Status.Phase = "Ready" // forbidden: do not rely on status during create
+    obj.Status.Phase = "Ready" // forbidden: status writes (report/controller-owned state) are a separate request
     if err := r.client.Create(ctx, obj); err != nil {
         return err
     }

@@ -14,7 +14,7 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ---
 
-## Terminology (MUST)
+## Terminology
 
 > Terms like “main resource”, “status subresource”, and patch-domain boundaries are defined in
 > `controller-reconcile-helper*.mdc`.
@@ -50,10 +50,9 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **MAY**.
 
 ---
 
-## Patch sequencing policy (MUST)
+## Patch sequencing policy
 
 Reconcile methods **MUST** be the only place that decides:
-
 - whether a patch request is needed;
 - the order of multiple patch requests (including main vs status sequencing);
 - how outcomes/errors from multiple sub-steps are aggregated;
@@ -63,18 +62,18 @@ Single-call API writes may be delegated to helpers, but **the sequencing policy 
 
 ---
 
-## DeepCopy & patch-base rules (MUST)
+## DeepCopy & patch-base rules
 
-### DeepCopy is per patch request (MUST)
+### DeepCopy is per patch request
 
 - For every patch request, the Reconcile method **MUST** create **exactly one**
-  patch base via `obj.DeepCopy()` **immediately before** that patch request.
+  patch base via `obj.DeepCopy()` **immediately before** the object is mutated in that **patch domain** (and then used for the subsequent patch request).
 - The patch base variable name **MUST** be `base`.
 
 If a Reconcile method performs multiple patch requests:
 
 - it **MUST** create multiple `base` objects (one per patch request);
-- each `base` **MUST** be taken from the object state **immediately before** that specific patch;
+- each `base` **MUST** be taken from the object state **immediately before** that **patch domain** is mutated for that specific patch request;
 - after patch #1 updates the object, patch #2 **MUST** take `base` from the updated object
   to preserve correct diff and `resourceVersion`.
 
@@ -82,7 +81,27 @@ Go note (no extra lexical scopes required):
 
 ```go
 var base *ObjT
-base = obj.DeepCopy() // immediately before each patch
+
+
+base = obj.DeepCopy()
+
+// ApplyReconcileHelpers (or EnsureReconcileHelpers) bring `obj` to the intended in-memory state for this patch domain.
+applyMainLabels(obj, targetLabels)
+applyMainSpec(obj, targetSpec)
+
+if err := patchObj(ctx, obj, base); err != nil {
+    return err
+}
+
+base = obj.DeepCopy()
+
+// ApplyReconcileHelpers (or EnsureReconcileHelpers) bring `obj` to the intended in-memory state for this patch domain.
+applyStatusReport(obj, report)
+applyStatusConditions(obj, reportConditions)
+
+if err := patchObjStatus(ctx, obj, base); err != nil {
+    return err
+}
 ```
 
 ### `base` is a read-only diff reference (MUST)
@@ -123,26 +142,32 @@ it **MUST** append/insert the created objects in their final in-memory state
 
 ### Pattern selection rule (MUST)
 
-- Each Reconcile method **MUST** choose exactly one pattern.
+- Each **Reconcile method** **MUST** choose exactly one pattern.
 - The choice **MUST** be documented in GoDoc.
 
 ### Pattern 1: In-place reconciliation
 
-Ensure/Mutate → Detect → Patch
+ObjCopy → Ensure #1 → Ensure #2 → ... → if changed → Patch
 
 Use when reconciliation is naturally step-by-step and imperative.
 
-### Pattern 2: Desired-state driven
+### Pattern 2 (default): Target-state driven
 
-computeDesired → isUpToDate → apply → patch
+ComputeTarget #1 → ComputeTarget #2 → ... → if !all isUpToDate → ObjCopy → Apply those not upToDate → Patch
 
-Use when desired state is compact and comparison is trivial.
+Use when computing the target is cheap/necessary and the up-to-date check naturally depends on the computed target.
 
-### Pattern 3 (default): Conditional desired evaluation
+### Pattern 3: Conditional desired evaluation
 
-computeDesiredIfNeeded → apply → patch
+if ! isUpToDate → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
 
-Default declarative style; avoids `DeepCopy` when no patch is needed.
+Use when it is easy to check up-to-date equality without computing state.
+
+### Pattern 4: Pure orchestration
+
+reconcile #1 → reconcile #2 → ... → reconcile #N
+
+Use when the **Reconcile method** is a thin orchestrator that delegates all work to other **Reconcile methods**, and does not implement **domain/business** logic itself (except basic object loading and delegation).
 
 ---
 
@@ -178,41 +203,6 @@ Allowed:
 - If unblocked by **unwatched** events:
   - return an error, or
   - requeue only with clear justification and visible status signal.
-
----
-
-## Error wrapping & context (MUST)
-
-- Errors propagated upward **MUST** be wrapped with context.
-- Errors **MUST** describe:
-  - what action failed,
-  - at what orchestration step / responsibility boundary.
-
-### Error identity rules (MUST)
-
-- Do **NOT** include the primary reconcile object identity (`name` / `namespace`)
-  or controller identity in the error string:
-  - controller-runtime logger already carries:
-    `controller`, `controllerGroup`, `controllerKind`,
-    `name`, `namespace` (when namespaced), `reconcileID`.
-- Duplicating them in error strings is forbidden noise.
-
-### Secondary / child identities (MUST)
-
-- If reconciliation targets **secondary / child resources**,
-  you **MUST** include that resource identity in the error
-  (`namespace/name` or `name` for cluster-scoped resources).
-
-Rationale:
-- controller-runtime logger identity refers only to the **primary** reconcile object.
-
----
-
-## API helpers vs controller business logic (MUST)
-
-- Mechanical helpers (`Get/Set/Has`) **MUST** live on API types.
-- No business decisions in API helpers.
-- Business logic stays in Reconcile methods and ReconcileHelpers.
 
 ---
 

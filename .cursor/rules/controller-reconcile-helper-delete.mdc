@@ -21,7 +21,7 @@ Summary only; if anything differs, follow normative sections below.
 
 - **DeleteReconcileHelpers** (`delete<Kind>`) are **single-call I/O helpers**: they perform exactly **one** **Kubernetes API I/O** write — `Delete(...)` — for exactly one **object** (or treat NotFound as “already absent”, depending on policy).
 - They **MUST NOT** perform any other **Kubernetes API I/O** calls (`Get/List/Create/Update/Patch`), **MUST NOT** call **DeepCopy**, and **MUST NOT** execute patches or make **patch ordering** / **patch type decision** decisions.
-- They **MUST NOT** mutate the **object** as part of deletion (no “marking”, no finalizer edits, no status writes); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via a **separate** ensure/apply + patch step **before** calling delete.
+- They **MUST NOT** mutate the **object** as part of deletion (no “marking”, no finalizer edits, no status writes — no publishing **report** and no persisting **controller-owned state**); any prerequisite mutations (e.g., finalizer removal) are done by **Reconcile methods** via a **separate** ensure/apply + patch step **before** calling delete.
 - Everything they control **MUST** be deterministic (no time/random/env-driven behavior; consistent NotFound handling).
 
 ---
@@ -142,6 +142,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 - A **DeleteReconcileHelper** **MUST** perform exactly one API write (`Delete(...)`) for exactly one object.
 - Any prerequisite mutations (e.g., removing finalizers) **MUST** be composed in **Reconcile methods** (ensure/apply + patch) and **MUST NOT** be hidden inside the delete helper.
 - If multiple objects must be deleted (loops, groups, fan-out), that orchestration **MUST** live in **Reconcile methods**; delete helpers must remain single-object.
+- A **DeleteReconcileHelper** **MUST NOT** call other **ReconcileHelpers**.
 
 ---
 
@@ -198,7 +199,7 @@ func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
 ```go
 func (r *Reconciler) deleteEON(ctx context.Context, obj *v1alpha1.EON) error {
     obj.Finalizers = nil          // forbidden: mutation belongs to ensure/apply + patch
-    obj.Status.Phase = "Deleting" // forbidden: status write belongs elsewhere
+    obj.Status.Phase = "Deleting" // forbidden: status writes (report/controller-owned state) belong elsewhere
     return r.client.Delete(ctx, obj)
 }
 ```

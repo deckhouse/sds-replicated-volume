@@ -130,7 +130,7 @@ func initReconcilerFromClient(ctx context.Context, cl client.Client) *rvcontroll
 		}
 	}
 
-	errs := pool.BulkAdd(pairs)
+	errs := pool.Fill(pairs)
 	for i, err := range errs {
 		ExpectWithOffset(1, err).To(Succeed(), "should initialize pool from existing rv deviceMinor values (pair index=%d)", i)
 	}

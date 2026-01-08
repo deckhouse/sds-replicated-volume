@@ -37,6 +37,12 @@ func IsNameConflict(err error) bool {
 	return ok
 }
 
+// IsOutOfRange reports whether err is (or wraps) an OutOfRangeError.
+func IsOutOfRange(err error) bool {
+	_, ok := AsOutOfRange(err)
+	return ok
+}
+
 // AsDuplicateID extracts a DuplicateIDError from err (including wrapped errors).
 func AsDuplicateID(err error) (DuplicateIDError, bool) {
 	var e DuplicateIDError
@@ -62,4 +68,13 @@ func AsNameConflict(err error) (NameConflictError, bool) {
 		return e, true
 	}
 	return NameConflictError{}, false
+}
+
+// AsOutOfRange extracts an OutOfRangeError from err (including wrapped errors).
+func AsOutOfRange(err error) (OutOfRangeError, bool) {
+	var e OutOfRangeError
+	if errors.As(err, &e) {
+		return e, true
+	}
+	return OutOfRangeError{}, false
 }

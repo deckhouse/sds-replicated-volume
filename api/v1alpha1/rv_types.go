@@ -17,8 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -140,65 +138,6 @@ const (
 func (DeviceMinor) Min() uint32 { return deviceMinorMin }
 
 func (DeviceMinor) Max() uint32 { return deviceMinorMax }
-
-func (d DeviceMinor) Validate() error {
-	v := uint32(d)
-	if v < d.Min() || v > d.Max() {
-		return DeviceMinorOutOfRangeError{Min: d.Min(), Max: d.Max(), Requested: v}
-	}
-	return nil
-}
-
-// DeviceMinorOutOfRangeError reports that a uint32 value is outside the allowed DeviceMinor range.
-// +kubebuilder:object:generate=false
-type DeviceMinorOutOfRangeError struct {
-	Min       uint32
-	Max       uint32
-	Requested uint32
-}
-
-func (e DeviceMinorOutOfRangeError) Error() string {
-	return fmt.Sprintf("DeviceMinor: value %d is outside allowed range [%d..%d]", e.Requested, e.Min, e.Max)
-}
-
-func (s *ReplicatedVolumeStatus) HasDeviceMinor() bool {
-	return s != nil && s.DeviceMinor != nil
-}
-
-func (s *ReplicatedVolumeStatus) GetDeviceMinor() (DeviceMinor, bool) {
-	if s == nil || s.DeviceMinor == nil {
-		return 0, false
-	}
-	return *s.DeviceMinor, true
-}
-
-func (s *ReplicatedVolumeStatus) SetDeviceMinor(v DeviceMinor) (changed bool) {
-	if s.DeviceMinor != nil && *s.DeviceMinor == v {
-		return false
-	}
-	s.DeviceMinor = &v
-	return true
-}
-
-func (s *ReplicatedVolumeStatus) SetDeviceMinorPtr(deviceMinor *DeviceMinor) (changed bool) {
-	if deviceMinor == nil {
-		return s.ClearDeviceMinor()
-	}
-	return s.SetDeviceMinor(*deviceMinor)
-}
-
-func (s *ReplicatedVolumeStatus) DeviceMinorEquals(deviceMinor *DeviceMinor) bool {
-	current, ok := s.GetDeviceMinor()
-	return deviceMinor == nil && !ok || deviceMinor != nil && ok && current == *deviceMinor
-}
-
-func (s *ReplicatedVolumeStatus) ClearDeviceMinor() (changed bool) {
-	if s == nil || s.DeviceMinor == nil {
-		return false
-	}
-	s.DeviceMinor = nil
-	return true
-}
 
 // +kubebuilder:object:generate=true
 type DRBDResource struct {

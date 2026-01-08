@@ -20,9 +20,10 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **IsUpToDateReconcileHelpers** (`is*UpToDate`) are tiny, **pure**, **deterministic**, strictly **non-I/O** boolean checks.
-- They compare the current `obj` state to a single **desired value** for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) and return `true/false`.
+- They compare the current `obj` state to a single **target** (and/or **report**) value for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) and return `true/false`.
+- For status **report/observations**, the compared “**report**” value **MAY** be directly reused from selected **actual** observations (including being the same value/type as an **actual** snapshot) when publishing observations verbatim to `.status`.
 - They **SHOULD NOT** return errors, **MUST NOT** do **Outcome control flow**, and **MUST NOT** log.
-- They treat `obj` and `desired` as **read-only inputs** (no mutations, including via map/slice **Aliasing**; **Clone** before any normalization).
+- They treat `obj` and `target` / `report` as **read-only inputs** (no mutations, including via map/slice **Aliasing**; **Clone** before any normalization).
 
 ---
 
@@ -31,10 +32,10 @@ Summary only; if anything differs, follow normative sections below.
 An **IsUpToDateReconcileHelper** (“up-to-date helper”) is a **ReconcileHelper** that is:
 
 - **strictly non-I/O**, and
-- checks whether the current object state is **already equal to the desired state** for **exactly one patch domain** (**main resource** or **status subresource**), and
+- checks whether the current object state is already equal to the intended **target** (and/or published **report**) for **exactly one patch domain** (**main resource** or **status subresource**), and
 - returns a boolean result.
 
-Typical up-to-date helpers gate patch execution by answering “do we need to patch this domain?” for a single desired input.
+Typical up-to-date helpers gate patch execution by answering “do we need to patch this domain?” for a single **target**/**report** input.
 
 ---
 
@@ -45,12 +46,12 @@ Typical up-to-date helpers gate patch execution by answering “do we need to pa
   - `isMain*UpToDate` / `IsMain*UpToDate` / `is*MainUpToDate` / `Is*MainUpToDate`
   - `isStatus*UpToDate` / `IsStatus*UpToDate` / `is*StatusUpToDate` / `Is*StatusUpToDate`
 - **IsUpToDateReconcileHelpers** **SHOULD NOT** include `Main` / `Status` in the name when there is no such ambiguity.
-- **IsUpToDateReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` unless the checked “thing” name includes `Desired` / `Actual`.
+- **IsUpToDateReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the checked “thing” name in the **object** API includes those words.
 - **IsUpToDateReconcileHelpers** names **SHOULD** name the “thing” being checked for drift:
-  - `isLabelsUpToDate(obj, desiredLabels)`
-  - `isSpecFooUpToDate(obj, desiredFoo)`
-  - `isStatusUpToDate(obj, desiredStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
-  - `isConditionsUpToDate(obj, desiredConditions)`
+  - `isLabelsUpToDate(obj, targetLabels)`
+  - `isSpecFooUpToDate(obj, targetFoo)`
+  - `isStatusUpToDate(obj, targetStatus)` (ok when status is small; otherwise prefer artifact-specific checks)
+  - `isConditionsUpToDate(obj, reportConditions)` (when checking published **report** conditions)
 - **IsUpToDateReconcileHelpers** names **SHOULD NOT** be generic (`isUpToDate`, `isEverythingUpToDate`) — the name should communicate the **patch domain** + artifact being compared.
 
 ---
@@ -62,7 +63,7 @@ Typical up-to-date helpers gate patch execution by answering “do we need to pa
 
 ### Simple check (no flow, no logging)
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool
 ```
 
 ---
@@ -110,7 +111,7 @@ In particular, avoid producing “equivalent but different” intermediate repre
 
 `is*UpToDate` / `Is*UpToDate` **MUST** treat all inputs as read-only:
 
-- it **MUST NOT** mutate any input values (including `obj`, `desired`, and any other args);
+- it **MUST NOT** mutate any input values (including `obj`, `target` / `report`, and any other args);
 - it **MUST NOT** perform in-place modifications through aliases.
 
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
@@ -126,16 +127,16 @@ See the common read-only contract in `controller-reconcile-helper.mdc` (especial
 
 ✅ Main-only / status-only (GOOD)
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFooMain) bool
-func isFooStatusUpToDate(obj *v1alpha1.Foo, desired DesiredFooStatus) bool
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFooMain) bool
+func isFooStatusUpToDate(obj *v1alpha1.Foo, report FooReport) bool
 ```
 
 ❌ Mixed domains in one helper (BAD)
 ```go
 func isFooUpToDate(
     obj *v1alpha1.Foo,
-    desiredMain DesiredFooMain,
-    desiredStatus DesiredFooStatus,
+    targetMain TargetFooMain,
+    report FooReport,
 ) bool
 ```
 
@@ -148,6 +149,7 @@ func isFooUpToDate(
 - An **IsUpToDateReconcileHelper** **MAY** call other `is*UpToDate` helpers for reuse (pure composition).
   - It **SHOULD NOT** use such calls to compose independent checks; independent checks should be composed in Reconcile methods.
 - If checks are meaningfully independent and will be used separately, they **SHOULD** be split into separate `is*UpToDate` helpers and composed in Reconcile methods (not inside the helper).
+- An **IsUpToDateReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other **Helper categories**.
 
 ---
 
@@ -174,7 +176,7 @@ func isFooUpToDate(
 
 ❌ Doing any Kubernetes API I/O (directly or indirectly):
 ```go
-func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) bool {
+func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool {
     // forbidden: I/O in IsUpToDate helper
     var cm corev1.ConfigMap
     _ = r.client.Get(ctx, nn, &cm)
@@ -184,21 +186,21 @@ func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) b
 
 ❌ Returning `error` as part of the signature when it is avoidable:
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) (bool, error) { // avoid
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) (bool, error) { // avoid
     return true, nil
 }
 ```
 
 ❌ Doing flow control / returning `flow.Outcome`:
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) flow.Outcome { // forbidden
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) flow.Outcome { // forbidden
     return flow.Continue()
 }
 ```
 
 ❌ Logging or creating phases (no `ctx`, no logs):
 ```go
-func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) bool { // forbidden shape
+func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, target TargetFoo) bool { // forbidden shape
     l := log.FromContext(ctx)
     l.Info("checking up-to-date") // forbidden: no logging
     return true
@@ -207,7 +209,7 @@ func isFooUpToDate(ctx context.Context, obj *v1alpha1.Foo, desired DesiredFoo) b
 
 ❌ Calling `DeepCopy`:
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
     _ = obj.DeepCopy() // forbidden
     return true
 }
@@ -215,23 +217,23 @@ func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
 
 ❌ Mutating `obj` (even “harmless” changes):
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
-    obj.Spec.Replicas = desired.Replicas // forbidden: IsUpToDate is read-only
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
+    obj.Spec.Replicas = target.Replicas // forbidden: IsUpToDate is read-only
     return false
 }
 ```
 
-❌ Mutating `desired`:
+❌ Mutating `target` / `report`:
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
-    desired.Replicas = 3 // forbidden: desired is read-only
-    return obj.Spec.Replicas == desired.Replicas
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
+    target.Replicas = 3 // forbidden: target is read-only
+    return obj.Spec.Replicas == target.Replicas
 }
 ```
 
 ❌ Mutating through aliasing (maps/slices from inputs):
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
     ids := obj.Spec.IDs
     slices.Sort(ids) // forbidden: sorts in place and mutates obj
     return true
@@ -240,23 +242,23 @@ func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
 
 ❌ Depending on map iteration order (nondeterministic boolean):
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
     // obj.Spec.Flags is a map[string]bool
     got := make([]string, 0, len(obj.Spec.Flags))
     for k := range obj.Spec.Flags { // map iteration order is random
         got = append(got, k)
     }
-    // comparing to desired.Keys without sorting => nondeterministic result
-    return reflect.DeepEqual(got, desired.Keys)
+    // comparing to target.Keys without sorting => nondeterministic result
+    return reflect.DeepEqual(got, target.Keys)
 }
 ```
 
 ❌ Checking both patch domains in one helper:
 ```go
-func isFooUpToDate(obj *v1alpha1.Foo, desired DesiredFoo) bool {
+func isFooUpToDate(obj *v1alpha1.Foo, target TargetFoo) bool {
     // forbidden: mixes main + status checks
-    mainOK := obj.Spec.Replicas == desired.Replicas
-    statusOK := obj.Status.Phase == desired.Phase
+    mainOK := obj.Spec.Replicas == target.Replicas
+    statusOK := obj.Status.Phase == target.Phase
     return mainOK && statusOK
 }
 ```

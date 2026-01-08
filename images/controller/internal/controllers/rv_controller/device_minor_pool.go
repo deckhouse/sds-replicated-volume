@@ -163,15 +163,11 @@ func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.
 		return nil, fmt.Errorf("listing rvs: %w", err)
 	}
 
-	// Filter only RVs with deviceMinor set and valid.
+	// Filter only RVs with deviceMinor set.
 	rvs := make([]*v1alpha1.ReplicatedVolume, 0, len(rvList.Items))
 	for i := range rvList.Items {
 		rv := &rvList.Items[i]
-		if !rv.Status.HasDeviceMinor() {
-			continue
-		}
-		if err := rv.Status.DeviceMinor.Validate(); err != nil {
-			c.log.Error(err, "deviceMinor is invalid", "rv", rv.Name, "deviceMinor", *rv.Status.DeviceMinor)
+		if rv.Status.DeviceMinor == nil {
 			continue
 		}
 		rvs = append(rvs, rv)
@@ -200,7 +196,7 @@ func (c *DeviceMinorPoolInitializer) doInitialize(ctx context.Context) (*idpool.
 			ID:   *rv.Status.DeviceMinor,
 		})
 	}
-	bulkErrs := pool.BulkAdd(pairs)
+	bulkErrs := pool.Fill(pairs)
 
 	// Report errors.
 	for i, rv := range rvs {

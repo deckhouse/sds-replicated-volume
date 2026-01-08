@@ -19,8 +19,8 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 Summary only; if anything differs, follow normative sections below.
 
-- **EnsureReconcileHelpers** (`ensure*`) are **pure**, **deterministic**, strictly **non-I/O** in-place steps for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) that compute **desired state** (or invariants) and immediately bring `obj` to it.
-- They mutate the caller-owned `obj` to the computed **desired state** and return **Outcome** (in code: `flow.Outcome`) that encodes:
+- **EnsureReconcileHelpers** (`ensure*`) are **pure**, **deterministic**, strictly **non-I/O** in-place steps for **exactly one** **patch domain** (**main patch domain** or **status patch domain**) that compute/enforce the per-step **target** (and/or status **report**) and immediately bring `obj` to it.
+- They mutate the caller-owned `obj` to the computed **target** / **report** and return **Outcome** (in code: `flow.Outcome`) that encodes:
   - whether `obj` was changed,
   - whether the subsequent save requires **Optimistic locking**,
   - and whether an error occurred.
@@ -36,10 +36,19 @@ Summary only; if anything differs, follow normative sections below.
 An **EnsureReconcileHelper** (“ensure helper”) is a **ReconcileHelper** that is:
 
 - **strictly non-I/O**, and
-- computes desired state (or invariants) and immediately performs in-place mutations on the object to bring it to that desired state for **exactly one patch domain** (**main resource** or **status subresource**), and
+- computes/enforces the per-step **target** (and/or status **report**) and immediately performs in-place mutations on the object to bring it to that state for **exactly one patch domain** (**main resource** or **status subresource**), and
 - returns a `flow.Outcome` that reports whether it changed the object, whether optimistic locking is required for the save operation (if any), and whether an error occurred.
 
 Typical ensure helpers implement step-by-step in-place reconciliation and return `flow.Outcome` (e.g., via `flow.Continue().ReportChanged()`, `flow.ContinueErr(...)`, `flow.Done()`, `flow.Fail(err)`, etc.) to drive patching decisions in **Reconcile methods**.
+
+Notes on `.status` (role vs location):
+- A status-domain ensure helper may write both:
+  - **controller-owned state** (persisted decisions/memory derived from **target**), and/or
+  - the published **report** (conditions/progress/selected observations).
+- The published **report** **MAY** directly reuse selected **actual** observations (including being the same value/type as an **actual** snapshot). Persisting such observations into `.status` is OK and they remain **report/observations** (output-only).
+- Status-domain ensure helpers **MUST NOT** treat existing **report/observations** as “intent/config inputs” for new **target** decisions.
+  - However, they **MAY** use existing **report/observations** (including previously published report fields in `.status`) as observation/constraint inputs (i.e., as a cached/stale form of **actual**) when deriving a new **target**.
+  - If prior decisions must be stable across reconciles, that input **MUST** come from explicit **controller-owned state** fields (by design), not from arbitrary report fields.
 
 ---
 
@@ -53,8 +62,10 @@ Typical ensure helpers implement step-by-step in-place reconciliation and return
 - **EnsureReconcileHelpers** names **SHOULD** name the invariant or property being ensured:
   - `ensureFinalizer(...)`
   - `ensureOwnerRefs(...)`
-  - `ensureDesiredLabels(...)`
-  - `ensureStatusConditions(...)`
+  - `ensureLabels(...)`
+  - `ensureStatusConditions(...)` (conditions are typically part of the published **report**)
+- **EnsureReconcileHelpers** names **MUST NOT** include `Desired` / `Actual` / `Intended` / `Target` / `Report` unless the applied “thing” name in the **object** API includes those words.
+  - Exception: helpers that explicitly build/publish a status **report** artifact **MAY** end with `Report` when it improves clarity (e.g., `ensureStatusReport`, `ensureConditionsReport`).
 - **EnsureReconcileHelpers** names **MUST NOT** sound like orchestration (`ensureAll`, `ensureEverything`, `ensureAndPatch`) — ensure helpers do not execute **I/O**; they only mutate and return **Outcome** (in code, the type is `flow.Outcome`).
 
 ---
@@ -96,7 +107,7 @@ Dependencies **MUST** be explicit and come **after `obj`**:
 func ensureBar(
     ctx context.Context,
     obj *v1alpha1.Foo,
-    desiredFoo DesiredFoo,
+    targetFoo TargetFoo,
 ) flow.Outcome
 ```
 
@@ -105,7 +116,7 @@ Or, if an ensure helper needs data from `Reconciler`:
 func (r *Reconciler) ensureBar(
     ctx context.Context,
     obj *v1alpha1.Foo,
-    desiredFoo DesiredFoo,
+    targetFoo TargetFoo,
 ) flow.Outcome
 ```
 
@@ -137,7 +148,7 @@ func (r *Reconciler) ensureBar(
 
 **EnsureReconcileHelpers** **MAY** request **Optimistic locking** by encoding it in the returned `flow.Outcome`, but they **MUST NOT** perform the save operation themselves.
 
-> Rationale: ensure helpers should be **deterministic** and unit-testable; they describe intended changes (and save-mode requirements), while the actual persistence belongs to **Reconcile methods**.
+> Rationale: ensure helpers should be **deterministic** and unit-testable; they describe the in-memory mutations required to reach the chosen **target** and/or publish the status **report** (and any save-mode requirements), while the actual persistence belongs to **Reconcile methods**.
 
 ---
 
@@ -148,8 +159,8 @@ An **EnsureReconcileHelper** **MUST** be **deterministic** given its explicit in
 See the common determinism contract in `controller-reconcile-helper.mdc`.
 
 In particular:
-- **EnsureReconcileHelpers** **MAY** use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, unique ID pools, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
-  - Note: cache population or allocating an ID from a pool is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result **MUST** be the same.
+- **EnsureReconcileHelpers** **MAY** use extracted computation/caching components owned by the reconciler (e.g. “world view” / “planner” / “topology scorer”, caches), as described in `controller-file-structure.mdc` (“Additional components”), as long as they do not violate the I/O boundaries above.
+  - Note: cache population is a side effect and an additional source of state; therefore, the helper is deterministic only relative to that state. For the same explicit inputs and the same state of these components, the result **MUST** be the same.
 - Returned `flow.Outcome` flags (changed / optimisticLock / error) **MUST** be stable for the same inputs and object state.
 
 > Practical reason: nondeterminism creates patch churn and flaky tests.
@@ -164,8 +175,8 @@ In particular:
 - it **MUST** mutate only the intended patch domain on `obj` (main resource **or** status subresource), treating the other domain as read-only;
 - it **MUST NOT** perform in-place modifications through aliases to non-`obj` data.
 
-Note: reconciler-owned deterministic components (e.g. caches, `idpool`) are allowed mutation targets in `ensure*` helpers **only** under the constraints defined above (non-I/O, explicit dependency, deterministic relative to the component state).
-If an `ensure*` helper mutates such a component, its GoDoc comment **MUST** explicitly state that this helper mutates reconciler-owned deterministic state (e.g. `idpool` allocation) and why this is acceptable (rare-case exception).
+Note: reconciler-owned deterministic components (e.g. caches) are allowed mutation targets in `ensure*` helpers **only** under the constraints defined above (non-I/O, explicit dependency, deterministic relative to the component state).
+If an `ensure*` helper mutates such a component, its GoDoc comment **MUST** explicitly state that this helper mutates reconciler-owned deterministic state and why this is acceptable (rare-case exception).
 
 See the common read-only contract in `controller-reconcile-helper.mdc` (especially the Go aliasing rule for `map` / `[]T`).
 
@@ -201,6 +212,7 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
   - If these steps represent one conceptual invariant set, they **SHOULD** remain in one ensure helper.
   - If steps are distinguishable and reused independently, they **SHOULD** be extracted into smaller ensure helpers.
 - An **EnsureReconcileHelper** **MAY** call other ensure helpers (compose “sub-ensures”).
+- An **EnsureReconcileHelper** **MAY** call **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure building blocks, as long as it stays strictly **non-I/O** and **deterministic**.
 - An **EnsureReconcileHelper** **MAY** depend on outputs of previous compute helpers:
   - the dependency **MUST** be explicit in the signature as additional args **after `obj`**.
 - If an **EnsureReconcileHelper** composes multiple sub-ensures, it **MUST** combine their results deterministically:
@@ -307,7 +319,7 @@ func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
 ```go
 func ensureFoo(obj *v1alpha1.Foo) flow.Outcome {
     obj.Spec.Replicas = 3            // main domain
-    obj.Status.Phase = "Reconciling" // status domain
+    obj.Status.Phase = "Reconciling" // status domain (typically published **report**)
     // forbidden: ensure must touch exactly one patch domain
     return flow.Continue().ReportChanged()
 }
