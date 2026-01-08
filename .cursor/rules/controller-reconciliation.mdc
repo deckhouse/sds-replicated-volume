@@ -153,13 +153,13 @@ Use when reconciliation is naturally step-by-step and imperative.
 
 ### Pattern 2 (default): Target-state driven
 
-ComputeTarget #1 → ComputeTarget #2 → ... → if !all isUpToDate → ObjCopy → Apply those not upToDate → Patch
+ComputeTarget #1 → ComputeTarget #2 → ... → if !all isInSync → ObjCopy → Apply those not InSync → Patch
 
 Use when computing the target is cheap/necessary and the up-to-date check naturally depends on the computed target.
 
 ### Pattern 3: Conditional desired evaluation
 
-if ! isUpToDate → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
+if ! isInSync → ObjCopy → Ensure OR (ComputeTarget + Apply) → Patch
 
 Use when it is easy to check up-to-date equality without computing state.
 

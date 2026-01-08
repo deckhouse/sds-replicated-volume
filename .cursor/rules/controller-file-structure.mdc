@@ -29,7 +29,7 @@ alwaysApply: true
         - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`)
           - Common sub-families: `computeIntended*`, `computeActual*`, `computeTarget*`, `compute*Report`.
         - **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`)
-        - **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`)
+        - **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`)
         - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`)
         - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`)
         - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`)

@@ -234,7 +234,7 @@ See the common read-only contract in `controller-reconcile-helper.mdc`.
 - **ConstructionReconcileHelpers** are “building blocks”.
 - **ConstructionReconcileHelpers** are typically used inside **ComputeReconcileHelpers** and **EnsureReconcileHelpers**.
 - A **ConstructionReconcileHelper** **MAY** call other **ConstructionReconcileHelpers** (`new*`, `build*`, `make*`, `compose*`) as pure sub-steps.
-- A **ConstructionReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other helper categories (`compute*`, `apply*`, `ensure*`, `patch*`, `create*`, `delete*`, `is*UpToDate`).
+- A **ConstructionReconcileHelper** **MUST NOT** call **ReconcileHelpers** from other helper categories (`compute*`, `apply*`, `ensure*`, `patch*`, `create*`, `delete*`, `is*InSync`).
   - If you need those semantics, move the orchestration to the caller (typically a compute/ensure helper or a Reconcile method).
 - If a function’s primary purpose is to produce **intended**/**actual**/**target**/**report** as part of reconciliation, you **SHOULD** prefer `compute*` naming and use **ConstructionReconcileHelpers** internally for sub-steps.
 

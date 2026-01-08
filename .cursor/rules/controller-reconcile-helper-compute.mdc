@@ -26,7 +26,7 @@ Summary only; if anything differs, follow normative sections below.
 - They **MUST NOT** perform **Kubernetes API I/O**, call **DeepCopy**, execute patches, or make any **patch ordering** / **patch type decision** decisions.
 - If a **ComputeReconcileHelper** returns **Outcome** (in code: `flow.Outcome`), it **MUST** use it only for **flow control** (continue/done/requeue) and/or **errors**.
 - A **ComputeReconcileHelper** **MUST NOT** use **Outcome** change tracking (`ReportChanged`, `ReportChangedIf`) or **Optimistic-lock signaling** (`RequireOptimisticLock`).
-- If `computeTarget*` derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**) that will later be used by **IsUpToDateReconcileHelper** and/or **ApplyReconcileHelper**, it **MUST** return **two separate** values (**target main** + **target status**), not a mixed struct.
+- If `computeTarget*` derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**) that will later be used by **IsInSyncReconcileHelper** and/or **ApplyReconcileHelper**, it **MUST** return **two separate** values (**target main** + **target status**), not a mixed struct.
 - New code **MUST NOT** introduce `computeDesired*` helpers. Replace legacy “desired” helpers with **intended**/**target**/**report** helpers.
 - If a **ComputeReconcileHelper** depends on previous compute output, the dependency **MUST** be explicit in the signature as args **after `obj`**.
 
@@ -324,7 +324,7 @@ func (r *Reconciler) computeIntendedX(ctx context.Context, obj *v1alpha1.X, out 
 ## Patch-domain separation
 
 - `computeIntended*` / `ComputeIntended*`, `computeActual*` / `ComputeActual*`, `computeTarget*` / `ComputeTarget*`, and `compute*Report` / `Compute*Report` **MAY** analyze **both** **patch domains** (**main patch domain** and **status patch domain**) as inputs.
-- If a `computeTarget*` helper derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**), and those **target** values will later be used by `IsUpToDate` and/or `Apply`, it **MUST** return **two separate** values (**target main** + **target status**), not a single “mixed” struct.
+- If a `computeTarget*` helper derives **target** values for **both** **patch domains** (**main patch domain** + **status patch domain**), and those **target** values will later be used by `IsInSync` and/or `Apply`, it **MUST** return **two separate** values (**target main** + **target status**), not a single “mixed” struct.
 - **target status** (for `computeTarget*`) is reserved for status-shaped values that represent **controller-owned state** to persist.
   - It **MUST NOT** include **report** data (conditions/messages/progress).
   - A `computeTarget*` helper **MAY** also compute **report** output, but it **MUST** return that **report** as a separate output (not embedded into **target status**).
@@ -459,7 +459,7 @@ func computeTargetFoo(obj *v1alpha1.Foo, intendedFoo IntendedFoo, actualFoo Actu
 }
 ```
 
-❌ Mixing **target main** + **target status** into one “mixed” **target** value used by Apply/IsUpToDate:
+❌ Mixing **target main** + **target status** into one “mixed” **target** value used by Apply/IsInSync:
 ```go
 type MixedTargetFoo struct {
     Labels map[string]string

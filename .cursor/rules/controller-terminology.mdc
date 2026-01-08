@@ -163,7 +163,7 @@ A **ReconcileHelper** is a helper function/method used by **Reconcile methods** 
 
 - **ComputeReconcileHelper**: `compute*` / `Compute*`
 - **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*`
-- **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*`
+- **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*`
 - **ApplyReconcileHelper**: `apply*` / `Apply*`
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*`
 - **CreateReconcileHelper**: `create*` / `Create*`
@@ -177,7 +177,7 @@ In this codebase, these **Helper categories** are **non-I/O** by definition:
 
 - **ComputeReconcileHelper**
 - **ConstructionReconcileHelper**
-- **IsUpToDateReconcileHelper**
+- **IsInSyncReconcileHelper**
 - **ApplyReconcileHelper**
 - **EnsureReconcileHelper**
 
@@ -309,12 +309,12 @@ A typical reconciliation step follows this conceptual flow:
 
 ### **target main** vs **target status**
 
-When **target** values are used for later `is*UpToDate` and/or `apply*`, **target** **MUST** be separated by **patch domain**:
+When **target** values are used for later `is*InSync` and/or `apply*`, **target** **MUST** be separated by **patch domain**:
 
 - **target main**: **target** values for the **main patch domain** (metadata/spec/non-status)
 - **target status**: **target** values for the **status patch domain** that represent **controller-owned state** to persist
 
-A “mixed target” that intermingles **main patch domain** + **status patch domain** into one value is considered an invalid shape for target-driven apply/isUpToDate flows in this codebase.
+A “mixed target” that intermingles **main patch domain** + **status patch domain** into one value is considered an invalid shape for target-driven apply/isInSync flows in this codebase.
 
 **report** is computed separately (often also written under the **status patch domain**) and should not be mixed into **target status**.
 
@@ -625,7 +625,7 @@ Below is the list of terms (without definitions) that in controller rules **MUST
 - **Helper categories**
 - **ComputeReconcileHelper**
 - **ConstructionReconcileHelper**
-- **IsUpToDateReconcileHelper**
+- **IsInSyncReconcileHelper**
 - **ApplyReconcileHelper**
 - **EnsureReconcileHelper**
 - **CreateReconcileHelper**

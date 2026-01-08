@@ -18,12 +18,12 @@ Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 Summary only; if anything differs, follow normative sections below.
 
 - **Reconcile methods** (`Reconcile*` / `reconcile*`) own reconciliation orchestration and I/O sequencing; **ReconcileHelpers** are category-named helpers used by them.
-- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*UpToDate*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
+- All **ReconcileHelpers** follow strict **naming-by-category** (some categories have multiple allowed prefixes, e.g. **ConstructionReconcileHelper** uses `new*`/`build*`/`make*`/`compose*`): `compute*`, `new*`/`build*`/`make*`/`compose*`, `is*InSync*`, `apply*`, `ensure*`, `create*`, `delete*`, `patch*` — to make intent and allowed behavior reviewable.
 - Every ReconcileHelper has explicit dependencies: if it takes `ctx`, it is first; if it operates on a Kubernetes object, `obj` is the first arg after `ctx`; all other inputs come **after `obj`**.
 - ReconcileHelpers are **deterministic**: never rely on map iteration order; sort when order matters; avoid “equivalent but different” outputs/states that cause patch churn.
 - ReconcileHelpers treat inputs as **read-only** except for the explicitly allowed mutation target(s); never mutate through map/slice aliasing — **clone before editing**.
 - **I/O** is **explicitly bounded by category**:
-  - **Compute / Construction / IsUpToDate / Apply / Ensure**: strictly **non-I/O**.
+  - **Compute / Construction / IsInSync / Apply / Ensure**: strictly **non-I/O**.
   - **Create / Delete / Patch**: allowed **I/O**, but **exactly one API write** per helper (`Create` / `Delete` / `Patch` or `Status().Patch`).
 
 ---
@@ -41,7 +41,7 @@ These categories are naming categories/patterns (see also `controller-file-struc
 
 - **ComputeReconcileHelper**: `compute*` / `Compute*` (see `controller-reconcile-helper-compute.mdc`).
 - **ConstructionReconcileHelper**: `new*` / `build*` / `make*` / `compose*` (see `controller-reconcile-helper-construction.mdc`).
-- **IsUpToDateReconcileHelper**: `is*UpToDate*` / `Is*UpToDate*` (starts with `is`/`Is` and contains `UpToDate`) (see `controller-reconcile-helper-is-up-to-date.mdc`).
+- **IsInSyncReconcileHelper**: `is*InSync*` / `Is*InSync*` (starts with `is`/`Is` and contains `InSync`) (see `controller-reconcile-helper-is-in-sync.mdc`).
 - **ApplyReconcileHelper**: `apply*` / `Apply*` (see `controller-reconcile-helper-apply.mdc`).
 - **EnsureReconcileHelper**: `ensure*` / `Ensure*` (see `controller-reconcile-helper-ensure.mdc`).
 - **CreateReconcileHelper**: `create*` / `Create*` (see `controller-reconcile-helper-create.mdc`).
@@ -77,7 +77,7 @@ Category-specific conventions are defined in dedicated documents referenced in *
   - **Large `ensure*`**: **MUST** create a **phase**.
     - “Large” includes: many sub-steps, loops over items, and/or non-trivial error handling.
   - **Large `compute*`**: **MAY** create a **phase** **only when it improves structure or diagnostics**.
-  - **All other Helper categories** (`apply*`, `is*UpToDate*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
+  - **All other Helper categories** (`apply*`, `is*InSync*`, `create*`, `delete*`, `patch*`) **MUST NOT** create **phases**.
 - If a helper uses **phases**, it **MUST** follow `internal/reconciliation/flow` rules (one **phase** per function; **phase** on first line; no **phases** inside loops).
 
 ### Visibility and receivers
@@ -177,7 +177,7 @@ This section is **not** about what helpers are *allowed* to do (see the category
 - **SHOULD** create these helpers **only when they have 2+ call sites** (within the same controller package).
 - **SHOULD NOT** create them “for symmetry” if the helper would only hide a one-off, standard I/O action (even when that action is usually written as a small boilerplate block in Reconcile methods).
 
-### ApplyReconcileHelper (`apply*`) / IsUpToDateReconcileHelper (`is*UpToDate*`) (small pure helpers)
+### ApplyReconcileHelper (`apply*`) / IsInSyncReconcileHelper (`is*InSync*`) (small pure helpers)
 
 - **SHOULD** create these helpers only when the logic cannot be expressed as **one obvious action** at the call site.
   - Examples of “one obvious action” (inline instead of helper): a single `obju.*` call; a single simple assignment; a single `meta` / `metav1` helper call.
@@ -196,7 +196,7 @@ This section is **not** about what helpers are *allowed* to do (see the category
 #### Splitting / nesting guidelines
 
 - **SHOULD NOT** split trivial logic into **ComputeReconcileHelper** (`compute*`) + **EnsureReconcileHelper** (`ensure*`) just to “follow patterns”. If one small helper can do it clearly (and within category rules), keep it in one place.
-- **MAY** create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsUpToDateReconcileHelper** (`is*UpToDate*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
+- **MAY** create an **EnsureReconcileHelper** (`ensure*`) that is only an orchestrator for **ComputeReconcileHelper** (`compute*`) → **IsInSyncReconcileHelper** (`is*InSync*`) → **ApplyReconcileHelper** (`apply*`) **only** when it significantly improves readability at the call site and does not hide orchestration decisions (ordering/retries/patch policy) that must remain explicit in a **Reconcile method**.
   - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **desired state** driven pipeline.
   - In general, the purpose of **EnsureReconcileHelper** (`ensure*`) is to perform in-place, step-by-step corrections on `obj` (for a single **patch domain**), not to wrap a **target**/**report**-driven pipeline.
 - If an **EnsureReconcileHelper** (`ensure*`) is small and readable, keep it monolithic:

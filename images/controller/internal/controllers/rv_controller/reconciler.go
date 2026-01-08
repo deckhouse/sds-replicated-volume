@@ -103,8 +103,8 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 		return outcome
 	}
 
-	// If status is up to date, return
-	if isDMUpToDate(rv, targetDM, targetDMCond) {
+	// If status is in sync, return
+	if isDMInSync(rv, targetDM, targetDMCond) {
 		return outcome
 	}
 
@@ -123,7 +123,7 @@ func (r *Reconciler) reconcileStatus(ctx context.Context, rvName string, rv *v1a
 	return outcome
 }
 
-func isDMUpToDate(rv *v1alpha1.ReplicatedVolume, targetdDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) bool {
+func isDMInSync(rv *v1alpha1.ReplicatedVolume, targetdDM *v1alpha1.DeviceMinor, targetDMCond metav1.Condition) bool {
 	return ptr.Equal(rv.Status.DeviceMinor, targetdDM) &&
 		obju.IsStatusConditionPresentAndSemanticallyEqual(rv, targetDMCond)
 }
