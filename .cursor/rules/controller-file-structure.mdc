@@ -2,6 +2,7 @@
 description: Controller file structure and conventions (sds-replicated-volume)
 globs:
   - "images/controller/internal/controllers/rv_controller/**/*.go"
+  - "images/controller/internal/controllers/rv_attach_controller/**/*.go"
 alwaysApply: true
 ---
 

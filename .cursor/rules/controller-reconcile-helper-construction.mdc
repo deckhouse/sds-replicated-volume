@@ -1,7 +1,8 @@
 ---
 description: Controller reconciliation helpers — ConstructionReconcileHelper
 globs:
-  - "images/controller/internal/controllers/rv_controller/**/*.go"
+  - "images/controller/internal/controllers/rv_controller/reconciler.go"
+  - "images/controller/internal/controllers/rv_attach_controller/reconciler.go"
 alwaysApply: true
 ---
 
