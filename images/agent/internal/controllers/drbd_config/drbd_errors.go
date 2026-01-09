@@ -58,7 +58,7 @@ func resetAllDRBDAPIErrors(apiErrors *v1alpha1.DRBDErrors) {
 // [drbdAPIError.WriteDRBDError]
 
 func (c configurationCommandError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
-	apiErrors.ConfigurationCommandError = &v1alpha1.CmdError{
+	apiErrors.ConfigurationCommandError = &v1alpha1.DRBDCmdError{
 		Command:  trimLen(strings.Join(c.CommandWithArgs(), " "), maxErrLen),
 		Output:   trimLen(c.Output(), maxErrLen),
 		ExitCode: c.ExitCode(),
@@ -66,7 +66,7 @@ func (c configurationCommandError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors
 }
 
 func (f fileSystemOperationError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
-	apiErrors.FileSystemOperationError = &v1alpha1.MessageError{
+	apiErrors.FileSystemOperationError = &v1alpha1.DRBDMessageError{
 		Message: trimLen(f.Error(), maxErrLen),
 	}
 }

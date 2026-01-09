@@ -1,0 +1,10 @@
+go 1.24.11
+
+use (
+	./api
+	./images/controller
+	./internal
+	./lib/go/common
+)
+
+

@@ -22,10 +22,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
+	rvcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
-	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
 	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
-	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
 	rvstatusconfigsharedsecret "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_shared_secret"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
@@ -49,14 +48,13 @@ func init() {
 	registry = append(registry, rvrtiebreakercount.BuildController)
 	registry = append(registry, rvstatusconfigquorum.BuildController)
 	registry = append(registry, rvrstatusconfigpeers.BuildController)
-	registry = append(registry, rvstatusconfigdeviceminor.BuildController)
+	registry = append(registry, rvcontroller.BuildController)
 	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
 	registry = append(registry, rvrmetadata.BuildController)
 	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrfinalizerrelease.BuildController)
-	registry = append(registry, rvmetadata.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
 	registry = append(registry, rvstatusconditions.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)

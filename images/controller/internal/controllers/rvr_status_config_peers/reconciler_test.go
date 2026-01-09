@@ -39,6 +39,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -54,14 +55,27 @@ var _ = Describe("Reconciler", func() {
 		rec *rvrstatusconfigpeers.Reconciler
 	)
 
+	withRVRIndex := func(b *fake.ClientBuilder) *fake.ClientBuilder {
+		return b.WithIndex(&v1alpha1.ReplicatedVolumeReplica{}, indexes.IndexFieldRVRByReplicatedVolumeName, func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		})
+	}
+
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		clientBuilder = fake.NewClientBuilder().
+		clientBuilder = withRVRIndex(fake.NewClientBuilder().
 			WithScheme(scheme).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
-				&v1alpha1.ReplicatedVolume{})
+				&v1alpha1.ReplicatedVolume{}))
 
 		// To be safe. To make sure we don't use client from previous iterations
 		cl = nil
@@ -102,7 +116,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -114,7 +128,7 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "other-rv",
 					UID:        "other-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					Size:                       resource.MustParse("1Gi"),
@@ -129,9 +143,9 @@ var _ = Describe("Reconciler", func() {
 		})
 
 		DescribeTableSubtree("when rv does not have config because",
-			Entry("nil Status", func() { rv.Status = nil }),
-			Entry("nil Status.DRBD", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
-			Entry("nil Status.DRBD.Config", func() { rv.Status = &v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
+			Entry("empty Status", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{} }),
+			Entry("nil Status.DRBD", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD.Config", func() { rv.Status = v1alpha1.ReplicatedVolumeStatus{DRBD: &v1alpha1.DRBDResource{Config: nil}} }),
 			func(setup func()) {
 				BeforeEach(func() {
 					setup()
@@ -148,7 +162,7 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				firstReplica = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-1"},
 				}
 				Expect(controllerutil.SetControllerReference(rv, &firstReplica, scheme)).To(Succeed())
 			})
@@ -295,9 +309,9 @@ var _ = Describe("Reconciler", func() {
 						})
 
 						DescribeTableSubtree("if rvr-2 is not ready because",
-							Entry("without status", func() { secondRvr.Status = nil }),
-							Entry("without status.drbd", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
-							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
+							Entry("with empty status", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{} }),
+							Entry("without status.drbd", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+							Entry("without status.drbd.config", func() { secondRvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
 							Entry("without owner reference", func() { secondRvr.OwnerReferences = []metav1.OwnerReference{} }),
@@ -341,15 +355,15 @@ var _ = Describe("Reconciler", func() {
 				rvrList = []v1alpha1.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-1"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-2"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-3"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: rv.Name, NodeName: "node-3"},
 					},
 				}
 
@@ -443,9 +457,6 @@ var _ = Describe("Reconciler", func() {
 							{IPv4: "192.168.1.2", Port: 7000},
 						}
 						for i := range rvrList {
-							if rvrList[i].Status == nil {
-								rvrList[i].Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-							}
 							if rvrList[i].Status.DRBD == nil {
 								rvrList[i].Status.DRBD = &v1alpha1.DRBD{}
 							}

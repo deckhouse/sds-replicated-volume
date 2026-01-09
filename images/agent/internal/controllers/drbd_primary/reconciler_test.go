@@ -111,15 +111,15 @@ var _ = Describe("Reconciler", func() {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:       "test-rv",
 					UID:        "test-uid",
-					Finalizers: []string{v1alpha1.ControllerAppFinalizer},
+					Finalizers: []string{v1alpha1.ControllerFinalizer},
 				},
 				Spec: v1alpha1.ReplicatedVolumeSpec{
 					ReplicatedStorageClassName: "test-storage-class",
 				},
-				Status: &v1alpha1.ReplicatedVolumeStatus{
+				Status: v1alpha1.ReplicatedVolumeStatus{
 					Conditions: []metav1.Condition{
 						{
-							Type:   v1alpha1.ConditionTypeRVIOReady,
+							Type:   v1alpha1.ReplicatedVolumeCondIOReadyType,
 							Status: metav1.ConditionTrue,
 						},
 					},
@@ -174,10 +174,9 @@ var _ = Describe("Reconciler", func() {
 
 		DescribeTableSubtree("when rvr is not ready because",
 			Entry("no NodeName", func() { rvr.Spec.NodeName = "" }),
-			Entry("nil Status", func() { rvr.Status = nil }),
-			Entry("nil Status.DRBD", func() { rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
+			Entry("nil Status.DRBD", func() { rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: nil} }),
 			Entry("nil Status.DRBD.Actual", func() {
-				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+				rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha1.DRBD{
 						Config: &v1alpha1.DRBDConfig{Primary: u.Ptr(true)},
 						Status: &v1alpha1.DRBDStatus{},
@@ -185,9 +184,9 @@ var _ = Describe("Reconciler", func() {
 					},
 				}
 			}),
-			Entry("nil Status.DRBD.Config", func() { rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
+			Entry("nil Status.DRBD.Config", func() { rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 			Entry("nil Status.DRBD.Config.Primary", func() {
-				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+				rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha1.DRBD{
 						Config: &v1alpha1.DRBDConfig{Primary: nil},
 						Status: &v1alpha1.DRBDStatus{},
@@ -196,7 +195,7 @@ var _ = Describe("Reconciler", func() {
 				}
 			}),
 			Entry("nil Status.DRBD.Status", func() {
-				rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{
+				rvr.Status = v1alpha1.ReplicatedVolumeReplicaStatus{
 					DRBD: &v1alpha1.DRBD{Config: &v1alpha1.DRBDConfig{Primary: u.Ptr(true)}, Status: nil}}
 			}),
 			func(setup func()) {
@@ -211,9 +210,6 @@ var _ = Describe("Reconciler", func() {
 
 		When("RVR does not belong to this node", func() {
 			BeforeEach(func() {
-				if rvr.Status == nil {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-				}
 				if rvr.Status.DRBD == nil {
 					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
@@ -239,9 +235,6 @@ var _ = Describe("Reconciler", func() {
 
 		When("Initial sync not completed", func() {
 			BeforeEach(func() {
-				if rvr.Status == nil {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-				}
 				if rvr.Status.DRBD == nil {
 					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
@@ -267,9 +260,6 @@ var _ = Describe("Reconciler", func() {
 
 		When("RVR is ready and belongs to this node", func() {
 			BeforeEach(func() {
-				if rvr.Status == nil {
-					rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-				}
 				if rvr.Status.DRBD == nil {
 					rvr.Status.DRBD = &v1alpha1.DRBD{}
 				}
@@ -290,9 +280,6 @@ var _ = Describe("Reconciler", func() {
 
 			DescribeTableSubtree("when role already matches desired state",
 				Entry("Primary desired and current role is Primary", func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -311,9 +298,6 @@ var _ = Describe("Reconciler", func() {
 					rvr.Status.DRBD.Actual.InitialSyncCompleted = true
 				}),
 				Entry("Secondary desired and current role is Secondary", func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -338,20 +322,17 @@ var _ = Describe("Reconciler", func() {
 
 					It("should clear errors if they exist", func(ctx SpecContext) {
 						// Set some errors first
-						if rvr.Status == nil {
-							rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-						}
 						if rvr.Status.DRBD == nil {
 							rvr.Status.DRBD = &v1alpha1.DRBD{}
 						}
 						if rvr.Status.DRBD.Errors == nil {
 							rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 						}
-						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
+						rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.DRBDCmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
-						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
+						rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.DRBDCmdError{
 							Output:   "test error",
 							ExitCode: 1,
 						}
@@ -370,9 +351,6 @@ var _ = Describe("Reconciler", func() {
 
 			When("need to promote to primary", func() {
 				BeforeEach(func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -414,16 +392,13 @@ var _ = Describe("Reconciler", func() {
 
 				It("should clear LastSecondaryError when promoting", func(ctx SpecContext) {
 					// Set a secondary error first
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Errors == nil {
 						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.CmdError{
+					rvr.Status.DRBD.Errors.LastSecondaryError = &v1alpha1.DRBDCmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}
@@ -439,9 +414,6 @@ var _ = Describe("Reconciler", func() {
 
 			When("need to demote to secondary", func() {
 				BeforeEach(func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -480,16 +452,13 @@ var _ = Describe("Reconciler", func() {
 
 				It("should clear LastPrimaryError when demoting", func(ctx SpecContext) {
 					// Set a primary error first
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
 					if rvr.Status.DRBD.Errors == nil {
 						rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
 					}
-					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.CmdError{
+					rvr.Status.DRBD.Errors.LastPrimaryError = &v1alpha1.DRBDCmdError{
 						Output:   "previous error",
 						ExitCode: 1,
 					}
@@ -506,9 +475,6 @@ var _ = Describe("Reconciler", func() {
 			When("Status patch fails with non-NotFound error", func() {
 				patchError := errors.New("failed to patch status")
 				BeforeEach(func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
@@ -545,9 +511,6 @@ var _ = Describe("Reconciler", func() {
 			When("Status patch fails with NotFound error", func() {
 				var rvrName string
 				BeforeEach(func() {
-					if rvr.Status == nil {
-						rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-					}
 					if rvr.Status.DRBD == nil {
 						rvr.Status.DRBD = &v1alpha1.DRBD{}
 					}
