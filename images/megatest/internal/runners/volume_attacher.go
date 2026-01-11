@@ -172,8 +172,8 @@ func (v *VolumeAttacher) attachCycle(ctx context.Context, nodeName string) error
 	log.Debug("started")
 	defer log.Debug("finished")
 
-	if err := v.doPublish(ctx, nodeName); err != nil {
-		log.Error("failed to doPublish", "error", err)
+	if err := v.doAttach(ctx, nodeName); err != nil {
+		log.Error("failed to doAttach", "error", err)
 		return err
 	}
 	return nil
@@ -257,7 +257,7 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 	return v.detachCycle(ctx, nodeName)
 }
 
-func (v *VolumeAttacher) doPublish(ctx context.Context, nodeName string) error {
+func (v *VolumeAttacher) doAttach(ctx context.Context, nodeName string) error {
 	if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
 		return fmt.Errorf("failed to create RVA: %w", err)
 	}

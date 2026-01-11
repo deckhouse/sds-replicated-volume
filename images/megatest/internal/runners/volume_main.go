@@ -122,11 +122,12 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	}
 	v.log.Debug("attached nodes", "nodes", attachNodes)
 
-	// Create RV
+	// Create RV and RVAs
 	createDuration, err := v.createRV(ctx, attachNodes)
 	if err != nil {
-		v.log.Error("failed to create RV", "error", err)
-		return err
+		v.log.Error("failed to create RV and RVAs", "error", err)
+		v.cleanup(ctx, lifetimeCtx, v.forceCleanupChan)
+		return nil
 	}
 	if v.totalCreateRVTime != nil {
 		v.totalCreateRVTime.Add(createDuration.Nanoseconds())
@@ -247,6 +248,7 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 	return names, nil
 }
 
+// createRV creates a ReplicatedVolume and RVAs for the given nodes.
 func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.Duration, error) {
 	startTime := time.Now()
 
@@ -265,6 +267,11 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 		return time.Since(startTime), err
 	}
 
+	// Increment statistics counter on successful creation
+	if v.createdRVCount != nil {
+		v.createdRVCount.Add(1)
+	}
+
 	// Create initial attachment intents via RVA (if requested).
 	for _, nodeName := range attachNodes {
 		if nodeName == "" {
@@ -278,16 +285,25 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 		}
 	}
 
-	// Increment statistics counter on successful creation
-	if v.createdRVCount != nil {
-		v.createdRVCount.Add(1)
-	}
-
 	return time.Since(startTime), nil
 }
 
 func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
 	startTime := time.Now()
+
+	// Unattach from all nodes - delete all RVAs for this RV.
+	rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
+	if err != nil {
+		return time.Since(startTime), err
+	}
+	for _, rva := range rvas {
+		if rva.Spec.NodeName == "" {
+			continue
+		}
+		if err := v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName); err != nil {
+			return time.Since(startTime), err
+		}
+	}
 
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
@@ -295,7 +311,7 @@ func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (tim
 		},
 	}
 
-	err := v.client.DeleteRV(ctx, rv)
+	err = v.client.DeleteRV(ctx, rv)
 	if err != nil {
 		return time.Since(startTime), err
 	}
