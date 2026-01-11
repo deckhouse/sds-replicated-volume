@@ -1,0 +1,56 @@
+---
+alwaysApply: false
+description: "Registers the CORE series and defines its series-level rules."
+---
+
+# FIRD-CORE-6: The CORE series
+
+This document registers the `CORE` series, as required by [FIRD-CORE-5]. It defines what kinds of FIRDs belong in `CORE`, and the series-level dependency expectations for `CORE`.
+
+Normative key words are defined in [FIRD-CORE-1#normative-words].
+
+## Scope
+
+This FIRD applies when creating, editing, or reviewing FIRDs, and when deciding whether a FIRD belongs to the `CORE` series.
+
+This FIRD defines:
+- the purpose of the `CORE` series;
+- what kinds of FIRDs belong in the `CORE` series; and
+- series-level dependency expectations for `CORE`.
+
+## Status of this FIRD
+
+Status: Draft.
+
+## 1. Terminology
+
+- **CORE series** — the series identifier `CORE`, reserved for FIRDs that define the system-wide interpretation, conformance, and other foundational mechanics of FIRDs.
+- **Core rule** — a rule that defines FIRD interpretation, FIRD conformance expectations, or other system-level mechanics intended to apply broadly across the FIRD system (as opposed to environment-specific or project-specific rules).
+
+## 2. What belongs in CORE
+
+- A FIRD contributor MUST place a FIRD in the `CORE` series only if the FIRD defines one or more Core rules.
+- A FIRD contributor MUST NOT place environment-specific, repository-specific, or tooling-specific rules in the `CORE` series.
+
+> [!INFORMATIVE]
+> A practical test: if a rule would not make sense outside a specific environment, repository, or tooling context, it is not a Core rule and does not belong in `CORE`.
+
+## 3. Dependency expectations
+
+### 3.1 Allowed referenced series
+
+The `CORE` series is registered with the following series-level allowlist:
+
+- **Allowed referenced series** (in the sense of [FIRD-CORE-5]): *(none)*
+
+As a consequence:
+
+- FIRDs in the `CORE` series MUST NOT make cross-series references to any non-`CORE` series.
+
+> [!INFORMATIVE]
+> This keeps `CORE` self-contained and portable. It also prevents `CORE` rules from accidentally depending on non-core policies that may evolve independently.
+
+### 3.2 Compatibility and evolution expectations
+
+- A FIRD contributor SHOULD treat changes to `CORE` FIRDs as high-impact and SHOULD avoid silent semantic changes to existing requirements.
+- If a Core rule needs a breaking change, a FIRD contributor SHOULD prefer introducing a new Core FIRD (new reference token) and using document Status to mark the old document as Deprecated or Replaced, rather than rewriting the old rule in-place.

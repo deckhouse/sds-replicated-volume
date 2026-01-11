@@ -1,0 +1,156 @@
+---
+alwaysApply: false
+description: "Creating and registering FIRD series."
+---
+
+# FIRD-CORE-5: FIRD series registration
+
+This FIRD defines how FIRD series are created and registered, and how each series declares which other series its documents are allowed to reference.
+
+This FIRD uses the normative key words defined in [FIRD-CORE-1#normative-words].
+
+## Scope
+
+This FIRD applies when:
+- creating a new series (choosing a new `<SERIES>` value);
+- registering a series; and/or
+- adding or validating cross-series references in FIRDs.
+
+This FIRD defines:
+- what it means for a series to be registered;
+- the minimum required content of a series registration FIRD; and
+- how a series declares which other series it may reference (via an explicit allowlist).
+
+This FIRD does not define:
+- how to write FIRDs in general (document structure, language style, examples, etc.);
+- how FIRD agents determine Applicable FIRDs at runtime; or
+- how to record requirement overrides (except insofar as series rules may be overridden under the general override mechanism).
+
+## Status of this FIRD
+
+Status: Draft.
+
+## 1. Terminology
+
+- **Series** — the `<SERIES>` component of a `FIRD-<SERIES>-<N>` reference token. Series identifiers MUST follow the constraints defined for series tokens in [FIRD-CORE-1#fird-identification].
+- **Series registration FIRD** — a FIRD in the `CORE` series that registers exactly one series by defining its purpose and series-level rules (including allowed cross-series references).
+- **Registered series** — a series for which there exists exactly one series registration FIRD. If there is no registration FIRD, or more than one registration FIRD for the same series, the series is not registered for the purposes of this specification.
+- **Cross-series reference** — any term reference or rule reference (as defined in [FIRD-CORE-1#fird-references]) whose referenced token’s series differs from the referencing document’s series.
+- **Allowed referenced series** — the allowlist of series that FIRDs in a given series are permitted to reference cross-series, as declared by that series’ registration FIRD.
+
+## 2. Creating a new series
+
+### 2.1 When a new series is justified
+
+A FIRD contributor SHOULD create a new series only when at least one of the following is true:
+
+- The documents in the new series will form a coherent family with a distinct lifecycle.
+- The new series requires autonomy of numbering and evolution that would be confusing or unsafe inside an existing series.
+- The new series requires series-level dependency boundaries that cannot be expressed cleanly by Scope alone.
+
+A FIRD contributor SHOULD NOT create a new series “just in case” or as a substitute for writing a clear Scope section.
+
+### 2.2 Naming constraints and reserved series
+
+- A FIRD contributor MUST choose a series identifier that conforms to the `<SERIES>` constraints in [FIRD-CORE-1#fird-identification].
+- A FIRD contributor MUST NOT create a new series whose identifier conflicts with an existing registered series.
+- A FIRD contributor MUST treat the series identifiers `CORE` and `LOCAL` as reserved.
+
+### 2.3 Registration-first rule
+
+- A FIRD contributor MUST register a new series before:
+  - publishing any FIRD whose reference token uses that series; or
+  - introducing any cross-series references to FIRDs in that series.
+- To register a series, a FIRD contributor MUST create a series registration FIRD in the `CORE` series that conforms to Section 3.
+
+## 3. Registering a series
+
+### 3.1 What it means to register a series
+
+A series is registered if and only if there exists exactly one series registration FIRD that registers that series.
+
+If there is no series registration FIRD, or more than one series registration FIRD claims to register the same series, the series MUST be treated as unregistered.
+
+### 3.2 Requirements for a series registration FIRD
+
+A series registration FIRD MUST:
+
+1. Register exactly one series.
+2. Clearly declare the registered series identifier.
+3. Describe the series purpose and the kinds of FIRDs that belong to the series.
+4. Declare an explicit allowlist of **Allowed referenced series**.
+5. Describe compatibility and evolution expectations for the series.
+
+A series registration FIRD SHOULD include stable anchors for key declarations.
+
+### 3.3 Series allowlist: allowed cross-series references
+
+Each series registration FIRD MUST declare an explicit allowlist of **Allowed referenced series**.
+
+The allowlist MUST be expressed as either:
+
+- an explicit list of series identifiers; or
+- the single special value `*`, meaning “any registered series” (except `LOCAL`).
+
+Cross-series references are permitted only when:
+
+- the referenced series is `CORE`; or
+- the referenced series is allowed by the allowlist.
+
+Additional rules:
+
+- References to the `CORE` series are always permitted.
+- Cross-series references to the `LOCAL` series MUST NOT be permitted by any allowlist, including via `*`.
+- A series registration FIRD MUST NOT allow references to unregistered series.
+
+## 4. Using an unregistered series
+
+### 4.1 Authoring rule
+
+- A FIRD contributor MUST NOT publish a FIRD that:
+  - uses an unregistered series in its own reference token; or
+  - contains a cross-series reference to an unregistered series.
+
+### 4.2 FIRD agent and tooling guidance
+
+- Tools and FIRD agents SHOULD report references to unregistered series as errors.
+- If such a reference is required for compliance, the FIRD agent MUST avoid claiming compliance.
+
+## [INFORMATIVE] Appendix A: Registration template
+
+```md example
+---
+alwaysApply: false
+description: "Registers the <SERIES> series."
+---
+
+# FIRD-CORE-<N>: Series registration for <SERIES>
+
+## Scope
+
+This document registers the <SERIES> series and defines its series-level rules.
+
+## Status of this FIRD
+
+Status: Draft.
+
+## 1. Terminology
+
+- **Registered series** — `<SERIES>`
+
+## 2. Series purpose
+
+Describe what this series is for and what kinds of FIRDs belong in it.
+
+## 3. Allowed series references
+
+List the series that FIRDs in `<SERIES>` may reference.
+- CORE is always allowed.
+- LOCAL must not be allowed.
+
+## 4. Compatibility and evolution
+
+Describe how changes in this series are managed.
+
+## [INFORMATIVE] Examples
+```

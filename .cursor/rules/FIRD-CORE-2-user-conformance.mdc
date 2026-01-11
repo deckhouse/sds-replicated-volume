@@ -1,0 +1,35 @@
+---
+alwaysApply: false
+---
+
+# FIRD-CORE-2: FIRD user conformance (how FIRD users must follow FIRDs)
+
+<a id="user-conformance"></a>
+## 1. FIRD user conformance requirements
+
+- A FIRD user MUST comply with all requirements addressed to the FIRD user in all Applicable FIRDs [FIRD-CORE-1#terms].
+- If a FIRD agent reports a FIRD requirement conflict [FIRD-CORE-1#terms], a FIRD user MUST provide a resolution before the FIRD agent can proceed.
+- When resolving a FIRD requirement conflict, a FIRD user SHOULD prefer resolving it via:
+  - clarifying intent and constraints (and updating the request accordingly); and/or
+  - changing the Applicable FIRDs (for example, by updating FIRDs).
+- A FIRD user MAY authorize a FIRD requirement override [FIRD-CORE-1#terms] for a specific requirement.
+- A FIRD user MUST NOT request or instruct a FIRD agent to ignore or violate applicable requirements except through an explicit FIRD requirement override that is recorded in the Work product [FIRD-CORE-1#terms] according to applicable override recording rules.
+- If a FIRD user authorizes a FIRD requirement override, a FIRD user MUST ensure the override is recorded in the Work product.
+- If a FIRD agent indicates that it cannot record a FIRD requirement override because no applicable override recording rules are available (or the rules are ambiguous), a FIRD user MUST provide a FIRD that defines how FIRD requirement overrides are recorded for the current Work product type.
+- If a FIRD agent reports ambiguity or missing context required for compliance, a FIRD user SHOULD resolve it by clarifying intent and constraints (and, if necessary, by changing which FIRDs are in effect in the environment they are using).
+
+<a id="frontmatter"></a>
+## 2. YAML frontmatter
+
+YAML frontmatter fields [FIRD-CORE-1#frontmatter]. How a FIRD agent determines Applicable FIRDs [FIRD-CORE-3#applicability].
+
+- For the purposes of FIRD user conformance, a FIRD user MUST ignore the values of `description` and `alwaysApply`.
+- The `globs` field is informative to the FIRD user:
+  - A FIRD user MAY read `globs` as a hint about intended applicability.
+  - A FIRD user MUST NOT treat `globs` as defining which FIRDs are in effect for the task.
+
+<a id="user-references"></a>
+## 3. Referencing FIRDs
+
+- A FIRD user SHOULD reference FIRDs using a FIRD reference token (for example, `FIRD-EXAMPLE-12`) to avoid ambiguity [FIRD-CORE-1#fird-references].
+- When referencing a specific section, a FIRD user SHOULD prefer a FIRD section reference token (for example, `FIRD-EXAMPLE-12#some-anchor`).

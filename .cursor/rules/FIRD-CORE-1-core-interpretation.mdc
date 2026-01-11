@@ -1,0 +1,240 @@
+---
+alwaysApply: true
+---
+
+# FIRD-CORE-1: Core interpretation rules for FIRDs
+
+This FIRD defines core rules for interpreting Flant Interpretable Rules Documents (FIRDs). It is intended for FIRD conformers, not for FIRD contributors.
+
+FIRD stands for Flant Interpretable Rules Document. It is pronounced like "bird" or "heard".
+
+<a id="normative-words"></a>
+## 1. Normative words
+
+Per BCP 14 (RFC 2119 / RFC 8174), these key words have the meanings specified below only when they appear in all capitals.
+
+1. MUST
+   This word, or the terms "REQUIRED" or "SHALL", mean that the definition is an absolute requirement of the specification.
+
+2. MUST NOT
+   This phrase, or the phrase "SHALL NOT", mean that the definition is an absolute prohibition of the specification.
+
+3. SHOULD
+   This word, or the adjective "RECOMMENDED", mean that there may exist valid reasons in particular circumstances to ignore a particular item, but the full implications must be understood and carefully weighed before choosing a different course.
+
+4. SHOULD NOT
+   This phrase, or the phrase "NOT RECOMMENDED", mean that there may exist valid reasons in particular circumstances when the particular behavior is acceptable or even useful, but the full implications should be understood and the case carefully weighed before implementing any behavior described with this label.
+
+5. MAY
+   This word, or the adjective "OPTIONAL", mean that an item is truly optional.
+
+### 1.1 Normative key words in code and literals
+
+The normative key words defined in this section have their special meaning only in normal prose text.
+
+Occurrences of normative key words inside any of the following MUST NOT be interpreted as using BCP 14 normative meanings and MUST NOT create requirements. They MAY be treated as informative text (for example, as part of an example or literal), but only within their literal/example meaning.
+
+- Markdown inline code spans (text enclosed in backticks, for example, `MUST`);
+- Markdown fenced code blocks (including the fence info string) and indented code blocks.
+
+<a id="normative-words-headings"></a>
+### 1.2 Normative key words in headings and YAML frontmatter values
+
+The normative key words defined in this section have their special meaning only in normal prose text.
+
+Occurrences of normative key words inside any of the following MUST NOT be interpreted as using BCP 14 normative meanings and MUST NOT create requirements. They MAY be treated as informative text (for example, as part of a title or metadata), but only within their literal meaning.
+
+- Markdown headings of any level (`#` through `######`), including the FIRD title.
+- YAML frontmatter values (including `description`).
+
+To avoid ambiguity, a FIRD MUST NOT contain a BCP 14 normative key word written in all capitals in any of the locations above unless the occurrence is clearly marked as a literal by being enclosed in backticks (for example, `` `MUST` ``).
+
+A document that would otherwise be treated as a FIRD and violates this rule is malformed.
+
+<a id="terms"></a>
+## 2. Terms
+
+- **FIRD user** — a human or system entity acting in the **FIRD user role** within an environment where FIRDs are in effect: it provides or approves intent and constraints for a task (including instructions to the FIRD agent) and is responsible for complying with all applicable requirements addressed to the FIRD user.
+> [!INFORMATIVE]
+> Which humans/systems are treated as FIRD users is determined by the environment’s governance (for example, project policy, access control, or contractual/process obligations). FIRDs define what a FIRD user must do **when acting in the FIRD user role**; they do not define who is granted that role.
+- **FIRD agent** — an agentic system acting in the **FIRD agent role** within an environment where FIRDs are in effect: it reads applicable FIRDs and performs actions and/or produces outputs in response to the FIRD user, guided by the rules in FIRDs, and is responsible for complying with all applicable requirements addressed to the FIRD agent.
+- **FIRD conformer** — a FIRD user or FIRD agent.
+- **FIRD contributor** — a FIRD conformer who creates, edits, or reviews a FIRD work product.
+- **Applicable FIRDs** — the set of FIRDs that are in effect for the current task.
+- **FIRD requirement conflict** — a situation where two or more applicable normative requirements addressed to the same subject cannot all be satisfied for the current task.
+- **Work product** — the artifact(s) created, modified, or produced as the output of the current task.
+- **FIRD requirement override** — an explicit decision to ignore or modify a specific applicable requirement for a given work product.
+- **FIRD title** — the first Markdown heading of level 1 (`# ...`) in the document, excluding YAML frontmatter (if present).
+
+<a id="shared-principles"></a>
+## 3. Shared interpretation principles
+
+- FIRD conformers MUST follow the normative key words defined in Section 1 exactly as written, and MUST NOT reinterpret, weaken, or strengthen them.
+- FIRD conformers MUST treat normative statements as requirements for the subject described in the statement (for example, the FIRD user or the FIRD agent).
+- When a normative statement explicitly addresses a specific role (for example, `A FIRD user MUST ...` or `A FIRD agent MUST ...`), only that role is bound by the requirement; other FIRD conformers MUST treat that statement as Informative for themselves.
+- Normative statements that explicitly address `FIRD conformers` are normative for all FIRD conformers.
+- Normative statements that do not explicitly address a role are interpretation rules about FIRDs and are normative for all FIRD conformers when interpreting FIRDs.
+> [!INFORMATIVE]
+> This rule prevents accidentally “double-applying” requirements that are intended for a specific role (for example, the FIRD user role or the FIRD agent role).
+>
+> Example: `A FIRD agent MUST ...` is normative for FIRD agents. FIRD users may read it to understand expected agent behavior, but it does not impose any obligation on FIRD users.
+>
+> Similarly, `A FIRD user SHOULD ...` is normative for FIRD users. FIRD agents may read it to understand what the FIRD user is expected to do, but it does not impose any obligation on FIRD agents.
+>
+> Requirements that define FIRD structure (for example, token grammar or frontmatter rules) are interpretation rules and apply to all FIRD conformers when interpreting FIRDs.
+- FIRD conformers MUST distinguish normative statements from Informative content as defined in Section 7.
+- FIRD conformers MUST NOT infer new requirements from Informative content.
+
+<a id="fird-identification"></a>
+## 4. FIRD identification
+
+A Flant Interpretable Rules Document (FIRD) is identified by its FIRD title.
+
+A document MAY start with YAML frontmatter (see Section 5). The FIRD title is the first Markdown heading of level 1 (`#`) that appears after the YAML frontmatter (if any).
+
+The heading text of the FIRD title (excluding the leading `#` and following whitespace) MUST begin with one of the following forms:
+
+```text
+FIRD-<SERIES>-<N>: <title>
+[INFORMATIVE] FIRD-<SERIES>-<N>: <title>
+```
+
+Where `<SERIES>` and `<N>` are defined in Section 4.1.
+
+If the FIRD title does not match one of the forms above, a FIRD conformer MUST NOT treat the document as a FIRD.
+
+### 4.1 FIRD reference token declaration
+
+A FIRD reference token has the form `FIRD-<SERIES>-<N>`, where:
+
+- `<SERIES>` MUST be 1 to 10 characters long and contain only uppercase ASCII letters `A`-`Z` and digits `0`-`9`.
+- `<N>` MUST be a positive decimal integer and MUST NOT contain leading zeros.
+
+Series exist so that independent working groups can publish FIRDs without coordinating global numbering. Numbering MUST be unique within a given series.
+
+The FIRD reference token is the `FIRD-<SERIES>-<N>` prefix in the FIRD title.
+
+A FIRD MUST declare exactly one FIRD reference token in its FIRD title.
+
+<a id="frontmatter"></a>
+## 5. YAML frontmatter
+
+A FIRD MAY begin with a YAML frontmatter block.
+
+- If present, YAML frontmatter MUST be the first content in the document.
+- The YAML frontmatter block begins with a line containing exactly `---` and ends with the next line containing exactly `---`.
+- The YAML frontmatter content MUST be a YAML mapping.
+
+The standardized YAML frontmatter fields are:
+
+- `description` — a free-form string describing when the FIRD is intended to apply.
+- `alwaysApply` — a boolean (`true` / `false`) indicating unconditional applicability.
+- `globs` — either a single glob pattern string or a YAML list of glob pattern strings describing file paths the FIRD is intended to apply to.
+
+How agents use YAML frontmatter (and explicit user requests) to determine Applicable FIRDs is specified in [FIRD-CORE-3#applicability].
+
+Additional actor-specific guidance for frontmatter is provided in [FIRD-CORE-2#frontmatter] and [FIRD-CORE-3#frontmatter].
+
+<a id="scope-declaration"></a>
+## 6. Scope declaration
+
+A FIRD declares a scope if it contains a second-level heading (Markdown `##`) whose heading text is exactly:
+
+- `Scope`
+
+The scope of that FIRD is defined by the content within the scope section and ends immediately before the next second-level heading (Markdown `##`) or the end of the document.
+
+<a id="informative-content"></a>
+## 7. Informative content
+
+Some FIRDs contain informative content (examples, rationale, conceptual notes) that MUST NOT create requirements. Such content is marked as **INFORMATIVE**.
+
+### 7.1 Marking a whole document as Informative
+
+An FIRD is marked as Informative for the entire document if its FIRD title begins with `[INFORMATIVE] ` immediately followed by a FIRD reference token (as defined in Section 4).
+
+- If an FIRD is marked as Informative for the entire document, all content within that FIRD (including all sections, blocks, and references) is Informative.
+
+### 7.2 Marking Informative sections
+
+A section is marked as Informative if its heading contains the literal marker `[INFORMATIVE]` (for example, `## 9. [INFORMATIVE] Rationale`).
+
+- If a section is marked INFORMATIVE, all content within that section (including nested subsections, blocks, and references) is INFORMATIVE.
+
+### 7.3 Marking Informative blocks
+
+A block is marked as Informative if it uses the Markdown callout form:
+
+`> [!INFORMATIVE]`
+
+An Informative callout block begins at the line `> [!INFORMATIVE]` and includes all subsequent contiguous lines that begin with `>` (including blank quoted lines such as `>`). The block ends immediately before the first subsequent line that does not begin with `>` (or at end of document). All lines within that block are Informative.
+
+### 7.4 Marking Informative fenced code blocks
+
+A fenced code block is marked as Informative if its opening fence line contains an info string with a whitespace-delimited token equal to `example`.
+
+- The token match MUST be case-insensitive.
+- This rule applies to fenced code blocks using backticks (```) or tildes (~~~).
+- Only the fenced code block content is marked as Informative.
+
+Example:
+
+```go example
+fmt.Println("example")
+```
+
+### 7.5 Marking Informative references and links
+
+A reference or link is marked as Informative if its square-bracket text begins with `INFORMATIVE:` (for example, `[INFORMATIVE: FIRD-EXAMPLE-12]`, `[INFORMATIVE: FIRD-EXAMPLE-12: Name](...)`, or `[INFORMATIVE: background](...)`).
+
+### 7.6 Interpreting Informative content
+
+- Informative content is informative and is not a source of conformance requirements.
+- FIRD conformers MUST NOT treat Informative content as creating obligations or prohibitions, even if it contains normative key words.
+
+<a id="conceptual-guidance"></a>
+### 7.7 Using Informative content as conceptual guidance
+
+Informative content MAY appear anywhere, including within sections that also contain normative statements.
+
+- A FIRD agent MUST read and internalize relevant Informative content and MUST use it as interpretive context for:
+  - understanding terms used by requirements;
+  - reasoning about trade-offs explicitly described by the FIRDs; and
+  - making decisions where requirements allow multiple compliant options or are otherwise underspecified.
+- A FIRD user SHOULD read relevant Informative content to understand the intent and trade-offs expressed by FIRDs and to make requests that are compatible with the Applicable FIRDs.
+- When multiple actions satisfy all applicable requirements, an agent SHOULD prefer the option that best aligns with relevant Informative content.
+- Informative content MUST NOT silently create new obligations. If a behavior is intended to be mandatory or prohibited, it MUST be stated as a normative statement outside Informative content using the key words defined in Section 1.
+- If Informative content conflicts with a normative requirement, the normative requirement takes precedence. A FIRD conformer SHOULD call out the conflict explicitly.
+
+<a id="fird-references"></a>
+## 8. FIRD references
+
+When FIRDs (or FIRD conformers) reference other FIRDs, the reference forms defined in this section apply.
+
+- A FIRD reference token has the form `FIRD-<SERIES>-<N>`.
+- A FIRD section reference token has the form `FIRD-<SERIES>-<N>#<anchor>`, where `<anchor>` is a URL fragment identifying a section or location within the referenced FIRD.
+
+### 8.1 Term references
+
+If a FIRD term definition includes a FIRD reference in square brackets immediately after the term name (for example, `**Term** [FIRD-EXAMPLE-12: Name of the FIRD] — ...`), that bracketed reference is a **term reference**.
+
+- The bracketed reference MAY include a FIRD title after the token (for example, `[FIRD-EXAMPLE-12: Name of the FIRD]`) or omit it (for example, `[FIRD-EXAMPLE-12]`).
+- The bracketed reference MAY be written as a Markdown link. In that case, the link text MUST contain the FIRD reference token (for example, `[FIRD-EXAMPLE-12](...)` or `[FIRD-EXAMPLE-12: Name of the FIRD](...)`).
+- A term reference MAY be marked as Informative by prefixing the bracketed content with `INFORMATIVE:` (for example, `[INFORMATIVE: FIRD-EXAMPLE-12]`, including as a Markdown link).
+- If a term reference is present and is not marked Informative (either explicitly, or by being contained within Informative content), it is a dependency for conformance.
+
+### 8.2 Rule references
+
+If a normative statement references another FIRD using square brackets, it is a **rule reference**.
+
+- If a normative statement instructs to follow a specific section, it MUST reference that section using an anchor, by including a FIRD section reference token in square brackets (for example, `follow the rules in [FIRD-EXAMPLE-12#local-development]`).
+- If a normative statement instructs to follow rules from a FIRD without naming a specific section (for example, `follow the rules from [FIRD-EXAMPLE-12]`), the reference applies to the entire FIRD.
+- The bracketed reference MAY be written as a Markdown link. In that case, the link text MUST contain the FIRD reference token (`FIRD-<SERIES>-<N>`) or FIRD section reference token (`FIRD-<SERIES>-<N>#<anchor>`), as applicable.
+- A rule reference MAY be marked as Informative by prefixing the bracketed content with `INFORMATIVE:` (for example, `[INFORMATIVE: FIRD-EXAMPLE-12]`, including as a Markdown link).
+- If a rule reference is present and is not marked Informative (either explicitly, or by being contained within Informative content), it is a dependency for conformance.
+
+<a id="known-issues"></a>
+## [INFORMATIVE] Known issues
+
+- The canonical storage location / repository layout for FIRDs is not yet specified. It SHOULD be standardized in a future revision.
+- The semantics of YAML frontmatter `globs` and `description` (glob dialect, path base, case-sensitivity, and how to interpret `description`) are not yet standardized and may vary between implementations. It SHOULD be standardized in a future revision.

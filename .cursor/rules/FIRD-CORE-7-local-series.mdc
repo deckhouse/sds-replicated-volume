@@ -1,0 +1,67 @@
+---
+alwaysApply: false
+description: "Registers the LOCAL series and defines its dependency boundaries."
+---
+
+# FIRD-CORE-7: The LOCAL series
+
+This document registers the `LOCAL` series, as required by [FIRD-CORE-5]. It defines what kinds of FIRDs belong in `LOCAL` and establishes the portability boundary between `LOCAL` and non-`LOCAL` series.
+
+Normative key words are defined in [FIRD-CORE-1#normative-words].
+
+## Scope
+
+This FIRD applies when creating, editing, or reviewing FIRDs, and when deciding whether a FIRD belongs to the `LOCAL` series.
+
+This FIRD defines:
+- the purpose of the `LOCAL` series; and
+- the series-level portability boundary between `LOCAL` and all non-`LOCAL` series.
+
+## Status of this FIRD
+
+Status: Draft.
+
+## 1. Terminology
+
+- **Local FIRD** — a FIRD in the `LOCAL` series whose rules are environment-specific and not intended to be portable across environments.
+- **Portable FIRD** — a FIRD that does not depend on environment-specific rules; in particular, a Portable FIRD MUST NOT reference the `LOCAL` series (per Section 3).
+- **Portability boundary** — a series-level restriction on cross-series references, intended to prevent non-portable dependencies from leaking into portable FIRDs.
+
+## 2. What the `LOCAL` series is for
+
+- A FIRD contributor MUST place a FIRD in the `LOCAL` series if the FIRD’s rules are environment-specific and not intended to be portable.
+- A FIRD contributor MUST NOT place such environment-specific rules in a non-`LOCAL` series.
+
+> [!INFORMATIVE]
+> A practical test: if a rule only makes sense in a particular environment (repository layout, tooling integration, installation-specific process), it belongs in `LOCAL`.
+
+## 3. Reference boundary: non-`LOCAL` must not reference `LOCAL`
+
+### 3.1 Allowed referenced series for `LOCAL`
+
+The `LOCAL` series is registered with the following series-level allowlist:
+
+- **Allowed referenced series** (in the sense of [FIRD-CORE-5]): `*` (any registered non-`LOCAL` series)
+
+> [!INFORMATIVE]
+> References to the `CORE` series are always permitted by the series registration rules in [FIRD-CORE-5]. The allowlist above controls cross-series references beyond `CORE`.
+
+### 3.2 Prohibited `LOCAL` references from non-`LOCAL` FIRDs
+
+- A FIRD contributor MUST ensure that any FIRD whose series is not `LOCAL` contains no references to any FIRD whose series is `LOCAL`.
+
+For the purposes of this section, a “reference” includes:
+
+- any rule reference or term reference to a `LOCAL` FIRD token (as defined in [FIRD-CORE-1#fird-references]); and
+- any such reference even if marked Informative (for example, via `INFORMATIVE:`), or even if it appears inside Informative content.
+
+> [!INFORMATIVE]
+> This rule intentionally prohibits “for reference” pointers from portable FIRDs to local FIRDs. The goal is to prevent local dependencies from leaking into portable documents and ecosystems.
+
+## 4. How to handle local details without breaking portability
+
+- When a rule has both a portable core and environment-specific details, a FIRD contributor SHOULD split it into:
+  - a Portable FIRD (non-`LOCAL`) that defines the portable core; and
+  - a `LOCAL` FIRD that defines the environment-specific implementation details.
+
+- A FIRD contributor SHOULD avoid duplicating portable rules into `LOCAL` FIRDs unless duplication is necessary for local clarity.

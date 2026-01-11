@@ -1,0 +1,188 @@
+---
+alwaysApply: false
+description: "English usage and editorial style conventions for FIRDs."
+---
+
+# FIRD-CORE-8: English usage and style for FIRDs
+
+This FIRD defines conventions for English usage and editorial style in FIRDs.
+
+Normative key words are defined in [FIRD-CORE-1#normative-words].
+
+## Scope
+
+This FIRD applies to English prose written in FIRDs, including:
+
+- normative statements written in English; and
+- Informative explanations written in English.
+
+This FIRD defines:
+
+- baseline editorial authority for English prose in FIRDs; and
+- additional standards-style technical prose conventions adapted for FIRDs.
+
+This FIRD does not define:
+
+- document structure rules, markup conventions, or formatting rules for FIRDs; or
+- the meaning of normative key words (defined in [FIRD-CORE-1#normative-words]).
+
+## Status of this FIRD
+
+Status: Draft.
+
+## 1. Style authority and precedence
+
+### 1.1 Baseline editorial authority
+
+A FIRD contributor MUST follow **The Chicago Manual of Style (CMOS)** for English grammar, punctuation, capitalization, and general editorial decisions, except where overridden by:
+
+- this FIRD; or
+- any other applicable FIRD requirement.
+
+> [!INFORMATIVE]
+> This FIRD deliberately includes a small number of technical-writing exceptions where strict CMOS typography can create ambiguity (for example, punctuation placement around literal tokens).
+
+### 1.2 Precedence of requirements over style
+
+If a stylistic convention conflicts with an applicable FIRD requirement, the FIRD requirement takes precedence.
+
+A FIRD contributor MUST NOT make a stylistic edit that changes the technical meaning of a requirement or its applicability.
+
+### 1.3 Literals, identifiers, and exact strings
+
+A FIRD contributor MUST preserve the spelling and casing of:
+
+- identifiers (function names, types, variables, protocol elements);
+- commands and flags;
+- file and package names;
+- stable string values and constants; and
+- any other literal tokens where a spelling change would alter meaning.
+
+A FIRD contributor MUST place surrounding punctuation so that it does not alter the literal.
+
+> [!INFORMATIVE]
+> This rule often matters more than typographic preference.
+
+### 1.4 FIRD agent behavior for stylistic uncertainty
+
+A FIRD agent acting as a FIRD contributor MUST follow all explicit rules in applicable FIRDs.
+
+If a FIRD agent cannot confidently determine the CMOS-preferred choice for a purely stylistic edit, and the edit is not required for correctness or clarity, the FIRD agent SHOULD avoid making the change.
+
+## 2. Editorial philosophy for FIRDs
+
+This section adapts the intent of RFC 7322 Section 2 (“RFC Editor’s Philosophy”) to the FIRD authoring context.
+
+### 2.1 Editorial goals
+
+A FIRD contributor SHOULD aim to:
+
+- make the document as clear, consistent, and readable as possible;
+- correct larger clarity issues; and
+- fix internal inconsistencies (for example, terms that appear in multiple forms, duplicated text, or inconsistent capitalization).
+
+If a passage is unclear in a way that could affect interpretation, a FIRD contributor SHOULD flag it explicitly rather than guessing.
+
+### 2.2 Consistency targets
+
+A FIRD contributor SHOULD strive for consistency within:
+
+- the document itself; and
+- a coherent set of related FIRDs (for example, FIRDs that are commonly used together or define adjacent concepts).
+
+### 2.3 Editorial balance and meaning preservation
+
+A FIRD contributor MUST treat editing as distinct from technical review.
+
+A FIRD contributor MAY suggest wording changes for clarity, but a FIRD contributor MUST NOT prefer an editorial convention over wording that is a more accurate representation of the intended technical meaning.
+
+A FIRD contributor MUST follow this prime directive over grammatical conventions:
+
+- do not change the intended meaning of the text.
+
+If a proposed edit has a serious risk of altering meaning, a FIRD contributor MUST NOT apply it and SHOULD instead request clarification or review.
+
+## 3. Style conventions
+
+This section adapts RFC 7322 Section 3 (“RFC Style Conventions”) subsections 3.1–3.6 for FIRDs, excluding RFC-specific publication-process rules.
+
+### 3.1 Language and spelling
+
+A FIRD contributor MUST use American English spelling as the default for English prose in FIRDs.
+
+A FIRD contributor MUST keep spelling internally consistent within a document.
+
+A FIRD contributor MUST preserve the original spelling of proper names and quoted material.
+
+### 3.2 Punctuation and quotation handling
+
+A FIRD contributor MUST use the serial comma (Oxford comma) in English lists where doing so improves clarity.
+
+When quoting **literal text** (for example, a literal string to search for, an exact token, or an identifier), a FIRD contributor MUST place surrounding punctuation **outside** quotation marks so the quoted literal remains exact.
+
+When quoting **general prose** (for example, a sentence from another document), punctuation SHOULD follow normal CMOS conventions.
+
+A FIRD contributor SHOULD omit quotation marks when a quotation is presented as a block quotation.
+
+### 3.3 DNS names and URIs in examples
+
+DNS names used as generic examples (including those embedded in URIs) SHOULD use the reserved example names defined in “Reserved Top Level DNS Names” (BCP 32) to avoid accidental conflicts.
+
+A FIRD contributor SHOULD avoid using real production domains as “generic examples”.
+
+> [!INFORMATIVE]
+> Common example domains include `example.com`, `example.net`, and `example.org`.
+
+### 3.4 Capitalization
+
+A FIRD contributor MUST keep capitalization consistent within a document.
+
+A FIRD contributor SHOULD keep capitalization consistent with closely related FIRDs when the terms refer to the same concept.
+
+For titles and section titles, a FIRD contributor SHOULD follow CMOS title-capitalization conventions (title case) unless the title is written as a full sentence, in which case sentence capitalization SHOULD be used.
+
+Figure titles MAY use either sentence form or title case, but a document SHOULD be consistent.
+
+### 3.5 Citations and cross-references
+
+A FIRD contributor MUST ensure that references and citations match:
+
+- every citation has a corresponding reference entry; and
+- every reference entry is cited.
+
+When referring to locations within a document or another document, a FIRD contributor MUST NOT rely on page numbers.
+
+A FIRD contributor SHOULD prefer stable section references (for example, section titles, section numbers when present, or stable anchors where applicable).
+
+> [!INFORMATIVE]
+> Pagination can change across renderers and devices; stable section references do not.
+
+### 3.6 Abbreviation rules
+
+A FIRD contributor SHOULD expand abbreviations in FIRD titles and upon first use in running prose.
+
+When expanding an abbreviation, a FIRD contributor SHOULD follow this pattern:
+
+- `<full expansion> (<abbreviation>)`
+
+A FIRD contributor MAY omit expanding an abbreviation if it appears in the online **RFC Production Center Abbreviations List**.
+
+A FIRD contributor SHOULD expand an abbreviation even if it appears in that list when, in the author’s judgment, the abbreviation is likely to be unclear in the specific context.
+
+A FIRD contributor MUST use a single expansion consistently within a document when an abbreviation has multiple plausible expansions.
+
+## 4. Additional technical prose guidance
+
+A FIRD contributor MUST write requirements so that they are unambiguous and reviewable.
+
+A FIRD contributor SHOULD apply the following standards-style technical prose practices:
+
+- Prefer short, declarative sentences for requirements.
+- Avoid ambiguous pronouns (“it”, “this”, “that”) when the referent could be unclear.
+- Prefer explicit subjects (“A FIRD contributor …”, “A FIRD agent …”, “FIRD conformers …”) over implied subjects.
+- Use parallel structure in lists and sublists.
+- Avoid burying critical conditions in parenthetical asides.
+- When a requirement has multiple conditions, structure the text so the logical relationships are explicit (for example, by splitting into separate sentences or clearly scoped clauses).
+
+> [!INFORMATIVE]
+> A useful review test: a reader should be able to answer “Who must do what, when, and under which conditions?” without inference.

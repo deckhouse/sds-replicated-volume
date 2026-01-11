@@ -1,0 +1,213 @@
+---
+alwaysApply: false
+description: "Override recording rules for Flant Interpretable Rules Documents (FIRDs)."
+globs:
+  - "**/FIRD-*.mdc"
+  - "**/ARD-*.mdc"
+---
+
+# FIRD-CORE-4: Recording requirement overrides in FIRDs
+
+This FIRD defines override recording rules for work products that are FIRDs.
+
+Normative key words are defined in [FIRD-CORE-1#normative-words].
+
+<a id="scope"></a>
+## Scope
+
+This FIRD applies when a work product includes one or more FIRDs and a FIRD conformer needs to proceed under an authorized FIRD requirement override.
+
+This FIRD defines:
+- where override records are recorded in FIRD work products; and
+- the minimum required content and format of override records, so that FIRD agents can detect and apply overrides deterministically.
+
+This FIRD does not define:
+- how FIRD users authorize overrides, or the FIRD user-side responsibilities around overrides (defined in [FIRD-CORE-2]); or
+- how FIRD agents handle conflicts and apply overrides (defined in [FIRD-CORE-3]), except that this FIRD provides the recording rules that FIRD agents may require.
+
+Override recording rules for non-FIRD work product types (for example, code or configuration files) are outside the scope of this FIRD and require separate override recording rules.
+
+<a id="status"></a>
+## Status of this FIRD
+
+Status: Draft.
+
+<a id="terminology"></a>
+## 1. Terminology
+
+- **Override record** — a machine-detectable record, stored in a FIRD work product, that documents an authorized FIRD requirement override.
+- **Override target** — the specific requirement being overridden, referenced in an override record.
+- **Override scope** — the explicit boundary of where the override applies (and where it does not), as recorded in an override record.
+- **Requirement locator** — a disambiguator recorded in an override record when the overridden requirement cannot be identified unambiguously by a stable anchor alone (for example, when overriding a single list item within a section).
+
+This FIRD uses the base terms **FIRD conformer**, **FIRD user**, **FIRD agent**, **FIRD requirement override**, **Work product**, and **FIRD requirement conflict** as defined in [FIRD-CORE-1#terms].
+
+For the purposes of [FIRD-CORE-2] and [FIRD-CORE-3], the rules in this FIRD are “override recording rules” for the work product type “FIRD document”.
+
+<a id="overrides-section"></a>
+## 2. Overrides section as a standard structural element
+
+When a FIRD work product contains one or more override records, the work product MUST contain a second-level heading (Markdown `##`) whose heading text is exactly:
+
+- `Overrides`
+
+This `## Overrides` section:
+
+- MUST contain all override records that apply to that FIRD work product; and
+- MUST NOT be used to store ordinary requirements (i.e., requirements that are not overrides).
+
+If a FIRD work product contains no override records, the `## Overrides` section MAY be omitted.
+
+A `## Overrides` section SHOULD appear near the end of the document, after the primary requirements and guidance, so it is easy to find during review.
+
+<a id="override-record-requirements"></a>
+## 3. Override record requirements
+
+<a id="when-required"></a>
+### 3.1 When an override record is required
+
+If a FIRD conformer intends to proceed under an authorized FIRD requirement override for a FIRD work product, the work product MUST contain an override record for that override.
+
+A FIRD agent MUST treat an override as not recorded for the purposes of [FIRD-CORE-3] unless it is recorded as an override record that conforms to this FIRD.
+
+<a id="where-to-record"></a>
+### 3.2 Where to record overrides
+
+For a work product that includes one or more FIRDs:
+
+- An override record MUST be recorded in the `## Overrides` section of each FIRD document in the work product whose conformance depends on that override (i.e., each FIRD document that would be non-conforming without the override).
+- An override record MUST NOT be recorded by modifying the referenced FIRD that defines the overridden requirement, unless that referenced FIRD is itself part of the current work product and the override is intended to apply to it.
+- If the same override applies to multiple FIRD documents in the same work product, each such FIRD document MUST contain an override record. If recorded in multiple documents, the override records MUST be identical in content.
+
+<a id="record-content"></a>
+### 3.3 Override record content requirements
+
+Each override record MUST override exactly one requirement.
+
+Each override record MUST include all of the following fields:
+
+- **Requirement** — the override target.
+- **Locator** — a Requirement locator. REQUIRED when the `Requirement` field does not uniquely identify a single requirement.
+- **Reason** — why the override is needed.
+- **Scope** — the override scope.
+- **Authorized by** — the FIRD conformer who authorized the override (free-form identifier).
+
+#### Requirement field
+
+The `Requirement` field MUST identify the overridden requirement unambiguously.
+
+- The `Requirement` field MUST include a FIRD section reference token (for example, `FIRD-CORE-3#applying-overrides`) that points to the smallest stable location that contains the overridden requirement.
+- If no stable anchor exists that identifies exactly the overridden requirement (for example, the anchor points to a section that contains multiple requirements), the override record MUST include the `Locator` field to identify exactly which requirement within that location is overridden.
+
+#### Locator field
+
+The `Locator` field MUST identify the overridden requirement within the location referenced by the `Requirement` field.
+
+The `Locator` field MUST use exactly one of the following forms:
+
+- `anchor <FIRD-...#anchor>` — a stable anchor that identifies the overridden requirement; or
+- `excerpt <literal>` — a verbatim excerpt of the overridden requirement.
+
+If the `Locator` field uses the `excerpt` form:
+
+- the excerpt MUST be written as a Markdown literal using an inline code span (backticks), so normative key words inside the excerpt are not interpreted as requirements; and
+- the excerpt MUST include the normative key word and enough surrounding text to uniquely identify the requirement being overridden.
+
+#### Reason field
+
+- The `Reason` field MUST be a short explanation sufficient for review (typically 1–3 sentences).
+- The `Reason` field MUST NOT be used to silently redefine requirements; it is justification, not a replacement specification.
+
+#### Scope field
+
+The `Scope` field MUST state:
+
+- what the override applies to (at minimum, identify the affected FIRD document(s) and/or parts); and
+- what the override does not apply to, unless the non-applicability is trivially “everything else” and cannot be misread.
+
+If an override is conditional or time-bounded, the `Scope` field MUST describe those conditions or bounds.
+
+#### Authorized by field
+
+- The `Authorized by` field MUST identify the authorizing FIRD conformer using a free-form string.
+- If the authorizing FIRD conformer is a FIRD user, `Authorized by` SHOULD identify the FIRD user in the way that is standard for the environment (for example, a username or role name), without embedding revision history in the document.
+
+<a id="record-format"></a>
+### 3.4 Recommended override record format
+
+Each override record MUST be written as a single top-level Markdown list item.
+
+The text of that top-level list item MUST begin with the literal `Override:` (case-sensitive). The top-level list item MAY include additional text after `Override:` (for example, a short human-readable identifier).
+
+The required fields MUST be written as nested list items under the top-level `Override:` list item.
+
+Field labels MUST be written exactly as follows (including capitalization and the trailing colon):
+
+- `Requirement:`
+- `Locator:`
+- `Reason:`
+- `Scope:`
+- `Authorized by:`
+
+Within a single override record:
+
+- each required field label MUST appear at most once; and
+- each required field label MUST appear exactly once, except `Locator:`, which MAY be omitted only when the `Requirement:` field uniquely identifies exactly one requirement.
+
+An override record MAY include additional optional fields as nested list items, as long as doing so does not make the record ambiguous and does not change or omit any required fields.
+
+<a id="templates"></a>
+## [INFORMATIVE] Appendix A: Templates
+
+```md example
+## Overrides
+
+- Override:
+  - Requirement: FIRD-CORE-3#applying-overrides
+  - Locator: <optional; required if Requirement is not specific enough>
+  - Reason: <why this override is needed>
+  - Scope: <what this override applies to and what it does not apply to>
+  - Authorized by: <actor identifier>
+```
+
+<a id="examples"></a>
+## [INFORMATIVE] Appendix B: Examples
+
+### Example 1: Simple override
+
+```md example
+## Overrides
+
+- Override:
+  - Requirement: FIRD-CORE-9#frontmatter
+  - Reason: The upstream generator produces valid FIRDs but cannot emit YAML frontmatter in the current environment.
+  - Scope: Applies only to this FIRD file; does not apply to any other FIRD work products.
+  - Authorized by: user
+```
+
+### Example 2: Scoped override with explicit exclusion
+
+```md example
+## Overrides
+
+- Override:
+  - Requirement: FIRD-CORE-9#stable-anchors
+  - Locator: excerpt `A FIRD contributor SHOULD use stable anchors for ...`
+  - Reason: This document is experimental and is expected to be rewritten before publication.
+  - Scope: Applies only to anchors in sections 6.* of this file; does not apply to the FIRD title, Scope, or Terminology anchors.
+  - Authorized by: user
+```
+
+### Anti-example: Missing scope and ambiguous target
+
+```md example
+## Overrides
+
+- Override:
+  - Requirement: FIRD-CORE-9
+  - Reason: Needed.
+  - Authorized by: user
+```
+
+> [!INFORMATIVE]
+> The anti-example is non-conforming because it does not identify a specific requirement location and does not state the override scope, making it impossible to apply safely and review reliably.

@@ -1,0 +1,78 @@
+---
+alwaysApply: true
+---
+
+# FIRD-CORE-3: FIRD agent conformance (how FIRD agents must follow FIRDs)
+
+<a id="terms"></a>
+## 1. Terms
+
+- **FIRD agent context** — the information available to the FIRD agent for reasoning and output generation (for example, the current conversation plus any loaded documents).
+- **Context compaction** — any process that reduces, summarizes, truncates, or replaces existing context with a shorter representation to fit constraints (for example, summarization or dropping previously loaded material).
+
+<a id="frontmatter"></a>
+## 2. YAML frontmatter and applicability
+
+YAML frontmatter fields [FIRD-CORE-1#frontmatter].
+
+<a id="applicability"></a>
+### 2.1 Determining Applicable FIRDs
+
+A FIRD agent MUST determine Applicable FIRDs for the current task using YAML frontmatter, using the rules below.
+
+- If a FIRD has `alwaysApply: true`, the FIRD agent MUST treat that FIRD as applicable to every task. In this case, the FIRD agent MUST ignore `globs` and `description` for applicability.
+- If `alwaysApply` is not `true` and a FIRD has a non-empty `globs` value, the FIRD agent MUST treat that FIRD as applicable whenever the FIRD agent is working with one or more files whose paths match any glob in `globs`.
+- If `alwaysApply` is not `true` and a FIRD has a non-empty `description` value, the FIRD agent MUST treat that FIRD as applicable when the FIRD user’s request context is within the intent/scope described by `description`.
+- If `alwaysApply` is not `true` and both `globs` and `description` are present and non-empty, the FIRD agent MUST treat the FIRD as applicable when either condition would make it applicable.
+- If `alwaysApply` is not `true` and the FIRD has neither `globs` nor `description`, the FIRD agent MUST treat that FIRD as applicable only when the FIRD user explicitly requests that the FIRD agent follow that FIRD (for example, by referencing its FIRD reference token).
+- If the FIRD user explicitly requests that the FIRD agent follow a FIRD (for example, by referencing its FIRD reference token), the FIRD agent MUST treat that FIRD as applicable, even if the FIRD’s `globs` and/or `description` would not otherwise make it applicable.
+- If YAML frontmatter is absent, or if any standardized fields are absent, the FIRD agent MUST treat missing fields as if they were unset (for example, `alwaysApply` is not `true` and `globs` / `description` are empty).
+
+<a id="agent-conformance"></a>
+## 3. FIRD agent conformance requirements
+
+- A FIRD agent MUST comply with all applicable requirements that are addressed to the FIRD agent.
+- A FIRD agent MUST apply FIRD requirements only within the scope defined by each applicable FIRD (if a scope is declared) [FIRD-CORE-1#scope-declaration].
+- A FIRD agent MUST resolve FIRD references [FIRD-CORE-1#fird-references], except where marked Informative.
+- If an applicable FIRD is malformed according to [FIRD-CORE-1#normative-words-headings], a FIRD agent MUST:
+  - stop before performing any further changes to the Work product [FIRD-CORE-1#terms];
+  - report the issue to the FIRD user (including what FIRD is malformed and where the violation occurs); and
+  - request that the FIRD be corrected (or otherwise made non-applicable) before proceeding.
+- A FIRD agent MUST NOT “work around” a malformed applicable FIRD by silently ignoring it, rewriting it, or guessing author intent.
+
+<a id="references-and-loading"></a>
+## 4. References and dependency loading
+
+- If a term reference or rule reference is required to comply with an applicable requirement addressed to the FIRD agent, and the reference is not marked Informative (either explicitly, or by being contained within Informative content), the FIRD agent MUST treat it as a dependency for compliance.
+- For dependencies required for compliance, the FIRD agent MUST load into its agent context the referenced material that is required to follow the dependency.
+- If a FIRD agent cannot access or load required referenced material that is necessary for compliance, the FIRD agent MUST state that limitation and MUST avoid claiming compliance.
+
+<a id="conflicts"></a>
+## 5. Conflicts and requirement overrides
+
+### 5.1 Handling requirement conflicts
+
+- If Applicable FIRDs contain a FIRD requirement conflict [FIRD-CORE-1#terms], a FIRD agent MUST:
+  - stop before performing any further changes to the Work product [FIRD-CORE-1#terms];
+  - report the conflict to the FIRD user, including the conflicting requirements (using FIRD section reference tokens) and why they conflict; and
+  - request FIRD user instructions to resolve the conflict.
+- A FIRD agent MUST NOT continue until the FIRD user provides a resolution for the conflict.
+- After the FIRD user provides a resolution (for example, by clarifying intent/constraints, updating FIRDs, and/or authorizing overrides), the FIRD agent MUST re-evaluate Applicable FIRDs and MUST proceed only if no FIRD requirement conflict remains.
+
+### 5.2 Applying requirement overrides
+
+- If the FIRD user authorizes a FIRD requirement override [FIRD-CORE-1#terms], a FIRD agent MUST NOT proceed under that override unless the override is recorded in the Work product according to applicable override recording rules.
+- If the FIRD agent cannot determine how to record the override (for example, no applicable override recording rules exist for the current Work product, or the rules are ambiguous), the FIRD agent MUST NOT continue and MUST request that the FIRD user provide a FIRD that defines how FIRD requirement overrides are recorded for the current Work product type.
+- In particular, if override recording rules are missing, incomplete, or ambiguous, the agent MUST NOT invent, infer, or “fill in” override recording rules or formats.
+- Once an override is recorded, the FIRD agent MUST treat the overridden requirement as not applicable only within the scope defined by that override record.
+
+<a id="context-handling"></a>
+## 6. Context loading and context compaction
+
+### 6.1 Loading into agent context
+
+- If a FIRD agent can control what is loaded into its agent context, it MUST ensure that all applicable agent-facing FIRD content required for compliance is available in the agent context.
+
+### 6.2 Context compaction
+
+- If context compaction causes required agent-facing FIRD content to become unavailable, the FIRD agent MUST state the limitation and MUST avoid claiming compliance.

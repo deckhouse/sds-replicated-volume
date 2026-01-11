@@ -1,0 +1,17 @@
+---
+alwaysApply: true
+---
+
+# FIRD-LOCAL-1: Working with FIRDs in this repository
+
+## 1. Resolving FIRD reference tokens in this repository
+
+Within this repository, FIRDs are stored as `.mdc` files under `.cursor/rules/`.
+
+Within this repository, a FIRD reference token `FIRD-<SERIES>-<N>` MUST resolve to exactly one `.mdc` file under `.cursor/rules/` whose basename begins with `FIRD-<SERIES>-<N>` and is followed by either:
+
+- the end of the basename (for example, `FIRD-EXAMPLE-12.mdc`), or
+- a non-digit character (for example, `FIRD-EXAMPLE-12-something.mdc`).
+
+If there is no matching file, or if there is more than one matching file, the reference is unresolved or ambiguous.
+
