@@ -64,6 +64,7 @@ type VolumeMain struct {
 	totalCreateRVTime       *atomic.Int64 // nanoseconds
 	totalDeleteRVTime       *atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime *atomic.Int64 // nanoseconds
+	createRVErrorCount      *atomic.Int64
 
 	// Callback to register checker stats in MultiVolume
 	registerCheckerStats func(*CheckerStats)
@@ -82,6 +83,7 @@ func NewVolumeMain(
 	totalCreateRVTime *atomic.Int64,
 	totalDeleteRVTime *atomic.Int64,
 	totalWaitForRVReadyTime *atomic.Int64,
+	createRVErrorCount *atomic.Int64,
 	registerCheckerStats func(*CheckerStats),
 	forceCleanupChan <-chan struct{},
 ) *VolumeMain {
@@ -99,6 +101,7 @@ func NewVolumeMain(
 		totalCreateRVTime:             totalCreateRVTime,
 		totalDeleteRVTime:             totalDeleteRVTime,
 		totalWaitForRVReadyTime:       totalWaitForRVReadyTime,
+		createRVErrorCount:            createRVErrorCount,
 		registerCheckerStats:          registerCheckerStats,
 		forceCleanupChan:              forceCleanupChan,
 	}
@@ -126,6 +129,9 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	createDuration, err := v.createRV(ctx, attachNodes)
 	if err != nil {
 		v.log.Error("failed to create RV and RVAs", "error", err)
+		if v.createRVErrorCount != nil {
+			v.createRVErrorCount.Add(1)
+		}
 		v.cleanup(ctx, lifetimeCtx, v.forceCleanupChan)
 		return nil
 	}

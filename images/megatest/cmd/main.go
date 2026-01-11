@@ -116,7 +116,8 @@ func main() {
 	duration := time.Since(start)
 
 	fmt.Fprintf(os.Stdout, "\nStatistics:\n")
-	fmt.Fprintf(os.Stdout, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
+	fmt.Fprintf(os.Stdout, "Total RV created: %d\n", stats.CreatedRVCount)
+	fmt.Fprintf(os.Stdout, "Total create RV errors: %d\n", stats.CreateRVErrorCount)
 
 	// Calculate average times
 	var avgCreateTime, avgDeleteTime, avgWaitTime time.Duration
