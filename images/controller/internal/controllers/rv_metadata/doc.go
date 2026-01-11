@@ -14,35 +14,37 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package rvfinalizer implements the rv-finalizer-controller, which manages the
-// controller finalizer on ReplicatedVolume resources.
+// Package rvmetadata implements the rv-metadata-controller, which manages
+// metadata (finalizers and labels) on ReplicatedVolume resources.
 //
 // # Controller Responsibilities
 //
-// The controller ensures proper lifecycle management by:
-//   - Adding the controller finalizer (sds-replicated-volume.storage.deckhouse.io/controller) to new RVs
+// The controller ensures proper lifecycle and metadata management by:
+//   - Adding the controller finalizer (sds-replicated-volume.deckhouse.io/controller) to new RVs
 //   - Removing the finalizer when deletion is safe (all RVRs are gone)
+//   - Setting the replicated-storage-class label on RVs
 //
 // # Watched Resources
 //
 // The controller watches:
-//   - ReplicatedVolume: To manage finalizers
+//   - ReplicatedVolume: To manage finalizers and labels
 //   - ReplicatedVolumeReplica: To track when all replicas are deleted
 //
 // # Reconciliation Flow
 //
 // When RV is not being deleted (metadata.deletionTimestamp is not set):
-//  1. Check if the finalizer sds-replicated-volume.storage.deckhouse.io/controller exists
+//  1. Check if the finalizer sds-replicated-volume.deckhouse.io/controller exists
 //  2. If not present, add it to rv.metadata.finalizers
+//  3. Ensure replicated-storage-class label is set from rv.spec.replicatedStorageClassName
 //
 // When RV is being deleted (metadata.deletionTimestamp is set):
 //  1. List all ReplicatedVolumeReplicas with rvr.spec.replicatedVolumeName matching the RV
 //  2. If any RVRs exist, keep the finalizer (deletion is not safe)
 //  3. If no RVRs exist, remove the controller finalizer from rv.metadata.finalizers
 //
-// # Status Updates
+// # Labels Managed
 //
-// This controller does not update status fields; it only manages finalizers.
+//   - sds-replicated-volume.deckhouse.io/replicated-storage-class: Name of the ReplicatedStorageClass
 //
 // # Special Notes
 //
@@ -52,4 +54,4 @@ limitations under the License.
 //
 // This controller works with rv-delete-propagation-controller, which triggers deletion
 // of RVRs when an RV is deleted.
-package rvfinalizer
+package rvmetadata

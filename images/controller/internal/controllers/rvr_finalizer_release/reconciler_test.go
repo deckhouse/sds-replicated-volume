@@ -239,14 +239,14 @@ var _ = Describe("Reconcile", func() {
 				})
 			})
 
-			When("deleting replica is published", func() {
+			When("deleting replica is attached", func() {
 				JustBeforeEach(func(ctx SpecContext) {
 					rvr2.Status.ActualType = v1alpha1.ReplicaTypeDiskful
 					rvr3.Status.ActualType = v1alpha1.ReplicaTypeDiskful
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 
-					rv.Status.PublishedOn = []string{rvr.Spec.NodeName}
+					rv.Status.ActuallyAttachedTo = []string{rvr.Spec.NodeName}
 					Expect(cl.Update(ctx, rv)).To(Succeed())
 				})
 
@@ -268,7 +268,7 @@ var _ = Describe("Reconcile", func() {
 					Expect(cl.Update(ctx, rvr2)).To(Succeed())
 					Expect(cl.Update(ctx, rvr3)).To(Succeed())
 
-					rv.Status.PublishedOn = []string{}
+					rv.Status.ActuallyAttachedTo = []string{}
 					Expect(cl.Update(ctx, rv)).To(Succeed())
 
 					currentRsc := &v1alpha1.ReplicatedStorageClass{}

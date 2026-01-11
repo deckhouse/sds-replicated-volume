@@ -22,9 +22,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const AgentAppFinalizer = "sds-replicated-volume.storage.deckhouse.io/agent"
+const AgentAppFinalizer = "sds-replicated-volume.deckhouse.io/agent"
 
-const ControllerAppFinalizer = "sds-replicated-volume.storage.deckhouse.io/controller"
+const ControllerAppFinalizer = "sds-replicated-volume.deckhouse.io/controller"
 
 func isExternalFinalizer(f string) bool {
 	return f != ControllerAppFinalizer && f != AgentAppFinalizer

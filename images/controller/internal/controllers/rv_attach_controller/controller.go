@@ -14,18 +14,23 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvpublishcontroller
+package rvattachcontroller
 
 import (
+	"context"
+
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 )
 
 func BuildController(mgr manager.Manager) error {
-	const controllerName = "rv_publish_controller"
+	const controllerName = "rv_attach_controller"
 
 	log := mgr.GetLogger().WithName(controllerName)
 
@@ -33,10 +38,23 @@ func BuildController(mgr manager.Manager) error {
 
 	return builder.ControllerManagedBy(mgr).
 		Named(controllerName).
-		For(&v1alpha1.ReplicatedVolume{}).
+		WithOptions(controller.Options{MaxConcurrentReconciles: 10}).
+		For(&v1alpha1.ReplicatedVolume{}, builder.WithPredicates(replicatedVolumePredicate())).
 		Watches(
 			&v1alpha1.ReplicatedVolumeReplica{},
 			handler.EnqueueRequestForOwner(mgr.GetScheme(), mgr.GetRESTMapper(), &v1alpha1.ReplicatedVolume{}),
+			builder.WithPredicates(replicatedVolumeReplicaPredicate()),
+		).
+		Watches(
+			&v1alpha1.ReplicatedVolumeAttachment{},
+			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []reconcile.Request {
+				rva, ok := obj.(*v1alpha1.ReplicatedVolumeAttachment)
+				if !ok || rva.Spec.ReplicatedVolumeName == "" {
+					return nil
+				}
+				return []reconcile.Request{{NamespacedName: client.ObjectKey{Name: rva.Spec.ReplicatedVolumeName}}}
+			}),
+			builder.WithPredicates(replicatedVolumeAttachmentPredicate()),
 		).
 		Complete(rec)
 }

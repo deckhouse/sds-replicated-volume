@@ -26,6 +26,7 @@ import (
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Cluster,shortName=rv
 // +kubebuilder:metadata:labels=module=sds-replicated-volume
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 120",message="metadata.name must be at most 120 characters (to fit derived RVR/LLV names)"
 // +kubebuilder:printcolumn:name="IOReady",type=string,JSONPath=".status.conditions[?(@.type=='IOReady')].status"
 // +kubebuilder:printcolumn:name="Size",type=string,JSONPath=".spec.size"
 // +kubebuilder:printcolumn:name="ActualSize",type=string,JSONPath=".status.actualSize"
@@ -48,10 +49,6 @@ type ReplicatedVolumeSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	ReplicatedStorageClassName string `json:"replicatedStorageClassName"`
-
-	// +kubebuilder:validation:MaxItems=2
-	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
-	PublishOn []string `json:"publishOn"`
 }
 
 // +kubebuilder:object:generate=true
@@ -70,7 +67,14 @@ type ReplicatedVolumeStatus struct {
 	// +kubebuilder:validation:MaxItems=2
 	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
 	// +optional
-	PublishedOn []string `json:"publishedOn,omitempty"`
+	ActuallyAttachedTo []string `json:"actuallyAttachedTo,omitempty"`
+
+	// DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
+	// It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
+	// +kubebuilder:validation:MaxItems=2
+	// +kubebuilder:validation:Items={type=string,minLength=1,maxLength=253}
+	// +optional
+	DesiredAttachTo []string `json:"desiredAttachTo,omitempty"`
 
 	// +optional
 	ActualSize *resource.Quantity `json:"actualSize,omitempty"`
@@ -92,10 +96,10 @@ type ReplicatedVolumeStatus struct {
 	// +optional
 	DiskfulReplicasInSync string `json:"diskfulReplicasInSync,omitempty"`
 
-	// PublishedAndIOReadyCount represents the number of published replicas that are IOReady in format "ready/published"
-	// Example: "1/2" means 1 replica is IOReady out of 2 published
+	// AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
+	// Example: "1/2" means 1 replica is IOReady out of 2 attached
 	// +optional
-	PublishedAndIOReadyCount string `json:"publishedAndIOReadyCount,omitempty"`
+	AttachedAndIOReadyCount string `json:"attachedAndIOReadyCount,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

@@ -31,14 +31,11 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
 	v9 "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf/v9"
 )
-
-type ResourceScanner interface {
-	ResourceShouldBeRefreshed(resourceName string)
-}
 
 type UpAndAdjustHandler struct {
 	cl       client.Client
@@ -48,7 +45,6 @@ type UpAndAdjustHandler struct {
 	lvg      *snc.LVMVolumeGroup   // will be nil for non-diskful replicas
 	llv      *snc.LVMLogicalVolume // will be nil for non-diskful replicas
 	nodeName string
-	scanner  ResourceScanner
 }
 
 func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
@@ -88,7 +84,10 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 		return fmt.Errorf("patching status: %w", errors.Join(patchErr, err))
 	}
 
-	h.scanner.ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
+	s := scanner.DefaultScanner()
+	if s != nil {
+		(*s).ResourceShouldBeRefreshed(h.rvr.Spec.ReplicatedVolumeName)
+	} // scanner didn't start yet, and it will refresh all resources when it starts anyway, so no need to trigger
 
 	return err
 }
@@ -152,7 +151,7 @@ func (h *UpAndAdjustHandler) handleDRBDOperation(ctx context.Context) error {
 	}
 
 	// write config to temp file
-	regularFilePath, tmpFilePath := FilePaths(rvName)
+	regularFilePath, tmpFilePath := FilePaths(h.rvr.Name)
 	if err := h.writeResourceConfig(tmpFilePath); err != nil {
 		return fmt.Errorf("writing to %s: %w", tmpFilePath, fileSystemOperationError{err})
 	}

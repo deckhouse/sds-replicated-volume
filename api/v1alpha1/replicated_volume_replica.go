@@ -37,16 +37,17 @@ import (
 // +kubebuilder:printcolumn:name="Volume",type=string,JSONPath=".spec.replicatedVolumeName"
 // +kubebuilder:printcolumn:name="Node",type=string,JSONPath=".spec.nodeName"
 // +kubebuilder:printcolumn:name="Type",type=string,JSONPath=".spec.type"
-// +kubebuilder:printcolumn:name="Published",type=string,JSONPath=".status.conditions[?(@.type=='Published')].status"
+// +kubebuilder:printcolumn:name="Attached",type=string,JSONPath=".status.conditions[?(@.type=='Attached')].status"
 // +kubebuilder:printcolumn:name="Online",type=string,JSONPath=".status.conditions[?(@.type=='Online')].status"
 // +kubebuilder:printcolumn:name="IOReady",type=string,JSONPath=".status.conditions[?(@.type=='IOReady')].status"
 // +kubebuilder:printcolumn:name="Configured",type=string,JSONPath=".status.conditions[?(@.type=='Configured')].status"
 // +kubebuilder:printcolumn:name="DataInitialized",type=string,JSONPath=".status.conditions[?(@.type=='DataInitialized')].status"
 // +kubebuilder:printcolumn:name="InQuorum",type=string,JSONPath=".status.conditions[?(@.type=='InQuorum')].status"
-// +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.conditions[?(@.type=='InSync')].status"
+// +kubebuilder:printcolumn:name="InSync",type=string,JSONPath=".status.syncProgress"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')",message="metadata.name must start with spec.replicatedVolumeName + '-'"
 // +kubebuilder:validation:XValidation:rule="int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-') + 1)) <= 31",message="numeric suffix must be between 0 and 31"
+// +kubebuilder:validation:XValidation:rule="size(self.metadata.name) <= 123",message="metadata.name must be at most 123 characters (to fit derived LLV name with prefix)"
 type ReplicatedVolumeReplica struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -111,7 +112,7 @@ func (rvr *ReplicatedVolumeReplica) SetReplicatedVolume(rv *ReplicatedVolume, sc
 type ReplicatedVolumeReplicaSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=127
+	// +kubebuilder:validation:MaxLength=120
 	// +kubebuilder:validation:Pattern=`^[0-9A-Za-z.+_-]*$`
 	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="replicatedVolumeName is immutable"
 	ReplicatedVolumeName string `json:"replicatedVolumeName"`
@@ -173,6 +174,13 @@ type ReplicatedVolumeReplicaStatus struct {
 
 	// +patchStrategy=merge
 	DRBD *DRBD `json:"drbd,omitempty" patchStrategy:"merge"`
+
+	// SyncProgress shows sync status for kubectl output:
+	// - "True" when fully synced (InSync condition is True)
+	// - "XX.XX%" during active synchronization (SyncTarget)
+	// - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
+	// +optional
+	SyncProgress string `json:"syncProgress,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

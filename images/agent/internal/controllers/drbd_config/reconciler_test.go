@@ -37,6 +37,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	fakedrbdadm "github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm/fake"
@@ -114,7 +115,7 @@ func (t *testResourceScanner) ResourceShouldBeRefreshed(resourceName string) {
 	t.resourceNames[resourceName] = struct{}{}
 }
 
-var _ drbdconfig.ResourceScanner = &testResourceScanner{}
+var _ scanner.ResourceScanner = &testResourceScanner{}
 
 func TestReconciler_Reconcile(t *testing.T) {
 	testCases := []*reconcileTestCase{
@@ -179,7 +180,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				newExpectedCmd(drbdadm.Command, drbdadm.DownArgs(testRVName), "", nil),
 			},
 			prepare: func(t *testing.T) {
-				regular, tmp := drbdconfig.FilePaths(testRVName)
+				regular, tmp := drbdconfig.FilePaths(testRVRDeleteName)
 				mustWriteFile(t, regular, []byte("data"))
 				mustWriteFile(t, tmp, []byte("data"))
 			},
@@ -195,7 +196,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 				} else if !apierrors.IsNotFound(err) {
 					t.Fatalf("getting llv after reconcile: %v", err)
 				}
-				regular, tmp := drbdconfig.FilePaths(testRVName)
+				regular, tmp := drbdconfig.FilePaths(testRVRDeleteName)
 				expectFileAbsent(t, regular, tmp)
 			},
 			skipResourceRefresh: true,
@@ -206,7 +207,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			rvr:               disklessRVR(testRVRName, addr(testNodeIPv4, port(0)), peersFrom(peerDisklessSpec(testPeerNodeName, testPeerNodeID, addr(testPeerIPv4, port(1))))),
 			needsResourcesDir: true,
 			cryptoAlgs:        []string{testAlgSHA256},
-			expectedCommands:  disklessExpectedCommands(testRVName),
+			expectedCommands:  disklessExpectedCommands(testRVRName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
 				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
@@ -220,7 +221,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			rvr:               rvrWithErrors(disklessRVR(testRVRAltName, addr(testNodeIPv4, port(2)), peersFrom(peerDisklessSpec(testPeerNodeName, testPeerNodeID, addr(testPeerIPv4, port(4)))))),
 			needsResourcesDir: true,
 			cryptoAlgs:        []string{testAlgSHA256},
-			expectedCommands:  disklessExpectedCommands(testRVName),
+			expectedCommands:  disklessExpectedCommands(testRVRAltName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
 				expectNoDRBDErrors(t, rvr.Status.DRBD.Errors)
@@ -234,7 +235,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			lvg:               newLVG(testLVGName),
 			needsResourcesDir: true,
 			cryptoAlgs:        []string{testAlgSHA256},
-			expectedCommands:  diskfulExpectedCommands(testRVName),
+			expectedCommands:  diskfulExpectedCommands(testRVRAltName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
 				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
@@ -248,7 +249,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			rvr:                  disklessRVR(testRVRName, addr(testNodeIPv4, port(10))),
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
-			expectedCommands:     shNopFailureCommands(testRVName),
+			expectedCommands:     shNopFailureCommands(testRVRName),
 			expectedReconcileErr: errors.New("ExitErr"),
 		},
 		{
@@ -257,7 +258,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			rvr:                  disklessRVR(testRVRAltName, addr(testNodeIPv4, port(11))),
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
-			expectedCommands:     adjustFailureCommands(testRVName),
+			expectedCommands:     adjustFailureCommands(testRVRAltName),
 			expectedReconcileErr: errors.New("adjusting the resource '" + testRVName + "': ExitErr"),
 		},
 		{
@@ -268,7 +269,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			lvg:                  newLVG(testLVGName),
 			needsResourcesDir:    true,
 			cryptoAlgs:           []string{testAlgSHA256},
-			expectedCommands:     createMDFailureCommands(testRVName),
+			expectedCommands:     createMDFailureCommands(testRVRAltName),
 			expectedReconcileErr: errors.New("dumping metadata: ExitErr"),
 		},
 		{
@@ -279,7 +280,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			lvg:               newLVG(testLVGName),
 			needsResourcesDir: true,
 			cryptoAlgs:        []string{testAlgSHA256},
-			expectedCommands:  diskfulExpectedCommandsWithExistingMetadata(testRVName),
+			expectedCommands:  diskfulExpectedCommandsWithExistingMetadata(testRVRAltName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRAltName)
 				expectTrue(t, rvr.Status.DRBD.Actual.InitialSyncCompleted, "initial sync completed")
@@ -306,7 +307,7 @@ func TestReconciler_Reconcile(t *testing.T) {
 			rvr:               disklessRVR(testRVRName, addr(testNodeIPv4, port(201)), peersFrom(peerDisklessSpec(testPeerNodeName, testPeerNodeID, addr(testPeerIPv4, port(202))))),
 			needsResourcesDir: true,
 			cryptoAlgs:        []string{"sha256"}, // lowercase in kernel
-			expectedCommands:  disklessExpectedCommands(testRVName),
+			expectedCommands:  disklessExpectedCommands(testRVRName),
 			postCheck: func(t *testing.T, cl client.Client) {
 				rvr := fetchRVR(t, cl, testRVRName)
 				expectFinalizers(t, rvr.Finalizers, v1alpha1.AgentAppFinalizer, v1alpha1.ControllerAppFinalizer)
@@ -352,8 +353,9 @@ func TestReconciler_Reconcile(t *testing.T) {
 				fakeExec.Setup(t)
 
 				resScanner := &testResourceScanner{}
+				scanner.SetDefaultScanner(resScanner)
 
-				rec := drbdconfig.NewReconciler(cl, nil, testNodeName, resScanner)
+				rec := drbdconfig.NewReconciler(cl, nil, testNodeName)
 
 				_, err := rec.Reconcile(
 					t.Context(),
@@ -627,32 +629,32 @@ func newExpectedCmd(name string, args []string, output string, err error) *faked
 	}
 }
 
-func disklessExpectedCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func disklessExpectedCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "ok", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
 	}
 }
 
-func diskfulExpectedCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func diskfulExpectedCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
 		{
 			Name:         drbdadm.Command,
-			Args:         drbdadm.DumpMDArgs(rvName),
+			Args:         drbdadm.DumpMDArgs(testRVName),
 			ResultOutput: []byte("No valid meta data found"),
 			ResultErr:    fakedrbdadm.ExitErr{Code: 1},
 		},
-		newExpectedCmd(drbdadm.Command, drbdadm.CreateMDArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.CreateMDArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(testRVName), "", nil),
 	}
 }
 
@@ -691,14 +693,14 @@ func peersFrom(specs ...peerSpec) map[string]v1alpha1.Peer {
 	return peers
 }
 
-func diskfulExpectedCommandsWithExistingMetadata(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func diskfulExpectedCommandsWithExistingMetadata(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", nil),
 	}
 }
 
@@ -798,26 +800,26 @@ func selectErr(prefix, resource, name string) error {
 	return fmt.Errorf("getting %s: %w", prefix, notFoundErr(resource, name))
 }
 
-func shNopFailureCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func shNopFailureCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", fakedrbdadm.ExitErr{Code: 1}),
 	}
 }
 
-func adjustFailureCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func adjustFailureCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(rvName), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(rvName), "", fakedrbdadm.ExitErr{Code: 1}),
+		newExpectedCmd(drbdadm.Command, drbdadm.StatusArgs(testRVName), "", nil),
+		newExpectedCmd(drbdadm.Command, drbdadm.AdjustArgs(testRVName), "", fakedrbdadm.ExitErr{Code: 1}),
 	}
 }
 
-func createMDFailureCommands(rvName string) []*fakedrbdadm.ExpectedCmd {
-	regular, tmp := drbdconfig.FilePaths(rvName)
+func createMDFailureCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
+	regular, tmp := drbdconfig.FilePaths(rvrName)
 	return []*fakedrbdadm.ExpectedCmd{
 		newExpectedCmd(drbdadm.Command, drbdadm.ShNopArgs(tmp, regular), "", nil),
-		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(rvName), "", fakedrbdadm.ExitErr{Code: 2}),
+		newExpectedCmd(drbdadm.Command, drbdadm.DumpMDArgs(testRVName), "", fakedrbdadm.ExitErr{Code: 2}),
 	}
 }

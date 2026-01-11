@@ -27,8 +27,8 @@ var FS = &afero.Afero{Fs: afero.NewOsFs()}
 
 var ResourcesDir = "/var/lib/sds-replicated-volume-agent.d/"
 
-func FilePaths(rvName string) (regularFilePath, tempFilePath string) {
-	regularFilePath = filepath.Join(ResourcesDir, rvName+".res")
+func FilePaths(rvrName string) (regularFilePath, tempFilePath string) {
+	regularFilePath = filepath.Join(ResourcesDir, rvrName+".res")
 	tempFilePath = regularFilePath + "_tmp"
 	return
 }

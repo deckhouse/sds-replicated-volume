@@ -35,7 +35,6 @@ type Reconciler struct {
 	cl       client.Client
 	log      *slog.Logger
 	nodeName string
-	scanner  ResourceScanner
 }
 
 var _ reconcile.Reconciler = &Reconciler{}
@@ -95,7 +94,6 @@ func (r *Reconciler) Reconcile(
 			rv:       rv,
 			llv:      llv,
 			nodeName: r.nodeName,
-			scanner:  r.scanner,
 		}
 
 		if llv != nil {
@@ -173,7 +171,7 @@ func (r *Reconciler) selectLVG(
 }
 
 // NewReconciler constructs a Reconciler; exported for tests.
-func NewReconciler(cl client.Client, log *slog.Logger, nodeName string, scanner ResourceScanner) *Reconciler {
+func NewReconciler(cl client.Client, log *slog.Logger, nodeName string) *Reconciler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -181,7 +179,6 @@ func NewReconciler(cl client.Client, log *slog.Logger, nodeName string, scanner 
 		cl:       cl,
 		log:      log.With("nodeName", nodeName),
 		nodeName: nodeName,
-		scanner:  scanner,
 	}
 }
 

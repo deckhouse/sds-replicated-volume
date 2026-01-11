@@ -14,26 +14,16 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package rvrownerreference
+package rvrmetadata_test
 
 import (
-	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"testing"
 
-	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
 )
 
-func BuildController(mgr manager.Manager) error {
-	nameController := "rvr_owner_reference_controller"
-
-	r := &Reconciler{
-		cl:     mgr.GetClient(),
-		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
-		scheme: mgr.GetScheme(),
-	}
-
-	return builder.ControllerManagedBy(mgr).
-		Named(nameController).
-		For(&v1alpha1.ReplicatedVolumeReplica{}).
-		Complete(r)
+func TestRvrMetadataController(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "RvrMetadataController Suite")
 }

@@ -90,16 +90,16 @@ func (r *Reconciler) Reconcile(
 			}, nil
 		}
 
-		if isDeletingReplicaPublished(rv, rvr.Spec.NodeName) {
-			log.Info("cluster is not ready for RVR GC: deleting replica is published. Requeue after", "seconds", requeueAfterSec)
+		if isDeletingReplicaAttached(rv, rvr.Spec.NodeName) {
+			log.Info("cluster is not ready for RVR GC: deleting replica is attached. Requeue after", "seconds", requeueAfterSec)
 			return reconcile.Result{
 				RequeueAfter: requeueAfterSec * time.Second,
 			}, nil
 		}
 	} else {
 		for i := range replicasForRV {
-			if isDeletingReplicaPublished(rv, replicasForRV[i].Spec.NodeName) {
-				log.Info("cluster is not ready for RVR GC: one replica is still published. Requeue after",
+			if isDeletingReplicaAttached(rv, replicasForRV[i].Spec.NodeName) {
+				log.Info("cluster is not ready for RVR GC: one replica is still attached. Requeue after",
 					"seconds", requeueAfterSec,
 					"replicaName", replicasForRV[i].Name)
 				return reconcile.Result{
@@ -178,7 +178,7 @@ func isThisReplicaCountEnoughForQuorum(
 	return onlineReplicaCount >= quorum
 }
 
-func isDeletingReplicaPublished(
+func isDeletingReplicaAttached(
 	rv *v1alpha1.ReplicatedVolume,
 	deletingRVRNodeName string,
 ) bool {
@@ -189,7 +189,7 @@ func isDeletingReplicaPublished(
 		return false
 	}
 
-	return slices.Contains(rv.Status.PublishedOn, deletingRVRNodeName)
+	return slices.Contains(rv.Status.ActuallyAttachedTo, deletingRVRNodeName)
 }
 
 func hasEnoughDiskfulReplicasForReplication(

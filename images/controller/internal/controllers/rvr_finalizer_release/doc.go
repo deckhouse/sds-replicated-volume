@@ -24,14 +24,14 @@ limitations under the License.
 //   - Verifying cluster stability before allowing replica removal
 //   - Checking quorum requirements are maintained
 //   - Ensuring sufficient Diskful replicas remain
-//   - Confirming replicas are not published (not Primary)
+//   - Confirming replicas are not attached (not Primary)
 //   - Removing the controller finalizer when conditions are met
 //
 // # Background
 //
 // The agent sets two finalizers on each RVR:
-//   - sds-replicated-volume.storage.deckhouse.io/agent (F/agent)
-//   - sds-replicated-volume.storage.deckhouse.io/controller (F/controller)
+//   - sds-replicated-volume.deckhouse.io/agent (F/agent)
+//   - sds-replicated-volume.deckhouse.io/controller (F/controller)
 //
 // The agent will not remove DRBD resources or remove its finalizer while F/controller
 // remains. This controller's job is to release F/controller only when safe to do so.
@@ -48,9 +48,9 @@ limitations under the License.
 // The controller removes F/controller from a deleting RVR when ALL conditions are met:
 //
 // Always required:
-//   - Replica is not published: node not in rv.status.publishedOn
+//   - Replica is not attached: node not in rv.status.actuallyAttachedTo
 //   - For RV deletion (rv.metadata.deletionTimestamp set):
-//   - All replicas must be unpublished (len(rv.status.publishedOn)==0)
+//   - All replicas must be detached (len(rv.status.actuallyAttachedTo)==0)
 //
 // When RV is NOT being deleted (rv.metadata.deletionTimestamp==nil):
 //   - Remaining online replicas >= quorum:
@@ -69,7 +69,7 @@ limitations under the License.
 //  2. If not deleting, skip reconciliation
 //  3. Get the associated ReplicatedVolume
 //  4. Check if RV is being deleted:
-//     a. If yes, verify len(rv.status.publishedOn)==0
+//     a. If yes, verify len(rv.status.actuallyAttachedTo)==0
 //     b. If condition met, remove F/controller and exit
 //  5. For non-deleted RV:
 //     a. Count online replicas (excluding current RVR)
@@ -77,9 +77,9 @@ limitations under the License.
 //     c. Get ReplicatedStorageClass and determine required Diskful count
 //     d. Count ready Diskful replicas (excluding those being deleted)
 //     e. Verify count meets replication requirements
-//     f. Verify current RVR node not in rv.status.publishedOn
+//     f. Verify current RVR node not in rv.status.actuallyAttachedTo
 //  6. If all conditions met:
-//     - Remove sds-replicated-volume.storage.deckhouse.io/controller from finalizers
+//     - Remove sds-replicated-volume.deckhouse.io/controller from finalizers
 //
 // # Status Updates
 //
@@ -87,7 +87,7 @@ limitations under the License.
 //
 // # Special Notes
 //
-// This controller replaces the older rvr-quorum-and-publish-constrained-release-controller
+// This controller replaces the older rvr-quorum-and-attach-constrained-release-controller
 // with enhanced safety checks including the Online condition.
 //
 // The IOReady condition is checked instead of just Ready to ensure the replica can

@@ -21,9 +21,9 @@ import (
 
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	rvattachcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_attach_controller"
 	rvdeletepropagation "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_delete_propagation"
-	rvfinalizer "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_finalizer"
-	rvpublishcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_publish_controller"
+	rvmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_metadata"
 	rvstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_conditions"
 	rvstatusconfigdeviceminor "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_device_minor"
 	rvstatusconfigquorum "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rv_status_config_quorum"
@@ -31,7 +31,7 @@ import (
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
 	rvrfinalizerrelease "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_finalizer_release"
-	rvrownerreference "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_owner_reference"
+	rvrmetadata "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_metadata"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
 	rvrstatusconditions "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_conditions"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
@@ -42,6 +42,9 @@ import (
 var registry = []func(mgr manager.Manager) error{}
 
 func init() {
+	// Must be first: controllers rely on MatchingFields against these indexes.
+	registry = append(registry, RegisterIndexes)
+
 	registry = append(registry, rvrdiskfulcount.BuildController)
 	registry = append(registry, rvrtiebreakercount.BuildController)
 	registry = append(registry, rvstatusconfigquorum.BuildController)
@@ -50,14 +53,14 @@ func init() {
 	registry = append(registry, rvstatusconfigsharedsecret.BuildController)
 	registry = append(registry, rvraccesscount.BuildController)
 	registry = append(registry, rvrvolume.BuildController)
-	registry = append(registry, rvrownerreference.BuildController)
+	registry = append(registry, rvrmetadata.BuildController)
 	registry = append(registry, rvdeletepropagation.BuildController)
 	registry = append(registry, rvrfinalizerrelease.BuildController)
-	registry = append(registry, rvfinalizer.BuildController)
+	registry = append(registry, rvmetadata.BuildController)
 	registry = append(registry, rvrstatusconditions.BuildController)
 	registry = append(registry, rvstatusconditions.BuildController)
 	registry = append(registry, rvrschedulingcontroller.BuildController)
-	registry = append(registry, rvpublishcontroller.BuildController)
+	registry = append(registry, rvattachcontroller.BuildController)
 
 	// ...
 }

@@ -14,46 +14,26 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package drbdconfig
+package rvrmetadata
 
 import (
-	"log/slog"
-
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	u "github.com/deckhouse/sds-common-lib/utils"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
-	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 )
 
 func BuildController(mgr manager.Manager) error {
-	cfg, err := env.GetConfig()
-	if err != nil {
-		return err
+	nameController := "rvr_metadata_controller"
+
+	r := &Reconciler{
+		cl:     mgr.GetClient(),
+		log:    mgr.GetLogger().WithName(nameController).WithName("Reconciler"),
+		scheme: mgr.GetScheme(),
 	}
 
-	log := slog.Default().With("name", ControllerName)
-
-	rec := NewReconciler(
-		mgr.GetClient(),
-		log,
-		cfg.NodeName(),
-	)
-
-	return u.LogError(
-		log,
-		builder.ControllerManagedBy(mgr).
-			Named(ControllerName).
-			For(&v1alpha1.ReplicatedVolume{}).
-			Watches(
-				&v1alpha1.ReplicatedVolumeReplica{},
-				handler.EnqueueRequestForOwner(
-					mgr.GetScheme(),
-					mgr.GetRESTMapper(),
-					&v1alpha1.ReplicatedVolume{},
-				),
-			).
-			Complete(rec))
+	return builder.ControllerManagedBy(mgr).
+		Named(nameController).
+		For(&v1alpha1.ReplicatedVolumeReplica{}).
+		Complete(r)
 }

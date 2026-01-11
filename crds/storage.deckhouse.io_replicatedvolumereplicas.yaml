@@ -28,8 +28,8 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Published')].status
-      name: Published
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
       type: string
     - jsonPath: .status.conditions[?(@.type=='Online')].status
       name: Online
@@ -46,7 +46,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
       name: InQuorum
       type: string
-    - jsonPath: .status.conditions[?(@.type=='InSync')].status
+    - jsonPath: .status.syncProgress
       name: InSync
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -80,7 +80,7 @@ spec:
                 minLength: 1
                 type: string
               replicatedVolumeName:
-                maxLength: 127
+                maxLength: 120
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
@@ -478,6 +478,13 @@ spec:
               lvmLogicalVolumeName:
                 maxLength: 256
                 type: string
+              syncProgress:
+                description: |-
+                  SyncProgress shows sync status for kubectl output:
+                  - "True" when fully synced (InSync condition is True)
+                  - "XX.XX%" during active synchronization (SyncTarget)
+                  - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
+                type: string
             type: object
         required:
         - metadata
@@ -489,6 +496,9 @@ spec:
         - message: numeric suffix must be between 0 and 31
           rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
             + 1)) <= 31
+        - message: metadata.name must be at most 123 characters (to fit derived LLV
+            name with prefix)
+          rule: size(self.metadata.name) <= 123
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName

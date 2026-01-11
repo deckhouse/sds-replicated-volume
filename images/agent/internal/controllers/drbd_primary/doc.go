@@ -59,9 +59,9 @@ limitations under the License.
 // # Special Notes
 //
 // The controller only processes resources when the RV has the controller finalizer
-// (sds-replicated-volume.storage.deckhouse.io/controller) set.
+// (sds-replicated-volume.deckhouse.io/controller) set.
 //
 // Resources marked for deletion (metadata.deletionTimestamp set) are only considered
 // deleted if they don't have non-module finalizers (those not starting with
-// sds-replicated-volume.storage.deckhouse.io/).
+// sds-replicated-volume.deckhouse.io/).
 package drbdprimary

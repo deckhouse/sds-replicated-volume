@@ -20,6 +20,7 @@ package scanner
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
@@ -27,26 +28,30 @@ import (
 	"sync/atomic"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/deckhouse/sds-common-lib/cooldown"
 	u "github.com/deckhouse/sds-common-lib/utils"
-	uiter "github.com/deckhouse/sds-common-lib/utils/iter"
-	uslices "github.com/deckhouse/sds-common-lib/utils/slices"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
-var defaultScanner atomic.Pointer[Scanner]
+type ResourceScanner interface {
+	ResourceShouldBeRefreshed(resourceName string)
+}
 
-func DefaultScanner() *Scanner {
+var defaultScanner atomic.Pointer[ResourceScanner]
+
+func DefaultScanner() *ResourceScanner {
 	return defaultScanner.Load()
 }
 
-func SetDefaultScanner(s *Scanner) {
-	defaultScanner.Store(s)
+func SetDefaultScanner(s ResourceScanner) {
+	defaultScanner.Store(&s)
 }
 
 type Scanner struct {
@@ -79,7 +84,7 @@ func NewScanner(
 func (s *Scanner) retryUntilCancel(fn func() error) error {
 	return retry.OnError(
 		wait.Backoff{
-			Steps:    7,
+			Steps:    8,
 			Duration: 50 * time.Millisecond,
 			Factor:   2.0,
 			Cap:      5 * time.Second,
@@ -124,13 +129,9 @@ func (s *Scanner) Run() error {
 type updatedResourceName string
 
 func appendUpdatedResourceNameToBatch(batch []updatedResourceName, newItem updatedResourceName) []updatedResourceName {
-	if !slices.ContainsFunc(
-		batch,
-		func(e updatedResourceName) bool { return e == newItem },
-	) {
+	if !slices.Contains(batch, newItem) {
 		return append(batch, newItem)
 	}
-
 	return batch
 }
 
@@ -181,13 +182,14 @@ func (s *Scanner) processEvents(
 }
 
 func (s *Scanner) ConsumeBatches() error {
-	return s.retryUntilCancel(func() error {
-		cd := cooldown.NewExponentialCooldown(
-			50*time.Millisecond,
-			5*time.Second,
-		)
-		log := s.log.With("goroutine", "consumeBatches")
+	// Create cooldown OUTSIDE the retry loop to preserve its state across retries
+	cd := cooldown.NewExponentialCooldown(
+		1*time.Second,
+		5*time.Second,
+	)
+	log := s.log.With("goroutine", "consumeBatches")
 
+	return s.retryUntilCancel(func() error {
 		for batch := range s.batcher.ConsumeWithCooldown(s.ctx, cd) {
 			log.Debug("got batch of 'n' resources", "n", len(batch))
 
@@ -195,23 +197,18 @@ func (s *Scanner) ConsumeBatches() error {
 			if err != nil {
 				return u.LogError(log, fmt.Errorf("getting statusResult: %w", err))
 			}
+			resourceStatusByName := make(map[string]*drbdsetup.Resource, len(statusResult))
+			for i := range statusResult {
+				resourceStatusByName[statusResult[i].Name] = &statusResult[i]
+			}
 
 			log.Debug("got status for 'n' resources", "n", len(statusResult))
 
-			// TODO: add index
-			rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-			err = s.cl.List(s.ctx, rvrList)
-			if err != nil {
-				return u.LogError(log, fmt.Errorf("listing rvr: %w", err))
-			}
-
+			var batchErrors error
 			for _, item := range batch {
 				resourceName := string(item)
 
-				resourceStatus, ok := uiter.Find(
-					uslices.Ptrs(statusResult),
-					func(res *drbdsetup.Resource) bool { return res.Name == resourceName },
-				)
+				resourceStatus, ok := resourceStatusByName[resourceName]
 				if !ok {
 					log.Warn(
 						"got update event for resource 'resourceName', but it's missing in drbdsetup status",
@@ -220,34 +217,58 @@ func (s *Scanner) ConsumeBatches() error {
 					continue
 				}
 
-				rvr, ok := uiter.Find(
-					uslices.Ptrs(rvrList.Items),
-					func(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
-						return rvr.Spec.ReplicatedVolumeName == resourceName &&
-							rvr.Spec.NodeName == s.hostname
-					},
-				)
-				if !ok {
-					log.Debug(
-						"didn't find rvr with 'replicatedVolumeName'",
-						"replicatedVolumeName", resourceName,
-					)
-					continue
+				if err := s.refreshResource(log, resourceStatus); err != nil {
+					batchErrors = errors.Join(batchErrors, err)
+					// requeue same item
+					_ = s.batcher.Add(item)
 				}
+			}
 
-				err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
-				if err != nil {
-					return u.LogError(
-						log,
-						fmt.Errorf("updating replica status: %w", err),
-					)
-				}
-				log.Debug("updated replica status", "resourceName", resourceName)
+			if batchErrors != nil {
+				return batchErrors
 			}
 		}
 
 		return s.ctx.Err()
 	})
+}
+
+func (s *Scanner) refreshResource(log *slog.Logger, resourceStatus *drbdsetup.Resource) error {
+	rvr := &v1alpha1.ReplicatedVolumeReplica{
+		Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+			// required for SetNameWithNodeID
+			ReplicatedVolumeName: resourceStatus.Name,
+		},
+	}
+	rvr.SetNameWithNodeID(uint(resourceStatus.NodeID))
+	if err := s.cl.Get(s.ctx, client.ObjectKeyFromObject(rvr), rvr); err != nil {
+		if client.IgnoreNotFound(err) == nil {
+			log.Warn(
+				"got update event for resource 'resourceName' nodeId='nodeId', but rvr 'rvrName' missing in cluster",
+				"resourceName", resourceStatus.Name,
+				"nodeId", resourceStatus.NodeID,
+				"rvrName", rvr.Name,
+			)
+			return nil
+		}
+		return u.LogError(log, fmt.Errorf("getting rvr for resource: %w", err))
+	}
+
+	if rvr.Spec.NodeName != s.hostname {
+		log.Error(
+			"got update event for rvr 'rvrNodeName', but it has unexpected node name",
+			"hostname", s.hostname,
+			"rvrNodeName", rvr.Spec.NodeName,
+		)
+		return nil
+	}
+
+	err := s.updateReplicaStatusIfNeeded(rvr, resourceStatus)
+	if err != nil {
+		return u.LogError(log, fmt.Errorf("updating replica status: %w", err))
+	}
+	log.Debug("updated replica status", "resourceName", resourceStatus.Name)
+	return nil
 }
 
 func (s *Scanner) updateReplicaStatusIfNeeded(
@@ -268,11 +289,73 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	_ = rvr.UpdateStatusConditionInQuorum()
 	_ = rvr.UpdateStatusConditionInSync()
 
+	// Calculate SyncProgress for kubectl display
+	rvr.Status.SyncProgress = calculateSyncProgress(rvr, resource)
+
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
 	}
 
 	return nil
+}
+
+// calculateSyncProgress returns a string for the SyncProgress field:
+// - "True" when InSync condition is True
+// - "Unknown" when InSync condition is Unknown or not set
+// - "XX.XX%" during active synchronization (when this replica is SyncTarget)
+// - DiskState (e.g. "Outdated") when not syncing but not in sync
+func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbdsetup.Resource) string {
+	// Check InSync condition first
+	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInSync)
+	if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
+		return "True"
+	}
+
+	// Return Unknown if condition is not yet set or explicitly Unknown
+	if inSyncCond == nil || inSyncCond.Status == metav1.ConditionUnknown {
+		return "Unknown"
+	}
+
+	// Get local disk state
+	if len(resource.Devices) == 0 {
+		return "Unknown"
+	}
+	localDiskState := resource.Devices[0].DiskState
+
+	// Check if we are SyncTarget - find minimum PercentInSync from connections
+	// where replication state indicates active sync
+	var minPercent float64 = -1
+	for _, conn := range resource.Connections {
+		for _, pd := range conn.PeerDevices {
+			if isSyncingState(pd.ReplicationState) {
+				if minPercent < 0 || pd.PercentInSync < minPercent {
+					minPercent = pd.PercentInSync
+				}
+			}
+		}
+	}
+
+	// If we found active sync, return the percentage
+	if minPercent >= 0 {
+		return fmt.Sprintf("%.2f%%", minPercent)
+	}
+
+	// Not syncing - return disk state
+	return localDiskState
+}
+
+// isSyncingState returns true if the replication state indicates active synchronization
+func isSyncingState(state string) bool {
+	switch state {
+	case "SyncSource", "SyncTarget",
+		"StartingSyncS", "StartingSyncT",
+		"PausedSyncS", "PausedSyncT",
+		"WFBitMapS", "WFBitMapT",
+		"WFSyncUUID":
+		return true
+	default:
+		return false
+	}
 }
 
 func copyStatusFields(

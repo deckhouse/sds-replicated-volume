@@ -12,9 +12,9 @@
   - [`rv-status-config-device-minor-controller`](#rv-status-config-device-minor-controller)
   - [`rvr-tie-breaker-count-controller`](#rvr-tie-breaker-count-controller)
   - [`rvr-access-count-controller`](#rvr-access-count-controller)
-  - [`rv-publish-controller`](#rv-publish-controller)
+  - [`rv-attach-controller`](#rv-attach-controller)
   - [`rvr-volume-controller`](#rvr-volume-controller)
-  - [`rvr-quorum-and-publish-constrained-release-controller`](#rvr-quorum-and-publish-constrained-release-controller)
+  - [`rvr-quorum-and-attach-constrained-release-controller`](#rvr-quorum-and-attach-constrained-release-controller)
   - [`rvr-owner-reference-controller`](#rvr-owner-reference-controller)
   - [`rv-status-config-quorum-controller`](#rv-status-config-quorum-controller)
   - [`rv-status-config-shared-secret-controller`](#rv-status-config-shared-secret-controller)
@@ -44,9 +44,9 @@
 ## `drbd-config-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
-Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.storage.deckhouse.io/*`),
+Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.deckhouse.io/*`),
 то объект не должен считаться удалённым. Любая логика, связанная с обработкой удалённых rv/rvr должна
 быть обновлена, чтобы включать это условие.
 
@@ -75,7 +75,7 @@ Cм. существующую реализацию `drbdadm resize`.
 
 Ошибки drbd команд требуется выводить в `rvr.status.drbd.errors.*`.
 
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ### Вывод 
  - `rvr.status.drbd.errors.*`
@@ -84,18 +84,18 @@ Cм. существующую реализацию `drbdadm resize`.
 ## `drbd-primary-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
-Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.storage.deckhouse.io/*`),
+Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.deckhouse.io/*`),
 то объект не должен считаться удалённым. Любая логика, связанная с обработкой удалённых rv/rvr должна
 быть обновлена, чтобы включать это условие.
 
 ## `rvr-status-config-address-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
-Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.storage.deckhouse.io/*`),
+Если на rvr/rv есть `metadata.deletionTimestamp` и не наш финализатор (не `sds-replicated-volume.deckhouse.io/*`),
 то объект не должен считаться удалённым. Любая логика, связанная с обработкой удалённых rv/rvr должна
 быть обновлена, чтобы включать это условие.
 
@@ -104,118 +104,118 @@ Cм. существующую реализацию `drbdadm resize`.
 ## `rvr-diskful-count-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
-`sds-replicated-volume.storage.deckhouse.io/*` (нет чужих), новые реплики не создаются.
+`sds-replicated-volume.deckhouse.io/*` (нет чужих), новые реплики не создаются.
 
 ## `rvr-scheduling-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-status-config-node-id-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-status-config-peers-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rv-status-config-device-minor-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-tie-breaker-count-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
-`sds-replicated-volume.storage.deckhouse.io/*` (нет чужих), новые реплики не создаются.
+`sds-replicated-volume.deckhouse.io/*` (нет чужих), новые реплики не создаются.
 
 ## `rvr-access-count-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
-`sds-replicated-volume.storage.deckhouse.io/*` (нет чужих), новые реплики не создаются.
+`sds-replicated-volume.deckhouse.io/*` (нет чужих), новые реплики не создаются.
 
 ### Добавление
 - начинать работу только если у RV  status.condition[type=IOReady].status=True
 
-## `rv-publish-controller`
+## `rv-attach-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 В случае, если в rv стоит `metadata.deletionTimestamp` и только наши финализаторы
-`sds-replicated-volume.storage.deckhouse.io/*` (нет чужих) - убираем публикацию со всех rvr данного rv и
+`sds-replicated-volume.deckhouse.io/*` (нет чужих) - убираем публикацию со всех rvr данного rv и
 не публикуем новые rvr для данного rv.
 
 ## `rvr-volume-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
-## `rvr-quorum-and-publish-constrained-release-controller`
+## `rvr-quorum-and-attach-constrained-release-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-owner-reference-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rv-status-config-quorum-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rv-status-config-shared-secret-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-missing-node-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-node-cordon-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-status-conditions-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `llv-owner-reference-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rv-status-conditions-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rv-gc-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `tie-breaker-removal-controller`
 
 ### Уточнение
-Пока на rv нет нашего финализатора "[sds-replicated-volume.storage.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
+Пока на rv нет нашего финализатора "[sds-replicated-volume.deckhouse.io/controller](spec_v1alpha3.md#финализаторы-ресурсов)", rv не обрабатываем.
 
 ## `rvr-finalizer-release-controller`
 
@@ -223,13 +223,13 @@ Cм. существующую реализацию `drbdadm resize`.
 
 ### Обновление
 
-Контроллер заменяет `rvr-quorum-and-publish-constrained-release-controller`
+Контроллер заменяет `rvr-quorum-and-attach-constrained-release-controller`
 
 ### Контекст
 
 Приложение agent ставит 2 финализатора на все RVR до того, как сконфигурирует DRBD.
-  - `sds-replicated-volume.storage.deckhouse.io/agent` (далее - `F/agent`)
-  - `sds-replicated-volume.storage.deckhouse.io/controller` (далее - `F/controller`)
+  - `sds-replicated-volume.deckhouse.io/agent` (далее - `F/agent`)
+  - `sds-replicated-volume.deckhouse.io/controller` (далее - `F/controller`)
 
 При удалении RVR, agent не удаляет ресурс из DRBD, и не снимает финализаторы,
 пока есть хотя бы один финализатор, кроме `F/agent`.
@@ -240,8 +240,8 @@ Cм. существующую реализацию `drbdadm resize`.
 кластер к этому готов.
 
 Условие готовности (даже если `rv.metadata.deletionTimestamp!=nil`):
-- удаляемые реплики не опубликованы (`rv.status.publishedOn`), при этом при удалении RV, удаляемыми
-считаются все реплики (`len(rv.status.publishedOn)==0`)
+- удаляемые реплики не опубликованы (`rv.status.actuallyAttachedTo`), при этом при удалении RV, удаляемыми
+считаются все реплики (`len(rv.status.actuallyAttachedTo)==0`)
 
 В случае, когда RV не удаляется (`rv.metadata.deletionTimestamp==nil`), требуется
 проверить дополнительные условия:
@@ -251,7 +251,7 @@ Cм. существующую реализацию `drbdadm resize`.
 соответствии с `rsc.spec.replication`
 
 ### Вывод
- - удалить `rvr.metadata.finalizers[sds-replicated-volume.storage.deckhouse.io/controller]`
+ - удалить `rvr.metadata.finalizers[sds-replicated-volume.deckhouse.io/controller]`
 
 ## `rv-finalizer-controller`
 
@@ -259,13 +259,13 @@ Cм. существующую реализацию `drbdadm resize`.
 
 ### Цель
 
-Добавлять финализатор `sds-replicated-volume.storage.deckhouse.io/controller` на rv.
+Добавлять финализатор `sds-replicated-volume.deckhouse.io/controller` на rv.
 
 Снимать финализатор с rv, когда на нем есть `metadata.deletionTimestamp` и в
 кластере нет rvr, привязанных к данному rv по `rvr.spec.replicatedVolumeName`.
 
 ### Вывод
--  добавляет и снимает финализатор `sds-replicated-volume.storage.deckhouse.io/controller` на rv
+-  добавляет и снимает финализатор `sds-replicated-volume.deckhouse.io/controller` на rv
 
 ## `rv-delete-propagation-controller`
 

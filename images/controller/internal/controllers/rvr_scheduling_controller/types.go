@@ -25,22 +25,22 @@ import (
 )
 
 type SchedulingContext struct {
-	Log                            logr.Logger
-	Rv                             *v1alpha1.ReplicatedVolume
-	Rsc                            *v1alpha1.ReplicatedStorageClass
-	Rsp                            *v1alpha1.ReplicatedStoragePool
-	RvrList                        []*v1alpha1.ReplicatedVolumeReplica
-	PublishOnNodes                 []string
-	NodesWithAnyReplica            map[string]struct{}
-	PublishOnNodesWithoutRvReplica []string
-	UnscheduledDiskfulReplicas     []*v1alpha1.ReplicatedVolumeReplica
-	ScheduledDiskfulReplicas       []*v1alpha1.ReplicatedVolumeReplica
-	UnscheduledAccessReplicas      []*v1alpha1.ReplicatedVolumeReplica
-	UnscheduledTieBreakerReplicas  []*v1alpha1.ReplicatedVolumeReplica
-	RspLvgToNodeInfoMap            map[string]LvgInfo // {lvgName: {NodeName, ThinPoolName}}
-	RspNodesWithoutReplica         []string
-	NodeNameToZone                 map[string]string          // {nodeName: zoneName}
-	ZonesToNodeCandidatesMap       map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
+	Log                           logr.Logger
+	Rv                            *v1alpha1.ReplicatedVolume
+	Rsc                           *v1alpha1.ReplicatedStorageClass
+	Rsp                           *v1alpha1.ReplicatedStoragePool
+	RvrList                       []*v1alpha1.ReplicatedVolumeReplica
+	AttachToNodes                 []string
+	NodesWithAnyReplica           map[string]struct{}
+	AttachToNodesWithoutRvReplica []string
+	UnscheduledDiskfulReplicas    []*v1alpha1.ReplicatedVolumeReplica
+	ScheduledDiskfulReplicas      []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledAccessReplicas     []*v1alpha1.ReplicatedVolumeReplica
+	UnscheduledTieBreakerReplicas []*v1alpha1.ReplicatedVolumeReplica
+	RspLvgToNodeInfoMap           map[string]LvgInfo // {lvgName: {NodeName, ThinPoolName}}
+	RspNodesWithoutReplica        []string
+	NodeNameToZone                map[string]string          // {nodeName: zoneName}
+	ZonesToNodeCandidatesMap      map[string][]NodeCandidate // {zone1: [{name: node1, score: 100}, {name: node2, score: 90}]}
 	// RVRs with nodes assigned in this reconcile
 	RVRsToSchedule []*v1alpha1.ReplicatedVolumeReplica
 }
@@ -76,7 +76,7 @@ type LvgInfo struct {
 // UpdateAfterScheduling updates the scheduling context after replicas have been assigned nodes.
 // It removes assigned replicas from the appropriate unscheduled list based on their type,
 // adds them to ScheduledDiskfulReplicas (for Diskful type),
-// adds the assigned nodes to NodesWithAnyReplica, and removes them from PublishOnNodesWithoutRvReplica.
+// adds the assigned nodes to NodesWithAnyReplica, and removes them from AttachToNodesWithoutRvReplica.
 func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha1.ReplicatedVolumeReplica) {
 	if len(assignedReplicas) == 0 {
 		return
@@ -104,14 +104,14 @@ func (sctx *SchedulingContext) UpdateAfterScheduling(assignedReplicas []*v1alpha
 	// Add diskful replicas to ScheduledDiskfulReplicas
 	sctx.ScheduledDiskfulReplicas = append(sctx.ScheduledDiskfulReplicas, diskfulReplicas...)
 
-	// Remove assigned nodes from PublishOnNodesWithoutRvReplica
-	var remainingPublishNodes []string
-	for _, node := range sctx.PublishOnNodesWithoutRvReplica {
+	// Remove assigned nodes from AttachToNodesWithoutRvReplica
+	var remainingAttachToNodes []string
+	for _, node := range sctx.AttachToNodesWithoutRvReplica {
 		if _, assigned := assignedNodes[node]; !assigned {
-			remainingPublishNodes = append(remainingPublishNodes, node)
+			remainingAttachToNodes = append(remainingAttachToNodes, node)
 		}
 	}
-	sctx.PublishOnNodesWithoutRvReplica = remainingPublishNodes
+	sctx.AttachToNodesWithoutRvReplica = remainingAttachToNodes
 
 	// Add assigned replicas to RVRsToSchedule
 	sctx.RVRsToSchedule = append(sctx.RVRsToSchedule, assignedReplicas...)
@@ -128,24 +128,24 @@ func removeAssigned(replicas []*v1alpha1.ReplicatedVolumeReplica, assigned map[s
 	return result
 }
 
-const publishOnScoreBonus = 1000
+const attachToScoreBonus = 1000
 
-// ApplyPublishOnBonus increases score for nodes in rv.spec.publishOn.
-// This ensures publishOn nodes are preferred when scheduling Diskful replicas.
-func (sctx *SchedulingContext) ApplyPublishOnBonus() {
-	if len(sctx.PublishOnNodes) == 0 {
+// ApplyAttachToBonus increases score for nodes in rv.status.desiredAttachTo.
+// This ensures attachTo nodes are preferred when scheduling Diskful replicas.
+func (sctx *SchedulingContext) ApplyAttachToBonus() {
+	if len(sctx.AttachToNodes) == 0 {
 		return
 	}
 
-	publishOnSet := make(map[string]struct{}, len(sctx.PublishOnNodes))
-	for _, node := range sctx.PublishOnNodes {
-		publishOnSet[node] = struct{}{}
+	attachToSet := make(map[string]struct{}, len(sctx.AttachToNodes))
+	for _, node := range sctx.AttachToNodes {
+		attachToSet[node] = struct{}{}
 	}
 
 	for zone, candidates := range sctx.ZonesToNodeCandidatesMap {
 		for i := range candidates {
-			if _, isPublishOn := publishOnSet[candidates[i].Name]; isPublishOn {
-				candidates[i].Score += publishOnScoreBonus
+			if _, isAttachTo := attachToSet[candidates[i].Name]; isAttachTo {
+				candidates[i].Score += attachToScoreBonus
 			}
 		}
 		sctx.ZonesToNodeCandidatesMap[zone] = candidates
