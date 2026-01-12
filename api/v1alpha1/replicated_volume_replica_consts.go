@@ -154,6 +154,24 @@ func ParseReplicationState(s string) ReplicationState {
 	}
 }
 
+// IsSyncingState returns true if the replication state indicates active synchronization.
+func (r ReplicationState) IsSyncingState() bool {
+	switch r {
+	case ReplicationStateSyncSource,
+		ReplicationStateSyncTarget,
+		ReplicationStateStartingSyncSource,
+		ReplicationStateStartingSyncTarget,
+		ReplicationStatePausedSyncSource,
+		ReplicationStatePausedSyncTarget,
+		ReplicationStateWFBitMapSource,
+		ReplicationStateWFBitMapTarget,
+		ReplicationStateWFSyncUUID:
+		return true
+	default:
+		return false
+	}
+}
+
 func ParseConnectionState(s string) ConnectionState {
 	switch ConnectionState(s) {
 	case ConnectionStateStandAlone,
