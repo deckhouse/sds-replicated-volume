@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func setupScheme(t *testing.T) *runtime.Scheme {
@@ -106,8 +107,8 @@ func TestReconciler_RVNotFound(t *testing.T) {
 	ctx := t.Context()
 	s := setupScheme(t)
 
-	cl := fake.NewClientBuilder().
-		WithScheme(s).
+	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 		Build()
 
@@ -138,8 +139,8 @@ func TestReconciler_RSCNotFound(t *testing.T) {
 		},
 	}
 
-	cl := fake.NewClientBuilder().
-		WithScheme(s).
+	cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
 		WithObjects(rv).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}).
 		Build()
@@ -478,8 +479,8 @@ func runConditionTestCase(t *testing.T, tc conditionTestCase) {
 	}
 
 	// Build client
-	builder := fake.NewClientBuilder().
-		WithScheme(s).
+	builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+		WithScheme(s)).
 		WithObjects(rv, rsc).
 		WithStatusSubresource(&v1alpha1.ReplicatedVolume{}, &v1alpha1.ReplicatedVolumeReplica{})
 

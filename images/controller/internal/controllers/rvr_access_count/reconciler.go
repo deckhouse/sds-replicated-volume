@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -95,17 +95,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
-	// Get all RVRs
+	// Get all RVRs for this RV
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
-
-	// Filter RVRs by replicatedVolumeName
-	rvrList.Items = slices.DeleteFunc(rvrList.Items, func(item v1alpha1.ReplicatedVolumeReplica) bool {
-		return item.Spec.ReplicatedVolumeName != rv.Name
-	})
 
 	// Build maps of nodes with replicas.
 	// We need to know:

@@ -37,6 +37,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	drbdconfig "github.com/deckhouse/sds-replicated-volume/images/agent/internal/controllers/drbd_config"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/indexes"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scheme"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
@@ -344,6 +345,17 @@ func TestReconciler_Reconcile(t *testing.T) {
 					WithStatusSubresource(
 						&v1alpha1.ReplicatedVolumeReplica{},
 						&v1alpha1.ReplicatedVolume{},
+					).
+					WithIndex(
+						&v1alpha1.ReplicatedVolumeReplica{},
+						indexes.RVRByRVNameAndNodeName,
+						func(obj client.Object) []string {
+							replica := obj.(*v1alpha1.ReplicatedVolumeReplica)
+							if replica.Spec.ReplicatedVolumeName == "" || replica.Spec.NodeName == "" {
+								return nil
+							}
+							return []string{indexes.RVRByRVNameAndNodeNameKey(replica.Spec.ReplicatedVolumeName, replica.Spec.NodeName)}
+						},
 					).
 					WithObjects(tc.toObjects()...).
 					Build()
@@ -656,10 +668,6 @@ func diskfulExpectedCommands(rvrName string) []*fakedrbdadm.ExpectedCmd {
 		newExpectedCmd(drbdadm.Command, drbdadm.PrimaryForceArgs(testRVName), "", nil),
 		newExpectedCmd(drbdadm.Command, drbdadm.SecondaryArgs(testRVName), "", nil),
 	}
-}
-
-func ptrUint(v uint) *uint {
-	return &v
 }
 
 func addr(ip string, port uint) v1alpha1.Address {

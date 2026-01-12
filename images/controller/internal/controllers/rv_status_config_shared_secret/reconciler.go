@@ -26,6 +26,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -159,23 +160,23 @@ func (r *Reconciler) reconcileSwitchAlgorithm(
 	rv *v1alpha1.ReplicatedVolume,
 	log logr.Logger,
 ) (reconcile.Result, error) {
-	// Get all RVRs
+	// Get all RVRs for this RV
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "Listing ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
-	// Collect all RVRs for this RV with errors
+	// Collect all RVRs with errors
 	var rvrsWithErrors []*v1alpha1.ReplicatedVolumeReplica
 	var failedNodeNames []string
-	for _, rvr := range rvrList.Items {
-		if rvr.Spec.ReplicatedVolumeName != rv.Name {
-			continue
-		}
-		if hasUnsupportedAlgorithmError(&rvr) {
+	for i := range rvrList.Items {
+		rvr := &rvrList.Items[i]
+		if hasUnsupportedAlgorithmError(rvr) {
 			failedNodeNames = append(failedNodeNames, rvr.Spec.NodeName)
-			rvrsWithErrors = append(rvrsWithErrors, &rvr)
+			rvrsWithErrors = append(rvrsWithErrors, rvr)
 		}
 	}
 
