@@ -39,6 +39,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrstatusconfigpeers "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_status_config_peers"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -57,8 +58,8 @@ var _ = Describe("Reconciler", func() {
 	BeforeEach(func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed())
-		clientBuilder = fake.NewClientBuilder().
-			WithScheme(scheme).
+		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme)).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
 				&v1alpha1.ReplicatedVolume{})
@@ -148,7 +149,10 @@ var _ = Describe("Reconciler", func() {
 			BeforeEach(func() {
 				firstReplica = v1alpha1.ReplicatedVolumeReplica{
 					ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-					Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+					Spec: v1alpha1.ReplicatedVolumeReplicaSpec{
+						ReplicatedVolumeName: "test-rv",
+						NodeName:             "node-1",
+					},
 				}
 				Expect(controllerutil.SetControllerReference(rv, &firstReplica, scheme)).To(Succeed())
 			})
@@ -300,10 +304,9 @@ var _ = Describe("Reconciler", func() {
 							Entry("without status.drbd.config", func() { secondRvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{DRBD: &v1alpha1.DRBD{Config: nil}} }),
 							Entry("without address", func() { secondRvr.Status.DRBD.Config.Address = nil }),
 							Entry("without nodeName", func() { secondRvr.Spec.NodeName = "" }),
-							Entry("without owner reference", func() { secondRvr.OwnerReferences = []metav1.OwnerReference{} }),
-							Entry("with other owner reference", func() {
-								secondRvr.OwnerReferences = []metav1.OwnerReference{}
-								Expect(controllerutil.SetControllerReference(otherRv, &secondRvr, scheme)).To(Succeed())
+							Entry("without replicatedVolumeName", func() { secondRvr.Spec.ReplicatedVolumeName = "" }),
+							Entry("with different replicatedVolumeName", func() {
+								secondRvr.Spec.ReplicatedVolumeName = "other-rv"
 							}), func(setup func()) {
 								BeforeEach(func() {
 									setup()
@@ -341,15 +344,15 @@ var _ = Describe("Reconciler", func() {
 				rvrList = []v1alpha1.ReplicatedVolumeReplica{
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-1"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-1"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-1"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-2"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-2"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-2"},
 					},
 					{
 						ObjectMeta: metav1.ObjectMeta{Name: "rvr-3"},
-						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{NodeName: "node-3"},
+						Spec:       v1alpha1.ReplicatedVolumeReplicaSpec{ReplicatedVolumeName: "test-rv", NodeName: "node-3"},
 					},
 				}
 

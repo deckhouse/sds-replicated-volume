@@ -49,5 +49,43 @@ func RegisterIndexes(mgr manager.Manager) error {
 		return fmt.Errorf("index ReplicatedVolumeAttachment by spec.replicatedVolumeName: %w", err)
 	}
 
+	// Index ReplicatedVolumeReplica by spec.nodeName for efficient lookups per node.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolumeReplica{},
+		indexes.IndexFieldRVRByNodeName,
+		func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.NodeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.NodeName}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolumeReplica by spec.nodeName: %w", err)
+	}
+
+	// Index ReplicatedVolumeReplica by spec.replicatedVolumeName for efficient lookups per RV.
+	if err := mgr.GetFieldIndexer().IndexField(
+		context.Background(),
+		&v1alpha1.ReplicatedVolumeReplica{},
+		indexes.IndexFieldRVRByReplicatedVolumeName,
+		func(obj client.Object) []string {
+			rvr, ok := obj.(*v1alpha1.ReplicatedVolumeReplica)
+			if !ok {
+				return nil
+			}
+			if rvr.Spec.ReplicatedVolumeName == "" {
+				return nil
+			}
+			return []string{rvr.Spec.ReplicatedVolumeName}
+		},
+	); err != nil {
+		return fmt.Errorf("index ReplicatedVolumeReplica by spec.replicatedVolumeName: %w", err)
+	}
+
 	return nil
 }

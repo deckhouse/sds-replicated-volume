@@ -25,6 +25,7 @@ import (
 	"iter"
 	"log/slog"
 	"slices"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -290,7 +291,7 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 	_ = rvr.UpdateStatusConditionInSync()
 
 	// Calculate SyncProgress for kubectl display
-	rvr.Status.SyncProgress = calculateSyncProgress(rvr, resource)
+	rvr.Status.SyncProgress = calculateSyncProgress(rvr)
 
 	if err := s.cl.Status().Patch(s.ctx, rvr, statusPatch); err != nil {
 		return fmt.Errorf("patching status: %w", err)
@@ -302,9 +303,9 @@ func (s *Scanner) updateReplicaStatusIfNeeded(
 // calculateSyncProgress returns a string for the SyncProgress field:
 // - "True" when InSync condition is True
 // - "Unknown" when InSync condition is Unknown or not set
-// - "XX.XX%" during active synchronization (when this replica is SyncTarget)
+// - "XX.XX%" during active synchronization
 // - DiskState (e.g. "Outdated") when not syncing but not in sync
-func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbdsetup.Resource) string {
+func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica) string {
 	// Check InSync condition first
 	inSyncCond := meta.FindStatusCondition(rvr.Status.Conditions, v1alpha1.ConditionTypeInSync)
 	if inSyncCond != nil && inSyncCond.Status == metav1.ConditionTrue {
@@ -316,20 +317,27 @@ func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbd
 		return "Unknown"
 	}
 
+	drbdStatus := rvr.Status.DRBD.Status
+
 	// Get local disk state
-	if len(resource.Devices) == 0 {
+	if len(drbdStatus.Devices) == 0 {
 		return "Unknown"
 	}
-	localDiskState := resource.Devices[0].DiskState
+	localDiskState := drbdStatus.Devices[0].DiskState
 
-	// Check if we are SyncTarget - find minimum PercentInSync from connections
-	// where replication state indicates active sync
+	// Find minimum PercentInSync from connections where replication state indicates active sync
 	var minPercent float64 = -1
-	for _, conn := range resource.Connections {
+	for _, conn := range drbdStatus.Connections {
 		for _, pd := range conn.PeerDevices {
-			if isSyncingState(pd.ReplicationState) {
-				if minPercent < 0 || pd.PercentInSync < minPercent {
-					minPercent = pd.PercentInSync
+			if pd.ReplicationState.IsSyncingState() {
+				// Skip on parse error - PercentInSync comes from fmt.Sprintf("%.2f", float64),
+				// so failure is unlikely; SyncProgress is informational only.
+				percent, err := strconv.ParseFloat(pd.PercentInSync, 64)
+				if err != nil {
+					continue
+				}
+				if minPercent < 0 || percent < minPercent {
+					minPercent = percent
 				}
 			}
 		}
@@ -341,27 +349,15 @@ func calculateSyncProgress(rvr *v1alpha1.ReplicatedVolumeReplica, resource *drbd
 	}
 
 	// Not syncing - return disk state
-	return localDiskState
-}
-
-// isSyncingState returns true if the replication state indicates active synchronization
-func isSyncingState(state string) bool {
-	switch state {
-	case "SyncSource", "SyncTarget",
-		"StartingSyncS", "StartingSyncT",
-		"PausedSyncS", "PausedSyncT",
-		"WFBitMapS", "WFBitMapT",
-		"WFSyncUUID":
-		return true
-	default:
-		return false
-	}
+	return string(localDiskState)
 }
 
 func copyStatusFields(
 	target *v1alpha1.DRBDStatus,
 	source *drbdsetup.Resource,
 ) {
+	// Some properties were removed, as they are too verbose. See "removed (verbose):"
+
 	target.Name = source.Name
 	target.NodeId = source.NodeID
 	target.Role = source.Role
@@ -377,19 +373,19 @@ func copyStatusFields(
 	target.Devices = make([]v1alpha1.DeviceStatus, 0, len(source.Devices))
 	for _, d := range source.Devices {
 		target.Devices = append(target.Devices, v1alpha1.DeviceStatus{
-			Volume:       d.Volume,
-			Minor:        d.Minor,
-			DiskState:    v1alpha1.ParseDiskState(d.DiskState),
-			Client:       d.Client,
-			Open:         d.Open,
-			Quorum:       d.Quorum,
-			Size:         d.Size,
-			Read:         d.Read,
-			Written:      d.Written,
-			ALWrites:     d.ALWrites,
-			BMWrites:     d.BMWrites,
-			UpperPending: d.UpperPending,
-			LowerPending: d.LowerPending,
+			Volume:    d.Volume,
+			Minor:     d.Minor,
+			DiskState: v1alpha1.ParseDiskState(d.DiskState),
+			Client:    d.Client,
+			Open:      d.Open,
+			Quorum:    d.Quorum,
+			Size:      d.Size,
+			// removed (verbose): Read:         d.Read,
+			// removed (verbose): Written:      d.Written,
+			// removed (verbose): ALWrites:     d.ALWrites,
+			// removed (verbose): BMWrites:     d.BMWrites,
+			// removed (verbose): UpperPending: d.UpperPending,
+			// removed (verbose): LowerPending: d.LowerPending,
 		})
 	}
 
@@ -403,8 +399,8 @@ func copyStatusFields(
 			Congested:       c.Congested,
 			Peerrole:        c.Peerrole,
 			TLS:             c.TLS,
-			APInFlight:      c.APInFlight,
-			RSInFlight:      c.RSInFlight,
+			// removed (verbose): APInFlight:      c.APInFlight,
+			// removed (verbose): RSInFlight:      c.RSInFlight,
 		}
 
 		// Paths
@@ -429,14 +425,14 @@ func copyStatusFields(
 		conn.PeerDevices = make([]v1alpha1.PeerDeviceStatus, 0, len(c.PeerDevices))
 		for _, pd := range c.PeerDevices {
 			conn.PeerDevices = append(conn.PeerDevices, v1alpha1.PeerDeviceStatus{
-				Volume:                 pd.Volume,
-				ReplicationState:       v1alpha1.ParseReplicationState(pd.ReplicationState),
-				PeerDiskState:          v1alpha1.ParseDiskState(pd.PeerDiskState),
-				PeerClient:             pd.PeerClient,
-				ResyncSuspended:        pd.ResyncSuspended,
-				OutOfSync:              pd.OutOfSync,
-				Pending:                pd.Pending,
-				Unacked:                pd.Unacked,
+				Volume:           pd.Volume,
+				ReplicationState: v1alpha1.ParseReplicationState(pd.ReplicationState),
+				PeerDiskState:    v1alpha1.ParseDiskState(pd.PeerDiskState),
+				PeerClient:       pd.PeerClient,
+				ResyncSuspended:  pd.ResyncSuspended,
+				OutOfSync:        pd.OutOfSync,
+				// removed (verbose): Pending:                pd.Pending,
+				// removed (verbose): Unacked:                pd.Unacked,
 				HasSyncDetails:         pd.HasSyncDetails,
 				HasOnlineVerifyDetails: pd.HasOnlineVerifyDetails,
 				PercentInSync:          fmt.Sprintf("%.2f", pd.PercentInSync),

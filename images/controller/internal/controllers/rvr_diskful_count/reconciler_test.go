@@ -33,6 +33,7 @@ import (
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrdiskfulcount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_diskful_count"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 // TODO: replace with direct in place assignment for clarity. Code duplication will be resolved by grouping tests together and having initialisation in BeforeEach blocks once for multiple cases
@@ -91,8 +92,8 @@ var _ = Describe("Reconciler", func() {
 	)
 
 	BeforeEach(func() {
-		clientBuilder = fake.NewClientBuilder().
-			WithScheme(scheme).
+		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme)).
 			WithStatusSubresource(
 				&v1alpha1.ReplicatedVolumeReplica{},
 				&v1alpha1.ReplicatedVolume{})
