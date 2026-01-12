@@ -29,9 +29,9 @@ func TestCalculateSyncProgress_PercentFormat(t *testing.T) {
 	// This test verifies that calculateSyncProgress correctly parses PercentInSync
 	// formatted by copyStatusFields using fmt.Sprintf("%.2f", float64).
 	testCases := []struct {
-		name           string
-		percentInSync  float64
-		wantContains   string
+		name          string
+		percentInSync float64
+		wantContains  string
 	}{
 		{"zero", 0.0, "0.00%"},
 		{"half", 50.0, "50.00%"},
@@ -143,4 +143,3 @@ func TestCalculateSyncProgress_DiskState(t *testing.T) {
 		t.Errorf("calculateSyncProgress() = %q, want %q", result, "Outdated")
 	}
 }
-
