@@ -20,17 +20,11 @@ import (
 	"strings"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/drbdapierrors"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 )
 
-type drbdAPIError interface {
-	error
-	WriteDRBDError(apiErrors *v1alpha1.DRBDErrors)
-	// should be callable with zero receiver
-	ResetDRBDError(apiErrors *v1alpha1.DRBDErrors)
-}
-
-// all errors
+// Error types specific to drbd_config controller
 
 type configurationCommandError struct{ drbdadm.CommandError }
 
@@ -41,33 +35,34 @@ type sharedSecretAlgUnsupportedError struct {
 	unsupportedAlg string
 }
 
-// [drbdAPIError]
-
-var allDRBDAPIErrors = []drbdAPIError{
+// allDRBDConfigErrors lists all error types managed by the drbd_config controller.
+// Used to reset only this controller's errors without affecting other controllers' errors.
+var allDRBDConfigErrors = []drbdapierrors.DRBDAPIError{
 	configurationCommandError{},
 	fileSystemOperationError{},
 	sharedSecretAlgUnsupportedError{},
 }
 
-func resetAllDRBDAPIErrors(apiErrors *v1alpha1.DRBDErrors) {
-	for _, e := range allDRBDAPIErrors {
+// resetDRBDConfigErrors resets only the errors managed by the drbd_config controller.
+func resetDRBDConfigErrors(apiErrors *v1alpha1.DRBDErrors) {
+	for _, e := range allDRBDConfigErrors {
 		e.ResetDRBDError(apiErrors)
 	}
 }
 
-// [drbdAPIError.WriteDRBDError]
+// WriteDRBDError implementations
 
 func (c configurationCommandError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.ConfigurationCommandError = &v1alpha1.CmdError{
-		Command:  trimLen(strings.Join(c.CommandWithArgs(), " "), maxErrLen),
-		Output:   trimLen(c.Output(), maxErrLen),
+		Command:  drbdapierrors.TrimLen(strings.Join(c.CommandWithArgs(), " "), drbdapierrors.MaxErrLen),
+		Output:   drbdapierrors.TrimLen(c.Output(), drbdapierrors.MaxErrLen),
 		ExitCode: c.ExitCode(),
 	}
 }
 
 func (f fileSystemOperationError) WriteDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.FileSystemOperationError = &v1alpha1.MessageError{
-		Message: trimLen(f.Error(), maxErrLen),
+		Message: drbdapierrors.TrimLen(f.Error(), drbdapierrors.MaxErrLen),
 	}
 }
 
@@ -77,7 +72,7 @@ func (s sharedSecretAlgUnsupportedError) WriteDRBDError(apiErrors *v1alpha1.DRBD
 	}
 }
 
-// [drbdAPIError.ResetDRBDError]
+// ResetDRBDError implementations
 
 func (configurationCommandError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.ConfigurationCommandError = nil
@@ -89,15 +84,4 @@ func (fileSystemOperationError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 
 func (sharedSecretAlgUnsupportedError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.SharedSecretAlgSelectionError = nil
-}
-
-// utils
-
-const maxErrLen = 1024
-
-func trimLen(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[0:maxLen]
-	}
-	return s
 }

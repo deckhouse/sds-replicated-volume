@@ -31,6 +31,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/drbdapierrors"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdconf"
@@ -61,13 +62,13 @@ func (h *UpAndAdjustHandler) Handle(ctx context.Context) error {
 
 	err := h.handleDRBDOperation(ctx)
 
-	// reset all drbd errors
+	// reset only drbd_config controller's errors (not other controllers' errors like LastPrimaryError/LastSecondaryError)
 	if h.rvr.Status.DRBD.Errors != nil {
-		resetAllDRBDAPIErrors(h.rvr.Status.DRBD.Errors)
+		resetDRBDConfigErrors(h.rvr.Status.DRBD.Errors)
 	}
 
 	// save last drbd error
-	var drbdErr drbdAPIError
+	var drbdErr drbdapierrors.DRBDAPIError
 	if errors.As(err, &drbdErr) {
 		if h.rvr.Status.DRBD.Errors == nil {
 			h.rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
