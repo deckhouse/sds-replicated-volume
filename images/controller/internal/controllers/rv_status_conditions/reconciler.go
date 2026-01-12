@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 type Reconciler struct {
@@ -63,17 +64,14 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 
 	// List all RVRs for this RV
 	rvrList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, rvrList); err != nil {
+	if err := r.cl.List(ctx, rvrList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		log.Error(err, "failed to list ReplicatedVolumeReplicas")
 		return reconcile.Result{}, err
 	}
 
-	var rvrs []v1alpha1.ReplicatedVolumeReplica
-	for _, rvr := range rvrList.Items {
-		if rvr.Spec.ReplicatedVolumeName == rv.Name {
-			rvrs = append(rvrs, rvr)
-		}
-	}
+	rvrs := rvrList.Items
 
 	// Calculate conditions and counters
 	patchedRV := rv.DeepCopy()

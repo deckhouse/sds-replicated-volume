@@ -33,6 +33,7 @@ import (
 
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes"
 )
 
 const (
@@ -308,16 +309,18 @@ func (r *Reconciler) prepareSchedulingContext(
 		return nil, fmt.Errorf("unable to get ReplicatedStorageClass: %w", err)
 	}
 
-	// List all ReplicatedVolumeReplica resources in the cluster.
+	// List all ReplicatedVolumeReplica resources for this RV.
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
+	if err := r.cl.List(ctx, replicaList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rv.Name,
+	}); err != nil {
 		return nil, fmt.Errorf("unable to list ReplicatedVolumeReplica: %w", err)
 	}
 
 	// Collect replicas for this RV:
 	// - replicasForRV: non-deleting replicas
 	// - nodesWithRVReplica: all occupied nodes (including nodes with deleting replicas)
-	replicasForRV, nodesWithRVReplica := collectReplicasAndOccupiedNodes(replicaList.Items, rv.Name)
+	replicasForRV, nodesWithRVReplica := collectReplicasAndOccupiedNodes(replicaList.Items)
 
 	rsp := &v1alpha1.ReplicatedStoragePool{}
 	if err := r.cl.Get(ctx, client.ObjectKey{Name: rsc.Spec.StoragePool}, rsp); err != nil {
@@ -811,20 +814,16 @@ func getAttachToNodeList(rv *v1alpha1.ReplicatedVolume) []string {
 	return slices.Clone(rv.Status.DesiredAttachTo)
 }
 
-// collectReplicasAndOccupiedNodes filters replicas for a given RV and returns:
+// collectReplicasAndOccupiedNodes processes replicas (already filtered for a given RV) and returns:
 // - activeReplicas: non-deleting replicas (both scheduled and unscheduled)
 // - occupiedNodes: all nodes with replicas (including deleting ones) to prevent scheduling collisions
 func collectReplicasAndOccupiedNodes(
 	allReplicas []v1alpha1.ReplicatedVolumeReplica,
-	rvName string,
 ) (activeReplicas []*v1alpha1.ReplicatedVolumeReplica, occupiedNodes map[string]struct{}) {
 	occupiedNodes = make(map[string]struct{})
 
 	for i := range allReplicas {
 		rvr := &allReplicas[i]
-		if rvr.Spec.ReplicatedVolumeName != rvName {
-			continue
-		}
 		// Track nodes from ALL replicas (including deleting ones) for occupancy
 		// This prevents scheduling new replicas on nodes where replicas are being deleted
 		if rvr.Spec.NodeName != "" {
@@ -950,9 +949,11 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	notReadyReason *rvrNotReadyReason,
 	log logr.Logger,
 ) error {
-	// List all ReplicatedVolumeReplica resources in the cluster.
+	// List all ReplicatedVolumeReplica resources for this RV.
 	replicaList := &v1alpha1.ReplicatedVolumeReplicaList{}
-	if err := r.cl.List(ctx, replicaList); err != nil {
+	if err := r.cl.List(ctx, replicaList, client.MatchingFields{
+		indexes.IndexFieldRVRByReplicatedVolumeName: rvName,
+	}); err != nil {
 		log.Error(err, "unable to list ReplicatedVolumeReplica")
 		return err
 	}
@@ -960,7 +961,7 @@ func (r *Reconciler) setFailedScheduledConditionOnNonScheduledRVRs(
 	// Update Scheduled condition on all RVRs belonging to this RV.
 	for _, rvr := range replicaList.Items {
 		// TODO: fix checking for deletion
-		if rvr.Spec.ReplicatedVolumeName != rvName || !rvr.DeletionTimestamp.IsZero() {
+		if !rvr.DeletionTimestamp.IsZero() {
 			continue
 		}
 

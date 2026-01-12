@@ -39,6 +39,7 @@ import (
 	u "github.com/deckhouse/sds-common-lib/utils"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrtiebreakercount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_tie_breaker_count"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var errExpectedTestError = errors.New("test error")
@@ -56,7 +57,7 @@ var _ = Describe("Reconcile", func() {
 	)
 
 	BeforeEach(func() {
-		builder = fake.NewClientBuilder().WithScheme(scheme)
+		builder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme))
 		cl = nil
 		rec = nil
 	})
@@ -699,7 +700,7 @@ var _ = Describe("DesiredTieBreakerTotal", func() {
 							index++
 						}
 					}
-					builder = fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...)
+					builder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme)).WithObjects(objects...)
 				})
 
 				JustBeforeEach(func() {

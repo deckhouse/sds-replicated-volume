@@ -27,9 +27,6 @@ import (
 )
 
 const (
-	// RVRByNodeName indexes ReplicatedVolumeReplica by spec.nodeName.
-	RVRByNodeName = "spec.nodeName"
-
 	// RVRByRVNameAndNodeName indexes ReplicatedVolumeReplica by composite key
 	// of spec.replicatedVolumeName and spec.nodeName.
 	RVRByRVNameAndNodeName = "spec.replicatedVolumeName+spec.nodeName"
@@ -43,22 +40,6 @@ func RVRByRVNameAndNodeNameKey(rvName, nodeName string) string {
 // RegisterIndexes registers all field indexes used by the agent.
 func RegisterIndexes(ctx context.Context, mgr manager.Manager) error {
 	indexer := mgr.GetFieldIndexer()
-
-	// Index by spec.nodeName
-	if err := indexer.IndexField(
-		ctx,
-		&v1alpha1.ReplicatedVolumeReplica{},
-		RVRByNodeName,
-		func(rawObj client.Object) []string {
-			replica := rawObj.(*v1alpha1.ReplicatedVolumeReplica)
-			if replica.Spec.NodeName == "" {
-				return nil
-			}
-			return []string{replica.Spec.NodeName}
-		},
-	); err != nil {
-		return fmt.Errorf("indexing %s: %w", RVRByNodeName, err)
-	}
 
 	// Index by composite key: spec.replicatedVolumeName + spec.nodeName
 	if err := indexer.IndexField(

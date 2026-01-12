@@ -28,6 +28,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 func TestAgentPodToRVRMapper(t *testing.T) {
@@ -140,7 +141,7 @@ func TestAgentPodToRVRMapper(t *testing.T) {
 			ctx := t.Context()
 
 			// Build client
-			builder := fake.NewClientBuilder().WithScheme(s)
+			builder := indextest.WithRVRByNodeNameIndex(fake.NewClientBuilder().WithScheme(s))
 			if len(tc.objects) > 0 {
 				builder = builder.WithObjects(tc.objects...)
 			}

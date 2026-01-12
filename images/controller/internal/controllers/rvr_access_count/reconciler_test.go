@@ -32,6 +32,7 @@ import (
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvraccesscount "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_access_count"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 var _ = Describe("Reconciler", func() {
@@ -46,8 +47,8 @@ var _ = Describe("Reconciler", func() {
 		scheme = runtime.NewScheme()
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
 		Expect(v1alpha1.AddToScheme(scheme)).To(Succeed(), "should add v1alpha1 to scheme")
-		clientBuilder = fake.NewClientBuilder().
-			WithScheme(scheme).
+		clientBuilder = indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme)).
 			// WithStatusSubresource makes fake client mimic real API server behavior:
 			// - Create() ignores status field
 			// - Update() ignores status field

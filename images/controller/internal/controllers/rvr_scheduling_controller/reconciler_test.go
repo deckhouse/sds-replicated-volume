@@ -42,6 +42,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	v1alpha1 "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	rvrschedulingcontroller "github.com/deckhouse/sds-replicated-volume/images/controller/internal/controllers/rvr_scheduling_controller"
+	indextest "github.com/deckhouse/sds-replicated-volume/images/controller/internal/indexes/testhelpers"
 )
 
 // ClusterSetup defines a cluster configuration for tests
@@ -368,8 +369,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 		}
 
 		// Create client and reconciler
-		cl := fake.NewClientBuilder().
-			WithScheme(scheme).
+		cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+			WithScheme(scheme)).
 			WithRuntimeObjects(objects...).
 			WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 			Build()
@@ -967,8 +968,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
@@ -1053,8 +1054,8 @@ var _ = Describe("RVR Scheduling Integration Tests", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
@@ -1193,7 +1194,7 @@ var _ = Describe("Access Phase Tests", Ordered, func() {
 		for _, rvr := range rvrList {
 			objects = append(objects, rvr)
 		}
-		builder := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objects...)
+		builder := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().WithScheme(scheme)).WithRuntimeObjects(objects...)
 		if withStatusSubresource {
 			builder = builder.WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{})
 		}
@@ -1426,8 +1427,8 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
@@ -1544,8 +1545,8 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
@@ -1630,8 +1631,8 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
@@ -1721,8 +1722,8 @@ var _ = Describe("Partial Scheduling and Edge Cases", Ordered, func() {
 				objects = append(objects, lvg)
 			}
 
-			cl := fake.NewClientBuilder().
-				WithScheme(scheme).
+			cl := indextest.WithRVRByReplicatedVolumeNameIndex(fake.NewClientBuilder().
+				WithScheme(scheme)).
 				WithRuntimeObjects(objects...).
 				WithStatusSubresource(&v1alpha1.ReplicatedVolumeReplica{}).
 				Build()
