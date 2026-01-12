@@ -36,4 +36,3 @@ func ExecuteSecondary(ctx context.Context, resource string) error {
 
 	return nil
 }
-

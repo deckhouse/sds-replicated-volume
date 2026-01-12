@@ -71,4 +71,3 @@ func (primaryCommandError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 func (secondaryCommandError) ResetDRBDError(apiErrors *v1alpha1.DRBDErrors) {
 	apiErrors.LastSecondaryError = nil
 }
-
