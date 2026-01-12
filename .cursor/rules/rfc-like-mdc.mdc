@@ -1,0 +1,67 @@
+---
+globs: .cursor/rules/*.mdc
+alwaysApply: false
+---
+# RFC-style English and structure for .mdc
+
+Write clear, reviewable technical prose. Use BCP 14 key words (RFC 2119 / RFC 8174) only when you intend normative meaning.
+
+## 1. Authority and precedence
+
+- Follow The Chicago Manual of Style (CMOS) for English grammar, punctuation, capitalization, and general editorial decisions, unless overridden by an explicit requirement in the current document.
+- If a stylistic convention conflicts with an explicit requirement, the requirement takes precedence.
+- Do not make “stylistic” edits that change technical meaning, scope, or applicability.
+
+## 2. Literals and exactness
+
+- Preserve the spelling and casing of: identifiers, commands/flags, file and package names, stable constants, and any other literal tokens where a change would alter meaning.
+- Preserve the original spelling of proper names and quoted material.
+- Put literal tokens in inline code (backticks) and keep surrounding punctuation outside the literal.
+- When quoting literal text (exact strings to match, exact tokens), punctuation MUST be outside quotation marks so the quoted literal remains exact.
+- When quoting general prose (not a literal), punctuation SHOULD follow normal CMOS conventions. Prefer block quotes for longer quotations.
+
+## 3. Editing discipline
+
+- Aim for clarity, consistency, and readability; fix internal inconsistencies (terminology, capitalization, duplicated text).
+- If a passage is unclear in a way that could affect interpretation, flag it explicitly rather than guessing.
+- Treat editing as distinct from technical review: suggest rewrites for clarity, but never optimize typography over correctness.
+- If you cannot confidently choose the CMOS-preferred option for a purely stylistic change, and the change is not required for correctness or clarity, avoid making the change.
+
+## 4. Style conventions
+
+- Use American English spelling by default; keep spelling consistent within the document.
+- Use the serial (Oxford) comma where it improves clarity.
+- Avoid ambiguous pronouns (“it/this/that”) when the referent could be unclear; prefer explicit subjects.
+- Prefer short, declarative sentences for requirements; make conditions explicit (split sentences or use structured lists).
+- Use parallel structure in lists and sublists; avoid burying critical conditions in parenthetical asides.
+- Keep capitalization consistent within the document and, when applicable, across closely related documents.
+- For section titles, prefer CMOS title case unless a full-sentence title is clearer; be consistent.
+
+### 4.1 Citations, references, and cross-references
+
+- Ensure every citation has a corresponding reference entry, and every reference entry is cited.
+- Do not rely on page numbers; prefer stable locations (section titles/numbers, anchors, or explicit URLs).
+- When citing RFCs/BCPs or other specs, use a stable label scheme (e.g., [RFC2119], [RFC8174]) and define labels in a References section.
+
+### 4.2 Examples and placeholder safety
+
+- Prefer fenced code blocks for multi-line literals and examples. Do not “pretty up” examples if that risks breaking reproducibility.
+- Use reserved example domains (e.g., example.com / example.net / example.org) for generic DNS/URI examples; avoid real production domains as “generic examples”.
+- Clearly distinguish placeholders (e.g., <placeholder>) from literal values.
+- Keep examples minimal, accurate, and resilient to staleness.
+
+### 4.3 Abbreviations
+
+- Expand abbreviations in titles and on first use: “full expansion (ABBR)”.
+- Use one expansion consistently when multiple expansions are possible.
+
+## 5. Section drafting checklist (apply to any heading level)
+
+- Does this section need a short intro/abstract?
+- Does it need background/context, or can it stand alone?
+- Are there any terms that must be defined to remove ambiguity?
+- Where are the requirements, and can a reviewer find them quickly?
+- Do we need rationale (why) to explain trade-offs or non-obvious choices?
+- Do we need examples, and are they clearly marked as examples (not requirements)?
+- Mixing requirements/rationale/definitions/examples is allowed, but requirements must remain easy to locate.
+- For short, obvious sections, one tight paragraph may be enough; do not create subsections just to satisfy structure.
