@@ -1,8 +1,7 @@
 ---
 description: Go rules
-globs:
-  - "**/*.go"
-alwaysApply: true
+globs: **/*.go
+alwaysApply: false
 ---
 
 - Formatting (MUST):

@@ -1,10 +1,9 @@
 ---
-description: Reconciliation flow usage — phases and Outcome composition
-globs:
-  - "images/controller/internal/controllers/rv_controller/reconciler.go"
-  - "images/controller/internal/controllers/rv_attach_controller/reconciler.go"
-alwaysApply: true
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go,images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
 ---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 # Using flow (`internal/reconciliation/flow`)
 
@@ -13,8 +12,6 @@ how to structure work into **phases** and how to compose/propagate/enrich **Outc
 
 Scope: any function that uses **flow** (calls any function from `internal/reconciliation/flow` and/or returns/accepts **Outcome**) **MUST** follow this document.
 In code, the type is `flow.Outcome`.
-
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 

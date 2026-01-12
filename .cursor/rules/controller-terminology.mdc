@@ -1,28 +1,14 @@
 ---
-description: Common controller terminology (shared definitions referenced by all controller rules)
-globs:
-  - "images/controller/internal/controllers/rv_controller/reconciler.go"
-  - "images/controller/internal/controllers/rv_attach_controller/reconciler.go"
-  - ".cursor/rules/controller*.mdc"
-alwaysApply: true
+globs: images/controller/internal/controllers/rv_controller/**/*.go,images/controller/internal/controllers/rv_attach_controller/**/*.go,.cursor/rules/controller*.mdc
+alwaysApply: false
 ---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 # Controller terminology
 
 This document defines shared terminology used across controller rule files in this repository.
 All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
-
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** (see below).
-
----
-
-## Normative keywords
-
-The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** are to be interpreted as in RFC 2119 / RFC 8174.
-
-- **MUST / MUST NOT**: absolute requirement / absolute prohibition.
-- **SHOULD / SHOULD NOT**: strong recommendation; deviations require an explicit reason.
-- **MAY**: optional; allowed when it improves clarity/correctness/performance.
 
 ---
 
@@ -32,7 +18,7 @@ The keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** are to 
 A **controller package** is a Go package under `images/controller/internal/controllers/<name>/...` that defines one controller-runtime controller, and contains:
 
 - **`controller.go`** (**Wiring-only** setup)
-- **`predicate.go`** (predicate/**filter** implementations; required only when the package uses controller-runtime **predicate**/**filter**s)
+- **`predicates.go`** (predicate/**filter** implementations; required only when the package uses controller-runtime **predicate**/**filter**s)
 - **`reconciler.go`** (**Reconciliation business logic**)
 - **`reconciler_test.go`** (tests) and/or other `*_test.go` files
 
@@ -43,12 +29,12 @@ A **controller package** is a Go package under `images/controller/internal/contr
 - It constructs the reconciler, registers **runnables** on the **manager** (`mgr.Add(...)`),
   configures **watches** via the **builder chain**, and registers field indexes via the **manager**’s field indexer.
 
-### **`predicate.go`**
-**`predicate.go`** is the file that owns controller-runtime **predicate**/**filter** implementations for a **controller package**.
+### **`predicates.go`**
+**`predicates.go`** is the file that owns controller-runtime **predicate**/**filter** implementations for a **controller package**.
 
 - It contains only **mechanical** change detection (no **I/O**, no **domain/business** decisions).
 - It is referenced from the **builder chain** in **`controller.go`** via `builder.WithPredicates(<kind>Predicates()...)`.
-- It is optional, but when the controller uses any controller-runtime **predicate**/**filter**, **`predicate.go`** is required.
+- It is optional, but when the controller uses any controller-runtime **predicate**/**filter**, **`predicates.go`** is required.
 
 ### **`reconciler.go`**
 **`reconciler.go`** is the file that owns all **Reconciliation business logic** for the **controller package**, including:
@@ -603,24 +589,24 @@ This section applies to **.mdc** rules that describe how to write controllers in
 
 - All other controller `.mdc` documents **SHOULD** reference this file instead of re-defining the same terms.
 
-### Normative keywords
+### Writing conventions
 
-- The normative keywords **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY** in controller rules **MUST** always be bold (i.e., `**MUST**`, `**SHOULD**`, etc.).
-- If any of these keywords appears with normative meaning, it **MUST** be spelled exactly as above and **MUST** be bold.
+- Formatting conventions for controller rule files (including normative keywords and term emphasis) are defined in `rfc-like-mdc.mdc`.
 
-### Term usage and bolding
+### Term usage
 
-- Terms defined in **Controller terminology** **MUST** be used consistently with their definitions and **MUST** always be bold on every mention.
-- Terms defined in the current rules document (within a specific **.mdc** file) **MUST** be used consistently with their definitions and **MUST** always be bold on every mention.
-- If a concept matches an existing term from **Controller terminology**, you **SHOULD** reuse the existing term (and spelling) instead of introducing a new synonym.
+- Terms defined in **Controller terminology** MUST be used consistently with their definitions.
+- Terms defined in the current rules document (within a specific **.mdc** file) MUST be used consistently with their definitions.
+- If a concept matches an existing term from **Controller terminology**, you SHOULD reuse the existing term (and spelling) instead of introducing a new synonym.
 
-### List of terms that must be bold
+### Canonical term list
 
-Below is the list of terms (without definitions) that in controller rules **MUST** always be bold whenever mentioned:
+Below is the list of terms (without definitions) that are defined in **Controller terminology**. Use these spellings consistently across controller rules:
+Terms MUST be written in italics on every mention (see `rfc-like-mdc.mdc`).
 
 - **controller package**
 - **`controller.go`**
-- **`predicate.go`**
+- **`predicates.go`**
 - **`reconciler.go`**
 - **`reconciler_test.go`**
 - **Entrypoint**

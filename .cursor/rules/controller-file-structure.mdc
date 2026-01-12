@@ -1,15 +1,14 @@
 ---
-description: Controller file structure and conventions (sds-replicated-volume)
-globs:
-  - "images/controller/internal/controllers/rv_controller/**/*.go"
-  - "images/controller/internal/controllers/rv_attach_controller/**/*.go"
-alwaysApply: true
+globs: images/controller/internal/controllers/rv_controller/**/*.go,images/controller/internal/controllers/rv_attach_controller/**/*.go
+alwaysApply: false
 ---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 - **controller package** structure (**MUST**):
   - Each **controller package** **MUST** have these files:
     - **`controller.go`**
-    - **`predicate.go`** (required only when the controller uses controller-runtime **predicate**/**filter**s)
+    - **`predicates.go`** (required only when the controller uses controller-runtime **predicate**/**filter**s)
     - **`reconciler.go`**
     - **`reconciler_test.go`**
 

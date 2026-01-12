@@ -1,26 +1,26 @@
 ---
-description: Controller predicate rules for predicate.go (mechanical change detection; no I/O; no business logic)
-globs:
-  - "images/controller/internal/controllers/**/predicate.go"
-alwaysApply: true
+globs: images/controller/internal/controllers/**/predicates*.go
+alwaysApply: false
 ---
 
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
+
 - TL;DR:
-  - **`predicate.go`** contains controller-runtime **predicate**/**filter** implementations for a **controller package**.
+  - **`predicates.go`** contains controller-runtime **predicate**/**filter** implementations for a **controller package**.
   - **predicates**/**filters** are **mechanical** change detection only:
     - no **I/O**,
     - no **domain/business** decisions,
     - no mutation of observed objects.
   - **`controller.go`** wires predicates into the **builder chain**:
     - by calling `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
-    - Predicate implementation still lives in **`predicate.go`**.
+    - Predicate implementation still lives in **`predicates.go`**.
   - **`reconciler.go`** **MUST NOT** contain **predicates**/**filters**.
 
 - Scope (**MUST**):
-  - This document applies only to **`predicate.go`**.
+  - This document applies only to **`predicates.go`**.
   - It defines what is allowed inside controller-runtime **predicates**/**filters** and how to structure them.
 
-- What is allowed in **`predicate.go`** (**MUST**):
+- What is allowed in **`predicates.go`** (**MUST**):
   - Definitions of predicate sets as **functions** (no package-level `var` predicates).
     Predicate-set function naming (**MUST**) follows this convention:
     - `func <Kind>Predicates() []predicate.Predicate { ... }`
@@ -28,11 +28,11 @@ alwaysApply: true
     - Each such function returns **all** predicates needed for that `<Kind>` at the watch site where it is used.
   - Pure, **mechanical** comparisons of object fields to decide whether to enqueue a **reconcile request**.
   - Typed events (preferred): `event.TypedUpdateEvent[client.Object]`, etc.
-  - **`predicate.go`** **MUST NOT** define controller-runtime builder wiring helpers:
+  - **`predicates.go`** **MUST NOT** define controller-runtime builder wiring helpers:
     - no `*ForOptions` / `*OwnsOptions` / `*WatchesOptions` functions,
     - no `builder.*` imports.
 
-- What is forbidden in **`predicate.go`** (**MUST NOT**):
+- What is forbidden in **`predicates.go`** (**MUST NOT**):
   - any **Kubernetes API I/O** (`Get/List/Create/Update/Patch/Delete`) or controller-runtime client usage;
   - any multi-step **domain/business** logic (validation rules, placement/scheduling decisions, state machines);
   - any mutation of the event objects (no writes to `.Spec`, `.Status`, metadata, conditions, maps/slices);
@@ -75,7 +75,7 @@ alwaysApply: true
   - If a field is available via `client.Object` methods, you **MUST** use those methods:
     - `GetGeneration()`, `GetLabels()`, `GetAnnotations()`, `GetFinalizers()`, `GetOwnerReferences()`, etc.
 
-  Example: functions returning predicate sets (predicate.go style)
+  Example: functions returning predicate sets (predicates.go style)
   (requires Go 1.21+ for `maps`/`slices`; and `k8s.io/apimachinery/pkg/api/equality` for `apiequality`)
 
   ```go
@@ -125,7 +125,7 @@ alwaysApply: true
     - `obju.AreConditionsSemanticallyEqual(...)` when you need Type/Status/Reason/Message/ObservedGeneration semantics.
     - `obju.AreConditionsEqualByStatus(...)` when only Type+Status matter.
 
-  Example: compare condition(s) via **`obju`** (predicate.go style)
+  Example: compare condition(s) via **`obju`** (predicates.go style)
 
   ```go
   package examplecontroller
@@ -160,7 +160,7 @@ alwaysApply: true
   - Cast to a concrete API type only when `client.Object` methods are not enough.
   - If you cast and the assertion fails / is nil, return `true` (allow reconcile).
 
-  Example: safe cast (predicate.go style)
+  Example: safe cast (predicates.go style)
 
   ```go
   package examplecontroller

@@ -1,9 +1,9 @@
 ---
-description: Controller entrypoint rules for controller.go (wiring-only, controller-runtime builder, runnables, predicates)
-globs:
-  - "images/controller/internal/controllers/**/controller.go"
-alwaysApply: true
+globs: images/controller/internal/controllers/**/controller*.go
+alwaysApply: false
 ---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 - TL;DR:
   - **`controller.go`** = **Wiring-only** **Entrypoint**.
@@ -11,7 +11,7 @@ alwaysApply: true
   - **builder chain** = single fluent chain, ends with `.Complete(rec)`.
   - **predicates**/**filters**:
     - are **mechanical** change detection (no **I/O**, no **domain/business** decisions),
-    - live in **`predicate.go`**,
+    - live in **`predicates.go`**,
     - **MUST NOT** be implemented in **`controller.go`**.
   - All **Reconciliation business logic** = **`reconciler.go`**.
   - **controller name** string values are `kebab-case` (see **Controller terminology**).
@@ -29,7 +29,7 @@ alwaysApply: true
     - `.For(...)`, `.Owns(...)`, `.Watches(...)`
     - `.WithOptions(...)`, `.Complete(...)`
   - wiring **predicates**/**filters** by calling `builder.WithPredicates(<kind>Predicates()...)`
-    (where `<kind>Predicates()` is implemented in **`predicate.go`**).
+    (where `<kind>Predicates()` is implemented in **`predicates.go`**).
   - **Manager-owned dependencies** (wiring-only) from the **manager**:
     - `mgr.GetClient()`, `mgr.GetScheme()`, `mgr.GetCache()`, `mgr.GetEventRecorderFor(...)`
   - registering **runnables**/**sources** on the **manager** (wiring-only), e.g. `mgr.Add(...)`, indexes, **sources**.
@@ -38,7 +38,7 @@ alwaysApply: true
   - any functions that **compute/ensure/apply/reconcile** domain logic (must live in `reconciler.go`).
   - implementing controller-runtime **predicates**/**filters**:
     - **`controller.go`** **MUST NOT** define `predicate.Funcs{...}` (or any other predicate implementation) inline.
-    - All predicate implementations **MUST** live in **`predicate.go`** (see: `controller-predicate.mdc`).
+    - All predicate implementations **MUST** live in **`predicates.go`** (see: `controller-predicate.mdc`).
   - reading/modifying `.Spec` / `.Status` (except **mechanical** access in wiring callbacks):
     - **`controller.go`** **MUST NOT** read or write `.Spec` / `.Status` as part of business logic.
     - **mechanical** reads are allowed only inside **watch** mapping functions whose only job is pure request mapping (`obj -> []reconcile.Request`).
@@ -52,8 +52,8 @@ alwaysApply: true
     - The suffix "-controller" **MAY** be appended; it **SHOULD** be appended only when needed to avoid ambiguity/collisions (see **Controller terminology**).
   - **Entrypoint**: `BuildController(mgr manager.Manager) error`.
   - **predicates**/**filters** are optional.
-    - If the controller uses any **predicates**/**filters**, the **controller package** **MUST** include **`predicate.go`**.
-    - Predicate implementation is done in **`predicate.go`**; **`controller.go`** wires it via `builder.WithPredicates(...)`.
+    - If the controller uses any **predicates**/**filters**, the **controller package** **MUST** include **`predicates.go`**.
+    - Predicate implementation is done in **`predicates.go`**; **`controller.go`** wires it via `builder.WithPredicates(...)`.
 
 - What belongs in `BuildController` (**MUST**):
   - Take **Manager-owned dependencies** from the **manager**:
@@ -105,7 +105,7 @@ alwaysApply: true
   ```
 
 - Predicate implementation rules:
-  - **predicates**/**filters** **MUST** be implemented in **`predicate.go`**.
+  - **predicates**/**filters** **MUST** be implemented in **`predicates.go`**.
   - **`controller.go`** **MUST NOT** contain predicate implementation code.
   - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
   - See: `controller-predicate.mdc`.

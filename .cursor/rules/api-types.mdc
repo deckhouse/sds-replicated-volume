@@ -1,11 +1,7 @@
 ---
 description: API rules for type-centric layout, enums, status, naming, and helpers/custom logic
-globs:
-  - "api/**/*_types.go"
-  - "api/**/common_types.go"
-  - "!api/linstor/**/*.go"
-  - "!api/**/zz_generated*"
-alwaysApply: true
+globs: api/v*/**/*_types.go,api/v*/**/common_types.go
+alwaysApply: false
 ---
 
 ## Code layout: type-centric blocks (MUST)

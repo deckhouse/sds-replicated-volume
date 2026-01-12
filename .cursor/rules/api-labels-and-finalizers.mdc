@@ -1,10 +1,7 @@
 ---
 description: API naming rules for label keys and finalizers (sds-replicated-volume)
-globs:
-  - "api/**/labels.go"
-  - "api/**/finalizers.go"
-  - "!api/linstor/**/*.go"
-alwaysApply: true
+globs: api/v*/**/finalizers.go,api/v*/**/labels.go,
+alwaysApply: false
 ---
 
 ## Label keys (`labels.go`)

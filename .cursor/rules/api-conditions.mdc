@@ -1,9 +1,7 @@
 ---
 description: API Conditions naming rules (v1alpha1)
-globs:
-  - "api/**/*_conditions.go"
-  - "!api/linstor/**/*.go"
-alwaysApply: true
+globs: api/v*/**/*_conditions.go
+alwaysApply: false
 ---
 
 - Condition constants naming:

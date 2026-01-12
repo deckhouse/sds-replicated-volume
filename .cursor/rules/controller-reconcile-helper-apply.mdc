@@ -1,18 +1,15 @@
 ---
-description: Controller reconciliation helpers — ApplyReconcileHelper
-globs:
-  - "images/controller/internal/controllers/rv_controller/reconciler.go"
-  - "images/controller/internal/controllers/rv_attach_controller/reconciler.go"
-alwaysApply: true
+globs: images/controller/internal/controllers/rv_controller/reconciler*.go, images/controller/internal/controllers/rv_attach_controller/reconciler*.go
+alwaysApply: false
 ---
+
+See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and general .mdc writing conventions.
 
 # ApplyReconcileHelper
 
 This document defines naming and contracts for **ApplyReconcileHelper** functions/methods.
 
 Common terminology and rules for any **ReconcileHelper** live in `controller-reconcile-helper.mdc`.
-
-Normative keywords: **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, **MAY**.
 
 ---
 

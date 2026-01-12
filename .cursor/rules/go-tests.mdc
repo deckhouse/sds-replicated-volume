@@ -1,8 +1,7 @@
 ---
 description: Go test rules
-globs:
-  - "**/*_test.go"
-alwaysApply: true
+globs: **/*_test.go
+alwaysApply: false
 ---
 
 - Test fixtures & I/O (MUST):

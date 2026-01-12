@@ -1,9 +1,7 @@
 ---
 description: API codegen rules (kubebuilder/controller-gen)
-globs:
-  - "api/**/*.go"
-  - "!api/linstor/**/*.go"
-alwaysApply: true
+globs: api/v*/**/*.go
+alwaysApply: false
 ---
 
 - Kubebuilder markers & API changes (MUST):

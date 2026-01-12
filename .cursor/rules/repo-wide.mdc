@@ -1,7 +1,5 @@
 ---
 description: Repository-wide Cursor Context Rules for sds-replicated-volume-2
-globs:
-  - "**/*"
 alwaysApply: true
 ---
 

@@ -1,9 +1,7 @@
 ---
 description: API file structure and conventions (sds-replicated-volume)
-globs:
-  - "api/**/*.go"
-  - "!api/linstor/**/*.go"
-alwaysApply: true
+globs: api/v*/**/*.go
+alwaysApply: false
 ---
 
 - Object prefixes (MUST):
