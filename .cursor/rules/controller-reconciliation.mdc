@@ -24,6 +24,76 @@ This document complements `controller-reconcile-helper*.mdc` and defines rules t
   (typically executed by a `patch*` / `patch*Status` helper).
 - **Patch base (`base`)**: the `DeepCopy()` snapshot used as a diff reference for **one** patch request.
 
+## `reconciler.go` layout and sorting (MUST)
+
+This section defines the canonical ordering inside **`reconciler.go`** to keep the file readable and reviewable.
+It is a *layout* convention (not a behavioral contract), but it MUST be followed for consistency.
+
+### High-level rule (MUST)
+
+- **`reconciler.go`** MUST be organized top-to-bottom in **call-graph order**, keeping helpers from **Non-I/O helper categories** close to
+  the **Reconcile method** that primarily uses/owns them.
+- The file SHOULD use explicit section comments to make boundaries obvious, e.g.:
+  - `// --- Reconcile: <name>`
+  - `// --- Helpers: <name> (Non-I/O helper categories)`
+  - `// --- Single-call I/O helper categories`
+
+### 1. Wiring / construction (MUST)
+
+- `type Reconciler { ... }` MUST be first (top of file).
+- `NewReconciler(...)` MUST be immediately after `type Reconciler { ... }`.
+- `NewReconciler` MUST remain wiring/DI only (no Kubernetes API I/O).
+
+### 2. Reconcile methods in call-graph order (MUST)
+
+- The controller-runtime `Reconcile(ctx, req)` MUST appear before any other `reconcile*` / `Reconcile*` methods.
+- Other **Reconcile methods** MUST be declared in the order they are called.
+  - If `Reconcile` calls `reconcileA(...)` and then `reconcileB(...)`, `reconcileA` MUST appear before `reconcileB`.
+  - Sibling reconciles (called from the same parent) SHOULD appear in the same order as they appear at the call site.
+
+### 3. Per-reconcile helper blocks (non-I/O) (MUST)
+
+Immediately after each **Reconcile method**, **`reconciler.go`** MUST place the helpers from **Non-I/O helper categories** that are used by
+that method (excluding helpers from **Single-call I/O helper categories**), in this order:
+
+1) **EnsureReconcileHelper** helpers (`ensure*`)
+2) **ComputeReconcileHelper** + **IsInSyncReconcileHelper** + **ApplyReconcileHelper** (grouped per entity/artifact; see below)
+3) **ConstructionReconcileHelper** helpers (`new*` / `build*` / `make*` / `compose*`)
+
+#### ComputeReconcileHelper + IsInSyncReconcileHelper + ApplyReconcileHelper grouping rule (MUST)
+
+- For one logical entity/artifact, `compute*`, `is*InSync*`, and `apply*` helpers MUST be kept adjacent as a group.
+- Inside such a group, the order MUST be:
+  1. `computeIntended*` (if any)
+  2. `computeActual*` (if any)
+  3. `computeTarget*` and/or `compute*Report`
+  4. `is*InSync*`
+  5. `apply*`
+
+Notes:
+- Use `is*InSync*` naming (not “up-to-date”) per `controller-reconcile-helper-is-in-sync.mdc`.
+- “Construction” helpers in this per-reconcile block MUST be local to the same reconcile step; if they become shared,
+  move them to the nearest owning reconcile step (see next section) or a shared block.
+
+#### Shared helper placement (SHOULD)
+
+- If a non-I/O helper is used by more than one **Reconcile method**, it SHOULD be placed under the nearest
+  **owning** reconcile step (the closest common parent in the call graph that conceptually owns the helper).
+- If there is no clear owner, it MAY be placed into a small `// Shared non-I/O helpers` block immediately above
+  the I/O helpers section.
+- Helpers MUST NOT be duplicated to satisfy locality.
+
+### 4. I/O helpers at the end (MUST)
+
+- All helpers from **Single-call I/O helper categories** (**GetReconcileHelper**, **CreateReconcileHelper**, **PatchReconcileHelper**, **DeleteReconcileHelper**) MUST be the last section in **`reconciler.go`**.
+- These helpers MUST be grouped and sorted as follows:
+  1) **Group by object kind/type** (one group per kind).
+  2) Inside a kind group, order MUST be: **GetReconcileHelper → CreateReconcileHelper → PatchReconcileHelper → DeleteReconcileHelper**.
+  3) Kind-group ordering MUST be:
+     1. the **primary reconciled kind** first,
+     2. then other kinds from this repository API (types under `api/v*/`) in **alphabetical order** by established kind name (short kind name when applicable),
+     3. then kinds from other APIs in **alphabetical order** by kind name.
+
 ## Core invariants for Reconcile methods (MUST)
 
 ### Phases for Reconcile methods (MUST)
