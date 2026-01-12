@@ -30,7 +30,7 @@ import (
 	snc "github.com/deckhouse/sds-node-configurator/api/v1alpha1"
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
@@ -40,10 +40,9 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 	)
 
 	var (
-		ctx    = context.Background()
-		cl     = newFakeClient()
-		log, _ = logger.NewLogger("2")
-		lc, _  = lapi.NewClient(lapi.Log(log))
+		cl    = newFakeClient()
+		log   = logger.WrapLorg(GinkgoLogr)
+		lc, _ = lapi.NewClient(lapi.Log(log))
 
 		testReplicatedSP = &srv.ReplicatedStoragePool{
 			ObjectMeta: metav1.ObjectMeta{
@@ -53,7 +52,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		}
 	)
 
-	It("GetReplicatedStoragePool", func() {
+	It("GetReplicatedStoragePool", func(ctx SpecContext) {
 		err := cl.Create(ctx, testReplicatedSP)
 		Expect(err).NotTo(HaveOccurred())
 
@@ -63,7 +62,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(replicatedSP.Namespace).To(Equal(testNameSpace))
 	})
 
-	It("UpdateReplicatedStoragePool", func() {
+	It("UpdateReplicatedStoragePool", func(ctx SpecContext) {
 		const (
 			testLblKey   = "test_label_key"
 			testLblValue = "test_label_value"
@@ -109,7 +108,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(m[""]).To(Equal("value3"))
 	})
 
-	It("GetLVMVolumeGroup", func() {
+	It("GetLVMVolumeGroup", func(ctx SpecContext) {
 		testLvm := &snc.LVMVolumeGroup{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: testName,
@@ -124,7 +123,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(lvm.Name).To(Equal(testName))
 	})
 
-	It("Validations", func() {
+	It("Validations", func(ctx SpecContext) {
 		const (
 			LVMVGOneOnFirstNodeName    = "lvmVG-1-on-FirstNode"
 			ActualVGOneOnFirstNodeName = "actualVG-1-on-FirstNode"
@@ -178,7 +177,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		goodReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: goodReplicatedStoragePool.ObjectMeta.Namespace, Name: goodReplicatedStoragePool.ObjectMeta.Name}}
-		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, *log, lc)
+		shouldRequeue, err := controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, goodReplicatedStoragePoolrequest, log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
 
@@ -197,7 +196,7 @@ var _ = Describe(controller.ReplicatedStoragePoolControllerName, func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		badReplicatedStoragePoolrequest := reconcile.Request{NamespacedName: types.NamespacedName{Namespace: badReplicatedStoragePool.ObjectMeta.Namespace, Name: badReplicatedStoragePool.ObjectMeta.Name}}
-		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, *log, lc)
+		shouldRequeue, err = controller.ReconcileReplicatedStoragePoolEvent(ctx, cl, badReplicatedStoragePoolrequest, log, lc)
 		Expect(err).To(HaveOccurred())
 		Expect(shouldRequeue).To(BeTrue())
 

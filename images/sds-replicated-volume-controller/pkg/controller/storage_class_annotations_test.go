@@ -17,7 +17,6 @@ limitations under the License.
 package controller_test
 
 import (
-	"context"
 	"fmt"
 	"maps"
 
@@ -34,7 +33,7 @@ import (
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/config"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/controller"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
@@ -45,7 +44,6 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 	)
 
 	var (
-		ctx context.Context
 		cl  client.WithWatch
 		log logger.Logger
 
@@ -100,9 +98,8 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 	)
 
 	BeforeEach(func() {
-		ctx = context.Background()
 		cl = newFakeClient()
-		log = logger.Logger{}
+		log = logger.WrapLorg(GinkgoLogr)
 		storageClassResource = nil
 		configMap = nil
 		replicatedStorageClassResource = nil
@@ -124,7 +121,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 					},
 				}
 			})
-			JustBeforeEach(func() {
+			JustBeforeEach(func(ctx SpecContext) {
 				err := cl.Create(ctx, storageClassResource)
 				Expect(err).NotTo(HaveOccurred())
 				if storageClassResource.Annotations != nil {
@@ -134,7 +131,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				err = cl.Create(ctx, replicatedStorageClassResource)
 				Expect(err).NotTo(HaveOccurred())
 			})
-			JustAfterEach(func() {
+			JustAfterEach(func(ctx SpecContext) {
 				storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(storageClass).NotTo(BeNil())
@@ -179,11 +176,11 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 							},
 						}
 					})
-					JustBeforeEach(func() {
+					JustBeforeEach(func(ctx SpecContext) {
 						err := cl.Create(ctx, configMap)
 						Expect(err).NotTo(HaveOccurred())
 					})
-					JustAfterEach(func() {
+					JustAfterEach(func(ctx SpecContext) {
 						err := cl.Delete(ctx, configMap)
 						Expect(err).NotTo(HaveOccurred())
 
@@ -196,7 +193,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				})
 			} else {
 				When("ConfigMap does not exist", func() {
-					JustBeforeEach(func() {
+					JustBeforeEach(func(ctx SpecContext) {
 						var err error
 						configMap, err := getConfigMap(ctx, cl, validCFG.ControllerNamespace)
 
@@ -225,7 +222,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						storageClassResource.Parameters[controller.StorageClassParamAllowRemoteVolumeAccessKey] = "true"
 					})
 					foo()
-					JustAfterEach(func() {
+					JustAfterEach(func(ctx SpecContext) {
 						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 						Expect(err).NotTo(HaveOccurred())
 						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "true"))
@@ -246,7 +243,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 						Expect(storageClassResource.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
 					})
 					foo()
-					JustAfterEach(func() {
+					JustAfterEach(func(ctx SpecContext) {
 						storageClass, err := getSC(ctx, cl, storageClassResource.Name, storageClassResource.Namespace)
 						Expect(err).NotTo(HaveOccurred())
 						Expect(storageClass.Parameters).To(HaveKeyWithValue(controller.StorageClassParamAllowRemoteVolumeAccessKey, "false"))
@@ -300,7 +297,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 					}
 					configMap.Data[controller.VirtualizationModuleEnabledKey] = strValue
 				})
-				JustBeforeEach(func() {
+				JustBeforeEach(func(ctx SpecContext) {
 					virtualizationEnabled, err := controller.GetVirtualizationModuleEnabled(ctx, cl, log, request.NamespacedName)
 					Expect(err).NotTo(HaveOccurred())
 					Expect(virtualizationEnabled).To(BeEquivalentTo(value))
@@ -310,7 +307,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		}
 
 		itHasNoAnnotations := func() {
-			It("has no annotations", func() {
+			It("has no annotations", func(ctx SpecContext) {
 				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(shouldRequeue).To(BeFalse())
@@ -323,7 +320,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 		}
 
 		itHasOnlyDefaultStorageClassAnnotationKey := func() {
-			It("has only default storage class annotation", func() {
+			It("has only default storage class annotation", func(ctx SpecContext) {
 				shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(shouldRequeue).To(BeFalse())
@@ -370,7 +367,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 				whenVirtualizationIs(true, func() {
 					whenDefaultAnnotationExistsIs(false, func() {
 						whenAllowRemoteVolumeAccessKeyIs(false, func() {
-							It("has only access mode annotation", func() {
+							It("has only access mode annotation", func(ctx SpecContext) {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(shouldRequeue).To(BeFalse())
@@ -389,7 +386,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 					})
 					whenDefaultAnnotationExistsIs(true, func() {
 						whenAllowRemoteVolumeAccessKeyIs(false, func() {
-							It("has default storage class and access mode annotations", func() {
+							It("has default storage class and access mode annotations", func(ctx SpecContext) {
 								shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 								Expect(err).NotTo(HaveOccurred())
 								Expect(shouldRequeue).To(BeFalse())
@@ -419,7 +416,7 @@ var _ = Describe(controller.StorageClassAnnotationsCtrlName, func() {
 
 						itHasOnlyDefaultStorageClassAnnotationKey()
 
-						It("parameter StorageClassParamAllowRemoteVolumeAccessKey set to false and another provisioner", func() {
+						It("parameter StorageClassParamAllowRemoteVolumeAccessKey set to false and another provisioner", func(ctx SpecContext) {
 							shouldRequeue, err := controller.ReconcileControllerConfigMapEvent(ctx, cl, log, request)
 							Expect(err).NotTo(HaveOccurred())
 							Expect(shouldRequeue).To(BeFalse())

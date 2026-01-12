@@ -43,7 +43,7 @@ import (
 
 	srv "github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
 	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/config"
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (
@@ -83,6 +83,8 @@ const (
 	StorageClassParamAllowRemoteVolumeAccessKey   = "replicated.csi.storage.deckhouse.io/allowRemoteVolumeAccess"
 	StorageClassParamAllowRemoteVolumeAccessValue = "- fromSame:\n  - topology.kubernetes.io/zone"
 	ReplicatedStorageClassParamNameKey            = "replicated.csi.storage.deckhouse.io/replicatedStorageClassName"
+	StorageClassParamTopologyKey                  = "replicated.csi.storage.deckhouse.io/topology"
+	StorageClassParamZonesKey                     = "replicated.csi.storage.deckhouse.io/zones"
 
 	StorageClassParamFSTypeKey                     = "csi.storage.k8s.io/fstype"
 	FsTypeExt4                                     = "ext4"
@@ -518,6 +520,22 @@ func GenerateStorageClassFromReplicatedStorageClass(replicatedSC *srv.Replicated
 		volumeBindingMode = "Immediate"
 	}
 
+	// Add topology parameter
+	storageClassParameters[StorageClassParamTopologyKey] = replicatedSC.Spec.Topology
+
+	// Add zones parameter (serialize array to YAML list format)
+	if len(replicatedSC.Spec.Zones) > 0 {
+		var zonesBuilder strings.Builder
+		for i, zone := range replicatedSC.Spec.Zones {
+			if i > 0 {
+				zonesBuilder.WriteString("\n")
+			}
+			zonesBuilder.WriteString("- ")
+			zonesBuilder.WriteString(zone)
+		}
+		storageClassParameters[StorageClassParamZonesKey] = zonesBuilder.String()
+	}
+
 	switch replicatedSC.Spec.Topology {
 	case TopologyTransZonal:
 		storageClassParameters[StorageClassParamReplicasOnSameKey] = fmt.Sprintf("%s/%s", StorageClassLabelKeyPrefix, replicatedSC.Name)
@@ -647,10 +665,19 @@ func canRecreateStorageClass(newSC, oldSC *storagev1.StorageClass) (bool, string
 	// We can recreate StorageClass only if the following parameters are not equal.
 	// If other parameters are not equal, we can't recreate StorageClass and
 	// users must delete ReplicatedStorageClass resource and create it again manually.
+	// Ignore these parameters during comparison as they may be missing in old StorageClass:
+	// - QuorumMinimumRedundancyWithPrefixSCKey: optional parameter
+	// - ReplicatedStorageClassParamNameKey: optional parameter
+	// - StorageClassParamTopologyKey: new parameter, may be missing in old StorageClass
+	// - StorageClassParamZonesKey: new parameter, may be missing in old StorageClass
 	delete(newSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(newSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(newSCCopy.Parameters, StorageClassParamTopologyKey)
+	delete(newSCCopy.Parameters, StorageClassParamZonesKey)
 	delete(oldSCCopy.Parameters, QuorumMinimumRedundancyWithPrefixSCKey)
 	delete(oldSCCopy.Parameters, ReplicatedStorageClassParamNameKey)
+	delete(oldSCCopy.Parameters, StorageClassParamTopologyKey)
+	delete(oldSCCopy.Parameters, StorageClassParamZonesKey)
 	return CompareStorageClasses(newSCCopy, oldSCCopy)
 }
 

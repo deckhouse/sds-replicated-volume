@@ -32,7 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
-	"github.com/deckhouse/sds-replicated-volume/images/sds-replicated-volume-controller/pkg/logger"
+	"github.com/deckhouse/sds-replicated-volume/lib/go/common/logger"
 )
 
 const (
@@ -76,7 +76,7 @@ func NewLinstorResourcesWatcher(
 	log logger.Logger,
 ) {
 	cl := mgr.GetClient()
-	ctx := context.Background()
+	ctx := context.Background() // TODO: should use external context to make it cancelable
 
 	log.Info(fmt.Sprintf("[NewLinstorResourcesWatcher] the controller %s starts the work", linstorResourcesWatcherCtrlName))
 
@@ -369,7 +369,7 @@ func createTieBreaker(ctx context.Context, lc *lapi.Client, resourceName, nodeNa
 			Name:        resourceName,
 			NodeName:    nodeName,
 			Flags:       disklessFlags,
-			LayerObject: lapi.ResourceLayer{},
+			LayerObject: &lapi.ResourceLayer{},
 		},
 	}
 
