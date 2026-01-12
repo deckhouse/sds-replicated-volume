@@ -127,7 +127,9 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 
 	// Create RV and RVAs
 	// We are waiting for the RVA to be ready, so it may take a long time.
-	createDuration, err := v.createRV(ctx, attachNodes)
+	createDuration, err := measureDurationError(func() error {
+		return v.createRV(ctx, attachNodes)
+	})
 	if err != nil {
 		v.log.Error("failed to create RV and RVAs", "error", err)
 		if v.createRVErrorCount != nil {
@@ -145,7 +147,9 @@ func (v *VolumeMain) Run(ctx context.Context) error {
 	v.startSubRunners(lifetimeCtx)
 
 	// Wait for RV to become ready
-	waitDuration, err := v.waitForRVReady(lifetimeCtx)
+	waitDuration, err := measureDurationError(func() error {
+		return v.waitForRVReady(lifetimeCtx)
+	})
 	if err != nil {
 		v.log.Error("failed waiting for RV to become ready", "error", err)
 		// Continue to cleanup
@@ -215,7 +219,9 @@ waitLoop:
 		v.startVolumeCheckerForFinalState(cleanupCtx, log)
 	}
 
-	deleteDuration, err := v.deleteRVAndWait(cleanupCtx, log)
+	deleteDuration, err := measureDurationError(func() error {
+		return v.deleteRVAndWait(cleanupCtx, log)
+	})
 	if err != nil {
 		v.log.Error("failed to delete RV", "error", err)
 	}
@@ -256,9 +262,7 @@ func (v *VolumeMain) getPublishNodes(ctx context.Context, count int) ([]string, 
 }
 
 // createRV creates a ReplicatedVolume and RVAs for the given nodes.
-func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.Duration, error) {
-	startTime := time.Now()
-
+func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) error {
 	rv := &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: v.rvName,
@@ -271,7 +275,7 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 
 	err := v.client.CreateRV(ctx, rv)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 
 	// Increment statistics counter on successful creation
@@ -285,30 +289,28 @@ func (v *VolumeMain) createRV(ctx context.Context, attachNodes []string) (time.D
 			continue
 		}
 		if _, err := v.client.EnsureRVA(ctx, v.rvName, nodeName); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 		if err := v.client.WaitForRVAReady(ctx, v.rvName, nodeName); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 	}
 
-	return time.Since(startTime), nil
+	return nil
 }
 
-func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (time.Duration, error) {
-	startTime := time.Now()
-
+func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) error {
 	// Unattach from all nodes - delete all RVAs for this RV.
 	rvas, err := v.client.ListRVAsByRVName(ctx, v.rvName)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 	for _, rva := range rvas {
 		if rva.Spec.NodeName == "" {
 			continue
 		}
 		if err := v.client.DeleteRVA(ctx, v.rvName, rva.Spec.NodeName); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 	}
 
@@ -320,25 +322,23 @@ func (v *VolumeMain) deleteRVAndWait(ctx context.Context, log *slog.Logger) (tim
 
 	err = v.client.DeleteRV(ctx, rv)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 
 	err = v.WaitForRVDeleted(ctx, log)
 	if err != nil {
-		return time.Since(startTime), err
+		return err
 	}
 
-	return time.Since(startTime), nil
+	return nil
 }
 
-func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) {
-	startTime := time.Now()
-
+func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
 		if err := ctx.Err(); err != nil {
-			return time.Since(startTime), err
+			return err
 		}
 
 		rv, err := v.client.GetRV(ctx, v.rvName)
@@ -347,11 +347,11 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) (time.Duration, error) 
 				time.Sleep(500 * time.Millisecond)
 				continue
 			}
-			return time.Since(startTime), err
+			return err
 		}
 
 		if v.client.IsRVReady(rv) {
-			return time.Since(startTime), nil
+			return nil
 		}
 
 		time.Sleep(1 * time.Second)
