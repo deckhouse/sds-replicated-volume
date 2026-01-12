@@ -94,6 +94,91 @@ Notes:
      2. then other kinds from this repository API (types under `api/v*/`) in **alphabetical order** by established kind name (short kind name when applicable),
      3. then kinds from other APIs in **alphabetical order** by kind name.
 
+## Optional scalar fields (`omitempty` + non-nil-able) (MUST)
+
+Kubernetes API types sometimes mark fields as optional via `json:",omitempty"`, while the Go type itself cannot be `nil`
+(e.g., `bool`, numbers, `string`, structs). Such fields are semantically optional, but the API type cannot express
+“unset” vs “set to the zero value”.
+
+To preserve optionality across the reconciliation pipeline, controller code MUST represent such values as pointers when
+they are stored/passed/returned outside of the raw Kubernetes object.
+
+- If a Kubernetes API field is tagged `omitempty` and its Go type is **non-nil-able**, reconciliation code MUST:
+  - store it as `*T` in any controller POV state artifacts (**intended**, **actual**, **target**, **report**, and derived structs),
+  - pass it between functions as `*T`,
+  - return it from functions as `*T`.
+- Exception: if a function parameter is an explicitly **required** input (the function cannot be called without a value),
+  that parameter MAY be `T` by value.
+- This rule applies to any functions in `reconciler.go` (**Reconcile methods**, **ReconcileHelpers**, and any other local helpers).
+
+Definitions:
+- **non-nil-able** types include: `bool`, numeric types, `string`, structs, arrays, `time.Duration`, `metav1.Duration`, `resource.Quantity`, etc.
+- **nil-able** types include: pointers, maps, slices, interfaces, channels, functions.
+
+Example (illustrative):
+```go
+// Foo.Spec.TimeoutSeconds is `int32` with `json:",omitempty"`.
+type TargetFooSpec struct {
+    TimeoutSeconds *int32
+}
+
+func applyFooSpec(obj *v1alpha1.Foo, target TargetFooSpec) {
+    if target.TimeoutSeconds != nil {
+        obj.Spec.TimeoutSeconds = *target.TimeoutSeconds
+    }
+}
+```
+
+## State variable naming conventions (MUST)
+
+Variables that hold controller POV state artifacts MUST be named after the state they contain
+(`intended`, `actual`, `target`, `report`, etc.).
+
+### Canonical convention (MUST)
+
+The canonical naming style for state variables is **state-prefix**:
+
+- `<state><Artifact>` (lowerCamelCase)
+  - examples: `intendedLabels`, `actualPods`, `targetMain`, `targetStatus`, `reportConditions`
+
+This rule applies even when the variable type already contains the state word (types like `ActualFoo`, `TargetBar`, etc.):
+the *variable* name MUST still carry the state word for readability.
+
+### Alternative convention (MAY)
+
+The **state-suffix** style MAY be used in legacy code or when it reads strictly better in a very small scope:
+
+- `<artifact><State>`
+  - examples: `labelsIntended`, `podsActual`, `conditionsReport`
+
+Constraints (MUST):
+- A function MUST NOT mix state-prefix and state-suffix styles in the same scope.
+- Regardless of style, a state variable name MUST contain the state word (`intended` / `actual` / `target` / `report`).
+
+### Terminology guardrails (MUST NOT)
+
+- New code MUST NOT use `desired` as a controller POV state name (use `intended` / `target` / `report`).
+
+### Default shortening (MAY)
+
+When there is exactly one artifact of a given state in a tight scope, the artifact part MAY be omitted:
+`intended`, `actual`, `target`, `report`.
+
+### Target split naming (SHOULD)
+
+This rule applies only when the same target artifact (same conceptual value, same name) exists in both patch domains.
+
+When such a **target** artifact is split by patch domain, variables SHOULD be named:
+- `targetMain` for the **main patch domain**,
+- `targetStatus` for the **status patch domain** (**controller-owned state** to persist).
+
+Published status output SHOULD be named as `report...` (it SHOULD NOT be stored in a `targetStatus...` variable).
+
+### Suggested declaration order (SHOULD)
+
+When declaring several pipeline variables together, the order SHOULD follow the pipeline:
+`intended` → `actual` → `target` → `report`.
+
 ## Core invariants for Reconcile methods (MUST)
 
 ### Phases for Reconcile methods (MUST)
