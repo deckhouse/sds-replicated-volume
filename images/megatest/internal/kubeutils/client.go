@@ -18,6 +18,8 @@ package kubeutils
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"math/rand/v2"
 	"sync"
@@ -426,6 +428,126 @@ func (c *Client) PatchRV(ctx context.Context, originalRV *v1alpha1.ReplicatedVol
 	return c.cl.Patch(ctx, updatedRV, client.MergeFrom(originalRV))
 }
 
+func buildRVAName(rvName, nodeName string) string {
+	base := "rva-" + rvName + "-" + nodeName
+	if len(base) <= 253 {
+		return base
+	}
+	sum := sha1.Sum([]byte(base))
+	hash := hex.EncodeToString(sum[:])[:8]
+	// "rva-" + rv + "-" + node + "-" + hash
+	const prefixLen = 4
+	const sepCount = 2
+	const hashLen = 8
+	maxPartsLen := 253 - prefixLen - sepCount - hashLen
+	if maxPartsLen < 2 {
+		return "rva-" + hash
+	}
+	rvMax := maxPartsLen / 2
+	nodeMax := maxPartsLen - rvMax
+	rvPart := rvName
+	if len(rvPart) > rvMax {
+		rvPart = rvPart[:rvMax]
+	}
+	nodePart := nodeName
+	if len(nodePart) > nodeMax {
+		nodePart = nodePart[:nodeMax]
+	}
+	return "rva-" + rvPart + "-" + nodePart + "-" + hash
+}
+
+// EnsureRVA creates a ReplicatedVolumeAttachment for (rvName, nodeName) if it does not exist.
+func (c *Client) EnsureRVA(ctx context.Context, rvName, nodeName string) (*v1alpha1.ReplicatedVolumeAttachment, error) {
+	rvaName := buildRVAName(rvName, nodeName)
+	existing := &v1alpha1.ReplicatedVolumeAttachment{}
+	if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, existing); err == nil {
+		return existing, nil
+	} else if client.IgnoreNotFound(err) != nil {
+		return nil, fmt.Errorf("get RVA %s: %w", rvaName, err)
+	}
+
+	rva := &v1alpha1.ReplicatedVolumeAttachment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: rvaName,
+		},
+		Spec: v1alpha1.ReplicatedVolumeAttachmentSpec{
+			ReplicatedVolumeName: rvName,
+			NodeName:             nodeName,
+		},
+	}
+	if err := c.cl.Create(ctx, rva); err != nil {
+		return nil, err
+	}
+	return rva, nil
+}
+
+// DeleteRVA deletes a ReplicatedVolumeAttachment for (rvName, nodeName). It is idempotent.
+func (c *Client) DeleteRVA(ctx context.Context, rvName, nodeName string) error {
+	rvaName := buildRVAName(rvName, nodeName)
+	rva := &v1alpha1.ReplicatedVolumeAttachment{}
+	if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	return client.IgnoreNotFound(c.cl.Delete(ctx, rva))
+}
+
+// ListRVAsByRVName lists non-deleting RVAs for a given RV (cluster-scoped).
+func (c *Client) ListRVAsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeAttachment, error) {
+	list := &v1alpha1.ReplicatedVolumeAttachmentList{}
+	if err := c.cl.List(ctx, list); err != nil {
+		return nil, err
+	}
+	var out []v1alpha1.ReplicatedVolumeAttachment
+	for _, item := range list.Items {
+		if !item.DeletionTimestamp.IsZero() {
+			continue
+		}
+		if item.Spec.ReplicatedVolumeName != rvName {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out, nil
+}
+
+// WaitForRVAReady waits until RVA Ready condition becomes True.
+func (c *Client) WaitForRVAReady(ctx context.Context, rvName, nodeName string) error {
+	rvaName := buildRVAName(rvName, nodeName)
+	for {
+		rva := &v1alpha1.ReplicatedVolumeAttachment{}
+		if err := c.cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva); err != nil {
+			if client.IgnoreNotFound(err) != nil {
+				return err
+			}
+			if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			continue
+		}
+		if rva.Status == nil {
+			if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+				return err
+			}
+			continue
+		}
+		cond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeReady)
+		if cond != nil && cond.Status == metav1.ConditionTrue {
+			return nil
+		}
+		// Early exit for permanent attach failures: these are reported via Attached condition reason.
+		attachedCond := meta.FindStatusCondition(rva.Status.Conditions, v1alpha1.RVAConditionTypeAttached)
+		if attachedCond != nil &&
+			attachedCond.Status == metav1.ConditionFalse &&
+			(attachedCond.Reason == v1alpha1.RVAAttachedReasonLocalityNotSatisfied || attachedCond.Reason == v1alpha1.RVAAttachedReasonUnableToProvideLocalVolumeAccess) {
+			return fmt.Errorf("RVA %s for volume=%s node=%s not attachable: Attached=%s reason=%s message=%q",
+				rvaName, rvName, nodeName, attachedCond.Status, attachedCond.Reason, attachedCond.Message)
+		}
+		if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+			return err
+		}
+	}
+}
+
 // ListRVRsByRVName lists all ReplicatedVolumeReplicas for a given RV
 // Filters by spec.replicatedVolumeName field
 func (c *Client) ListRVRsByRVName(ctx context.Context, rvName string) ([]v1alpha1.ReplicatedVolumeReplica, error) {
@@ -475,4 +597,14 @@ func (c *Client) ListPods(ctx context.Context, namespace, labelSelector string) 
 // DeletePod deletes a pod (does not wait for deletion)
 func (c *Client) DeletePod(ctx context.Context, pod *corev1.Pod) error {
 	return c.cl.Delete(ctx, pod)
+}
+
+// waitWithContext waits for the specified duration or until context is cancelled
+func waitWithContext(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }

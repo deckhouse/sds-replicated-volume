@@ -69,3 +69,10 @@ func waitWithContext(ctx context.Context, d time.Duration) error {
 func waitRandomWithContext(ctx context.Context, d config.DurationMinMax) error {
 	return waitWithContext(ctx, randomDuration(d))
 }
+
+// measureDurationError measures the execution time of a function that returns only error
+func measureDurationError(fn func() error) (time.Duration, error) {
+	startTime := time.Now()
+	err := fn()
+	return time.Since(startTime), err
+}

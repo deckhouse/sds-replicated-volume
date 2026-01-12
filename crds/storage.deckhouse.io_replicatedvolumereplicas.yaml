@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.20.0
+    controller-gen.kubebuilder.io/version: v0.19.0
   labels:
     module: sds-replicated-volume
   name: replicatedvolumereplicas.storage.deckhouse.io
@@ -28,8 +28,8 @@ spec:
     - jsonPath: .spec.type
       name: Type
       type: string
-    - jsonPath: .status.conditions[?(@.type=='Published')].status
-      name: Published
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
       type: string
     - jsonPath: .status.conditions[?(@.type=='Online')].status
       name: Online
@@ -46,7 +46,7 @@ spec:
     - jsonPath: .status.conditions[?(@.type=='InQuorum')].status
       name: InQuorum
       type: string
-    - jsonPath: .status.conditions[?(@.type=='InSync')].status
+    - jsonPath: .status.syncProgress
       name: InSync
       type: string
     - jsonPath: .metadata.creationTimestamp
@@ -80,7 +80,7 @@ spec:
                 minLength: 1
                 type: string
               replicatedVolumeName:
-                maxLength: 127
+                maxLength: 120
                 minLength: 1
                 pattern: ^[0-9A-Za-z.+_-]*$
                 type: string
@@ -198,10 +198,6 @@ spec:
                         - ipv4
                         - port
                         type: object
-                      nodeId:
-                        maximum: 7
-                        minimum: 0
-                        type: integer
                       peers:
                         additionalProperties:
                           properties:
@@ -294,8 +290,6 @@ spec:
                       connections:
                         items:
                           properties:
-                            apInFlight:
-                              type: integer
                             congested:
                               type: boolean
                             connectionState:
@@ -352,16 +346,12 @@ spec:
                                     type: boolean
                                   peerDiskState:
                                     type: string
-                                  pending:
-                                    type: integer
                                   percentInSync:
                                     type: string
                                   replicationState:
                                     type: string
                                   resyncSuspended:
                                     type: string
-                                  unacked:
-                                    type: integer
                                   volume:
                                     type: integer
                                 required:
@@ -370,11 +360,9 @@ spec:
                                 - outOfSync
                                 - peerClient
                                 - peerDiskState
-                                - pending
                                 - percentInSync
                                 - replicationState
                                 - resyncSuspended
-                                - unacked
                                 - volume
                                 type: object
                               type: array
@@ -382,12 +370,9 @@ spec:
                               type: integer
                             peerRole:
                               type: string
-                            rsInFlight:
-                              type: integer
                             tls:
                               type: boolean
                           required:
-                          - apInFlight
                           - congested
                           - connectionState
                           - name
@@ -395,53 +380,34 @@ spec:
                           - peerDevices
                           - peerNodeId
                           - peerRole
-                          - rsInFlight
                           - tls
                           type: object
                         type: array
                       devices:
                         items:
                           properties:
-                            alWrites:
-                              type: integer
-                            bmWrites:
-                              type: integer
                             client:
                               type: boolean
                             diskState:
                               type: string
-                            lowerPending:
-                              type: integer
                             minor:
                               type: integer
                             open:
                               type: boolean
                             quorum:
                               type: boolean
-                            read:
-                              type: integer
                             size:
-                              type: integer
-                            upperPending:
                               type: integer
                             volume:
                               type: integer
-                            written:
-                              type: integer
                           required:
-                          - alWrites
-                          - bmWrites
                           - client
                           - diskState
-                          - lowerPending
                           - minor
                           - open
                           - quorum
-                          - read
                           - size
-                          - upperPending
                           - volume
-                          - written
                           type: object
                         type: array
                       forceIOFailures:
@@ -482,11 +448,27 @@ spec:
               lvmLogicalVolumeName:
                 maxLength: 256
                 type: string
+              syncProgress:
+                description: |-
+                  SyncProgress shows sync status for kubectl output:
+                  - "True" when fully synced (InSync condition is True)
+                  - "XX.XX%" during active synchronization (SyncTarget)
+                  - DiskState (e.g. "Outdated", "Inconsistent") when not syncing but not in sync
+                type: string
             type: object
         required:
         - metadata
         - spec
         type: object
+        x-kubernetes-validations:
+        - message: metadata.name must start with spec.replicatedVolumeName + '-'
+          rule: self.metadata.name.startsWith(self.spec.replicatedVolumeName + '-')
+        - message: numeric suffix must be between 0 and 31
+          rule: int(self.metadata.name.substring(self.metadata.name.lastIndexOf('-')
+            + 1)) <= 31
+        - message: metadata.name must be at most 123 characters (to fit derived LLV
+            name with prefix)
+          rule: size(self.metadata.name) <= 123
     selectableFields:
     - jsonPath: .spec.nodeName
     - jsonPath: .spec.replicatedVolumeName

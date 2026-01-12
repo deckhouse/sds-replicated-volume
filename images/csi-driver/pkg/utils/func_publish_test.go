@@ -18,11 +18,13 @@ package utils
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -35,10 +37,10 @@ import (
 
 func TestPublishUtils(t *testing.T) {
 	RegisterFailHandler(Fail)
-	RunSpecs(t, "Publish Utils Suite")
+	RunSpecs(t, "RVA Utils Suite")
 }
 
-var _ = Describe("AddPublishRequested", func() {
+var _ = Describe("ReplicatedVolumeAttachment utils", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -51,95 +53,175 @@ var _ = Describe("AddPublishRequested", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when adding node to empty publishRequested", func() {
-		It("should successfully add the node", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
+	It("EnsureRVA creates a new RVA when it does not exist", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(rvaName).ToNot(BeEmpty())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
-		})
+		got := &v1alpha1.ReplicatedVolumeAttachment{}
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, got)).To(Succeed())
+		Expect(got.Spec.ReplicatedVolumeName).To(Equal(volumeName))
+		Expect(got.Spec.NodeName).To(Equal(nodeName))
 	})
 
-	Context("when adding second node", func() {
-		It("should successfully add the second node", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName1 := "node-1"
-			nodeName2 := "node-2"
+	It("EnsureRVA is idempotent when RVA already exists", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{nodeName1})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+		_, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+		_, err = EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName2)
-			Expect(err).NotTo(HaveOccurred())
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(2))
-		})
+		list := &v1alpha1.ReplicatedVolumeAttachmentList{}
+		Expect(cl.List(ctx, list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(1))
 	})
 
-	Context("when node already exists", func() {
-		It("should return nil without error", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
+	It("DeleteRVA deletes existing RVA and is idempotent", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+		_, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
+		Expect(DeleteRVA(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
+		Expect(DeleteRVA(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
 
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName))
-		})
+		list := &v1alpha1.ReplicatedVolumeAttachmentList{}
+		Expect(cl.List(ctx, list)).To(Succeed())
+		Expect(list.Items).To(HaveLen(0))
 	})
 
-	Context("when maximum nodes already present", func() {
-		It("should return an error", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName1 := "node-1"
-			nodeName2 := "node-2"
-			nodeName3 := "node-3"
+	It("WaitForRVAReady returns nil when Ready=True", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
+		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName3)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("maximum of 2 nodes already present"))
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(2))
+		rva := &v1alpha1.ReplicatedVolumeAttachment{}
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
+		if rva.Status == nil {
+			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
+		}
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeAttached,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.RVAAttachedReasonAttached,
+			Message:            "attached",
+			ObservedGeneration: rva.Generation,
 		})
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeReplicaIOReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.ReasonIOReady,
+			Message:            "io ready",
+			ObservedGeneration: rva.Generation,
+		})
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeReady,
+			Status:             metav1.ConditionTrue,
+			Reason:             v1alpha1.RVAReadyReasonReady,
+			Message:            "ok",
+			ObservedGeneration: rva.Generation,
+		})
+		Expect(cl.Status().Update(ctx, rva)).To(Succeed())
+
+		Expect(WaitForRVAReady(ctx, cl, &log, traceID, volumeName, nodeName)).To(Succeed())
 	})
 
-	Context("when ReplicatedVolume does not exist", func() {
-		It("should return an error", func(ctx SpecContext) {
-			volumeName := "non-existent-volume"
-			nodeName := "node-1"
+	It("WaitForRVAReady returns error immediately when Attached=False and reason=LocalityNotSatisfied", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
 
-			err := AddPublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("get ReplicatedVolume"))
+		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+
+		rva := &v1alpha1.ReplicatedVolumeAttachment{}
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
+		if rva.Status == nil {
+			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
+		}
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeAttached,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.RVAAttachedReasonLocalityNotSatisfied,
+			Message:            "Local volume access requires a Diskful replica on the requested node",
+			ObservedGeneration: rva.Generation,
 		})
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.RVAReadyReasonNotAttached,
+			Message:            "Waiting for volume to be attached to the requested node",
+			ObservedGeneration: rva.Generation,
+		})
+		Expect(cl.Status().Update(ctx, rva)).To(Succeed())
+
+		start := time.Now()
+		err = WaitForRVAReady(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).To(HaveOccurred())
+		Expect(time.Since(start)).To(BeNumerically("<", time.Second))
+
+		var waitErr *RVAWaitError
+		Expect(errors.As(err, &waitErr)).To(BeTrue())
+		Expect(waitErr.Permanent).To(BeTrue())
+		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
+		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.RVAReadyReasonNotAttached))
+		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.RVAAttachedReasonLocalityNotSatisfied))
+	})
+
+	It("WaitForRVAReady returns context deadline error but includes last observed reason/message", func(ctx SpecContext) {
+		volumeName := "test-volume"
+		nodeName := "node-1"
+
+		rvaName, err := EnsureRVA(ctx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).NotTo(HaveOccurred())
+
+		rva := &v1alpha1.ReplicatedVolumeAttachment{}
+		Expect(cl.Get(ctx, client.ObjectKey{Name: rvaName}, rva)).To(Succeed())
+		if rva.Status == nil {
+			rva.Status = &v1alpha1.ReplicatedVolumeAttachmentStatus{}
+		}
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeAttached,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.RVAAttachedReasonSettingPrimary,
+			Message:            "Waiting for replica to become Primary",
+			ObservedGeneration: rva.Generation,
+		})
+		meta.SetStatusCondition(&rva.Status.Conditions, metav1.Condition{
+			Type:               v1alpha1.RVAConditionTypeReady,
+			Status:             metav1.ConditionFalse,
+			Reason:             v1alpha1.RVAReadyReasonNotAttached,
+			Message:            "Waiting for volume to be attached to the requested node",
+			ObservedGeneration: rva.Generation,
+		})
+		Expect(cl.Status().Update(ctx, rva)).To(Succeed())
+
+		timeoutCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+		defer cancel()
+
+		err = WaitForRVAReady(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+		Expect(err).To(HaveOccurred())
+		Expect(errors.Is(err, context.DeadlineExceeded)).To(BeTrue())
+
+		var waitErr *RVAWaitError
+		Expect(errors.As(err, &waitErr)).To(BeTrue())
+		Expect(waitErr.LastReadyCondition).NotTo(BeNil())
+		Expect(waitErr.LastReadyCondition.Reason).To(Equal(v1alpha1.RVAReadyReasonNotAttached))
+		Expect(waitErr.LastAttachedCondition).NotTo(BeNil())
+		Expect(waitErr.LastAttachedCondition.Reason).To(Equal(v1alpha1.RVAAttachedReasonSettingPrimary))
+		Expect(waitErr.LastAttachedCondition.Message).To(Equal("Waiting for replica to become Primary"))
 	})
 })
 
-var _ = Describe("RemovePublishRequested", func() {
+var _ = Describe("WaitForAttachedToProvided", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -152,110 +234,26 @@ var _ = Describe("RemovePublishRequested", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when removing existing node", func() {
-		It("should successfully remove the node", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
-
-			rv := createTestReplicatedVolume(volumeName, []string{nodeName})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
-		})
-	})
-
-	Context("when removing one node from two", func() {
-		It("should successfully remove one node and keep the other", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName1 := "node-1"
-			nodeName2 := "node-2"
-
-			rv := createTestReplicatedVolume(volumeName, []string{nodeName1, nodeName2})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName1)
-			Expect(err).NotTo(HaveOccurred())
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(updatedRV.Spec.PublishOn).NotTo(ContainElement(nodeName1))
-			Expect(updatedRV.Spec.PublishOn).To(ContainElement(nodeName2))
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(1))
-		})
-	})
-
-	Context("when node does not exist", func() {
-		It("should return nil without error", func(ctx SpecContext) {
-			volumeName := "test-volume"
-			nodeName := "node-1"
-
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			Expect(cl.Create(ctx, rv)).To(Succeed())
-
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-
-			updatedRV := &v1alpha1.ReplicatedVolume{}
-			Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-			Expect(len(updatedRV.Spec.PublishOn)).To(Equal(0))
-		})
-	})
-
-	Context("when ReplicatedVolume does not exist", func() {
-		It("should return nil (considered success)", func(ctx SpecContext) {
-			volumeName := "non-existent-volume"
-			nodeName := "node-1"
-
-			err := RemovePublishRequested(ctx, cl, &log, traceID, volumeName, nodeName)
-			Expect(err).NotTo(HaveOccurred())
-		})
-	})
-})
-
-var _ = Describe("WaitForPublishProvided", func() {
-	var (
-		cl      client.Client
-		log     logger.Logger
-		traceID string
-	)
-
-	BeforeEach(func() {
-		cl = newFakeClient()
-		log = logger.WrapLorg(GinkgoLogr)
-		traceID = "test-trace-id"
-	})
-
-	Context("when node already in publishProvided", func() {
+	Context("when node already in status.actuallyAttachedTo", func() {
 		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
-			}
+			rv := createTestReplicatedVolume(volumeName)
+			rv.Status.ActuallyAttachedTo = []string{nodeName}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("when node appears in publishProvided", func() {
+	Context("when node appears in status.actuallyAttachedTo", func() {
 		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
-			}
+			rv := createTestReplicatedVolume(volumeName)
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Update status in background after a short delay
@@ -264,7 +262,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 				time.Sleep(100 * time.Millisecond)
 				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.PublishedOn = []string{nodeName}
+				updatedRV.Status.ActuallyAttachedTo = []string{nodeName}
 				// Use Update instead of Status().Update for fake client
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
 			}()
@@ -273,7 +271,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -283,7 +281,7 @@ var _ = Describe("WaitForPublishProvided", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishProvided(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("ReplicatedVolume"))
 		})
@@ -294,23 +292,20 @@ var _ = Describe("WaitForPublishProvided", func() {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
-			}
+			rv := createTestReplicatedVolume(volumeName)
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToProvided(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})
 	})
 })
 
-var _ = Describe("WaitForPublishRemoved", func() {
+var _ = Describe("WaitForAttachedToRemoved", func() {
 	var (
 		cl      client.Client
 		log     logger.Logger
@@ -323,31 +318,26 @@ var _ = Describe("WaitForPublishRemoved", func() {
 		traceID = "test-trace-id"
 	})
 
-	Context("when node already not in publishProvided", func() {
+	Context("when node already not in status.actuallyAttachedTo", func() {
 		It("should return immediately", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{},
-			}
+			rv := createTestReplicatedVolume(volumeName)
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("when node is removed from publishProvided", func() {
+	Context("when node is removed from status.actuallyAttachedTo", func() {
 		It("should wait and return successfully", func(ctx SpecContext) {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
-			}
+			rv := createTestReplicatedVolume(volumeName)
+			rv.Status.ActuallyAttachedTo = []string{nodeName}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			// Update status in background after a short delay
@@ -356,7 +346,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 				time.Sleep(100 * time.Millisecond)
 				updatedRV := &v1alpha1.ReplicatedVolume{}
 				Expect(cl.Get(ctx, client.ObjectKey{Name: volumeName}, updatedRV)).To(Succeed())
-				updatedRV.Status.PublishedOn = []string{}
+				updatedRV.Status.ActuallyAttachedTo = []string{}
 				// Use Update instead of Status().Update for fake client
 				Expect(cl.Update(ctx, updatedRV)).To(Succeed())
 			}()
@@ -365,7 +355,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 			defer cancel()
 
-			err := WaitForPublishRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(timeoutCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -375,7 +365,7 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			volumeName := "non-existent-volume"
 			nodeName := "node-1"
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -385,11 +375,11 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
+			rv := createTestReplicatedVolume(volumeName)
 			rv.Status = nil
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
-			err := WaitForPublishRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(ctx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
@@ -399,16 +389,14 @@ var _ = Describe("WaitForPublishRemoved", func() {
 			volumeName := "test-volume"
 			nodeName := "node-1"
 
-			rv := createTestReplicatedVolume(volumeName, []string{})
-			rv.Status = &v1alpha1.ReplicatedVolumeStatus{
-				PublishedOn: []string{nodeName},
-			}
+			rv := createTestReplicatedVolume(volumeName)
+			rv.Status.ActuallyAttachedTo = []string{nodeName}
 			Expect(cl.Create(ctx, rv)).To(Succeed())
 
 			cancelledCtx, cancel := context.WithCancel(ctx)
 			cancel()
 
-			err := WaitForPublishRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
+			err := WaitForAttachedToRemoved(cancelledCtx, cl, &log, traceID, volumeName, nodeName)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(Equal(context.Canceled))
 		})
@@ -422,22 +410,23 @@ func newFakeClient() client.Client {
 	_ = metav1.AddMetaToScheme(s)
 	_ = v1alpha1.AddToScheme(s)
 
-	builder := fake.NewClientBuilder().WithScheme(s)
+	builder := fake.NewClientBuilder().
+		WithScheme(s).
+		WithStatusSubresource(&v1alpha1.ReplicatedVolumeAttachment{})
 	return builder.Build()
 }
 
-func createTestReplicatedVolume(name string, publishOn []string) *v1alpha1.ReplicatedVolume {
+func createTestReplicatedVolume(name string) *v1alpha1.ReplicatedVolume {
 	return &v1alpha1.ReplicatedVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: name,
 		},
 		Spec: v1alpha1.ReplicatedVolumeSpec{
 			Size:                       resource.MustParse("1Gi"),
-			PublishOn:                  publishOn,
 			ReplicatedStorageClassName: "rsc",
 		},
 		Status: &v1alpha1.ReplicatedVolumeStatus{
-			PublishedOn: []string{},
+			ActuallyAttachedTo: []string{},
 		},
 	}
 }

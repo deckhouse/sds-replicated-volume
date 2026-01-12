@@ -116,7 +116,8 @@ func main() {
 	duration := time.Since(start)
 
 	fmt.Fprintf(os.Stdout, "\nStatistics:\n")
-	fmt.Fprintf(os.Stdout, "Total ReplicatedVolumes created: %d\n", stats.CreatedRVCount)
+	fmt.Fprintf(os.Stdout, "Total RV created: %d\n", stats.CreatedRVCount)
+	fmt.Fprintf(os.Stdout, "Total create RV errors: %d\n", stats.CreateRVErrorCount)
 
 	// Calculate average times
 	var avgCreateTime, avgDeleteTime, avgWaitTime time.Duration
@@ -127,7 +128,7 @@ func main() {
 	}
 
 	if logLevel >= slog.LevelDebug {
-		fmt.Fprintf(os.Stdout, "Total time to create RV via API: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
+		fmt.Fprintf(os.Stdout, "Total time to create RV via API and RVAs: %s (avg: %s)\n", stats.TotalCreateRVTime.String(), avgCreateTime.String())
 	}
 	fmt.Fprintf(os.Stdout, "Total create RV time: %s (avg: %s)\n", stats.TotalWaitForRVReadyTime.String(), avgWaitTime.String())
 	fmt.Fprintf(os.Stdout, "Total delete RV time: %s (avg: %s)\n", stats.TotalDeleteRVTime.String(), avgDeleteTime.String())

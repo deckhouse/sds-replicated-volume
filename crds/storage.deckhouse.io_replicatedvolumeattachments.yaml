@@ -6,37 +6,46 @@ metadata:
     controller-gen.kubebuilder.io/version: v0.19.0
   labels:
     module: sds-replicated-volume
-  name: replicatedvolumes.storage.deckhouse.io
+  name: replicatedvolumeattachments.storage.deckhouse.io
 spec:
   group: storage.deckhouse.io
   names:
-    kind: ReplicatedVolume
-    listKind: ReplicatedVolumeList
-    plural: replicatedvolumes
+    kind: ReplicatedVolumeAttachment
+    listKind: ReplicatedVolumeAttachmentList
+    plural: replicatedvolumeattachments
     shortNames:
-    - rv
-    singular: replicatedvolume
+    - rva
+    singular: replicatedvolumeattachment
   scope: Cluster
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .status.conditions[?(@.type=='IOReady')].status
-      name: IOReady
+    - jsonPath: .spec.replicatedVolumeName
+      name: Volume
       type: string
-    - jsonPath: .spec.size
-      name: Size
-      type: string
-    - jsonPath: .status.actualSize
-      name: ActualSize
-      type: string
-    - jsonPath: .status.diskfulReplicaCount
-      name: DiskfulReplicas
+    - jsonPath: .spec.nodeName
+      name: Node
       type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.conditions[?(@.type=='Attached')].status
+      name: Attached
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='ReplicaIOReady')].status
+      name: ReplicaIOReady
+      type: string
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
     name: v1alpha1
     schema:
       openAPIV3Schema:
+        description: |-
+          ReplicatedVolumeAttachment is a Kubernetes Custom Resource that represents an attachment intent/state
+          of a ReplicatedVolume to a specific node.
         properties:
           apiVersion:
             description: |-
@@ -57,37 +66,27 @@ spec:
             type: object
           spec:
             properties:
-              replicatedStorageClassName:
+              nodeName:
+                maxLength: 253
                 minLength: 1
                 type: string
-              size:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
+                x-kubernetes-validations:
+                - message: nodeName is immutable
+                  rule: self == oldSelf
+              replicatedVolumeName:
+                maxLength: 127
+                minLength: 1
+                pattern: ^[0-9A-Za-z.+_-]*$
+                type: string
+                x-kubernetes-validations:
+                - message: replicatedVolumeName is immutable
+                  rule: self == oldSelf
             required:
-            - replicatedStorageClassName
-            - size
+            - nodeName
+            - replicatedVolumeName
             type: object
           status:
             properties:
-              actualSize:
-                anyOf:
-                - type: integer
-                - type: string
-                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
-                x-kubernetes-int-or-string: true
-              actuallyAttachedTo:
-                items:
-                  type: string
-                maxItems: 2
-                type: array
-              attachedAndIOReadyCount:
-                description: |-
-                  AttachedAndIOReadyCount represents the number of attached replicas that are IOReady in format "ready/attached"
-                  Example: "1/2" means 1 replica is IOReady out of 2 attached
-                type: string
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current
@@ -147,74 +146,21 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              desiredAttachTo:
-                description: |-
-                  DesiredAttachTo is the desired set of nodes where the volume should be attached (up to 2 nodes).
-                  It is computed by controllers from ReplicatedVolumeAttachment (RVA) objects.
-                items:
-                  type: string
-                maxItems: 2
-                type: array
-              diskfulReplicaCount:
-                description: |-
-                  DiskfulReplicaCount represents the current and desired number of diskful replicas in format "current/desired"
-                  Example: "2/3" means 2 current diskful replicas out of 3 desired
-                type: string
-              diskfulReplicasInSync:
-                description: |-
-                  DiskfulReplicasInSync represents the number of diskful replicas that are in sync in format "inSync/total"
-                  Example: "2/3" means 2 diskful replicas are in sync out of 3 total diskful replicas
-                type: string
-              drbd:
-                properties:
-                  config:
-                    properties:
-                      allowTwoPrimaries:
-                        default: false
-                        type: boolean
-                      deviceMinor:
-                        maximum: 1048575
-                        minimum: 0
-                        type: integer
-                      quorum:
-                        maximum: 8
-                        minimum: 0
-                        type: integer
-                      quorumMinimumRedundancy:
-                        maximum: 8
-                        minimum: 0
-                        type: integer
-                      sharedSecret:
-                        minLength: 1
-                        type: string
-                      sharedSecretAlg:
-                        enum:
-                        - SHA256
-                        - SHA1
-                        - DummyForTest
-                        type: string
-                    type: object
-                type: object
-              errors:
-                properties:
-                  deviceMinor:
-                    properties:
-                      message:
-                        maxLength: 1024
-                        type: string
-                    type: object
-                type: object
               phase:
+                enum:
+                - Pending
+                - Attaching
+                - Attached
+                - Detaching
                 type: string
             type: object
         required:
         - metadata
         - spec
         type: object
-        x-kubernetes-validations:
-        - message: metadata.name must be at most 120 characters (to fit derived RVR/LLV
-            names)
-          rule: size(self.metadata.name) <= 120
+    selectableFields:
+    - jsonPath: .spec.nodeName
+    - jsonPath: .spec.replicatedVolumeName
     served: true
     storage: true
     subresources:

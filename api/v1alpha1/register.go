@@ -48,6 +48,8 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&ReplicatedStoragePoolList{},
 		&ReplicatedVolume{},
 		&ReplicatedVolumeList{},
+		&ReplicatedVolumeAttachment{},
+		&ReplicatedVolumeAttachmentList{},
 		&ReplicatedVolumeReplica{},
 		&ReplicatedVolumeReplicaList{},
 	)

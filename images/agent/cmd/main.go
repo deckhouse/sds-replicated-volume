@@ -76,16 +76,16 @@ func run(ctx context.Context, log *slog.Logger) (err error) {
 		return err
 	}
 
+	// DRBD SCANNER
+	s := scanner.NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
+	scanner.SetDefaultScanner(s)
+
 	eg.Go(func() error {
 		if err := mgr.Start(ctx); err != nil {
 			return u.LogError(log, fmt.Errorf("starting controller: %w", err))
 		}
 		return ctx.Err()
 	})
-
-	// DRBD SCANNER
-	s := scanner.NewScanner(ctx, log.With("actor", "scanner"), mgr.GetClient(), envConfig.NodeName())
-	scanner.SetDefaultScanner(s)
 
 	eg.Go(func() error {
 		return s.Run()

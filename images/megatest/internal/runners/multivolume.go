@@ -52,6 +52,7 @@ type Stats struct {
 	TotalCreateRVTime       time.Duration
 	TotalDeleteRVTime       time.Duration
 	TotalWaitForRVReadyTime time.Duration
+	CreateRVErrorCount      int64
 }
 
 // MultiVolume orchestrates multiple volume-main instances and pod-destroyers
@@ -69,6 +70,7 @@ type MultiVolume struct {
 	totalCreateRVTime       atomic.Int64 // nanoseconds
 	totalDeleteRVTime       atomic.Int64 // nanoseconds
 	totalWaitForRVReadyTime atomic.Int64 // nanoseconds
+	createRVErrorCount      atomic.Int64
 
 	// Checker stats from all VolumeCheckers
 	checkerStatsMu sync.Mutex
@@ -116,13 +118,6 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 
 	// Main volume creation loop
 	for {
-		select {
-		case <-ctx.Done():
-			m.cleanup(ctx.Err())
-			return nil
-		default:
-		}
-
 		// Check if we can create more volumes
 		currentVolumes := int(m.runningVolumes.Load())
 		if currentVolumes < m.cfg.MaxVolumes {
@@ -163,6 +158,7 @@ func (m *MultiVolume) GetStats() Stats {
 		TotalCreateRVTime:       time.Duration(m.totalCreateRVTime.Load()),
 		TotalDeleteRVTime:       time.Duration(m.totalDeleteRVTime.Load()),
 		TotalWaitForRVReadyTime: time.Duration(m.totalWaitForRVReadyTime.Load()),
+		CreateRVErrorCount:      m.createRVErrorCount.Load(),
 	}
 }
 
@@ -203,6 +199,7 @@ func (m *MultiVolume) startVolumeMain(ctx context.Context, rvName string, storag
 	volumeMain := NewVolumeMain(
 		rvName, cfg, m.client,
 		&m.createdRVCount, &m.totalCreateRVTime, &m.totalDeleteRVTime, &m.totalWaitForRVReadyTime,
+		&m.createRVErrorCount,
 		m.AddCheckerStats, m.forceCleanupChan,
 	)
 

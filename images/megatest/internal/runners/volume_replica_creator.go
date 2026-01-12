@@ -105,7 +105,7 @@ func (v *VolumeReplicaCreator) doCreate(ctx context.Context) {
 
 	// Create RVR object
 	// Note: We don't set OwnerReference here.
-	// The rvr_owner_reference_controller handles this automatically
+	// The rvr_metadata_controller handles this automatically
 	// based on spec.replicatedVolumeName.
 	rvr := &v1alpha1.ReplicatedVolumeReplica{
 		ObjectMeta: metav1.ObjectMeta{
