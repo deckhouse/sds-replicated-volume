@@ -18,8 +18,6 @@ package drbdprimary
 
 import (
 	"context"
-	"errors"
-	"os/exec"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -29,9 +27,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/deckhouse/sds-replicated-volume/api/v1alpha1"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/drbdapierrors"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/env"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/internal/scanner"
 	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdadm"
+	"github.com/deckhouse/sds-replicated-volume/images/agent/pkg/drbdsetup"
 )
 
 type Reconciler struct {
@@ -62,8 +62,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 	}()
 
 	rvr := &v1alpha1.ReplicatedVolumeReplica{}
-	err := r.cl.Get(ctx, req.NamespacedName, rvr)
-	if err != nil {
+	if err := r.cl.Get(ctx, req.NamespacedName, rvr); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.V(4).Info("ReplicatedVolumeReplica not found, skipping")
 			return reconcile.Result{}, nil
@@ -83,126 +82,105 @@ func (r *Reconciler) Reconcile(ctx context.Context, req reconcile.Request) (reco
 		return reconcile.Result{}, nil
 	}
 
+	// Role already matches - clear errors and return
 	if wantPrimary == actuallyPrimary {
 		log.V(4).Info("DRBD role already matches desired state", "wantPrimary", wantPrimary, "actuallyPrimary", actuallyPrimary)
-		// Clear any previous errors
-		err = r.clearErrors(ctx, rvr)
-		if err != nil {
+		if err := r.clearErrors(ctx, rvr); err != nil {
 			log.Error(err, "clearing errors")
+			return reconcile.Result{}, err
 		}
-		return reconcile.Result{}, err
+		return reconcile.Result{}, nil
 	}
 
-	if wantPrimary {
-		// promote
-		if !r.canPromote(log, rvr) {
-			return reconcile.Result{}, nil
-		}
-	} // we can always demote
-
-	// Execute drbdadm command
-	var cmdErr error
-	var cmdOutput string
-	var exitCode int
-
-	if wantPrimary {
-		log.Info("Promoting to primary")
-		cmdErr = drbdadm.ExecutePrimary(ctx, rvr.Spec.ReplicatedVolumeName)
-	} else {
-		log.Info("Demoting to secondary")
-		cmdErr = drbdadm.ExecuteSecondary(ctx, rvr.Spec.ReplicatedVolumeName)
+	// Check promotion prerequisites
+	if wantPrimary && !r.canPromote(log, rvr) {
+		return reconcile.Result{}, nil
 	}
 
-	// Extract error details
+	// Execute role change
+	isDeleting := rvr.DeletionTimestamp != nil
+	cmdErr := r.executeRoleChange(ctx, log, rvr.Spec.ReplicatedVolumeName, wantPrimary, isDeleting)
+
+	// Log result
 	if cmdErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(cmdErr, &exitErr) {
-			exitCode = exitErr.ExitCode()
-		}
-		// The error from drbdadm.ExecutePrimary/ExecuteSecondary is a joined error
-		// containing both the exec error and the command output
-		cmdOutput = cmdErr.Error()
-		log.Error(cmdErr, "executed command failed",
-			"command", drbdadm.Command,
-			"args", map[bool][]string{
-				true:  drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName),
-				false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName),
-			}[wantPrimary],
-			"output", cmdOutput)
+		log.Error(cmdErr, "role change failed",
+			"command", cmdErr.CommandWithArgs(),
+			"output", cmdErr.Output(),
+			"exitCode", cmdErr.ExitCode())
 	} else {
-		log.V(4).Info("executed command successfully",
-			"command", drbdadm.Command,
-			"args", map[bool][]string{
-				true:  drbdadm.PrimaryArgs(rvr.Spec.ReplicatedVolumeName),
-				false: drbdadm.SecondaryArgs(rvr.Spec.ReplicatedVolumeName),
-			}[wantPrimary],
-		)
+		log.V(4).Info("role change succeeded", "wantPrimary", wantPrimary)
 	}
 
-	// Update status with error or clear it
-	err = r.updateErrorStatus(ctx, rvr, cmdErr, cmdOutput, exitCode, wantPrimary)
-	if err != nil {
+	// During cleanup, skip status patch - just return error for retry
+	if isDeleting {
+		return reconcile.Result{}, cmdErr
+	}
+
+	// Update status with error (or clear it)
+	if err := r.updateErrorStatus(ctx, rvr, cmdErr, wantPrimary); err != nil {
 		log.Error(err, "updating error status")
 		return reconcile.Result{}, err
 	}
 
-	s := scanner.DefaultScanner()
-	if s != nil {
+	// Return cmdErr to trigger retry if command failed
+	if cmdErr != nil {
+		return reconcile.Result{}, cmdErr
+	}
+
+	if s := scanner.DefaultScanner(); s != nil {
 		(*s).ResourceShouldBeRefreshed(rvr.Spec.ReplicatedVolumeName)
 	}
 
 	return reconcile.Result{}, nil
 }
 
+// executeRoleChange executes drbdadm primary/secondary command.
+// During deletion, falls back to drbdsetup if drbdadm fails.
+func (r *Reconciler) executeRoleChange(ctx context.Context, log logr.Logger, rvName string, wantPrimary bool, isDeleting bool) drbdadm.CommandError {
+	if wantPrimary {
+		log.Info("Promoting to primary")
+		return drbdadm.ExecutePrimary(ctx, rvName)
+	}
+
+	log.Info("Demoting to secondary")
+	cmdErr := drbdadm.ExecuteSecondary(ctx, rvName)
+
+	// During cleanup, fallback to drbdsetup if drbdadm fails (config file may be removed)
+	if cmdErr != nil && isDeleting {
+		log.Info("drbdadm secondary failed during cleanup, trying drbdsetup secondary",
+			"resource", rvName, "error", cmdErr)
+		if err := drbdsetup.ExecuteSecondary(ctx, rvName); err != nil {
+			log.Error(err, "drbdsetup secondary also failed")
+			// Return original drbdadm error since drbdsetup also failed
+			return cmdErr
+		}
+		log.Info("successfully demoted DRBD resource via drbdsetup", "resource", rvName)
+		return nil
+	}
+
+	return cmdErr
+}
+
 func (r *Reconciler) updateErrorStatus(
 	ctx context.Context,
 	rvr *v1alpha1.ReplicatedVolumeReplica,
-	cmdErr error,
-	cmdOutput string,
-	exitCode int,
+	cmdErr drbdadm.CommandError,
 	isPrimary bool,
 ) error {
 	patch := client.MergeFrom(rvr.DeepCopy())
+	apiErrors := drbdapierrors.EnsureErrorsField(rvr)
 
-	if rvr.Status == nil {
-		rvr.Status = &v1alpha1.ReplicatedVolumeReplicaStatus{}
-	}
-	if rvr.Status.DRBD == nil {
-		rvr.Status.DRBD = &v1alpha1.DRBD{}
-	}
-	if rvr.Status.DRBD.Errors == nil {
-		rvr.Status.DRBD.Errors = &v1alpha1.DRBDErrors{}
-	}
+	// Reset only this controller's errors, then write if there's an error
+	resetDRBDPrimaryErrors(apiErrors)
 
-	// Set or clear error based on command result
 	if cmdErr != nil {
-		// Limit output to 1024 characters as per API validation
-		output := cmdOutput
-		if len(output) > 1024 {
-			output = output[:1024]
-		}
-
-		errorField := &v1alpha1.CmdError{
-			Output:   output,
-			ExitCode: exitCode,
-		}
-
+		var drbdErr drbdapierrors.DRBDAPIError
 		if isPrimary {
-			rvr.Status.DRBD.Errors.LastPrimaryError = errorField
-			// Clear secondary error if it exists
-			rvr.Status.DRBD.Errors.LastSecondaryError = nil
+			drbdErr = primaryCommandError{cmdErr}
 		} else {
-			rvr.Status.DRBD.Errors.LastSecondaryError = errorField
-			// Clear primary error if it exists
-			rvr.Status.DRBD.Errors.LastPrimaryError = nil
+			drbdErr = secondaryCommandError{cmdErr}
 		}
-	} else {
-		// Clear error on success
-		if isPrimary {
-			rvr.Status.DRBD.Errors.LastPrimaryError = nil
-		} else {
-			rvr.Status.DRBD.Errors.LastSecondaryError = nil
-		}
+		drbdErr.WriteDRBDError(apiErrors)
 	}
 
 	return r.cl.Status().Patch(ctx, rvr, patch)
@@ -210,14 +188,13 @@ func (r *Reconciler) updateErrorStatus(
 
 func (r *Reconciler) clearErrors(ctx context.Context, rvr *v1alpha1.ReplicatedVolumeReplica) error {
 	// Check if there are any errors to clear
-	if allErrorsAreNil(rvr) {
+	if allPrimaryErrorsAreNil(rvr) {
 		return nil
 	}
 
 	patch := client.MergeFrom(rvr.DeepCopy())
-	// Clear primary and secondary errors since role is already correct
-	rvr.Status.DRBD.Errors.LastPrimaryError = nil
-	rvr.Status.DRBD.Errors.LastSecondaryError = nil
+	// Clear only this controller's errors (primary and secondary)
+	resetDRBDPrimaryErrors(rvr.Status.DRBD.Errors)
 	return r.cl.Status().Patch(ctx, rvr, patch)
 }
 
@@ -252,7 +229,7 @@ func (r *Reconciler) canPromote(log logr.Logger, rvr *v1alpha1.ReplicatedVolumeR
 	return true
 }
 
-func allErrorsAreNil(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
+func allPrimaryErrorsAreNil(rvr *v1alpha1.ReplicatedVolumeReplica) bool {
 	if rvr.Status == nil || rvr.Status.DRBD == nil || rvr.Status.DRBD.Errors == nil {
 		return true
 	}

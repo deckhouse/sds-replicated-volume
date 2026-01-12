@@ -81,7 +81,7 @@ func thisNodeRVRShouldEitherBePromotedOrDemotedOrHasErrors(nodeName string, rvr 
 		return false
 	}
 
-	if wantPrimary == actuallyPrimary && allErrorsAreNil(rvr) {
+	if wantPrimary == actuallyPrimary && allPrimaryErrorsAreNil(rvr) {
 		// do not need promote/demote and has no errors
 		return false
 	}

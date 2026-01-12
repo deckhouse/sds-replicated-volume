@@ -392,24 +392,17 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should attempt to promote and store command result in status", func(ctx SpecContext) {
-					// Note: drbdadm.ExecutePrimary will be called, but in test environment it will likely fail
-					// because drbdadm is not installed. This tests the error handling path.
-					// The important thing is that the reconciler correctly handles the command execution
-					// and updates the status accordingly. Command errors are stored in status, not returned.
+					// drbdadm.ExecutePrimary will fail in test environment because drbdadm is not installed.
+					// The reconciler stores error in status AND returns it for retry.
 
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+					_, err := rec.Reconcile(ctx, RequestFor(rvr))
+					Expect(err).To(HaveOccurred(), "command error should be returned for retry")
 
-					// Verify status was updated
+					// Verify status was updated with the error
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
-
-					// Command will likely fail in test environment, so verify error was stored in status
-					// The reconciler stores command errors in status, not returns them
 					Expect(rvr.Status.DRBD.Errors).NotTo(BeNil())
-					// If command failed, error should be in status
-					if rvr.Status.DRBD.Errors.LastPrimaryError != nil {
-						Expect(rvr.Status.DRBD.Errors.LastPrimaryError).NotTo(BeNil())
-						Expect(rvr.Status.DRBD.Errors.LastSecondaryError).To(BeNil())
-					}
+					Expect(rvr.Status.DRBD.Errors.LastPrimaryError).NotTo(BeNil())
+					Expect(rvr.Status.DRBD.Errors.LastSecondaryError).To(BeNil())
 				})
 
 				It("should clear LastSecondaryError when promoting", func(ctx SpecContext) {
@@ -429,9 +422,10 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Status().Update(ctx, rvr)).To(Succeed())
 
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+					// Command will fail, but status should still be updated
+					_, _ = rec.Reconcile(ctx, RequestFor(rvr))
 
-					// Verify secondary error was cleared
+					// Verify secondary error was cleared (even though primary error was set)
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 					Expect(rvr.Status.DRBD.Errors.LastSecondaryError).To(BeNil())
 				})
@@ -461,21 +455,17 @@ var _ = Describe("Reconciler", func() {
 				})
 
 				It("should attempt to demote and store command result in status", func(ctx SpecContext) {
-					// Note: drbdadm.ExecuteSecondary will be called, but in test environment it will likely fail
-					// because drbdadm is not installed. This tests the error handling path.
+					// drbdadm.ExecuteSecondary will fail in test environment because drbdadm is not installed.
+					// The reconciler stores error in status AND returns it for retry.
 
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+					_, err := rec.Reconcile(ctx, RequestFor(rvr))
+					Expect(err).To(HaveOccurred(), "command error should be returned for retry")
 
-					// Verify status was updated
+					// Verify status was updated with the error
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
-
-					// Command will likely fail in test environment, so verify error was stored in status
 					Expect(rvr.Status.DRBD.Errors).NotTo(BeNil())
-					// If command failed, error should be in status
-					if rvr.Status.DRBD.Errors.LastSecondaryError != nil {
-						Expect(rvr.Status.DRBD.Errors.LastSecondaryError).NotTo(BeNil())
-						Expect(rvr.Status.DRBD.Errors.LastPrimaryError).To(BeNil())
-					}
+					Expect(rvr.Status.DRBD.Errors.LastSecondaryError).NotTo(BeNil())
+					Expect(rvr.Status.DRBD.Errors.LastPrimaryError).To(BeNil())
 				})
 
 				It("should clear LastPrimaryError when demoting", func(ctx SpecContext) {
@@ -495,9 +485,10 @@ var _ = Describe("Reconciler", func() {
 					}
 					Expect(cl.Status().Update(ctx, rvr)).To(Succeed())
 
-					Expect(rec.Reconcile(ctx, RequestFor(rvr))).ToNot(Requeue())
+					// Command will fail, but status should still be updated
+					_, _ = rec.Reconcile(ctx, RequestFor(rvr))
 
-					// Verify primary error was cleared
+					// Verify primary error was cleared (even though secondary error was set)
 					Expect(cl.Get(ctx, client.ObjectKeyFromObject(rvr), rvr)).To(Succeed())
 					Expect(rvr.Status.DRBD.Errors.LastPrimaryError).To(BeNil())
 				})
