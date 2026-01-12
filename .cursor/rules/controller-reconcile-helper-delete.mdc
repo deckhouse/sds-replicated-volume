@@ -39,7 +39,9 @@ Typical delete helpers encapsulate the mechanical delete call (including “alre
 ## Naming
 
 - A **DeleteReconcileHelper** name MUST start with `delete` / `Delete`.
-- **DeleteReconcileHelpers** for Kubernetes **objects** MUST use the form: `delete<Kind>` / `Delete<Kind>`. `<Kind>` MUST either correspond to the Kubernetes **object** kind being deleted or be a short kind name that is already established in the codebase. Examples:
+- **DeleteReconcileHelpers** for Kubernetes **objects** MUST use the form: `delete<Kind>` / `Delete<Kind>`. `<Kind>` MUST either correspond to the Kubernetes **object** kind being deleted or be a short kind name that is already established in the codebase.
+  When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  Examples:
   - `deleteCM(...)` (or `deleteConfigMap(...)`)
   - `deleteSVC(...)` (or `deleteService(...)`)
   - `deleteSKN(...)` (or `deleteSomeKindName(...)`)

@@ -40,7 +40,9 @@ Typical create helpers are used for child resources to encapsulate the mechanica
 ## Naming
 
 - A **CreateReconcileHelper** name MUST start with `create` / `Create`.
-- **CreateReconcileHelpers** for Kubernetes **objects** MUST use the form: `create<Kind>` / `Create<Kind>`. `<Kind>` MUST either correspond to the Kubernetes **object** kind being created or be a short kind name that is already established in the codebase. Examples:
+- **CreateReconcileHelpers** for Kubernetes **objects** MUST use the form: `create<Kind>` / `Create<Kind>`. `<Kind>` MUST either correspond to the Kubernetes **object** kind being created or be a short kind name that is already established in the codebase.
+  When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  Examples:
   - `createCM(...)` (or `createConfigMap(...)`)
   - `createSVC(...)` (or `createService(...)`)
   - `createSKN(...)` (or `createSomeKindName(...)`)

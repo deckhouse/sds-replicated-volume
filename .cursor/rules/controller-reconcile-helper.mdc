@@ -88,11 +88,13 @@ Category-specific conventions are defined in dedicated documents referenced in *
 
 ### Naming
 
-- If a **ReconcileHelper** name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`), `<Kind>` MAY be either:
-  - a short, codebase-established name (preferred in examples), or
-  - the full kind name.
+- If a **ReconcileHelper** name includes a Kubernetes object kind (e.g. `create<Kind>`, `delete<Kind>`, `patch<Kind>`):
+  - when `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`);
+  - otherwise, `<Kind>` MAY be either:
+    - a short, codebase-established name (preferred in examples), or
+    - the full kind name.
 - If a short kind name is used, it MUST be an established name in this codebase (do not invent new abbreviations ad-hoc).
-  - Examples: `createSKN(...)` (or `createSomeKindName(...)`), `patchSKN(...)` (or `patchSomeKindName(...)`).
+  - Examples (illustrative): `createSKN(...)` (or `createSomeKindName(...)`), `patchSKN(...)` (or `patchSomeKindName(...)`).
 
 ### Determinism contract
 

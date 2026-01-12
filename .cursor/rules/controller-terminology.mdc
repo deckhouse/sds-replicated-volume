@@ -71,6 +71,23 @@ In this codebase it is defined as a package-level `const <XControllerName> = "<n
   - It SHOULD be appended when omitting it would create ambiguity (e.g., name collision risk with another **controller name**, or confusion with a non-controller component).
   - It SHOULD NOT be appended when the shorter name is already unambiguous and collision-free in the same binary.
 
+### **short kind name**
+A **short kind name** is a stable, codebase-established abbreviation used in Go symbol names that refer to a Kubernetes **object** kind
+(for example, controller helper names like `get<Kind>`, `patch<Kind>Status`, and predicate-set functions like `<Kind>Predicates`).
+
+In this repository:
+
+- When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (not the full kind name).
+- Short kind names MUST be stable and MUST NOT be invented ad-hoc.
+
+Canonical short kind names for this repository’s API kinds:
+
+- `ReplicatedVolume` → `RV`
+- `ReplicatedVolumeReplica` → `RVR`
+- `ReplicatedVolumeAttachment` → `RVA`
+- `ReplicatedStorageClass` → `RSC`
+- `ReplicatedStoragePool` → `RSP`
+
 ### **manager**
 The **manager** is the controller-runtime **`manager.Manager`** instance.
 
@@ -611,6 +628,7 @@ Terms MUST be written in italics on every mention (see `rfc-like-mdc.mdc`).
 - **`reconciler_test.go`**
 - **Entrypoint**
 - **controller name**
+- **short kind name**
 - **manager**
 - **Manager-owned dependencies**
 - **builder chain**

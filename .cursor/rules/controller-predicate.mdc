@@ -14,6 +14,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - **`controller.go`** wires predicates into the **builder chain**:
     - by calling `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
     - Predicate implementation still lives in **`predicates.go`**.
+    - When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
   - **`reconciler.go`** MUST NOT contain **predicates**/**filters**.
 
 - Scope (MUST):
@@ -25,6 +26,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
     Predicate-set function naming (MUST) follows this convention:
     - `func <Kind>Predicates() []predicate.Predicate { ... }`
     - `<Kind>` MUST either correspond to the Kubernetes object **Kind** being filtered, or be a short kind name that is already established in this codebase (do not invent new abbreviations ad-hoc).
+    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
     - Each such function returns **all** predicates needed for that `<Kind>` at the watch site where it is used.
   - Pure, **mechanical** comparisons of object fields to decide whether to enqueue a **reconcile request**.
   - Typed events (preferred): `event.TypedUpdateEvent[client.Object]`, etc.
@@ -43,6 +45,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - Predicate symbols SHOULD be unexported unless another package must reuse them.
   - Use names that reflect the filtered object kind:
     - `<Kind>Predicates` (returns `[]predicate.Predicate`)
+    - When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` SHOULD use the **short kind name**.
   - Avoid generic prefixes like `primary*` in concrete controllers; prefer naming by the actual watched kind.
 
 - Multiple predicate sets for the same kind (MAY):

@@ -21,6 +21,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - It owns controller-runtime **builder chain** configuration, **watch** registration, and reconciler construction.
   - If the controller needs event filtering, **`controller.go`** wires predicates by calling
     `builder.WithPredicates(<kind>Predicates()...)` at the `.For(...)`/`.Owns(...)`/`.Watches(...)` call site.
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
   - It MUST NOT contain **Reconciliation business logic** (that belongs to **`reconciler.go`**).
 
 - ALLOW (in **`controller.go`**):
@@ -108,6 +109,7 @@ See `rfc-like-mdc.mdc` for normative keywords (BCP 14 / RFC 2119 / RFC 8174) and
   - **predicates**/**filters** MUST be implemented in **`predicates.go`**.
   - **`controller.go`** MUST NOT contain predicate implementation code.
   - **`controller.go`** wires predicates by calling `builder.WithPredicates(<kind>Predicates()...)`.
+    When `<kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
   - See: `controller-predicate.mdc`.
 
 - MaxConcurrentReconciles (MUST):

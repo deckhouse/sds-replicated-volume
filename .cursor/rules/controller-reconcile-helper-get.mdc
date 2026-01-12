@@ -52,6 +52,7 @@ Typical get helpers:
 - Get helpers SHOULD communicate which read call they wrap via the name:
   - Single object fetch (`Get(...)`): `get<Kind>` / `get<Artifact>`.
   - Multi-object fetch (`List(...)`): `get<PluralKind>` / `get<Kind>List` / `get<KindPluralByX>`.
+- When the `<Kind>` part refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
 - If the helper guarantees ordering, the name MUST include an ordering signal:
   - `getSorted*`, `getOrdered*`, `getFIFO*`, or an equivalent explicit term.
 - If ordering is **not** guaranteed, the helper MUST NOT imply ordering in its name.

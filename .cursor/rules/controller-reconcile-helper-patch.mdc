@@ -49,7 +49,9 @@ Typical patch helpers encapsulate the mechanical “patch this domain now” ope
 - **PatchReconcileHelpers** MUST use the form:
   - `patch<Kind>` / `Patch<Kind>` (**main patch domain**)
   - `patch<Kind>Status` / `Patch<Kind>Status` (**status patch domain**)
-  `<Kind>` MUST either correspond to the Kubernetes **object** kind being patched or be a short kind name that is already established in the codebase. Examples:
+  `<Kind>` MUST either correspond to the Kubernetes **object** kind being patched or be a short kind name that is already established in the codebase.
+  When `<Kind>` refers to a kind defined in this repository’s API (types under `api/v*/`), `<Kind>` MUST use the **short kind name** (see `controller-terminology.mdc`).
+  Examples:
   - `patchCM(...)` (or `patchConfigMap(...)`)
   - `patchCMStatus(...)` (or `patchConfigMapStatus(...)`)
   - `patchSVC(...)` (or `patchService(...)`)
