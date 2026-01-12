@@ -337,14 +337,12 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 	for {
 		v.log.Debug("waiting for RV to become ready")
 
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
 		rv, err := v.client.GetRV(ctx, v.rvName)
 		if err != nil {
 			if apierrors.IsNotFound(err) {
-				time.Sleep(500 * time.Millisecond)
+				if err := waitWithContext(ctx, 500*time.Millisecond); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -354,17 +352,15 @@ func (v *VolumeMain) waitForRVReady(ctx context.Context) error {
 			return nil
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 }
 
 func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) error {
 	for {
 		log.Debug("waiting for RV to be deleted")
-
-		if err := ctx.Err(); err != nil {
-			return err
-		}
 
 		_, err := v.client.GetRV(ctx, v.rvName)
 		if apierrors.IsNotFound(err) {
@@ -374,7 +370,9 @@ func (v *VolumeMain) WaitForRVDeleted(ctx context.Context, log *slog.Logger) err
 			return err
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 }
 

@@ -218,10 +218,6 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 	for {
 		log.Debug("waiting for both nodes to be attached", "selected_node", nodeName, "other_node", otherNodeName)
 
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
 		rv, err := v.client.GetRV(ctx, v.rvName)
 		if err != nil {
 			return err
@@ -231,7 +227,9 @@ func (v *VolumeAttacher) migrationCycle(ctx context.Context, otherNodeName, node
 			break
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 
 	// Step 2: Random delay
@@ -285,10 +283,6 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			log.Debug("waiting for node to be detached")
 		}
 
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
 		rv, err := v.client.GetRV(ctx, v.rvName)
 		if err != nil {
 			return err
@@ -311,7 +305,9 @@ func (v *VolumeAttacher) detachCycle(ctx context.Context, nodeName string) error
 			}
 		}
 
-		time.Sleep(1 * time.Second)
+		if err := waitWithContext(ctx, 1*time.Second); err != nil {
+			return err
+		}
 	}
 }
 

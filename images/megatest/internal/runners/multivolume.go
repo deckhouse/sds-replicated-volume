@@ -118,11 +118,6 @@ func (m *MultiVolume) Run(ctx context.Context) error {
 
 	// Main volume creation loop
 	for {
-		if err := ctx.Err(); err != nil {
-			m.cleanup(err)
-			return nil
-		}
-
 		// Check if we can create more volumes
 		currentVolumes := int(m.runningVolumes.Load())
 		if currentVolumes < m.cfg.MaxVolumes {
